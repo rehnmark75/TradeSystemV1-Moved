@@ -47,3 +47,10 @@ backup*
 old_data/
 postgresbackup/*.sql
 **/config.py
+
+# 🔐 Certificates and keys
+**/*.pem
+**/*.key
+**/*.crt
+**/*.p12
+**/*.pfx
