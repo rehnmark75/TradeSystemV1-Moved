@@ -69,6 +69,31 @@ class ZeroLagOptimalParameters:
     performance_score: float
     last_optimized: datetime
     market_conditions: Optional[MarketConditions] = None
+
+
+@dataclass
+class MACDOptimalParameters:
+    """Optimal MACD trading parameters for an epic"""
+    epic: str
+    fast_ema: int
+    slow_ema: int
+    signal_ema: int
+    confidence_threshold: float
+    timeframe: str
+    histogram_threshold: float
+    zero_line_filter: bool
+    rsi_filter_enabled: bool
+    momentum_confirmation: bool
+    mtf_enabled: bool
+    mtf_timeframes: Optional[str]
+    smart_money_enabled: bool
+    stop_loss_pips: float
+    take_profit_pips: float
+    risk_reward_ratio: float
+    performance_score: float
+    win_rate: float
+    last_optimized: datetime
+    market_conditions: Optional[MarketConditions] = None
     
 
 class OptimalParameterService:
@@ -528,6 +553,132 @@ class OptimalParameterService:
             last_optimized=datetime.now() - timedelta(days=999),  # Very old
             market_conditions=market_conditions
         )
+    
+    def get_macd_epic_parameters(self, 
+                               epic: str, 
+                               market_conditions: Optional[MarketConditions] = None,
+                               force_refresh: bool = False) -> MACDOptimalParameters:
+        """
+        Get optimal MACD parameters for specific epic
+        
+        Args:
+            epic: Trading pair epic (e.g. 'CS.D.EURUSD.CEEM.IP')
+            market_conditions: Current market conditions for context-aware selection
+            force_refresh: Force refresh from database even if cached
+            
+        Returns:
+            MACDOptimalParameters object with all MACD trading settings
+        """
+        cache_key = f"macd_{epic}_{hash(str(market_conditions)) if market_conditions else 'default'}"
+        
+        # Check cache first (unless force refresh)
+        if not force_refresh and self._is_cache_valid(cache_key):
+            self.logger.debug(f"📋 Using cached MACD parameters for {epic}")
+            return self._parameter_cache[cache_key]
+        
+        # Get from database
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Primary query: Get best MACD parameters for this epic
+                cursor.execute("""
+                    SELECT 
+                        epic, best_fast_ema, best_slow_ema, best_signal_ema,
+                        best_confidence_threshold, best_timeframe, best_histogram_threshold,
+                        best_zero_line_filter, best_rsi_filter_enabled, best_momentum_confirmation,
+                        best_mtf_enabled, best_mtf_timeframes, best_smart_money_enabled,
+                        optimal_stop_loss_pips, optimal_take_profit_pips,
+                        ROUND(optimal_take_profit_pips / optimal_stop_loss_pips, 2) as risk_reward,
+                        best_win_rate, best_composite_score, last_updated
+                    FROM macd_best_parameters 
+                    WHERE epic = %s
+                    ORDER BY last_updated DESC
+                    LIMIT 1
+                """, (epic,))
+                
+                result = cursor.fetchone()
+                
+                if result:
+                    # Create optimal MACD parameters from database result
+                    optimal_params = MACDOptimalParameters(
+                        epic=result[0],
+                        fast_ema=int(result[1]),
+                        slow_ema=int(result[2]),
+                        signal_ema=int(result[3]),
+                        confidence_threshold=float(result[4]),
+                        timeframe=result[5],
+                        histogram_threshold=float(result[6]),
+                        zero_line_filter=result[7],
+                        rsi_filter_enabled=result[8],
+                        momentum_confirmation=result[9],
+                        mtf_enabled=result[10],
+                        mtf_timeframes=result[11],
+                        smart_money_enabled=result[12],
+                        stop_loss_pips=float(result[13]),
+                        take_profit_pips=float(result[14]),
+                        risk_reward_ratio=float(result[15]),
+                        win_rate=float(result[16]) if result[16] else 0.0,
+                        performance_score=float(result[17]) if result[17] else 0.0,
+                        last_optimized=result[18],
+                        market_conditions=market_conditions
+                    )
+                    
+                    self.logger.info(f"✅ Retrieved optimal MACD parameters for {epic}: "
+                                   f"{result[1]}/{result[2]}/{result[3]} periods, {result[4]:.0%} confidence, "
+                                   f"{result[13]:.0f}/{result[14]:.0f} SL/TP")
+                    
+                else:
+                    # Fallback to default MACD parameters
+                    self.logger.warning(f"⚠️ No MACD optimization data found for {epic}, using fallbacks")
+                    optimal_params = self._get_macd_fallback_parameters(epic, market_conditions)
+                
+                # Cache the result
+                self._parameter_cache[cache_key] = optimal_params
+                self._cache_timestamps[cache_key] = datetime.now()
+                
+                return optimal_params
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get MACD parameters for {epic}: {e}")
+            return self._get_macd_fallback_parameters(epic, market_conditions)
+    
+    def _get_macd_fallback_parameters(self, epic: str, market_conditions: Optional[MarketConditions] = None) -> MACDOptimalParameters:
+        """Get fallback MACD parameters when optimization data is not available"""
+        
+        # Import MACD config for fallback values
+        from configdata.strategies.config_macd_strategy import MACD_PERIODS
+        
+        # JPY pairs typically need different pip values
+        if 'JPY' in epic.upper():
+            fallback_sl = 15.0
+            fallback_tp = 30.0
+        else:
+            fallback_sl = 10.0
+            fallback_tp = 20.0
+        
+        return MACDOptimalParameters(
+            epic=epic,
+            fast_ema=MACD_PERIODS['fast_ema'],
+            slow_ema=MACD_PERIODS['slow_ema'],
+            signal_ema=MACD_PERIODS['signal_ema'],
+            confidence_threshold=0.55,  # Standard MACD confidence
+            timeframe='15m',
+            histogram_threshold=0.00003,  # Standard threshold
+            zero_line_filter=False,
+            rsi_filter_enabled=True,  # Enable RSI filter by default
+            momentum_confirmation=True,  # Enable momentum confirmation
+            mtf_enabled=False,
+            mtf_timeframes=None,
+            smart_money_enabled=False,
+            stop_loss_pips=fallback_sl,
+            take_profit_pips=fallback_tp,
+            risk_reward_ratio=fallback_tp / fallback_sl,
+            win_rate=0.5,  # Assume neutral fallback
+            performance_score=0.0,  # No optimization data
+            last_optimized=datetime.now() - timedelta(days=999),  # Very old
+            market_conditions=market_conditions
+        )
 
 
 def get_optimal_parameter_service() -> OptimalParameterService:
@@ -609,6 +760,84 @@ def is_epic_zerolag_optimized(epic: str) -> bool:
         return params.performance_score > 0 and params.last_optimized > datetime.now() - timedelta(days=365)
     except Exception:
         return False
+
+
+# =============================================================================
+# MACD Convenience Functions
+# =============================================================================
+
+def get_macd_optimal_parameters(epic: str, market_conditions: Optional[MarketConditions] = None) -> MACDOptimalParameters:
+    """Get optimal MACD parameters for epic (convenience function)"""
+    service = get_optimal_parameter_service()
+    return service.get_macd_epic_parameters(epic, market_conditions)
+
+
+def get_epic_macd_config(epic: str) -> Dict[str, any]:
+    """Get MACD configuration for epic in format compatible with existing strategy"""
+    params = get_macd_optimal_parameters(epic)
+    
+    return {
+        'fast_ema': params.fast_ema,
+        'slow_ema': params.slow_ema,
+        'signal_ema': params.signal_ema,
+        'confidence_threshold': params.confidence_threshold,
+        'timeframe': params.timeframe,
+        'histogram_threshold': params.histogram_threshold,
+        'zero_line_filter': params.zero_line_filter,
+        'rsi_filter_enabled': params.rsi_filter_enabled,
+        'momentum_confirmation': params.momentum_confirmation,
+        'mtf_enabled': params.mtf_enabled,
+        'mtf_timeframes': params.mtf_timeframes,
+        'smart_money_enabled': params.smart_money_enabled,
+        'stop_loss_pips': params.stop_loss_pips,
+        'take_profit_pips': params.take_profit_pips,
+        'risk_reward_ratio': params.risk_reward_ratio,
+        'win_rate': params.win_rate,
+        'performance_score': params.performance_score
+    }
+
+
+def get_all_optimized_macd_epics() -> List[str]:
+    """Get list of all epics that have MACD optimization data"""
+    service = get_optimal_parameter_service()
+    all_params = service.get_all_macd_epic_parameters()
+    return list(all_params.keys())
+
+
+def is_epic_macd_optimized(epic: str) -> bool:
+    """Check if an epic has MACD optimization data available"""
+    try:
+        params = get_macd_optimal_parameters(epic)
+        # Check if parameters are from optimization (not fallback)
+        return params.performance_score > 0 and params.last_optimized > datetime.now() - timedelta(days=365)
+    except Exception:
+        return False
+
+
+def get_macd_optimization_status() -> Dict[str, any]:
+    """Get comprehensive MACD optimization status across all epics"""
+    try:
+        from forex_scanner import config
+        configured_epics = set(config.EPIC_LIST)
+        optimized_epics = set(get_all_optimized_macd_epics())
+        
+        missing_epics = configured_epics - optimized_epics
+        extra_epics = optimized_epics - configured_epics
+        
+        return {
+            'total_configured': len(configured_epics),
+            'total_optimized': len(optimized_epics),
+            'optimization_coverage': len(optimized_epics) / len(configured_epics) * 100 if configured_epics else 0,
+            'missing_epics': list(missing_epics),
+            'extra_epics': list(extra_epics),
+            'ready_for_production': len(missing_epics) == 0,
+            'system_type': 'MACD'
+        }
+    except Exception as e:
+        return {
+            'error': str(e),
+            'system_type': 'MACD'
+        }
 
 
 if __name__ == "__main__":

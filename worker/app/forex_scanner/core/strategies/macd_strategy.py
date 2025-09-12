@@ -33,6 +33,17 @@ try:
 except ImportError:
     from forex_scanner.configdata import config
 
+# Import optimization parameter service
+try:
+    from optimization.optimal_parameter_service import get_macd_optimal_parameters, is_epic_macd_optimized
+    OPTIMIZATION_AVAILABLE = True
+except ImportError:
+    try:
+        from forex_scanner.optimization.optimal_parameter_service import get_macd_optimal_parameters, is_epic_macd_optimized
+        OPTIMIZATION_AVAILABLE = True
+    except ImportError:
+        OPTIMIZATION_AVAILABLE = False
+
 
 class MACDStrategy(BaseStrategy):
     """
@@ -42,11 +53,13 @@ class MACDStrategy(BaseStrategy):
     Coordinates focused helper modules to keep main class lightweight and maintainable.
     """
     
-    def __init__(self, data_fetcher=None, backtest_mode: bool = False):
+    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None, use_optimized_parameters: bool = True):
         # Initialize parent  
         self.name = 'macd'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
         self._validator = None  # Skip enhanced validator for simplicity
+        self.epic = epic
+        self.use_optimized_parameters = use_optimized_parameters
         
         # Basic initialization
         self.backtest_mode = backtest_mode
@@ -85,15 +98,48 @@ class MACDStrategy(BaseStrategy):
             self.logger.info("🔥 BACKTEST MODE: Time restrictions disabled")
     
     def _get_macd_periods(self) -> Dict:
-        """Get MACD periods from config or use standard defaults"""
+        """Get MACD periods from optimization database or config fallback"""
         try:
-            # Get MACD periods from the new config structure
-            macd_periods = getattr(config, 'MACD_PERIODS', None)
+            # First priority: Use optimized parameters from database if available
+            self.logger.debug(f"🔍 Checking optimization: use_optimized={self.use_optimized_parameters}, "
+                            f"available={OPTIMIZATION_AVAILABLE}, epic={self.epic}")
             
-            if macd_periods and isinstance(macd_periods, dict):
-                return macd_periods
+            if (self.use_optimized_parameters and 
+                OPTIMIZATION_AVAILABLE and 
+                self.epic and 
+                is_epic_macd_optimized(self.epic)):
+                
+                optimal_params = get_macd_optimal_parameters(self.epic)
+                
+                self.logger.info(f"✅ Using OPTIMIZED MACD parameters for {self.epic}: "
+                               f"{optimal_params.fast_ema}/{optimal_params.slow_ema}/{optimal_params.signal_ema} "
+                               f"(Score: {optimal_params.performance_score:.6f}, Win Rate: {optimal_params.win_rate:.1%})")
+                
+                return {
+                    'fast_ema': optimal_params.fast_ema,
+                    'slow_ema': optimal_params.slow_ema,
+                    'signal_ema': optimal_params.signal_ema,
+                    'confidence_threshold': optimal_params.confidence_threshold,
+                    'histogram_threshold': optimal_params.histogram_threshold,
+                    'rsi_filter_enabled': optimal_params.rsi_filter_enabled,
+                    'momentum_confirmation': optimal_params.momentum_confirmation,
+                    'zero_line_filter': optimal_params.zero_line_filter,
+                    'mtf_enabled': optimal_params.mtf_enabled,
+                    'stop_loss_pips': optimal_params.stop_loss_pips,
+                    'take_profit_pips': optimal_params.take_profit_pips
+                }
             
-            # Standard MACD defaults if config not available
+            # Second priority: Get MACD periods from the config structure
+            elif hasattr(config, 'MACD_PERIODS'):
+                macd_periods = getattr(config, 'MACD_PERIODS', None)
+                
+                if macd_periods and isinstance(macd_periods, dict):
+                    self.logger.info(f"📋 Using CONFIG MACD parameters for {self.epic or 'default'}: "
+                                   f"{macd_periods.get('fast_ema', 12)}/{macd_periods.get('slow_ema', 26)}/{macd_periods.get('signal_ema', 9)}")
+                    return macd_periods
+            
+            # Fallback: Standard MACD defaults
+            self.logger.warning(f"⚠️ Using FALLBACK MACD parameters for {self.epic or 'default'}: 12/26/9")
             return {'fast_ema': 12, 'slow_ema': 26, 'signal_ema': 9}
             
         except Exception as e:

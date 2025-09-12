@@ -60,7 +60,9 @@ class SignalDetector:
         
         # Initialize strategies
         self.ema_strategy = EMAStrategy(data_fetcher=self.data_fetcher)
-        self.macd_strategy = MACDStrategy(data_fetcher=self.data_fetcher)
+        # MACD strategy will be created per-epic with optimized parameters
+        self.macd_strategy = None  # Will be created when needed with epic parameter
+        self.macd_strategies_cache = {}  # Cache epic-specific strategies
         self.combined_strategy = CombinedStrategy(data_fetcher=self.data_fetcher)
         self.scalping_strategy = ScalpingStrategy()
         self.large_candle_filter = LargeCandleFilter()
@@ -189,6 +191,28 @@ class SignalDetector:
             self.logger.error(f"Error detecting BID-adjusted signals for {epic}: {e}")
             return None
     
+    def _get_macd_strategy_for_epic(self, epic: str) -> 'MACDStrategy':
+        """Get or create epic-specific MACD strategy with optimized parameters"""
+        if epic not in self.macd_strategies_cache:
+            try:
+                # Create MACD strategy with epic-specific optimized parameters
+                self.macd_strategies_cache[epic] = MACDStrategy(
+                    data_fetcher=self.data_fetcher, 
+                    epic=epic, 
+                    use_optimized_parameters=True
+                )
+                self.logger.debug(f"✅ Created optimized MACD strategy for {epic}")
+            except Exception as e:
+                self.logger.warning(f"Failed to create optimized MACD strategy for {epic}: {e}")
+                # Fallback to basic MACD strategy
+                self.macd_strategies_cache[epic] = MACDStrategy(
+                    data_fetcher=self.data_fetcher, 
+                    epic=epic, 
+                    use_optimized_parameters=False
+                )
+        
+        return self.macd_strategies_cache[epic]
+    
     def detect_signals_mid_prices(self, epic: str, pair: str, timeframe: str = None) -> Optional[Dict]:
         """
         Detect EMA signals using MID prices (no adjustment needed)
@@ -239,12 +263,15 @@ class SignalDetector:
                 return None
             
             # 📊 NEW: Use MTF-enhanced detection if available
-            if hasattr(self.macd_strategy, 'detect_signal_with_mtf') and getattr(config, 'MACD_FILTER_CONFIG', {}).get('multi_timeframe_analysis', False):
-                signal = self.macd_strategy.detect_signal_with_mtf(df, epic, spread_pips, timeframe)
+            # Get epic-specific MACD strategy with optimized parameters
+            macd_strategy = self._get_macd_strategy_for_epic(epic)
+            
+            if hasattr(macd_strategy, 'detect_signal_with_mtf') and getattr(config, 'MACD_FILTER_CONFIG', {}).get('multi_timeframe_analysis', False):
+                signal = macd_strategy.detect_signal_with_mtf(df, epic, spread_pips, timeframe)
                 self.logger.info(f"🔄 [MTF MACD] Used MTF-enhanced detection for {epic}")
             else:
                 # Fallback to standard detection
-                signal = self.macd_strategy.detect_signal(df, epic, spread_pips, timeframe)
+                signal = macd_strategy.detect_signal(df, epic, spread_pips, timeframe)
                 self.logger.info(f"📊 [STANDARD MACD] Used standard detection for {epic}")
             
             if signal:
@@ -1583,7 +1610,8 @@ class SignalDetector:
                 return {'error': 'Insufficient data', 'bars': len(df) if df is not None else 0}
             
             # Test MACD signal detection
-            signal = self.macd_strategy.detect_signal(df, epic, spread_pips, '5m')
+            macd_strategy = self._get_macd_strategy_for_epic(epic)
+            signal = macd_strategy.detect_signal(df, epic, spread_pips, '5m')
             
             if len(df) < 2:
                 return {'error': 'Need at least 2 bars for signal detection'}
@@ -2044,7 +2072,8 @@ class SignalDetector:
             # Test MACD strategy
             if getattr(config, 'MACD_EMA_STRATEGY', False):
                 try:
-                    signal = self.macd_strategy.detect_signal(df, pair, spread_pips, timeframe)
+                    macd_strategy = self._get_macd_strategy_for_epic(epic)
+                    signal = macd_strategy.detect_signal(df, pair, spread_pips, timeframe)
                     if signal:
                         signal['strategy_name'] = 'macd'
                         all_signals.append(signal)
@@ -2158,7 +2187,8 @@ class SignalDetector:
     
     def _detect_macd_signals(self, df: pd.DataFrame, epic: str, pair: str, spread_pips: float, timeframe: str) -> Optional[Dict]:
         """Helper method to detect MACD signals"""
-        return self.macd_strategy.detect_signal(df, epic, spread_pips, timeframe)
+        macd_strategy = self._get_macd_strategy_for_epic(epic)
+        return macd_strategy.detect_signal(df, epic, spread_pips, timeframe)
     
     def _normalize_timestamp(self, timestamp: Union[str, pd.Timestamp, datetime]) -> datetime:
         """
