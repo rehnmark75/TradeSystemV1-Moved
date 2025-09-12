@@ -112,7 +112,7 @@ EMA_STRATEGY_CONFIG = {
 }
 
 # Active configuration when not using dynamic mode
-ACTIVE_EMA_CONFIG = 'default'
+ACTIVE_EMA_CONFIG = 'aggressive'
 
 # Scanner and backtest dynamic EMA usage
 SCANNER_USE_DYNAMIC_EMA = True            # Use dynamic EMA in scanner
@@ -167,7 +167,7 @@ TWO_POLE_ZONE_BONUS = 0.1                # Confidence bonus for proper zone alig
 TWO_POLE_STRENGTH_MULTIPLIER = 0.5       # Multiplier for oscillator strength
 
 # Two-Pole Multi-Timeframe Validation
-TWO_POLE_MTF_VALIDATION = True           # Enable 1H timeframe Two-Pole validation
+TWO_POLE_MTF_VALIDATION = False          # Disable 1H timeframe Two-Pole validation to reduce delays
 TWO_POLE_MTF_TIMEFRAME = '1h'            # Higher timeframe for confirmation (1h, 4h, etc.)
 
 # =============================================================================
@@ -209,8 +209,8 @@ MACD_MIN_SLOPE_THRESHOLD = 0.00001              # Minimum slope threshold to avo
 
 # MACD Momentum Filter Settings - RELAXED FOR BETTER SIGNAL GENERATION
 MACD_MOMENTUM_VALIDATION_ENABLED = False        # Use MACD for signal validation
-MACD_TREND_SENSITIVITY = 'ultra_sensitive'     # Sensitivity: 'strict', 'normal', 'permissive', 'neutral_bias'
-MACD_VALIDATION_MODE = 'strict_blocking'       # Mode: 'strict_blocking', 'slope_aware', 'neutral_friendly'
+MACD_TREND_SENSITIVITY = 'permissive'          # Sensitivity: 'strict', 'normal', 'permissive', 'neutral_bias'
+MACD_VALIDATION_MODE = 'neutral_friendly'      # Mode: 'strict_blocking', 'slope_aware', 'neutral_friendly'
 
 # MACD trend sensitivity mappings (affects lookback and threshold)
 MACD_SENSITIVITY_SETTINGS = {
