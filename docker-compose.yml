@@ -8,6 +8,7 @@ services:
       args:
         APP_DIR: dev-app
     container_name: fastapi-dev
+    restart: unless-stopped
     volumes:
       - ./dev-app:/app:cached
       - ./logs/dev:/app/logs
@@ -34,6 +35,7 @@ services:
       args:
         APP_DIR: prod-app
     container_name: fastapi-prod
+    restart: unless-stopped
     ports:
       - "8002:8000"  
     volumes:
@@ -59,6 +61,7 @@ services:
       args:
         APP_DIR: stream-app
     container_name: fastapi-stream
+    restart: unless-stopped
     volumes:
       - ./stream-app:/app:cached
       - ./logs/stream:/app/logs
@@ -77,6 +80,7 @@ services:
   nginx:
     build: ./nginx
     container_name: nginx
+    restart: unless-stopped
     volumes:
       - ./certs:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
@@ -108,7 +112,7 @@ services:
   postgres:
     image: postgres:15
     container_name: postgres
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -123,7 +127,7 @@ services:
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin
-    restart: always
+    restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@pgadmin.com
       PGADMIN_DEFAULT_PASSWORD: admin
@@ -148,6 +152,7 @@ services:
     build:
       context: ./streamlit
     container_name: streamlit
+    restart: unless-stopped
     ports:
       - "8501:8501"
     environment:
@@ -168,6 +173,7 @@ services:
     build:
       context: ./worker
     container_name: task-worker
+    restart: unless-stopped
     volumes:
       - ./worker/app:/app
       - ./logs/worker:/app/logs
