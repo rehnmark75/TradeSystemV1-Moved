@@ -166,12 +166,18 @@ class EnhancedMACDBacktest:
             self.smart_money_enabled = False
             return False
     
-    def initialize_macd_strategy(self, optimization_config: Dict = None):
+    def initialize_macd_strategy(self, optimization_config: Dict = None, epic: str = None, timeframe: str = '15m'):
         """Initialize MACD strategy with optional optimization and MTF verification"""
         
-        # Use the new modular strategy creation
-        self.strategy = create_macd_strategy(data_fetcher=self.data_fetcher)
-        self.logger.info("✅ Modular MACD Strategy initialized for backtest")
+        # Use the new timeframe-aware strategy creation
+        self.strategy = MACDStrategy(
+            data_fetcher=self.data_fetcher,
+            backtest_mode=True,
+            epic=epic,
+            timeframe=timeframe,
+            use_optimized_parameters=True
+        )
+        self.logger.info(f"✅ Timeframe-aware MACD Strategy initialized for backtest ({timeframe})")
         
         # 🔍 CHECK MTF STATUS
         mtf_enabled = getattr(self.strategy, 'enable_mtf_analysis', False)
@@ -208,15 +214,17 @@ class EnhancedMACDBacktest:
         # Log strategy status
         self.strategy.log_modular_status()
         
-        # Log MACD configuration
+        # Log MACD configuration from actual strategy
         self.logger.info("   📊 MACD Parameters:")
-        self.logger.info("     Fast EMA: 12")
-        self.logger.info("     Slow EMA: 26") 
-        self.logger.info("     Signal EMA: 9")
+        self.logger.info(f"     Fast EMA: {getattr(self.strategy, 'fast_ema', 12)}")
+        self.logger.info(f"     Slow EMA: {getattr(self.strategy, 'slow_ema', 26)}") 
+        self.logger.info(f"     Signal EMA: {getattr(self.strategy, 'signal_ema', 9)}")
+        self.logger.info(f"     Timeframe: {getattr(self.strategy, 'timeframe', '15m')}")
+        self.logger.info(f"     Epic: {getattr(self.strategy, 'epic', 'None')}")
         self.logger.info("     EMA200 filter: Enabled")
         self.logger.info("     MTF Analysis: ✅ Enabled" if mtf_enabled else "     MTF Analysis: ❌ Disabled")
         self.logger.info("     Smart Money Analysis: ✅ Enabled" if self.smart_money_enabled else "     Smart Money Analysis: ❌ Disabled")
-        self.logger.info("     Architecture: Modular with integrated optimizers")
+        self.logger.info("     Architecture: Timeframe-aware with database optimization")
         
         return self.strategy
     
@@ -253,8 +261,8 @@ class EnhancedMACDBacktest:
         self.logger.info(f"📈 Timeframe: {timeframe}")
         
         try:
-            # Initialize strategy first
-            self.initialize_macd_strategy()
+            # Initialize strategy with timeframe awareness
+            self.initialize_macd_strategy(epic=epic, timeframe=timeframe)
             
             # Extract pair from epic
             pair = self._extract_pair_from_epic(epic)
@@ -1163,8 +1171,10 @@ class EnhancedMACDBacktest:
             self.logger.info(f"🎚️ Min confidence: {min_confidence:.1%} (was {original_min_conf:.1%})")
         
         try:
-            # Initialize strategy with optimization
-            self.initialize_macd_strategy(optimization_config)
+            # Initialize strategy with optimization and timeframe awareness
+            # Use first epic for strategy initialization (all use same parameters anyway)
+            first_epic = epic_list[0] if epic_list else None
+            self.initialize_macd_strategy(optimization_config, first_epic, timeframe)
             
             # Configure forex integration
             if enable_forex_integration:

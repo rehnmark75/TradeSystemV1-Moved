@@ -615,24 +615,26 @@ class OptimalParameterService:
     
     def get_macd_epic_parameters(self, 
                                epic: str, 
+                               timeframe: str = '15m',
                                market_conditions: Optional[MarketConditions] = None,
                                force_refresh: bool = False) -> MACDOptimalParameters:
         """
-        Get optimal MACD parameters for specific epic
+        Get optimal MACD parameters for specific epic and timeframe
         
         Args:
             epic: Trading pair epic (e.g. 'CS.D.EURUSD.CEEM.IP')
+            timeframe: Trading timeframe (e.g. '15m', '1h', '4h')
             market_conditions: Current market conditions for context-aware selection
             force_refresh: Force refresh from database even if cached
             
         Returns:
             MACDOptimalParameters object with all MACD trading settings
         """
-        cache_key = f"macd_{epic}_{hash(str(market_conditions)) if market_conditions else 'default'}"
+        cache_key = f"macd_{epic}_{timeframe}_{hash(str(market_conditions)) if market_conditions else 'default'}"
         
         # Check cache first (unless force refresh)
         if not force_refresh and self._is_cache_valid(cache_key):
-            self.logger.debug(f"📋 Using cached MACD parameters for {epic}")
+            self.logger.debug(f"📋 Using cached MACD parameters for {epic} ({timeframe})")
             return self._parameter_cache[cache_key]
         
         # Get from database
@@ -640,7 +642,7 @@ class OptimalParameterService:
             with self.db_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Primary query: Get best MACD parameters for this epic
+                # Primary query: Get best MACD parameters for this epic and timeframe
                 cursor.execute("""
                     SELECT 
                         epic, best_fast_ema, best_slow_ema, best_signal_ema,
@@ -651,10 +653,30 @@ class OptimalParameterService:
                         ROUND(optimal_take_profit_pips / optimal_stop_loss_pips, 2) as risk_reward,
                         best_win_rate, best_composite_score, last_updated
                     FROM macd_best_parameters 
-                    WHERE epic = %s
+                    WHERE epic = %s AND best_timeframe = %s
                     ORDER BY last_updated DESC
                     LIMIT 1
-                """, (epic,))
+                """, (epic, timeframe))
+                
+                result = cursor.fetchone()
+                
+                # If no timeframe-specific data, try to get any available data for this epic
+                if not result:
+                    self.logger.debug(f"No {timeframe} data for {epic}, trying fallback query")
+                    cursor.execute("""
+                        SELECT 
+                            epic, best_fast_ema, best_slow_ema, best_signal_ema,
+                            best_confidence_threshold, best_timeframe, best_histogram_threshold,
+                            best_zero_line_filter, best_rsi_filter_enabled, best_momentum_confirmation,
+                            best_mtf_enabled, best_mtf_timeframes, best_smart_money_enabled,
+                            optimal_stop_loss_pips, optimal_take_profit_pips,
+                            ROUND(optimal_take_profit_pips / optimal_stop_loss_pips, 2) as risk_reward,
+                            best_win_rate, best_composite_score, last_updated
+                        FROM macd_best_parameters 
+                        WHERE epic = %s
+                        ORDER BY best_composite_score DESC NULLS LAST
+                        LIMIT 1
+                    """, (epic,))
                 
                 result = cursor.fetchone()
                 
@@ -683,14 +705,14 @@ class OptimalParameterService:
                         market_conditions=market_conditions
                     )
                     
-                    self.logger.info(f"✅ Retrieved optimal MACD parameters for {epic}: "
+                    self.logger.info(f"✅ Retrieved optimal MACD parameters for {epic} ({timeframe}): "
                                    f"{result[1]}/{result[2]}/{result[3]} periods, {result[4]:.0%} confidence, "
                                    f"{result[13]:.0f}/{result[14]:.0f} SL/TP")
                     
                 else:
                     # Fallback to default MACD parameters
-                    self.logger.warning(f"⚠️ No MACD optimization data found for {epic}, using fallbacks")
-                    optimal_params = self._get_macd_fallback_parameters(epic, market_conditions)
+                    self.logger.warning(f"⚠️ No MACD optimization data found for {epic} ({timeframe}), using fallbacks")
+                    optimal_params = self._get_macd_fallback_parameters(epic, timeframe, market_conditions)
                 
                 # Cache the result
                 self._parameter_cache[cache_key] = optimal_params
@@ -699,14 +721,34 @@ class OptimalParameterService:
                 return optimal_params
                 
         except Exception as e:
-            self.logger.error(f"❌ Failed to get MACD parameters for {epic}: {e}")
-            return self._get_macd_fallback_parameters(epic, market_conditions)
+            self.logger.error(f"❌ Failed to get MACD parameters for {epic} ({timeframe}): {e}")
+            return self._get_macd_fallback_parameters(epic, timeframe, market_conditions)
     
-    def _get_macd_fallback_parameters(self, epic: str, market_conditions: Optional[MarketConditions] = None) -> MACDOptimalParameters:
+    def _get_macd_fallback_parameters(self, epic: str, timeframe: str = '15m', market_conditions: Optional[MarketConditions] = None) -> MACDOptimalParameters:
         """Get fallback MACD parameters when optimization data is not available"""
         
         # Import MACD config for fallback values
         from configdata.strategies.config_macd_strategy import MACD_PERIODS
+        
+        # Timeframe-specific MACD parameters (optimized for different timeframes)
+        if timeframe == '5m':
+            fast_ema, slow_ema, signal_ema = 8, 17, 5  # Faster for 5m
+            confidence_threshold = 0.60  # Higher confidence for noisy timeframe
+        elif timeframe == '15m':
+            fast_ema, slow_ema, signal_ema = 9, 19, 6  # Optimized for 15m
+            confidence_threshold = 0.55  # Standard confidence
+        elif timeframe == '1h':
+            fast_ema, slow_ema, signal_ema = 12, 26, 9  # Classic parameters for 1h
+            confidence_threshold = 0.50  # Lower confidence for stable timeframe
+        elif timeframe in ['4h', '1d']:
+            fast_ema, slow_ema, signal_ema = 12, 26, 9  # Classic for higher timeframes
+            confidence_threshold = 0.45  # Even lower for very stable timeframes
+        else:
+            # Default fallback to config
+            fast_ema = MACD_PERIODS.get('fast_ema', 12)
+            slow_ema = MACD_PERIODS.get('slow_ema', 26)
+            signal_ema = MACD_PERIODS.get('signal_ema', 9)
+            confidence_threshold = 0.55
         
         # JPY pairs typically need different pip values
         if 'JPY' in epic.upper():
@@ -718,11 +760,11 @@ class OptimalParameterService:
         
         return MACDOptimalParameters(
             epic=epic,
-            fast_ema=MACD_PERIODS['fast_ema'],
-            slow_ema=MACD_PERIODS['slow_ema'],
-            signal_ema=MACD_PERIODS['signal_ema'],
-            confidence_threshold=0.55,  # Standard MACD confidence
-            timeframe='15m',
+            fast_ema=fast_ema,
+            slow_ema=slow_ema,
+            signal_ema=signal_ema,
+            confidence_threshold=confidence_threshold,
+            timeframe=timeframe,
             histogram_threshold=0.00003,  # Standard threshold
             zero_line_filter=False,
             rsi_filter_enabled=True,  # Enable RSI filter by default
@@ -1090,15 +1132,15 @@ def is_epic_zerolag_optimized(epic: str) -> bool:
 # MACD Convenience Functions
 # =============================================================================
 
-def get_macd_optimal_parameters(epic: str, market_conditions: Optional[MarketConditions] = None) -> MACDOptimalParameters:
+def get_macd_optimal_parameters(epic: str, timeframe: str = '15m', market_conditions: Optional[MarketConditions] = None) -> MACDOptimalParameters:
     """Get optimal MACD parameters for epic (convenience function)"""
     service = get_optimal_parameter_service()
-    return service.get_macd_epic_parameters(epic, market_conditions)
+    return service.get_macd_epic_parameters(epic, timeframe, market_conditions)
 
 
-def get_epic_macd_config(epic: str) -> Dict[str, any]:
+def get_epic_macd_config(epic: str, timeframe: str = '15m') -> Dict[str, any]:
     """Get MACD configuration for epic in format compatible with existing strategy"""
-    params = get_macd_optimal_parameters(epic)
+    params = get_macd_optimal_parameters(epic, timeframe)
     
     return {
         'fast_ema': params.fast_ema,
@@ -1128,10 +1170,10 @@ def get_all_optimized_macd_epics() -> List[str]:
     return list(all_params.keys())
 
 
-def is_epic_macd_optimized(epic: str) -> bool:
-    """Check if an epic has MACD optimization data available"""
+def is_epic_macd_optimized(epic: str, timeframe: str = '15m') -> bool:
+    """Check if an epic has MACD optimization data available for specific timeframe"""
     try:
-        params = get_macd_optimal_parameters(epic)
+        params = get_macd_optimal_parameters(epic, timeframe)
         # Check if parameters are from optimization (not fallback)
         return params.performance_score > 0 and params.last_optimized > datetime.now() - timedelta(days=365)
     except Exception:

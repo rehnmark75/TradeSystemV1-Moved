@@ -64,42 +64,58 @@ class MACDParameterOptimizer:
         """Get parameter grid based on optimization mode"""
         
         if self.smart_presets:
-            # Smart presets: 12 high-probability combinations
+            # Smart presets optimized for 15m timeframe based on trading analysis
             return {
                 'macd_configs': [
-                    {'fast': 8, 'slow': 21, 'signal': 7, 'name': 'fast_scalp'},
-                    {'fast': 9, 'slow': 21, 'signal': 9, 'name': 'fast_swing'},
-                    {'fast': 12, 'slow': 26, 'signal': 9, 'name': 'classic'},
-                    {'fast': 12, 'slow': 24, 'signal': 8, 'name': 'responsive'}
+                    {'fast': 9, 'slow': 19, 'signal': 6, 'name': '15m_optimized'},
+                    {'fast': 8, 'slow': 18, 'signal': 5, 'name': '15m_fast'},
+                    {'fast': 10, 'slow': 20, 'signal': 7, 'name': '15m_smooth'},
+                    {'fast': 9, 'slow': 21, 'signal': 6, 'name': '15m_momentum'},
+                    {'fast': 8, 'slow': 17, 'signal': 5, 'name': '15m_aggressive'}
                 ],
-                'confidence_levels': [0.50, 0.60, 0.70],
+                'confidence_levels': [0.55, 0.60, 0.65],  # Higher confidence for 15m
                 'timeframes': ['15m'],
-                'histogram_thresholds': [0.00003],  # Single optimal threshold
+                'histogram_thresholds': [0.000050, 0.00005, 0.000075],  # Tuned for 15m volatility
                 'rsi_filter_options': [True, False],
-                'stop_loss_levels': [10, 15],
-                'take_profit_levels': [20, 30]
+                'momentum_confirmation_options': [True],  # Enable for better signals
+                'zero_line_filter_options': [False],  # Disable for 15m (reduces lag)
+                'mtf_enabled_options': [False],  # Disable MTF for 15m per analysis
+                'stop_loss_levels': [8, 10, 12],  # Tighter stops for 15m
+                'take_profit_levels': [16, 20, 25]  # Proportional targets
             }
         elif self.fast_mode:
-            # Fast mode: 432 combinations
+            # Fast mode with 15m-optimized parameters
             return {
                 'macd_configs': [
+                    {'fast': 9, 'slow': 19, 'signal': 6, 'name': '15m_optimized'},
                     {'fast': 12, 'slow': 26, 'signal': 9, 'name': 'classic'},
-                    {'fast': 10, 'slow': 24, 'signal': 8, 'name': 'responsive'},
-                    {'fast': 14, 'slow': 28, 'signal': 10, 'name': 'smooth'}
+                    {'fast': 8, 'slow': 18, 'signal': 5, 'name': '15m_fast'}
                 ],
-                'confidence_levels': [0.45, 0.55, 0.65],
+                'confidence_levels': [0.50, 0.55, 0.60, 0.65],
                 'timeframes': ['15m'],
-                'histogram_thresholds': [0.00001, 0.00003, 0.00005],
+                'histogram_thresholds': [0.000050, 0.00005, 0.000075],  # 15m-tuned thresholds
                 'rsi_filter_options': [False, True],
                 'momentum_confirmation_options': [False, True],
-                'stop_loss_levels': [8, 12, 18],
-                'take_profit_levels': [16, 24, 36],
+                'zero_line_filter_options': [False],  # Disabled for 15m
+                'mtf_enabled_options': [False],  # Disabled for 15m per analysis
+                'stop_loss_levels': [8, 10, 12, 15],
+                'take_profit_levels': [16, 20, 24, 30],
                 'smart_money_options': [False]
             }
         else:
-            # Full mode: 47,040 combinations (comprehensive testing)
+            # Full mode: Enhanced with 15m-optimized configurations
             return {
                 'macd_configs': [
+                    # 15m-optimized configurations (based on trading analysis)
+                    {'fast': 8, 'slow': 17, 'signal': 5, 'name': '15m_ultra_fast'},
+                    {'fast': 8, 'slow': 18, 'signal': 5, 'name': '15m_fast'},
+                    {'fast': 9, 'slow': 18, 'signal': 6, 'name': '15m_responsive'},
+                    {'fast': 9, 'slow': 19, 'signal': 6, 'name': '15m_optimized'},
+                    {'fast': 10, 'slow': 19, 'signal': 6, 'name': '15m_balanced'},
+                    {'fast': 10, 'slow': 20, 'signal': 7, 'name': '15m_smooth'},
+                    {'fast': 9, 'slow': 21, 'signal': 6, 'name': '15m_momentum'},
+                    
+                    # Traditional configurations for comparison
                     {'fast': 8, 'slow': 21, 'signal': 7, 'name': 'very_fast'},
                     {'fast': 9, 'slow': 21, 'signal': 8, 'name': 'fast_responsive'},
                     {'fast': 10, 'slow': 22, 'signal': 8, 'name': 'fast_smooth'},
@@ -113,11 +129,11 @@ class MACDParameterOptimizer:
                 ],
                 'confidence_levels': [0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70],
                 'timeframes': ['5m', '15m', '1h'],
-                'histogram_thresholds': [0.000005, 0.00001, 0.00003, 0.00005, 0.0001],
+                'histogram_thresholds': [0.000005, 0.00001, 0.00003, 0.00005, 0.000050, 0.000075, 0.0001],  # Added 15m-tuned values
                 'zero_line_filter_options': [False, True],
                 'rsi_filter_options': [False, True],
                 'momentum_confirmation_options': [False, True],
-                'mtf_enabled_options': [False, True],
+                'mtf_enabled_options': [False, True],  # Both options for A/B testing
                 'contradiction_filter_options': [False, True],
                 'stop_loss_levels': [5, 8, 10, 12, 15, 20, 25],
                 'take_profit_levels': [10, 15, 20, 25, 30, 40, 50],

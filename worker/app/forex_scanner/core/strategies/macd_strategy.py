@@ -53,12 +53,13 @@ class MACDStrategy(BaseStrategy):
     Coordinates focused helper modules to keep main class lightweight and maintainable.
     """
     
-    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None, use_optimized_parameters: bool = True):
+    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None, timeframe: str = '15m', use_optimized_parameters: bool = True):
         # Initialize parent  
         self.name = 'macd'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
         self._validator = None  # Skip enhanced validator for simplicity
         self.epic = epic
+        self.timeframe = timeframe
         self.use_optimized_parameters = use_optimized_parameters
         
         # Basic initialization
@@ -67,7 +68,7 @@ class MACDStrategy(BaseStrategy):
         self.data_fetcher = data_fetcher
         
         # Required attributes for backtest compatibility  
-        self.enable_mtf_analysis = getattr(config, 'MACD_MTF_ENABLED', False)  # TEMP: Disable for debugging
+        self.enable_mtf_analysis = self._should_enable_mtf_analysis(timeframe)
         
         # Simple MACD configuration - get from config or use defaults
         self.macd_config = self._get_macd_periods()
@@ -92,7 +93,7 @@ class MACDStrategy(BaseStrategy):
         else:
             self.mtf_analyzer_instance = None
         
-        self.logger.info(f"🎯 MACD Strategy initialized - Periods: {self.fast_ema}/{self.slow_ema}/{self.signal_ema}")
+        self.logger.info(f"🎯 MACD Strategy initialized - Periods: {self.fast_ema}/{self.slow_ema}/{self.signal_ema} ({timeframe})")
         self.logger.info(f"🔧 Using lightweight orchestrator pattern with 4 focused helpers")
         if backtest_mode:
             self.logger.info("🔥 BACKTEST MODE: Time restrictions disabled")
@@ -107,11 +108,11 @@ class MACDStrategy(BaseStrategy):
             if (self.use_optimized_parameters and 
                 OPTIMIZATION_AVAILABLE and 
                 self.epic and 
-                is_epic_macd_optimized(self.epic)):
+                is_epic_macd_optimized(self.epic, self.timeframe)):
                 
-                optimal_params = get_macd_optimal_parameters(self.epic)
+                optimal_params = get_macd_optimal_parameters(self.epic, self.timeframe)
                 
-                self.logger.info(f"✅ Using OPTIMIZED MACD parameters for {self.epic}: "
+                self.logger.info(f"✅ Using OPTIMIZED MACD parameters for {self.epic} ({self.timeframe}): "
                                f"{optimal_params.fast_ema}/{optimal_params.slow_ema}/{optimal_params.signal_ema} "
                                f"(Score: {optimal_params.performance_score:.6f}, Win Rate: {optimal_params.win_rate:.1%})")
                 
@@ -129,22 +130,79 @@ class MACDStrategy(BaseStrategy):
                     'take_profit_pips': optimal_params.take_profit_pips
                 }
             
-            # Second priority: Get MACD periods from the config structure
-            elif hasattr(config, 'MACD_PERIODS'):
-                macd_periods = getattr(config, 'MACD_PERIODS', None)
-                
-                if macd_periods and isinstance(macd_periods, dict):
-                    self.logger.info(f"📋 Using CONFIG MACD parameters for {self.epic or 'default'}: "
-                                   f"{macd_periods.get('fast_ema', 12)}/{macd_periods.get('slow_ema', 26)}/{macd_periods.get('signal_ema', 9)}")
-                    return macd_periods
-            
-            # Fallback: Standard MACD defaults
-            self.logger.warning(f"⚠️ Using FALLBACK MACD parameters for {self.epic or 'default'}: 12/26/9")
-            return {'fast_ema': 12, 'slow_ema': 26, 'signal_ema': 9}
+            # Second priority: Use OptimalParameterService timeframe-aware fallback
+            else:
+                try:
+                    from optimization.optimal_parameter_service import get_macd_optimal_parameters
+                    
+                    self.logger.info(f"📋 Using TIMEFRAME-AWARE fallback parameters for {self.epic or 'default'} ({self.timeframe})")
+                    optimal_params = get_macd_optimal_parameters(
+                        epic=self.epic or "CS.D.DEFAULT.MINI.IP",
+                        timeframe=self.timeframe
+                    )
+                    
+                    return {
+                        'fast_ema': optimal_params.fast_ema,
+                        'slow_ema': optimal_params.slow_ema,
+                        'signal_ema': optimal_params.signal_ema,
+                        'confidence_threshold': optimal_params.confidence_threshold,
+                        'histogram_threshold': optimal_params.histogram_threshold,
+                        'rsi_filter_enabled': optimal_params.rsi_filter_enabled,
+                        'momentum_confirmation': optimal_params.momentum_confirmation,
+                        'zero_line_filter': optimal_params.zero_line_filter,
+                        'mtf_enabled': optimal_params.mtf_enabled,
+                        'stop_loss_pips': optimal_params.stop_loss_pips,
+                        'take_profit_pips': optimal_params.take_profit_pips
+                    }
+                    
+                except Exception as fallback_error:
+                    self.logger.warning(f"⚠️ Timeframe-aware fallback failed: {fallback_error}")
+                    
+                    # Final fallback: Use config if available, otherwise defaults
+                    if hasattr(config, 'MACD_PERIODS'):
+                        macd_periods = getattr(config, 'MACD_PERIODS', None)
+                        if macd_periods and isinstance(macd_periods, dict):
+                            self.logger.info(f"📋 Using CONFIG MACD parameters for {self.epic or 'default'}: "
+                                           f"{macd_periods.get('fast_ema', 12)}/{macd_periods.get('slow_ema', 26)}/{macd_periods.get('signal_ema', 9)}")
+                            return macd_periods
+                    
+                    # Ultimate fallback: Standard MACD defaults
+                    self.logger.warning(f"⚠️ Using ULTIMATE FALLBACK MACD parameters: 12/26/9")
+                    return {'fast_ema': 12, 'slow_ema': 26, 'signal_ema': 9}
             
         except Exception as e:
             self.logger.warning(f"Could not load MACD config: {e}, using defaults")
             return {'fast_ema': 12, 'slow_ema': 26, 'signal_ema': 9}
+    
+    def _should_enable_mtf_analysis(self, timeframe: str) -> bool:
+        """
+        Determine if MTF analysis should be enabled based on timeframe
+        
+        Fast timeframes (5m, 15m) don't benefit from MTF validation and it adds lag
+        Higher timeframes (1h, 4h, 1d) benefit from MTF confirmation
+        """
+        # Check config override first
+        config_mtf_enabled = getattr(config, 'MACD_MTF_ENABLED', None)
+        if config_mtf_enabled is not None:
+            # If explicitly set in config, respect that setting
+            if config_mtf_enabled:
+                self.logger.info(f"🔧 MTF analysis ENABLED via config override for {timeframe}")
+                return True
+        
+        # Timeframe-based logic
+        fast_timeframes = ['1m', '5m', '15m']
+        slow_timeframes = ['1h', '4h', '1d', '1w']
+        
+        if timeframe in fast_timeframes:
+            self.logger.info(f"🚫 MTF analysis DISABLED for fast timeframe {timeframe} (reduces lag)")
+            return False
+        elif timeframe in slow_timeframes:
+            self.logger.info(f"✅ MTF analysis ENABLED for slower timeframe {timeframe} (improves accuracy)")
+            return True
+        else:
+            # Unknown timeframe, default to enabled but log warning
+            self.logger.warning(f"⚠️ Unknown timeframe {timeframe}, defaulting to MTF ENABLED")
+            return True
     
     def get_required_indicators(self) -> List[str]:
         """Required indicators for MACD strategy"""
