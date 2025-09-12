@@ -1,0 +1,48 @@
+# 🐍 Python artifacts - Global
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/*.pyc
+**/*.pyd
+**/*.so
+**/*.egg
+**/*.egg-info/
+**/dist/
+**/build/
+**/.pytest_cache/
+**/.coverage
+**/htmlcov/
+
+# 🔧 IDE and editor files
+.vscode/
+.idea/
+**/*.swp
+**/*.swo
+**/*~
+
+# 🗂️ OS files  
+**/.DS_Store
+**/Thumbs.db
+
+# 📁 Docker and containers
+**/.dockerignore
+**/docker-compose.override.yml
+
+# 📝 Environment and config
+.env
+.env.local
+**/*.log
+
+# 🗄️ Database files
+**/postgres/
+**/data/
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# Sensitive files
+secrets.toml
+backup*
+old_data/
+postgresbackup/*.sql
+**/config.py

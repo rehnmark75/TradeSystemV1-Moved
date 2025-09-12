@@ -1,0 +1,189 @@
+version: "3.8"
+
+services:
+  fastapi-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.fastapi
+      args:
+        APP_DIR: dev-app
+    container_name: fastapi-dev
+    volumes:
+      - ./dev-app:/app:cached
+      - ./logs/dev:/app/logs
+    working_dir: /app
+    ports:
+      - "8001:8000"
+    expose:
+      - "8001"
+    environment:
+      - PORT=8001
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - IG_API_KEY=${DEMO_API_KEY}
+      - IG_PWD=${DEMO_PASSWORD}
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+
+  fastapi-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile.fastapi
+      args:
+        APP_DIR: prod-app
+    container_name: fastapi-prod
+    ports:
+      - "8002:8000"  
+    volumes:
+      - ./prod-app:/app:cached
+      - ./logs/prod:/app/logs
+    working_dir: /app
+    expose:
+      - "8002"
+    environment:
+      - PORT=8002
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - IG_API_KEY=${PROD_API_KEY}
+      - IG_PWD=${PROD_PASSWORD}
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+  fastapi-stream:
+    build:
+      context: .
+      dockerfile: Dockerfile.fastapistream
+      args:
+        APP_DIR: stream-app
+    container_name: fastapi-stream
+    volumes:
+      - ./stream-app:/app:cached
+      - ./logs/stream:/app/logs
+
+    ports:
+      - "8003:8000"  
+    expose:
+      - "8003"
+    environment:
+      - PORT=8003
+      - IG_API_KEY=${PROD_API_KEY}
+      - IG_PWD=${PROD_PASSWORD}
+    networks:
+      - lab-net
+
+  nginx:
+    build: ./nginx
+    container_name: nginx
+    volumes:
+      - ./certs:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    ports:
+      - "80:80"
+      - "4443:4443"
+      - "4446:4446"
+    command: /bin/sh -c "sleep 5 && nginx -g 'daemon off;'"
+    depends_on:
+      - fastapi-dev
+      - fastapi-prod
+      - pgadmin
+    networks:
+      - lab-net
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./certs:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: >
+      sh -c "certbot certonly --webroot -w /var/www/certbot
+      --email your@email.com --agree-tos --no-eff-email
+      -d trader.nordicbynature.se"
+    networks:
+      - lab-net
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: forex
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres:/var/lib/postgresql/data 
+    networks:
+      - lab-net
+  
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@pgadmin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_LISTEN_PORT: 4445
+      PGADMIN_ENABLE_TLS: "True"
+      PGADMIN_TLS_CERT: /certs/server.cert
+      PGADMIN_TLS_KEY: /certs/server.key
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "4445:4445"
+    volumes:
+      - ./pgadmin/certs/server.cert:/certs/server.cert:ro
+      - ./pgadmin/certs/server.key:/certs/server.key:ro
+      - ./pgadmin/servers.json:/pgadmin4/servers.json
+      - ./pgadmin/pgadmin4.key:/pgadmin4/pgadmin4.key
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - lab-net
+  streamlit:
+    build:
+      context: ./streamlit
+    container_name: streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - IG_API_KEY=${PROD_API_KEY}
+      - IG_PWD=${PROD_PASSWORD}
+    volumes:
+      - ./streamlit:/app
+      - ./logs:/logs:ro  # Read-only for safety
+    working_dir: /app
+    networks:
+      - lab-net
+    depends_on:
+      - fastapi-dev
+      - fastapi-prod
+  task-worker:
+    build:
+      context: ./worker
+    container_name: task-worker
+    volumes:
+      - ./worker/app:/app
+      - ./logs/worker:/app/logs
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - ORDER_API_URL=http://fastapi-dev:8000/orders
+      - IG_API_KEY=${PROD_API_KEY}
+      - IG_PWD=${PROD_PASSWORD}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+volumes:
+  pgadmin_data:
+
+networks:
+  lab-net:

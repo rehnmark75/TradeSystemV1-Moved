@@ -1,0 +1,1 @@
+LOG_FILE = '/tmp/pgadmin4.log'  # Writable inside container

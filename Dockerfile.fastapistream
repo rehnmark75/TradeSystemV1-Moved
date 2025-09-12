@@ -1,0 +1,16 @@
+# Dockerfile.fastapistream
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Optional: system packages
+RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
+
+# Copy only streaming app
+COPY ./stream-app /app
+
+# Install streaming requirements
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

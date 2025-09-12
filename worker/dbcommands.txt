@@ -1,0 +1,30 @@
+CREATE TABLE alerts (
+    id SERIAL PRIMARY KEY,
+    epic TEXT NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    direction TEXT CHECK (direction IN ('BUY', 'SELL')) NOT NULL,
+    price NUMERIC NOT NULL,
+    alert_type TEXT NOT NULL,
+    zone_confirmed BOOLEAN NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE alerts
+ALTER COLUMN zone_confirmed DROP NOT NULL;
+
+SELECT 
+    tl.symbol, 
+    tl.direction, 
+    tl.timestamp as trade_timestamp,
+    tl.alert_id, 
+    tl.profit_loss,
+    ah.epic,
+    ah.signal_type,
+    ah.confidence_score,
+    ah.strategy,
+	ah.strategy_indicators,
+    ah.timeframe
+FROM trade_log tl
+INNER JOIN alert_history ah ON tl.alert_id = ah.id
+WHERE DATE(tl.timestamp) = '2025-08-20'
+order by tl.alert_id desc;

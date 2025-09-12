@@ -1,0 +1,9 @@
+/worker/app/tradesetups/
+/worker/app/claude_analysis/*
+TradeSystemV1/postgres/
+TradeSystemV1/worker/app/forex_scanner/claude_analysis/*
+TradeSystemV1/worker/app/forex_scanner/claude_analysis_enhanced/*
+TradeSystemV1/worker/app/forex_scanner/claude_rejections/*
+worker/app/forex_scanner/claude_analysis/*
+worker/app/forex_scanner/claude_analysis_enhanced/*
+worker/app/forex_scanner/claude_rejections/*

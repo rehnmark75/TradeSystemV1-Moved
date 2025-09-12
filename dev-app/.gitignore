@@ -1,0 +1,25 @@
+# 🐍 Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 🔧 IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 🗂️ OS files  
+.DS_Store
+Thumbs.db

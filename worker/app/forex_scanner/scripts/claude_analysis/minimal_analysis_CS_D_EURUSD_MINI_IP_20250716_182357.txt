@@ -1,0 +1,17 @@
+Claude Minimal Analysis
+Generated: 2025-07-16 18:23:57
+Epic: CS.D.EURUSD.MINI.IP
+Signal: BUY
+Price: 1.085
+
+CLAUDE DECISION:
+Score: 8/10
+Decision: APPROVE
+Approved: True
+Reason: All three EMAs show strong upward alignment with price above them, and the high confidence rating of 85% supports a bullish momentum.
+
+Raw Response:
+
+SCORE: 8
+DECISION: APPROVE
+REASON: All three EMAs show strong upward alignment with price above them, and the high confidence rating of 85% supports a bullish momentum.

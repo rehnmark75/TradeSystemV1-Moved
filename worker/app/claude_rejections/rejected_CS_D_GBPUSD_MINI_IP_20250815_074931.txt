@@ -1,0 +1,17 @@
+Claude Signal Rejection Analysis
+Generated: 2025-08-15 07:49:31
+Epic: CS.D.GBPUSD.MINI.IP
+Signal Type: BUY
+Price: 1.355205
+Confidence: 75.5%
+Strategy: combined
+
+CLAUDE REJECTION:
+Score: 6/10
+Decision: REJECT
+Reason: Despite bullish EMA alignment, the extremely tight EMA separations (0.3-2.4 pips) combined with low ATR suggests a lack of directional momentum and potential for whipsaws. The mid-range position (60.9%) with neutral RSI and bearish MACD crossover presents insufficient conviction for institutional capital deployment, especially during typically volatile London hours where clearer setups should be prioritized.
+
+Raw Response:
+SCORE: 6/10
+DECISION: REJECT
+REASON: Despite bullish EMA alignment, the extremely tight EMA separations (0.3-2.4 pips) combined with low ATR suggests a lack of directional momentum and potential for whipsaws. The mid-range position (60.9%) with neutral RSI and bearish MACD crossover presents insufficient conviction for institutional capital deployment, especially during typically volatile London hours where clearer setups should be prioritized.

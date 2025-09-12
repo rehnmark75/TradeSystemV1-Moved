@@ -1,0 +1,17 @@
+Claude Signal Rejection Analysis
+Generated: 2025-08-14 17:19:16
+Epic: CS.D.USDCHF.MINI.IP
+Signal Type: BUY
+Price: 0.80837
+Confidence: 78.0%
+Strategy: combined
+
+CLAUDE REJECTION:
+Score: 6/10
+Decision: REJECT
+Reason: Despite bullish EMA alignment, the extremely low volatility (ATR 0.00077) combined with weak momentum (MACD 0.000037) suggests insufficient directional conviction for institutional position sizing. The mid-range location (27.9% from support) with narrow range boundaries (10.8 pips) indicates choppy price action, while the neutral RSI and standard volume metrics fail to provide compelling evidence for directional bias in current market conditions.
+
+Raw Response:
+SCORE: 6/10
+DECISION: REJECT
+REASON: Despite bullish EMA alignment, the extremely low volatility (ATR 0.00077) combined with weak momentum (MACD 0.000037) suggests insufficient directional conviction for institutional position sizing. The mid-range location (27.9% from support) with narrow range boundaries (10.8 pips) indicates choppy price action, while the neutral RSI and standard volume metrics fail to provide compelling evidence for directional bias in current market conditions.

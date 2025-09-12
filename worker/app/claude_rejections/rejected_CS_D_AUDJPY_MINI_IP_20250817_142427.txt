@@ -1,0 +1,17 @@
+Claude Signal Rejection Analysis
+Generated: 2025-08-17 14:24:27
+Epic: CS.D.AUDJPY.MINI.IP
+Signal Type: BEAR
+Price: 95.7655
+Confidence: 86.5%
+Strategy: macd_ema200
+
+CLAUDE REJECTION:
+Score: 6/10
+Decision: REJECT
+Reason: Despite high system confidence and strong volume, the conflicting signals between short-term bullish EMAs and bearish MACD crossover create an ambiguous setup. The position's location at 68.5% from support in a range-bound market suggests limited downside potential, while the risk/reward ratio appears unfavorable given the distance to nearest support. Institutional execution would be better served waiting for clearer directional alignment of EMAs and price action.
+
+Raw Response:
+SCORE: 6/10
+DECISION: REJECT
+REASON: Despite high system confidence and strong volume, the conflicting signals between short-term bullish EMAs and bearish MACD crossover create an ambiguous setup. The position's location at 68.5% from support in a range-bound market suggests limited downside potential, while the risk/reward ratio appears unfavorable given the distance to nearest support. Institutional execution would be better served waiting for clearer directional alignment of EMAs and price action.

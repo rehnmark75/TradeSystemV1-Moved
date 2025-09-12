@@ -1,0 +1,17 @@
+timestamp,epic,signal_type,strategy,confidence,price,message
+2025-07-16 13:28:54,CS.D.EURUSD.MINI.IP,BEAR,enhanced_simple_ema,0.9053,1.16673,📊 BEAR Signal: CS.D.EURUSD.MINI.IP
+Strategy: enhanced_simple_ema
+Confidence: 90.5%
+MID: 1.16673; EXEC: 1.16665
+2025-07-16 18:18:45,CS.D.AUDUSD.MINI.IP,BEAR,enhanced_simple_ema,0.9411,0.65465,📊 BEAR Signal: CS.D.AUDUSD.MINI.IP
+Strategy: enhanced_simple_ema
+Confidence: 94.1%
+MID: 0.65465; EXEC: 0.65457
+2025-07-16 18:18:48,CS.D.AUDJPY.MINI.IP,BEAR,enhanced_simple_ema,0.8700,96.66507,📊 BEAR Signal: CS.D.AUDJPY.MINI.IP
+Strategy: enhanced_simple_ema
+Confidence: 87.0%
+MID: 96.66507; EXEC: 96.66500
+2025-07-16 18:39:00,CS.D.EURUSD.MINI.IP,BUY,INTEGRATION_TEST,0.8500,1.08500,📊 BUY Signal: CS.D.EURUSD.MINI.IP Strategy: INTEGRATION_TEST Confidence: 85.0% Price: 1.085
+2025-07-16 18:39:00,CS.D.EURUSD.MINI.IP,BUY,INTEGRATION_TEST,0.8500,1.08500,📊 BUY Signal: CS.D.EURUSD.MINI.IP Strategy: INTEGRATION_TEST Confidence: 85.0% Price: 1.085 🤖 Claude: 8/10 - BUY
+2025-07-16 18:39:00,CS.D.EURUSD.MINI.IP,BUY,INTEGRATION_TEST,0.8500,1.08500,📊 BUY Signal: CS.D.EURUSD.MINI.IP Strategy: INTEGRATION_TEST Confidence: 85.0% Price: 1.085 🤖 Claude: 8/10 - BUY 💰 TRADE EXECUTED
+2025-07-16 18:39:06,CS.D.EURUSD.MINI.IP,BUY,FINAL_INTEGRATION_TEST,0.8500,1.08500,📊 BUY Signal: CS.D.EURUSD.MINI.IP Strategy: FINAL_INTEGRATION_TEST Confidence: 85.0% Price: 1.085

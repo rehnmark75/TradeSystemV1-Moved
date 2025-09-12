@@ -1,0 +1,17 @@
+Claude Minimal Analysis
+Generated: 2025-07-16 18:18:48
+Epic: CS.D.AUDJPY.MINI.IP
+Signal: BEAR
+Price: 96.66507499999999
+
+CLAUDE DECISION:
+Score: 8/10
+Decision: APPROVE
+Approved: True
+Reason: All three EMAs show close alignment above current price with a strong bearish setup and high confidence level of 87%, indicating good potential for a short-term scalping opportunity.
+
+Raw Response:
+
+SCORE: 8
+DECISION: APPROVE
+REASON: All three EMAs show close alignment above current price with a strong bearish setup and high confidence level of 87%, indicating good potential for a short-term scalping opportunity.

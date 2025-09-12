@@ -1,0 +1,9 @@
+# Ignore claude_analysis folders
+/app/forex_scanner/claude_analysis/
+/app/claude_analysis/
+app/forex_scanner/claude_rejections/
+TradeSystemV1/worker/app/claude_analysis/
+worker/app/forex_scanner/claude_analysis/
+worker/app/forex_scanner/claude_analysis_enhanced/
+worker/app/claude_analysis_enhanced/
+worker/app/claude_rejections/

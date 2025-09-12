@@ -1,0 +1,1167 @@
+# dev-app/trailing_class.py
+
+"""
+Advanced Trailing Stop Strategies - ENHANCED WITH CRITICAL FIXES
+
+This module implements multiple sophisticated trailing stop techniques that adapt
+to market conditions and volatility for better profit protection and trend following.
+
+CRITICAL FIXES APPLIED:
+- Fixed safe trail calculation direction bug
+- Enhanced point-to-price conversion accuracy  
+- Improved status management (pending → break_even → trailing)
+- Added comprehensive validation and error handling
+- Fixed BUY/SELL direction logic inconsistencies
+"""
+
+import math
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import List, Optional, Dict, Tuple
+from datetime import datetime, timedelta
+from enum import Enum
+
+from services.models import TradeLog, IGCandle
+from sqlalchemy.orm import Session
+from utils import get_point_value, convert_price_to_points, calculate_move_points
+
+
+class TrailingMethod(Enum):
+    """Different trailing stop methods available"""
+    FIXED_POINTS = "fixed_points"           # Original simple method
+    PERCENTAGE = "percentage"               # Percentage-based trailing
+    ATR_BASED = "atr_based"                # ATR volatility-based
+    CHANDELIER = "chandelier"              # Chandelier exit
+    PARABOLIC_SAR = "parabolic_sar"        # Parabolic SAR-style
+    SMART_TRAIL = "smart_trail"            # Multi-condition intelligent trailing
+    SUPPORT_RESISTANCE = "support_resistance"  # Technical level-based
+
+
+@dataclass
+class TrailingConfig:
+    """Configuration for advanced trailing strategies"""
+    method: TrailingMethod = TrailingMethod.SMART_TRAIL
+    
+    # Universal settings
+    initial_trigger_points: int = 7
+    break_even_trigger_points: int = 7  # move to BE after +7 points
+    min_trail_distance: int = 5
+    max_trail_distance: int = 50
+
+    monitor_interval_seconds: int = 60  # ✅ NEW: poll interval between trade checks
+    
+    # Percentage-based
+    trail_percentage: float = 1.5
+
+    # ATR-based
+    atr_multiplier: float = 2.0
+    atr_period: int = 14
+    atr_timeframe: int = 60
+
+    # Chandelier settings
+    chandelier_period: int = 22
+    chandelier_multiplier: float = 3.0
+
+    # Parabolic SAR
+    sar_initial_af: float = 0.02
+    sar_max_af: float = 0.20
+    sar_increment: float = 0.02
+
+    # Smart trailing
+    volatility_threshold: float = 1.5
+    momentum_lookback: int = 5
+    trend_strength_min: float = 0.6
+
+class TrailingStrategy(ABC):
+    """Base class for trailing stop strategies"""
+    
+    def __init__(self, config: TrailingConfig, logger):
+        self.config = config
+        self.logger = logger
+    
+    @abstractmethod
+    def calculate_trail_level(self, trade: TradeLog, current_price: float, 
+                            candle_data: List[IGCandle], db: Session) -> Optional[float]:
+        """Calculate the new trailing stop level"""
+        pass
+    
+    @abstractmethod
+    def should_trail(self, trade: TradeLog, current_price: float,
+                    candle_data: List[IGCandle]) -> bool:
+        """Determine if we should update the trailing stop"""
+        pass
+
+
+class FixedPointsTrailing(TrailingStrategy):
+    """Fixed points trailing that intelligently respects current stop position"""
+    
+    def calculate_trail_level(self, trade: TradeLog, current_price: float,
+                            candle_data: List[IGCandle], db: Session) -> Optional[float]:
+        direction = trade.direction.upper()
+        point_value = self._get_point_value(trade.symbol)
+        
+        # Get safe distance
+        try:
+            safe_distance = self._get_safe_distance_from_processor(trade)
+        except:
+            safe_distance = self.config.min_trail_distance
+        
+        trail_distance_price = safe_distance * point_value
+        
+        # Get current stop level
+        current_stop = trade.sl_price or 0.0
+        
+        # ✅ INTELLIGENT TRAILING: Calculate both options and choose the better one
+        
+        # Option 1: Trail from current price (traditional)
+        if direction == "BUY":
+            trail_from_current = current_price - trail_distance_price
+        else:
+            trail_from_current = current_price + trail_distance_price
+        
+        # Option 2: Move current stop by minimum increment (progressive trailing)
+        if current_stop > 0:
+            min_increment = 1 * point_value  # Move by 1 point minimum
+            if direction == "BUY":
+                # For BUY: only move stop UP (higher)
+                trail_from_stop = current_stop + min_increment
+                # But don't go beyond safe distance from current
+                max_allowed = current_price - trail_distance_price
+                trail_from_stop = min(trail_from_stop, max_allowed)
+            else:
+                # For SELL: only move stop DOWN (lower)  
+                trail_from_stop = current_stop - min_increment
+                # But don't go beyond safe distance from current
+                min_allowed = current_price + trail_distance_price
+                trail_from_stop = max(trail_from_stop, min_allowed)
+        else:
+            trail_from_stop = trail_from_current
+        
+        # ✅ CHOOSE THE BETTER OPTION: 
+        # For BUY: higher stop is better
+        # For SELL: lower stop is better
+        if direction == "BUY":
+            # Choose the higher (better) stop level
+            if current_stop > 0:
+                trail_level = max(trail_from_current, current_stop + (1 * point_value))
+            else:
+                trail_level = trail_from_current
+        else:
+            # Choose the lower (better) stop level  
+            if current_stop > 0:
+                trail_level = min(trail_from_current, current_stop - (1 * point_value))
+            else:
+                trail_level = trail_from_current
+        
+        # Ensure we don't violate minimum distance
+        if direction == "BUY":
+            min_allowed = current_price - trail_distance_price
+            trail_level = min(trail_level, min_allowed)
+        else:
+            max_allowed = current_price + trail_distance_price
+            trail_level = max(trail_level, max_allowed)
+        
+        # Round to appropriate precision
+        trail_level = round(trail_level, 5)
+        
+        # Calculate distances for logging
+        distance_from_current = abs(current_price - trail_level) / point_value
+        
+        self.logger.info(f"[INTELLIGENT TRAIL] {trade.symbol} {direction}: "
+                        f"current={current_price:.5f}, current_stop={current_stop:.5f}, "
+                        f"trail_from_current={trail_from_current:.5f}, trail_level={trail_level:.5f}, "
+                        f"distance_from_current={distance_from_current:.1f}pts")
+        
+        # Final validation: only return if it's actually an improvement
+        if current_stop > 0:
+            if direction == "BUY":
+                is_improvement = trail_level > current_stop
+            else:
+                is_improvement = trail_level < current_stop
+            
+            if not is_improvement:
+                self.logger.warning(f"[TRAIL REJECT] {trade.symbol}: "
+                                  f"Calculated trail {trail_level:.5f} not better than current {current_stop:.5f}")
+                return None
+        
+        return trail_level
+    
+    def should_trail(self, trade: TradeLog, current_price: float,
+                    candle_data: List[IGCandle]) -> bool:
+        """More intelligent should_trail logic"""
+        direction = trade.direction.upper()
+        current_stop = trade.sl_price or 0.0
+        
+        if current_stop <= 0:
+            return True  # No current stop, definitely trail
+        
+        # Check if price has moved favorably enough to justify trailing
+        point_value = self._get_point_value(trade.symbol)
+        min_move_required = self._get_safe_distance_from_processor(trade)
+        
+        if direction == "BUY":
+            # For BUY: check if current price is significantly above current stop
+            distance_from_stop = (current_price - current_stop) / point_value
+            # Trail if we're at least 2x the minimum distance above current stop
+            should_trail = distance_from_stop >= (min_move_required * 2)
+        else:
+            # For SELL: check if current price is significantly below current stop
+            distance_from_stop = (current_stop - current_price) / point_value
+            should_trail = distance_from_stop >= (min_move_required * 2)
+        
+        self.logger.debug(f"[SHOULD TRAIL INTELLIGENT] {trade.symbol}: "
+                         f"distance_from_stop={distance_from_stop:.1f}pts, "
+                         f"required={min_move_required * 2}pts, should_trail={should_trail}")
+        
+        return should_trail
+    
+    def _get_safe_distance_from_processor(self, trade: TradeLog) -> int:
+        """Get the same safe distance that the EnhancedTradeProcessor uses"""
+        ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+        config_min_distance = self.config.min_trail_distance
+        
+        if ig_min_distance:
+            safe_distance = max(ig_min_distance, config_min_distance)
+        else:
+            safe_distance = config_min_distance
+        
+        return safe_distance
+    
+    def _get_point_value(self, epic: str) -> float:
+        """Get point value for the instrument"""
+        if "JPY" in epic:
+            return 0.01
+        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
+            return 0.0001
+        return 1.0
+
+
+class PercentageTrailing(TrailingStrategy):
+    """Percentage-based trailing stop - ENHANCED"""
+    
+    def calculate_trail_level(self, trade: TradeLog, current_price: float,
+                            candle_data: List[IGCandle], db: Session) -> Optional[float]:
+        direction = trade.direction.upper()
+        trail_percentage = self.config.trail_percentage / 100
+        
+        # ✅ ENHANCED: More sophisticated percentage calculation
+        if direction == "BUY":
+            trail_level = current_price * (1 - trail_percentage)
+        else:
+            trail_level = current_price * (1 + trail_percentage)
+        
+        # Validate minimum distance from current price
+        point_value = self._get_point_value(trade.symbol)
+        min_distance_price = self.config.min_trail_distance * point_value
+        
+        if direction == "BUY":
+            min_trail_level = current_price - min_distance_price
+            trail_level = min(trail_level, min_trail_level)
+        else:
+            min_trail_level = current_price + min_distance_price
+            trail_level = max(trail_level, min_trail_level)
+        
+        return round(trail_level, 5)
+    
+    def should_trail(self, trade: TradeLog, current_price: float,
+                    candle_data: List[IGCandle]) -> bool:
+        return True  # Always trail with percentage method
+    
+    def _get_point_value(self, epic: str) -> float:
+        if "JPY" in epic:
+            return 0.01
+        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
+            return 0.0001
+        return 1.0
+
+
+class ATRTrailing(TrailingStrategy):
+    """ATR-based adaptive trailing stop - ENHANCED WITH VALIDATION"""
+    
+    def calculate_trail_level(self, trade: TradeLog, current_price: float,
+                            candle_data: List[IGCandle], db: Session) -> Optional[float]:
+        atr = self._calculate_atr(candle_data)
+        if not atr:
+            # Fallback to percentage method
+            fallback = PercentageTrailing(self.config, self.logger)
+            return fallback.calculate_trail_level(trade, current_price, candle_data, db)
+        
+        direction = trade.direction.upper()
+        trail_distance = atr * self.config.atr_multiplier
+        
+        # Apply min/max constraints
+        point_value = self._get_point_value(trade.symbol)
+        min_distance = self.config.min_trail_distance * point_value
+        max_distance = self.config.max_trail_distance * point_value
+        trail_distance = max(min_distance, min(max_distance, trail_distance))
+        
+        # ✅ CRITICAL FIX: Correct direction logic
+        if direction == "BUY":
+            trail_level = current_price - trail_distance
+        else:
+            trail_level = current_price + trail_distance
+        
+        self.logger.debug(f"[ATR TRAIL] {trade.symbol} {direction}: "
+                         f"ATR={atr:.5f}, multiplier={self.config.atr_multiplier}, "
+                         f"trail_distance={trail_distance:.5f}, trail_level={trail_level:.5f}")
+        
+        return round(trail_level, 5)
+    
+    def should_trail(self, trade: TradeLog, current_price: float,
+                    candle_data: List[IGCandle]) -> bool:
+        if not trade.last_trigger_price:
+            return False
+        
+        atr = self._calculate_atr(candle_data)
+        if not atr:
+            return True  # Trail if no ATR data
+        
+        # Trail when move is at least 50% of ATR
+        direction = trade.direction.upper()
+        move = abs(current_price - trade.last_trigger_price)
+        return move >= (atr * 0.5)
+    
+    def _calculate_atr(self, candles: List[IGCandle]) -> Optional[float]:
+        """Calculate ATR from candle data - ENHANCED WITH VALIDATION"""
+        if len(candles) < self.config.atr_period + 1:
+            return None
+        
+        # Sort by time and take recent candles
+        sorted_candles = sorted(candles, key=lambda x: x.start_time)[-self.config.atr_period-1:]
+        
+        true_ranges = []
+        for i in range(1, len(sorted_candles)):
+            prev_close = sorted_candles[i-1].close
+            current = sorted_candles[i]
+            
+            tr = max(
+                current.high - current.low,
+                abs(current.high - prev_close),
+                abs(current.low - prev_close)
+            )
+            true_ranges.append(tr)
+        
+        if not true_ranges:
+            return None
+        
+        return sum(true_ranges) / len(true_ranges)
+    
+    def _get_point_value(self, epic: str) -> float:
+        if "JPY" in epic:
+            return 0.01
+        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
+            return 0.0001
+        return 1.0
+
+
+class ChandelierTrailing(TrailingStrategy):
+    """Chandelier Exit trailing stop method - ENHANCED"""
+    
+    def calculate_trail_level(self, trade: TradeLog, current_price: float,
+                            candle_data: List[IGCandle], db: Session) -> Optional[float]:
+        direction = trade.direction.upper()
+        
+        # Get recent candles for calculation
+        recent_candles = sorted(candle_data, key=lambda x: x.start_time)[-self.config.chandelier_period:]
+        
+        if len(recent_candles) < self.config.chandelier_period:
+            # Fallback to ATR method
+            fallback = ATRTrailing(self.config, self.logger)
+            return fallback.calculate_trail_level(trade, current_price, candle_data, db)
+        
+        # Calculate ATR
+        atr = self._calculate_atr(recent_candles)
+        if not atr:
+            return None
+        
+        # ✅ ENHANCED: Better Chandelier calculation
+        if direction == "BUY":
+            # For long positions: Highest high - (ATR * multiplier)
+            highest_high = max(candle.high for candle in recent_candles)
+            trail_level = highest_high - (atr * self.config.chandelier_multiplier)
+        else:
+            # For short positions: Lowest low + (ATR * multiplier)
+            lowest_low = min(candle.low for candle in recent_candles)
+            trail_level = lowest_low + (atr * self.config.chandelier_multiplier)
+        
+        # Validate against minimum distance
+        point_value = self._get_point_value(trade.symbol)
+        min_distance = self.config.min_trail_distance * point_value
+        
+        if direction == "BUY":
+            min_trail_level = current_price - min_distance
+            trail_level = min(trail_level, min_trail_level)
+        else:
+            min_trail_level = current_price + min_distance
+            trail_level = max(trail_level, min_trail_level)
+        
+        self.logger.debug(f"[CHANDELIER] {trade.symbol} {direction}: "
+                         f"ATR={atr:.5f}, multiplier={self.config.chandelier_multiplier}, "
+                         f"trail_level={trail_level:.5f}")
+        
+        return round(trail_level, 5)
+    
+    def should_trail(self, trade: TradeLog, current_price: float,
+                    candle_data: List[IGCandle]) -> bool:
+        return True  # Always calculate new Chandelier level
+    
+    def _calculate_atr(self, candles: List[IGCandle]) -> Optional[float]:
+        if len(candles) < 2:
+            return None
+        
+        true_ranges = []
+        for i in range(1, len(candles)):
+            prev_close = candles[i-1].close
+            current = candles[i]
+            
+            tr = max(
+                current.high - current.low,
+                abs(current.high - prev_close),
+                abs(current.low - prev_close)
+            )
+            true_ranges.append(tr)
+        
+        return sum(true_ranges) / len(true_ranges) if true_ranges else None
+    
+    def _get_point_value(self, epic: str) -> float:
+        if "JPY" in epic:
+            return 0.01
+        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
+            return 0.0001
+        return 1.0
+
+
+class SmartTrailing(TrailingStrategy):
+    """Intelligent multi-condition trailing strategy - ENHANCED WITH FIXES"""
+    
+    def __init__(self, config: TrailingConfig, logger):
+        super().__init__(config, logger)
+        self.atr_strategy = ATRTrailing(config, logger)
+        self.chandelier_strategy = ChandelierTrailing(config, logger)
+        self.fixed_strategy = FixedPointsTrailing(config, logger)
+    
+    def calculate_trail_level(self, trade: TradeLog, current_price: float,
+                            candle_data: List[IGCandle], db: Session) -> Optional[float]:
+        
+        # Analyze market conditions
+        market_condition = self._analyze_market_condition(candle_data, current_price, trade)
+        
+        trail_level = None
+        
+        if market_condition == "high_volatility":
+            # Use wider ATR-based trailing in volatile markets
+            self.logger.debug(f"[SMART] Using ATR trailing for {trade.symbol} (high volatility)")
+            trail_level = self.atr_strategy.calculate_trail_level(trade, current_price, candle_data, db)
+        
+        elif market_condition == "strong_trend":
+            # Use Chandelier for strong trending markets
+            self.logger.debug(f"[SMART] Using Chandelier trailing for {trade.symbol} (strong trend)")
+            trail_level = self.chandelier_strategy.calculate_trail_level(trade, current_price, candle_data, db)
+        
+        else:
+            # Use tighter fixed trailing for choppy/weak trend markets
+            self.logger.debug(f"[SMART] Using fixed trailing for {trade.symbol} (choppy market)")
+            trail_level = self.fixed_strategy.calculate_trail_level(trade, current_price, candle_data, db)
+        
+        # ✅ ENHANCED: Final validation and safety check
+        if trail_level is not None:
+            # Ensure trail level respects minimum distance
+            point_value = self._get_point_value(trade.symbol)
+            min_distance = self.config.min_trail_distance * point_value
+            direction = trade.direction.upper()
+            
+            if direction == "BUY":
+                safe_max = current_price - min_distance
+                trail_level = min(trail_level, safe_max)
+            else:
+                safe_min = current_price + min_distance
+                trail_level = max(trail_level, safe_min)
+        
+        return trail_level
+    
+    def should_trail(self, trade: TradeLog, current_price: float,
+                    candle_data: List[IGCandle]) -> bool:
+        # More conservative trailing in choppy markets
+        market_condition = self._analyze_market_condition(candle_data, current_price, trade)
+        
+        if market_condition == "choppy":
+            # Require larger moves to trail in choppy conditions
+            if not trade.last_trigger_price:
+                return False
+            
+            move_points = self._calculate_move_points(trade.last_trigger_price, 
+                                                    current_price, trade.direction, trade.symbol)
+            return move_points >= (self.config.min_trail_distance * 2)
+        
+        # Use underlying strategy logic for other conditions
+        return True
+    
+    def _analyze_market_condition(self, candles: List[IGCandle], current_price: float, 
+                                trade: TradeLog) -> str:
+        """Analyze current market conditions - ENHANCED"""
+        if len(candles) < 10:
+            return "unknown"
+        
+        recent_candles = sorted(candles, key=lambda x: x.start_time)[-10:]
+        
+        try:
+            # Calculate volatility (ATR relative to price)
+            atr = self._calculate_atr(recent_candles)
+            if atr and current_price > 0:
+                volatility_ratio = atr / current_price
+                
+                if volatility_ratio > (self.config.volatility_threshold / 100):
+                    return "high_volatility"
+            
+            # Calculate trend strength
+            trend_strength = self._calculate_trend_strength(recent_candles)
+            
+            if trend_strength > self.config.trend_strength_min:
+                return "strong_trend"
+            elif trend_strength < 0.3:
+                return "choppy"
+            else:
+                return "weak_trend"
+                
+        except Exception as e:
+            self.logger.error(f"[SMART ANALYSIS ERROR] {trade.symbol}: {e}")
+            return "unknown"
+    
+    def _calculate_trend_strength(self, candles: List[IGCandle]) -> float:
+        """Calculate trend strength (0 = no trend, 1 = perfect trend) - ENHANCED"""
+        if len(candles) < 5:
+            return 0.0
+        
+        closes = [c.close for c in candles]
+        
+        # Count consecutive moves in same direction
+        up_moves = 0
+        down_moves = 0
+        
+        for i in range(1, len(closes)):
+            if closes[i] > closes[i-1]:
+                up_moves += 1
+            elif closes[i] < closes[i-1]:
+                down_moves += 1
+        
+        total_moves = len(closes) - 1
+        if total_moves == 0:
+            return 0.0
+        
+        # Trend strength is the dominance of one direction
+        dominant_moves = max(up_moves, down_moves)
+        return dominant_moves / total_moves
+    
+    def _calculate_atr(self, candles: List[IGCandle]) -> Optional[float]:
+        """Calculate ATR - ENHANCED WITH ERROR HANDLING"""
+        if len(candles) < 2:
+            return None
+        
+        try:
+            true_ranges = []
+            for i in range(1, len(candles)):
+                prev_close = candles[i-1].close
+                current = candles[i]
+                
+                tr = max(
+                    current.high - current.low,
+                    abs(current.high - prev_close),
+                    abs(current.low - prev_close)
+                )
+                true_ranges.append(tr)
+            
+            return sum(true_ranges) / len(true_ranges) if true_ranges else None
+            
+        except Exception:
+            return None
+    
+    def _calculate_move_points(self, from_price: float, to_price: float, 
+                             direction: str, symbol: str) -> int:
+        """Calculate movement in points - ENHANCED"""
+        point_value = self._get_point_value(symbol)
+        
+        if direction.upper() == "BUY":
+            move = to_price - from_price
+        else:
+            move = from_price - to_price
+        
+        return max(0, int(move / point_value))
+    
+    def _get_point_value(self, epic: str) -> float:
+        if "JPY" in epic:
+            return 0.01
+        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
+            return 0.0001
+        return 1.0
+
+
+class AdvancedTrailingManager:
+    """Manager class for advanced trailing strategies - ENHANCED WITH FIXES"""
+    
+    def __init__(self, config: TrailingConfig, logger):
+        self.config = config
+        self.logger = logger
+        self.strategies = {
+            TrailingMethod.FIXED_POINTS: FixedPointsTrailing(config, logger),
+            TrailingMethod.PERCENTAGE: PercentageTrailing(config, logger),
+            TrailingMethod.ATR_BASED: ATRTrailing(config, logger),
+            TrailingMethod.CHANDELIER: ChandelierTrailing(config, logger),
+            TrailingMethod.SMART_TRAIL: SmartTrailing(config, logger),
+        }
+    
+    def get_candle_data(self, db: Session, symbol: str, timeframe: int = 60, 
+                       limit: int = 50) -> List[IGCandle]:
+        """Get recent candle data for analysis - ENHANCED WITH ERROR HANDLING"""
+        try:
+            return (db.query(IGCandle)
+                   .filter(IGCandle.epic == symbol, IGCandle.timeframe == timeframe)
+                   .order_by(IGCandle.start_time.desc())
+                   .limit(limit)
+                   .all())
+        except Exception as e:
+            self.logger.error(f"[CANDLE DATA ERROR] {symbol}: {e}")
+            return []
+    
+    def validate_stop_level(self, trade: TradeLog, current_price: float, proposed_stop: float) -> bool:
+        """Validate that the proposed stop level is safe and logical - ADDED MISSING METHOD"""
+        try:
+            direction = trade.direction.upper()
+            point_value = self._get_point_value(trade.symbol)
+            min_distance = self.config.min_trail_distance * point_value
+            
+            # Use epsilon for floating-point comparison to avoid precision issues
+            epsilon = 0.001  # Allow for tiny floating-point differences
+            
+            # Calculate actual distance
+            if direction == "BUY":
+                actual_distance = current_price - proposed_stop
+                max_trail = current_price - min_distance
+                is_valid = proposed_stop <= max_trail and actual_distance > 0
+                
+                self.logger.debug(f"[VALIDATION] {trade.symbol} BUY: "
+                                f"current={current_price:.5f}, proposed={proposed_stop:.5f}, "
+                                f"distance={actual_distance:.5f} ({actual_distance/point_value:.3f}pts), "
+                                f"min_required={min_distance:.5f} ({min_distance/point_value:.3f}pts), "
+                                f"valid={is_valid}")
+                                
+                if not is_valid:
+                    if proposed_stop > current_price:
+                        self.logger.error(f"[VALIDATION FAIL] BUY stop {proposed_stop:.5f} ABOVE current {current_price:.5f}")
+                    elif actual_distance < (min_distance - epsilon):
+                        self.logger.error(f"[VALIDATION FAIL] BUY distance {actual_distance/point_value:.3f}pts < required {min_distance/point_value:.3f}pts")
+                    else:
+                        self.logger.debug(f"[VALIDATION PASS] BUY distance {actual_distance/point_value:.3f}pts >= required {min_distance/point_value:.3f}pts")
+                        is_valid = True  # Override validation if it's within epsilon tolerance
+            else:
+                actual_distance = proposed_stop - current_price
+                min_trail = current_price + min_distance
+                is_valid = proposed_stop >= min_trail and actual_distance > 0
+                
+                self.logger.debug(f"[VALIDATION] {trade.symbol} SELL: "
+                                f"current={current_price:.5f}, proposed={proposed_stop:.5f}, "
+                                f"distance={actual_distance:.5f} ({actual_distance/point_value:.3f}pts), "
+                                f"min_required={min_distance:.5f} ({min_distance/point_value:.3f}pts), "
+                                f"valid={is_valid}")
+                                
+                if not is_valid:
+                    if proposed_stop < current_price:
+                        self.logger.error(f"[VALIDATION FAIL] SELL stop {proposed_stop:.5f} BELOW current {current_price:.5f}")
+                    elif actual_distance < (min_distance - epsilon):
+                        self.logger.error(f"[VALIDATION FAIL] SELL distance {actual_distance/point_value:.3f}pts < required {min_distance/point_value:.3f}pts")
+                    else:
+                        self.logger.debug(f"[VALIDATION PASS] SELL distance {actual_distance/point_value:.3f}pts >= required {min_distance/point_value:.3f}pts")
+                        is_valid = True  # Override validation if it's within epsilon tolerance
+            
+            return is_valid
+            
+        except Exception as e:
+            self.logger.error(f"[VALIDATION ERROR] Trade {trade.id}: {e}")
+            return False
+
+    def _get_point_value(self, epic: str) -> float:
+        if "JPY" in epic:
+            return 0.01
+        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
+            return 0.0001
+        return 1.0
+    
+    def should_update_trail(self, trade: TradeLog, current_price: float, 
+                          db: Session) -> bool:
+        """Determine if trailing stop should be updated - ENHANCED"""
+        try:
+            strategy = self.strategies[self.config.method]
+            candle_data = self.get_candle_data(db, trade.symbol)
+            
+            return strategy.should_trail(trade, current_price, candle_data)
+        except Exception as e:
+            self.logger.error(f"[SHOULD TRAIL ERROR] {trade.symbol}: {e}")
+            return False
+    
+    def calculate_new_trail_level(self, trade: TradeLog, current_price: float,
+                                db: Session) -> Optional[float]:
+        """Calculate new trailing stop level - ENHANCED WITH VALIDATION"""
+        try:
+            strategy = self.strategies[self.config.method]
+            candle_data = self.get_candle_data(db, trade.symbol)
+            
+            new_level = strategy.calculate_trail_level(trade, current_price, candle_data, db)
+            
+            if new_level:
+                # ✅ CRITICAL: Validate the calculated level
+                if not self._validate_trail_level(trade, current_price, new_level):
+                    self.logger.warning(f"[TRAIL VALIDATION FAILED] {trade.symbol}: "
+                                      f"Calculated level {new_level:.5f} invalid for current {current_price:.5f}")
+                    return None
+                
+                self.logger.info(f"[{self.config.method.value.upper()}] {trade.symbol} "
+                               f"new trail level: {new_level:.5f}")
+            
+            return new_level
+        except Exception as e:
+            self.logger.error(f"[TRAIL CALC ERROR] {trade.symbol}: {e}")
+            return None
+    
+    def _validate_trail_level(self, trade: TradeLog, current_price: float, trail_level: float) -> bool:
+        """Validate that trail level is safe and logical - ENHANCED WITH FLOATING-POINT FIX"""
+        try:
+            direction = trade.direction.upper()
+            point_value = self._get_point_value(trade.symbol)
+            min_distance = self.config.min_trail_distance * point_value
+            
+            # Use epsilon for floating-point comparison to avoid precision issues
+            epsilon = 0.001  # Allow for tiny floating-point differences
+            
+            # Calculate actual distance
+            if direction == "BUY":
+                actual_distance = current_price - trail_level
+                max_trail = current_price - min_distance
+                is_valid = trail_level <= max_trail and actual_distance > 0
+                
+                self.logger.debug(f"[VALIDATION] {trade.symbol} BUY: "
+                                f"current={current_price:.5f}, trail={trail_level:.5f}, "
+                                f"distance={actual_distance:.5f} ({actual_distance/point_value:.3f}pts), "
+                                f"min_required={min_distance:.5f} ({min_distance/point_value:.3f}pts), "
+                                f"valid={is_valid}")
+                                
+                if not is_valid:
+                    if trail_level > current_price:
+                        self.logger.error(f"[VALIDATION FAIL] BUY trail {trail_level:.5f} ABOVE current {current_price:.5f}")
+                    elif actual_distance < (min_distance - epsilon):  # ✅ FIXED: Use epsilon for comparison
+                        self.logger.error(f"[VALIDATION FAIL] BUY distance {actual_distance/point_value:.3f}pts < required {min_distance/point_value:.3f}pts")
+                    else:
+                        # ✅ NEW: Log successful validation when distance meets requirements
+                        self.logger.debug(f"[VALIDATION PASS] BUY distance {actual_distance/point_value:.3f}pts >= required {min_distance/point_value:.3f}pts")
+                        is_valid = True  # Override validation if it's within epsilon tolerance
+            else:
+                actual_distance = trail_level - current_price
+                min_trail = current_price + min_distance
+                is_valid = trail_level >= min_trail and actual_distance > 0
+                
+                self.logger.debug(f"[VALIDATION] {trade.symbol} SELL: "
+                                f"current={current_price:.5f}, trail={trail_level:.5f}, "
+                                f"distance={actual_distance:.5f} ({actual_distance/point_value:.3f}pts), "
+                                f"min_required={min_distance:.5f} ({min_distance/point_value:.3f}pts), "
+                                f"valid={is_valid}")
+                                
+                if not is_valid:
+                    if trail_level < current_price:
+                        self.logger.error(f"[VALIDATION FAIL] SELL trail {trail_level:.5f} BELOW current {current_price:.5f}")
+                    elif actual_distance < (min_distance - epsilon):  # ✅ FIXED: Use epsilon for comparison
+                        self.logger.error(f"[VALIDATION FAIL] SELL distance {actual_distance/point_value:.3f}pts < required {min_distance/point_value:.3f}pts")
+                    else:
+                        # ✅ NEW: Log successful validation when distance meets requirements
+                        self.logger.debug(f"[VALIDATION PASS] SELL distance {actual_distance/point_value:.3f}pts >= required {min_distance/point_value:.3f}pts")
+                        is_valid = True  # Override validation if it's within epsilon tolerance
+            
+            return is_valid
+            
+        except Exception as e:
+            self.logger.error(f"[VALIDATION ERROR] Trade {trade.id}: {e}")
+            return False
+    
+    def get_trail_adjustment_points(self, trade: TradeLog, current_price: float,
+                                  new_trail_level: float) -> int:
+        """Convert trail level to adjustment points for API - ENHANCED"""
+        try:
+            direction = trade.direction.upper()
+            point_value = self._get_point_value(trade.symbol)
+            current_stop = trade.sl_price or 0.0
+            
+            # Calculate the distance between current stop and new trail level
+            if direction == "BUY":
+                adjustment_distance = new_trail_level - current_stop
+            else:
+                adjustment_distance = current_stop - new_trail_level
+            
+            adjustment_points = int(abs(adjustment_distance) / point_value)
+            
+            # Ensure minimum adjustment
+            return max(1, adjustment_points)
+        except Exception as e:
+            self.logger.error(f"[ADJUSTMENT CALC ERROR] {trade.symbol}: {e}")
+            return 1
+    
+    def _get_point_value(self, epic: str) -> float:
+        if "JPY" in epic:
+            return 0.01
+        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
+            return 0.0001
+        return 1.0
+
+
+class EnhancedTradeProcessor:
+    """Enhanced trade processor with advanced trailing strategies - CRITICALLY FIXED"""
+    
+    def __init__(self, trailing_config: TrailingConfig, order_sender, logger):
+        self.trailing_manager = AdvancedTrailingManager(trailing_config, logger)
+        self.order_sender = order_sender
+        self.logger = logger
+        self.config = trailing_config
+    
+    def calculate_safe_trail_distance(self, trade: TradeLog) -> int:
+        """Calculate safe trailing distance respecting IG's minimum requirements - ENHANCED"""
+        try:
+            # Use IG's minimum distance if available, otherwise use config minimum
+            ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+            config_min_distance = self.config.min_trail_distance
+            
+            if ig_min_distance:
+                # Use the larger of IG's requirement or our config
+                safe_distance = max(ig_min_distance, config_min_distance)
+                self.logger.debug(f"[SAFE DISTANCE] Trade {trade.id} {trade.symbol}: "
+                                f"IG min={ig_min_distance}, config min={config_min_distance}, using={safe_distance}")
+            else:
+                # Fallback to config if IG minimum not stored
+                safe_distance = config_min_distance
+                self.logger.debug(f"[SAFE DISTANCE] Trade {trade.id} {trade.symbol}: "
+                                f"No IG minimum stored, using config={safe_distance}")
+            
+            self.logger.info(f"[SAFE DISTANCE RESULT] Trade {trade.id} {trade.symbol}: "
+                           f"Returning {safe_distance} points for trailing")
+            return safe_distance
+        except Exception as e:
+            self.logger.error(f"[SAFE DISTANCE ERROR] Trade {trade.id}: {e}")
+            return self.config.min_trail_distance
+    
+    def validate_stop_level(self, trade: TradeLog, current_price: float, proposed_stop: float) -> bool:
+        """Validate that the proposed stop level is safe - SYNCHRONIZED WITH TRAILING STRATEGY"""
+        try:
+            direction = trade.direction.upper()
+            point_value = get_point_value(trade.symbol)
+            
+            # ✅ CRITICAL FIX: Use the SAME distance that the trailing strategy uses
+            # Instead of calculate_safe_trail_distance(), use the config minimum
+            # This ensures consistency between calculation and validation
+            strategy_distance = self.config.min_trail_distance
+            min_distance_price = strategy_distance * point_value
+            
+            self.logger.debug(f"[VALIDATION SYNC] {trade.symbol}: Using strategy distance {strategy_distance} points "
+                            f"instead of safe distance for consistency")
+            
+            if direction == "BUY":
+                # For BUY: stop must be below current price by at least min distance
+                required_stop_max = current_price - min_distance_price
+                actual_distance = current_price - proposed_stop
+                is_valid = proposed_stop <= required_stop_max and actual_distance > 0
+                
+                actual_points = actual_distance / point_value
+                self.logger.debug(f"[VALIDATION SYNC] {trade.symbol} BUY: "
+                                f"current={current_price:.5f}, proposed={proposed_stop:.5f}, "
+                                f"actual_distance={actual_points:.1f}pts, required={strategy_distance}pts, "
+                                f"valid={is_valid}")
+                                
+                if not is_valid:
+                    if proposed_stop > current_price:
+                        self.logger.error(f"[VALIDATION FAIL] BUY stop {proposed_stop:.5f} ABOVE current {current_price:.5f}")
+                    elif actual_distance < min_distance_price:
+                        self.logger.error(f"[VALIDATION FAIL] BUY distance {actual_points:.1f}pts < required {strategy_distance}pts")
+            else:
+                # For SELL: stop must be above current price by at least min distance  
+                required_stop_min = current_price + min_distance_price
+                actual_distance = proposed_stop - current_price
+                is_valid = proposed_stop >= required_stop_min and actual_distance > 0
+                
+                actual_points = actual_distance / point_value
+                self.logger.debug(f"[VALIDATION SYNC] {trade.symbol} SELL: "
+                                f"current={current_price:.5f}, proposed={proposed_stop:.5f}, "
+                                f"actual_distance={actual_points:.1f}pts, required={strategy_distance}pts, "
+                                f"valid={is_valid}")
+                                
+                if not is_valid:
+                    if proposed_stop < current_price:
+                        self.logger.error(f"[VALIDATION FAIL] SELL stop {proposed_stop:.5f} BELOW current {current_price:.5f}")
+                    elif actual_distance < min_distance_price:
+                        self.logger.error(f"[VALIDATION FAIL] SELL distance {actual_points:.1f}pts < required {strategy_distance}pts")
+            
+            return is_valid
+        except Exception as e:
+            self.logger.error(f"[STOP VALIDATION ERROR] Trade {trade.id}: {e}")
+            return False
+
+    def calculate_safe_stop_level(self, trade: TradeLog, current_price: float) -> float:
+        """Calculate a safe stop level that respects IG's minimum distance - ENHANCED"""
+        try:
+            direction = trade.direction.upper()
+            safe_distance = self.calculate_safe_trail_distance(trade)
+            point_value = get_point_value(trade.symbol)
+            safe_distance_price = safe_distance * point_value
+            
+            if direction == "BUY":
+                safe_stop = current_price - safe_distance_price
+            else:  # SELL
+                safe_stop = current_price + safe_distance_price
+            
+            return round(safe_stop, 5)
+        except Exception as e:
+            self.logger.error(f"[SAFE STOP CALC ERROR] Trade {trade.id}: {e}")
+            # Fallback calculation
+            point_value = get_point_value(trade.symbol)
+            fallback_distance = self.config.min_trail_distance * point_value
+            if trade.direction.upper() == "BUY":
+                return current_price - fallback_distance
+            else:
+                return current_price + fallback_distance
+
+    def process_trade_with_advanced_trailing(self, trade: TradeLog, current_price: float, db: Session) -> bool:
+        """Process trade with break-even logic and then advanced trailing - CRITICALLY FIXED"""
+        
+        # Diagnostic log
+        self.logger.info(f"🔧 [ENHANCED] Processing trade {trade.id} {trade.symbol} status={trade.status}")
+        
+        try:
+            point_value = get_point_value(trade.symbol)
+            break_even_trigger = self.config.break_even_trigger_points * point_value
+            
+            # Calculate safe trailing distance
+            safe_trail_distance = self.calculate_safe_trail_distance(trade)
+            safe_trail_distance_price = safe_trail_distance * point_value
+
+            # ✅ CRITICAL FIX: Calculate current profit correctly
+            if trade.direction.upper() == "BUY":
+                moved_in_favor = current_price - trade.entry_price
+                profit_points = int(abs(moved_in_favor) / point_value)
+                is_profitable_for_breakeven = moved_in_favor >= break_even_trigger
+                
+                self.logger.info(f"📊 [PROFIT] Trade {trade.id} BUY: "
+                            f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
+                            f"profit={profit_points}pts, trigger={self.config.break_even_trigger_points}pts")
+                
+            elif trade.direction.upper() == "SELL":
+                moved_in_favor = trade.entry_price - current_price
+                profit_points = int(abs(moved_in_favor) / point_value)
+                is_profitable_for_breakeven = moved_in_favor >= break_even_trigger
+                
+                self.logger.info(f"📊 [PROFIT] Trade {trade.id} SELL: "
+                            f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
+                            f"profit={profit_points}pts, trigger={self.config.break_even_trigger_points}pts")
+
+            # --- STEP 1: Break-even logic ---
+            # ✅ CRITICAL FIX: Skip break-even logic if already profit_protected
+            if trade.status == "profit_protected":
+                self.logger.info(f"🛡️ [PROFIT PROTECTED] Trade {trade.id}: Skipping break-even check, already protected at +10pts")
+                # Set moved_to_breakeven to True to allow trailing
+                trade.moved_to_breakeven = True
+                # Don't change status if already profit_protected
+            elif not getattr(trade, 'moved_to_breakeven', False) and is_profitable_for_breakeven:
+                self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
+                            f"Profit {profit_points}pts >= trigger {self.config.break_even_trigger_points}pts")
+                
+                # Calculate break-even stop level
+                if trade.direction.upper() == "BUY":
+                    break_even_stop = trade.entry_price + (1 * point_value)  # Entry + 1 point
+                else:
+                    break_even_stop = trade.entry_price - (1 * point_value)  # Entry - 1 point
+                
+                # ✅ CRITICAL FIX: For profit_protected trades, check if break-even would worsen the position
+                current_stop = trade.sl_price or 0.0
+                
+                # Check if break-even move would worsen protection
+                if trade.direction.upper() == "BUY":
+                    would_worsen = break_even_stop < current_stop  # Moving stop down is worse for BUY
+                else:  # SELL
+                    would_worsen = break_even_stop > current_stop  # Moving stop up is worse for SELL
+                
+                if would_worsen:
+                    self.logger.info(f"🛡️ [SKIP BREAK-EVEN] Trade {trade.id}: Current stop ({current_stop:.5f}) is better than break-even ({break_even_stop:.5f})")
+                    # Set flag to allow trailing without actually moving stop
+                    trade.moved_to_breakeven = True
+                    # Don't change status if already profit_protected
+                    if trade.status != "profit_protected":
+                        trade.status = "break_even"
+                    db.commit()
+                else:
+                    # Proceed with normal break-even logic
+                    if self.validate_stop_level(trade, current_price, break_even_stop):
+                        # Calculate adjustment needed
+                        if trade.direction.upper() == "BUY":
+                            adjustment_distance = break_even_stop - current_stop
+                        else:
+                            adjustment_distance = current_stop - break_even_stop
+                        
+                        adjustment_points = int(abs(adjustment_distance) / point_value)
+                        
+                        if adjustment_points > 0:
+                            direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
+                            
+                            self.logger.info(f"📤 [BREAK-EVEN SEND] Trade {trade.id}: "
+                                        f"Moving stop to break-even (+1pt), adjustment={adjustment_points}pts")
+                            
+                            success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                            
+                            if success:
+                                trade.moved_to_breakeven = True
+                                # ✅ IMPORTANT: Don't change status if already profit_protected
+                                if trade.status != "profit_protected":
+                                    trade.status = "break_even"
+                                trade.sl_price = break_even_stop
+                                trade.last_trigger_price = current_price
+                                trade.trigger_time = datetime.utcnow()
+                                db.commit()
+                                
+                                self.logger.info(f"🎉 [BREAK-EVEN] Trade {trade.id} {trade.symbol} "
+                                            f"moved to break-even: {break_even_stop:.5f}")
+                                return True
+                            else:
+                                self.logger.error(f"❌ [BREAK-EVEN FAILED] Trade {trade.id}: Stop adjustment failed")
+                        else:
+                            self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Adjustment points = 0")
+                            # Set flag anyway to prevent repeated attempts
+                            trade.moved_to_breakeven = True
+                            if trade.status != "profit_protected":
+                                trade.status = "break_even"
+                            db.commit()
+                    else:
+                        self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Break-even level validation failed")
+
+            # --- STEP 2: Advanced trailing logic ---
+            should_trail = False
+            
+            # ✅ CRITICAL FIX: Allow trailing for profit_protected status OR moved_to_breakeven
+            trail_ready = getattr(trade, 'moved_to_breakeven', False) or trade.status == "profit_protected"
+            
+            if trail_ready:
+                # ✅ CRITICAL FIX: For profit_protected trades, calculate trailing from current stop level, not break-even
+                if trade.status == "profit_protected":
+                    # Calculate additional movement beyond current protected level
+                    current_stop = trade.sl_price or 0.0
+                    
+                    if trade.direction.upper() == "BUY":
+                        # For BUY: additional move = how much price moved above current stop + safe distance
+                        additional_move = current_price - current_stop
+                        should_trail = additional_move >= safe_trail_distance_price
+                        self.logger.debug(f"[TRAIL CHECK PROTECTED] BUY: current_price={current_price:.5f}, "
+                                        f"protected_stop={current_stop:.5f}, additional_move={additional_move:.5f}, "
+                                        f"required={safe_trail_distance_price:.5f}, should_trail={should_trail}")
+                    else:  # SELL
+                        # For SELL: additional move = how much price moved below current stop + safe distance
+                        additional_move = current_stop - current_price
+                        should_trail = additional_move >= safe_trail_distance_price
+                        self.logger.debug(f"[TRAIL CHECK PROTECTED] SELL: current_price={current_price:.5f}, "
+                                        f"protected_stop={current_stop:.5f}, additional_move={additional_move:.5f}, "
+                                        f"required={safe_trail_distance_price:.5f}, should_trail={should_trail}")
+                else:
+                    # Original logic for non-protected trades
+                    if trade.direction.upper() == "BUY":
+                        additional_move = current_price - trade.entry_price - break_even_trigger
+                        should_trail = additional_move >= safe_trail_distance_price
+                        self.logger.debug(f"[TRAIL CHECK] BUY additional_move={additional_move:.5f}, "
+                                        f"required={safe_trail_distance_price:.5f}, should_trail={should_trail}")
+                    else:
+                        additional_move = trade.entry_price - current_price - break_even_trigger
+                        should_trail = additional_move >= safe_trail_distance_price
+                        self.logger.debug(f"[TRAIL CHECK] SELL additional_move={additional_move:.5f}, "
+                                        f"required={safe_trail_distance_price:.5f}, should_trail={should_trail}")
+                
+                if should_trail:
+                    self.logger.info(f"🎯 [TRAILING TRIGGER] Trade {trade.id}: Additional movement sufficient for trailing")
+                    
+                    # Apply the selected trailing strategy
+                    if self.config.method == TrailingMethod.FIXED_POINTS:
+                        return self._apply_fixed_points_trailing(trade, current_price, db)
+                    elif self.config.method == TrailingMethod.PERCENTAGE_BASED:
+                        return self._apply_percentage_trailing(trade, current_price, db)
+                    elif self.config.method == TrailingMethod.ATR_BASED:
+                        return self._apply_atr_trailing(trade, current_price, db)
+                    elif self.config.method == TrailingMethod.VOLATILITY_ADAPTIVE:
+                        return self._apply_volatility_adaptive_trailing(trade, current_price, db)
+                    else:
+                        self.logger.warning(f"[UNKNOWN METHOD] Trade {trade.id}: {self.config.method}")
+                        return False
+                else:
+                    self.logger.debug(f"[NO TRAIL] Trade {trade.id}: Insufficient additional movement for trailing")
+                    return True  # No action needed, but continue monitoring
+            else:
+                self.logger.debug(f"[NOT READY] Trade {trade.id}: Not ready for trailing (moved_to_breakeven={getattr(trade, 'moved_to_breakeven', False)}, status={trade.status})")
+                return True  # Continue monitoring
+                
+        except Exception as e:
+            self.logger.error(f"❌ [ENHANCED PROCESSING ERROR] Trade {trade.id}: {e}")
+            return False
+
+    
+    def _send_stop_adjustment(self, trade: TradeLog, stop_points: int, 
+                            direction_stop: str, limit_points: int) -> bool:
+        """Send stop adjustment to order system - ENHANCED"""
+        try:
+            payload = {
+                "epic": trade.symbol,
+                "adjustDirectionStop": direction_stop,
+                "adjustDirectionLimit": "increase",
+                "stop_offset_points": stop_points,
+                "limit_offset_points": limit_points,
+                "dry_run": False
+            }
+            
+            self.logger.info(f"[TRAILING PAYLOAD] {trade.symbol} {payload}")
+            from config import ADJUST_STOP_URL
+            self.logger.info(f"[SENDING TO] {ADJUST_STOP_URL}")
+            
+            # Use the order sender to send the adjustment
+            result = self.order_sender.send_adjustment(trade.symbol, trade.direction, 
+                                                     stop_points, limit_points)
+            
+            self.logger.info(f"[✅ SENT] {trade.symbol} stop={stop_points}, limit={limit_points}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ [SEND ERROR] Trade {trade.id}: {e}")
+            return False
+
+
+# Configuration examples for different market conditions - ENHANCED
+SCALPING_CONFIG = TrailingConfig(
+    method=TrailingMethod.FIXED_POINTS,
+    initial_trigger_points=5,
+    break_even_trigger_points=5,  # ✅ ENHANCED: move to break-even after +5 points
+    min_trail_distance=2,
+    max_trail_distance=10
+)
+
+SWING_TRADING_CONFIG = TrailingConfig(
+    method=TrailingMethod.ATR_BASED,
+    initial_trigger_points=15,
+    break_even_trigger_points=10,  # ✅ ENHANCED
+    atr_multiplier=2.5,
+    min_trail_distance=10,
+    max_trail_distance=100
+)
+
+TREND_FOLLOWING_CONFIG = TrailingConfig(
+    method=TrailingMethod.CHANDELIER,
+    initial_trigger_points=20,
+    break_even_trigger_points=15,  # ✅ ENHANCED
+    chandelier_period=14,
+    chandelier_multiplier=3.0,
+    min_trail_distance=15
+)
+
+ADAPTIVE_CONFIG = TrailingConfig(
+    method=TrailingMethod.SMART_TRAIL,
+    initial_trigger_points=10,
+    break_even_trigger_points=7,  # ✅ ENHANCED
+    volatility_threshold=2.0,
+    trend_strength_min=0.7,
+    min_trail_distance=8,
+    max_trail_distance=50
+)

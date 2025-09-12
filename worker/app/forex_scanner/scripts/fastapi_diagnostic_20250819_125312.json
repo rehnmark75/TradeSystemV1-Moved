@@ -1,0 +1,76 @@
+{
+  "Container Status": {
+    "status": "fail",
+    "message": "Docker command not found",
+    "details": [
+      "Docker may not be installed or not in PATH"
+    ]
+  },
+  "Network Connectivity": {
+    "status": "fail",
+    "message": "No network connectivity to container",
+    "details": [
+      "Timeout 5s: 403 in 0.01s",
+      "Timeout 15s: 403 in 0.00s",
+      "Timeout 30s: 403 in 0.00s"
+    ]
+  },
+  "Health Endpoint": {
+    "status": "fail",
+    "message": "FastAPI not responding on any endpoints",
+    "details": [
+      "/health: 403",
+      "/: 403",
+      "/docs: 403",
+      "/openapi.json: 403"
+    ]
+  },
+  "Order Endpoint Access": {
+    "status": "fail",
+    "message": "Order endpoint is not accessible",
+    "details": [
+      "GET: 403 - Forbidden",
+      "POST: 403 - Forbidden",
+      "OPTIONS: 403 - Forbidden"
+    ]
+  },
+  "Order Endpoint Performance": {
+    "status": "pass",
+    "message": "Order endpoint performance is good",
+    "details": [
+      "Minimal: 403 in 0.00s",
+      "  \u2705 FAST: 0.00s",
+      "Standard: 403 in 0.00s",
+      "  \u2705 FAST: 0.00s",
+      "Complex: 403 in 0.00s",
+      "  \u2705 FAST: 0.00s"
+    ]
+  },
+  "Memory & CPU Usage": {
+    "status": "error",
+    "message": "Error checking resource usage: [Errno 2] No such file or directory: 'docker'",
+    "details": []
+  },
+  "Log Analysis": {
+    "status": "error",
+    "message": "Error analyzing logs: [Errno 2] No such file or directory: 'docker'",
+    "details": []
+  },
+  "Database Connectivity": {
+    "status": "warn",
+    "message": "Could not confirm database connectivity",
+    "details": [
+      "/health: 403",
+      "/positions: 403",
+      "/orders: 403",
+      "/status: 403"
+    ]
+  },
+  "Dependencies Check": {
+    "status": "warn",
+    "message": "FastAPI docs not accessible: 403",
+    "details": [
+      "GET /docs: 403"
+    ]
+  }
+}

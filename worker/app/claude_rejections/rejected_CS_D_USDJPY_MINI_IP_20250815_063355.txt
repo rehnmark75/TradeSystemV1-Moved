@@ -1,0 +1,17 @@
+Claude Signal Rejection Analysis
+Generated: 2025-08-15 06:33:55
+Epic: CS.D.USDJPY.MINI.IP
+Signal Type: SELL
+Price: 147.1015
+Confidence: 77.7%
+Strategy: combined
+
+CLAUDE REJECTION:
+Score: 4/10
+Decision: REJECT
+Reason: Despite the system's high confidence (77.7%), there are significant technical contradictions that raise concerns. The signal suggests a SELL while showing strong bullish momentum (MACD), price positioning near support (19.7% from level), and we're in a ranging market during lower-liquidity Tokyo hours. The risk/reward profile is particularly unfavorable given the proximity to support and the large resistance distance, suggesting potential mean reversion against the proposed direction.
+
+Raw Response:
+SCORE: 4/10
+DECISION: REJECT
+REASON: Despite the system's high confidence (77.7%), there are significant technical contradictions that raise concerns. The signal suggests a SELL while showing strong bullish momentum (MACD), price positioning near support (19.7% from level), and we're in a ranging market during lower-liquidity Tokyo hours. The risk/reward profile is particularly unfavorable given the proximity to support and the large resistance distance, suggesting potential mean reversion against the proposed direction.

@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+ARG APP_DIR=dev-app
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y git
+
+# Copy your app code
+COPY ${APP_DIR}/ /app/
+
+# ✅ Install the official Lightstreamer SDK and other dependencies
+RUN pip install --no-cache-dir \
+    fastapi uvicorn requests httpx pandas \
+    sqlalchemy psycopg2-binary
+
+# Run your FastAPI app
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+

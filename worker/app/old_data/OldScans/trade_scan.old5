@@ -1,0 +1,584 @@
+import os
+import pandas as pd
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+from sqlalchemy import create_engine, text
+from PIL import Image
+import google.generativeai as genai
+from services.keyvault import get_secret
+import json
+import re
+import logging
+from logging.handlers import TimedRotatingFileHandler
+import requests
+import schedule
+import time
+import pytz
+from datetime import datetime
+from services.smc_structure import (
+    detect_pivots, classify_pivots, get_recent_trailing_extremes,
+    calculate_zones, convert_swings_to_plot_shapes, determine_bias
+)
+
+import pandas_ta as ta
+
+# --- Setup Gemini ---
+api_key = get_secret("gemini")
+genai.configure(api_key=api_key)
+gemini_model = genai.GenerativeModel("gemini-2.5-flash-preview-05-20")
+
+# --- Config ---
+db_url = os.getenv("DATABASE_URL")
+engine = create_engine(db_url)
+
+stockholm = pytz.timezone("Europe/Stockholm")
+
+class LocalTimeFormatter(logging.Formatter):
+    def __init__(self, fmt=None, datefmt=None, tz=None):
+        super().__init__(fmt, datefmt)
+        self.tz = tz or pytz.UTC
+
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, self.tz)
+        return dt.strftime(datefmt) if datefmt else dt.isoformat()
+
+formatter = LocalTimeFormatter(
+    fmt="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    tz=stockholm
+)
+
+# Create rotating log handler — rotates daily
+# --- File handler (rotating daily)
+log_handler = TimedRotatingFileHandler("/app/logs/ema_alert.log", when="midnight", interval=1, backupCount=7)
+log_handler.suffix = "%Y-%m-%d"
+log_handler.setFormatter(formatter)
+
+# --- Console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+
+# --- Setup logger manually
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+log.addHandler(log_handler)
+log.addHandler(console_handler)
+log.propagate = False
+
+
+# Gemini log setup with daily rotation
+gemini_log = logging.getLogger("gemini")
+gemini_log.setLevel(logging.INFO)
+
+gemini_handler = TimedRotatingFileHandler(
+    "/app/logs/gemini_analysis.log", when="midnight", interval=1, backupCount=7
+)
+gemini_handler.suffix = "%Y-%m-%d"
+gemini_handler.setFormatter(formatter)
+
+gemini_log.addHandler(gemini_handler)
+gemini_log.propagate = False
+
+EPIC_MAP = {
+    "CS.D.EURUSD.MINI.IP": "EURUSD.1.MINI",
+    "CS.D.GBPUSD.MINI.IP": "GBPUSD.1.MINI",
+    "CS.D.USDJPY.MINI.IP": "USDJPY.100.MINI",
+    "CS.D.AUDUSD.MINI.IP": "AUDUSD.1.MINI"
+}
+
+log.info(f"🚀 BOOTING... {datetime.utcnow().isoformat()} UTC")
+ALERT_LOG_PATH = "/app/tradesetups/alert_log.json"
+
+ORDER_API_URL = "http://fastapi-dev:8000/orders/place-order"  # Update if hosted elsewhere
+API_SUBSCRIPTION_KEY = "436abe054a074894a0517e5172f0e5b6"
+
+# --- Fetch candles ---
+def fetch_candle_data(engine, epic, timeframe=15, lookback_hours=500):
+    since = datetime.utcnow() - timedelta(hours=lookback_hours)
+    source_tf = 5 if timeframe == 15 else timeframe
+
+    query = text("""
+        SELECT start_time, open, high, low, close
+        FROM ig_candles
+        WHERE epic = :epic
+          AND timeframe = :timeframe
+          AND start_time >= :since
+        ORDER BY start_time ASC
+    """)
+
+    with engine.connect() as conn:
+        result = conn.execute(query, {
+            "epic": epic,
+            "timeframe": source_tf,
+            "since": since
+        })
+        df = pd.DataFrame(result.fetchall(), columns=result.keys())
+
+    if df.empty:
+        raise ValueError(f"No data returned for epic={epic}, timeframe={source_tf}")
+
+    df['start_time'] = pd.to_datetime(df['start_time'])
+
+    if timeframe == 15 and source_tf == 5:
+        df.set_index("start_time", inplace=True)
+        df = df.resample("15min", label='right', closed='right').agg({
+            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'
+        }).dropna().reset_index()
+
+    return df.reset_index(drop=True)
+
+
+def get_epics(engine):
+    query = text("SELECT DISTINCT epic FROM ig_candles ORDER BY epic")
+    with engine.connect() as conn:
+        result = conn.execute(query)
+        return [row[0] for row in result.fetchall()]
+
+def send_order(external_epic, direction, stop_distance, limit_distance=None, size=None, custom_label=None, risk_reward=2.0):
+    # Reverse lookup for internal epic name
+    internal_epic = EPIC_MAP.get(external_epic)
+    if not internal_epic:
+        log.info(f"send_order [WARN] No reverse mapping found for: {external_epic}")
+        return
+
+    # Build order payload
+    body = {
+        "epic": internal_epic,
+        "direction": direction,
+        "stop_distance": stop_distance
+    }
+
+    # Optional fields
+    if limit_distance is not None:
+        body["limit_distance"] = limit_distance
+    if size is not None:
+        body["size"] = size
+    if custom_label is not None:
+        body["custom_label"] = custom_label
+    if risk_reward is not None:
+        body["risk_reward"] = risk_reward
+
+    headers = {
+        "x-apim-gateway": "verified",
+        "Content-Type": "application/json"
+    }
+
+    params = {
+        "subscription-key": API_SUBSCRIPTION_KEY
+    }
+
+    try:
+        response = requests.post(ORDER_API_URL, json=body, headers=headers, params=params)
+        if response.status_code == 200:
+            log.info(f"send_order: [ORDER SENT] {internal_epic} -> {direction}")
+        else:
+            log.info(f"send_order: [ERROR] Failed to send order: {response.status_code} | {response.text}")
+    except Exception as e:
+        log.info(f"send_order: [EXCEPTION] Error sending order: {e}")
+
+
+def log_alert_to_db(engine, epic, start_time, direction, price, alert_type):
+    query_check = text("""
+        SELECT 1 FROM alerts
+        WHERE epic = :epic AND start_time = :start_time AND alert_type = :alert_type
+        LIMIT 1
+    """)
+    
+    query_insert = text("""
+        INSERT INTO alerts (epic, start_time, direction, price, alert_type, created_at)
+        VALUES (:epic, :start_time, :direction, :price, :alert_type, NOW())
+    """)
+
+    with engine.begin() as conn:
+        exists = conn.execute(query_check, {
+            "epic": epic,
+            "start_time": start_time,
+            "alert_type": alert_type
+        }).fetchone()
+        
+        if exists:
+            print(f"⚠️ Alert already exists in DB for {epic} at {start_time} ({alert_type})")
+            return  # Do not insert
+
+        conn.execute(query_insert, {
+            "epic": epic,
+            "start_time": start_time,
+            "direction": direction,
+            "price": price,
+            "alert_type": alert_type
+        })
+
+
+
+def alert_exists_in_db(engine, epic, start_time, alert_type):
+    query = text("""
+        SELECT 1 FROM alerts
+        WHERE epic = :epic AND start_time = :start_time AND alert_type = :alert_type
+        LIMIT 1
+    """)
+    with engine.connect() as conn:
+        result = conn.execute(query, {
+            "epic": epic,
+            "start_time": start_time,
+            "alert_type": alert_type
+        })
+        return result.scalar() is not None
+
+def compute_ema(series: pd.Series, length: int) -> pd.Series:
+    return ta.ema(series, length=length)
+
+def compute_macd(series: pd.Series) -> pd.DataFrame:
+    """
+    Returns a DataFrame with 'macd_line', 'signal_line', and 'histogram'.
+    """
+    macd_df = ta.macd(series)
+    return macd_df.rename(columns={
+        f"MACD_12_26_9": "macd_line",
+        f"MACDs_12_26_9": "signal_line",
+        f"MACDh_12_26_9": "histogram"
+    })
+
+def compute_rsi(series: pd.Series, length: int = 14) -> pd.Series:
+    return ta.rsi(series, length=length)
+
+def detect_ema_alerts_from_indicators(df: pd.DataFrame, epic: str = "", eps: float = 1e-8) -> pd.DataFrame:
+    df = df.sort_values('start_time').reset_index(drop=True)
+
+    df["prev_close"] = df["close"].shift(1)
+    df["prev_ema_12"] = df["ema_12"].shift(1)
+
+    # Bull logic
+    df['bull_cross'] = (df['prev_close'] < df['prev_ema_12'] - eps) & (df['close'] > df['ema_12'] + eps)
+    df['bull_condition'] = (df['close'] > df['ema_50'] + eps) & (df['ema_12'] > df['ema_50'] + eps)
+
+    df['bull_alert'] = df['bull_cross'] & df['bull_condition']
+
+    # Bear logic
+    df['bear_cross'] = (df['prev_close'] > df['prev_ema_12'] + eps) & (df['close'] < df['ema_12'] - eps)
+    df['bear_condition'] = (df['close'] < df['ema_50'] - eps) & (df['ema_12'] < df['ema_50'] - eps) 
+    df['bear_alert'] = df['bear_cross'] & df['bear_condition']
+
+    return df
+
+def compute_alligator(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute the Williams Alligator indicator and a trend filter.
+    
+    Adds the following columns to df:
+    - alligator_jaw (SMMA 13 shifted 8)
+    - alligator_teeth (SMMA 8 shifted 5)
+    - alligator_lips (SMMA 5 shifted 3)
+    - is_trending (True if lips > teeth > jaw or lips < teeth < jaw)
+    """
+    # Calculate SMMA (equivalent to EMA with smoothing) with shift
+    df["alligator_jaw"] = df["close"].ewm(span=13, adjust=False).mean().shift(8)
+    df["alligator_teeth"] = df["close"].ewm(span=8, adjust=False).mean().shift(5)
+    df["alligator_lips"] = df["close"].ewm(span=5, adjust=False).mean().shift(3)
+
+    # Determine if the market is trending
+    df["is_trending"] = (
+        (df["alligator_lips"] > df["alligator_teeth"]) & 
+        (df["alligator_teeth"] > df["alligator_jaw"])
+    ) | (
+        (df["alligator_lips"] < df["alligator_teeth"]) & 
+        (df["alligator_teeth"] < df["alligator_jaw"])
+    )
+
+    return df
+
+def compute_macd(df: pd.DataFrame, suffix: str = "") -> pd.DataFrame:
+    macd = ta.macd(df["close"], fast=12, slow=26, signal=9)
+    df[f"macd_line{suffix}"] = macd["MACD_12_26_9"]
+    df[f"signal_line{suffix}"] = macd["MACDs_12_26_9"]
+    df[f"macd_histogram{suffix}"] = macd["MACDh_12_26_9"]
+    return df
+
+# --- Plot and Save ---
+def plot_alert_chart(df, epic, timeframe, image_path, zones=None, position_note=None):
+    print("time to plot the chart")
+    offset = 0.01 if "JPY" in epic else 0.0001
+
+    fig = go.Figure()
+
+    # Candles
+    fig.add_trace(go.Candlestick(x=df['start_time'], open=df['open'], high=df['high'],
+                                 low=df['low'], close=df['close'],
+                                 increasing_line_color="green", decreasing_line_color="red"))
+
+    # EMA lines
+    fig.add_trace(go.Scatter(x=df['start_time'], y=df['ema_12'], mode="lines", name="EMA12", line=dict(color="blue")))
+    fig.add_trace(go.Scatter(x=df['start_time'], y=df['ema_50'], mode="lines", name="EMA50", line=dict(color="orange")))
+
+        # === 5m EMA lines (dashed) ===
+    fig.add_trace(go.Scatter(
+        x=df['start_time'], y=df['ema_12_5m'],
+        mode="lines", name="EMA12 5m",
+        line=dict(color="blue", dash="dash")
+    ))
+    fig.add_trace(go.Scatter(
+        x=df['start_time'], y=df['ema_50_5m'],
+        mode="lines", name="EMA50 5m",
+        line=dict(color="orange", dash="dash")
+    ))
+
+    # === 1h EMA lines (dotted) ===
+    fig.add_trace(go.Scatter(
+        x=df['start_time'], y=df['ema_12_1h'],
+        mode="lines", name="EMA12 1h",
+        line=dict(color="blue", dash="dot")
+    ))
+    fig.add_trace(go.Scatter(
+        x=df['start_time'], y=df['ema_50_1h'],
+        mode="lines", name="EMA50 1h",
+        line=dict(color="orange", dash="dot")
+    ))
+
+    # Bullish Alerts
+    bull_df = df[df['bull_alert']]
+    fig.add_trace(go.Scatter(
+        x=bull_df['start_time'],
+        y=bull_df['high'] + offset,
+        mode="markers",
+        marker=dict(color="green", size=10, symbol="triangle-up"),
+        name="Bull"
+    ))
+
+    # Bearish Alerts
+    bear_df = df[df['bear_alert']]
+    fig.add_trace(go.Scatter(
+        x=bear_df['start_time'],
+        y=bear_df['low'] - offset,
+        mode="markers",
+        marker=dict(color="red", size=10, symbol="triangle-down"),
+        name="Bear"
+    ))
+
+    # Layout
+    fig.update_layout(
+        title=f"{epic} - {timeframe}m EMA Alerts",
+        xaxis_title="Time",
+        yaxis_title="Price",
+        plot_bgcolor="white",
+        width=1000,
+        height=600,
+        xaxis=dict(
+            rangeslider=dict(visible=False),
+            rangebreaks=[
+                dict(pattern="day of week", bounds=[6, 1]),
+                dict(bounds=["2025-05-23 23:00", "2025-05-25 22:00"])
+            ]
+        ),
+        margin=dict(l=40, r=40, t=50, b=40)
+    )
+
+    # Save chart
+    #fig.write_image(image_path)
+    print(f"📈 Chart saved to {image_path}")
+
+
+    # Save the image
+    os.makedirs(os.path.dirname(image_path), exist_ok=True)
+    img_bytes = fig.to_image(format="png", scale=2)
+    with open(image_path, "wb") as f:
+        f.write(img_bytes)
+    print(f"✅ Chart saved to: {image_path}")
+    return image_path
+
+def get_last_alert_type(valid_alerts):
+    if not valid_alerts:
+        return None
+    return valid_alerts[-1]
+
+
+def main():
+  
+    # Get all epics
+    epics = [
+    "CS.D.EURUSD.MINI.IP",
+    "CS.D.GBPUSD.MINI.IP",
+    "CS.D.USDJPY.MINI.IP",
+    "CS.D.AUDUSD.MINI.IP"]
+    
+    LOCAL_TZ = pytz.timezone("Europe/Stockholm")
+    #epics = ["CS.D.GBPUSD.MINI.IP"]
+    for epic in epics:
+        print(f"🔍 Scanning {epic}...")
+
+        try:
+            df_5m = fetch_candle_data(engine, epic, 5, 1000)
+            df_5m["start_time"] = pd.to_datetime(df_5m["start_time"]).dt.tz_localize("UTC").dt.tz_convert(LOCAL_TZ)
+
+            # 5m EMAs
+            df_5m["ema_12_5m"] = df_5m["close"].ewm(span=12, adjust=False).mean()
+            df_5m["ema_50_5m"] = df_5m["close"].ewm(span=50, adjust=False).mean()
+
+            # short term
+            df_15m = fetch_candle_data(engine, epic, 15, 1000)
+            df_15m["start_time"] = pd.to_datetime(df_15m["start_time"]).dt.tz_localize("UTC").dt.tz_convert(LOCAL_TZ)
+
+            df_15m['ema_12'] = df_15m['close'].ewm(span=12, adjust=False).mean()
+            df_15m['ema_50'] = df_15m['close'].ewm(span=50, adjust=False).mean()
+            df_15m = df_15m.dropna(subset=["ema_12", "ema_50"])
+
+            # long term
+            df_1h = fetch_candle_data(engine, epic, 60, lookback_hours=200)
+            df_1h['ema_12_1h'] = df_1h['close'].ewm(span=12, adjust=False).mean()
+            df_1h['ema_50_1h'] = df_1h['close'].ewm(span=50, adjust=False).mean()
+            df_1h['trend'] = df_1h['close'] > df_1h['ema_50_1h']
+
+            df_1h["start_time"] = pd.to_datetime(df_1h["start_time"]).dt.tz_localize("UTC").dt.tz_convert(LOCAL_TZ)
+
+            # 5m MACD
+            df_5m = compute_macd(df_5m, suffix="_5m")
+
+            # 1h MACD + trend
+            df_1h = compute_macd(df_1h,suffix="_1h")
+            df_1h = compute_alligator(df_1h)  # optional trend filter
+
+            df_15m = compute_alligator(df_15m)
+
+            # check for alerts
+            df_15m = detect_ema_alerts_from_indicators(df_15m)
+
+            # Merge 5m MACD and EMAs into 15m
+            df_15m = pd.merge_asof(
+                df_15m.sort_values("start_time"),
+                df_5m[["start_time", "macd_histogram_5m", "ema_12_5m", "ema_50_5m"]].sort_values("start_time"),
+                on="start_time",
+                direction="backward",
+                tolerance=pd.Timedelta("15min")
+            )
+
+            # Merge 1h MACD, trend, and EMAs into 15m
+            df_15m = pd.merge_asof(
+                df_15m.sort_values("start_time"),
+                df_1h[["start_time", "macd_histogram_1h", "trend", "ema_12_1h", "ema_50_1h"]].sort_values("start_time"),
+                on="start_time",
+                direction="backward",
+                tolerance=pd.Timedelta("1h")
+            )
+
+            df_15m["trend"] = df_15m["trend"].fillna(False).astype(bool)  # Default to False if no match
+
+    
+            valid_alerts = []
+            for idx, row in df_15m.iterrows():
+   
+                condition = None
+                alert_type = None
+                alert_class = None
+
+                alert_price = float(row["close"])
+                alert_time = row["start_time"]
+
+                # === Classic signal alerts ===
+                if row.get("bull_alert", False):
+                    if not row.get("trend", False):  # 🚫 1H trend not bullish
+                        #print(f"[{alert_time}] 1H trend not bullish")
+                        continue
+                    if row.get("macd_histogram_5m", 0) <= 0:
+                        #print(f"[{alert_time}] 5m filter on macd for bull alert")
+                        continue  # skip if short-term not bullish
+                    if row.get("macd_histogram_1h", 0) <= 0:
+                        #print(f"[{alert_time}] 1hfilter on macd for bull alert")
+                        continue  # 🔇 1H MACD is not bullish
+                    alert_type = "bull"
+                    alert_class = "Signal"
+                    condition = "bull_alert"
+                    valid_alerts.append({
+                        "timestamp": row["start_time"],
+                        "type": alert_type,
+                        "price": row["close"]
+                    })
+                elif row.get("bear_alert", False):
+                    if row.get("trend", True):  # 🚫 1H trend still bullish → suppress bear
+                        #print(f"[{alert_time}] 1H trend still bullish → suppress bear")
+                        continue
+                    if row.get("macd_histogram_5m", 0) >= 0:
+                        #print(f"[{alert_time}] 5m filter on macd for bear alert")
+                        continue
+                    if row.get("macd_histogram_1h", 0) >= 0:
+                        #print(f"[{alert_time}] filter on macd for bear alert")
+                        continue  # 🔇 1H MACD is not bullish
+                    alert_type = "bear"
+                    alert_class = "Signal"
+                    condition = "bear_alert"
+                    valid_alerts.append({
+                        "timestamp": row["start_time"],
+                        "type": alert_type,
+                        "price": row["close"]
+                    })
+                else:
+                    continue
+
+            last_alert = get_last_alert_type(valid_alerts)
+            
+            # Check age
+            alert_time = pd.to_datetime(last_alert["timestamp"])
+            now = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(LOCAL_TZ)
+            if now - alert_time > timedelta(minutes=30):
+                 log.info(f"⏩ Alert for {epic} is older than 30 minutes ({alert_time}), skipping.")
+                 continue
+
+            # Check if already in DB
+            if alert_exists_in_db(engine, epic, last_alert["timestamp"], last_alert["type"]):
+                log.info(f"⏩ Alert for {epic} at {alert_time} ({last_alert['type']}) already exists in DB, skipping.")
+                continue
+           
+            
+            direction = "BUY" if last_alert["type"] == "bull" else "SELL"
+    
+            # Get the row that matches the last alert time
+            alert_time = last_alert["timestamp"]
+            alert_type = last_alert["type"]
+            alert_price = last_alert["price"]
+
+            # Find index of the matching row
+            alert_row = df_15m[df_15m["start_time"] == alert_time]
+            if alert_row.empty:
+                log.warning("⚠️ Alert row not found in DataFrame")
+                continue
+
+            # log alert to db so we dont run it again
+            try:
+                log_alert_to_db(  
+                    engine,
+                    epic,
+                    last_alert["timestamp"],
+                    direction,
+                    float(last_alert["price"]),
+                    alert_type=last_alert["type"]
+                )
+            except Exception as e:
+                log.warning(f"Failed to log alert to database: {e}")
+            
+    
+            ig_stop_points = 10
+            log.info("time to send alert")
+            if last_alert:
+                direction = "BUY" if last_alert["type"] == "bull" else "SELL"
+                log.info(f"📤 Order to send: {epic} {direction} {ig_stop_points}")
+                send_order(epic, direction, ig_stop_points)
+                
+            else:
+                log.info("⚠️ No valid last_alert found. Skipping step to send order.")
+
+            
+        except Exception as e:
+            log.exception(f"❌ Error processing {epic}: {e}")
+
+
+def scan_and_trade():
+    log.info(f"[{datetime.utcnow()}] Running scheduled scan...")
+    main()
+
+
+if __name__ == "__main__":
+
+        print("⏳ Scheduler started... Running every 60 seconds.")
+        scan_and_trade()  # Optional initial run
+
+        schedule.every(2).minutes.do(scan_and_trade)
+        while True:
+            schedule.run_pending()
+            time.sleep(1)

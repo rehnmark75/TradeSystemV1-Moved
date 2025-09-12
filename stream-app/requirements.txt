@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+lightstreamer-client-lib 
+httpx
+requests
+sqlalchemy
+psycopg2-binary

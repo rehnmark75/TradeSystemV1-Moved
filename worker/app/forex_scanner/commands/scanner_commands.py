@@ -1,0 +1,133 @@
+# commands/scanner_commands.py
+"""
+Scanner Commands Module
+Handles basic scanning operations: single scan and live scanning
+"""
+
+import logging
+from typing import List, Dict, Optional
+
+try:
+    from core.scanner import IntelligentForexScanner as ForexScanner
+    from core.database import DatabaseManager
+    import config
+except ImportError:
+    from forex_scanner.core.scanner import IntelligentForexScanner as ForexScanner
+    from forex_scanner.core.database import DatabaseManager
+    from forex_scanner import config
+
+
+class ScannerCommands:
+    """Scanner command implementations"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+    
+    def setup_scanner(self) -> ForexScanner:
+        """Initialize the forex scanner with configuration"""
+        db_manager = DatabaseManager(config.DATABASE_URL)
+        
+        scanner = ForexScanner(
+            db_manager=db_manager,
+            epic_list=config.EPIC_LIST,
+            scan_interval=config.SCAN_INTERVAL,
+            claude_api_key=config.CLAUDE_API_KEY,
+            enable_claude_analysis=config.ENABLE_CLAUDE_ANALYSIS,
+            use_bid_adjustment=config.USE_BID_ADJUSTMENT,
+            spread_pips=config.SPREAD_PIPS,
+            min_confidence=config.MIN_CONFIDENCE,
+            user_timezone=config.USER_TIMEZONE
+        )
+        
+        return scanner
+    
+    def run_single_scan(self) -> bool:
+        """Run a single scan across all configured pairs"""
+        self.logger.info("🔍 Running single scan")
+        
+        try:
+            scanner = self.setup_scanner()
+            signals = scanner.scan_once()
+            
+            if signals:
+                self.logger.info(f"Found {len(signals)} signals:")
+                for signal in signals:
+                    strategy = signal.get('strategy', 'unknown')
+                    self.logger.info(f"  {signal['epic']}: {signal['signal_type']} "
+                                   f"(strategy: {strategy}, confidence: {signal['confidence_score']:.1%})")
+            else:
+                self.logger.info("No signals detected")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Single scan failed: {e}")
+            return False
+    
+    def run_live_scanner(self) -> bool:
+        """Run the live forex scanner continuously"""
+        self.logger.info("🚀 Starting Forex Scanner in LIVE mode")
+        
+        try:
+            scanner = self.setup_scanner()
+            scanner.start_continuous_scan()
+            return True
+            
+        except KeyboardInterrupt:
+            self.logger.info("🛑 Scanner stopped by user")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ Live scanner error: {e}")
+            return False
+    
+    def get_scanner_status(self) -> Dict[str, any]:
+        """Get current scanner configuration status"""
+        try:
+            scanner = self.setup_scanner()
+            status = scanner.get_scanner_status()
+            
+            # Add configuration info
+            status.update({
+                'epic_count': len(config.EPIC_LIST),
+                'strategies_enabled': {
+                    'ema': getattr(config, 'SIMPLE_EMA_STRATEGY', True),
+                    'macd': getattr(config, 'MACD_EMA_STRATEGY', False),
+                    'scalping': getattr(config, 'SCALPING_STRATEGY_ENABLED', False)
+                },
+                'timeframe': config.DEFAULT_TIMEFRAME,
+                'timezone': config.USER_TIMEZONE
+            })
+            
+            return status
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get scanner status: {e}")
+            return {'error': str(e)}
+    
+    def test_scanner_setup(self) -> bool:
+        """Test scanner setup without running scans"""
+        self.logger.info("🧪 Testing scanner setup...")
+        
+        try:
+            # Test database connection
+            db_manager = DatabaseManager(config.DATABASE_URL)
+            if not db_manager.test_connection():
+                self.logger.error("❌ Database connection failed")
+                return False
+            
+            self.logger.info("✅ Database connection OK")
+            
+            # Test scanner initialization
+            scanner = self.setup_scanner()
+            status = scanner.get_scanner_status()
+            
+            self.logger.info("✅ Scanner initialization OK")
+            self.logger.info(f"   Epic pairs: {status['epic_count']}")
+            self.logger.info(f"   Claude enabled: {status['claude_enabled']}")
+            self.logger.info(f"   BID adjustment: {status['bid_adjustment']}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Scanner setup test failed: {e}")
+            return False

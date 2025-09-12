@@ -1,0 +1,8 @@
+# ./streamlit/.streamlit/config.toml
+[server]
+port = 8501
+enableCORS = false
+enableXsrfProtection = false
+headless = true
+address = "0.0.0.0"
+baseUrlPath = "/streamlit"

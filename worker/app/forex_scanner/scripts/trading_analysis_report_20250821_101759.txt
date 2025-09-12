@@ -1,0 +1,36 @@
+TRADING PERFORMANCE ANALYSIS REPORT
+==================================================
+Generated: 2025-08-21T10:17:59.693156
+
+
+SIGNAL OVERVIEW:
+------------------------------
+{'total_signals': 23, 'bull_signals': 8, 'bear_signals': 15, 'avg_confidence': 0.8816086956521741, 'min_confidence': 0.8251, 'max_confidence': 0.94, 'unique_pairs': 9, 'strategies_used': ['macd_ema200'], 'time_range': {'start': '2025-08-20T10:20:33.779240', 'end': '2025-08-21T07:44:59.469239'}}
+
+CONFIDENCE ANALYSIS:
+------------------------------
+{'distribution': {'very_high (90-100%)': 9, 'high (80-90%)': 14, 'medium (70-80%)': 0, 'low (60-70%)': 0, 'very_low (<60%)': 0}, 'avg_confidence': 0.8816086956521741, 'std_confidence': 0.0375858763735369, 'low_confidence_signals': 0, 'high_confidence_signals': 23}
+
+STRATEGY PERFORMANCE:
+------------------------------
+{'macd_ema200': {'signal_count': 23, 'avg_confidence': 0.8816086956521741, 'bull_bear_ratio': 0.34782608695652173, 'avg_macd_histogram': 5.8565217391304406e-05, 'unique_pairs': 9}}
+
+PAIR ANALYSIS:
+------------------------------
+{'CS.D.USDCHF.MINI.IP': {'signal_count': 3, 'avg_confidence': 0.94, 'bull_signals': 1, 'bear_signals': 2, 'strategies_used': ['macd_ema200'], 'avg_spread_pips': 1.5}, 'CS.D.EURJPY.MINI.IP': {'signal_count': 4, 'avg_confidence': 0.8540749999999999, 'bull_signals': 1, 'bear_signals': 3, 'strategies_used': ['macd_ema200'], 'avg_spread_pips': 1.5}, 'CS.D.USDCAD.MINI.IP': {'signal_count': 3, 'avg_confidence': 0.8751333333333333, 'bull_signals': 3, 'bear_signals': 0, 'strategies_used': ['macd_ema200'], 'avg_spread_pips': 1.5}, 'CS.D.GBPUSD.MINI.IP': {'signal_count': 2, 'avg_confidence': 0.87, 'bull_signals': 0, 'bear_signals': 2, 'strategies_used': ['macd_ema200'], 'avg_spread_pips': 1.5}, 'CS.D.EURUSD.MINI.IP': {'signal_count': 4, 'avg_confidence': 0.8982749999999999, 'bull_signals': 2, 'bear_signals': 2, 'strategies_used': ['macd_ema200'], 'avg_spread_pips': 1.5}, 'CS.D.USDJPY.MINI.IP': {'signal_count': 2, 'avg_confidence': 0.91, 'bull_signals': 1, 'bear_signals': 1, 'strategies_used': ['macd_ema200'], 'avg_spread_pips': 1.5}, 'CS.D.NZDUSD.MINI.IP': {'signal_count': 3, 'avg_confidence': 0.8374, 'bull_signals': 0, 'bear_signals': 3, 'strategies_used': ['macd_ema200'], 'avg_spread_pips': 1.5}, 'CS.D.AUDUSD.MINI.IP': {'signal_count': 1, 'avg_confidence': 0.9, 'bull_signals': 0, 'bear_signals': 1, 'strategies_used': ['macd_ema200'], 'avg_spread_pips': 1.5}, 'CS.D.AUDJPY.MINI.IP': {'signal_count': 1, 'avg_confidence': 0.85, 'bull_signals': 0, 'bear_signals': 1, 'strategies_used': ['macd_ema200'], 'avg_spread_pips': 1.5}}
+
+TIMING ANALYSIS:
+------------------------------
+{'signals_by_hour': {6: 5, 7: 3, 13: 3, 2: 2, 17: 2, 14: 2, 20: 1, 19: 1, 15: 1, 12: 1, 11: 1, 10: 1}, 'avg_time_between_signals_minutes': 58.3830984840909, 'min_time_between_signals_minutes': 2.072297116666667, 'signals_too_close': 13, 'overtrading_periods': [], 'overtrading_hours': [6]}
+
+TECHNICAL ANALYSIS:
+------------------------------
+{'macd': {'avg_histogram': 5.8565217391304406e-05, 'std_histogram': 0.003423601716243063, 'weak_signals': 16, 'strong_signals': 6}, 'ema': {'avg_spread': 0.0051569565217394146, 'narrow_spreads': 16}, 'volume': {'avg_ratio': 421.5217391304348, 'low_volume_signals': 0}}
+
+QUALITY ISSUES:
+------------------------------
+{'low_confidence_signals': [], 'weak_technical_signals': [{'timestamp': '2025-08-21T07:44:59.469239', 'epic': 'CS.D.USDCHF.MINI.IP', 'macd_histogram': -1.7e-05}, {'timestamp': '2025-08-21T07:04:36.208881', 'epic': 'CS.D.USDCAD.MINI.IP', 'macd_histogram': 1.7e-05}, {'timestamp': '2025-08-21T06:45:19.997552', 'epic': 'CS.D.GBPUSD.MINI.IP', 'macd_histogram': -2.3e-05}, {'timestamp': '2025-08-21T06:32:28.043834', 'epic': 'CS.D.EURUSD.MINI.IP', 'macd_histogram': -4.6e-05}, {'timestamp': '2025-08-21T02:50:20.345858', 'epic': 'CS.D.NZDUSD.MINI.IP', 'macd_histogram': -4e-06}, {'timestamp': '2025-08-20T20:06:08.148631', 'epic': 'CS.D.AUDUSD.MINI.IP', 'macd_histogram': -1.2e-05}, {'timestamp': '2025-08-20T19:58:03.716550', 'epic': 'CS.D.USDCAD.MINI.IP', 'macd_histogram': 3.1e-05}, {'timestamp': '2025-08-20T17:54:36.491230', 'epic': 'CS.D.EURUSD.MINI.IP', 'macd_histogram': 4.3e-05}, {'timestamp': '2025-08-20T17:24:26.294491', 'epic': 'CS.D.EURUSD.MINI.IP', 'macd_histogram': 4e-06}, {'timestamp': '2025-08-20T15:52:52.443440', 'epic': 'CS.D.NZDUSD.MINI.IP', 'macd_histogram': -2e-06}], 'overtrading_pairs': {'CS.D.EURJPY.MINI.IP': 4, 'CS.D.EURUSD.MINI.IP': 4}, 'suspicious_patterns': []}
+
+RECOMMENDATIONS:
+------------------------------
+['⏰ URGENT: Add signal cooldown - too many signals generated', '🚫 URGENT: Limit signals per hour - detected overtrading', '🔧 Fix MACD thresholds - too many weak signals', '⚖️ Enable multiple strategies for better diversification']

@@ -1,0 +1,17 @@
+Claude Signal Rejection Analysis
+Generated: 2025-08-14 12:31:35
+Epic: CS.D.NZDUSD.MINI.IP
+Signal Type: BEAR
+Price: 0.59353
+Confidence: 87.4%
+Strategy: enhanced_ema_simple_forex
+
+CLAUDE REJECTION:
+Score: 6/10
+Decision: REJECT
+Reason: Despite strong bearish EMA alignment and high volume conviction, the mid-range price position (48.7%) combined with weak MACD momentum (-0.000044) suggests insufficient institutional-grade directional bias. The relatively tight range (21.6 pips) and low ATR (0.00054) indicate compressed volatility conditions, which typically precede a volatility expansion - making immediate directional plays risky without clear range breakout confirmation.
+
+Raw Response:
+SCORE: 6/10
+DECISION: REJECT
+REASON: Despite strong bearish EMA alignment and high volume conviction, the mid-range price position (48.7%) combined with weak MACD momentum (-0.000044) suggests insufficient institutional-grade directional bias. The relatively tight range (21.6 pips) and low ATR (0.00054) indicate compressed volatility conditions, which typically precede a volatility expansion - making immediate directional plays risky without clear range breakout confirmation.

@@ -1,0 +1,450 @@
+# core/strategies/helpers/zero_lag_indicator_calculator.py
+"""
+Zero Lag Indicator Calculator Module  
+Handles Zero Lag EMA calculation and signal detection logic
+"""
+
+import pandas as pd
+import numpy as np
+import logging
+from typing import Dict, List
+try:
+    import config
+except ImportError:
+    from forex_scanner import config
+
+
+class ZeroLagIndicatorCalculator:
+    """Calculates Zero Lag indicators and detects crossover signals"""
+    
+    def __init__(self, logger: logging.Logger = None, eps: float = 1e-8):
+        self.logger = logger or logging.getLogger(__name__)
+        self.eps = eps  # Epsilon for stability
+    
+    def ensure_zero_lag_indicators(self, df: pd.DataFrame, length: int = 21, 
+                                   band_multiplier: float = 2.0) -> pd.DataFrame:
+        """
+        Calculate Zero Lag EMA and related indicators
+        
+        Zero Lag EMA Formula: ZLEMA = EMA(src + (src - src[lag]), length)
+        Where lag = (length - 1) / 2
+        
+        Args:
+            df: DataFrame with price data
+            length: Zero Lag EMA period
+            band_multiplier: Volatility band multiplier
+            
+        Returns:
+            DataFrame with Zero Lag indicators added
+        """
+        try:
+            if df is None or df.empty:
+                self.logger.debug("Empty DataFrame provided")
+                return df
+            
+            if len(df) < length:
+                self.logger.debug(f"Insufficient data: {len(df)} < {length}")
+                return df
+            
+            df = df.copy()
+            
+            # Check if ZLEMA already exists
+            if 'zlema' in df.columns:
+                self.logger.debug("ZLEMA already present in DataFrame")
+            else:
+                # Calculate Zero Lag EMA
+                df = self._calculate_zero_lag_ema(df, length)
+            
+            # Calculate volatility bands (pass length parameter)
+            df = self._calculate_volatility_bands(df, band_multiplier, length)
+            
+            # Add trend state
+            df = self._calculate_trend_state(df)
+            
+            # Add EMA 200 for macro trend filter
+            if 'ema_200' not in df.columns:
+                df['ema_200'] = df['close'].ewm(span=200).mean()
+            
+            self.logger.debug(f"Zero Lag indicators calculated for {len(df)} bars")
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error ensuring Zero Lag indicators: {e}")
+            return df
+    
+    def _calculate_zero_lag_ema(self, df: pd.DataFrame, length: int) -> pd.DataFrame:
+        """
+        Calculate Zero Lag EMA using EXACT Pine Script ta.ema() formula
+        
+        Pine Script Logic:
+        lag = math.floor((length - 1) / 2)
+        zlema = ta.ema(src + (src - src[lag]), length)
+        
+        Pine Script ta.ema() uses: alpha = 2 / (length + 1)
+        """
+        try:
+            # Source price (close)
+            src = df['close']
+            
+            # Calculate lag exactly as Pine Script: floor((length - 1) / 2)
+            lag = int((length - 1) // 2)
+            
+            # Zero Lag EMA: EMA of (src + (src - src[lag]))
+            lagged_src = src.shift(lag)
+            momentum_adjustment = src - lagged_src
+            zlema_input = src + momentum_adjustment
+            
+            # CRITICAL FIX: Use pandas ewm() which matches Pine Script ta.ema() exactly
+            # Pine Script ta.ema() uses alpha = 2 / (length + 1)
+            # pandas ewm(span=length, adjust=False) uses the same formula
+            # The manual loop was causing initialization errors
+            
+            # Use pandas ewm with adjust=False for exact Pine Script match
+            df['zlema'] = zlema_input.ewm(span=length, adjust=False).mean()
+            
+            # Forward fill NaN values from start
+            df['zlema'] = df['zlema'].bfill().ffill()
+            
+            # Calculate alpha for debug logging (Pine Script formula)
+            alpha = 2 / (length + 1)
+            self.logger.debug(f"Zero Lag EMA calculated (Pine Script exact): length={length}, lag={lag}, alpha={alpha:.6f}")
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating Zero Lag EMA: {e}")
+            return df
+    
+    def _calculate_volatility_bands(self, df: pd.DataFrame, multiplier: float, length: int = 21) -> pd.DataFrame:
+        """
+        Calculate volatility bands using Pine Script formula:
+        volatility = ta.highest(ta.atr(length), length*3) * mult
+        """
+        try:
+            if 'zlema' not in df.columns:
+                return df
+            
+            # Use the provided length parameter (from Zero Lag EMA calculation)
+            
+            # Calculate ATR using Pine Script exact method
+            # Pine Script: ta.atr(length) = ta.rma(ta.tr, length)
+            # where ta.tr = max(high - low, abs(high - close[1]), abs(low - close[1]))
+            
+            prev_close = df['close'].shift(1)
+            high_low = df['high'] - df['low']
+            high_prev_close = (df['high'] - prev_close).abs()
+            low_prev_close = (df['low'] - prev_close).abs()
+            
+            # True Range - Pine Script method
+            true_range = pd.concat([high_low, high_prev_close, low_prev_close], axis=1).max(axis=1)
+            
+            # Pine Script ta.rma (RMA = Running Moving Average) is equivalent to EMA with alpha = 1/length
+            # Use exact Pine Script formula: atr = ta.rma(tr, length) = ta.ema(tr, length) with different alpha
+            atr_alpha = 1.0 / length
+            atr = true_range.ewm(alpha=atr_alpha, adjust=False).mean()
+            
+            # Pine Script: ta.highest(ta.atr(length), length*3) * mult
+            # Pine Script exact: ta.highest(ta.atr(length), length*3) * mult
+            volatility_lookback = length * 3  # Restore Pine Script exact calculation
+            volatility = atr.rolling(window=volatility_lookback).max() * multiplier
+            
+            # CRITICAL FIX: Handle insufficient data for volatility calculation
+            total_bars_needed = length + volatility_lookback  # 70 + 210 = 280
+            if len(df) < total_bars_needed:
+                # Use fallback: simple ATR-based volatility for insufficient data
+                self.logger.warning(f"Insufficient data for full volatility calculation ({len(df)} < {total_bars_needed}). Using fallback.")
+                fallback_volatility = atr * multiplier
+                volatility = fallback_volatility.bfill().ffill()
+            else:
+                volatility = volatility.bfill().ffill()
+            
+            # Final check: if still NaN, use close price * multiplier as emergency fallback
+            if volatility.isna().all():
+                emergency_volatility = df['close'].rolling(window=min(20, len(df)//2)).std() * multiplier
+                volatility = emergency_volatility.bfill().ffill()
+                self.logger.warning("Using emergency volatility calculation based on price standard deviation")
+            
+            # Log debug info
+            non_nan_count = volatility.notna().sum()
+            self.logger.debug(f"Volatility calculation: {non_nan_count}/{len(volatility)} non-NaN values (need {total_bars_needed} bars)")
+            
+            # Create bands
+            df['upper_band'] = df['zlema'] + volatility
+            df['lower_band'] = df['zlema'] - volatility
+            df['volatility'] = volatility
+            
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating volatility bands: {e}")
+            return df
+    
+    def _calculate_trend_state(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate trend state using Pine Script logic - COMPLETE REWRITE:
+        
+        var trend = 0
+        if ta.crossover(close, zlema+volatility)
+            trend := 1
+        if ta.crossunder(close, zlema-volatility)
+            trend := -1
+        """
+        try:
+            if 'zlema' not in df.columns or 'volatility' not in df.columns:
+                df['trend'] = 0
+                return df
+            
+            # Calculate upper and lower bands
+            upper_band = df['zlema'] + df['volatility']
+            lower_band = df['zlema'] - df['volatility']
+            
+            df['upper_band'] = upper_band
+            df['lower_band'] = lower_band
+            
+            # Initialize trend with Pine Script var logic
+            # Start with -1 (bearish) as default, as most markets start below bands
+            trend = pd.Series(-1, index=df.index, dtype=int)
+            close = df['close']
+            
+            # DEBUG: Add detailed crossover detection
+            bullish_crosses = []
+            bearish_crosses = []
+            
+            # Process each bar (Pine Script simulation)
+            for i in range(1, len(df)):
+                curr_close = close.iloc[i]
+                prev_close = close.iloc[i-1]
+                curr_upper = upper_band.iloc[i]
+                prev_upper = upper_band.iloc[i-1] 
+                curr_lower = lower_band.iloc[i]
+                prev_lower = lower_band.iloc[i-1]
+                
+                # Maintain previous trend as default
+                trend.iloc[i] = trend.iloc[i-1]
+                
+                # CRITICAL FIX: Must be a GREEN candle crossing above upper band
+                # Pine Script ta.crossover(close, upper_band) WITH candle color validation
+                curr_open = df['open'].iloc[i] if 'open' in df.columns else curr_close
+                is_green_candle = curr_close > curr_open  # Green candle: close > open
+                is_red_candle = curr_close < curr_open    # Red candle: close < open
+                
+                # BULL: GREEN candle must close above upper band
+                bullish_cross = (prev_close <= prev_upper) and (curr_close > curr_upper) and is_green_candle
+                
+                # BEAR: RED candle must close below lower band
+                bearish_cross = (prev_close >= prev_lower) and (curr_close < curr_lower) and is_red_candle
+                
+                if bullish_cross:
+                    trend.iloc[i] = 1
+                    bullish_crosses.append(i)
+                    # Enhanced debug with candle color and band movement info
+                    band_diff = curr_upper - prev_upper
+                    price_diff = curr_close - prev_close
+                    self.logger.debug(f"🔺 BULLISH CROSS at {i}: GREEN candle close {curr_close:.5f} > upper {curr_upper:.5f}")
+                    self.logger.debug(f"   Candle: Open={curr_open:.5f}, Close={curr_close:.5f} (GREEN)")
+                    self.logger.debug(f"   Previous: close {prev_close:.5f} <= upper {prev_upper:.5f}")
+                    self.logger.debug(f"   Band moved: {band_diff:.5f}, Price moved: {price_diff:.5f}")
+                    
+                elif bearish_cross:
+                    trend.iloc[i] = -1
+                    bearish_crosses.append(i)
+                    # Enhanced debug with candle color and band movement info
+                    band_diff = curr_lower - prev_lower
+                    price_diff = curr_close - prev_close
+                    self.logger.debug(f"🔻 BEARISH CROSS at {i}: RED candle close {curr_close:.5f} < lower {curr_lower:.5f}")
+                    self.logger.debug(f"   Candle: Open={curr_open:.5f}, Close={curr_close:.5f} (RED)")
+                    self.logger.debug(f"   Previous: close {prev_close:.5f} >= lower {prev_lower:.5f}")
+                    self.logger.debug(f"   Band moved: {band_diff:.5f}, Price moved: {price_diff:.5f}")
+                    
+                # CRITICAL DEBUG: Show current trend determination for validation (debug level)
+                if i >= len(df) - 5:  # Last 5 bars for debugging
+                    trend_color = "🟢 GREEN" if trend.iloc[i] == 1 else "🔴 RED" if trend.iloc[i] == -1 else "⚪ NEUTRAL"
+                    close_vs_bands = f"Close:{curr_close:.5f} vs Upper:{curr_upper:.5f} vs Lower:{curr_lower:.5f}"
+                    self.logger.debug(f"TREND DEBUG [{i}]: {trend_color} | {close_vs_bands}")
+            
+            df['trend'] = trend
+            
+            # Add debug info
+            self.logger.debug(f"Zero Lag trend calculation complete: {len(bullish_crosses)} bull crosses, {len(bearish_crosses)} bear crosses")
+            
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating trend state: {e}")
+            df['trend'] = 0
+            return df
+    
+    def detect_zero_lag_alerts(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Detect Zero Lag trend crossover signals (RIBBON COLOR CHANGES ONLY)
+        
+        Pine Script Logic:
+        - BULL: trend crosses from -1 to 1 (ribbon changes from RED to GREEN)
+        - BEAR: trend crosses from 1 to -1 (ribbon changes from GREEN to RED)
+        
+        This is MUCH more selective - only triggers when the ribbon color changes!
+        """
+        try:
+            if df is None or df.empty or len(df) < 2:
+                return df
+            
+            # Sort by time and reset index
+            df = df.sort_values('start_time').reset_index(drop=True)
+            
+            # Initialize alert columns
+            df['bull_alert'] = False
+            df['bear_alert'] = False
+            
+            # Get previous trend for crossover detection
+            prev_trend = df['trend'].shift(1)
+            current_trend = df['trend']
+            
+            # TREND CROSSOVERS ONLY (Pine Script logic)
+            # Bull alert: trend crosses from -1/0 to 1 (ribbon turns GREEN)
+            df['bull_alert'] = (prev_trend <= 0) & (current_trend == 1)
+            
+            # Bear alert: trend crosses from 1/0 to -1 (ribbon turns RED)
+            df['bear_alert'] = (prev_trend >= 0) & (current_trend == -1)
+            
+            # Add debug information
+            if df['bull_alert'].any() or df['bear_alert'].any():
+                bull_count = df['bull_alert'].sum()
+                bear_count = df['bear_alert'].sum()
+                self.logger.debug(f"Zero Lag crossovers detected: {bull_count} BULL, {bear_count} BEAR")
+            
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error in Zero Lag alert detection: {e}")
+            return df
+    
+    def validate_ema200_trend_filter(self, row: pd.Series, signal_type: str) -> bool:
+        """
+        EMA 200 Trend Filter: Ensure signals align with major trend direction
+        
+        Args:
+            row: DataFrame row with price and EMA data
+            signal_type: 'BULL' or 'BEAR'
+            
+        Returns:
+            True if trend is correct for signal type
+        """
+        try:
+            if not getattr(config, 'EMA_200_TREND_FILTER_ENABLED', True):
+                return True
+            
+            ema_200 = row.get('ema_200', 0)
+            close_price = row.get('close', 0)
+            
+            if ema_200 == 0 or close_price == 0:
+                self.logger.debug("EMA 200 or close price not available")
+                return True  # Allow signal if data not available
+            
+            # Buffer for noise reduction (1 pip buffer)
+            buffer_pips = getattr(config, 'EMA_200_BUFFER_PIPS', 1.0)
+            if close_price > 50:  # Likely JPY pair
+                pip_multiplier = 100
+            else:  # Standard pair
+                pip_multiplier = 10000
+            
+            buffer_distance = buffer_pips / pip_multiplier
+            
+            if signal_type == 'BULL':
+                # Bull signals: price must be above EMA 200
+                if close_price > ema_200 + buffer_distance:
+                    distance_above = (close_price - ema_200) * pip_multiplier
+                    self.logger.debug(f"EMA 200 trend OK for BULL: price {distance_above:.1f} pips above")
+                    return True
+                else:
+                    distance_below = (ema_200 - close_price) * pip_multiplier
+                    self.logger.info(f"EMA 200 trend INVALID for BULL: price {distance_below:.1f} pips below")
+                    return False
+            
+            elif signal_type == 'BEAR':
+                # Bear signals: price must be below EMA 200
+                if close_price < ema_200 - buffer_distance:
+                    distance_below = (ema_200 - close_price) * pip_multiplier
+                    self.logger.debug(f"EMA 200 trend OK for BEAR: price {distance_below:.1f} pips below")
+                    return True
+                else:
+                    distance_above = (close_price - ema_200) * pip_multiplier
+                    self.logger.info(f"EMA 200 trend INVALID for BEAR: price {distance_above:.1f} pips above")
+                    return False
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error validating EMA 200 trend: {e}")
+            return True  # Allow signal on error
+    
+    def get_required_indicators(self, length: int = 21) -> List[str]:
+        """
+        Get list of required indicators for Zero Lag strategy
+        
+        Args:
+            length: Zero Lag EMA period
+            
+        Returns:
+            List of required indicator column names
+        """
+        base_indicators = [
+            'zlema',
+            f'ema_200',
+            'close',
+            'open', 
+            'high',
+            'low',
+            'start_time',
+            'upper_band',
+            'lower_band',
+            'volatility',
+            'trend',
+            'zlema_slope'
+        ]
+        
+        # Add ATR if available
+        base_indicators.append('atr')
+        
+        # Add Squeeze Momentum indicators if enabled
+        if getattr(config, 'SQUEEZE_MOMENTUM_ENABLED', True):
+            base_indicators.extend([
+                'squeeze_momentum',
+                'squeeze_state',
+                'squeeze_is_lime',
+                'squeeze_is_green', 
+                'squeeze_is_red',
+                'squeeze_is_maroon',
+                'squeeze_bullish',
+                'squeeze_bearish',
+                'squeeze_on',
+                'squeeze_off'
+            ])
+        
+        return base_indicators
+    
+    def validate_data_requirements(self, df: pd.DataFrame, min_bars: int) -> bool:
+        """
+        Validate that DataFrame meets minimum requirements
+        
+        Args:
+            df: DataFrame to validate
+            min_bars: Minimum number of bars required
+            
+        Returns:
+            True if requirements met, False otherwise
+        """
+        if df is None or df.empty:
+            self.logger.debug("DataFrame is None or empty")
+            return False
+        
+        if len(df) < min_bars:
+            self.logger.debug(f"Insufficient data: {len(df)} < {min_bars}")
+            return False
+        
+        # Check for required columns
+        required_cols = ['close', 'open', 'high', 'low']
+        missing = [col for col in required_cols if col not in df.columns]
+        if missing:
+            self.logger.error(f"Missing required columns: {missing}")
+            return False
+        
+        return True

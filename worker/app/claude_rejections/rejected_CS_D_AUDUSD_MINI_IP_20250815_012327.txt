@@ -1,0 +1,17 @@
+Claude Signal Rejection Analysis
+Generated: 2025-08-15 01:23:27
+Epic: CS.D.AUDUSD.MINI.IP
+Signal Type: BEAR
+Price: 0.64945
+Confidence: 90.0%
+Strategy: enhanced_ema_simple_forex
+
+CLAUDE REJECTION:
+Score: 6/10
+Decision: REJECT
+Reason: Despite the bearish alignment of EMAs and high volume indicating institutional participation, the mid-range position (59.3%) with relatively tight range (20.7 pips) during Tokyo session suggests insufficient directional conviction. The risk/reward is suboptimal given the proximity of resistance (8.4 pips) versus support (12.3 pips), and the weak MACD histogram (-0.000005) indicates momentum deterioration that doesn't support a compelling institutional-grade setup.
+
+Raw Response:
+SCORE: 6/10
+DECISION: REJECT
+REASON: Despite the bearish alignment of EMAs and high volume indicating institutional participation, the mid-range position (59.3%) with relatively tight range (20.7 pips) during Tokyo session suggests insufficient directional conviction. The risk/reward is suboptimal given the proximity of resistance (8.4 pips) versus support (12.3 pips), and the weak MACD histogram (-0.000005) indicates momentum deterioration that doesn't support a compelling institutional-grade setup.

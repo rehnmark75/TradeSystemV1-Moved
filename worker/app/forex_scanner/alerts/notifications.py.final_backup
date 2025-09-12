@@ -1,0 +1,731 @@
+import logging
+from datetime import datetime
+from typing import Dict, Any, Optional
+import json
+
+try:
+    import config
+except ImportError:
+    # Fallback config for standalone testing
+    class Config:
+        NOTIFICATIONS = {'file': False, 'email': False, 'webhook': False}
+    config = Config()
+
+
+class NotificationManager:
+    """Enhanced notification manager with consistent messaging"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("📢 NotificationManager initialized")
+    
+    def send_signal_alert(self, signal: Dict[str, Any], message: Optional[str] = None, claude_decision: Optional[Dict] = None, executed: bool = False):
+        """
+        Enhanced signal alert with consistent formatting
+        
+        Args:
+            signal: Signal dictionary
+            message: Optional custom message
+            claude_decision: Optional Claude analysis results
+            executed: Whether order was executed
+        """
+        try:
+            # Preprocess variables for safe f-string formatting
+            confidence_percent = signal.get("confidence_score", 0) * 100
+            message_safe = str(message or "").replace("{", "{{").replace("}", "}}")
+
+            # Build comprehensive message if not provided
+            if message is None:
+                message = self._build_enhanced_signal_message(signal, claude_decision, executed)
+            
+            # Console notification (always enabled)
+            self._send_console_alert(signal, message, claude_decision, executed)
+            
+            # Additional notification channels
+            self._send_optional_notifications(signal, message)
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error sending signal alert: {e}")
+    
+    def _build_enhanced_signal_message(self, signal: Dict[str, Any], claude_decision: Optional[Dict] = None, executed: bool = False) -> str:
+        """Build comprehensive signal message with all context"""
+        
+        # Basic signal info
+        epic = signal.get('epic', 'Unknown')
+        signal_type = signal.get('signal_type', 'Unknown')
+        confidence = signal.get('confidence_score', 0)
+        strategy = signal.get('strategy', 'Unknown')
+        
+        # Price information
+        if 'price_mid' in signal:
+            price_info = f"MID: {signal['price_mid']:.5f}"
+            if 'execution_price' in signal:
+                price_info += f", EXEC: {signal['execution_price']:.5f}"
+        else:
+            price_info = f"Price: {signal.get('price', 0):.5f}"
+        
+        # Build message components
+        message_parts = [
+            f"📊 {signal_type} Signal: {epic}",
+            f"Strategy: {strategy}",
+            f"Confidence: {confidence_percent:.1f}",
+            price_info
+        ]
+        
+        # Add Claude analysis if available
+        if claude_decision:
+            structured = claude_decision.get('structured', {})
+            if 'signal_quality_score' in structured:
+                quality = structured['signal_quality_score']
+                decision = structured.get('trade_decision', 'ANALYZE')
+                message_parts.append(f"🤖 Claude: {quality}/10, {decision}")
+        
+        # Add execution status
+        if executed:
+            message_parts.append("💰 Order executed")
+        elif signal.get('paper_trade', False):
+            message_parts.append("📋 Paper trade mode")
+        
+        # Add technical details
+        if 'ema_9' in signal and 'ema_21' in signal:
+            ema_info = f"EMA: {signal['ema_9']:.5f}/{signal['ema_21']:.5f}"
+            message_parts.append(ema_info)
+        
+        if 'volume_ratio' in signal:
+            vol_ratio = signal['volume_ratio']
+            message_parts.append(f"Volume Ratio: {vol_ratio:.2f}")
+        
+        return "\n".join(message_parts)
+    
+    def _send_console_alert(self, signal: Dict[str, Any], message: str, claude_decision: Optional[Dict] = None, executed: bool = False):
+        """Enhanced console alert with better formatting"""
+        
+        epic = signal.get('epic', 'Unknown')
+        signal_type = signal.get('signal_type', 'Unknown')
+        confidence = signal.get('confidence_score', 0)
+        timestamp = signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+
+        # Convert confidence to percentage for display
+        confidence_percent = confidence * 100
+
+        
+        # Status indicators
+        status_indicators = []
+        if executed:
+            status_indicators.append("💰 EXECUTED")
+        if claude_decision:
+            structured = claude_decision.get('structured', {})
+            quality = structured.get('signal_quality_score', 'N/A')
+            status_indicators.append(f"🤖 CLAUDE: {quality}/10")
+        
+        status_line = " | ".join(status_indicators) if status_indicators else "📊 DETECTED"
+        
+        alert_display = f"""
+🚨 TRADING SIGNAL - {status_line} 🚨
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Epic: {epic}
+Signal: {signal_type}
+Confidence: {confidence_percent:.1f}
+Time: {timestamp}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{message}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        
+        p
+    def _send_optional_notifications(self, signal: Dict[str, Any], message: str):
+        """Send additional notification channels if configured"""
+        
+        # File notification
+        if hasattr(config, 'NOTIFICATIONS') and config.NOTIFICATIONS.get('file', False):
+            self._send_file_alert(signal, message)
+        
+        # Email notification
+        if hasattr(config, 'NOTIFICATIONS') and config.NOTIFICATIONS.get('email', False):
+            self._send_email_alert(signal, message)
+        
+        # Webhook notification
+        if hasattr(config, 'NOTIFICATIONS') and config.NOTIFICATIONS.get('webhook', False):
+            self._send_webhook_alert(signal, message)
+    
+    def _send_file_alert(self, signal: Dict[str, Any], message: str):
+        """Enhanced file alert with more data"""
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            epic = signal.get('epic', 'Unknown')
+            signal_type = signal.get('signal_type', 'Unknown')
+            confidence = signal.get('confidence_score', 0)
+            strategy = signal.get('strategy', 'Unknown')
+            
+            # Get price
+            if 'price_mid' in signal:
+                price = signal['price_mid']
+            else:
+                price = signal.get('price', 0)
+            
+            # Enhanced CSV format
+            alert_line = f"{timestamp},{epic},{signal_type},{strategy},{confidence:.4f},{price:.5f},{message.replace(',', ';')}\n"
+            
+            # Append to signals file
+            with open('trading_signals.csv', 'a') as f:
+                # Write header if file is new
+                if f.tell() == 0:
+                    header = "timestamp,epic,signal_type,strategy,confidence,price,message\n"
+                    f.write(header)
+                f.write(alert_line)
+            
+            self.logger.info("✅ Enhanced file alert written")
+            
+        except Exception as e:
+            self.logger.error(f"❌ File alert failed: {e}")
+    
+    def _send_email_alert(self, signal: Dict[str, Any], message: str):
+        """Send email alert (expandable)"""
+        # TODO: Implement email notification with SMTP
+        self.logger.info("📧 Email alert (ready for implementation)")
+    
+    def _send_webhook_alert(self, signal: Dict[str, Any], message: str):
+        """Send webhook alert (expandable)"""
+        # TODO: Implement webhook notification
+        self.logger.info("🔗 Webhook alert (ready for implementation)")
+    
+    def send_system_notification(self, message: str, level: str = 'info'):
+        """
+        Enhanced system notification
+        
+        Args:
+            message: Notification message
+            level: Notification level (info, warning, error, success)
+        """
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Level-specific formatting
+        level_icons = {
+            'info': 'ℹ️',
+            'warning': '⚠️',
+            'error': '❌',
+            'success': '✅'
+        }
+        
+        icon = level_icons.get(level, 'ℹ️')
+        formatted_message = f"[{timestamp}] {icon} SYSTEM {level.upper()}: {message_safe}"
+        
+        # Log appropriately
+        if level == 'error':
+            self.logger.error(formatted_message)
+        elif level == 'warning':
+            self.logger.warning(formatted_message)
+        elif level == 'success':
+            self.logger.info(formatted_message)
+        else:
+            self.logger.info(formatted_message)
+        
+        # Also print for immediate visibility
+        print(formatted_message)
+    
+    def send_scanner_status(self, status: Dict[str, Any]):
+        """
+        Enhanced scanner status notification
+        
+        Args:
+            status: Scanner status dictionary
+        """
+        
+        # Calculate uptime if available
+        uptime_info = ""
+        if 'start_time' in status:
+            start_time = status['start_time']
+            uptime = datetime.now() - start_time
+            uptime_info = f"Uptime: {uptime}"
+        
+        # Build status message
+        status_message = f"""
+📊 SCANNER STATUS UPDATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Running: {status.get('running', False)}
+Epic Count: {status.get('epic_count', 0)}
+Scan Interval: {status.get('scan_interval', 0)}s
+Claude Enabled: {status.get('claude_enabled', False)}
+BID Adjustment: {status.get('bid_adjustment', False)}
+Min Confidence: {status.get('min_confidence', 0):.1%}
+{uptime_info}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Recent Activity:
+Total Alerts: {status.get('recent_alerts_count', 0)}
+Last Scan: {status.get('last_scan_time', 'Never')}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        
+        print(status_message)
+        self.logger.info("📊 Scanner status update sent")
+    
+    def send_trade_execution_alert(self, signal: Dict[str, Any], execution_result: Dict[str, Any]):
+        """
+        Send trade execution specific alert
+        
+        Args:
+            signal: Original signal
+            execution_result: Trade execution results
+        """
+        epic = signal.get('epic', 'Unknown')
+        signal_type = signal.get('signal_type', 'Unknown')
+        
+        success = execution_result.get('success', False)
+        order_id = execution_result.get('order_id', 'N/A')
+        
+        if success:
+            message = f"""
+💰 TRADE EXECUTED SUCCESSFULLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Epic: {epic}
+Signal: {signal_type}
+Order ID: {order_id}
+Execution Price: {execution_result.get('execution_price', 'N/A')}
+Size: {execution_result.get('size', 'N/A')}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        else:
+            error_msg = execution_result.get('message', 'Unknown error')
+            message = f"""
+❌ TRADE EXECUTION FAILED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Epic: {epic}
+Signal: {signal_type}
+Error: {error_msg}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        
+        print(message)
+        self.logger.info(f"💰 Trade execution alert sent for {epic}")
+
+
+# USAGE CONSISTENCY FIXES:
+
+def fix_scanner_notifications():
+    """
+    Fix for core/scanner.py - ensure consistent notification usage
+    """
+    return """
+    # In _process_signal method, replace:
+    # self.notification_manager.send_signal_alert(signal)
+    
+    # With:
+    self.notification_manager.send_signal_alert(
+        signal, 
+        claude_decision=signal.get('claude_analysis_structured'),
+        executed=False  # Set to True if order was executed
+    )
+    """
+
+def fix_trade_scan_notifications():
+    """
+    Fix for trade_scan.py - remove duplicate notification logic
+    """
+    return """
+    # In trade_scan.py, replace the custom _send_signal_notification method with:
+    
+    def _send_signal_notification(self, signal: Dict, claude_decision: Optional[Dict], executed: bool):
+        '''Send notifications using the enhanced NotificationManager'''
+        try:
+            self.notification_manager.send_signal_alert(
+                signal,
+                claude_decision=claude_decision,
+                executed=executed
+            )
+        except Exception as e:
+            self.logger.error(f"Error sending notification: {e}")
+    """
+
+def test_enhanced_notifications():
+    """Test the enhanced notification system"""
+    
+    # Test signal
+    test_signal = {
+        'epic': 'CS.D.EURUSD.MINI.IP',
+        'signal_type': 'BULL',
+        'confidence_score': 0.85,
+        'strategy': 'ema_strategy',
+        'price_mid': 1.0850,
+        'execution_price': 1.0851,
+        'ema_9': 1.0848,
+        'ema_21': 1.0845,
+        'volume_ratio': 1.25,
+        'timestamp': '2025-01-09 15:30:00'
+    }
+    
+    # Test Claude decision
+    claude_decision = {
+        'structured': {
+            'signal_quality_score': 8,
+            'trade_decision': 'BUY',
+            'confidence_level': 'HIGH'
+        }
+    }
+    
+    # Initialize and test
+    nm = NotificationManager()
+    
+    print("🧪 Testing enhanced notifications...")
+    
+    # Test 1: Basic signal
+    nm.send_signal_alert(test_signal)
+    
+    # Test 2: Signal with Claude analysis
+    nm.send_signal_alert(test_signal, claude_decision=claude_decision)
+    
+    # Test 3: Signal with execution
+    nm.send_signal_alert(test_signal, claude_decision=claude_decision, executed=True)
+    
+    # Test 4: System notification
+    nm.send_system_notification("Scanner started successfully", "success")
+    
+    # Test 5: Status update
+    status = {
+        'running': True,
+        'epic_count': 8,
+        'scan_interval': 60,
+        'claude_enabled': True,
+        'recent_alerts_count': 5
+    }
+    nm.send_scanner_status(status)
+    
+    print("✅ Enhanced notification tests completed")
+
+if __name__ == "__main__":
+    test_enhanced_notifications()
+    def _build_enhanced_signal_message(self, signal: Dict[str, Any], claude_decision: Optional[Dict] = None, executed: bool = False) -> str:
+        """Build comprehensive signal message with all context"""
+        
+        # Basic signal info
+        epic = signal.get('epic', 'Unknown')
+        signal_type = signal.get('signal_type', 'Unknown')
+        confidence = signal.get('confidence_score', 0)
+        strategy = signal.get('strategy', 'Unknown')
+        
+        # Price information
+        if 'price_mid' in signal:
+            price_info = f"MID: {signal['price_mid']:.5f}"
+            if 'execution_price' in signal:
+                price_info += f", EXEC: {signal['execution_price']:.5f}"
+        else:
+            price_info = f"Price: {signal.get('price', 0):.5f}"
+        
+        # Build message components
+        message_parts = [
+            f"📊 {signal_type} Signal: {epic}",
+            f"Strategy: {strategy}",
+            f"Confidence: {confidence_percent:.1f}",
+            price_info
+        ]
+        
+        # Add Claude analysis if available
+        if claude_decision:
+            structured = claude_decision.get('structured', {})
+            if 'signal_quality_score' in structured:
+                quality = structured['signal_quality_score']
+                decision = structured.get('trade_decision', 'ANALYZE')
+                message_parts.append(f"🤖 Claude: {quality}/10, {decision}")
+        
+        # Add execution status
+        if executed:
+            message_parts.append("💰 Order executed")
+        elif signal.get('paper_trade', False):
+            message_parts.append("📋 Paper trade mode")
+        
+        # Add technical details
+        if 'ema_9' in signal and 'ema_21' in signal:
+            ema_info = f"EMA: {signal['ema_9']:.5f}/{signal['ema_21']:.5f}"
+            message_parts.append(ema_info)
+        
+        if 'volume_ratio' in signal:
+            vol_ratio = signal['volume_ratio']
+            message_parts.append(f"Volume Ratio: {vol_ratio:.2f}")
+        
+        return "\n".join(message_parts)
+    
+    def _send_console_alert(self, signal: Dict[str, Any], message: str, claude_decision: Optional[Dict] = None, executed: bool = False):
+        """Enhanced console alert with better formatting"""
+        
+        epic = signal.get('epic', 'Unknown')
+        signal_type = signal.get('signal_type', 'Unknown')
+        confidence = signal.get('confidence_score', 0)
+        timestamp = signal.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        
+        # Status indicators
+        status_indicators = []
+        if executed:
+            status_indicators.append("💰 EXECUTED")
+        if claude_decision:
+            structured = claude_decision.get('structured', {})
+            quality = structured.get('signal_quality_score', 'N/A')
+            status_indicators.append(f"🤖 CLAUDE: {quality}/10")
+        
+        status_line = " | ".join(status_indicators) if status_indicators else "📊 DETECTED"
+        
+        alert_display = f"""
+🚨 TRADING SIGNAL - {status_line} 🚨
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Epic: {epic}
+Signal: {signal_type}
+Confidence: {confidence_percent:.1f}
+Time: {timestamp}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{message}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        
+        print(alert_display)
+        self.logger.info(f"🚨 {signal_type} signal alert displayed for {epic}")
+    
+    def _send_optional_notifications(self, signal: Dict[str, Any], message: str):
+        """Send additional notification channels if configured"""
+        
+        # File notification
+        if hasattr(config, 'NOTIFICATIONS') and config.NOTIFICATIONS.get('file', False):
+            self._send_file_alert(signal, message)
+        
+        # Email notification
+        if hasattr(config, 'NOTIFICATIONS') and config.NOTIFICATIONS.get('email', False):
+            self._send_email_alert(signal, message)
+        
+        # Webhook notification
+        if hasattr(config, 'NOTIFICATIONS') and config.NOTIFICATIONS.get('webhook', False):
+            self._send_webhook_alert(signal, message)
+    
+    def _send_file_alert(self, signal: Dict[str, Any], message: str):
+        """Enhanced file alert with more data"""
+        try:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            epic = signal.get('epic', 'Unknown')
+            signal_type = signal.get('signal_type', 'Unknown')
+            confidence = signal.get('confidence_score', 0)
+            strategy = signal.get('strategy', 'Unknown')
+            
+            # Get price
+            if 'price_mid' in signal:
+                price = signal['price_mid']
+            else:
+                price = signal.get('price', 0)
+            
+            # Enhanced CSV format
+            alert_line = f"{timestamp},{epic},{signal_type},{strategy},{confidence:.4f},{price:.5f},{message.replace(',', ';')}\n"
+            
+            # Append to signals file
+            with open('trading_signals.csv', 'a') as f:
+                # Write header if file is new
+                if f.tell() == 0:
+                    header = "timestamp,epic,signal_type,strategy,confidence,price,message\n"
+                    f.write(header)
+                f.write(alert_line)
+            
+            self.logger.info("✅ Enhanced file alert written")
+            
+        except Exception as e:
+            self.logger.error(f"❌ File alert failed: {e}")
+    
+    def _send_email_alert(self, signal: Dict[str, Any], message: str):
+        """Send email alert (expandable)"""
+        # TODO: Implement email notification with SMTP
+        self.logger.info("📧 Email alert (ready for implementation)")
+    
+    def _send_webhook_alert(self, signal: Dict[str, Any], message: str):
+        """Send webhook alert (expandable)"""
+        # TODO: Implement webhook notification
+        self.logger.info("🔗 Webhook alert (ready for implementation)")
+    
+    def send_system_notification(self, message: str, level: str = 'info'):
+        """
+        Enhanced system notification
+        
+        Args:
+            message: Notification message
+            level: Notification level (info, warning, error, success)
+        """
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Level-specific formatting
+        level_icons = {
+            'info': 'ℹ️',
+            'warning': '⚠️',
+            'error': '❌',
+            'success': '✅'
+        }
+        
+        icon = level_icons.get(level, 'ℹ️')
+        formatted_message = f"[{timestamp}] {icon} SYSTEM {level.upper()}: {message_safe}"
+        
+        # Log appropriately
+        if level == 'error':
+            self.logger.error(formatted_message)
+        elif level == 'warning':
+            self.logger.warning(formatted_message)
+        elif level == 'success':
+            self.logger.info(formatted_message)
+        else:
+            self.logger.info(formatted_message)
+        
+        # Also print for immediate visibility
+        print(formatted_message)
+    
+    def send_scanner_status(self, status: Dict[str, Any]):
+        """
+        Enhanced scanner status notification
+        
+        Args:
+            status: Scanner status dictionary
+        """
+        
+        # Calculate uptime if available
+        uptime_info = ""
+        if 'start_time' in status:
+            start_time = status['start_time']
+            uptime = datetime.now() - start_time
+            uptime_info = f"Uptime: {uptime}"
+        
+        # Build status message
+        status_message = f"""
+📊 SCANNER STATUS UPDATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Running: {status.get('running', False)}
+Epic Count: {status.get('epic_count', 0)}
+Scan Interval: {status.get('scan_interval', 0)}s
+Claude Enabled: {status.get('claude_enabled', False)}
+BID Adjustment: {status.get('bid_adjustment', False)}
+Min Confidence: {status.get('min_confidence', 0):.1%}
+{uptime_info}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Recent Activity:
+Total Alerts: {status.get('recent_alerts_count', 0)}
+Last Scan: {status.get('last_scan_time', 'Never')}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        
+        print(status_message)
+        self.logger.info("📊 Scanner status update sent")
+    
+    def send_trade_execution_alert(self, signal: Dict[str, Any], execution_result: Dict[str, Any]):
+        """
+        Send trade execution specific alert
+        
+        Args:
+            signal: Original signal
+            execution_result: Trade execution results
+        """
+        epic = signal.get('epic', 'Unknown')
+        signal_type = signal.get('signal_type', 'Unknown')
+        
+        success = execution_result.get('success', False)
+        order_id = execution_result.get('order_id', 'N/A')
+        
+        if success:
+            message = f"""
+💰 TRADE EXECUTED SUCCESSFULLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Epic: {epic}
+Signal: {signal_type}
+Order ID: {order_id}
+Execution Price: {execution_result.get('execution_price', 'N/A')}
+Size: {execution_result.get('size', 'N/A')}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        else:
+            error_msg = execution_result.get('message', 'Unknown error')
+            message = f"""
+❌ TRADE EXECUTION FAILED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Epic: {epic}
+Signal: {signal_type}
+Error: {error_msg}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+        
+        print(message)
+        self.logger.info(f"💰 Trade execution alert sent for {epic}")
+
+
+# USAGE CONSISTENCY FIXES:
+
+def fix_scanner_notifications():
+    """
+    Fix for core/scanner.py - ensure consistent notification usage
+    """
+    return """
+    # In _process_signal method, replace:
+    # self.notification_manager.send_signal_alert(signal)
+    
+    # With:
+    self.notification_manager.send_signal_alert(
+        signal, 
+        claude_decision=signal.get('claude_analysis_structured'),
+        executed=False  # Set to True if order was executed
+    )
+    """
+
+def fix_trade_scan_notifications():
+    """
+    Fix for trade_scan.py - remove duplicate notification logic
+    """
+    return """
+    # In trade_scan.py, replace the custom _send_signal_notification method with:
+    
+    def _send_signal_notification(self, signal: Dict, claude_decision: Optional[Dict], executed: bool):
+        '''Send notifications using the enhanced NotificationManager'''
+        try:
+            self.notification_manager.send_signal_alert(
+                signal,
+                claude_decision=claude_decision,
+                executed=executed
+            )
+        except Exception as e:
+            self.logger.error(f"Error sending notification: {e}")
+    """
+
+def test_enhanced_notifications():
+    """Test the enhanced notification system"""
+    
+    # Test signal
+    test_signal = {
+        'epic': 'CS.D.EURUSD.MINI.IP',
+        'signal_type': 'BULL',
+        'confidence_score': 0.85,
+        'strategy': 'ema_strategy',
+        'price_mid': 1.0850,
+        'execution_price': 1.0851,
+        'ema_9': 1.0848,
+        'ema_21': 1.0845,
+        'volume_ratio': 1.25,
+        'timestamp': '2025-01-09 15:30:00'
+    }
+    
+    # Test Claude decision
+    claude_decision = {
+        'structured': {
+            'signal_quality_score': 8,
+            'trade_decision': 'BUY',
+            'confidence_level': 'HIGH'
+        }
+    }
+    
+    # Initialize and test
+    nm = NotificationManager()
+    
+    print("🧪 Testing enhanced notifications...")
+    
+    # Test 1: Basic signal
+    nm.send_signal_alert(test_signal)
+    
+    # Test 2: Signal with Claude analysis
+    nm.send_signal_alert(test_signal, claude_decision=claude_decision)
+    
+    # Test 3: Signal with execution
+    nm.send_signal_alert(test_signal, claude_decision=claude_decision, executed=True)
+    
+    # Test 4: System notification
+    nm.send_system_notification("Scanner started successfully", "success")
+    
+    # Test 5: Status update
+    status = {
+        'running': True,
+        'epic_count': 8,
+        'scan_interval': 60,
+        'claude_enabled': True,
+        'recent_alerts_count': 5
+    }
+    nm.send_scanner_status(status)
+    
+    print("✅ Enhanced notification tests completed")
+
+if __name__ == "__main__":
+    test_enhanced_notifications()
