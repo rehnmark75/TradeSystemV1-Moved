@@ -24,7 +24,8 @@ MAX_CANDLES_PER_REQUEST = 18  # Realistic IG API limit (was 1000, but IG only re
 BACKFILL_RATE_LIMIT_DELAY = 2  # Seconds between API requests
 MAX_BACKFILL_ATTEMPTS = 3
 BACKFILL_BATCH_SIZE = 5  # Number of gaps to process in one run
-MAX_CHUNK_SIZE = 15  # Maximum candles per chunk for large gap handling
+MAX_CHUNK_SIZE = 18  # Maximum candles per chunk for large gap handling (match API limit)
+EPIC_CHANGE_MAX_GAP_HOURS = 72  # Allow larger gaps for epic changes (was 48)
 
 class AutoBackfillService:
     """Automated backfill service that detects and fills data gaps"""
@@ -49,7 +50,7 @@ class AutoBackfillService:
             epics: List of trading pairs to monitor and backfill
         """
         self.epics = epics
-        self.gap_detector = GapDetector(max_gap_hours=48)  # Increased to handle weekend gaps and issues like EURUSD epic change
+        self.gap_detector = GapDetector(max_gap_hours=EPIC_CHANGE_MAX_GAP_HOURS)  # Increased to handle weekend gaps and epic changes
         self.headers = {}
         self.is_running = False
         self.last_backfill_time = {}
@@ -108,6 +109,7 @@ class AutoBackfillService:
     def _split_large_gap(self, gap: Dict) -> List[Dict]:
         """
         Split large gaps into smaller chunks that can be handled by IG API
+        Improved for better handling of epic changes and large historical gaps
         
         Args:
             gap: Gap dictionary from GapDetector
@@ -115,7 +117,10 @@ class AutoBackfillService:
         Returns:
             List of smaller gap chunks, each within MAX_CHUNK_SIZE limit
         """
-        if gap["missing_candles"] <= MAX_CHUNK_SIZE:
+        # For epic changes, use slightly smaller chunks for better reliability
+        chunk_size = MAX_CHUNK_SIZE - 2 if gap["missing_candles"] > 100 else MAX_CHUNK_SIZE
+        
+        if gap["missing_candles"] <= chunk_size:
             return [gap]  # Gap is small enough, return as-is
         
         chunks = []
@@ -124,8 +129,8 @@ class AutoBackfillService:
         gap_start = gap["gap_start"]
         gap_end = gap["gap_end"]
         
-        # Calculate time delta for each chunk
-        chunk_minutes = MAX_CHUNK_SIZE * timeframe
+        # Calculate time delta for each chunk using dynamic chunk size
+        chunk_minutes = chunk_size * timeframe
         chunk_delta = timedelta(minutes=chunk_minutes)
         
         current_start = gap_start

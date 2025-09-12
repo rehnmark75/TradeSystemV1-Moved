@@ -23,8 +23,17 @@ class GapDetector:
         Args:
             max_gap_hours: Maximum gap size to consider for backfilling (default 24 hours)
                           Larger gaps are likely intentional (weekend, holidays)
+                          For epic changes, use 72+ hours
         """
         self.max_gap_hours = max_gap_hours
+        # Known epic changes that may cause large gaps
+        self.epic_change_patterns = {
+            "CS.D.EURUSD.CEEM.IP": {
+                "previous_epics": ["CS.D.EURUSD.MINI.IP"],
+                "change_date": "2025-09-08",
+                "max_gap_hours": 72  # Allow larger gaps for this epic
+            }
+        }
         
     def detect_gaps(self, epic: str, timeframe: int, 
                     start_time: Optional[datetime] = None,
@@ -66,7 +75,14 @@ class GapDetector:
                 
                 # Check for gaps between consecutive candles
                 expected_delta = timedelta(minutes=timeframe)
-                max_gap_delta = timedelta(hours=self.max_gap_hours)
+                
+                # Use epic-specific max gap hours if available
+                epic_max_gap_hours = self.max_gap_hours
+                if epic in self.epic_change_patterns:
+                    epic_max_gap_hours = self.epic_change_patterns[epic]["max_gap_hours"]
+                    logger.debug(f"Using epic-specific max gap hours for {epic}: {epic_max_gap_hours}h")
+                
+                max_gap_delta = timedelta(hours=epic_max_gap_hours)
                 
                 for i in range(1, len(candles)):
                     prev_candle = candles[i-1]
@@ -89,10 +105,19 @@ class GapDetector:
                         # Calculate missing candles
                         missing_candles = int(actual_delta.total_seconds() / 60 / timeframe) - 1
                         
-                        # Skip very large gaps (weekends, holidays)
-                        if actual_delta > max_gap_delta:
-                            logger.debug(f"Skipping large gap ({actual_delta}) for {epic} - likely market closure")
+                        # Skip very large gaps (weekends, holidays) unless it's a known epic change
+                        is_epic_change = (epic in self.epic_change_patterns and 
+                                        actual_delta.total_seconds() / 3600 <= epic_max_gap_hours)
+                        
+                        if actual_delta > max_gap_delta and not is_epic_change:
+                            gap_hours = actual_delta.total_seconds() / 3600
+                            logger.debug(f"Skipping large gap ({gap_hours:.1f}h) for {epic} - likely market closure")
                             continue
+                        
+                        # Log epic change detection
+                        if is_epic_change and actual_delta > timedelta(hours=self.max_gap_hours):
+                            gap_hours = actual_delta.total_seconds() / 3600
+                            logger.info(f"Detected potential epic change gap for {epic}: {gap_hours:.1f}h gap")
                         
                         # Skip small gaps during low volatility periods (single candle)
                         if missing_candles < 1:
@@ -104,7 +129,9 @@ class GapDetector:
                             "gap_start": prev_time + expected_delta,
                             "gap_end": curr_time - expected_delta,
                             "missing_candles": missing_candles,
-                            "gap_duration_minutes": int(actual_delta.total_seconds() / 60) - timeframe
+                            "gap_duration_minutes": int(actual_delta.total_seconds() / 60) - timeframe,
+                            "is_epic_change": is_epic_change,  # Flag for epic change gaps
+                            "priority": 1 if is_epic_change else 2  # Higher priority for epic changes
                         }
                         
                         gaps.append(gap)
