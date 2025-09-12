@@ -33,7 +33,8 @@
       "Bash(sudo mkdir:*)",
       "Bash(mkdir:*)",
       "Bash(openssl req:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

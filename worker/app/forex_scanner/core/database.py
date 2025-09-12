@@ -44,12 +44,11 @@ class DatabaseManager:
         This method is needed for AlertHistoryManager compatibility
         """
         try:
-            # Use SQLAlchemy's raw_connection method
-            return self.engine.raw_connection()
+            # Always use direct psycopg2 connection to ensure context manager support
+            return self._create_psycopg2_connection()
         except Exception as e:
             self.logger.error(f"❌ Failed to get raw connection: {e}")
-            # Fallback: create psycopg2 connection directly
-            return self._create_psycopg2_connection()
+            raise
     
     def _create_psycopg2_connection(self):
         """Fallback method to create psycopg2 connection directly"""

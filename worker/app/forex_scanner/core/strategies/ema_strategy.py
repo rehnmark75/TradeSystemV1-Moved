@@ -40,7 +40,12 @@ class EMAStrategy(BaseStrategy):
     Based on the core logic from detect_ema_alerts function.
     """
     
-    def __init__(self, ema_config_name: str = None, data_fetcher=None, backtest_mode: bool = False):
+    def __init__(self, 
+                 ema_config_name: str = None, 
+                 data_fetcher=None, 
+                 backtest_mode: bool = False,
+                 epic: str = None,
+                 use_optimal_parameters: bool = True):
         # Initialize parent but skip the enhanced validator setup
         self.name = 'ema'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
@@ -50,21 +55,31 @@ class EMAStrategy(BaseStrategy):
         self.backtest_mode = backtest_mode
         self.price_adjuster = PriceAdjuster()
         self.data_fetcher = data_fetcher  # Store data fetcher for multi-timeframe analysis
+        self.epic = epic
+        self.use_optimal_parameters = use_optimal_parameters
         
         # Required attributes for backtest compatibility
         self.enable_mtf_analysis = False
         self.mtf_analyzer = None
         
-        # Simple EMA configuration - get from config or use defaults
-        self.ema_config = self._get_ema_periods()
+        # EMA configuration - now with dynamic optimization support
+        self.ema_config = self._get_ema_periods(epic)
         self.ema_short = self.ema_config.get('short', 12)
         self.ema_long = self.ema_config.get('long', 50) 
         self.ema_trend = self.ema_config.get('trend', 200)
         
         # Basic parameters
         self.eps = 1e-8  # Epsilon for stability (from detect_ema_alerts)
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.45)  # Lower threshold for simplicity
-        # Use reasonable minimum bars for EMA 12/50 strategy (not the config default of 70)
+        
+        # Dynamic parameter integration
+        self.optimal_params = None
+        if epic and use_optimal_parameters:
+            self._load_optimal_parameters(epic)
+        
+        # Set confidence threshold (optimal if available, otherwise config default)
+        self.min_confidence = self._get_optimal_confidence() or getattr(config, 'MIN_CONFIDENCE', 0.45)
+        
+        # Use reasonable minimum bars for EMA strategy
         self.min_bars = 50  # 50 bars minimum for EMA 50 to be stable
         
         # Initialize helper modules
@@ -78,10 +93,20 @@ class EMAStrategy(BaseStrategy):
         if backtest_mode:
             self.logger.info("🔥 BACKTEST MODE: Time restrictions disabled")
     
-    def _get_ema_periods(self) -> Dict:
-        """Get EMA periods from new configdata structure"""
+    def _get_ema_periods(self, epic: str = None) -> Dict:
+        """Get EMA periods - now with dynamic optimization support"""
         try:
-            # Get EMA configuration from new configdata structure
+            # NEW: Try to get optimal parameters from optimization results first
+            if epic and hasattr(self, 'use_optimal_parameters') and self.use_optimal_parameters:
+                try:
+                    from optimization.optimal_parameter_service import get_epic_ema_config
+                    optimal_config = get_epic_ema_config(epic)
+                    self.logger.info(f"🎯 Using optimal EMA periods for {epic}: {optimal_config}")
+                    return optimal_config
+                except Exception as e:
+                    self.logger.warning(f"Could not load optimal parameters for {epic}: {e}, falling back to config")
+            
+            # FALLBACK: Get EMA configuration from configdata structure
             ema_configs = getattr(config, 'EMA_STRATEGY_CONFIG', {})
             active_config = getattr(config, 'ACTIVE_EMA_CONFIG', 'default')
             
@@ -94,6 +119,51 @@ class EMAStrategy(BaseStrategy):
         except Exception as e:
             self.logger.warning(f"Could not load EMA config: {e}, using defaults")
             return {'short': 21, 'long': 50, 'trend': 200}
+    
+    def _load_optimal_parameters(self, epic: str):
+        """Load optimal parameters for this epic from optimization results"""
+        try:
+            from optimization.optimal_parameter_service import get_epic_optimal_parameters
+            self.optimal_params = get_epic_optimal_parameters(epic)
+            self.logger.info(f"🎯 Loaded optimal parameters for {epic}:")
+            self.logger.info(f"   EMA Config: {self.optimal_params.ema_config}")
+            self.logger.info(f"   Confidence: {self.optimal_params.confidence_threshold:.0%}")
+            self.logger.info(f"   Timeframe: {self.optimal_params.timeframe}")
+            self.logger.info(f"   SL/TP: {self.optimal_params.stop_loss_pips:.0f}/{self.optimal_params.take_profit_pips:.0f}")
+            self.logger.info(f"   Performance Score: {self.optimal_params.performance_score:.3f}")
+        except Exception as e:
+            self.logger.warning(f"Could not load optimal parameters for {epic}: {e}")
+            self.optimal_params = None
+    
+    def _get_optimal_confidence(self) -> Optional[float]:
+        """Get optimal confidence threshold if available"""
+        if self.optimal_params:
+            return self.optimal_params.confidence_threshold
+        return None
+    
+    def get_optimal_stop_loss(self) -> Optional[float]:
+        """Get optimal stop loss in pips"""
+        if self.optimal_params:
+            return self.optimal_params.stop_loss_pips
+        return None
+    
+    def get_optimal_take_profit(self) -> Optional[float]:
+        """Get optimal take profit in pips"""
+        if self.optimal_params:
+            return self.optimal_params.take_profit_pips
+        return None
+    
+    def get_optimal_timeframe(self) -> Optional[str]:
+        """Get optimal timeframe for this epic"""
+        if self.optimal_params:
+            return self.optimal_params.timeframe
+        return None
+    
+    def should_enable_smart_money(self) -> bool:
+        """Check if smart money analysis should be enabled"""
+        if self.optimal_params:
+            return self.optimal_params.smart_money_enabled
+        return False
     
     def get_required_indicators(self) -> List[str]:
         """Required indicators for basic EMA strategy"""
