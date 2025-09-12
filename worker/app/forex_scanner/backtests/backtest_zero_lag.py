@@ -130,11 +130,11 @@ class ZeroLagBacktest:
             return
         
         try:
-            self.smart_money_analyzer = SmartMoneyReadOnlyAnalyzer()
             self.smart_money_integration = SmartMoneyIntegration(
-                logger=self.logger,
-                analyzer=self.smart_money_analyzer
+                database_manager=self.db_manager,
+                data_fetcher=self.data_fetcher
             )
+            # Note: SmartMoneyIntegration creates its own analyzer internally
             self.smart_money_enabled = True
             self.logger.info("✅ Smart Money Concepts (SMC) analysis enabled")
             self.logger.info("   📊 Features: Market Structure, Order Blocks, Fair Value Gaps")

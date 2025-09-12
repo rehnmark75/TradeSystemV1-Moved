@@ -461,9 +461,14 @@ class AlertHistoryManager:
                 config_hash = hashlib.md5(json.dumps(strategy_config, sort_keys=True).encode()).hexdigest()
                 alert_data['strategy_config_hash'] = config_hash
                 
+                # Add current timestamp for alert_timestamp
+                from datetime import datetime
+                alert_data['alert_timestamp'] = datetime.utcnow()
+                
                 # Insert alert into database
                 insert_query = '''
                     INSERT INTO alert_history (
+                        alert_timestamp,
                         epic, pair, signal_type, strategy, confidence_score, price, bid_price, ask_price,
                         spread_pips, timeframe, strategy_config, strategy_indicators, strategy_metadata,
                         ema_short, ema_long, ema_trend, macd_line, macd_signal, macd_histogram,
@@ -477,6 +482,7 @@ class AlertHistoryManager:
                         signal_hash, data_source, market_timestamp, cooldown_key,
                         strategy_config_hash
                     ) VALUES (
+                        %(alert_timestamp)s,
                         %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(price)s, %(bid_price)s, %(ask_price)s,
                         %(spread_pips)s, %(timeframe)s, %(strategy_config)s, %(strategy_indicators)s, %(strategy_metadata)s,
                         %(ema_short)s, %(ema_long)s, %(ema_trend)s, %(macd_line)s, %(macd_signal)s, %(macd_histogram)s,
