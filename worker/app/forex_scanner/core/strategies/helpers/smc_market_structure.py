@@ -62,16 +62,19 @@ class StructureBreak:
 class SMCMarketStructure:
     """Smart Money Concepts Market Structure Analyzer"""
     
-    def __init__(self, logger: logging.Logger = None):
+    def __init__(self, logger: logging.Logger = None, data_fetcher=None):
         self.logger = logger or logging.getLogger(__name__)
         self.swing_points: List[SwingPoint] = []
         self.structure_breaks: List[StructureBreak] = []
         self.current_structure = StructureType.NEUTRAL
+        self.data_fetcher = data_fetcher  # For multi-timeframe analysis
         
     def analyze_market_structure(
         self, 
         df: pd.DataFrame, 
-        config: Dict
+        config: Dict,
+        epic: str = None,
+        timeframe: str = None
     ) -> pd.DataFrame:
         """
         Analyze market structure and add SMC indicators to DataFrame
@@ -89,8 +92,8 @@ class SMCMarketStructure:
             # Detect swing points
             df_enhanced = self._detect_swing_points(df_enhanced, config)
             
-            # Analyze structure breaks
-            df_enhanced = self._analyze_structure_breaks(df_enhanced, config)
+            # Analyze structure breaks with epic and timeframe for MTF validation
+            df_enhanced = self._analyze_structure_breaks(df_enhanced, config, epic, timeframe)
             
             # Add structure signals
             df_enhanced = self._add_structure_signals(df_enhanced, config)
@@ -302,7 +305,7 @@ class SMCMarketStructure:
             self.logger.error(f"Swing strength calculation failed: {e}")
             return 1.0
     
-    def _analyze_structure_breaks(self, df: pd.DataFrame, config: Dict) -> pd.DataFrame:
+    def _analyze_structure_breaks(self, df: pd.DataFrame, config: Dict, epic: str = None, timeframe: str = None) -> pd.DataFrame:
         """Analyze breaks of structure and changes of character"""
         try:
             confirmation_bars = config.get('structure_confirmation', 3)
@@ -327,7 +330,9 @@ class SMCMarketStructure:
                     swing_point, 
                     df, 
                     bos_threshold,
-                    confirmation_bars
+                    confirmation_bars,
+                    epic,
+                    timeframe
                 )
                 
                 if break_info:
@@ -357,54 +362,92 @@ class SMCMarketStructure:
         current_swing: SwingPoint,
         df: pd.DataFrame,
         threshold: float,
-        confirmation_bars: int
+        confirmation_bars: int,
+        epic: str = None,
+        timeframe: str = None
     ) -> Optional[StructureBreak]:
-        """Detect if current swing creates a structure break"""
+        """Detect if current swing creates a structure break with institutional validation"""
         try:
-            # Determine break type based on swing sequence
+            # Enhanced structure break classification with institutional context
+            break_type = None
+            direction = None
+            new_structure = None
+            
+            # Get recent swing context (last 3-5 swings for pattern recognition)
+            recent_swings = [sp for sp in self.swing_points[-5:] if sp.index <= current_swing.index]
+            
+            # Determine break type based on institutional logic
             if (previous_swing.swing_type in [SwingType.HIGHER_HIGH, SwingType.EQUAL_HIGH] and
-                current_swing.swing_type == SwingType.LOWER_HIGH):
-                # Potential bearish ChoCH (Change of Character)
+                current_swing.swing_type == SwingType.LOWER_HIGH and
+                self.current_structure in [StructureType.BULLISH, StructureType.NEUTRAL]):
+                # Potential bearish ChoCH (Change of Character) - Trend reversal
                 break_type = "ChoCH"
-                direction = "bearish"
+                direction = "bearish" 
                 new_structure = StructureType.BEARISH
                 
             elif (previous_swing.swing_type in [SwingType.LOWER_LOW, SwingType.EQUAL_LOW] and
-                  current_swing.swing_type == SwingType.HIGHER_LOW):
-                # Potential bullish ChoCH
+                  current_swing.swing_type == SwingType.HIGHER_LOW and
+                  self.current_structure in [StructureType.BEARISH, StructureType.NEUTRAL]):
+                # Potential bullish ChoCH - Trend reversal
                 break_type = "ChoCH"
                 direction = "bullish"
                 new_structure = StructureType.BULLISH
                 
             elif (current_swing.swing_type == SwingType.HIGHER_HIGH and 
                   self.current_structure == StructureType.BULLISH):
-                # Bullish BOS (Break of Structure)
+                # Bullish BOS (Break of Structure) - Trend continuation
                 break_type = "BOS"
                 direction = "bullish"
                 new_structure = StructureType.BULLISH
                 
             elif (current_swing.swing_type == SwingType.LOWER_LOW and 
                   self.current_structure == StructureType.BEARISH):
-                # Bearish BOS
+                # Bearish BOS - Trend continuation  
                 break_type = "BOS"
                 direction = "bearish"
                 new_structure = StructureType.BEARISH
                 
-            else:
+            # Enhanced equal levels detection for liquidity sweeps
+            elif (previous_swing.swing_type == SwingType.EQUAL_HIGH and
+                  current_swing.swing_type in [SwingType.HIGHER_HIGH, SwingType.LOWER_HIGH]):
+                # Liquidity sweep above equal highs
+                if self._validate_liquidity_sweep(df, current_swing, "high"):
+                    break_type = "BOS_LiquiditySweep" if current_swing.swing_type == SwingType.HIGHER_HIGH else "ChoCH_LiquiditySweep"
+                    direction = "bullish" if current_swing.swing_type == SwingType.HIGHER_HIGH else "bearish"
+                    new_structure = StructureType.BULLISH if direction == "bullish" else StructureType.BEARISH
+                    
+            elif (previous_swing.swing_type == SwingType.EQUAL_LOW and
+                  current_swing.swing_type in [SwingType.LOWER_LOW, SwingType.HIGHER_LOW]):
+                # Liquidity sweep below equal lows
+                if self._validate_liquidity_sweep(df, current_swing, "low"):
+                    break_type = "BOS_LiquiditySweep" if current_swing.swing_type == SwingType.LOWER_LOW else "ChoCH_LiquiditySweep"
+                    direction = "bearish" if current_swing.swing_type == SwingType.LOWER_LOW else "bullish"
+                    new_structure = StructureType.BEARISH if direction == "bearish" else StructureType.BULLISH
+            
+            if not break_type:
                 return None
             
-            # Check price movement threshold
+            # Enhanced price movement validation
             price_difference = abs(current_swing.price - previous_swing.price)
             if price_difference < threshold:
                 return None
             
-            # Calculate significance based on price move and volume
-            significance = self._calculate_break_significance(
-                previous_swing, current_swing, df
+            # Institutional validation filters
+            if not self._validate_institutional_context(df, current_swing, previous_swing, direction):
+                return None
+            
+            # Calculate enhanced significance with institutional factors
+            significance = self._calculate_enhanced_break_significance(
+                previous_swing, current_swing, df, break_type, recent_swings
             )
             
-            # Require minimum significance
-            if significance < 0.3:
+            # Apply stricter minimum significance from config
+            min_significance = getattr(self, 'min_structure_significance', 0.5)
+            if significance < min_significance:
+                return None
+            
+            # Multi-timeframe structure validation (if enabled in config)
+            if not self._validate_multi_timeframe_alignment(direction, significance, epic, timeframe):
                 return None
             
             return StructureBreak(
@@ -419,7 +462,7 @@ class SMCMarketStructure:
             )
             
         except Exception as e:
-            self.logger.error(f"Structure break detection failed: {e}")
+            self.logger.error(f"Enhanced structure break detection failed: {e}")
             return None
     
     def _calculate_break_significance(
@@ -654,3 +697,468 @@ class SMCMarketStructure:
         except Exception as e:
             self.logger.error(f"Structure levels calculation failed: {e}")
             return []
+    
+    def _validate_liquidity_sweep(self, df: pd.DataFrame, current_swing: SwingPoint, level_type: str) -> bool:
+        """Validate liquidity sweep with institutional context"""
+        try:
+            # Look for volume spike during liquidity sweep
+            current_index = current_swing.index
+            if current_index >= len(df) or current_index < 5:
+                return False
+            
+            # Get volume data around the sweep
+            sweep_volume = df.iloc[current_index].get('volume', df.iloc[current_index].get('ltv', 1))
+            if not sweep_volume or sweep_volume <= 0:
+                return False
+            
+            # Calculate recent average volume
+            recent_volumes = []
+            for i in range(max(0, current_index - 10), current_index):
+                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                if vol and vol > 0:
+                    recent_volumes.append(vol)
+            
+            if not recent_volumes:
+                return False
+            
+            avg_volume = sum(recent_volumes) / len(recent_volumes)
+            volume_ratio = sweep_volume / avg_volume
+            
+            # Require significant volume increase for liquidity sweep
+            min_liquidity_volume = getattr(self, 'min_liquidity_volume', 1.3)
+            if volume_ratio < min_liquidity_volume:
+                return False
+            
+            # Check for immediate reversal after sweep (institutional behavior)
+            if current_index + 3 < len(df):
+                sweep_price = current_swing.price
+                
+                if level_type == "high":
+                    # After sweeping highs, expect immediate reversal down
+                    next_prices = [df.iloc[i]['low'] for i in range(current_index + 1, min(current_index + 4, len(df)))]
+                    if next_prices and min(next_prices) < sweep_price * 0.9995:  # 0.5 pip reversal
+                        return True
+                        
+                elif level_type == "low":
+                    # After sweeping lows, expect immediate reversal up
+                    next_prices = [df.iloc[i]['high'] for i in range(current_index + 1, min(current_index + 4, len(df)))]
+                    if next_prices and max(next_prices) > sweep_price * 1.0005:  # 0.5 pip reversal
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Liquidity sweep validation failed: {e}")
+            return False
+    
+    def _validate_institutional_context(
+        self, 
+        df: pd.DataFrame, 
+        current_swing: SwingPoint, 
+        previous_swing: SwingPoint, 
+        direction: str
+    ) -> bool:
+        """Validate institutional context for structure break"""
+        try:
+            current_index = current_swing.index
+            
+            # Volume profile validation
+            if not self._validate_volume_profile(df, current_index, direction):
+                return False
+            
+            # Time-based validation (avoid low liquidity periods)
+            if not self._validate_trading_session(current_swing.timestamp):
+                return False
+            
+            # Price action validation (avoid spiky/erratic moves)
+            if not self._validate_price_action_quality(df, current_index):
+                return False
+            
+            # Swing strength validation
+            min_swing_strength = getattr(self, 'min_swing_strength', 1.5)
+            if current_swing.strength < min_swing_strength:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Institutional context validation failed: {e}")
+            return False
+    
+    def _validate_volume_profile(self, df: pd.DataFrame, index: int, direction: str) -> bool:
+        """Validate volume profile for institutional activity"""
+        try:
+            if index < 5 or index >= len(df):
+                return False
+            
+            # Get volume data around structure break
+            volume_window = []
+            for i in range(max(0, index - 3), min(index + 2, len(df))):
+                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                if vol and vol > 0:
+                    volume_window.append(vol)
+            
+            if len(volume_window) < 3:
+                return False
+            
+            # Calculate baseline volume (20-period average)
+            baseline_volumes = []
+            for i in range(max(0, index - 25), max(0, index - 5)):
+                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                if vol and vol > 0:
+                    baseline_volumes.append(vol)
+            
+            if not baseline_volumes:
+                return False
+            
+            baseline_avg = sum(baseline_volumes) / len(baseline_volumes)
+            break_avg_volume = sum(volume_window) / len(volume_window)
+            
+            # Require institutional volume (1.5x baseline minimum)
+            volume_factor = break_avg_volume / baseline_avg
+            return volume_factor >= 1.5
+            
+        except Exception:
+            return False
+    
+    def _validate_trading_session(self, timestamp: pd.Timestamp) -> bool:
+        """Validate that structure break occurs during institutional trading hours"""
+        try:
+            # Convert to UTC hour for session analysis
+            if hasattr(timestamp, 'hour'):
+                utc_hour = timestamp.hour
+            else:
+                return True  # Skip validation if timestamp format unknown
+            
+            # London session: 08:00-16:00 UTC
+            # New York session: 13:00-22:00 UTC  
+            # London/NY overlap: 13:00-16:00 UTC (premium time)
+            
+            london_session = 8 <= utc_hour <= 16
+            ny_session = 13 <= utc_hour <= 22
+            overlap_session = 13 <= utc_hour <= 16
+            
+            # Prefer overlap, then major sessions
+            if overlap_session:
+                return True  # Best time for institutional activity
+            elif london_session or ny_session:
+                return True  # Good institutional activity
+            else:
+                # Asian session or off-hours - avoid unless very strong signal
+                return False
+                
+        except Exception:
+            return True  # Default to allowing if session check fails
+    
+    def _validate_price_action_quality(self, df: pd.DataFrame, index: int) -> bool:
+        """Validate price action quality (avoid spiky/erratic moves)"""
+        try:
+            if index < 3 or index + 3 >= len(df):
+                return True
+            
+            # Get price data around the break
+            price_window = []
+            for i in range(index - 2, index + 3):
+                high = df.iloc[i]['high']
+                low = df.iloc[i]['low']
+                range_val = high - low
+                price_window.append(range_val)
+            
+            if not price_window:
+                return True
+            
+            # Check for excessive volatility (spike detection)
+            avg_range = sum(price_window) / len(price_window)
+            max_range = max(price_window)
+            
+            # Reject if any single bar is more than 3x average range (spike)
+            if max_range > avg_range * 3:
+                return False
+            
+            return True
+            
+        except Exception:
+            return True
+    
+    def _calculate_enhanced_break_significance(
+        self,
+        previous_swing: SwingPoint,
+        current_swing: SwingPoint,
+        df: pd.DataFrame,
+        break_type: str,
+        recent_swings: List[SwingPoint]
+    ) -> float:
+        """Calculate enhanced significance with institutional factors"""
+        try:
+            base_significance = self._calculate_break_significance(previous_swing, current_swing, df)
+            
+            # Enhancement factors
+            enhancement_factors = []
+            
+            # 1. Liquidity sweep bonus
+            if "LiquiditySweep" in break_type:
+                enhancement_factors.append(0.2)
+            
+            # 2. Multiple swing confirmation
+            if len(recent_swings) >= 3:
+                consistent_direction = True
+                for i in range(len(recent_swings) - 1):
+                    if current_swing.swing_type in [SwingType.HIGHER_HIGH, SwingType.HIGHER_LOW]:
+                        if recent_swings[i].swing_type not in [SwingType.HIGHER_HIGH, SwingType.HIGHER_LOW]:
+                            consistent_direction = False
+                            break
+                    elif current_swing.swing_type in [SwingType.LOWER_LOW, SwingType.LOWER_HIGH]:
+                        if recent_swings[i].swing_type not in [SwingType.LOWER_LOW, SwingType.LOWER_HIGH]:
+                            consistent_direction = False
+                            break
+                
+                if consistent_direction:
+                    enhancement_factors.append(0.15)
+            
+            # 3. Volume profile enhancement
+            current_index = current_swing.index
+            if self._validate_volume_profile(df, current_index, "bullish"):
+                enhancement_factors.append(0.1)
+            
+            # 4. Session timing bonus
+            if self._validate_trading_session(current_swing.timestamp):
+                # Check if it's overlap session (premium time)
+                if hasattr(current_swing.timestamp, 'hour'):
+                    utc_hour = current_swing.timestamp.hour
+                    if 13 <= utc_hour <= 16:  # London/NY overlap
+                        enhancement_factors.append(0.15)
+                    else:
+                        enhancement_factors.append(0.05)
+            
+            # Apply enhancements
+            total_enhancement = sum(enhancement_factors)
+            enhanced_significance = base_significance + total_enhancement
+            
+            return min(max(enhanced_significance, 0.0), 1.0)
+            
+        except Exception as e:
+            self.logger.error(f"Enhanced significance calculation failed: {e}")
+            return self._calculate_break_significance(previous_swing, current_swing, df)
+    
+    def _validate_multi_timeframe_alignment(self, direction: str, significance: float, epic: str = None, current_timeframe: str = None) -> bool:
+        """Validate multi-timeframe structure alignment with actual higher TF data"""
+        try:
+            # If no data_fetcher available, fall back to significance-based validation
+            if not self.data_fetcher or not epic:
+                return self._fallback_mtf_validation(significance)
+            
+            # Define timeframe hierarchy for multi-timeframe analysis
+            timeframe_hierarchy = {
+                '5m': ['15m', '1h'],
+                '15m': ['1h', '4h'], 
+                '1h': ['4h', '1d'],
+                '4h': ['1d', '1w']
+            }
+            
+            current_tf = current_timeframe or '15m'
+            higher_timeframes = timeframe_hierarchy.get(current_tf, ['1h', '4h'])
+            
+            alignment_score = 0
+            total_checks = 0
+            
+            # Check alignment with each higher timeframe
+            for htf in higher_timeframes:
+                try:
+                    # Fetch higher timeframe data
+                    htf_structure = self._get_higher_timeframe_structure(epic, htf)
+                    
+                    if htf_structure:
+                        total_checks += 1
+                        
+                        # Check if higher timeframe structure aligns with signal direction
+                        if self._check_structure_alignment(htf_structure, direction):
+                            alignment_score += 1
+                            
+                            # Bonus for strong higher timeframe trends
+                            if htf_structure.get('trend_strength', 0) > 0.7:
+                                alignment_score += 0.5
+                                
+                except Exception as e:
+                    self.logger.debug(f"Could not fetch {htf} data for MTF analysis: {e}")
+                    continue
+            
+            # Require at least 60% alignment across checked timeframes
+            if total_checks == 0:
+                return self._fallback_mtf_validation(significance)
+            
+            alignment_ratio = alignment_score / total_checks
+            required_alignment = 0.6  # 60% minimum alignment
+            
+            # Apply MTF confluence weight from config
+            mtf_weight = getattr(self, 'mtf_confluence_weight', 0.8)
+            weighted_alignment = alignment_ratio * mtf_weight
+            
+            is_aligned = weighted_alignment >= required_alignment
+            
+            if is_aligned:
+                self.logger.debug(f"✅ Multi-timeframe alignment confirmed: {alignment_ratio:.1%}")
+            else:
+                self.logger.debug(f"❌ Multi-timeframe alignment failed: {alignment_ratio:.1%} < {required_alignment:.1%}")
+            
+            return is_aligned
+                
+        except Exception as e:
+            self.logger.error(f"Multi-timeframe alignment validation failed: {e}")
+            return self._fallback_mtf_validation(significance)
+    
+    def _fallback_mtf_validation(self, significance: float) -> bool:
+        """Fallback MTF validation when higher timeframe data unavailable"""
+        # High significance suggests multi-timeframe alignment
+        if significance >= 0.7:
+            return True
+        elif significance >= 0.5:
+            return True  # Allow medium significance signals  
+        else:
+            return False
+    
+    def _get_higher_timeframe_structure(self, epic: str, timeframe: str) -> Dict:
+        """Get higher timeframe structure analysis"""
+        try:
+            if not self.data_fetcher:
+                return None
+            
+            # Extract pair from epic for data fetching
+            pair = self._extract_pair_from_epic(epic)
+            
+            # Fetch higher timeframe data (48 hours for trend analysis)
+            htf_data = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=timeframe,
+                lookback_hours=48
+            )
+            
+            if htf_data is None or htf_data.empty or len(htf_data) < 20:
+                return None
+            
+            # Perform basic structure analysis on higher timeframe
+            structure_analysis = self._analyze_htf_structure(htf_data)
+            
+            return structure_analysis
+            
+        except Exception as e:
+            self.logger.debug(f"Higher timeframe structure fetch failed: {e}")
+            return None
+    
+    def _extract_pair_from_epic(self, epic: str) -> str:
+        """Extract currency pair from epic"""
+        try:
+            if '.D.' in epic and '.MINI.IP' in epic:
+                parts = epic.split('.D.')
+                if len(parts) > 1:
+                    pair_part = parts[1].split('.MINI.IP')[0]
+                    return pair_part
+            
+            # Fallback for unknown format
+            return 'EURUSD'
+            
+        except Exception:
+            return 'EURUSD'
+    
+    def _analyze_htf_structure(self, df: pd.DataFrame) -> Dict:
+        """Analyze higher timeframe structure for trend and momentum"""
+        try:
+            if len(df) < 20:
+                return None
+            
+            # Simple trend analysis using price action
+            recent_data = df.tail(20)
+            
+            # Calculate trend using linear regression-like approach
+            prices = recent_data['close'].values
+            x = range(len(prices))
+            
+            # Simple slope calculation
+            n = len(prices)
+            sum_x = sum(x)
+            sum_y = sum(prices)
+            sum_xy = sum(x[i] * prices[i] for i in range(n))
+            sum_xx = sum(x[i] ** 2 for i in range(n))
+            
+            if n * sum_xx - sum_x ** 2 == 0:
+                slope = 0
+            else:
+                slope = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x ** 2)
+            
+            # Determine trend direction and strength
+            price_range = recent_data['high'].max() - recent_data['low'].min()
+            if price_range == 0:
+                trend_strength = 0
+            else:
+                trend_strength = abs(slope) / price_range * 1000  # Scale for readability
+                trend_strength = min(trend_strength, 1.0)  # Cap at 1.0
+            
+            if slope > 0.00001:  # Bullish trend
+                trend_direction = 'bullish'
+            elif slope < -0.00001:  # Bearish trend
+                trend_direction = 'bearish'
+            else:
+                trend_direction = 'neutral'
+            
+            # Additional momentum analysis
+            momentum = self._calculate_htf_momentum(recent_data)
+            
+            return {
+                'trend_direction': trend_direction,
+                'trend_strength': trend_strength,
+                'slope': slope,
+                'momentum': momentum,
+                'price_range': price_range,
+                'analysis_period': len(recent_data)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"HTF structure analysis failed: {e}")
+            return None
+    
+    def _calculate_htf_momentum(self, df: pd.DataFrame) -> float:
+        """Calculate momentum for higher timeframe analysis"""
+        try:
+            if len(df) < 10:
+                return 0.5
+            
+            # Simple momentum using rate of change
+            recent_close = df['close'].iloc[-1]
+            older_close = df['close'].iloc[-10]
+            
+            if older_close == 0:
+                return 0.5
+            
+            momentum_raw = (recent_close - older_close) / older_close
+            
+            # Normalize to 0-1 scale (0.5 = neutral)
+            momentum_normalized = 0.5 + (momentum_raw * 100)  # Scale up
+            return max(0.0, min(1.0, momentum_normalized))  # Clamp to 0-1
+            
+        except Exception:
+            return 0.5
+    
+    def _check_structure_alignment(self, htf_structure: Dict, signal_direction: str) -> bool:
+        """Check if higher timeframe structure aligns with signal direction"""
+        try:
+            htf_direction = htf_structure.get('trend_direction', 'neutral')
+            htf_strength = htf_structure.get('trend_strength', 0)
+            
+            # Require minimum trend strength for alignment
+            if htf_strength < 0.3:
+                return False  # Too weak to provide meaningful alignment
+            
+            # Check directional alignment
+            if signal_direction == 'bullish' and htf_direction == 'bullish':
+                return True
+            elif signal_direction == 'bearish' and htf_direction == 'bearish':
+                return True
+            elif htf_direction == 'neutral':
+                # Neutral higher timeframe allows signals with lower confidence
+                return htf_strength < 0.5  # Only if really neutral
+            else:
+                # Opposite direction - reject signal
+                return False
+                
+        except Exception:
+            return False

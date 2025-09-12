@@ -21,34 +21,59 @@ SMC_STRATEGY_CONFIG = {
         # Market Structure Detection
         'swing_length': 5,          # Length for swing high/low detection
         'structure_confirmation': 3,  # Bars needed to confirm structure break
-        'bos_threshold': 0.0001,    # Break of Structure threshold (price)
-        'choch_threshold': 0.0001,  # Change of Character threshold
+        'bos_threshold': 0.00015,   # Break of Structure threshold (price) - Increased for reliability
+        'choch_threshold': 0.00015, # Change of Character threshold - Increased for reliability
+        'min_structure_significance': 0.5,  # Minimum significance for valid structure break
         
-        # Order Block Detection
+        # Order Block Detection  
         'order_block_length': 3,    # Minimum length for order block
-        'order_block_volume_factor': 1.5,  # Volume must be X times average
+        'order_block_volume_factor': 1.8,  # Volume must be X times average - Increased
         'order_block_buffer': 2,    # Pips buffer around order block zones
         'max_order_blocks': 5,      # Maximum order blocks to track
+        'order_block_min_strength': 0.6,  # Minimum strength for valid order block
         
         # Fair Value Gap Detection
-        'fvg_min_size': 3,          # Minimum FVG size in pips
+        'fvg_min_size': 5,          # Minimum FVG size in pips - Increased
         'fvg_max_age': 20,          # Maximum bars to keep FVG active
-        'fvg_fill_threshold': 0.5,  # Percentage filled to consider closed
+        'fvg_fill_threshold': 0.4,  # Percentage filled to consider closed - More strict
+        'fvg_volume_confirmation': True,  # Require volume confirmation for FVG
         
         # Supply/Demand Zones
         'zone_min_touches': 2,      # Minimum touches to create zone
         'zone_max_age': 50,         # Maximum bars to keep zone active
-        'zone_strength_factor': 1.2, # Volume factor for strong zones
+        'zone_strength_factor': 1.4, # Volume factor for strong zones - Increased
+        
+        # Liquidity Analysis (NEW)
+        'liquidity_sweep_enabled': True,      # Enable liquidity sweep detection
+        'equal_levels_tolerance': 0.5,        # Tolerance for equal highs/lows (pips)
+        'min_liquidity_volume': 1.3,          # Min volume for liquidity events
+        'liquidity_confirmation_bars': 2,     # Bars to confirm liquidity sweep
+        
+        # Premium/Discount Analysis (NEW)
+        'premium_discount_enabled': True,     # Enable market maker model
+        'daily_range_multiplier': 0.618,     # Golden ratio for optimal entry
+        'weekly_range_multiplier': 0.382,    # Weekly range analysis
+        'premium_threshold': 0.7,            # Threshold for premium zone
+        'discount_threshold': 0.3,           # Threshold for discount zone
         
         # Signal Generation
-        'confluence_required': 2,   # Minimum confluence factors needed
-        'min_risk_reward': 1.5,     # Minimum R:R ratio required
-        'max_distance_to_zone': 10, # Maximum pips from entry to nearest zone
+        'confluence_required': 2.5, # Minimum confluence factors needed - Increased
+        'min_risk_reward': 1.8,     # Minimum R:R ratio required - Increased  
+        'max_distance_to_zone': 8,  # Maximum pips from entry to nearest zone - Reduced
+        'min_confidence': 0.65,     # Minimum signal confidence - NEW
         
         # Multi-timeframe Settings
         'use_higher_tf': True,      # Use higher timeframe confirmation
         'higher_tf_multiplier': 4,  # Higher TF = current TF * multiplier
         'structure_alignment_required': True, # Require HTF structure alignment
+        'mtf_confluence_weight': 0.8,        # Weight for multi-timeframe confluence
+        
+        # Session Analysis (NEW)
+        'session_filtering_enabled': True,    # Enable session-based filtering
+        'london_session_boost': 1.2,         # Confluence boost during London
+        'ny_session_boost': 1.3,             # Confluence boost during NY
+        'overlap_session_boost': 1.5,        # Boost during London/NY overlap
+        'avoid_asian_session': True,         # Avoid signals during Asian session
         
         'description': 'Balanced SMC configuration for trending markets',
         'best_for': ['trending', 'institutional_flow', 'breakouts'],
@@ -59,6 +84,76 @@ SMC_STRATEGY_CONFIG = {
         'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP'],
         'min_pip_volatility': 10.0,
         'max_pip_volatility': 80.0
+    },
+    
+    'moderate': {
+        # Market Structure Detection - Relaxed but still quality
+        'swing_length': 4,          # Shorter for more sensitivity
+        'structure_confirmation': 2, # Faster confirmation
+        'bos_threshold': 0.0001,    # More sensitive to breaks
+        'choch_threshold': 0.0001,  # More sensitive to character changes
+        'min_structure_significance': 0.4,  # Slightly lower bar
+        
+        # Order Block Detection - Balanced approach
+        'order_block_length': 3,    # Keep standard length
+        'order_block_volume_factor': 1.4,  # Relaxed volume requirement
+        'order_block_buffer': 2,    # Keep buffer
+        'max_order_blocks': 5,      # Keep tracking limit
+        'order_block_min_strength': 0.4,  # Lower strength requirement
+        'order_block_min_confidence': 0.3, # Lower confidence threshold
+        
+        # Fair Value Gap Detection - More inclusive
+        'fvg_min_size': 3,          # Smaller gaps accepted
+        'fvg_max_age': 25,          # Longer validity
+        'fvg_fill_threshold': 0.5,  # Moderate fill requirement
+        'fvg_volume_confirmation': True,  # Keep volume confirmation
+        
+        # Supply/Demand Zones - Moderate
+        'zone_min_touches': 1,      # Single touch creates zone
+        'zone_max_age': 40,         # Longer validity
+        'zone_strength_factor': 1.2, # Relaxed strength requirement
+        
+        # Liquidity Analysis - Keep enabled but relaxed
+        'liquidity_sweep_enabled': True,
+        'equal_levels_tolerance': 1.0,        # More tolerance for equal levels
+        'min_liquidity_volume': 1.2,          # Lower volume requirement
+        'liquidity_confirmation_bars': 1,     # Faster confirmation
+        
+        # Premium/Discount Analysis - Keep but relaxed
+        'premium_discount_enabled': True,
+        'daily_range_multiplier': 0.618,     # Keep golden ratio
+        'weekly_range_multiplier': 0.382,    # Keep weekly analysis
+        'premium_threshold': 0.75,           # Slightly higher premium threshold
+        'discount_threshold': 0.25,          # Slightly lower discount threshold
+        
+        # Signal Generation - CRITICAL ADJUSTMENTS
+        'confluence_required': 1.0,    # REDUCED to match scalping success
+        'min_risk_reward': 1.2,        # Even more accessible
+        'max_distance_to_zone': 15,    # More distance allowed
+        'min_confidence': 0.35,        # MAJOR REDUCTION for more signals
+        
+        # Multi-timeframe Settings - Relaxed
+        'use_higher_tf': True,         # Keep multi-timeframe
+        'higher_tf_multiplier': 4,     # Keep multiplier
+        'structure_alignment_required': False, # DISABLE strict alignment
+        'mtf_confluence_weight': 0.6,  # Reduced weight
+        
+        # Session Analysis - Relaxed
+        'session_filtering_enabled': False,   # DISABLE session filtering
+        'london_session_boost': 1.1,         # Smaller boost
+        'ny_session_boost': 1.2,             # Smaller boost  
+        'overlap_session_boost': 1.3,        # Smaller boost
+        'avoid_asian_session': False,        # ALLOW Asian session
+        
+        'description': 'Moderate SMC configuration balancing quality with signal frequency',
+        'best_for': ['balanced_trading', 'regular_signals', 'quality_frequency_balance'],
+        'best_volatility_regime': 'medium',
+        'best_trend_strength': 'medium',
+        'best_market_regime': 'trending_or_ranging',
+        'best_session': ['all_sessions'],
+        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP', 'CS.D.EURJPY.MINI.IP'],
+        'min_pip_volatility': 5.0,
+        'max_pip_volatility': 100.0
     },
     
     'conservative': {
@@ -248,8 +343,8 @@ SMC_STRATEGY_CONFIG = {
     }
 }
 
-# Active configuration selector
-ACTIVE_SMC_CONFIG = 'scalping'
+# Active configuration selector  
+ACTIVE_SMC_CONFIG = 'moderate'
 
 # Individual feature toggles
 SMC_MARKET_STRUCTURE_ENABLED = True

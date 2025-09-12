@@ -1,12 +1,13 @@
 # core/strategies/helpers/smc_order_blocks.py
 """
-Smart Money Concepts - Order Block Detection
-Identifies institutional order blocks based on volume and price action
+Smart Money Concepts - Enhanced Order Block Detection with Fair Value Gap Analysis
+Identifies institutional order blocks based on volume, price action, and FVG validation
 
 Order Blocks represent areas where institutions have placed large orders:
-- Bullish Order Block: Strong move up after consolidation/pullback
-- Bearish Order Block: Strong move down after consolidation/pullback
-- High volume + significant price movement = Institution activity
+- Bullish Order Block: Strong move up after consolidation/pullback + FVG validation
+- Bearish Order Block: Strong move down after consolidation/pullback + FVG validation
+- High volume + significant price movement + Fair Value Gap = Institution activity
+- FVG analysis enhances order block quality and confirmation
 """
 
 import pandas as pd
@@ -15,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 import logging
 from dataclasses import dataclass
 from enum import Enum
+from .smc_fair_value_gaps import SMCFairValueGaps, FVGType, FairValueGap
 
 
 class OrderBlockType(Enum):
@@ -33,7 +35,7 @@ class OrderBlockStrength(Enum):
 
 @dataclass
 class OrderBlock:
-    """Represents an institutional order block"""
+    """Represents an institutional order block enhanced with Fair Value Gap analysis"""
     start_index: int
     end_index: int
     high_price: float
@@ -46,14 +48,20 @@ class OrderBlock:
     tested_count: int = 0
     still_valid: bool = True
     confidence: float = 0.0
+    # Fair Value Gap enhancements
+    associated_fvgs: List[FairValueGap] = None
+    fvg_confluence_score: float = 0.0
+    has_fvg_support: bool = False
+    fvg_alignment_strength: float = 0.0
 
 
 class SMCOrderBlocks:
-    """Smart Money Concepts Order Block Detector"""
+    """Smart Money Concepts Order Block Detector Enhanced with Fair Value Gap Analysis"""
     
     def __init__(self, logger: logging.Logger = None):
         self.logger = logger or logging.getLogger(__name__)
         self.order_blocks: List[OrderBlock] = []
+        self.fvg_analyzer = SMCFairValueGaps(logger=self.logger)
         
     def detect_order_blocks(
         self, 
@@ -61,14 +69,14 @@ class SMCOrderBlocks:
         config: Dict
     ) -> pd.DataFrame:
         """
-        Detect order blocks and add to DataFrame
+        Enhanced order block detection with Fair Value Gap analysis
         
         Args:
             df: OHLCV DataFrame
             config: SMC configuration dictionary
             
         Returns:
-            Enhanced DataFrame with order block analysis
+            Enhanced DataFrame with order block and FVG analysis
         """
         try:
             df_enhanced = df.copy()
@@ -80,12 +88,18 @@ class SMCOrderBlocks:
             df_enhanced['order_block_confidence'] = 0.0
             df_enhanced['order_block_high'] = np.nan
             df_enhanced['order_block_low'] = np.nan
+            df_enhanced['order_block_fvg_support'] = False
+            df_enhanced['order_block_fvg_score'] = 0.0
             
             # Clear previous order blocks
             self.order_blocks = []
             
-            # Detect order blocks
-            self._scan_for_order_blocks(df_enhanced, config)
+            # First, detect Fair Value Gaps for validation
+            self.logger.debug("🔍 Detecting Fair Value Gaps for order block validation")
+            df_enhanced = self.fvg_analyzer.detect_fair_value_gaps(df_enhanced, config)
+            
+            # Detect order blocks with FVG validation
+            self._scan_for_order_blocks_with_fvg(df_enhanced, config)
             
             # Mark order blocks in DataFrame
             for order_block in self.order_blocks:
@@ -94,11 +108,154 @@ class SMCOrderBlocks:
             # Add order block zones
             df_enhanced = self._add_order_block_zones(df_enhanced, config)
             
+            self.logger.debug(f"📊 Enhanced order block detection complete: {len(self.order_blocks)} blocks found")
+            
             return df_enhanced
             
         except Exception as e:
-            self.logger.error(f"Order block detection failed: {e}")
+            self.logger.error(f"Enhanced order block detection failed: {e}")
             return df
+    
+    def _scan_for_order_blocks_with_fvg(self, df: pd.DataFrame, config: Dict):
+        """Enhanced scan for order blocks with Fair Value Gap validation"""
+        try:
+            order_block_length = config.get('order_block_length', 3)
+            volume_factor = config.get('order_block_volume_factor', 1.5)
+            min_price_movement = config.get('bos_threshold', 0.0001) * 2
+            
+            # Calculate average volume for comparison
+            volumes = []
+            for i in range(len(df)):
+                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                if vol and vol > 0:
+                    volumes.append(vol)
+            
+            avg_volume = sum(volumes) / len(volumes) if volumes else 1
+            
+            # Scan for order block patterns with FVG validation
+            for i in range(order_block_length * 2, len(df) - order_block_length):
+                self._check_bullish_order_block_with_fvg(df, i, config, avg_volume)
+                self._check_bearish_order_block_with_fvg(df, i, config, avg_volume)
+            
+            # Keep only the strongest order blocks (prioritizing FVG support)
+            max_blocks = config.get('max_order_blocks', 5)
+            if len(self.order_blocks) > max_blocks:
+                # Sort by FVG support first, then confidence
+                self.order_blocks.sort(key=lambda x: (x.has_fvg_support, x.confidence), reverse=True)
+                self.order_blocks = self.order_blocks[:max_blocks]
+                
+        except Exception as e:
+            self.logger.error(f"Enhanced order block scanning failed: {e}")
+    
+    def _validate_order_block_with_fvg(
+        self, 
+        df: pd.DataFrame,
+        consolidation_start: int,
+        consolidation_end: int,
+        move_start: int,
+        move_end: int,
+        block_type: OrderBlockType,
+        config: Dict
+    ) -> Tuple[bool, float, List[FairValueGap], float]:
+        """
+        Validate order block with Fair Value Gap analysis
+        
+        Returns:
+            (has_fvg_support, fvg_confluence_score, associated_fvgs, alignment_strength)
+        """
+        try:
+            associated_fvgs = []
+            fvg_confluence_score = 0.0
+            alignment_strength = 0.0
+            
+            # Check for FVGs in the move period and surrounding areas
+            search_start = max(0, consolidation_start - 5)
+            search_end = min(len(df), move_end + 5)
+            
+            # Look for FVGs that align with the order block direction
+            for i in range(search_start, search_end):
+                if i >= len(df):
+                    continue
+                    
+                row = df.iloc[i]
+                
+                # Check for bullish FVG support for bullish order block
+                if (block_type == OrderBlockType.BULLISH and 
+                    row.get('fvg_bullish', False)):
+                    
+                    fvg_high = row.get('fvg_high', 0)
+                    fvg_low = row.get('fvg_low', 0)
+                    
+                    if fvg_high > 0 and fvg_low > 0:
+                        # Check if FVG overlaps with consolidation area
+                        consolidation_data = df.iloc[consolidation_start:consolidation_end + 1]
+                        consolidation_low = consolidation_data['low'].min()
+                        consolidation_high = consolidation_data['high'].max()
+                        
+                        # FVG provides support if it's below or within consolidation
+                        if (fvg_low <= consolidation_high and fvg_high >= consolidation_low):
+                            fvg_gap = FairValueGap(
+                                start_index=i,
+                                high_price=fvg_high,
+                                low_price=fvg_low,
+                                gap_type=FVGType.BULLISH,
+                                gap_size_pips=(fvg_high - fvg_low) * 10000,
+                                volume_confirmation=row.get('volume', 1),
+                                timestamp=df.index[i] if hasattr(df.index, 'to_pydatetime') else pd.Timestamp.now(),
+                                significance=row.get('fvg_significance', 0.5)
+                            )
+                            associated_fvgs.append(fvg_gap)
+                            
+                            # Calculate confluence score based on proximity and size
+                            proximity_score = 1.0 - abs(i - move_start) / max(10, move_end - move_start)
+                            size_score = min(1.0, fvg_gap.gap_size_pips / 50)  # Normalize by 50 pips
+                            fvg_confluence_score += proximity_score * size_score * fvg_gap.significance
+                
+                # Check for bearish FVG support for bearish order block
+                elif (block_type == OrderBlockType.BEARISH and 
+                      row.get('fvg_bearish', False)):
+                    
+                    fvg_high = row.get('fvg_high', 0)
+                    fvg_low = row.get('fvg_low', 0)
+                    
+                    if fvg_high > 0 and fvg_low > 0:
+                        # Check if FVG overlaps with consolidation area
+                        consolidation_data = df.iloc[consolidation_start:consolidation_end + 1]
+                        consolidation_low = consolidation_data['low'].min()
+                        consolidation_high = consolidation_data['high'].max()
+                        
+                        # FVG provides resistance if it's above or within consolidation
+                        if (fvg_high >= consolidation_low and fvg_low <= consolidation_high):
+                            fvg_gap = FairValueGap(
+                                start_index=i,
+                                high_price=fvg_high,
+                                low_price=fvg_low,
+                                gap_type=FVGType.BEARISH,
+                                gap_size_pips=(fvg_high - fvg_low) * 10000,
+                                volume_confirmation=row.get('volume', 1),
+                                timestamp=df.index[i] if hasattr(df.index, 'to_pydatetime') else pd.Timestamp.now(),
+                                significance=row.get('fvg_significance', 0.5)
+                            )
+                            associated_fvgs.append(fvg_gap)
+                            
+                            # Calculate confluence score
+                            proximity_score = 1.0 - abs(i - move_start) / max(10, move_end - move_start)
+                            size_score = min(1.0, fvg_gap.gap_size_pips / 50)
+                            fvg_confluence_score += proximity_score * size_score * fvg_gap.significance
+            
+            # Calculate alignment strength
+            if associated_fvgs:
+                alignment_strength = min(1.0, fvg_confluence_score)
+                has_fvg_support = alignment_strength > 0.3  # Threshold for significant FVG support
+            else:
+                has_fvg_support = False
+                alignment_strength = 0.0
+            
+            return has_fvg_support, fvg_confluence_score, associated_fvgs, alignment_strength
+            
+        except Exception as e:
+            self.logger.error(f"FVG validation failed: {e}")
+            return False, 0.0, [], 0.0
     
     def _scan_for_order_blocks(self, df: pd.DataFrame, config: Dict):
         """Scan DataFrame for order block patterns"""
@@ -130,6 +287,264 @@ class SMCOrderBlocks:
                 
         except Exception as e:
             self.logger.error(f"Order block scanning failed: {e}")
+    
+    def _check_bullish_order_block_with_fvg(
+        self, 
+        df: pd.DataFrame, 
+        current_index: int, 
+        config: Dict, 
+        avg_volume: float
+    ):
+        """Enhanced bullish order block detection with Fair Value Gap validation"""
+        try:
+            block_length = config.get('order_block_length', 3)
+            volume_factor = config.get('order_block_volume_factor', 1.5)
+            
+            # Look back for consolidation period followed by strong move up
+            consolidation_start = current_index - block_length * 2
+            consolidation_end = current_index - block_length
+            move_start = consolidation_end
+            move_end = current_index
+            
+            if consolidation_start < 0:
+                return
+            
+            # Check consolidation phase
+            consolidation_data = df.iloc[consolidation_start:consolidation_end + 1]
+            if len(consolidation_data) < block_length:
+                return
+            
+            consolidation_high = consolidation_data['high'].max()
+            consolidation_low = consolidation_data['low'].min()
+            consolidation_range = consolidation_high - consolidation_low
+            
+            # Check move phase
+            move_data = df.iloc[move_start:move_end + 1]
+            if len(move_data) < block_length:
+                return
+            
+            move_high = move_data['high'].max()
+            move_low = move_data['low'].min()
+            move_start_price = df.iloc[move_start]['close']
+            move_end_price = df.iloc[move_end]['close']
+            
+            price_movement = move_end_price - move_start_price
+            move_range = move_high - move_low
+            
+            # Check if this is a bullish pattern
+            if price_movement <= 0:
+                return
+            
+            # Check volume confirmation
+            move_volumes = []
+            for i in range(move_start, move_end + 1):
+                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                if vol and vol > 0:
+                    move_volumes.append(vol)
+            
+            if not move_volumes:
+                return
+            
+            move_avg_volume = sum(move_volumes) / len(move_volumes)
+            volume_confirmation = move_avg_volume / avg_volume
+            
+            # Basic order block criteria
+            basic_criteria_met = (volume_confirmation >= volume_factor and 
+                                price_movement >= config.get('bos_threshold', 0.0001) and
+                                move_range > consolidation_range * 0.5)
+            
+            if basic_criteria_met:
+                # Enhanced FVG validation
+                has_fvg_support, fvg_confluence_score, associated_fvgs, alignment_strength = \
+                    self._validate_order_block_with_fvg(
+                        df, consolidation_start, consolidation_end, move_start, move_end,
+                        OrderBlockType.BULLISH, config
+                    )
+                
+                # Calculate enhanced order block strength (including FVG)
+                base_strength = self._calculate_order_block_strength(
+                    price_movement, volume_confirmation, move_range, consolidation_range
+                )
+                
+                # Enhance strength with FVG support
+                if has_fvg_support:
+                    if base_strength == OrderBlockStrength.WEAK:
+                        enhanced_strength = OrderBlockStrength.MEDIUM
+                    elif base_strength == OrderBlockStrength.MEDIUM:
+                        enhanced_strength = OrderBlockStrength.STRONG
+                    else:
+                        enhanced_strength = OrderBlockStrength.VERY_STRONG
+                else:
+                    enhanced_strength = base_strength
+                
+                # Enhanced confidence calculation (including FVG)
+                base_confidence = self._calculate_order_block_confidence(
+                    volume_confirmation, price_movement, enhanced_strength, 'bullish'
+                )
+                
+                # Boost confidence with FVG support
+                fvg_boost = min(0.3, alignment_strength * 0.5) if has_fvg_support else 0.0
+                enhanced_confidence = min(1.0, base_confidence + fvg_boost)
+                
+                # Only create order block if it has minimum quality (FVG support or high confidence)
+                min_confidence = config.get('order_block_min_confidence', 0.4)
+                if enhanced_confidence >= min_confidence or has_fvg_support:
+                    # Create enhanced order block with FVG information
+                    order_block = OrderBlock(
+                        start_index=consolidation_start,
+                        end_index=consolidation_end,
+                        high_price=consolidation_high,
+                        low_price=consolidation_low,
+                        block_type=OrderBlockType.BULLISH,
+                        strength=enhanced_strength,
+                        volume_factor=volume_confirmation,
+                        price_movement=price_movement,
+                        timestamp=df.index[current_index] if hasattr(df.index, 'to_pydatetime') else pd.Timestamp.now(),
+                        confidence=enhanced_confidence,
+                        # FVG enhancements
+                        associated_fvgs=associated_fvgs,
+                        fvg_confluence_score=fvg_confluence_score,
+                        has_fvg_support=has_fvg_support,
+                        fvg_alignment_strength=alignment_strength
+                    )
+                    
+                    self.order_blocks.append(order_block)
+                    self.logger.debug(f"✅ Enhanced bullish order block detected at {current_index} "
+                                    f"(confidence: {enhanced_confidence:.2f}, "
+                                    f"FVG support: {has_fvg_support}, "
+                                    f"FVG score: {fvg_confluence_score:.2f})")
+                
+        except Exception as e:
+            self.logger.error(f"Enhanced bullish order block check failed: {e}")
+    
+    def _check_bearish_order_block_with_fvg(
+        self, 
+        df: pd.DataFrame, 
+        current_index: int, 
+        config: Dict, 
+        avg_volume: float
+    ):
+        """Enhanced bearish order block detection with Fair Value Gap validation"""
+        try:
+            block_length = config.get('order_block_length', 3)
+            volume_factor = config.get('order_block_volume_factor', 1.5)
+            
+            # Look back for consolidation period followed by strong move down
+            consolidation_start = current_index - block_length * 2
+            consolidation_end = current_index - block_length
+            move_start = consolidation_end
+            move_end = current_index
+            
+            if consolidation_start < 0:
+                return
+            
+            # Check consolidation phase
+            consolidation_data = df.iloc[consolidation_start:consolidation_end + 1]
+            if len(consolidation_data) < block_length:
+                return
+            
+            consolidation_high = consolidation_data['high'].max()
+            consolidation_low = consolidation_data['low'].min()
+            consolidation_range = consolidation_high - consolidation_low
+            
+            # Check move phase
+            move_data = df.iloc[move_start:move_end + 1]
+            if len(move_data) < block_length:
+                return
+            
+            move_high = move_data['high'].max()
+            move_low = move_data['low'].min()
+            move_start_price = df.iloc[move_start]['close']
+            move_end_price = df.iloc[move_end]['close']
+            
+            price_movement = move_start_price - move_end_price  # Negative for bearish
+            move_range = move_high - move_low
+            
+            # Check if this is a bearish pattern
+            if price_movement <= 0:
+                return
+            
+            # Check volume confirmation
+            move_volumes = []
+            for i in range(move_start, move_end + 1):
+                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                if vol and vol > 0:
+                    move_volumes.append(vol)
+            
+            if not move_volumes:
+                return
+            
+            move_avg_volume = sum(move_volumes) / len(move_volumes)
+            volume_confirmation = move_avg_volume / avg_volume
+            
+            # Basic order block criteria
+            basic_criteria_met = (volume_confirmation >= volume_factor and 
+                                price_movement >= config.get('bos_threshold', 0.0001) and
+                                move_range > consolidation_range * 0.5)
+            
+            if basic_criteria_met:
+                # Enhanced FVG validation
+                has_fvg_support, fvg_confluence_score, associated_fvgs, alignment_strength = \
+                    self._validate_order_block_with_fvg(
+                        df, consolidation_start, consolidation_end, move_start, move_end,
+                        OrderBlockType.BEARISH, config
+                    )
+                
+                # Calculate enhanced order block strength (including FVG)
+                base_strength = self._calculate_order_block_strength(
+                    price_movement, volume_confirmation, move_range, consolidation_range
+                )
+                
+                # Enhance strength with FVG support
+                if has_fvg_support:
+                    if base_strength == OrderBlockStrength.WEAK:
+                        enhanced_strength = OrderBlockStrength.MEDIUM
+                    elif base_strength == OrderBlockStrength.MEDIUM:
+                        enhanced_strength = OrderBlockStrength.STRONG
+                    else:
+                        enhanced_strength = OrderBlockStrength.VERY_STRONG
+                else:
+                    enhanced_strength = base_strength
+                
+                # Enhanced confidence calculation (including FVG)
+                base_confidence = self._calculate_order_block_confidence(
+                    volume_confirmation, price_movement, enhanced_strength, 'bearish'
+                )
+                
+                # Boost confidence with FVG support
+                fvg_boost = min(0.3, alignment_strength * 0.5) if has_fvg_support else 0.0
+                enhanced_confidence = min(1.0, base_confidence + fvg_boost)
+                
+                # Only create order block if it has minimum quality (FVG support or high confidence)
+                min_confidence = config.get('order_block_min_confidence', 0.4)
+                if enhanced_confidence >= min_confidence or has_fvg_support:
+                    # Create enhanced order block with FVG information
+                    order_block = OrderBlock(
+                        start_index=consolidation_start,
+                        end_index=consolidation_end,
+                        high_price=consolidation_high,
+                        low_price=consolidation_low,
+                        block_type=OrderBlockType.BEARISH,
+                        strength=enhanced_strength,
+                        volume_factor=volume_confirmation,
+                        price_movement=price_movement,
+                        timestamp=df.index[current_index] if hasattr(df.index, 'to_pydatetime') else pd.Timestamp.now(),
+                        confidence=enhanced_confidence,
+                        # FVG enhancements
+                        associated_fvgs=associated_fvgs,
+                        fvg_confluence_score=fvg_confluence_score,
+                        has_fvg_support=has_fvg_support,
+                        fvg_alignment_strength=alignment_strength
+                    )
+                    
+                    self.order_blocks.append(order_block)
+                    self.logger.debug(f"✅ Enhanced bearish order block detected at {current_index} "
+                                    f"(confidence: {enhanced_confidence:.2f}, "
+                                    f"FVG support: {has_fvg_support}, "
+                                    f"FVG score: {fvg_confluence_score:.2f})")
+                
+        except Exception as e:
+            self.logger.error(f"Enhanced bearish order block check failed: {e}")
     
     def _check_bullish_order_block(
         self, 
@@ -394,7 +809,7 @@ class SMCOrderBlocks:
             return 0.5
     
     def _mark_order_block_in_df(self, df: pd.DataFrame, order_block: OrderBlock):
-        """Mark order block in DataFrame"""
+        """Enhanced method to mark order block with FVG information in DataFrame"""
         try:
             start_idx = order_block.start_index
             end_idx = order_block.end_index
@@ -411,8 +826,12 @@ class SMCOrderBlocks:
                 df.iloc[i, df.columns.get_loc('order_block_high')] = order_block.high_price
                 df.iloc[i, df.columns.get_loc('order_block_low')] = order_block.low_price
                 
+                # Enhanced FVG information
+                df.iloc[i, df.columns.get_loc('order_block_fvg_support')] = order_block.has_fvg_support
+                df.iloc[i, df.columns.get_loc('order_block_fvg_score')] = order_block.fvg_confluence_score
+                
         except Exception as e:
-            self.logger.error(f"Order block marking failed: {e}")
+            self.logger.error(f"Enhanced order block marking failed: {e}")
     
     def _add_order_block_zones(self, df: pd.DataFrame, config: Dict) -> pd.DataFrame:
         """Add order block zone analysis"""
