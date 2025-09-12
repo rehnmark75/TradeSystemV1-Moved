@@ -47,7 +47,8 @@ class SMCStrategy(BaseStrategy):
     - Supply/demand zone interactions
     """
     
-    def __init__(self, smc_config_name: str = None, data_fetcher=None, backtest_mode: bool = False):
+    def __init__(self, smc_config_name: str = None, data_fetcher=None, backtest_mode: bool = False, 
+                 epic: str = None, use_optimized_parameters: bool = True):
         # Initialize parent
         super().__init__('smc')
         
@@ -55,8 +56,13 @@ class SMCStrategy(BaseStrategy):
         self.backtest_mode = backtest_mode
         self.price_adjuster = PriceAdjuster()
         self.data_fetcher = data_fetcher
+        self.epic = epic
+        self.use_optimized_parameters = use_optimized_parameters
         
-        # SMC configuration
+        # Check optimization availability
+        self._optimization_available = self._check_optimization_availability()
+        
+        # SMC configuration - prioritize optimization results if available
         self.smc_config = self._get_smc_config(smc_config_name)
         
         # Initialize SMC analyzers with data_fetcher for multi-timeframe analysis
@@ -77,11 +83,71 @@ class SMCStrategy(BaseStrategy):
         self.logger.info(f"🔧 Config: {smc_config_name or 'default'}")
         self.logger.info(f"🎯 Confluence required: {self.confluence_required}")
         self.logger.info(f"📊 Min R:R ratio: {self.min_risk_reward}")
+        if epic:
+            self.logger.info(f"📍 Epic: {epic} | Optimized Parameters: {use_optimized_parameters}")
         if backtest_mode:
             self.logger.info("🔥 BACKTEST MODE: Time restrictions disabled")
     
+    def _check_optimization_availability(self) -> bool:
+        """Check if SMC optimization system is available"""
+        try:
+            # Check for our actual SMC database parameter service
+            from optimization.smc_database_parameter_service import get_smc_optimal_parameters
+            return True
+        except ImportError:
+            self.logger.debug("SMC optimization system not available")
+            return False
+    
     def _get_smc_config(self, config_name: str = None) -> Dict:
-        """Get SMC configuration from configdata"""
+        """Get SMC configuration - prioritize optimization results if available"""
+        
+        # Check if we should use optimized parameters
+        if (self.use_optimized_parameters and self.epic and 
+            hasattr(self, '_optimization_available') and self._optimization_available):
+            
+            try:
+                # Try to get optimized SMC parameters from our database service
+                from optimization.smc_database_parameter_service import get_smc_optimal_parameters
+                
+                optimal_params = get_smc_optimal_parameters(self.epic)
+                
+                # Get the base configuration and enhance with optimization results
+                base_config = self._get_base_smc_config(optimal_params['smc_config'])
+                
+                # Apply optimized parameters where available
+                optimized_config = base_config.copy()
+                optimized_config.update({
+                    # Core optimization parameters
+                    'confidence_level': optimal_params['confidence_level'],
+                    'min_confidence': optimal_params['confidence_level'],
+                    'min_risk_reward': optimal_params['risk_reward_ratio'],
+                    'timeframe': optimal_params['timeframe'],
+                    
+                    # Risk management from optimization
+                    'stop_loss_pips': optimal_params['stop_loss_pips'],
+                    'take_profit_pips': optimal_params['take_profit_pips'],
+                    'risk_reward_ratio': optimal_params['risk_reward_ratio'],
+                    
+                    # Performance metadata
+                    'expected_win_rate': optimal_params['expected_win_rate'],
+                    'expected_profit_factor': optimal_params['expected_profit_factor'],
+                    'performance_score': optimal_params['performance_score'],
+                    'optimization_source': optimal_params['optimization_source'],
+                    'last_optimized': optimal_params['last_optimized']
+                })
+                
+                self.logger.info(f"🎯 Using optimized SMC parameters for {self.epic}")
+                self.logger.info(f"   Config: {optimal_params['smc_config']} | Confidence: {optimal_params['confidence_level']}")
+                self.logger.info(f"   Expected Win Rate: {optimal_params['expected_win_rate']:.1f}%")
+                self.logger.info(f"   Performance Score: {optimal_params['performance_score']:.1f}")
+                
+                return optimized_config
+                    
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to get optimized SMC parameters for {self.epic}: {e}")
+                # Fall through to static configuration
+        
+        # Use static configuration from configdata
         try:
             # Import SMC configuration
             from configdata.strategies.config_smc_strategy import (
@@ -93,7 +159,10 @@ class SMCStrategy(BaseStrategy):
             active_config = config_name or ACTIVE_SMC_CONFIG
             
             if active_config in SMC_STRATEGY_CONFIG:
-                return SMC_STRATEGY_CONFIG[active_config]
+                static_config = SMC_STRATEGY_CONFIG[active_config].copy()
+                static_config['_optimized'] = False  # Mark as static
+                self.logger.info(f"📋 Using STATIC SMC parameters: {active_config} config")
+                return static_config
             
             # Fallback to default
             return SMC_STRATEGY_CONFIG.get('default', {
@@ -103,7 +172,8 @@ class SMCStrategy(BaseStrategy):
                 'min_risk_reward': 1.5,
                 'order_block_length': 3,
                 'fvg_min_size': 3,
-                'max_distance_to_zone': 10
+                'max_distance_to_zone': 10,
+                '_optimized': False
             })
             
         except Exception as e:
@@ -115,8 +185,73 @@ class SMCStrategy(BaseStrategy):
                 'min_risk_reward': 1.5,
                 'order_block_length': 3,
                 'fvg_min_size': 3,
-                'max_distance_to_zone': 10
+                'max_distance_to_zone': 10,
+                '_optimized': False
             }
+    
+    def _get_base_smc_config(self, config_name: str = 'default') -> Dict:
+        """Get base SMC configuration from the configdata system."""
+        try:
+            # Import SMC configuration from configdata
+            from configdata.strategies.config_smc_strategy import SMC_STRATEGY_CONFIG
+            
+            # Get the specific configuration
+            if config_name in SMC_STRATEGY_CONFIG:
+                return SMC_STRATEGY_CONFIG[config_name].copy()
+            else:
+                # Fallback to default if config name not found
+                return SMC_STRATEGY_CONFIG.get('default', self._get_fallback_smc_config())
+                
+        except ImportError:
+            # If configdata.strategies.config_smc_strategy doesn't exist, use fallback
+            self.logger.warning("SMC strategy configuration not found in configdata, using fallback")
+            return self._get_fallback_smc_config()
+    
+    def _get_fallback_smc_config(self) -> Dict:
+        """Fallback SMC configuration when configdata is unavailable."""
+        return {
+            # Market Structure Parameters
+            'swing_length': 5,
+            'structure_confirmation': 3,
+            'bos_threshold': 0.5,  # Break of Structure threshold
+            'choch_threshold': 0.3,  # Change of Character threshold
+            
+            # Order Block Parameters
+            'order_block_length': 3,
+            'order_block_volume_factor': 1.5,
+            'order_block_buffer': 2,  # pips
+            'max_order_blocks': 5,
+            
+            # Fair Value Gap Parameters
+            'fvg_min_size': 3,  # minimum pip size
+            'fvg_max_age': 50,  # maximum age in bars
+            'fvg_fill_threshold': 0.7,  # percentage fill required
+            
+            # Supply/Demand Zone Parameters
+            'zone_min_touches': 2,
+            'zone_max_age': 100,  # bars
+            'zone_strength_factor': 1.2,
+            
+            # Signal Generation Parameters
+            'confluence_required': 2,  # minimum confluence factors
+            'min_risk_reward': 1.5,
+            'max_distance_to_zone': 10,  # pips
+            'min_confidence': 0.6,
+            
+            # Multi-timeframe Parameters
+            'use_higher_tf': True,
+            'higher_tf_multiplier': 4,  # 5m -> 20m, 15m -> 1h
+            'mtf_confluence_weight': 0.3,
+            
+            # Risk Management
+            'stop_loss_pips': 10,
+            'take_profit_pips': 20,
+            'risk_reward_ratio': 2.0,
+            
+            # Metadata
+            'description': 'Fallback SMC configuration',
+            '_optimized': False
+        }
     
     def get_required_indicators(self) -> List[str]:
         """Required indicators for SMC strategy"""
@@ -209,7 +344,7 @@ class SMCStrategy(BaseStrategy):
             )
             
             # Store premium/discount analysis for later use in signal detection
-            df._premium_discount_analysis = premium_discount_analysis
+            df.attrs['_premium_discount_analysis'] = premium_discount_analysis
             
             return df
             
@@ -619,7 +754,7 @@ class SMCStrategy(BaseStrategy):
         """Check premium/discount confluence for signal validation"""
         try:
             # Get premium/discount analysis from DataFrame metadata
-            pd_analysis = getattr(df, '_premium_discount_analysis', None)
+            pd_analysis = df.attrs.get('_premium_discount_analysis', None)
             
             if not pd_analysis or pd_analysis.get('error'):
                 return None
@@ -659,7 +794,7 @@ class SMCStrategy(BaseStrategy):
         """Calculate risk levels using institutional SMC methodology"""
         try:
             # Get premium/discount analysis for advanced exit strategies
-            pd_analysis = getattr(current_row.to_frame().T, '_premium_discount_analysis', None)
+            pd_analysis = df.attrs.get('_premium_discount_analysis', None)
             
             # Get structure levels and order blocks for stop placement
             structure_levels = self.market_structure.get_structure_levels(direction)

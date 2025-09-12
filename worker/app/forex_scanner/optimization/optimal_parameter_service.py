@@ -94,6 +94,65 @@ class MACDOptimalParameters:
     win_rate: float
     last_optimized: datetime
     market_conditions: Optional[MarketConditions] = None
+
+
+@dataclass
+class SMCOptimalParameters:
+    """Optimal Smart Money Concepts trading parameters for an epic"""
+    epic: str
+    smc_config: str
+    confidence_threshold: float
+    timeframe: str
+    use_smart_money: bool
+    
+    # Market Structure Parameters
+    swing_length: int
+    structure_confirmation: int
+    bos_threshold: float
+    choch_threshold: float
+    
+    # Order Block Parameters
+    order_block_length: int
+    order_block_volume_factor: float
+    order_block_buffer: float
+    max_order_blocks: int
+    
+    # Fair Value Gap Parameters
+    fvg_min_size: float
+    fvg_max_age: int
+    fvg_fill_threshold: float
+    
+    # Supply/Demand Zone Parameters
+    zone_min_touches: int
+    zone_max_age: int
+    zone_strength_factor: float
+    
+    # Signal Generation Parameters
+    confluence_required: float
+    min_risk_reward: float
+    max_distance_to_zone: float
+    min_signal_confidence: float
+    
+    # Multi-timeframe Parameters
+    use_higher_tf: bool
+    higher_tf_multiplier: int
+    mtf_confluence_weight: float
+    
+    # Risk Management
+    stop_loss_pips: float
+    take_profit_pips: float
+    risk_reward_ratio: float
+    
+    # Performance Metrics
+    performance_score: float
+    win_rate: float
+    confluence_accuracy: float
+    structure_break_accuracy: float
+    order_block_success_rate: float
+    fvg_success_rate: float
+    
+    last_optimized: datetime
+    market_conditions: Optional[MarketConditions] = None
     
 
 class OptimalParameterService:
@@ -679,6 +738,271 @@ class OptimalParameterService:
             last_optimized=datetime.now() - timedelta(days=999),  # Very old
             market_conditions=market_conditions
         )
+    
+    # =============================================================================
+    # SMC Strategy Parameter Methods
+    # =============================================================================
+    
+    def get_smc_epic_parameters(self, epic: str, market_conditions: Optional[MarketConditions] = None) -> SMCOptimalParameters:
+        """
+        Get optimal SMC parameters for an epic from optimization results
+        
+        Args:
+            epic: Epic code (e.g., 'CS.D.EURUSD.MINI.IP')
+            market_conditions: Optional market conditions for parameter adjustment
+            
+        Returns:
+            SMCOptimalParameters with optimal settings
+        """
+        
+        cache_key = f"smc_{epic}_{hash(str(market_conditions))}"
+        
+        # Check cache first
+        if cache_key in self._parameter_cache:
+            cached_params, cache_time = self._parameter_cache[cache_key]
+            if datetime.now() - cache_time < timedelta(minutes=self.cache_duration):
+                self.logger.debug(f"🔄 Using cached SMC parameters for {epic}")
+                return cached_params
+        
+        try:
+            with self.db_manager.get_db_connection() as conn:
+                query = """
+                SELECT 
+                    best_smc_config, best_confidence_level, best_timeframe, use_smart_money,
+                    optimal_swing_length, optimal_structure_confirmation, 
+                    optimal_bos_threshold, optimal_choch_threshold,
+                    optimal_order_block_length, optimal_order_block_volume_factor,
+                    optimal_order_block_buffer, optimal_max_order_blocks,
+                    optimal_fvg_min_size, optimal_fvg_max_age, optimal_fvg_fill_threshold,
+                    optimal_zone_min_touches, optimal_zone_max_age, optimal_zone_strength_factor,
+                    optimal_confluence_required, optimal_min_risk_reward,
+                    optimal_max_distance_to_zone, optimal_min_signal_confidence,
+                    optimal_use_higher_tf, optimal_higher_tf_multiplier, optimal_mtf_confluence_weight,
+                    optimal_stop_loss_pips, optimal_take_profit_pips, optimal_risk_reward_ratio,
+                    best_win_rate, best_performance_score, confluence_accuracy, 
+                    structure_break_accuracy, order_block_success_rate, fvg_success_rate,
+                    last_optimized, market_regime, volatility_regime, session_preference
+                FROM smc_best_parameters
+                WHERE epic = %s
+                """
+                
+                with conn.cursor() as cursor:
+                    cursor.execute(query, (epic,))
+                    result = cursor.fetchone()
+                    
+                    if result:
+                        # Create optimal parameters from database result
+                        optimal_params = SMCOptimalParameters(
+                            epic=epic,
+                            smc_config=result[0],
+                            confidence_threshold=float(result[1]),
+                            timeframe=result[2],
+                            use_smart_money=result[3],
+                            
+                            # Market Structure Parameters
+                            swing_length=result[4],
+                            structure_confirmation=result[5],
+                            bos_threshold=float(result[6]),
+                            choch_threshold=float(result[7]),
+                            
+                            # Order Block Parameters
+                            order_block_length=result[8],
+                            order_block_volume_factor=float(result[9]),
+                            order_block_buffer=float(result[10]),
+                            max_order_blocks=result[11],
+                            
+                            # Fair Value Gap Parameters
+                            fvg_min_size=float(result[12]),
+                            fvg_max_age=result[13],
+                            fvg_fill_threshold=float(result[14]),
+                            
+                            # Supply/Demand Zone Parameters
+                            zone_min_touches=result[15],
+                            zone_max_age=result[16],
+                            zone_strength_factor=float(result[17]),
+                            
+                            # Signal Generation Parameters
+                            confluence_required=float(result[18]),
+                            min_risk_reward=float(result[19]),
+                            max_distance_to_zone=float(result[20]),
+                            min_signal_confidence=float(result[21]),
+                            
+                            # Multi-timeframe Parameters
+                            use_higher_tf=result[22],
+                            higher_tf_multiplier=result[23],
+                            mtf_confluence_weight=float(result[24]),
+                            
+                            # Risk Management
+                            stop_loss_pips=float(result[25]),
+                            take_profit_pips=float(result[26]),
+                            risk_reward_ratio=float(result[27]),
+                            
+                            # Performance Metrics
+                            win_rate=float(result[28]),
+                            performance_score=float(result[29]),
+                            confluence_accuracy=float(result[30]),
+                            structure_break_accuracy=float(result[31] or 0),
+                            order_block_success_rate=float(result[32] or 0),
+                            fvg_success_rate=float(result[33] or 0),
+                            
+                            last_optimized=result[34],
+                            market_conditions=market_conditions
+                        )
+                        
+                        # Apply market condition adjustments
+                        if market_conditions:
+                            optimal_params = self._apply_smc_market_adjustments(optimal_params, market_conditions)
+                        
+                        # Cache the result
+                        self._parameter_cache[cache_key] = (optimal_params, datetime.now())
+                        
+                        self.logger.info(f"📊 Retrieved SMC optimal parameters for {epic}: "
+                                       f"{optimal_params.smc_config} config, "
+                                       f"{optimal_params.confidence_threshold:.0%} confidence, "
+                                       f"{optimal_params.timeframe} timeframe, "
+                                       f"Score: {optimal_params.performance_score:.6f}")
+                        
+                        return optimal_params
+                    else:
+                        # No optimization data found, use fallback
+                        self.logger.info(f"⚠️ No SMC optimization data for {epic}, using fallback parameters")
+                        return self._get_smc_fallback_parameters(epic, market_conditions)
+                        
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get SMC parameters for {epic}: {e}")
+            return self._get_smc_fallback_parameters(epic, market_conditions)
+    
+    def _apply_smc_market_adjustments(self, params: SMCOptimalParameters, conditions: MarketConditions) -> SMCOptimalParameters:
+        """Apply market condition adjustments to SMC parameters"""
+        
+        # Create a copy of the parameters
+        import copy
+        adjusted_params = copy.deepcopy(params)
+        
+        # Volatility adjustments
+        if conditions.volatility_level == 'high':
+            # Increase stop losses and take profits for high volatility
+            adjusted_params.stop_loss_pips *= 1.3
+            adjusted_params.take_profit_pips *= 1.3
+            # Wider order block buffers
+            adjusted_params.order_block_buffer *= 1.2
+            # Larger FVG minimum size
+            adjusted_params.fvg_min_size *= 1.2
+            # More distance to zones allowed
+            adjusted_params.max_distance_to_zone *= 1.2
+            
+        elif conditions.volatility_level == 'low':
+            # Decrease stop losses and take profits for low volatility
+            adjusted_params.stop_loss_pips *= 0.8
+            adjusted_params.take_profit_pips *= 0.8
+            # Tighter order block buffers
+            adjusted_params.order_block_buffer *= 0.8
+            # Smaller FVG minimum size
+            adjusted_params.fvg_min_size *= 0.8
+            # Less distance to zones
+            adjusted_params.max_distance_to_zone *= 0.8
+        
+        # Session adjustments
+        if conditions.session == 'asian':
+            # Asian session: more conservative parameters
+            adjusted_params.confluence_required *= 1.2  # Require more confluence
+            adjusted_params.min_signal_confidence *= 1.1  # Higher confidence threshold
+            
+        elif conditions.session in ['london', 'new_york']:
+            # Major sessions: can be slightly more aggressive
+            adjusted_params.confluence_required *= 0.9
+            
+        # Market regime adjustments
+        if conditions.market_regime == 'ranging':
+            # Ranging markets: focus on mean reversion
+            adjusted_params.zone_strength_factor *= 1.2  # Stronger zones needed
+            adjusted_params.fvg_fill_threshold *= 0.8  # Partial fills more acceptable
+            
+        elif conditions.market_regime == 'trending':
+            # Trending markets: allow more aggressive entries
+            adjusted_params.structure_confirmation = max(1, adjusted_params.structure_confirmation - 1)
+            adjusted_params.max_distance_to_zone *= 1.3  # Allow entries further from zones
+        
+        return adjusted_params
+    
+    def _get_smc_fallback_parameters(self, epic: str, market_conditions: Optional[MarketConditions] = None) -> SMCOptimalParameters:
+        """Get fallback SMC parameters when optimization data is not available"""
+        
+        # Import SMC config for fallback values
+        from configdata.strategies.config_smc_strategy import SMC_STRATEGY_CONFIG, ACTIVE_SMC_CONFIG
+        
+        # Get default SMC configuration
+        default_config = SMC_STRATEGY_CONFIG.get(ACTIVE_SMC_CONFIG, SMC_STRATEGY_CONFIG.get('moderate', {}))
+        
+        # Epic-specific adjustments
+        if 'JPY' in epic.upper():
+            fallback_sl = 15.0
+            fallback_tp = 30.0
+            # JPY pairs need different thresholds
+            bos_threshold = default_config.get('bos_threshold', 0.00015) * 100
+            choch_threshold = default_config.get('choch_threshold', 0.00015) * 100
+        else:
+            fallback_sl = 10.0
+            fallback_tp = 20.0
+            bos_threshold = default_config.get('bos_threshold', 0.00015)
+            choch_threshold = default_config.get('choch_threshold', 0.00015)
+        
+        return SMCOptimalParameters(
+            epic=epic,
+            smc_config=ACTIVE_SMC_CONFIG,
+            confidence_threshold=default_config.get('min_confidence', 0.55),
+            timeframe='15m',  # Standard timeframe
+            use_smart_money=True,
+            
+            # Market Structure Parameters
+            swing_length=default_config.get('swing_length', 5),
+            structure_confirmation=default_config.get('structure_confirmation', 3),
+            bos_threshold=bos_threshold,
+            choch_threshold=choch_threshold,
+            
+            # Order Block Parameters
+            order_block_length=default_config.get('order_block_length', 3),
+            order_block_volume_factor=default_config.get('order_block_volume_factor', 1.8),
+            order_block_buffer=default_config.get('order_block_buffer', 2.0),
+            max_order_blocks=default_config.get('max_order_blocks', 5),
+            
+            # Fair Value Gap Parameters
+            fvg_min_size=default_config.get('fvg_min_size', 3.0),
+            fvg_max_age=default_config.get('fvg_max_age', 25),
+            fvg_fill_threshold=default_config.get('fvg_fill_threshold', 0.5),
+            
+            # Supply/Demand Zone Parameters
+            zone_min_touches=default_config.get('zone_min_touches', 2),
+            zone_max_age=default_config.get('zone_max_age', 50),
+            zone_strength_factor=default_config.get('zone_strength_factor', 1.4),
+            
+            # Signal Generation Parameters
+            confluence_required=default_config.get('confluence_required', 2.0),
+            min_risk_reward=default_config.get('min_risk_reward', 1.5),
+            max_distance_to_zone=default_config.get('max_distance_to_zone', 10.0),
+            min_signal_confidence=default_config.get('min_confidence', 0.55),
+            
+            # Multi-timeframe Parameters
+            use_higher_tf=default_config.get('use_higher_tf', True),
+            higher_tf_multiplier=default_config.get('higher_tf_multiplier', 4),
+            mtf_confluence_weight=default_config.get('mtf_confluence_weight', 0.8),
+            
+            # Risk Management
+            stop_loss_pips=fallback_sl,
+            take_profit_pips=fallback_tp,
+            risk_reward_ratio=fallback_tp / fallback_sl,
+            
+            # Performance Metrics (fallback values)
+            win_rate=0.5,  # Neutral assumption
+            performance_score=0.0,  # No optimization data
+            confluence_accuracy=0.7,  # Conservative estimate
+            structure_break_accuracy=0.6,
+            order_block_success_rate=0.5,
+            fvg_success_rate=0.4,
+            
+            last_optimized=datetime.now() - timedelta(days=999),  # Very old
+            market_conditions=market_conditions
+        )
 
 
 def get_optimal_parameter_service() -> OptimalParameterService:
@@ -837,6 +1161,115 @@ def get_macd_optimization_status() -> Dict[str, any]:
         return {
             'error': str(e),
             'system_type': 'MACD'
+        }
+
+
+# =============================================================================
+# SMC Convenience Functions
+# =============================================================================
+
+def get_smc_optimal_parameters(epic: str, market_conditions: Optional[MarketConditions] = None) -> SMCOptimalParameters:
+    """Get optimal SMC parameters for epic (convenience function)"""
+    service = get_optimal_parameter_service()
+    return service.get_smc_epic_parameters(epic, market_conditions)
+
+
+def get_epic_smc_config(epic: str) -> Dict[str, any]:
+    """Get SMC configuration for epic in format compatible with existing strategy"""
+    params = get_smc_optimal_parameters(epic)
+    
+    return {
+        'smc_config': params.smc_config,
+        'confidence_threshold': params.confidence_threshold,
+        'timeframe': params.timeframe,
+        'use_smart_money': params.use_smart_money,
+        
+        # Market Structure
+        'swing_length': params.swing_length,
+        'structure_confirmation': params.structure_confirmation,
+        'bos_threshold': params.bos_threshold,
+        'choch_threshold': params.choch_threshold,
+        
+        # Order Blocks
+        'order_block_length': params.order_block_length,
+        'order_block_volume_factor': params.order_block_volume_factor,
+        'order_block_buffer': params.order_block_buffer,
+        'max_order_blocks': params.max_order_blocks,
+        
+        # Fair Value Gaps
+        'fvg_min_size': params.fvg_min_size,
+        'fvg_max_age': params.fvg_max_age,
+        'fvg_fill_threshold': params.fvg_fill_threshold,
+        
+        # Supply/Demand Zones
+        'zone_min_touches': params.zone_min_touches,
+        'zone_max_age': params.zone_max_age,
+        'zone_strength_factor': params.zone_strength_factor,
+        
+        # Signal Generation
+        'confluence_required': params.confluence_required,
+        'min_risk_reward': params.min_risk_reward,
+        'max_distance_to_zone': params.max_distance_to_zone,
+        'min_signal_confidence': params.min_signal_confidence,
+        
+        # Multi-timeframe
+        'use_higher_tf': params.use_higher_tf,
+        'higher_tf_multiplier': params.higher_tf_multiplier,
+        'mtf_confluence_weight': params.mtf_confluence_weight,
+        
+        # Risk Management
+        'stop_loss_pips': params.stop_loss_pips,
+        'take_profit_pips': params.take_profit_pips,
+        'risk_reward_ratio': params.risk_reward_ratio
+    }
+
+
+def get_all_optimized_smc_epics() -> List[str]:
+    """Get list of all epics that have SMC optimization data"""
+    try:
+        db_manager = DatabaseManager()
+        with db_manager.get_db_connection() as conn:
+            query = "SELECT DISTINCT epic FROM smc_best_parameters ORDER BY epic"
+            with conn.cursor() as cursor:
+                cursor.execute(query)
+                results = cursor.fetchall()
+                return [row[0] for row in results] if results else []
+    except Exception:
+        return []
+
+
+def is_epic_smc_optimized(epic: str) -> bool:
+    """Check if an epic has SMC optimization data available"""
+    try:
+        params = get_smc_optimal_parameters(epic)
+        # Check if parameters are from optimization (not fallback)
+        return params.performance_score > 0 and params.last_optimized > datetime.now() - timedelta(days=365)
+    except Exception:
+        return False
+
+
+def get_smc_system_readiness() -> Dict[str, any]:
+    """Check if SMC optimization system is ready for production"""
+    try:
+        configured_epics = set(config.EPIC_LIST)
+        optimized_epics = set(get_all_optimized_smc_epics())
+        
+        missing_epics = configured_epics - optimized_epics
+        extra_epics = optimized_epics - configured_epics
+        
+        return {
+            'total_configured': len(configured_epics),
+            'total_optimized': len(optimized_epics),
+            'optimization_coverage': len(optimized_epics) / len(configured_epics) * 100 if configured_epics else 0,
+            'missing_epics': list(missing_epics),
+            'extra_epics': list(extra_epics),
+            'ready_for_production': len(missing_epics) == 0,
+            'system_type': 'SMC'
+        }
+    except Exception as e:
+        return {
+            'error': str(e),
+            'system_type': 'SMC'
         }
 
 
