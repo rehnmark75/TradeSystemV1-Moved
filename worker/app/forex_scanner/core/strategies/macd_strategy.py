@@ -28,6 +28,17 @@ from .helpers.macd_signal_calculator import MACDSignalCalculator
 from .helpers.macd_trend_validator import MACDTrendValidator
 from .helpers.macd_mtf_analyzer import MACDMultiTimeframeAnalyzer
 
+# Import optimization functions
+try:
+    from optimization.optimal_parameter_service import get_macd_optimal_parameters, is_epic_macd_optimized
+    OPTIMIZATION_AVAILABLE = True
+except ImportError:
+    OPTIMIZATION_AVAILABLE = False
+    def get_macd_optimal_parameters(*args, **kwargs):
+        raise ImportError("Optimization service not available")
+    def is_epic_macd_optimized(*args, **kwargs):
+        return False
+
 try:
     from configdata import config
 except ImportError:
@@ -102,15 +113,30 @@ class MACDStrategy(BaseStrategy):
         """Get MACD periods from optimization database or config fallback"""
         try:
             # First priority: Use optimized parameters from database if available
-            self.logger.debug(f"🔍 Checking optimization: use_optimized={self.use_optimized_parameters}, "
-                            f"available={OPTIMIZATION_AVAILABLE}, epic={self.epic}")
+            self.logger.info(f"🔍 DEBUGGING: use_optimized={self.use_optimized_parameters}, "
+                            f"available={OPTIMIZATION_AVAILABLE}, epic={self.epic}, timeframe={self.timeframe}")
             
-            if (self.use_optimized_parameters and 
-                OPTIMIZATION_AVAILABLE and 
-                self.epic and 
-                is_epic_macd_optimized(self.epic, self.timeframe)):
-                
-                optimal_params = get_macd_optimal_parameters(self.epic, self.timeframe)
+            if self.epic and self.timeframe:
+                is_optimized = is_epic_macd_optimized(self.epic, self.timeframe)
+                self.logger.info(f"🔍 is_epic_macd_optimized({self.epic}, {self.timeframe}) = {is_optimized}")
+            else:
+                self.logger.info(f"🔍 Missing epic or timeframe: epic={self.epic}, timeframe={self.timeframe}")
+            
+            final_condition = (self.use_optimized_parameters and 
+                               OPTIMIZATION_AVAILABLE and 
+                               self.epic and 
+                               is_epic_macd_optimized(self.epic, self.timeframe))
+            
+            self.logger.info(f"🔍 Final condition: {final_condition}")
+            
+            if final_condition:
+                self.logger.info("🎯 ENTERING OPTIMIZATION BLOCK")
+                try:
+                    optimal_params = get_macd_optimal_parameters(self.epic, self.timeframe)
+                    self.logger.info("🎯 get_macd_optimal_parameters SUCCESS")
+                except Exception as opt_e:
+                    self.logger.error(f"❌ get_macd_optimal_parameters FAILED: {opt_e}")
+                    raise
                 
                 self.logger.info(f"✅ Using OPTIMIZED MACD parameters for {self.epic} ({self.timeframe}): "
                                f"{optimal_params.fast_ema}/{optimal_params.slow_ema}/{optimal_params.signal_ema} "
@@ -133,7 +159,6 @@ class MACDStrategy(BaseStrategy):
             # Second priority: Use OptimalParameterService timeframe-aware fallback
             else:
                 try:
-                    from optimization.optimal_parameter_service import get_macd_optimal_parameters
                     
                     self.logger.info(f"📋 Using TIMEFRAME-AWARE fallback parameters for {self.epic or 'default'} ({self.timeframe})")
                     optimal_params = get_macd_optimal_parameters(

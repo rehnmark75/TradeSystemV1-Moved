@@ -639,10 +639,12 @@ class OptimalParameterService:
         
         # Get from database
         try:
+            self.logger.debug(f"🔍 Querying MACD parameters for {epic} ({timeframe})")
             with self.db_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Primary query: Get best MACD parameters for this epic and timeframe
+                self.logger.debug("📊 Executing primary MACD query...")
                 cursor.execute("""
                     SELECT 
                         epic, best_fast_ema, best_slow_ema, best_signal_ema,
@@ -659,10 +661,13 @@ class OptimalParameterService:
                 """, (epic, timeframe))
                 
                 result = cursor.fetchone()
+                self.logger.debug(f"🔍 Primary query result: {result}")
+                self.logger.debug(f"🔍 Result is None: {result is None}")
+                self.logger.debug(f"🔍 Result truthiness: {bool(result)}")
                 
                 # If no timeframe-specific data, try to get any available data for this epic
                 if not result:
-                    self.logger.debug(f"No {timeframe} data for {epic}, trying fallback query")
+                    self.logger.debug(f"⚠️ ENTERING FALLBACK: No {timeframe} data for {epic}, trying fallback query")
                     cursor.execute("""
                         SELECT 
                             epic, best_fast_ema, best_slow_ema, best_signal_ema,
@@ -677,8 +682,9 @@ class OptimalParameterService:
                         ORDER BY best_composite_score DESC NULLS LAST
                         LIMIT 1
                     """, (epic,))
-                
-                result = cursor.fetchone()
+                    
+                    result = cursor.fetchone()
+                    self.logger.debug(f"🔍 Fallback query result: {result}")
                 
                 if result:
                     # Create optimal MACD parameters from database result
