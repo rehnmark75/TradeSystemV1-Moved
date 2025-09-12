@@ -247,7 +247,64 @@ class Config:
             return self.strategies.get_ema_separation_for_epic(epic)
         else:
             # Fallback logic
-            return 4.0  # Default separation
+            return 3.0  # Default separation
+    
+    # ==================== ZERO-LAG STRATEGY CONVENIENCE METHODS ====================
+    
+    def get_zerolag_config_for_epic(self, epic: str, market_condition: str = 'default') -> dict:
+        """
+        Convenience method to get zero-lag configuration (delegates to strategy config)
+        """
+        if hasattr(self.strategies, 'get_zerolag_config_for_epic'):
+            return self.strategies.get_zerolag_config_for_epic(epic, market_condition)
+        else:
+            # Fallback logic
+            return {
+                'zl_length': 50,
+                'band_multiplier': 1.5,
+                'min_confidence': 0.65,
+                'bb_length': 20,
+                'bb_mult': 2.0,
+                'kc_length': 20,
+                'kc_mult': 1.5
+            }
+    
+    def get_zerolag_threshold_for_epic(self, epic: str) -> float:
+        """
+        Convenience method to get zero-lag threshold (delegates to strategy config)
+        """
+        if hasattr(self.strategies, 'get_zerolag_threshold_for_epic'):
+            return self.strategies.get_zerolag_threshold_for_epic(epic)
+        else:
+            # Fallback logic
+            if 'JPY' in epic.upper():
+                return 0.003
+            elif 'GBP' in epic.upper():
+                return 0.00005
+            else:
+                return 0.00003
+    
+    def get_zerolag_squeeze_config_for_epic(self, epic: str) -> dict:
+        """
+        Convenience method to get zero-lag squeeze configuration (delegates to strategy config)
+        """
+        if hasattr(self.strategies, 'get_zerolag_squeeze_config_for_epic'):
+            return self.strategies.get_zerolag_squeeze_config_for_epic(epic)
+        else:
+            # Fallback logic with epic-specific adjustments
+            config = {
+                'bb_length': 20,
+                'bb_mult': 2.0,
+                'kc_length': 20,
+                'kc_mult': 1.5
+            }
+            
+            epic_upper = epic.upper()
+            if 'JPY' in epic_upper:
+                config['bb_mult'] *= 1.3
+                config['kc_mult'] *= 1.2
+            
+            return config
 
 # Create singleton instance
 config = Config()

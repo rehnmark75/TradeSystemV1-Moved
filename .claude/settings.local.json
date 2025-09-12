@@ -34,7 +34,8 @@
       "Bash(mkdir:*)",
       "Bash(openssl req:*)",
       "Bash(grep:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

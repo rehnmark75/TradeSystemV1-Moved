@@ -16,13 +16,19 @@ EPIC_MAP = {
     "USDCHF.1.MINI": "CS.D.USDCHF.MINI.IP"
 }
 
+# Trading blacklist - prevent trading for specific epics (scan-only mode)
+TRADING_BLACKLIST = [
+    "EURUSD.1.MINI",  # No IG trading permissions for FX_NOR exchange
+    # Add other blocked epics here as needed
+]
+
 # Additional epic mappings from broker transaction analyzer
 BROKER_EPIC_MAP = {
     'USD/CAD': 'CS.D.USDCAD.MINI.IP',
     'USD/CHF': 'CS.D.USDCHF.MINI.IP', 
     'USD/JPY': 'CS.D.USDJPY.MINI.IP',
     'EUR/JPY': 'CS.D.EURJPY.MINI.IP',
-    'EUR/USD': 'CS.D.EURUSD.MINI.IP',
+    'EUR/USD': 'CS.D.EURUSD.CEEM.IP',
     'GBP/USD': 'CS.D.GBPUSD.MINI.IP',
     'AUD/USD': 'CS.D.AUDUSD.MINI.IP',
     'NZD/USD': 'CS.D.NZDUSD.MINI.IP',

@@ -229,6 +229,18 @@ class OrderExecutor:
             
             self.logger.info(f"🔄 Epic mapping: {internal_epic} -> {external_epic}")
             
+            # Check if epic is blacklisted from trading
+            trading_blacklist = getattr(config, 'TRADING_BLACKLIST', {})
+            if internal_epic in trading_blacklist:
+                reason = trading_blacklist[internal_epic]
+                self.logger.warning(f"🚫 Trading blocked for {internal_epic}: {reason}")
+                return {
+                    "status": "blocked", 
+                    "message": f"Trading blocked: {reason}",
+                    "epic": internal_epic,
+                    "alert_id": alert_id
+                }
+            
             # Convert signal type to trading direction
             direction = signal_type  # Assuming signal_type is already 'BUY' or 'SELL'
             if direction not in ['BUY', 'SELL']:

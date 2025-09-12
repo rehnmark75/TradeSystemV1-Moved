@@ -22,14 +22,45 @@ def save_signal_to_database_direct(signal: Dict, message: str = "Signal detected
         conn = db.get_connection()
         cursor = conn.cursor()
         
-        # Extract and clean signal data
-        epic = str(signal.get('epic', 'Unknown'))
-        pair = str(signal.get('pair', epic.replace('CS.D.', '').replace('.MINI.IP', '')))
-        signal_type = str(signal.get('signal_type', 'Unknown'))
-        strategy = str(signal.get('strategy', 'Unknown'))
-        confidence_score = float(signal.get('confidence_score', 0.0))
-        price = float(signal.get('price', 0.0))
-        timeframe = str(signal.get('timeframe', '15m'))
+        # Extract and clean signal data with proper null handling
+        epic = signal.get('epic')
+        if not epic or epic is None:
+            raise ValueError("Epic cannot be null - required field")
+        epic = str(epic)
+        
+        pair = signal.get('pair')
+        if not pair or pair is None:
+            # Try to derive from epic
+            if epic and 'CS.D.' in str(epic):
+                pair = str(epic).replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            else:
+                pair = 'UNKNOWN'
+        pair = str(pair)
+        
+        signal_type = signal.get('signal_type')
+        if not signal_type or signal_type is None:
+            raise ValueError("Signal type cannot be null - required field")
+        signal_type = str(signal_type)
+        
+        strategy = signal.get('strategy')
+        if not strategy or strategy is None:
+            raise ValueError("Strategy cannot be null - required field")
+        strategy = str(strategy)
+        
+        confidence_score = signal.get('confidence_score')
+        if confidence_score is None:
+            raise ValueError("Confidence score cannot be null - required field")
+        confidence_score = float(confidence_score)
+        
+        price = signal.get('price')
+        if price is None:
+            raise ValueError("Price cannot be null - required field")
+        price = float(price)
+        
+        timeframe = signal.get('timeframe')
+        if not timeframe or timeframe is None:
+            timeframe = '15m'  # Default fallback
+        timeframe = str(timeframe)
         
         # Handle JSON fields properly
         def safe_json(value):

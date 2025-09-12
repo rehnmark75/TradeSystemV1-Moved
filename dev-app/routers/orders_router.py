@@ -18,7 +18,7 @@ import time
 from utils import get_point_value, convert_stop_distance_to_price, convert_limit_distance_to_price
 
 from services.keyvault import get_secret
-from config import EPIC_MAP, API_BASE_URL, TRADE_COOLDOWN_ENABLED, TRADE_COOLDOWN_MINUTES, EPIC_SPECIFIC_COOLDOWNS
+from config import EPIC_MAP, API_BASE_URL, TRADE_COOLDOWN_ENABLED, TRADE_COOLDOWN_MINUTES, EPIC_SPECIFIC_COOLDOWNS, TRADING_BLACKLIST
 from dependencies import get_ig_auth_headers, ig_token_cache
 import logging
 import asyncio
@@ -156,6 +156,19 @@ async def ig_place_order(
     symbol = EPIC_MAP.get(epic.upper())
     if not symbol:
         raise HTTPException(status_code=404, detail=f"No mapping found for epic: {epic}")
+
+    # Check if epic is blacklisted from trading
+    if epic.upper() in TRADING_BLACKLIST:
+        logger.warning(f"🚫 Trading blocked for {epic}: Epic is blacklisted")
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "Trading blocked",
+                "message": f"Trading is temporarily disabled for {epic}",
+                "epic": epic,
+                "reason": "Market access restrictions"
+            }
+        )
 
     # Check trade cooldown before proceeding
     cooldown_result = check_trade_cooldown(symbol, db)

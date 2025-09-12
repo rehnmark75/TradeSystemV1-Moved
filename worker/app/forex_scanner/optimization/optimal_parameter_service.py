@@ -47,6 +47,28 @@ class OptimalParameters:
     performance_score: float
     last_optimized: datetime
     market_conditions: Optional[MarketConditions] = None
+
+
+@dataclass
+class ZeroLagOptimalParameters:
+    """Optimal Zero-Lag trading parameters for an epic"""
+    epic: str
+    zl_length: int
+    band_multiplier: float
+    confidence_threshold: float
+    timeframe: str
+    bb_length: int
+    bb_mult: float
+    kc_length: int
+    kc_mult: float
+    smart_money_enabled: bool
+    mtf_validation_enabled: bool
+    stop_loss_pips: float
+    take_profit_pips: float
+    risk_reward_ratio: float
+    performance_score: float
+    last_optimized: datetime
+    market_conditions: Optional[MarketConditions] = None
     
 
 class OptimalParameterService:
@@ -278,6 +300,234 @@ class OptimalParameterService:
         self._parameter_cache.clear()
         self._cache_timestamps.clear()
         self.logger.info("🗑️ Parameter cache cleared")
+    
+    # ==================== ZERO-LAG STRATEGY METHODS ====================
+    
+    def get_zerolag_parameters(self, 
+                              epic: str, 
+                              market_conditions: Optional[MarketConditions] = None,
+                              force_refresh: bool = False) -> ZeroLagOptimalParameters:
+        """
+        Get optimal zero-lag parameters for specific epic
+        
+        Args:
+            epic: Trading pair epic (e.g. 'CS.D.EURUSD.CEEM.IP')
+            market_conditions: Current market conditions for context-aware selection
+            force_refresh: Force refresh from database even if cached
+            
+        Returns:
+            ZeroLagOptimalParameters object with all trading settings
+        """
+        cache_key = f"zerolag_{epic}_{hash(str(market_conditions)) if market_conditions else 'default'}"
+        
+        # Check cache first (unless force refresh)
+        if not force_refresh and self._is_cache_valid(cache_key):
+            self.logger.debug(f"📋 Using cached zero-lag parameters for {epic}")
+            return self._parameter_cache[cache_key]
+        
+        # Get from database
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Primary query: Get best zero-lag parameters for this epic
+                cursor.execute("""
+                    SELECT 
+                        epic, best_zl_length, best_band_multiplier, best_confidence_threshold, best_timeframe,
+                        best_bb_length, best_bb_mult, best_kc_length, best_kc_mult,
+                        best_smart_money_enabled, best_mtf_validation_enabled,
+                        optimal_stop_loss_pips, optimal_take_profit_pips,
+                        ROUND(optimal_take_profit_pips / optimal_stop_loss_pips, 2) as risk_reward,
+                        best_win_rate, best_profit_factor, best_net_pips, best_composite_score,
+                        last_updated
+                    FROM zerolag_best_parameters 
+                    WHERE epic = %s
+                    ORDER BY last_updated DESC
+                    LIMIT 1
+                """, (epic,))
+                
+                result = cursor.fetchone()
+                
+                if result:
+                    # Create optimal parameters from database result
+                    optimal_params = ZeroLagOptimalParameters(
+                        epic=result[0],
+                        zl_length=int(result[1]),
+                        band_multiplier=float(result[2]),
+                        confidence_threshold=float(result[3]),
+                        timeframe=result[4],
+                        bb_length=int(result[5]),
+                        bb_mult=float(result[6]),
+                        kc_length=int(result[7]),
+                        kc_mult=float(result[8]),
+                        smart_money_enabled=bool(result[9]),
+                        mtf_validation_enabled=bool(result[10]),
+                        stop_loss_pips=float(result[11]),
+                        take_profit_pips=float(result[12]),
+                        risk_reward_ratio=float(result[13]),
+                        performance_score=float(result[17]),
+                        last_optimized=result[18],
+                        market_conditions=market_conditions
+                    )
+                    
+                    self.logger.info(f"✅ Retrieved optimal zero-lag parameters for {epic}: "
+                                   f"zl_len={result[1]}, band_mult={result[2]:.2f}, {result[3]:.0%} confidence, "
+                                   f"squeeze={result[5]}/{result[6]:.1f}-{result[7]}/{result[8]:.1f}, "
+                                   f"{result[11]:.0f}/{result[12]:.0f} SL/TP")
+                    
+                else:
+                    # Fallback to default parameters
+                    self.logger.warning(f"⚠️ No zero-lag optimization data found for {epic}, using fallbacks")
+                    optimal_params = self._get_zerolag_fallback_parameters(epic, market_conditions)
+                
+                # Cache the result
+                self._parameter_cache[cache_key] = optimal_params
+                self._cache_timestamps[cache_key] = datetime.now()
+                
+                return optimal_params
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get zero-lag parameters for {epic}: {e}")
+            return self._get_zerolag_fallback_parameters(epic, market_conditions)
+    
+    def get_all_zerolag_parameters(self, 
+                                  market_conditions: Optional[MarketConditions] = None) -> Dict[str, ZeroLagOptimalParameters]:
+        """Get optimal zero-lag parameters for all epics with optimization data"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT epic FROM zerolag_best_parameters 
+                    ORDER BY best_composite_score DESC
+                """)
+                
+                epics = [row[0] for row in cursor.fetchall()]
+                
+                # Get parameters for each epic
+                all_parameters = {}
+                for epic in epics:
+                    all_parameters[epic] = self.get_zerolag_parameters(epic, market_conditions)
+                
+                self.logger.info(f"✅ Retrieved zero-lag parameters for {len(all_parameters)} optimized epics")
+                return all_parameters
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get all zero-lag epic parameters: {e}")
+            return {}
+    
+    def get_zerolag_performance_history(self, epic: str, days: int = 30) -> pd.DataFrame:
+        """Get zero-lag parameter performance history for analysis"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                query = """
+                    SELECT 
+                        run_id, epic, zl_length, band_multiplier, confidence_threshold, timeframe,
+                        bb_length, bb_mult, kc_length, kc_mult,
+                        smart_money_enabled, mtf_validation_enabled,
+                        stop_loss_pips, take_profit_pips, risk_reward_ratio, 
+                        total_signals, win_rate, profit_factor, net_pips, composite_score, created_at
+                    FROM zerolag_optimization_results
+                    WHERE epic = %s 
+                        AND created_at >= NOW() - INTERVAL '%s days'
+                        AND total_signals >= 3
+                    ORDER BY composite_score DESC NULLS LAST
+                    LIMIT 100
+                """
+                
+                df = pd.read_sql_query(query, conn, params=[epic, days])
+                return df
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get zero-lag performance history for {epic}: {e}")
+            return pd.DataFrame()
+    
+    def suggest_zerolag_parameter_updates(self, epic: str) -> Dict[str, any]:
+        """Analyze if zero-lag parameters need updating based on recent performance"""
+        try:
+            history_df = self.get_zerolag_performance_history(epic, days=7)
+            current_params = self.get_zerolag_parameters(epic)
+            
+            if history_df.empty:
+                return {'needs_update': False, 'reason': 'No recent zero-lag optimization data'}
+            
+            # Compare current vs recent best
+            recent_best = history_df.iloc[0]
+            performance_gap = recent_best['composite_score'] - current_params.performance_score
+            
+            suggestions = {
+                'needs_update': performance_gap > 0.1,
+                'performance_improvement': performance_gap,
+                'suggested_zl_length': int(recent_best['zl_length']),
+                'suggested_band_multiplier': float(recent_best['band_multiplier']),
+                'suggested_confidence': float(recent_best['confidence_threshold']),
+                'suggested_squeeze_bb': f"{int(recent_best['bb_length'])}/{recent_best['bb_mult']:.1f}",
+                'suggested_squeeze_kc': f"{int(recent_best['kc_length'])}/{recent_best['kc_mult']:.1f}",
+                'suggested_sl_tp': f"{recent_best['stop_loss_pips']:.0f}/{recent_best['take_profit_pips']:.0f}",
+                'reason': f"Recent zero-lag optimization shows {performance_gap:.3f} improvement potential"
+            }
+            
+            return suggestions
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to generate zero-lag suggestions for {epic}: {e}")
+            return {'needs_update': False, 'error': str(e)}
+    
+    def _get_zerolag_fallback_parameters(self, epic: str, market_conditions: Optional[MarketConditions] = None) -> ZeroLagOptimalParameters:
+        """Get fallback zero-lag parameters when no optimization data exists"""
+        
+        # Epic-specific fallbacks based on currency pair characteristics
+        if 'JPY' in epic:
+            # JPY pairs typically need wider stops due to higher volatility
+            fallback_sl, fallback_tp = 15.0, 30.0
+            fallback_zl_length = 89  # Longer period for more stability
+            fallback_band_mult = 2.5  # Wider bands for volatility
+        elif 'GBP' in epic:
+            # GBP pairs are volatile, need wider stops
+            fallback_sl, fallback_tp = 12.0, 25.0
+            fallback_zl_length = 70
+            fallback_band_mult = 2.0
+        elif 'EUR' in epic or 'USD' in epic:
+            # Major pairs, standard parameters
+            fallback_sl, fallback_tp = 10.0, 20.0
+            fallback_zl_length = 50
+            fallback_band_mult = 1.5
+        else:
+            # Other pairs, conservative approach
+            fallback_sl, fallback_tp = 15.0, 30.0
+            fallback_zl_length = 89
+            fallback_band_mult = 2.0
+        
+        # Market condition adjustments
+        if market_conditions:
+            if market_conditions.volatility_level == 'high':
+                fallback_sl *= 1.2
+                fallback_tp *= 1.2
+                fallback_band_mult *= 1.2
+            elif market_conditions.volatility_level == 'low':
+                fallback_sl *= 0.8
+                fallback_tp *= 0.8
+                fallback_band_mult *= 0.8
+        
+        return ZeroLagOptimalParameters(
+            epic=epic,
+            zl_length=fallback_zl_length,
+            band_multiplier=fallback_band_mult,
+            confidence_threshold=0.65,  # Standard zero-lag confidence
+            timeframe='15m',
+            bb_length=20,  # Standard squeeze parameters
+            bb_mult=2.0,
+            kc_length=20,
+            kc_mult=1.5,
+            smart_money_enabled=False,
+            mtf_validation_enabled=False,
+            stop_loss_pips=fallback_sl,
+            take_profit_pips=fallback_tp,
+            risk_reward_ratio=fallback_tp / fallback_sl,
+            performance_score=0.0,  # No optimization data
+            last_optimized=datetime.now() - timedelta(days=999),  # Very old
+            market_conditions=market_conditions
+        )
 
 
 def get_optimal_parameter_service() -> OptimalParameterService:
@@ -316,6 +566,49 @@ def get_epic_ema_config(epic: str) -> Dict[str, int]:
     
     # Fallback to default periods
     return {'short': 21, 'long': 50, 'trend': 200}
+
+
+# Zero-Lag Strategy Convenience Functions
+def get_zerolag_optimal_parameters(epic: str, market_conditions: Optional[MarketConditions] = None) -> ZeroLagOptimalParameters:
+    """Convenience function to get optimal zero-lag parameters for an epic"""
+    service = get_optimal_parameter_service()
+    return service.get_zerolag_parameters(epic, market_conditions)
+
+
+def get_epic_zerolag_config(epic: str) -> Dict[str, any]:
+    """Get zero-lag configuration for epic in format compatible with existing strategy"""
+    params = get_zerolag_optimal_parameters(epic)
+    
+    return {
+        'zl_length': params.zl_length,
+        'band_multiplier': params.band_multiplier,
+        'confidence_threshold': params.confidence_threshold,
+        'bb_length': params.bb_length,
+        'bb_mult': params.bb_mult,
+        'kc_length': params.kc_length,
+        'kc_mult': params.kc_mult,
+        'smart_money_enabled': params.smart_money_enabled,
+        'mtf_validation_enabled': params.mtf_validation_enabled,
+        'stop_loss_pips': params.stop_loss_pips,
+        'take_profit_pips': params.take_profit_pips
+    }
+
+
+def get_all_optimized_zerolag_epics() -> List[str]:
+    """Get list of all epics that have zero-lag optimization data"""
+    service = get_optimal_parameter_service()
+    all_params = service.get_all_zerolag_parameters()
+    return list(all_params.keys())
+
+
+def is_epic_zerolag_optimized(epic: str) -> bool:
+    """Check if an epic has zero-lag optimization data available"""
+    try:
+        params = get_zerolag_optimal_parameters(epic)
+        # Check if parameters are from optimization (not fallback)
+        return params.performance_score > 0 and params.last_optimized > datetime.now() - timedelta(days=365)
+    except Exception:
+        return False
 
 
 if __name__ == "__main__":

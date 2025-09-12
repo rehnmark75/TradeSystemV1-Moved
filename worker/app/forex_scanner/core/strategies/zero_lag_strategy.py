@@ -53,12 +53,14 @@ class ZeroLagStrategy(BaseStrategy):
     - Enhanced maintainability
     """
     
-    def __init__(self, data_fetcher=None):
+    def __init__(self, data_fetcher=None, epic=None, use_optimal_parameters=False):
         super().__init__('zero_lag_squeeze')
         
         # Initialize core components
         self.price_adjuster = PriceAdjuster()
         self.data_fetcher = data_fetcher
+        self.epic = epic
+        self.use_optimal_parameters = use_optimal_parameters
         
         # Initialize simplified helper modules
         self.indicator_calculator = ZeroLagIndicatorCalculator(logger=self.logger)
@@ -70,32 +72,145 @@ class ZeroLagStrategy(BaseStrategy):
             squeeze_analyzer=self.squeeze_analyzer
         )
         
-        # Strategy configuration
-        # Get configuration from configdata if available, otherwise use defaults
-        if configdata and hasattr(configdata, 'strategies'):
-            zero_lag_config = getattr(configdata.strategies, 'ZERO_LAG_STRATEGY_CONFIG', {}).get('default', {})
-            self.length = zero_lag_config.get('length', 21)
-            self.band_multiplier = zero_lag_config.get('band_multiplier', 2.0) 
-            self.min_confidence = zero_lag_config.get('min_confidence', 0.65)
+        # Strategy configuration - Dynamic or Static
+        if use_optimal_parameters and epic:
+            self._load_optimal_parameters(epic)
         else:
-            self.length = 21
-            self.band_multiplier = 2.0
+            self._load_static_configuration()
+        
+        # Strategy feature settings
+        self.momentum_bias_enabled = False  # Zero Lag strategy doesn't use momentum bias
+        self.mtf_validation_enabled = getattr(self, 'mtf_validation_enabled', False)
+        self.smart_money_enabled = getattr(self, 'smart_money_enabled', False)
+    
+    def _load_optimal_parameters(self, epic: str):
+        """Load optimal parameters from database optimization results"""
+        try:
+            # Import the new parameter service
+            from optimization.zerolag_parameter_service import get_zerolag_parameter_service
+            
+            # Get parameter service and optimal parameters for this epic
+            param_service = get_zerolag_parameter_service()
+            if not param_service:
+                raise Exception("Failed to initialize parameter service")
+                
+            optimal_config = param_service.get_optimal_parameters(epic)
+            if not optimal_config:
+                raise Exception(f"No optimal parameters found for {epic}")
+            
+            # Apply optimal parameters
+            self.length = optimal_config.zl_length
+            self.band_multiplier = optimal_config.band_multiplier
+            self.min_confidence = optimal_config.confidence_threshold
+            self.bb_length = optimal_config.bb_length
+            self.bb_mult = optimal_config.bb_mult
+            self.kc_length = optimal_config.kc_length
+            self.kc_mult = optimal_config.kc_mult
+            self.smart_money_enabled = optimal_config.smart_money_enabled
+            self.mtf_validation_enabled = optimal_config.mtf_validation_enabled
+            
+            # Store optimization metadata
+            self.optimal_stop_loss_pips = optimal_config.stop_loss_pips
+            self.optimal_take_profit_pips = optimal_config.take_profit_pips
+            self.performance_score = optimal_config.composite_score
+            self.win_rate = optimal_config.win_rate
+            self.net_pips = optimal_config.net_pips
+            self.last_optimized = optimal_config.last_updated
+            
+            self.logger.info("✅ Zero Lag + Squeeze Momentum Strategy initialized with OPTIMAL PARAMETERS")
+            self.logger.info(f"   📊 Epic: {epic}")
+            self.logger.info(f"   ⚡ ZL Length: {self.length} (optimized)")
+            self.logger.info(f"   📈 Band Multiplier: {self.band_multiplier:.2f} (optimized)")
+            self.logger.info(f"   🎯 Min Confidence: {self.min_confidence:.1%} (optimized)")
+            self.logger.info(f"   🔍 Squeeze BB: {self.bb_length}/{self.bb_mult:.1f} (optimized)")
+            self.logger.info(f"   🔍 Squeeze KC: {self.kc_length}/{self.kc_mult:.1f} (optimized)")
+            self.logger.info(f"   🧠 Smart Money: {'Enabled' if self.smart_money_enabled else 'Disabled'}")
+            self.logger.info(f"   📊 MTF Validation: {'Enabled' if self.mtf_validation_enabled else 'Disabled'}")
+            self.logger.info(f"   📈 Performance Score: {self.performance_score:.2f} | Win Rate: {self.win_rate:.1%}")
+            self.logger.info(f"   🎯 Optimal SL/TP: {self.optimal_stop_loss_pips:.0f}/{self.optimal_take_profit_pips:.0f} pips")
+            
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to load optimal parameters for {epic}: {e}")
+            self.logger.info("   📋 Falling back to static configuration")
+            self._load_static_configuration()
+    
+    def _load_static_configuration(self):
+        """Load static configuration from config files (fallback)"""
+        try:
+            # Get configuration from configdata if available, otherwise use defaults
+            if configdata and hasattr(configdata, 'strategies'):
+                zero_lag_config = getattr(configdata.strategies, 'ZERO_LAG_STRATEGY_CONFIG', {}).get('default', {})
+                self.length = zero_lag_config.get('zl_length', 50)
+                self.band_multiplier = zero_lag_config.get('band_multiplier', 1.5) 
+                self.min_confidence = zero_lag_config.get('min_confidence', 0.65)
+                self.bb_length = zero_lag_config.get('bb_length', 20)
+                self.bb_mult = zero_lag_config.get('bb_mult', 2.0)
+                self.kc_length = zero_lag_config.get('kc_length', 20)
+                self.kc_mult = zero_lag_config.get('kc_mult', 1.5)
+            else:
+                # Fallback defaults
+                self.length = 50
+                self.band_multiplier = 1.5
+                self.min_confidence = 0.65
+                self.bb_length = 20
+                self.bb_mult = 2.0
+                self.kc_length = 20
+                self.kc_mult = 1.5
+            
+            # Feature settings from config
+            self.smart_money_enabled = getattr(configdata.strategies if configdata and hasattr(configdata, 'strategies') else config, 'ZERO_LAG_SMART_MONEY_ENABLED', False)
+            self.mtf_validation_enabled = getattr(configdata.strategies if configdata and hasattr(configdata, 'strategies') else config, 'ZERO_LAG_MTF_VALIDATION_ENABLED', False)
+            
+            # Set defaults for optimization metadata
+            self.optimal_stop_loss_pips = None
+            self.optimal_take_profit_pips = None
+            self.performance_score = 0.0
+            self.last_optimized = None
+            
+            self.logger.info("✅ Zero Lag + Squeeze Momentum Strategy initialized with STATIC CONFIGURATION")
+            self.logger.info(f"   ⚡ ZL Length: {self.length}")
+            self.logger.info(f"   📈 Band Multiplier: {self.band_multiplier:.2f}")
+            self.logger.info(f"   🎯 Min Confidence: {self.min_confidence:.1%}")
+            self.logger.info(f"   🔍 Squeeze BB: {self.bb_length}/{self.bb_mult:.1f}")
+            self.logger.info(f"   🔍 Squeeze KC: {self.kc_length}/{self.kc_mult:.1f}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to load configuration: {e}")
+            # Ultra-safe fallback
+            self.length = 50
+            self.band_multiplier = 1.5
             self.min_confidence = 0.65
-        
-        # Squeeze Momentum configuration
-        self.bb_length = getattr(config, 'SQUEEZE_BB_LENGTH', 20)
-        self.bb_mult = getattr(config, 'SQUEEZE_BB_MULT', 2.0)
-        self.kc_length = getattr(config, 'SQUEEZE_KC_LENGTH', 20)
-        self.kc_mult = getattr(config, 'SQUEEZE_KC_MULT', 1.5)
-        
-        self.logger.info("✅ Zero Lag + Squeeze Momentum Strategy initialized (simplified architecture)")
-        self.logger.info(f"   📊 Zero Lag Length: {self.length}")
-        self.logger.info(f"   📈 Band Multiplier: {self.band_multiplier}")
-        self.logger.info(f"   🎯 Min Confidence: {self.min_confidence:.1%}")
-        self.logger.info(f"   🔍 Squeeze BB/KC: {self.bb_length}/{self.kc_length}")
-        
-        # Momentum Bias settings - Zero Lag strategy doesn't use momentum bias
-        self.momentum_bias_enabled = False
+            self.bb_length = 20
+            self.bb_mult = 2.0
+            self.kc_length = 20
+            self.kc_mult = 1.5
+            self.smart_money_enabled = False
+            self.mtf_validation_enabled = False
+    
+    def get_strategy_metadata(self) -> Dict:
+        """Get strategy configuration and optimization metadata"""
+        return {
+            'strategy_name': 'Zero Lag + Squeeze Momentum',
+            'epic': self.epic,
+            'use_optimal_parameters': self.use_optimal_parameters,
+            'configuration': {
+                'zl_length': self.length,
+                'band_multiplier': self.band_multiplier,
+                'min_confidence': self.min_confidence,
+                'bb_length': self.bb_length,
+                'bb_mult': self.bb_mult,
+                'kc_length': self.kc_length,
+                'kc_mult': self.kc_mult,
+                'smart_money_enabled': self.smart_money_enabled,
+                'mtf_validation_enabled': self.mtf_validation_enabled
+            },
+            'optimization_data': {
+                'performance_score': getattr(self, 'performance_score', 0.0),
+                'optimal_stop_loss_pips': getattr(self, 'optimal_stop_loss_pips', None),
+                'optimal_take_profit_pips': getattr(self, 'optimal_take_profit_pips', None),
+                'last_optimized': getattr(self, 'last_optimized', None)
+            }
+        }
 
     def get_required_indicators(self) -> List[str]:
         """Return list of required indicators for this strategy"""
@@ -491,7 +606,38 @@ class ZeroLagStrategy(BaseStrategy):
         }
 
 
-# Factory function for easy integration
-def create_zero_lag_strategy(data_fetcher=None):
-    """Factory function to create Zero Lag strategy"""
-    return ZeroLagStrategy(data_fetcher=data_fetcher)
+# Factory functions for easy integration
+def create_zero_lag_strategy(data_fetcher=None, epic=None, use_optimal_parameters=False):
+    """
+    Factory function to create Zero Lag strategy
+    
+    Args:
+        data_fetcher: Data fetcher instance for market data
+        epic: Trading pair epic (required for optimal parameters)
+        use_optimal_parameters: If True, loads optimized parameters from database
+        
+    Returns:
+        Configured ZeroLagStrategy instance
+    """
+    return ZeroLagStrategy(
+        data_fetcher=data_fetcher,
+        epic=epic,
+        use_optimal_parameters=use_optimal_parameters
+    )
+
+def create_optimized_zero_lag_strategy(epic: str, data_fetcher=None):
+    """
+    Convenience factory to create Zero Lag strategy with optimal parameters
+    
+    Args:
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
+        data_fetcher: Data fetcher instance
+        
+    Returns:
+        ZeroLagStrategy with optimization-driven parameters
+    """
+    return ZeroLagStrategy(
+        data_fetcher=data_fetcher,
+        epic=epic,
+        use_optimal_parameters=True
+    )

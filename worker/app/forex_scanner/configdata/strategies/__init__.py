@@ -11,8 +11,15 @@ from .config_smc_strategy import *
 
 # Define what gets exported when using "from strategies import *"
 __all__ = [
-    # ZeroLag Strategy Settings
+    # ZeroLag Strategy Settings (Enhanced Modular Configuration)
     'ZERO_LAG_STRATEGY',
+    'ZERO_LAG_STRATEGY_CONFIG',
+    'ACTIVE_ZERO_LAG_CONFIG',
+    'ZERO_LAG_SQUEEZE_MOMENTUM_ENABLED',
+    'ZERO_LAG_MTF_VALIDATION_ENABLED',
+    'ZERO_LAG_SMART_MONEY_ENABLED',
+    
+    # Backward Compatibility
     'ZERO_LAG_LENGTH', 
     'ZERO_LAG_BAND_MULT',
     'ZERO_LAG_MIN_CONFIDENCE',
@@ -28,6 +35,12 @@ __all__ = [
     'ZERO_LAG_MIN_DATA_PERIODS',
     'ZERO_LAG_ENABLE_PERFORMANCE_TRACKING',
     'ZERO_LAG_DEBUG_LOGGING',
+    
+    # Helper Functions
+    'get_zerolag_config_for_epic',
+    'get_zerolag_threshold_for_epic',
+    'get_zerolag_squeeze_config_for_epic',
+    'validate_zerolag_config',
     
     # MACD Strategy Core Settings
     'MACD_EMA_STRATEGY',
@@ -229,7 +242,7 @@ def get_strategies_summary() -> dict:
 def validate_strategy_configs() -> dict:
     """Validate all strategy configuration completeness"""
     validation_results = {
-        'zerolag': _validate_zerolag_config(),
+        'zerolag': validate_zerolag_config(),
         'macd': _validate_macd_config(),
         'ema': _validate_ema_config(),
         'smc': _validate_smc_config()

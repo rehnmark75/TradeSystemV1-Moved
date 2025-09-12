@@ -970,6 +970,12 @@ EPIC_MAP = {
     "CS.D.USDCHF.MINI.IP": "USDCHF.1.MINI"
 }
 
+# Trading blacklist - epics to scan but NOT trade
+TRADING_BLACKLIST = {
+    "CS.D.EURUSD.CEEM.IP": "No trading permissions for FX_NOR exchange",
+    # Add other blocked epics here as needed
+}
+
 # FIXED: Create correct reverse mapping for order executor
 REVERSE_EPIC_MAP = {}
 for scanner_epic, api_epic in EPIC_MAP.items():  # ← FIXED variable names

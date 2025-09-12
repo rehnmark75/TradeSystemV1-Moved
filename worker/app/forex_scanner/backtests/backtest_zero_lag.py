@@ -73,6 +73,10 @@ class ZeroLagBacktest:
             'analysis_failures': 0,
             'avg_analysis_time': 0
         }
+        
+        # Optimization integration - store signals for extraction
+        self.detected_signals = []
+        self.test_parameters = None
     
     def setup_logging(self):
         """Setup logging configuration"""
@@ -138,6 +142,181 @@ class ZeroLagBacktest:
         except Exception as e:
             self.logger.error(f"❌ Smart Money initialization failed: {e}")
             self.smart_money_enabled = False
+    
+    # ==================== OPTIMIZATION INTEGRATION METHODS ====================
+    
+    def set_test_parameters(self, test_params: Dict):
+        """
+        Set parameters for optimization testing
+        
+        Args:
+            test_params: Dictionary with zero-lag parameters to test
+        """
+        self.test_parameters = test_params
+        self.detected_signals.clear()  # Reset signals for new test
+        
+        # Override strategy configuration temporarily
+        if self.strategy:
+            if 'zl_length' in test_params:
+                self.strategy.length = test_params['zl_length']
+            if 'band_multiplier' in test_params:
+                self.strategy.band_multiplier = test_params['band_multiplier']
+            if 'min_confidence' in test_params:
+                self.strategy.min_confidence = test_params['min_confidence']
+            if 'bb_length' in test_params:
+                self.strategy.bb_length = test_params['bb_length']
+            if 'bb_mult' in test_params:
+                self.strategy.bb_mult = test_params['bb_mult']
+            if 'kc_length' in test_params:
+                self.strategy.kc_length = test_params['kc_length']
+            if 'kc_mult' in test_params:
+                self.strategy.kc_mult = test_params['kc_mult']
+            if 'smart_money_enabled' in test_params:
+                self.strategy.smart_money_enabled = test_params['smart_money_enabled']
+            if 'mtf_validation_enabled' in test_params:
+                self.strategy.mtf_validation_enabled = test_params['mtf_validation_enabled']
+        
+        self.logger.debug(f"🔧 Test parameters set: {test_params}")
+    
+    def create_optimized_strategy(self, epic: str, test_params: Dict):
+        """
+        Create strategy instance with specific test parameters
+        
+        Args:
+            epic: Epic to test
+            test_params: Parameter configuration to test
+            
+        Returns:
+            Configured ZeroLagStrategy instance
+        """
+        from core.strategies.zero_lag_strategy import create_zero_lag_strategy
+        
+        # Create strategy with data fetcher
+        strategy = create_zero_lag_strategy(data_fetcher=self.data_fetcher)
+        
+        # Apply test parameters
+        if 'zl_length' in test_params:
+            strategy.length = test_params['zl_length']
+        if 'band_multiplier' in test_params:
+            strategy.band_multiplier = test_params['band_multiplier']
+        if 'min_confidence' in test_params:
+            strategy.min_confidence = test_params['min_confidence']
+        if 'bb_length' in test_params:
+            strategy.bb_length = test_params['bb_length']
+        if 'bb_mult' in test_params:
+            strategy.bb_mult = test_params['bb_mult']
+        if 'kc_length' in test_params:
+            strategy.kc_length = test_params['kc_length']
+        if 'kc_mult' in test_params:
+            strategy.kc_mult = test_params['kc_mult']
+        if 'smart_money_enabled' in test_params:
+            strategy.smart_money_enabled = test_params['smart_money_enabled']
+            # Initialize smart money if needed
+            if test_params['smart_money_enabled']:
+                self.initialize_smart_money_integration(True)
+        if 'mtf_validation_enabled' in test_params:
+            strategy.mtf_validation_enabled = test_params['mtf_validation_enabled']
+        
+        self.strategy = strategy
+        self.test_parameters = test_params
+        return strategy
+    
+    def run_optimization_test(self, epic: str, test_params: Dict, days: int = 7, 
+                            timeframe: str = '15m') -> Dict:
+        """
+        Run backtest with specific parameters for optimization
+        
+        Args:
+            epic: Epic to test
+            test_params: Parameters to test
+            days: Days to backtest
+            timeframe: Timeframe to test
+            
+        Returns:
+            Dict with performance metrics and detected signals
+        """
+        # Clear previous results
+        self.detected_signals.clear()
+        
+        # Create optimized strategy
+        self.create_optimized_strategy(epic, test_params)
+        
+        # Run backtest
+        success = self.run_backtest(
+            epic=epic,
+            days=days,
+            timeframe=timeframe,
+            show_signals=False,
+            enable_squeeze_momentum=True,
+            enable_smart_money=test_params.get('smart_money_enabled', False),
+            min_confidence=test_params.get('min_confidence')
+        )
+        
+        if not success:
+            return {
+                'success': False,
+                'signals': [],
+                'error': 'Backtest execution failed'
+            }
+        
+        return {
+            'success': True,
+            'signals': self.detected_signals.copy(),
+            'test_parameters': test_params,
+            'epic': epic,
+            'backtest_days': days,
+            'timeframe': timeframe
+        }
+    
+    def extract_signals(self) -> List[Dict]:
+        """
+        Extract detected signals from the last backtest run
+        
+        Returns:
+            List of signal dictionaries
+        """
+        return self.detected_signals.copy()
+    
+    def add_detected_signal(self, signal: Dict):
+        """
+        Add a detected signal to the collection (for optimization tracking)
+        
+        Args:
+            signal: Signal dictionary to add
+        """
+        self.detected_signals.append(signal)
+    
+    def get_performance_summary(self) -> Dict:
+        """
+        Get performance summary of the last backtest run
+        
+        Returns:
+            Dictionary with performance metrics
+        """
+        if not self.detected_signals:
+            return {
+                'total_signals': 0,
+                'win_rate': 0.0,
+                'profit_factor': 0.0,
+                'net_pips': 0.0,
+                'test_parameters': self.test_parameters
+            }
+        
+        # Calculate basic performance metrics
+        total_signals = len(self.detected_signals)
+        
+        # Simple performance calculation (placeholder for real implementation)
+        # In practice, this would track actual trade outcomes
+        avg_confidence = sum(s.get('confidence', 0.65) for s in self.detected_signals) / total_signals
+        estimated_win_rate = min(0.85, avg_confidence + 0.15)  # Based on confidence
+        
+        return {
+            'total_signals': total_signals,
+            'win_rate': estimated_win_rate,
+            'avg_confidence': avg_confidence,
+            'signals': self.detected_signals.copy(),
+            'test_parameters': self.test_parameters
+        }
     
     def _display_zero_lag_statistics(self, signals: List[Dict]):
         """Display Zero Lag strategy-specific statistics"""

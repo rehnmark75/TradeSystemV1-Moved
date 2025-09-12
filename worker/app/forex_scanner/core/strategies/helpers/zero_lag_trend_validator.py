@@ -228,13 +228,35 @@ class ZeroLagTrendValidator:
                 self.logger.debug(f"No 1H data available for {epic}")
                 return True
             
-            # Find the most recent 1H candle
+            # Find the most recent 1H candle with proper timezone handling
             if 'start_time' in df_1h.columns:
-                valid_candles = df_1h[df_1h['start_time'] <= current_time]
-                if valid_candles.empty:
+                try:
+                    # Ensure both timestamps are timezone-aware or timezone-naive for comparison
+                    df_start_times = df_1h['start_time']
+                    
+                    # Convert current_time to timezone-naive if needed for comparison
+                    if hasattr(current_time, 'tz_localize') and current_time.tz is not None:
+                        # current_time is timezone-aware, convert to UTC then remove timezone
+                        current_time_utc = current_time.tz_convert('UTC').tz_localize(None)
+                    else:
+                        # current_time is already timezone-naive
+                        current_time_utc = current_time
+                    
+                    # Convert DataFrame start_times to timezone-naive if needed
+                    if hasattr(df_start_times.iloc[0], 'tz') and df_start_times.iloc[0].tz is not None:
+                        # DataFrame has timezone-aware timestamps, convert to UTC then remove timezone
+                        df_start_times = df_start_times.dt.tz_convert('UTC').dt.tz_localize(None)
+                    
+                    # Now perform the comparison with both as timezone-naive
+                    valid_candles = df_1h[df_start_times <= current_time_utc]
+                    if valid_candles.empty:
+                        latest_1h = df_1h.iloc[-1]
+                    else:
+                        latest_1h = valid_candles.iloc[-1]
+                except Exception as tz_error:
+                    self.logger.debug(f"Timezone comparison error in 1H, using latest candle: {tz_error}")
+                    # Fallback to latest candle if timezone comparison fails
                     latest_1h = df_1h.iloc[-1]
-                else:
-                    latest_1h = valid_candles.iloc[-1]
             else:
                 latest_1h = df_1h.iloc[-1]
             
@@ -249,25 +271,63 @@ class ZeroLagTrendValidator:
                 return True
             
             if signal_type == 'BULL':
-                # For bull signals, check 1H bullish conditions
-                h1_bullish = (h1_close > h1_ema200 and h1_close > h1_zlema and h1_trend >= 0)
+                # More balanced 1H bull signal validation - require majority of conditions
+                price_above_ema200 = h1_close > h1_ema200
+                price_above_zlema = h1_close > h1_zlema  
+                trend_neutral_or_up = h1_trend >= -0.5  # Allow slight downtrend
+                
+                # Count positive conditions
+                bull_conditions = [price_above_ema200, price_above_zlema, trend_neutral_or_up]
+                bull_score = sum(bull_conditions)
+                
+                # BULL valid if 2 out of 3 conditions are met (majority rule)
+                h1_bullish = bull_score >= 2
                 
                 if h1_bullish:
-                    self.logger.debug("✅ 1H timeframe confirms BULL signal")
+                    condition_details = []
+                    if price_above_ema200: condition_details.append("above EMA200")
+                    if price_above_zlema: condition_details.append("above ZLEMA")
+                    if trend_neutral_or_up: condition_details.append("neutral/up trend")
+                    
+                    self.logger.debug(f"✅ 1H timeframe confirms BULL signal ({bull_score}/3): {', '.join(condition_details)}")
                     return True
                 else:
-                    self.logger.debug("❌ 1H timeframe does not support BULL signal")
+                    failed_conditions = []
+                    if not price_above_ema200: failed_conditions.append("below EMA200")
+                    if not price_above_zlema: failed_conditions.append("below ZLEMA")
+                    if not trend_neutral_or_up: failed_conditions.append("strong downtrend")
+                    
+                    self.logger.debug(f"❌ 1H timeframe does not support BULL signal ({bull_score}/3): {', '.join(failed_conditions)}")
                     return False
             
             elif signal_type == 'BEAR':
-                # For bear signals, check 1H bearish conditions
-                h1_bearish = (h1_close < h1_ema200 and h1_close < h1_zlema and h1_trend <= 0)
+                # More balanced 1H bear signal validation - require majority of conditions
+                price_below_ema200 = h1_close < h1_ema200
+                price_below_zlema = h1_close < h1_zlema
+                trend_neutral_or_down = h1_trend <= 0.5  # Allow slight uptrend
+                
+                # Count positive conditions
+                bear_conditions = [price_below_ema200, price_below_zlema, trend_neutral_or_down]
+                bear_score = sum(bear_conditions)
+                
+                # BEAR valid if 2 out of 3 conditions are met (majority rule)
+                h1_bearish = bear_score >= 2
                 
                 if h1_bearish:
-                    self.logger.debug("✅ 1H timeframe confirms BEAR signal")
+                    condition_details = []
+                    if price_below_ema200: condition_details.append("below EMA200")
+                    if price_below_zlema: condition_details.append("below ZLEMA")
+                    if trend_neutral_or_down: condition_details.append("neutral/down trend")
+                    
+                    self.logger.debug(f"✅ 1H timeframe confirms BEAR signal ({bear_score}/3): {', '.join(condition_details)}")
                     return True
                 else:
-                    self.logger.debug("❌ 1H timeframe does not support BEAR signal")
+                    failed_conditions = []
+                    if not price_below_ema200: failed_conditions.append("above EMA200")
+                    if not price_below_zlema: failed_conditions.append("above ZLEMA")  
+                    if not trend_neutral_or_down: failed_conditions.append("strong uptrend")
+                    
+                    self.logger.debug(f"❌ 1H timeframe does not support BEAR signal ({bear_score}/3): {', '.join(failed_conditions)}")
                     return False
             
             return True
@@ -297,7 +357,7 @@ class ZeroLagTrendValidator:
                 'h4_validation': True,
                 'overall_valid': True,
                 'validation_details': {},
-                'strict_mode': getattr(config, 'ZERO_LAG_MTF_STRICT_MODE', True)
+                'strict_mode': getattr(config, 'ZERO_LAG_MTF_STRICT_MODE', False)
             }
             
             if not results['mtf_validation_enabled']:
@@ -342,7 +402,19 @@ class ZeroLagTrendValidator:
                 results['overall_valid'] = results['h1_validation'] and results['h4_validation']
             else:
                 # Lenient mode: either 1H or 4H can pass (or both disabled)
-                results['overall_valid'] = results['h1_validation'] or results['h4_validation']
+                # Give extra weight to 1H since it's more reactive and relevant for entries
+                if results['h1_validation']:
+                    # If 1H passes, that's usually sufficient for signal confirmation
+                    results['overall_valid'] = True
+                    results['validation_details']['primary_confirmation'] = "1H validation sufficient"
+                elif results['h4_validation']:
+                    # If only 4H passes, that's also acceptable (longer-term trend alignment)
+                    results['overall_valid'] = True
+                    results['validation_details']['primary_confirmation'] = "4H validation sufficient"
+                else:
+                    # Both timeframes failed
+                    results['overall_valid'] = False
+                    results['validation_details']['primary_confirmation'] = "Both timeframes failed"
             
             # Log results - only show failures for live trading
             h1_status = "✓" if results['h1_validation'] else "✗"
@@ -350,10 +422,11 @@ class ZeroLagTrendValidator:
             mode_str = "STRICT" if results['strict_mode'] else "LENIENT"
             
             if results['overall_valid']:
-                self.logger.debug(f"✅ MTF validation PASSED for {signal_type}: 1H={h1_status} 4H={h4_status}")
+                confirmation_reason = results['validation_details'].get('primary_confirmation', 'Both timeframes passed')
+                self.logger.info(f"✅ MTF validation PASSED for {signal_type}: 1H={h1_status} 4H={h4_status} ({confirmation_reason})")
             else:
                 # Only show failures at info level for live trading visibility
-                self.logger.info(f"❌ MTF validation FAILED for {signal_type}: 1H={h1_status} 4H={h4_status}")
+                self.logger.info(f"❌ MTF validation FAILED for {signal_type}: 1H={h1_status} 4H={h4_status} (Both timeframes failed)")
             
             # Add detailed results for debugging
             results['validation_details']['mode'] = mode_str
@@ -409,13 +482,35 @@ class ZeroLagTrendValidator:
                 self.logger.debug(f"No {timeframe.upper()} data available for {epic}")
                 return True  # Allow signal if no data
             
-            # Find the most recent candle
+            # Find the most recent candle with proper timezone handling
             if 'start_time' in df_htf.columns:
-                valid_candles = df_htf[df_htf['start_time'] <= current_time]
-                if valid_candles.empty:
+                try:
+                    # Ensure both timestamps are timezone-aware or timezone-naive for comparison
+                    df_start_times = df_htf['start_time']
+                    
+                    # Convert current_time to timezone-naive if needed for comparison
+                    if hasattr(current_time, 'tz_localize') and current_time.tz is not None:
+                        # current_time is timezone-aware, convert to UTC then remove timezone
+                        current_time_utc = current_time.tz_convert('UTC').tz_localize(None)
+                    else:
+                        # current_time is already timezone-naive
+                        current_time_utc = current_time
+                    
+                    # Convert DataFrame start_times to timezone-naive if needed
+                    if hasattr(df_start_times.iloc[0], 'tz') and df_start_times.iloc[0].tz is not None:
+                        # DataFrame has timezone-aware timestamps, convert to UTC then remove timezone
+                        df_start_times = df_start_times.dt.tz_convert('UTC').dt.tz_localize(None)
+                    
+                    # Now perform the comparison with both as timezone-naive
+                    valid_candles = df_htf[df_start_times <= current_time_utc]
+                    if valid_candles.empty:
+                        latest_htf = df_htf.iloc[-1]
+                    else:
+                        latest_htf = valid_candles.iloc[-1]
+                except Exception as tz_error:
+                    self.logger.debug(f"Timezone comparison error in {timeframe}, using latest candle: {tz_error}")
+                    # Fallback to latest candle if timezone comparison fails
                     latest_htf = df_htf.iloc[-1]
-                else:
-                    latest_htf = valid_candles.iloc[-1]
             else:
                 latest_htf = df_htf.iloc[-1]
             
@@ -430,29 +525,71 @@ class ZeroLagTrendValidator:
                 return True
             
             if signal_type == 'BULL':
-                # For bull signals, check higher timeframe bullish conditions
-                htf_bullish = (htf_close > htf_ema200 and htf_close > htf_zlema and htf_trend >= 0)
+                # More balanced bull signal validation - require majority of conditions
+                price_above_ema200 = htf_close > htf_ema200
+                price_above_zlema = htf_close > htf_zlema  
+                # For 4H timeframe, be even more lenient with trend since it moves slowly
+                trend_threshold = -1.0 if timeframe == '4h' else -0.5
+                trend_neutral_or_up = htf_trend >= trend_threshold  # More lenient for 4H
+                
+                # Count positive conditions
+                bull_conditions = [price_above_ema200, price_above_zlema, trend_neutral_or_up]
+                bull_score = sum(bull_conditions)
+                
+                # BULL valid if 2 out of 3 conditions are met (majority rule)
+                htf_bullish = bull_score >= 2
                 
                 if htf_bullish:
-                    self.logger.debug(f"✅ {timeframe.upper()} timeframe confirms BULL signal")
-                    self.logger.debug(f"    {timeframe.upper()}: close={htf_close:.5f} > EMA200={htf_ema200:.5f}, close > ZLEMA={htf_zlema:.5f}, trend={htf_trend}")
+                    condition_details = []
+                    if price_above_ema200: condition_details.append("above EMA200")
+                    if price_above_zlema: condition_details.append("above ZLEMA")
+                    if trend_neutral_or_up: condition_details.append("neutral/up trend")
+                    
+                    self.logger.debug(f"✅ {timeframe.upper()} timeframe confirms BULL signal ({bull_score}/3): {', '.join(condition_details)}")
+                    self.logger.debug(f"    {timeframe.upper()}: close={htf_close:.5f}, EMA200={htf_ema200:.5f}, ZLEMA={htf_zlema:.5f}, trend={htf_trend}")
                     return True
                 else:
-                    self.logger.debug(f"❌ {timeframe.upper()} timeframe does not support BULL signal")
-                    self.logger.debug(f"    {timeframe.upper()}: close={htf_close:.5f} vs EMA200={htf_ema200:.5f}, vs ZLEMA={htf_zlema:.5f}, trend={htf_trend}")
+                    failed_conditions = []
+                    if not price_above_ema200: failed_conditions.append("below EMA200")
+                    if not price_above_zlema: failed_conditions.append("below ZLEMA")
+                    if not trend_neutral_or_up: failed_conditions.append("strong downtrend")
+                    
+                    self.logger.debug(f"❌ {timeframe.upper()} timeframe does not support BULL signal ({bull_score}/3): {', '.join(failed_conditions)}")
+                    self.logger.debug(f"    {timeframe.upper()}: close={htf_close:.5f}, EMA200={htf_ema200:.5f}, ZLEMA={htf_zlema:.5f}, trend={htf_trend}")
                     return False
             
             elif signal_type == 'BEAR':
-                # For bear signals, check higher timeframe bearish conditions
-                htf_bearish = (htf_close < htf_ema200 and htf_close < htf_zlema and htf_trend <= 0)
+                # More balanced bear signal validation - require majority of conditions
+                price_below_ema200 = htf_close < htf_ema200
+                price_below_zlema = htf_close < htf_zlema
+                # For 4H timeframe, be even more lenient with trend since it moves slowly
+                trend_threshold = 1.0 if timeframe == '4h' else 0.5
+                trend_neutral_or_down = htf_trend <= trend_threshold  # More lenient for 4H
+                
+                # Count positive conditions
+                bear_conditions = [price_below_ema200, price_below_zlema, trend_neutral_or_down]
+                bear_score = sum(bear_conditions)
+                
+                # BEAR valid if 2 out of 3 conditions are met (majority rule)
+                htf_bearish = bear_score >= 2
                 
                 if htf_bearish:
-                    self.logger.debug(f"✅ {timeframe.upper()} timeframe confirms BEAR signal")
-                    self.logger.debug(f"    {timeframe.upper()}: close={htf_close:.5f} < EMA200={htf_ema200:.5f}, close < ZLEMA={htf_zlema:.5f}, trend={htf_trend}")
+                    condition_details = []
+                    if price_below_ema200: condition_details.append("below EMA200")
+                    if price_below_zlema: condition_details.append("below ZLEMA")
+                    if trend_neutral_or_down: condition_details.append("neutral/down trend")
+                    
+                    self.logger.debug(f"✅ {timeframe.upper()} timeframe confirms BEAR signal ({bear_score}/3): {', '.join(condition_details)}")
+                    self.logger.debug(f"    {timeframe.upper()}: close={htf_close:.5f}, EMA200={htf_ema200:.5f}, ZLEMA={htf_zlema:.5f}, trend={htf_trend}")
                     return True
                 else:
-                    self.logger.debug(f"❌ {timeframe.upper()} timeframe does not support BEAR signal")
-                    self.logger.debug(f"    {timeframe.upper()}: close={htf_close:.5f} vs EMA200={htf_ema200:.5f}, vs ZLEMA={htf_zlema:.5f}, trend={htf_trend}")
+                    failed_conditions = []
+                    if not price_below_ema200: failed_conditions.append("above EMA200")
+                    if not price_below_zlema: failed_conditions.append("above ZLEMA")  
+                    if not trend_neutral_or_down: failed_conditions.append("strong uptrend")
+                    
+                    self.logger.debug(f"❌ {timeframe.upper()} timeframe does not support BEAR signal ({bear_score}/3): {', '.join(failed_conditions)}")
+                    self.logger.debug(f"    {timeframe.upper()}: close={htf_close:.5f}, EMA200={htf_ema200:.5f}, ZLEMA={htf_zlema:.5f}, trend={htf_trend}")
                     return False
             
             return True
