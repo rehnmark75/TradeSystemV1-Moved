@@ -9,6 +9,14 @@ from .config_macd_strategy import *
 from .config_ema_strategy import *
 from .config_smc_strategy import *
 
+# Import TradingView integration
+try:
+    from .tradingview_integration import *
+    TRADINGVIEW_INTEGRATION_AVAILABLE = True
+except ImportError as e:
+    TRADINGVIEW_INTEGRATION_AVAILABLE = False
+    print(f"⚠️ TradingView integration not available: {e}")
+
 # Define what gets exported when using "from strategies import *"
 __all__ = [
     # ZeroLag Strategy Settings (Enhanced Modular Configuration)
@@ -224,6 +232,20 @@ __all__ = [
     'validate_smc_config'
 ]
 
+# Add TradingView integration functions if available
+if TRADINGVIEW_INTEGRATION_AVAILABLE:
+    __all__.extend([
+        # TradingView Integration Functions
+        'search_tradingview_strategies',
+        'import_tradingview_strategy',
+        'list_tradingview_imports',
+        'get_tradingview_import_status',
+        'validate_tradingview_integration',
+        'TradingViewStrategyIntegrator',
+        'get_integrator',
+        'TRADINGVIEW_INTEGRATION_AVAILABLE'
+    ])
+
 # Module metadata
 __version__ = "1.0.0"
 __description__ = "Strategy-specific configuration modules for ZeroLag, MACD, EMA, and SMC strategies"
@@ -247,6 +269,13 @@ def validate_strategy_configs() -> dict:
         'ema': _validate_ema_config(),
         'smc': _validate_smc_config()
     }
+    
+    # Add TradingView integration validation if available
+    if TRADINGVIEW_INTEGRATION_AVAILABLE:
+        try:
+            validation_results['tradingview_integration'] = validate_tradingview_integration()
+        except Exception as e:
+            validation_results['tradingview_integration'] = {'valid': False, 'error': str(e)}
     
     validation_results['overall_valid'] = all(result.get('valid', False) for result in validation_results.values() if isinstance(result, dict)) and all(result for result in validation_results.values() if isinstance(result, bool))
     return validation_results
