@@ -40,7 +40,7 @@ class MACDSignalCalculator:
             Confidence score between 0.0 and 0.95 (higher threshold required)
         """
         try:
-            base_confidence = 0.65  # Start with 65% (raised from 50% for quality)
+            base_confidence = 0.55  # Start with 55% (balanced quality vs quantity)
             
             # Get enhanced indicator values
             macd_histogram = latest_row.get('macd_histogram', 0)
@@ -68,8 +68,8 @@ class MACDSignalCalculator:
             elif adx >= 25:
                 adx_boost = 0.10  # Moderate trend
             else:
-                # Weak trend - penalize significantly for restrictive strategy
-                return 0.25  # Too choppy for high-confidence signals
+                # Weak trend - reduce confidence but still allow signals
+                adx_boost = 0.05  # Small boost instead of rejection
             
             base_confidence += adx_boost
             
@@ -174,9 +174,9 @@ class MACDSignalCalculator:
             # Ensure we have a high-quality signal (65%+ minimum after all boosts)
             final_confidence = max(0.20, min(0.95, base_confidence))
             
-            # Additional restrictive quality gate
-            if final_confidence < 0.65:
-                self.logger.debug(f"Signal rejected: confidence {final_confidence:.3f} below 65% threshold")
+            # Quality gate - temporarily lowered for testing  
+            if final_confidence < 0.30:
+                self.logger.debug(f"Signal rejected: confidence {final_confidence:.3f} below 30% threshold")
                 return 0.30  # Below trading threshold
             
             self.logger.debug(f"Enhanced MACD confidence: {final_confidence:.3f} for {signal_type} "

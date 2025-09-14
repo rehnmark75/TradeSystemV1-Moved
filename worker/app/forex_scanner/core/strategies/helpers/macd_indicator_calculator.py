@@ -139,69 +139,29 @@ class MACDIndicatorCalculator:
             # Apply volatility-adjusted thresholds (2-3x higher for restrictive filtering)
             strength_threshold = self.get_enhanced_threshold(df_copy, epic, base_threshold)
             
-            # ENHANCED RESTRICTIVE CONDITIONS: Multiple filters + divergence preference
+            # SIMPLIFIED TRADITIONAL MACD: Basic crossovers with light filtering
             
-            # Prioritize divergence signals (highest quality)
-            bull_divergence_signal = (
-                # MACD bullish divergence detected
-                df_copy['bullish_divergence'] &
-                
-                # Basic crossover still required
+            # Basic MACD histogram crossover detection
+            bull_cross = (
                 (df_copy['macd_histogram'] > 0) & 
                 (df_copy['histogram_prev'] <= 0) &
-                
-                # Relaxed threshold for divergence signals (higher quality)
-                (df_copy['macd_histogram'] >= base_threshold) &
-                
-                # ADX trending requirement (lower threshold for divergence)
-                (df_copy['adx'] > 20) &
-                
-                # RSI confluence
-                (df_copy['rsi'] < 70)
+                (df_copy['macd_histogram'] >= base_threshold * 0.3)  # Light threshold
             )
             
-            # Regular crossover signals (more restrictive)
-            bull_regular_signal = (
-                # No divergence detected - require stronger conditions
-                ~df_copy['bullish_divergence'] &
-                
-                # Basic MACD crossover with enhanced threshold
-                (df_copy['macd_histogram'] > 0) & 
-                (df_copy['histogram_prev'] <= 0) &
-                (df_copy['macd_histogram'] >= strength_threshold) &
-                
-                # Stronger ADX requirement for regular signals
-                (df_copy['adx'] > 30) &
-                
-                # RSI and trend alignment
-                (df_copy['rsi'] < 65) &
-                (df_copy['close'] > df_copy['ema_200'])
-            )
-            
-            # Combine divergence and regular signals
-            bull_cross = bull_divergence_signal | bull_regular_signal
-            
-            # BEAR SIGNALS: Similar logic
-            bear_divergence_signal = (
-                df_copy['bearish_divergence'] &
+            bear_cross = (
                 (df_copy['macd_histogram'] < 0) & 
                 (df_copy['histogram_prev'] >= 0) &
-                (df_copy['macd_histogram'] <= -base_threshold) &
-                (df_copy['adx'] > 20) &
-                (df_copy['rsi'] > 30)
+                (df_copy['macd_histogram'] <= -base_threshold * 0.3)  # Light threshold
             )
             
-            bear_regular_signal = (
-                ~df_copy['bearish_divergence'] &
-                (df_copy['macd_histogram'] < 0) & 
-                (df_copy['histogram_prev'] >= 0) &
-                (df_copy['macd_histogram'] <= -strength_threshold) &
-                (df_copy['adx'] > 30) &
-                (df_copy['rsi'] > 35) &
-                (df_copy['close'] < df_copy['ema_200'])
-            )
+            # Log basic info for debugging
+            bull_count = bull_cross.sum()
+            bear_count = bear_cross.sum()
+            self.logger.debug(f"Traditional MACD crossovers for {epic}: {bull_count} bull, {bear_count} bear (threshold: {base_threshold:.8f})")
             
-            bear_cross = bear_divergence_signal | bear_regular_signal
+            # Apply signal spacing/cooldown mechanism (3-4 signals per day target)
+            bull_cross = self._apply_signal_spacing(df_copy, bull_cross, 'bull', epic)
+            bear_cross = self._apply_signal_spacing(df_copy, bear_cross, 'bear', epic)
             
             df_copy['bull_crossover'] = bull_cross
             df_copy['bear_crossover'] = bear_cross
@@ -244,10 +204,10 @@ class MACDIndicatorCalculator:
         try:
             # Check if this is a JPY pair
             if 'JPY' in epic.upper():
-                threshold = 0.010  # JPY pairs - calibrated from actual market data
+                threshold = 0.008  # JPY pairs - much more restrictive
                 self.logger.debug(f"Using JPY histogram threshold: {threshold}")
             else:
-                threshold = 0.00010  # Non-JPY pairs - calibrated from actual market data
+                threshold = 0.0008  # Non-JPY pairs - much more restrictive
                 self.logger.debug(f"Using non-JPY histogram threshold: {threshold}")
             
             return threshold
@@ -290,8 +250,8 @@ class MACDIndicatorCalculator:
             else:
                 atr_multiplier = 2.0  # Default multiplier if ATR unavailable
             
-            # Apply restrictive multiplier (2-3x base threshold)
-            restrictive_multiplier = 2.5  # Base 2.5x more restrictive
+            # Apply balanced multiplier (tuned for quality scoring system)
+            restrictive_multiplier = 1.0  # Neutral for scoring-based selection
             
             # Combine volatility and restrictive adjustments
             enhanced_threshold = base_threshold * restrictive_multiplier * atr_multiplier
@@ -711,3 +671,215 @@ class MACDIndicatorCalculator:
         except Exception as e:
             self.logger.error(f"Error detecting hidden divergence: {e}")
             return df
+    
+    def _apply_signal_spacing(self, df: pd.DataFrame, signals: pd.Series, signal_type: str, epic: str) -> pd.Series:
+        """
+        Apply signal spacing/cooldown mechanism to prevent over-trading
+        
+        Target: 3-4 signals per day per epic (96-128 15m bars spacing)
+        Cooldown: 6-8 hours between signals (24-32 15m bars)
+        
+        Args:
+            df: DataFrame with timestamp index
+            signals: Boolean series of detected signals
+            signal_type: 'bull' or 'bear'
+            epic: Trading pair epic
+            
+        Returns:
+            Filtered signal series with spacing applied
+        """
+        try:
+            if signals.sum() == 0:
+                return signals
+            
+            # Calculate spacing requirements (15m timeframe)
+            min_spacing_bars = 24  # 6 hours minimum spacing
+            max_daily_signals = 4  # Target maximum per day
+            
+            # Create filtered signal series
+            spaced_signals = pd.Series(False, index=signals.index)
+            
+            # Track last signal timestamp for cooldown
+            last_signal_idx = None
+            daily_signal_counts = {}
+            
+            for idx, signal in signals.items():
+                if not signal:
+                    continue
+                    
+                current_bar_idx = signals.index.get_loc(idx)
+                
+                # Handle datetime index properly
+                try:
+                    if hasattr(idx, 'date'):
+                        current_date = idx.date()
+                    elif hasattr(idx, 'to_pydatetime'):
+                        current_date = idx.to_pydatetime().date()
+                    else:
+                        # Fallback to string-based date grouping
+                        current_date = str(current_bar_idx // 96)  # Group by ~daily periods (96 15m bars = 24h)
+                except Exception:
+                    current_date = str(current_bar_idx // 96)  # Fallback grouping
+                
+                # Check daily limit
+                if current_date not in daily_signal_counts:
+                    daily_signal_counts[current_date] = 0
+                    
+                if daily_signal_counts[current_date] >= max_daily_signals:
+                    continue
+                
+                # Check spacing from last signal
+                if last_signal_idx is not None:
+                    bars_since_last = current_bar_idx - last_signal_idx
+                    if bars_since_last < min_spacing_bars:
+                        continue
+                
+                # Signal passes all filters
+                spaced_signals.loc[idx] = True
+                last_signal_idx = current_bar_idx
+                daily_signal_counts[current_date] += 1
+            
+            # Log spacing results
+            original_count = signals.sum()
+            final_count = spaced_signals.sum()
+            if original_count != final_count:
+                self.logger.debug(f"Signal spacing applied: {signal_type} signals reduced from {original_count} to {final_count}")
+            
+            return spaced_signals
+            
+        except Exception as e:
+            self.logger.error(f"Error applying signal spacing: {e}")
+            return signals
+    
+    def _calculate_signal_quality_score(self, row: pd.Series, signal_type: str, base_threshold: float) -> float:
+        """
+        Calculate progressive quality score for a MACD signal (0-100 points)
+        
+        Scoring Components:
+        - MACD Histogram Strength (25 points): Stronger momentum = higher score
+        - RSI Confluence (20 points): Overbought/oversold alignment  
+        - ADX Trend Strength (20 points): Strong trending markets preferred
+        - EMA200 Trend Alignment (15 points): Direction confirmation
+        - Divergence Bonus (10 points): Premium quality signals
+        - MACD Line Position (10 points): Additional momentum confirmation
+        
+        Args:
+            row: DataFrame row with indicator data
+            signal_type: 'BULL' or 'BEAR'
+            base_threshold: Base histogram threshold for pair
+            
+        Returns:
+            Quality score from 0-100
+        """
+        try:
+            total_score = 0.0
+            
+            # Get indicator values
+            histogram = row.get('macd_histogram', 0)
+            macd_line = row.get('macd_line', 0) 
+            macd_signal = row.get('macd_signal', 0)
+            rsi = row.get('rsi', 50)
+            adx = row.get('adx', 0)
+            close = row.get('close', 0)
+            ema_200 = row.get('ema_200', 0)
+            
+            # 1. MACD Histogram Strength (25 points)
+            hist_abs = abs(histogram)
+            if signal_type == 'BULL' and histogram > 0:
+                if hist_abs >= base_threshold * 3.0:
+                    total_score += 25  # Very strong
+                elif hist_abs >= base_threshold * 2.0:
+                    total_score += 20  # Strong
+                elif hist_abs >= base_threshold * 1.0:
+                    total_score += 15  # Moderate
+                elif hist_abs >= base_threshold * 0.5:
+                    total_score += 10  # Weak but valid
+                else:
+                    total_score += 5   # Very weak
+            elif signal_type == 'BEAR' and histogram < 0:
+                if hist_abs >= base_threshold * 3.0:
+                    total_score += 25  # Very strong
+                elif hist_abs >= base_threshold * 2.0:
+                    total_score += 20  # Strong
+                elif hist_abs >= base_threshold * 1.0:
+                    total_score += 15  # Moderate
+                elif hist_abs >= base_threshold * 0.5:
+                    total_score += 10  # Weak but valid
+                else:
+                    total_score += 5   # Very weak
+            
+            # 2. RSI Confluence (20 points)
+            if signal_type == 'BULL':
+                if rsi < 30:
+                    total_score += 20  # Oversold - excellent for bulls
+                elif rsi < 40:
+                    total_score += 15  # Good setup
+                elif rsi < 50:
+                    total_score += 10  # Decent
+                elif rsi < 60:
+                    total_score += 5   # Neutral
+                # No points for overbought (RSI > 70)
+            else:  # BEAR
+                if rsi > 70:
+                    total_score += 20  # Overbought - excellent for bears
+                elif rsi > 60:
+                    total_score += 15  # Good setup
+                elif rsi > 50:
+                    total_score += 10  # Decent
+                elif rsi > 40:
+                    total_score += 5   # Neutral
+                # No points for oversold (RSI < 30)
+            
+            # 3. ADX Trend Strength (20 points) 
+            if adx >= 40:
+                total_score += 20  # Very strong trend
+            elif adx >= 30:
+                total_score += 15  # Strong trend
+            elif adx >= 25:
+                total_score += 10  # Moderate trend
+            elif adx >= 20:
+                total_score += 5   # Weak trend
+            # No points for adx < 20 (ranging market)
+            
+            # 4. EMA200 Trend Alignment (15 points)
+            if close > 0 and ema_200 > 0:
+                if signal_type == 'BULL' and close > ema_200:
+                    distance_pct = (close - ema_200) / ema_200 * 100
+                    if distance_pct > 2.0:
+                        total_score += 15  # Strong uptrend
+                    elif distance_pct > 0.5:
+                        total_score += 10  # Uptrend
+                    else:
+                        total_score += 5   # Weak uptrend
+                elif signal_type == 'BEAR' and close < ema_200:
+                    distance_pct = (ema_200 - close) / ema_200 * 100
+                    if distance_pct > 2.0:
+                        total_score += 15  # Strong downtrend
+                    elif distance_pct > 0.5:
+                        total_score += 10  # Downtrend
+                    else:
+                        total_score += 5   # Weak downtrend
+            
+            # 5. Divergence Bonus (10 points)
+            if signal_type == 'BULL' and row.get('bullish_divergence', False):
+                total_score += 10
+            elif signal_type == 'BEAR' and row.get('bearish_divergence', False):
+                total_score += 10
+            
+            # 6. MACD Line Position (10 points)
+            if signal_type == 'BULL' and macd_line > macd_signal:
+                if macd_line > 0:
+                    total_score += 10  # Above zero line
+                else:
+                    total_score += 5   # Above signal but below zero
+            elif signal_type == 'BEAR' and macd_line < macd_signal:
+                if macd_line < 0:
+                    total_score += 10  # Below zero line
+                else:
+                    total_score += 5   # Below signal but above zero
+            
+            return min(100.0, total_score)  # Cap at 100
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating signal quality score: {e}")
+            return 0.0
