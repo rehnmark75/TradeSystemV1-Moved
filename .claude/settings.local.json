@@ -40,7 +40,8 @@
       "Bash(timeout:*)",
       "Bash(chmod:*)",
       "Bash(./manage-tradingview.sh:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

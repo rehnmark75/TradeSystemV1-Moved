@@ -12,6 +12,15 @@ from core.database import DatabaseManager
 from core.data_fetcher import DataFetcher
 from core.backtest.performance_analyzer import PerformanceAnalyzer
 from core.backtest.signal_analyzer import SignalAnalyzer
+
+# Import optimization service
+try:
+    from optimization.optimal_parameter_service import OptimalParameterService
+    OPTIMIZATION_AVAILABLE = True
+except ImportError:
+    OPTIMIZATION_AVAILABLE = False
+    logging.getLogger(__name__).warning("Optimization service not available - using fallback parameters")
+
 try:
     import config
 except ImportError:
@@ -19,25 +28,56 @@ except ImportError:
 
 
 class BacktestBase(ABC):
-    """Base class for all strategy backtests"""
+    """Base class for all strategy backtests with database optimization support"""
     
-    def __init__(self, strategy_name: str):
+    def __init__(self, strategy_name: str, use_optimal_parameters: bool = True):
         self.strategy_name = strategy_name
         self.logger = logging.getLogger(f"backtest_{strategy_name}")
         self.db_manager = DatabaseManager(config.DATABASE_URL)
         self.data_fetcher = DataFetcher(self.db_manager, config.USER_TIMEZONE)
         self.performance_analyzer = PerformanceAnalyzer()
         self.signal_analyzer = SignalAnalyzer()
+        
+        # Database optimization integration
+        self.use_optimal_parameters = use_optimal_parameters and OPTIMIZATION_AVAILABLE
+        self.optimal_service = OptimalParameterService() if self.use_optimal_parameters else None
+        
+        if self.use_optimal_parameters:
+            self.logger.info(f"🎯 Database optimization ENABLED for {strategy_name} backtests")
+        else:
+            if use_optimal_parameters and not OPTIMIZATION_AVAILABLE:
+                self.logger.warning(f"⚠️ Database optimization requested but not available, using fallback parameters")
+            else:
+                self.logger.info(f"📊 Using static parameters for {strategy_name} backtests")
     
     @abstractmethod
-    def initialize_strategy(self):
-        """Initialize the specific strategy"""
+    def initialize_strategy(self, epic: str = None):
+        """Initialize the specific strategy with optional epic for optimal parameters"""
         pass
     
     @abstractmethod
     def run_strategy_backtest(self, df: pd.DataFrame, epic: str, spread_pips: float, timeframe: str) -> List[Dict]:
         """Run backtest for this specific strategy"""
         pass
+    
+    def get_optimal_parameters(self, epic: str):
+        """Get optimal parameters for an epic if optimization is enabled"""
+        if not self.use_optimal_parameters or not self.optimal_service:
+            return None
+        
+        try:
+            params = self.optimal_service.get_epic_parameters(epic)
+            self.logger.info(f"✅ Using optimal parameters for {epic}:")
+            self.logger.info(f"   Config: {getattr(params, 'ema_config', 'N/A')}")
+            self.logger.info(f"   Confidence: {params.confidence_threshold:.1%}")
+            self.logger.info(f"   Timeframe: {params.timeframe}")
+            self.logger.info(f"   SL/TP: {params.stop_loss_pips:.0f}/{params.take_profit_pips:.0f} pips")
+            self.logger.info(f"   R:R: {params.risk_reward_ratio:.1f}")
+            self.logger.info(f"   Performance: {params.performance_score:.3f}")
+            return params
+        except Exception as e:
+            self.logger.warning(f"❌ Failed to get optimal parameters for {epic}: {e}")
+            return None
     
     def run_backtest(
         self, 
@@ -47,21 +87,22 @@ class BacktestBase(ABC):
         show_signals: bool = False,
         **kwargs
     ) -> bool:
-        """Main backtest execution"""
+        """Main backtest execution with optimal parameter support"""
         
         epic_list = [epic] if epic else config.EPIC_LIST
         self.logger.info(f"🧪 Running {self.strategy_name} backtest")
         self.logger.info(f"   Epic(s): {epic_list}")
         self.logger.info(f"   Days: {days}, Timeframe: {timeframe}")
+        self.logger.info(f"   Database optimization: {'✅ ENABLED' if self.use_optimal_parameters else '❌ DISABLED'}")
         
         try:
-            # Initialize strategy
-            strategy = self.initialize_strategy()
-            
             all_signals = []
             
             for current_epic in epic_list:
-                self.logger.info(f"📊 Processing {current_epic}")
+                self.logger.info(f"\n📊 Processing {current_epic}")
+                
+                # Initialize strategy with epic for optimal parameters
+                strategy = self.initialize_strategy(current_epic)
                 
                 # Get data
                 df = self.data_fetcher.fetch_enhanced_data(

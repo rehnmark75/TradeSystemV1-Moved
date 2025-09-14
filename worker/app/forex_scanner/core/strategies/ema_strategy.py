@@ -88,8 +88,27 @@ class EMAStrategy(BaseStrategy):
         self.mtf_analyzer = EMAMultiTimeframeAnalyzer(logger=self.logger, data_fetcher=data_fetcher)
         self.indicator_calculator = EMAIndicatorCalculator(logger=self.logger, eps=self.eps)
         
+        # Initialize enhanced breakout validator to reduce false signals
+        self.enhanced_validation = getattr(config, 'EMA_ENHANCED_VALIDATION', True)
+        if self.enhanced_validation:
+            try:
+                from .helpers.ema_breakout_validator import EMABreakoutValidator
+                self.breakout_validator = EMABreakoutValidator(logger=self.logger)
+                self.logger.info("🔍 Enhanced breakout validator initialized - False breakout reduction enabled")
+            except ImportError as e:
+                self.breakout_validator = None
+                self.enhanced_validation = False
+                self.logger.warning(f"⚠️ Enhanced validator not available: {e}")
+        else:
+            self.breakout_validator = None
+            
         self.logger.info(f"🎯 EMA Strategy initialized - Periods: {self.ema_short}/{self.ema_long}/{self.ema_trend}")
-        self.logger.info(f"🔧 Using simple confidence calculation (no enhanced validator)")
+        
+        if self.enhanced_validation:
+            self.logger.info(f"🔍 Enhanced validation ENABLED - Multi-factor breakout confirmation")
+        else:
+            self.logger.info(f"🔧 Enhanced validation DISABLED - Using original signal detection")
+            
         if backtest_mode:
             self.logger.info("🔥 BACKTEST MODE: Time restrictions disabled")
     
@@ -274,6 +293,19 @@ class EMAStrategy(BaseStrategy):
                     self.logger.warning(f"❌ EMA BULL signal REJECTED: Price below EMA 200 (against major trend)")
                     return None
                 
+                # ENHANCED VALIDATION: Multi-factor breakout confirmation
+                if self.enhanced_validation and self.breakout_validator:
+                    is_valid_breakout, breakout_confidence, validation_details = self.breakout_validator.validate_breakout(
+                        df_with_signals, 'BULL', epic
+                    )
+                    
+                    if not is_valid_breakout:
+                        self.logger.warning(f"❌ EMA BULL signal REJECTED by enhanced validation (confidence: {breakout_confidence:.1%})")
+                        self.logger.debug(f"   Validation details: {validation_details}")
+                        return None
+                    else:
+                        self.logger.info(f"✅ Enhanced validation passed for BULL signal (confidence: {breakout_confidence:.1%})")
+                
                 signal = self._create_signal(
                     signal_type='BULL',
                     epic=epic,
@@ -314,6 +346,19 @@ class EMAStrategy(BaseStrategy):
                 if not trend_valid:
                     self.logger.warning(f"❌ EMA BEAR signal REJECTED: Price above EMA 200 (against major trend)")
                     return None
+                
+                # ENHANCED VALIDATION: Multi-factor breakout confirmation
+                if self.enhanced_validation and self.breakout_validator:
+                    is_valid_breakout, breakout_confidence, validation_details = self.breakout_validator.validate_breakout(
+                        df_with_signals, 'BEAR', epic
+                    )
+                    
+                    if not is_valid_breakout:
+                        self.logger.warning(f"❌ EMA BEAR signal REJECTED by enhanced validation (confidence: {breakout_confidence:.1%})")
+                        self.logger.debug(f"   Validation details: {validation_details}")
+                        return None
+                    else:
+                        self.logger.info(f"✅ Enhanced validation passed for BEAR signal (confidence: {breakout_confidence:.1%})")
                 
                 signal = self._create_signal(
                     signal_type='BEAR', 

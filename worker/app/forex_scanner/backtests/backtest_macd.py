@@ -166,16 +166,22 @@ class EnhancedMACDBacktest:
             self.smart_money_enabled = False
             return False
     
-    def initialize_macd_strategy(self, optimization_config: Dict = None, epic: str = None, timeframe: str = '15m'):
-        """Initialize MACD strategy with optional optimization and MTF verification"""
+    def initialize_macd_strategy(self, optimization_config: Dict = None, epic: str = None, timeframe: str = '15m', use_optimal_parameters: bool = True):
+        """ENHANCED: Initialize MACD strategy with database optimization support"""
         
-        # Use the new timeframe-aware strategy creation
+        # Log optimization status
+        if use_optimal_parameters and epic:
+            self.logger.info(f"🎯 Initializing MACD strategy with DATABASE OPTIMIZATION for {epic}")
+        else:
+            self.logger.info(f"📊 Initializing MACD strategy with STATIC CONFIGURATION")
+        
+        # Use the new timeframe-aware strategy creation with enhanced optimization
         self.strategy = MACDStrategy(
             data_fetcher=self.data_fetcher,
             backtest_mode=True,
             epic=epic,
             timeframe=timeframe,
-            use_optimized_parameters=True
+            use_optimized_parameters=use_optimal_parameters  # Enhanced to use parameter
         )
         self.logger.info(f"✅ Timeframe-aware MACD Strategy initialized for backtest ({timeframe})")
         
@@ -1136,7 +1142,8 @@ class EnhancedMACDBacktest:
         min_confidence: float = None,
         optimization_config: Dict = None,
         enable_forex_integration: bool = True,
-        enable_smart_money: bool = False
+        enable_smart_money: bool = False,
+        use_optimal_parameters: bool = True
     ) -> bool:
         """Run enhanced MACD strategy backtest with optional Smart Money analysis"""
         
@@ -1148,7 +1155,7 @@ class EnhancedMACDBacktest:
         # Setup epic list
         epic_list = [epic] if epic else config.EPIC_LIST
         
-        self.logger.info("🧪 ENHANCED MACD STRATEGY BACKTEST WITH SMART MONEY")
+        self.logger.info("🧪 ENHANCED MACD STRATEGY BACKTEST WITH DATABASE OPTIMIZATION")
         self.logger.info("=" * 60)
         self.logger.info(f"📊 Epic(s): {epic_list}")
         self.logger.info(f"⏰ Timeframe: {timeframe}")
@@ -1156,6 +1163,7 @@ class EnhancedMACDBacktest:
         self.logger.info(f"🎯 Show signals: {show_signals}")
         self.logger.info(f"🔗 Forex integration: {enable_forex_integration}")
         self.logger.info(f"🧠 Smart Money analysis: {enable_smart_money}")
+        self.logger.info(f"🎯 Database optimization: {'✅ ENABLED' if use_optimal_parameters else '❌ DISABLED'}")
         
         # Initialize Smart Money analysis
         if enable_smart_money:
@@ -1171,10 +1179,15 @@ class EnhancedMACDBacktest:
             self.logger.info(f"🎚️ Min confidence: {min_confidence:.1%} (was {original_min_conf:.1%})")
         
         try:
-            # Initialize strategy with optimization and timeframe awareness
+            # Initialize strategy with database optimization and timeframe awareness
             # Use first epic for strategy initialization (all use same parameters anyway)
             first_epic = epic_list[0] if epic_list else None
-            self.initialize_macd_strategy(optimization_config, first_epic, timeframe)
+            self.initialize_macd_strategy(
+                optimization_config=optimization_config, 
+                epic=first_epic, 
+                timeframe=timeframe,
+                use_optimal_parameters=use_optimal_parameters
+            )
             
             # Configure forex integration
             if enable_forex_integration:
@@ -2540,6 +2553,7 @@ def main():
     parser.add_argument('--structure-analysis', action='store_true', help='Enable detailed market structure analysis')
     parser.add_argument('--order-flow-analysis', action='store_true', help='Enable detailed order flow analysis')
     parser.add_argument('--force-smart-money', action='store_true', help='Force enable Smart Money even if modules missing')
+    parser.add_argument('--no-optimal-params', action='store_true', help='Disable database optimization (use static parameters)')
     
     # NEW: Signal validation arguments
     parser.add_argument('--validate-signal', help='Validate a specific signal by timestamp (format: "YYYY-MM-DD HH:MM:SS")')
@@ -2644,7 +2658,8 @@ def main():
         min_confidence=args.min_confidence,
         optimization_config=optimization_config if optimization_config else None,
         enable_forex_integration=not args.disable_forex_integration,
-        enable_smart_money=enable_smart_money
+        enable_smart_money=enable_smart_money,
+        use_optimal_parameters=not args.no_optimal_params
     )
     
     if success:

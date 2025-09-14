@@ -153,7 +153,7 @@ EMA200_DISTANCE_MOMENTUM_MULTIPLIER = 0.8
 # =============================================================================
 
 # Two-Pole Oscillator Configuration (momentum confirmation for EMA signals)
-TWO_POLE_OSCILLATOR_ENABLED = True       # Enable Two-Pole Oscillator validation
+TWO_POLE_OSCILLATOR_ENABLED = False      # TEMPORARILY DISABLE to test enhanced validation effectiveness
 TWO_POLE_FILTER_LENGTH = 20              # Filter length (default: 20)
 TWO_POLE_SMA_LENGTH = 25                 # SMA length for normalization (default: 25)  
 TWO_POLE_SIGNAL_DELAY = 4                # Signal delay in bars (default: 4)
@@ -320,6 +320,63 @@ EMA_ENABLE_PERFORMANCE_TRACKING = True        # Track strategy performance
 EMA_DEBUG_LOGGING = True                      # Enable detailed debug logging
 
 # =============================================================================
+# ENHANCED EMA BREAKOUT VALIDATION SYSTEM (FALSE BREAKOUT REDUCTION)
+# =============================================================================
+
+# Main switch for enhanced validation system
+EMA_ENHANCED_VALIDATION = True               # Enable/disable enhanced breakout validation (FOREX OPTIMIZED)
+
+# Multi-candle confirmation settings (MORE PERMISSIVE FOR FOREX)
+EMA_CONFIRMATION_CANDLES = 1                 # Number of candles required to confirm breakout (1 for forex speed)
+EMA_REQUIRE_PROGRESSIVE_MOVEMENT = False     # Don't require progressive movement (too restrictive)
+
+# Volume-based validation settings (FOREX FRIENDLY)
+EMA_VOLUME_SPIKE_THRESHOLD = 1.2             # Volume spike multiplier (1.2 = 20% above average - more realistic)
+EMA_VOLUME_LOW_THRESHOLD = 0.6               # Low volume threshold (0.6 = 60% of average)
+
+# Pullback and retest settings (DISABLED FOR FOREX SPEED)
+EMA_REQUIRE_PULLBACK = False                 # Don't require pullback (too slow for forex)
+EMA_PULLBACK_TOLERANCE_PIPS = 0.5            # Tolerance for pullback detection
+
+# Market condition filtering (MORE PERMISSIVE)
+EMA_STRONG_TREND_THRESHOLD = 0.002           # EMA separation threshold for strong trending (0.2% - higher)
+EMA_MODERATE_TREND_THRESHOLD = 0.0008        # EMA separation threshold for moderate trending (0.08%)
+EMA_RANGING_THRESHOLD = 0.0003               # EMA separation threshold for ranging market (0.03%)
+
+# Volatility-based filtering (MORE PERMISSIVE)
+EMA_HIGH_VOLATILITY_THRESHOLD = 3.0          # High volatility ratio threshold (higher)
+EMA_LOW_VOLATILITY_THRESHOLD = 0.3           # Low volatility ratio threshold (lower)
+
+# Price action validation settings (MORE PERMISSIVE)
+EMA_MIN_CANDLE_BODY_RATIO = 0.2              # Minimum candle body to total range ratio (lower)
+EMA_REQUIRE_STRONG_CLOSE = False             # Don't require close near high/low (too restrictive)
+
+# ADX trend strength validation (MORE PERMISSIVE FOR FOREX)
+EMA_ADX_STRONG_TREND_THRESHOLD = 20.0        # ADX value indicating strong trend (lowered from 25)
+EMA_ADX_WEAK_TREND_THRESHOLD = 15.0          # ADX value indicating weak trend (lowered from 20)
+EMA_ADX_SCALING_FACTOR = 40.0                # ADX scaling factor for confidence calculation
+
+# BALANCED HIGH-QUALITY validation confidence scoring
+EMA_ENHANCED_MIN_CONFIDENCE = 0.72           # BALANCED MODE: High quality with good frequency
+EMA_VALIDATION_WEIGHTS = {
+    "multi_candle": 0.25,                    # Weight for multi-candle confirmation
+    "volume": 0.15,                          # Weight for volume analysis
+    "support_resistance": 0.20,              # Weight for support/resistance levels
+    "market_conditions": 0.15,               # Weight for market regime analysis
+    "trend_strength": 0.10,                  # Weight for ADX trend strength
+    "price_action": 0.10,                    # Weight for price action patterns
+    "pullback": 0.05                         # Weight for pullback/retest behavior
+}
+
+# Strategy comparison and A/B testing
+EMA_ENABLE_VALIDATION_COMPARISON = True      # Enable comparison between old and new validation
+EMA_LOG_REJECTED_SIGNALS = True             # Log signals that would have been accepted without enhanced validation
+
+# Performance monitoring
+EMA_TRACK_FALSE_POSITIVE_REDUCTION = True   # Track reduction in false positives
+EMA_VALIDATION_PERFORMANCE_WINDOW = 100     # Number of signals to track for performance analysis
+
+# =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 
@@ -400,7 +457,15 @@ def get_ema_config_summary() -> dict:
         'ema_periods': EMA_PERIODS,
         'min_data_periods': EMA_MIN_DATA_PERIODS,
         'debug_logging': EMA_DEBUG_LOGGING,
-        'total_configurations': len(EMA_STRATEGY_CONFIG)
+        'total_configurations': len(EMA_STRATEGY_CONFIG),
+        # Enhanced validation settings
+        'enhanced_validation_enabled': EMA_ENHANCED_VALIDATION,
+        'confirmation_candles': EMA_CONFIRMATION_CANDLES,
+        'volume_spike_threshold': EMA_VOLUME_SPIKE_THRESHOLD,
+        'require_pullback': EMA_REQUIRE_PULLBACK,
+        'enhanced_min_confidence': EMA_ENHANCED_MIN_CONFIDENCE,
+        'validation_comparison_enabled': EMA_ENABLE_VALIDATION_COMPARISON,
+        'false_positive_tracking': EMA_TRACK_FALSE_POSITIVE_REDUCTION
     }
 
 # Quick configuration presets for different signal generation frequencies
@@ -435,3 +500,63 @@ def set_macd_filter_preset(preset: str = 'balanced'):
     }
     
     return presets.get(preset, presets['balanced'])
+
+def set_enhanced_validation_preset(preset: str = 'balanced'):
+    """
+    Quick presets for enhanced validation configuration
+    
+    Args:
+        preset: 'conservative', 'balanced', 'aggressive', 'minimal'
+    """
+    presets = {
+        'conservative': {
+            'confirmation_candles': 3,
+            'volume_spike_threshold': 2.0,
+            'enhanced_min_confidence': 0.7,
+            'require_pullback': True,
+            'strong_trend_threshold': 0.002,
+            'adx_strong_threshold': 30.0,
+            'description': 'Strictest validation - fewest false breakouts, fewer total signals'
+        },
+        'balanced': {
+            'confirmation_candles': 2,
+            'volume_spike_threshold': 1.5,
+            'enhanced_min_confidence': 0.6,
+            'require_pullback': True,
+            'strong_trend_threshold': 0.001,
+            'adx_strong_threshold': 25.0,
+            'description': 'Balanced validation - good false breakout reduction with reasonable signal frequency'
+        },
+        'aggressive': {
+            'confirmation_candles': 2,
+            'volume_spike_threshold': 1.3,
+            'enhanced_min_confidence': 0.5,
+            'require_pullback': False,
+            'strong_trend_threshold': 0.0005,
+            'adx_strong_threshold': 20.0,
+            'description': 'Moderate validation - some false breakout reduction with more signals'
+        },
+        'minimal': {
+            'confirmation_candles': 1,
+            'volume_spike_threshold': 1.2,
+            'enhanced_min_confidence': 0.4,
+            'require_pullback': False,
+            'strong_trend_threshold': 0.0002,
+            'adx_strong_threshold': 15.0,
+            'description': 'Minimal validation - light filtering for maximum signal generation'
+        }
+    }
+    
+    return presets.get(preset, presets['balanced'])
+
+def get_enhanced_validation_status():
+    """Get current enhanced validation configuration status"""
+    return {
+        'enabled': EMA_ENHANCED_VALIDATION,
+        'confirmation_candles': EMA_CONFIRMATION_CANDLES,
+        'volume_threshold': EMA_VOLUME_SPIKE_THRESHOLD,
+        'min_confidence': EMA_ENHANCED_MIN_CONFIDENCE,
+        'pullback_required': EMA_REQUIRE_PULLBACK,
+        'comparison_mode': EMA_ENABLE_VALIDATION_COMPARISON,
+        'description': f"Enhanced validation {'ENABLED' if EMA_ENHANCED_VALIDATION else 'DISABLED'} with {EMA_CONFIRMATION_CANDLES} candle confirmation"
+    }

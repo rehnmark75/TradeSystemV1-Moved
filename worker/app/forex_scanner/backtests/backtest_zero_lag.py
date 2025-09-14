@@ -106,12 +106,36 @@ class ZeroLagBacktest:
             self.logger.debug(f"Timestamp conversion error: {e}")
             return f"{str(timestamp)} UTC"
 
-    def initialize_zero_lag_strategy(self, enable_squeeze_momentum: bool = True):
-        """Initialize Zero Lag + Squeeze Momentum strategy"""
+    def initialize_zero_lag_strategy(self, enable_squeeze_momentum: bool = True, epic: str = None, use_optimal_parameters: bool = True):
+        """ENHANCED: Initialize Zero Lag strategy with database optimization support"""
         
-        # Initialize with data_fetcher for enhanced functionality
-        self.strategy = ZeroLagStrategy(data_fetcher=self.data_fetcher)
-        self.logger.info("✅ Zero Lag + Squeeze Momentum Strategy initialized")
+        # Log optimization status
+        if use_optimal_parameters and epic:
+            self.logger.info(f"🎯 Initializing Zero Lag strategy with DATABASE OPTIMIZATION for {epic}")
+        else:
+            self.logger.info(f"📊 Initializing Zero Lag strategy with STATIC CONFIGURATION")
+        
+        # Initialize with enhanced data_fetcher functionality
+        # Note: ZeroLagStrategy may need to be updated to support use_optimal_parameters
+        try:
+            if use_optimal_parameters and epic:
+                # Try to initialize with optimal parameters
+                self.strategy = ZeroLagStrategy(
+                    data_fetcher=self.data_fetcher,
+                    epic=epic,
+                    use_optimal_parameters=True
+                )
+                self.logger.info("✅ Zero Lag Strategy initialized with DATABASE OPTIMIZATION")
+            else:
+                # Fallback to standard initialization
+                self.strategy = ZeroLagStrategy(data_fetcher=self.data_fetcher)
+                self.logger.info("✅ Zero Lag Strategy initialized with STATIC CONFIGURATION")
+        except Exception as e:
+            # Fallback in case optimal parameters fail
+            self.logger.warning(f"❌ Failed to initialize with optimal parameters: {e}")
+            self.logger.warning("   Falling back to standard initialization...")
+            self.strategy = ZeroLagStrategy(data_fetcher=self.data_fetcher)
+            self.logger.info("✅ Zero Lag Strategy initialized with FALLBACK CONFIGURATION")
         
         # Get strategy summary
         summary = self.strategy.get_strategy_summary()
@@ -354,15 +378,17 @@ class ZeroLagBacktest:
         min_confidence: float = None,
         sl_type: str = 'atr',
         sl_atr_multiplier: float = 1.5,
-        trailing_stop: bool = True
+        trailing_stop: bool = True,
+        use_optimal_parameters: bool = True
     ) -> bool:
-        """Run Zero Lag strategy backtest"""
+        """ENHANCED: Run Zero Lag strategy backtest with database optimization support"""
         
         # Setup epic list
         epic_list = [epic] if epic else config.EPIC_LIST
         
-        self.logger.info("⚡ ZERO LAG + SQUEEZE MOMENTUM BACKTEST")
+        self.logger.info("⚡ ENHANCED ZERO LAG + SQUEEZE MOMENTUM BACKTEST")
         self.logger.info("=" * 50)
+        self.logger.info(f"🎯 Database optimization: {'✅ ENABLED' if use_optimal_parameters else '❌ DISABLED'}")
         self.logger.info(f"📊 Epic(s): {epic_list}")
         self.logger.info(f"⏰ Timeframe: {timeframe}")
         self.logger.info(f"📅 Days: {days}")
@@ -387,16 +413,19 @@ class ZeroLagBacktest:
                 self.logger.info(f"🎚️ Min confidence: {min_confidence:.1%} (was {original_min_conf:.1%})")
         
         try:
-            # Initialize strategy
-            self.initialize_zero_lag_strategy(enable_squeeze_momentum)
-            
-            # Initialize Smart Money if requested
-            self.initialize_smart_money_integration(enable_smart_money)
-            
             all_signals = []
             epic_results = {}
             
             for current_epic in epic_list:
+                # ENHANCED: Initialize strategy per epic for optimal parameters
+                self.initialize_zero_lag_strategy(
+                    enable_squeeze_momentum=enable_squeeze_momentum,
+                    epic=current_epic,
+                    use_optimal_parameters=use_optimal_parameters
+                )
+                
+                # Initialize Smart Money if requested
+                self.initialize_smart_money_integration(enable_smart_money)
                 self.logger.info(f"\n📈 Processing {current_epic}")
                 
                 # Get enhanced data - Need to extract pair from epic
@@ -1298,6 +1327,7 @@ def main():
     parser.add_argument('--squeeze-momentum', action='store_true', default=True, help='Enable Squeeze Momentum indicator (default: enabled)')
     parser.add_argument('--disable-squeeze-momentum', action='store_true', help='Disable Squeeze Momentum filtering')
     parser.add_argument('--smart-money', action='store_true', help='Enable Smart Money Concepts analysis')
+    parser.add_argument('--no-optimal-params', action='store_true', help='Disable database optimization (use static parameters)')
     parser.add_argument('--min-confidence', type=float, help='Override minimum confidence threshold (0.0-1.0)')
     parser.add_argument('--sl-type', type=str, default='atr', choices=['atr', 'fixed', 'volatility'], help='Stop loss type (default: atr)')
     parser.add_argument('--sl-atr-multiplier', type=float, default=1.5, help='ATR multiplier for stop loss (default: 1.5)')
@@ -1333,7 +1363,8 @@ def main():
         min_confidence=args.min_confidence,
         sl_type=args.sl_type,
         sl_atr_multiplier=args.sl_atr_multiplier,
-        trailing_stop=enable_trailing
+        trailing_stop=enable_trailing,
+        use_optimal_parameters=not args.no_optimal_params
     )
     
     if success:

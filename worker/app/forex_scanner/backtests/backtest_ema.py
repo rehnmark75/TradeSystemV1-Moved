@@ -122,22 +122,55 @@ class EMABacktest:
             self.logger.debug(f"Timestamp conversion error: {e}")
             return f"{str(timestamp)} UTC"
     
-    def initialize_ema_strategy(self, ema_config: str = None):
-        """FIXED: Initialize EMA strategy with modular components"""
+    def initialize_ema_strategy(self, ema_config: str = None, epic: str = None, use_optimal_parameters: bool = True):
+        """ENHANCED: Initialize EMA strategy with database optimization support"""
         
-        # Temporarily override EMA config if specified
+        # Check if we should use optimal parameters from database
+        use_optimal = use_optimal_parameters and epic is not None
+        
+        if use_optimal:
+            try:
+                from optimization.optimal_parameter_service import OptimalParameterService
+                param_service = OptimalParameterService()
+                optimal_params = param_service.get_epic_parameters(epic)
+                
+                if optimal_params:
+                    self.logger.info(f"🎯 Using DATABASE OPTIMAL parameters for {epic}:")
+                    self.logger.info(f"   EMA Config: {optimal_params.ema_config}")
+                    self.logger.info(f"   Confidence: {optimal_params.confidence_threshold:.1%}")
+                    self.logger.info(f"   SL/TP: {optimal_params.stop_loss_pips:.0f}/{optimal_params.take_profit_pips:.0f} pips")
+                    self.logger.info(f"   Performance Score: {optimal_params.performance_score:.3f}")
+                    
+                    # Initialize strategy with optimal parameters enabled
+                    self.strategy = EMAStrategy(
+                        data_fetcher=self.data_fetcher, 
+                        backtest_mode=True,
+                        use_optimal_parameters=True
+                    )
+                    
+                    # Set the epic so strategy can load its optimal parameters
+                    if hasattr(self.strategy, '_epic'):
+                        self.strategy._epic = epic
+                    
+                    self.logger.info("✅ EMA Strategy initialized with DATABASE OPTIMIZATION")
+                    return None
+                    
+            except Exception as e:
+                self.logger.warning(f"❌ Failed to load optimal parameters for {epic}: {e}")
+                self.logger.warning("   Falling back to static configuration...")
+        
+        # Fallback to static configuration
         original_config = None
         if ema_config and hasattr(strategy_config, 'ACTIVE_EMA_CONFIG'):
             original_config = strategy_config.ACTIVE_EMA_CONFIG
-            # Note: Cannot dynamically modify ema_config as it's from configdata
-            self.logger.info(f"🔧 Using EMA config: {ema_config}")
+            self.logger.info(f"🔧 Using static EMA config: {ema_config}")
         
-        # CRITICAL FIX: Initialize with data_fetcher for modular functionality + BACKTEST MODE
+        # Initialize with static configuration
         self.strategy = EMAStrategy(data_fetcher=self.data_fetcher, backtest_mode=True)
-        self.logger.info("✅ EMA Strategy initialized with modular components")
+        self.logger.info("✅ EMA Strategy initialized with STATIC CONFIGURATION")
         self.logger.info("🔥 BACKTEST MODE ENABLED: Time-based cooldowns disabled for historical analysis")
         
-        # Get EMA configuration details
+        # Get EMA configuration details for display
         ema_configs = getattr(strategy_config, 'EMA_STRATEGY_CONFIG', {})
         active_config = ema_config or getattr(strategy_config, 'ACTIVE_EMA_CONFIG', 'default')
         
@@ -288,19 +321,21 @@ class EMABacktest:
         show_signals: bool = False,
         ema_config: str = None,
         min_confidence: float = None,
-        enable_smart_money: bool = False
+        enable_smart_money: bool = False,
+        use_optimal_parameters: bool = True
     ) -> bool:
-        """FIXED: Run EMA strategy backtest using modular components"""
+        """ENHANCED: Run EMA strategy backtest with database optimization support"""
         
         epic_list = [epic] if epic else config.EPIC_LIST
         
-        self.logger.info("🧪 FIXED EMA STRATEGY BACKTEST")
+        self.logger.info("🧪 ENHANCED EMA STRATEGY BACKTEST")
         self.logger.info("=" * 40)
         self.logger.info(f"📊 Epic(s): {epic_list}")
         self.logger.info(f"⏰ Timeframe: {timeframe}")
         self.logger.info(f"📅 Days: {days}")
         self.logger.info(f"🎯 Show signals: {show_signals}")
         self.logger.info(f"🧠 Smart Money analysis: {enable_smart_money}")
+        self.logger.info(f"🎯 Database optimization: {'✅ ENABLED' if use_optimal_parameters else '❌ DISABLED'}")
         
         # Initialize Smart Money analysis if enabled
         if enable_smart_money:
@@ -312,14 +347,18 @@ class EMABacktest:
             self.logger.info(f"🎚️ Min confidence: {min_confidence:.1%} (was {original_min_conf:.1%})")
         
         try:
-            # CRITICAL FIX: Initialize strategy with modular components
-            original_config = self.initialize_ema_strategy(ema_config)
-            
             all_signals = []
             epic_results = {}
             
             for current_epic in epic_list:
                 self.logger.info(f"\n📈 Processing {current_epic}")
+                
+                # ENHANCED: Initialize strategy per epic for optimal parameters
+                original_config = self.initialize_ema_strategy(
+                    ema_config=ema_config, 
+                    epic=current_epic,
+                    use_optimal_parameters=use_optimal_parameters
+                )
                 
                 # Extract pair from epic
                 pair = self._extract_pair_from_epic(current_epic)
@@ -1551,6 +1590,7 @@ def main():
     parser.add_argument('--ema-config', help='EMA configuration')
     parser.add_argument('--min-confidence', type=float, help='Minimum confidence threshold')
     parser.add_argument('--smart-money', action='store_true', help='Enable Smart Money analysis')
+    parser.add_argument('--no-optimal-params', action='store_true', help='Disable database optimization (use static parameters)')
     parser.add_argument('--verbose', action='store_true', help='Verbose logging')
     
     # NEW: Signal validation arguments
@@ -1617,7 +1657,8 @@ def main():
             show_signals=args.show_signals,
             ema_config=args.ema_config,
             min_confidence=args.min_confidence,
-            enable_smart_money=args.smart_money
+            enable_smart_money=args.smart_money,
+            use_optimal_parameters=not args.no_optimal_params
         )
     
     sys.exit(0 if success else 1)
