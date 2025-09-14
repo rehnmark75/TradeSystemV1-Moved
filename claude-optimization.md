@@ -528,6 +528,104 @@ The dynamic parameter system is fully operational with:
 - **Signal Quality**: Reduced false signals by 40-60% through better parameter selection
 - **Risk Management**: Improved risk-adjusted returns through optimized SL/TP levels
 
+## TradingView Integration Database Schema
+
+### TradingView Scripts Storage
+
+The system includes a complete TradingView integration that stores community scripts and strategies in PostgreSQL for analysis and strategy development:
+
+**Database Location:**
+- **Database**: `forex` (same as trading data)
+- **Schema**: `tradingview`
+- **Table**: `tradingview.scripts`
+
+**Table Structure:**
+```sql
+-- TradingView scripts with advanced PostgreSQL features
+CREATE TABLE tradingview.scripts (
+    -- Core identification
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    title VARCHAR(500) NOT NULL,
+    author VARCHAR(255) NOT NULL,
+    
+    -- Content and metadata
+    description TEXT,
+    code TEXT,                           -- Complete Pine Script code
+    script_type VARCHAR(50) DEFAULT 'strategy',  -- 'strategy' or 'indicator'
+    strategy_type VARCHAR(50),           -- 'trending', 'scalping', 'breakout', etc.
+    
+    -- Community engagement
+    open_source BOOLEAN DEFAULT true,
+    likes INTEGER DEFAULT 0,
+    views INTEGER DEFAULT 0,
+    
+    -- Advanced data types (PostgreSQL-specific)
+    indicators TEXT[],                   -- Array: ['EMA', 'RSI', 'MACD']
+    signals TEXT[],                      -- Array: ['crossover', 'breakout']
+    timeframes TEXT[],                   -- Array: ['5m', '15m', '1h']
+    parameters JSONB DEFAULT '{}',       -- JSON: extracted parameters
+    metadata JSONB DEFAULT '{}',        -- JSON: additional data
+    
+    -- Timestamps and source
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    source_url TEXT
+);
+
+-- Performance indexes
+CREATE INDEX idx_scripts_title_fts ON tradingview.scripts 
+    USING gin(to_tsvector('english', title));
+CREATE INDEX idx_scripts_description_fts ON tradingview.scripts 
+    USING gin(to_tsvector('english', description));
+CREATE INDEX idx_scripts_likes ON tradingview.scripts (likes DESC);
+CREATE INDEX idx_scripts_strategy_type ON tradingview.scripts (strategy_type);
+```
+
+**Sample Data:**
+```sql
+-- Example records in the database
+SELECT title, script_type, strategy_type, likes, indicators, signals 
+FROM tradingview.scripts 
+ORDER BY likes DESC LIMIT 3;
+
+-- Results:
+-- "Volume Weighted Average Price (VWAP)" | indicator | indicator | 15420 | {VWAP} | {volume_analysis}
+-- "Relative Strength Index (RSI)"        | indicator | indicator | 12800 | {RSI}  | {momentum}
+-- "EMA Trend Following System"           | strategy  | trending  |   520 | {EMA}  | {trend_following,crossover}
+```
+
+**Integration with Optimization System:**
+
+The TradingView data enhances the optimization system by providing:
+
+1. **Community Parameter Insights**: Analysis of popular parameter ranges used by successful strategies
+2. **Strategy Classification**: Automated categorization of trading approaches
+3. **Performance Benchmarking**: Comparison of optimized parameters against community standards
+4. **Pattern Recognition**: Identification of common successful pattern combinations
+
+**API Access:**
+```python
+# Access TradingView data programmatically
+GET http://localhost:8080/api/tvscripts/stats
+GET http://localhost:8080/api/tvscripts/search?query=EMA&limit=10
+GET http://localhost:8080/api/tvscripts/script/{slug}
+```
+
+**Container Status:**
+- **Service**: `tradingview` container (running on port 8080)
+- **Health**: Available at `http://localhost:8080/health`
+- **Interface**: Streamlit UI on port 8502
+- **Database**: Connected to same PostgreSQL instance as trading data
+
+**Data Summary:**
+- **Total Scripts**: 15 (5 strategies + 10 indicators)
+- **Popular Strategies**: EMA-based trending systems with 300-500+ likes
+- **Top Indicators**: VWAP (15k+ likes), RSI (12k+ likes), MACD (11k+ likes)
+- **Integration**: Full-text search, JSON parameters, array storage for indicators/signals
+
+This integration provides a rich dataset for strategy development, allowing comparison of optimized parameters against community-tested approaches and enabling data-driven strategy enhancement.
+
 For command usage, see [Commands & CLI](claude-commands.md).
 For architecture context, see [System Architecture](claude-architecture.md).
 For strategy integration, see [Strategy Development](claude-strategies.md).

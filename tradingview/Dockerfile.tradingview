@@ -1,0 +1,41 @@
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    sqlite3 \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements-tradingview.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/logs /app/mcp /app/strategy_bridge /app/api /app/streamlit_tv /app/indexer
+
+# Copy TradingView integration files
+COPY mcp/ /app/mcp/
+COPY strategy_bridge/ /app/strategy_bridge/  
+COPY api/ /app/api/
+COPY tradingview_importer.py /app/streamlit_tv/
+COPY indexer/ /app/indexer/
+COPY *.py /app/
+COPY init_tradingview_tables.sql /app/sql/
+
+# Set Python path
+ENV PYTHONPATH="/app:/app/mcp:/app/strategy_bridge"
+
+# Expose ports for API and Streamlit
+EXPOSE 8080 8501
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Default command runs the FastAPI server
+CMD ["python", "-m", "uvicorn", "api.tvscripts_app:app", "--host", "0.0.0.0", "--port", "8080"]

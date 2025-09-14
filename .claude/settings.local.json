@@ -37,7 +37,10 @@
       "Bash(python:*)",
       "Bash(find:*)",
       "Bash(timeout 60s docker exec:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(chmod:*)",
+      "Bash(./manage-tradingview.sh:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

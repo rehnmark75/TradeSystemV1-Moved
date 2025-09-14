@@ -11,6 +11,13 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+class PineToTradeSystemMapper:
+    """Maps Pine Script patterns to TradeSystemV1 configurations"""
+    
+    def to_config(self, inputs: List[Dict], signals: Dict[str, Any], strategy_name: str = "ImportedFromTV") -> Dict[str, Any]:
+        """Convert Pine Script analysis to TradeSystemV1 configuration"""
+        return to_config(inputs, signals, strategy_name)
+
 def to_config(inputs: List[Dict], signals: Dict[str, Any], strategy_name: str = "ImportedFromTV") -> Dict[str, Any]:
     """
     Convert Pine Script analysis to TradeSystemV1 configuration

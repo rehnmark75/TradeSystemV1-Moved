@@ -169,6 +169,32 @@ services:
     depends_on:
       - fastapi-dev
       - fastapi-prod
+  tradingview:
+    build:
+      context: ./tradingview
+      dockerfile: Dockerfile.tradingview
+    container_name: tradingview
+    restart: unless-stopped
+    ports:
+      - "8080:8080"  # FastAPI server
+      - "8502:8501"  # Streamlit interface
+    volumes:
+      - ./logs/tradingview:/app/logs
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - PYTHONPATH=/app:/app/mcp:/app/strategy_bridge
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   task-worker:
     build:
       context: ./worker
@@ -184,6 +210,7 @@ services:
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
     networks:
       - lab-net
     depends_on:

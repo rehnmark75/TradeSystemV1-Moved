@@ -373,6 +373,91 @@ def _determine_strategy_type(signals: ExtractedSignals, pine_code: str) -> str:
     # Default
     return "trending" if signals.ema_periods else "indicator"
 
+class PineScriptExtractor:
+    """Main class for extracting patterns from Pine Script code"""
+    
+    def extract_inputs(self, pine_code: str) -> List[Dict[str, Any]]:
+        """Extract input parameters from Pine Script"""
+        return extract_inputs(pine_code)
+    
+    def extract_signals(self, pine_code: str) -> Dict[str, Any]:
+        """Extract signals and patterns from Pine Script"""
+        signals = extract_signals(pine_code)
+        
+        # Handle both dict and ExtractedSignals object
+        if isinstance(signals, dict):
+            return signals
+        
+        return {
+            'ema_periods': signals.ema_periods,
+            'sma_periods': signals.sma_periods,
+            'rsi_periods': signals.rsi_periods,
+            'macd': signals.macd,
+            'bollinger_bands': signals.bollinger_bands,
+            'crossovers': [f'crossover detected'] if (signals.has_cross_up or signals.has_cross_down) else [],
+            'indicators': self._get_indicator_list(signals),
+            'entry_conditions': self._extract_conditions(pine_code, 'entry'),
+            'exit_conditions': self._extract_conditions(pine_code, 'exit')
+        }
+    
+    def classify_strategy(self, pine_code: str) -> str:
+        """Classify strategy type"""
+        signals = extract_signals(pine_code)
+        
+        # Handle both dict and ExtractedSignals object
+        if isinstance(signals, dict):
+            # Convert dict back to object for _determine_strategy_type
+            # For now, return a simple classification based on dict content
+            if 'EMA' in signals.get('indicators', []):
+                return 'trending'
+            elif 'MACD' in signals.get('indicators', []):
+                return 'momentum' 
+            else:
+                return 'unknown'
+        else:
+            return _determine_strategy_type(signals, pine_code)
+    
+    def _get_indicator_list(self, signals) -> List[str]:
+        """Get list of indicators used"""
+        indicators = []
+        
+        # Handle both dict and ExtractedSignals object
+        if isinstance(signals, dict):
+            if signals.get('ema_periods'):
+                indicators.append('EMA')
+            if signals.get('sma_periods'):
+                indicators.append('SMA')
+            if signals.get('rsi_periods'):
+                indicators.append('RSI')
+            if signals.get('macd'):
+                indicators.append('MACD')
+            if signals.get('bollinger_bands'):
+                indicators.append('BB')
+        else:
+            if signals.ema_periods:
+                indicators.append('EMA')
+            if signals.sma_periods:
+                indicators.append('SMA')
+            if signals.rsi_periods:
+                indicators.append('RSI')
+            if signals.macd:
+                indicators.append('MACD')
+            if signals.bollinger_bands:
+                indicators.append('BB')
+        
+        return indicators
+    
+    def _extract_conditions(self, pine_code: str, condition_type: str) -> List[str]:
+        """Extract entry/exit conditions"""
+        conditions = []
+        if condition_type == 'entry':
+            if 'strategy.entry' in pine_code:
+                conditions.append('strategy_entry_detected')
+        elif condition_type == 'exit':
+            if 'strategy.close' in pine_code or 'strategy.exit' in pine_code:
+                conditions.append('strategy_exit_detected')
+        return conditions
+
 def extract_strategy_rules(pine_code: str) -> List[Dict[str, Any]]:
     """
     Extract trading rules and conditions from Pine Script
