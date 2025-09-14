@@ -23,94 +23,165 @@ class MACDSignalCalculator:
     
     def calculate_simple_confidence(self, latest_row: pd.Series, signal_type: str) -> float:
         """
-        SIMPLE CONFIDENCE CALCULATION: Based on MACD histogram strength and trend alignment
+        ENHANCED CONFIDENCE CALCULATION: Multi-factor analysis with restrictive weighting
         
-        Factors considered:
-        - MACD histogram strength (most important)
-        - MACD line vs signal line alignment
-        - EMA 200 trend alignment
-        - Price position relative to EMA 200
+        New weighting system (research-based 2025):
+        - ADX strength (30%): Strong trending markets preferred
+        - MACD histogram strength (25%): Core momentum signal
+        - RSI confluence (20%): Overbought/oversold alignment  
+        - EMA 200 trend alignment (15%): Major trend direction
+        - MACD line vs signal alignment (10%): Additional confirmation
         
         Args:
             latest_row: DataFrame row with indicator data
             signal_type: 'BULL' or 'BEAR'
             
         Returns:
-            Confidence score between 0.0 and 0.95
+            Confidence score between 0.0 and 0.95 (higher threshold required)
         """
         try:
-            base_confidence = 0.5  # Start with 50%
+            base_confidence = 0.65  # Start with 65% (raised from 50% for quality)
             
-            # Get MACD values
+            # Get enhanced indicator values
             macd_histogram = latest_row.get('macd_histogram', 0)
             macd_line = latest_row.get('macd_line', 0)
             macd_signal = latest_row.get('macd_signal', 0)
             ema_200 = latest_row.get('ema_200', 0)
             close = latest_row.get('close', 0)
+            adx = latest_row.get('adx', 0)
+            rsi = latest_row.get('rsi', 50)
+            
+            # Divergence signals (premium quality boost)
+            bullish_divergence = latest_row.get('bullish_divergence', False)
+            bearish_divergence = latest_row.get('bearish_divergence', False)
+            divergence_strength = latest_row.get('divergence_strength', 0)
             
             if macd_histogram == 0:
                 return 0.3  # Low confidence if MACD missing
             
-            # 1. MACD HISTOGRAM STRENGTH (50% weight)
-            # Strong histogram values indicate strong momentum
+            # 1. ADX TREND STRENGTH ANALYSIS (30% weight) - NEW PRIMARY FACTOR
+            adx_boost = 0.0
+            if adx >= 40:
+                adx_boost = 0.30  # Very strong trend
+            elif adx >= 30:
+                adx_boost = 0.20  # Strong trend
+            elif adx >= 25:
+                adx_boost = 0.10  # Moderate trend
+            else:
+                # Weak trend - penalize significantly for restrictive strategy
+                return 0.25  # Too choppy for high-confidence signals
+            
+            base_confidence += adx_boost
+            
+            # 2. MACD HISTOGRAM STRENGTH (25% weight) - CORE MOMENTUM
             histogram_abs = abs(macd_histogram)
+            histogram_boost = 0.0
             
             if signal_type == 'BULL' and macd_histogram > 0:
-                # Bullish histogram strength
-                if histogram_abs > 0.001:
-                    histogram_boost = 0.25  # Very strong
+                if histogram_abs > 0.002:
+                    histogram_boost = 0.25  # Very strong bullish momentum
+                elif histogram_abs > 0.001:
+                    histogram_boost = 0.20  # Strong
                 elif histogram_abs > 0.0005:
-                    histogram_boost = 0.15  # Strong
-                elif histogram_abs > 0.0001:
-                    histogram_boost = 0.10  # Moderate
+                    histogram_boost = 0.15  # Moderate
                 else:
                     histogram_boost = 0.05  # Weak
             elif signal_type == 'BEAR' and macd_histogram < 0:
-                # Bearish histogram strength
-                if histogram_abs > 0.001:
-                    histogram_boost = 0.25  # Very strong
+                if histogram_abs > 0.002:
+                    histogram_boost = 0.25  # Very strong bearish momentum
+                elif histogram_abs > 0.001:
+                    histogram_boost = 0.20  # Strong
                 elif histogram_abs > 0.0005:
-                    histogram_boost = 0.15  # Strong
-                elif histogram_abs > 0.0001:
-                    histogram_boost = 0.10  # Moderate
+                    histogram_boost = 0.15  # Moderate
                 else:
                     histogram_boost = 0.05  # Weak
             else:
-                # Wrong direction histogram
-                return 0.2  # Very low confidence
+                # Wrong direction histogram - critical failure
+                return 0.20
             
             base_confidence += histogram_boost
             
-            # 2. MACD LINE vs SIGNAL LINE ALIGNMENT (20% weight)
-            if signal_type == 'BULL' and macd_line > macd_signal:
-                base_confidence += 0.10  # MACD above signal is bullish
-            elif signal_type == 'BEAR' and macd_line < macd_signal:
-                base_confidence += 0.10  # MACD below signal is bearish
-            else:
-                base_confidence -= 0.05  # Misalignment penalty
+            # 3. RSI CONFLUENCE ANALYSIS (20% weight) - OVERBOUGHT/OVERSOLD ALIGNMENT
+            rsi_boost = 0.0
+            if signal_type == 'BULL':
+                if rsi < 30:
+                    rsi_boost = 0.20  # Oversold - excellent for bull signals
+                elif rsi < 50:
+                    rsi_boost = 0.15  # Below midline - good
+                elif rsi < 60:
+                    rsi_boost = 0.10  # Neutral zone
+                elif rsi < 70:
+                    rsi_boost = 0.05  # Getting overbought
+                else:
+                    rsi_boost = -0.10  # Overbought - penalty
+            else:  # BEAR
+                if rsi > 70:
+                    rsi_boost = 0.20  # Overbought - excellent for bear signals
+                elif rsi > 50:
+                    rsi_boost = 0.15  # Above midline - good
+                elif rsi > 40:
+                    rsi_boost = 0.10  # Neutral zone
+                elif rsi > 30:
+                    rsi_boost = 0.05  # Getting oversold
+                else:
+                    rsi_boost = -0.10  # Oversold - penalty
             
-            # 3. EMA 200 TREND ALIGNMENT (20% weight)
+            base_confidence += rsi_boost
+            
+            # 4. EMA 200 TREND ALIGNMENT (15% weight) - MAJOR TREND DIRECTION
+            ema_boost = 0.0
             if ema_200 > 0 and close > 0:
                 if signal_type == 'BULL' and close > ema_200:
-                    base_confidence += 0.10  # Price above EMA 200 supports bullish
+                    distance_ratio = (close - ema_200) / ema_200
+                    if distance_ratio > 0.02:  # More than 2% above EMA200
+                        ema_boost = 0.15  # Strong uptrend confirmation
+                    else:
+                        ema_boost = 0.10  # Basic uptrend confirmation
                 elif signal_type == 'BEAR' and close < ema_200:
-                    base_confidence += 0.10  # Price below EMA 200 supports bearish
+                    distance_ratio = (ema_200 - close) / ema_200
+                    if distance_ratio > 0.02:  # More than 2% below EMA200
+                        ema_boost = 0.15  # Strong downtrend confirmation
+                    else:
+                        ema_boost = 0.10  # Basic downtrend confirmation
                 else:
-                    base_confidence -= 0.05  # Against major trend penalty
+                    ema_boost = -0.10  # Against major trend - significant penalty
             
-            # 4. MACD MOMENTUM DIRECTION (10% weight)
-            # Check if MACD line is moving in signal direction
-            macd_prev = latest_row.get('macd_line_prev', macd_line)
-            if signal_type == 'BULL' and macd_line > macd_prev:
-                base_confidence += 0.05  # MACD rising supports bullish
-            elif signal_type == 'BEAR' and macd_line < macd_prev:
-                base_confidence += 0.05  # MACD falling supports bearish
+            base_confidence += ema_boost
             
-            # Ensure confidence stays within bounds
-            confidence = max(0.1, min(0.95, base_confidence))
+            # 5. MACD LINE vs SIGNAL ALIGNMENT (10% weight) - ADDITIONAL CONFIRMATION
+            alignment_boost = 0.0
+            if signal_type == 'BULL' and macd_line > macd_signal:
+                alignment_boost = 0.10  # MACD above signal supports bull
+            elif signal_type == 'BEAR' and macd_line < macd_signal:
+                alignment_boost = 0.10  # MACD below signal supports bear
+            else:
+                alignment_boost = -0.05  # Misalignment penalty
             
-            self.logger.debug(f"MACD confidence calculated: {confidence:.3f} for {signal_type}")
-            return confidence
+            base_confidence += alignment_boost
+            
+            # 6. DIVERGENCE PREMIUM BONUS - HIGHEST QUALITY SIGNALS
+            divergence_boost = 0.0
+            if signal_type == 'BULL' and bullish_divergence:
+                divergence_boost = 0.15 + (divergence_strength * 0.10)  # Up to 25% bonus
+                self.logger.debug(f"🎯 BULLISH DIVERGENCE DETECTED! Confidence boost: +{divergence_boost:.3f}")
+            elif signal_type == 'BEAR' and bearish_divergence:
+                divergence_boost = 0.15 + (divergence_strength * 0.10)  # Up to 25% bonus
+                self.logger.debug(f"🎯 BEARISH DIVERGENCE DETECTED! Confidence boost: +{divergence_boost:.3f}")
+            
+            base_confidence += divergence_boost
+            
+            # Final confidence bounds and quality control
+            # Ensure we have a high-quality signal (65%+ minimum after all boosts)
+            final_confidence = max(0.20, min(0.95, base_confidence))
+            
+            # Additional restrictive quality gate
+            if final_confidence < 0.65:
+                self.logger.debug(f"Signal rejected: confidence {final_confidence:.3f} below 65% threshold")
+                return 0.30  # Below trading threshold
+            
+            self.logger.debug(f"Enhanced MACD confidence: {final_confidence:.3f} for {signal_type} "
+                            f"(ADX: {adx:.1f}, RSI: {rsi:.1f}, Histogram: {macd_histogram:.6f})")
+            return final_confidence
             
         except Exception as e:
             self.logger.error(f"Error calculating MACD confidence: {e}")

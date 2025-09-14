@@ -323,7 +323,7 @@ class MACDStrategy(BaseStrategy):
         try:
             # Check for bull crossover
             if latest_row.get('bull_alert', False):
-                self.logger.info(f"🎯 MACD BULL crossover detected at bar {bar_count}")
+                self.logger.debug(f"🎯 MACD BULL crossover detected at bar {bar_count}")
                 
                 # Validate EMA 200 trend filter
                 if not self.trend_validator.validate_ema_200_trend(latest_row, 'BULL'):
@@ -353,14 +353,14 @@ class MACDStrategy(BaseStrategy):
                     spread_pips=spread_pips
                 )
                 if signal:
-                    self.logger.info(f"✅ MACD BULL signal generated: {signal['confidence']:.1%}")
+                    self.logger.debug(f"✅ MACD BULL signal generated: {signal['confidence']:.1%}")
                     return signal
                 else:
                     self.logger.info("❌ MACD BULL signal creation failed")
             
             # Check for bear crossover
             if latest_row.get('bear_alert', False):
-                self.logger.info(f"🎯 MACD BEAR crossover detected at bar {bar_count}")
+                self.logger.debug(f"🎯 MACD BEAR crossover detected at bar {bar_count}")
                 
                 # Validate EMA 200 trend filter
                 if not self.trend_validator.validate_ema_200_trend(latest_row, 'BEAR'):
@@ -390,7 +390,7 @@ class MACDStrategy(BaseStrategy):
                     spread_pips=spread_pips
                 )
                 if signal:
-                    self.logger.info(f"✅ MACD BEAR signal generated: {signal['confidence']:.1%}")
+                    self.logger.debug(f"✅ MACD BEAR signal generated: {signal['confidence']:.1%}")
                     return signal
                 else:
                     self.logger.info("❌ MACD BEAR signal creation failed")
@@ -451,7 +451,7 @@ class MACDStrategy(BaseStrategy):
             if not self.signal_calculator.validate_confidence_threshold(confidence):
                 return None
             
-            self.logger.info(f"🎯 MACD {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}")
+            self.logger.debug(f"🎯 MACD {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}")
             return signal
             
         except Exception as e:

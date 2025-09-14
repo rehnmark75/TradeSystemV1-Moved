@@ -1263,7 +1263,7 @@ class EnhancedMACDBacktest:
                 # Restore original batch size
                 self.data_fetcher.batch_size = original_batch_size
                 
-                if df.empty:
+                if df is None or df.empty:
                     self.logger.warning(f"❌ No data available for {current_epic}")
                     epic_results[current_epic] = {'signals': 0, 'error': 'No data'}
                     continue
@@ -1526,35 +1526,10 @@ class EnhancedMACDBacktest:
                     enhanced_signal = self._add_performance_metrics(signal, df, i)
                     signals.append(enhanced_signal)
                     
-                    # Log with original timestamp for traceability 
+                    # Only log basic signal info (reduced verbosity to allow summary table to show)
                     original_timestamp = signal['backtest_timestamp']
-                    self.logger.info(f"📊 MACD signal at {original_timestamp}: "
+                    self.logger.debug(f"📊 MACD signal at {original_timestamp}: "
                                     f"{signal.get('signal_type')} (conf: {confidence_value:.1%}){mtf_info}")
-                    # Debug epic preservation
-                    signal_epic = signal.get('epic', 'MISSING')
-                    self.logger.debug(f"   Signal epic: '{signal_epic}' (expected: '{epic}')")
-                    # Also log index for correlation with summary
-                    self.logger.debug(f"   Signal index: {i}, Epic: {epic}")
-                    
-                    # Add detailed MACD values for correlation with validation logs
-                    try:
-                        current_data_for_macd = df.iloc[max(0, i-50):i+1]  # Get enough context for MACD
-                        if len(current_data_for_macd) > 0 and 'macd_histogram' in current_data_for_macd.columns:
-                            latest_bar = current_data_for_macd.iloc[-1]
-                            macd_line = latest_bar.get('macd_line', 'N/A')
-                            macd_signal_line = latest_bar.get('macd_signal', 'N/A')
-                            macd_histogram = latest_bar.get('macd_histogram', 'N/A')
-                            
-                            self.logger.info(f"   📈 MACD Values: Line={macd_line:.6f}, Signal={macd_signal_line:.6f}, Histogram={macd_histogram:.6f}")
-                            
-                            # Also log previous histogram for change calculation
-                            if len(current_data_for_macd) > 1 and 'macd_histogram' in current_data_for_macd.columns:
-                                prev_histogram = current_data_for_macd.iloc[-2].get('macd_histogram', 'N/A')
-                                if isinstance(macd_histogram, (int, float)) and isinstance(prev_histogram, (int, float)):
-                                    histogram_change = macd_histogram - prev_histogram
-                                    self.logger.info(f"   🔄 Histogram Change: {prev_histogram:.6f} → {macd_histogram:.6f} (Δ {histogram_change:.6f})")
-                    except Exception as e:
-                        self.logger.debug(f"Could not log MACD details: {e}")
                     
             except Exception as e:
                 self.logger.debug(f"⚠️ Error processing candle {i}: {e}")
@@ -2212,10 +2187,11 @@ class EnhancedMACDBacktest:
                 self.logger.info(f"      ⚖️ Breakeven: {len(breakeven)} (no gain/loss)")
                 self.logger.info(f"      ⚪ Neutral: {len(neutral)} (other)")
                 
-                # ENHANCED: Show trade execution details with trailing stop info
+                # ENHANCED: Show top/worst trade execution details (limit verbose output)
                 if winners:
-                    self.logger.info(f"   🔍 WINNER DETAILS:")
-                    for i, signal in enumerate(winners, 1):
+                    self.logger.info(f"   🔍 TOP WINNERS (showing up to 5):")
+                    top_winners = sorted(winners, key=lambda x: x.get('exit_pnl', x.get('max_profit_pips', 0)), reverse=True)[:5]
+                    for i, signal in enumerate(top_winners, 1):
                         exit_pnl = signal.get('exit_pnl', signal.get('max_profit_pips', 0))
                         exit_reason = signal.get('exit_reason', 'UNKNOWN')
                         exit_bar = signal.get('exit_bar', 'N/A')
@@ -2234,8 +2210,9 @@ class EnhancedMACDBacktest:
                             self.logger.info(f"         Best: {best_profit:.1f} pips (gave back {best_profit-exit_pnl:.1f})")
                         
                 if losers:
-                    self.logger.info(f"   🔍 LOSER DETAILS:")
-                    for i, signal in enumerate(losers, 1):
+                    self.logger.info(f"   🔍 WORST LOSERS (showing up to 5):")
+                    worst_losers = sorted(losers, key=lambda x: x.get('exit_pnl', -x.get('max_loss_pips', 0)))[:5]
+                    for i, signal in enumerate(worst_losers, 1):
                         exit_pnl = signal.get('exit_pnl', -signal.get('max_loss_pips', 0))
                         exit_reason = signal.get('exit_reason', 'UNKNOWN')
                         exit_bar = signal.get('exit_bar', 'N/A')
