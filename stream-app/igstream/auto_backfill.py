@@ -23,7 +23,7 @@ API_BASE_URL = IG_API_BASE_URL
 MAX_CANDLES_PER_REQUEST = 18  # Realistic IG API limit (was 1000, but IG only returns ~20 max)
 BACKFILL_RATE_LIMIT_DELAY = 2  # Seconds between API requests
 MAX_BACKFILL_ATTEMPTS = 3
-BACKFILL_BATCH_SIZE = 5  # Number of gaps to process in one run
+BACKFILL_BATCH_SIZE = 20  # Number of gaps to process in one run
 MAX_CHUNK_SIZE = 18  # Maximum candles per chunk for large gap handling (match API limit)
 EPIC_CHANGE_MAX_GAP_HOURS = 72  # Allow larger gaps for epic changes (was 48)
 

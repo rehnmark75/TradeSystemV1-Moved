@@ -173,7 +173,7 @@ async def watchdog():
                     for epic, epic_gaps in gap_stats["gaps_by_epic"].items():
                         if epic_gaps["missing_candles"] > 0:
                             logger.warning(f"   {epic}: {epic_gaps['5m']} gaps in 5m, "
-                                         f"{epic_gaps['15m']} gaps in 15m "
+                                         f"{epic_gaps['60m']} gaps in 60m "
                                          f"({epic_gaps['missing_candles']} candles)")
                 else:
                     logger.info("✅ No gaps detected in candle data")

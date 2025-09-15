@@ -186,7 +186,7 @@ class GapDetector:
         
         Args:
             epics: List of trading pairs to check
-            timeframes: List of timeframes in minutes (default: [5, 15])
+            timeframes: List of timeframes in minutes (default: [5, 60])
             
         Returns:
             Dictionary mapping "epic_timeframe" to list of gaps
