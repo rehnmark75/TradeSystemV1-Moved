@@ -79,7 +79,7 @@ def get_database_connection():
         return None
 
 
-def run_your_exact_query(date_filter: str = "2025-08-21"):
+def run_your_exact_query(date_filter: str = "today"):
     """Run your exact original query"""
     conn = get_database_connection()
     if not conn:
@@ -300,7 +300,7 @@ def main():
         
         date_option = st.selectbox(
             "Date Filter",
-            ["2025-08-21", "today", "week", "month"]
+            ["today", "week", "month"]
         )
         
         if st.button("🔄 Refresh"):
