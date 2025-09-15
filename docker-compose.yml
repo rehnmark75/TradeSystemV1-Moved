@@ -160,6 +160,7 @@ services:
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
+      - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
     volumes:
       - ./streamlit:/app
       - ./logs:/logs:ro  # Read-only for safety
@@ -176,8 +177,7 @@ services:
     container_name: tradingview
     restart: unless-stopped
     ports:
-      - "8080:8080"  # FastAPI server
-      - "8502:8501"  # Streamlit interface
+      - "8080:8080"  # FastAPI API server only (Streamlit integrated with main streamlit container)
     volumes:
       - ./logs/tradingview:/app/logs
     environment:

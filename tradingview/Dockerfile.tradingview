@@ -16,13 +16,12 @@ COPY requirements-tradingview.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Create necessary directories
-RUN mkdir -p /app/data /app/logs /app/mcp /app/strategy_bridge /app/api /app/streamlit_tv /app/indexer
+RUN mkdir -p /app/data /app/logs /app/mcp /app/strategy_bridge /app/api /app/indexer
 
 # Copy TradingView integration files
 COPY mcp/ /app/mcp/
-COPY strategy_bridge/ /app/strategy_bridge/  
+COPY strategy_bridge/ /app/strategy_bridge/
 COPY api/ /app/api/
-COPY tradingview_importer.py /app/streamlit_tv/
 COPY indexer/ /app/indexer/
 COPY *.py /app/
 COPY init_tradingview_tables.sql /app/sql/
@@ -30,8 +29,8 @@ COPY init_tradingview_tables.sql /app/sql/
 # Set Python path
 ENV PYTHONPATH="/app:/app/mcp:/app/strategy_bridge"
 
-# Expose ports for API and Streamlit
-EXPOSE 8080 8501
+# Expose port for API only (Streamlit handled by dedicated container)
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

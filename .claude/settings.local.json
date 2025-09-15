@@ -45,7 +45,8 @@
       "WebFetch(domain:www.mindmathmoney.com)",
       "Bash(./tradingview/manage-tradingview.sh status:*)",
       "Bash(cat:*)",
-      "Bash(while read script)"
+      "Bash(while read script)",
+      "Bash(./download_luxalgo_collection.sh:*)"
     ],
     "deny": [],
     "ask": []
