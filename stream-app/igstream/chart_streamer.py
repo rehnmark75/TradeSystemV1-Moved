@@ -205,15 +205,10 @@ class IGChartCandleListener(SubscriptionListener):
         try:
             # Calculate MID prices for analytics compatibility
             mid_open, mid_high, mid_low, mid_close = candle.get_mid_ohlc()
-            
-            # Apply scaling correction for CS.D.EURUSD.CEEM.IP
-            # This epic uses 10,000x scaling that needs to be normalized
-            if candle.epic == DEFAULT_TEST_EPIC:
-                mid_open = mid_open / 10000
-                mid_high = mid_high / 10000
-                mid_low = mid_low / 10000
-                mid_close = mid_close / 10000
-                logger.debug(f"Applied EURUSD CEEM scaling correction: {mid_close * 10000:.1f} -> {mid_close:.5f}")
+
+            # Note: IG Markets changed their data format in September 2025
+            # EURUSD data now comes in correct format (1.176xx) and doesn't need scaling
+            # Removed old scaling correction that was dividing by 10,000
             
             # Validate price data using database function
             with SessionLocal() as validation_session:

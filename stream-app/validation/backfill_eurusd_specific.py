@@ -149,11 +149,8 @@ async def backfill_specific_range():
                                     mid_low = (bid_low + ask_low) / 2
                                     mid_close = (bid_close + ask_close) / 2
                                     
-                                    # Apply EURUSD scaling correction (divide by 10000)
-                                    mid_open = mid_open / 10000
-                                    mid_high = mid_high / 10000
-                                    mid_low = mid_low / 10000
-                                    mid_close = mid_close / 10000
+                                    # Note: IG Markets changed data format in September 2025
+                                    # EURUSD data now comes in correct format, no scaling needed
                                     
                                     if existing:
                                         # Update existing record if data_source is not from API
