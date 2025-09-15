@@ -301,9 +301,10 @@ class IchimokuStrategy(BaseStrategy):
         try:
             # Validate data requirements
             if not self.indicator_calculator.validate_data_requirements(df, self.min_bars):
+                self.logger.info(f"🌥️ Ichimoku {epic}: Insufficient data ({len(df)} bars, need {self.min_bars})")
                 return None
 
-            self.logger.debug(f"Processing {len(df)} bars for {epic}")
+            self.logger.info(f"🌥️ Ichimoku {epic}: Processing {len(df)} bars for signal detection")
 
             # Calculate Ichimoku indicators if not present
             df_enhanced = self.indicator_calculator.ensure_ichimoku_indicators(df.copy(), self.ichimoku_config)
@@ -314,19 +315,24 @@ class IchimokuStrategy(BaseStrategy):
             # Get latest data for signal evaluation
             latest_row = df_with_signals.iloc[-1]
 
-            # Debug logging for troubleshooting
-            if len(df) < 100:  # Only log for small datasets to avoid spam
-                tk_bull = latest_row.get('tk_bull_cross', False)
-                tk_bear = latest_row.get('tk_bear_cross', False)
-                cloud_bull = latest_row.get('cloud_bull_breakout', False)
-                cloud_bear = latest_row.get('cloud_bear_breakout', False)
-                if any([tk_bull, tk_bear, cloud_bull, cloud_bear]):
-                    self.logger.info(f"🌥️ Ichimoku signals - TK: B{tk_bull}/B{tk_bear}, Cloud: B{cloud_bull}/B{cloud_bear}")
+            # Enhanced logging for monitoring
+            tk_bull = latest_row.get('tk_bull_cross', False)
+            tk_bear = latest_row.get('tk_bear_cross', False)
+            cloud_bull = latest_row.get('cloud_bull_breakout', False)
+            cloud_bear = latest_row.get('cloud_bear_breakout', False)
+
+            # Always log what we found (or didn't find)
+            if any([tk_bull, tk_bear, cloud_bull, cloud_bear]):
+                self.logger.info(f"🌥️ Ichimoku {epic}: Potential signals - TK: Bull={tk_bull}/Bear={tk_bear}, Cloud: Bull={cloud_bull}/Bear={cloud_bear}")
+            else:
+                self.logger.info(f"🌥️ Ichimoku {epic}: No TK crosses or cloud breakouts detected")
 
             # Check for immediate signals
             signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df), df_with_signals)
             if signal:
                 return signal
+            else:
+                self.logger.info(f"🌥️ Ichimoku {epic}: Signal validation failed or no valid signals")
 
             return None
 
@@ -347,16 +353,19 @@ class IchimokuStrategy(BaseStrategy):
 
                 # Validate cloud position (price should be above cloud for bull signals)
                 if not self.trend_validator.validate_cloud_position(latest_row, 'BULL'):
+                    self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal failed cloud position validation")
                     return None
 
                 # Validate Chikou span (should be clear of historical price action)
                 if not self.trend_validator.validate_chikou_span(df_with_signals, 'BULL'):
+                    self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal failed Chikou span validation")
                     return None
 
                 # Multi-timeframe validation if enabled
                 if self.enable_mtf_analysis and self.mtf_analyzer:
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_mtf_ichimoku(epic, current_time, 'BULL'):
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal failed MTF validation")
                         return None
 
                 # Create bull signal
@@ -382,16 +391,19 @@ class IchimokuStrategy(BaseStrategy):
 
                 # Validate cloud position (price should be below cloud for bear signals)
                 if not self.trend_validator.validate_cloud_position(latest_row, 'BEAR'):
+                    self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal failed cloud position validation")
                     return None
 
                 # Validate Chikou span (should be clear of historical price action)
                 if not self.trend_validator.validate_chikou_span(df_with_signals, 'BEAR'):
+                    self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal failed Chikou span validation")
                     return None
 
                 # Multi-timeframe validation if enabled
                 if self.enable_mtf_analysis and self.mtf_analyzer:
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_mtf_ichimoku(epic, current_time, 'BEAR'):
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal failed MTF validation")
                         return None
 
                 # Create bear signal
