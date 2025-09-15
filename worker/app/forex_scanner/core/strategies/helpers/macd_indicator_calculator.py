@@ -20,11 +20,11 @@ class MACDIndicatorCalculator:
         # EMERGENCY: Global signal tracking across backtest calls
         self.global_signal_tracker = {}  # {epic: {'last_signal_time': timestamp, 'signal_count': int}}
         
-        # PROVEN FOREX MACD PARAMETERS (research-backed 8-17-9 for forex markets)
+        # Default MACD parameters (fallback only - prefer database parameters)
         self.default_config = {
-            'fast_ema': 8,    # Faster than traditional 12 - better for forex volatility
-            'slow_ema': 17,   # More responsive than 26 - better for forex trends
-            'signal_ema': 9   # Keep signal line the same
+            'fast_ema': 12,   # Traditional default
+            'slow_ema': 26,   # Traditional default
+            'signal_ema': 9   # Standard signal line
         }
     
     def get_required_indicators(self, macd_config: Dict = None) -> List[str]:
@@ -107,7 +107,7 @@ class MACDIndicatorCalculator:
             self.logger.error(f"Error calculating MACD indicators: {e}")
             return df_copy
     
-    def detect_macd_crossovers(self, df: pd.DataFrame, epic: str = '') -> pd.DataFrame:
+    def detect_macd_crossovers(self, df: pd.DataFrame, epic: str = '', is_backtest: bool = False) -> pd.DataFrame:
         """
         Detect MACD histogram crossovers with strength filtering (main signal generation)
         
@@ -206,15 +206,22 @@ class MACDIndicatorCalculator:
             bear_count = bear_cross.sum()
             self.logger.debug(f"Multi-filter MACD crossovers for {epic}: {bull_count} bull, {bear_count} bear (threshold: {base_threshold:.8f})")
 
-            # EMERGENCY: Apply global backtest signal tracking FIRST
-            bull_cross, bear_cross = self._apply_backtest_global_filter(df_copy, bull_cross, bear_cross, epic)
+            # Only apply backtest filters when actually backtesting
+            if is_backtest:
+                # Apply global backtest signal tracking FIRST
+                bull_cross, bear_cross = self._apply_backtest_global_filter(df_copy, bull_cross, bear_cross, epic)
 
-            # Then apply per-call signal limiter
-            bull_cross, bear_cross = self._apply_global_signal_limiter(df_copy, bull_cross, bear_cross, epic)
+                final_bull_count = bull_cross.sum()
+                final_bear_count = bear_cross.sum()
+                self.logger.info(f"🚨 BACKTEST GLOBAL + CALL LIMITER for {epic}: Bull {bull_count} -> {final_bull_count}, Bear {bear_count} -> {final_bear_count}")
+            else:
+                # For live trading, apply simpler signal limiter
+                bull_cross, bear_cross = self._apply_global_signal_limiter(df_copy, bull_cross, bear_cross, epic)
 
-            final_bull_count = bull_cross.sum()
-            final_bear_count = bear_cross.sum()
-            self.logger.info(f"🚨 BACKTEST GLOBAL + CALL LIMITER for {epic}: Bull {bull_count} -> {final_bull_count}, Bear {bear_count} -> {final_bear_count}")
+                final_bull_count = bull_cross.sum()
+                final_bear_count = bear_cross.sum()
+                if bull_count + bear_count != final_bull_count + final_bear_count:
+                    self.logger.info(f"🎯 LIVE SIGNAL LIMITER for {epic}: Bull {bull_count} -> {final_bull_count}, Bear {bear_count} -> {final_bear_count}")
             
             df_copy['bull_crossover'] = bull_cross
             df_copy['bear_crossover'] = bear_cross

@@ -24,8 +24,8 @@ import pandas as pd
 # Add project path
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../../..'))
 
-from engines.live_simulation_engine import LiveSimulationEngine
-from components.trade_manager import MACDTradeManager
+from .engines.live_simulation_engine import LiveSimulationEngine
+from .components.trade_manager import MACDTradeManager
 
 
 class RealisticMACDBacktest:

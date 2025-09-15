@@ -42,7 +42,10 @@
       "Bash(./manage-tradingview.sh:*)",
       "Bash(curl:*)",
       "WebSearch",
-      "WebFetch(domain:www.mindmathmoney.com)"
+      "WebFetch(domain:www.mindmathmoney.com)",
+      "Bash(./tradingview/manage-tradingview.sh status:*)",
+      "Bash(cat:*)",
+      "Bash(while read script)"
     ],
     "deny": [],
     "ask": []

@@ -48,8 +48,8 @@ class LiveSimulationEngine:
         self.strategy = MACDStrategy(
             epic=epic,
             timeframe=timeframe,
-            backtest_mode=False,  # Use live mode for accurate simulation
-            use_optimized_parameters=False  # Force proven 8-17-9 settings
+            backtest_mode=True,  # Use backtest mode for proper signal filtering
+            use_optimized_parameters=True  # Use database-stored optimized parameters
         )
 
         # Live simulation state

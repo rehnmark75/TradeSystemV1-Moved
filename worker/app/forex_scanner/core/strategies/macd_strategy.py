@@ -64,7 +64,7 @@ class MACDStrategy(BaseStrategy):
     Coordinates focused helper modules to keep main class lightweight and maintainable.
     """
     
-    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None, timeframe: str = '15m', use_optimized_parameters: bool = False):  # EMERGENCY: Disable optimization
+    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None, timeframe: str = '15m', use_optimized_parameters: bool = True):  # Enable optimization by default
         # Initialize parent  
         self.name = 'macd'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
@@ -122,10 +122,20 @@ class MACDStrategy(BaseStrategy):
             else:
                 self.logger.info(f"🔍 Missing epic or timeframe: epic={self.epic}, timeframe={self.timeframe}")
             
-            final_condition = (self.use_optimized_parameters and 
-                               OPTIMIZATION_AVAILABLE and 
-                               self.epic and 
-                               is_epic_macd_optimized(self.epic, self.timeframe))
+            # Force database lookup if optimization is available and epic is provided
+            has_epic_data = False
+            if self.epic and OPTIMIZATION_AVAILABLE:
+                try:
+                    has_epic_data = is_epic_macd_optimized(self.epic, self.timeframe)
+                    self.logger.info(f"🔍 Database check for {self.epic}: {has_epic_data}")
+                except Exception as check_error:
+                    self.logger.warning(f"Database check failed: {check_error}")
+                    has_epic_data = False
+
+            final_condition = (self.use_optimized_parameters and
+                               OPTIMIZATION_AVAILABLE and
+                               self.epic and
+                               has_epic_data)
             
             self.logger.info(f"🔍 Final condition: {final_condition}")
             
@@ -156,34 +166,68 @@ class MACDStrategy(BaseStrategy):
                     'take_profit_pips': optimal_params.take_profit_pips
                 }
             
-            # EMERGENCY OVERRIDE: Use proven forex MACD settings (8-17-9)
+            # Fallback: Use database defaults if optimization not available
             else:
-                self.logger.info(f"🚨 EMERGENCY: Using PROVEN FOREX MACD settings (8-17-9) for {self.epic or 'default'} ({self.timeframe})")
+                self.logger.info(f"📊 Using DATABASE defaults for {self.epic or 'default'} ({self.timeframe}) - proven 8-17-9 settings")
 
-                return {
-                    'fast_ema': 8,    # Proven forex setting (faster than traditional 12)
-                    'slow_ema': 17,   # Proven forex setting (faster than traditional 26)
-                    'signal_ema': 9,  # Standard signal line
-                    'confidence_threshold': 0.5,
-                    'histogram_threshold': 0.00001,  # Very permissive for emergency
-                    'rsi_filter_enabled': False,    # Disabled for emergency
-                    'momentum_confirmation': False,  # Disabled for emergency
-                    'zero_line_filter': False,      # Disabled for emergency
-                    'mtf_enabled': False,           # Disabled for emergency
-                    'stop_loss_pips': 10.0,
-                    'take_profit_pips': 20.0
-                }
+                # Try to get from database fallback method
+                try:
+                    from optimization.optimal_parameter_service import _get_macd_fallback_parameters
+                    fallback_params = _get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.MINI.IP', self.timeframe)
+
+                    return {
+                        'fast_ema': fallback_params.fast_ema,
+                        'slow_ema': fallback_params.slow_ema,
+                        'signal_ema': fallback_params.signal_ema,
+                        'confidence_threshold': fallback_params.confidence_threshold,
+                        'histogram_threshold': fallback_params.histogram_threshold,
+                        'rsi_filter_enabled': fallback_params.rsi_filter_enabled,
+                        'momentum_confirmation': fallback_params.momentum_confirmation,
+                        'zero_line_filter': fallback_params.zero_line_filter,
+                        'mtf_enabled': fallback_params.mtf_enabled,
+                        'stop_loss_pips': fallback_params.stop_loss_pips,
+                        'take_profit_pips': fallback_params.take_profit_pips
+                    }
+                except Exception as fallback_error:
+                    self.logger.warning(f"Database fallback failed: {fallback_error}, using minimal defaults")
+                    # Last resort minimal defaults
+                    return {
+                        'fast_ema': 8, 'slow_ema': 17, 'signal_ema': 9,
+                        'confidence_threshold': 0.6, 'histogram_threshold': 0.00005,
+                        'rsi_filter_enabled': False, 'momentum_confirmation': False,
+                        'zero_line_filter': False, 'mtf_enabled': False,
+                        'stop_loss_pips': 10.0, 'take_profit_pips': 20.0
+                    }
             
         except Exception as e:
-            self.logger.warning(f"Could not load MACD config: {e}, using EMERGENCY FOREX defaults")
-            # EMERGENCY: Force proven forex settings even in exception handler
-            return {
-                'fast_ema': 8, 'slow_ema': 17, 'signal_ema': 9,
-                'confidence_threshold': 0.5, 'histogram_threshold': 0.00005,
-                'rsi_filter_enabled': False, 'momentum_confirmation': False,
-                'zero_line_filter': False, 'mtf_enabled': False,
-                'stop_loss_pips': 10.0, 'take_profit_pips': 20.0
-            }
+            self.logger.warning(f"Could not load MACD config: {e}, using DATABASE defaults")
+            # Last resort: Use database stored defaults
+            try:
+                from optimization.optimal_parameter_service import _get_macd_fallback_parameters
+                fallback_params = _get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.MINI.IP', self.timeframe)
+                return {
+                    'fast_ema': fallback_params.fast_ema,
+                    'slow_ema': fallback_params.slow_ema,
+                    'signal_ema': fallback_params.signal_ema,
+                    'confidence_threshold': fallback_params.confidence_threshold,
+                    'histogram_threshold': fallback_params.histogram_threshold,
+                    'rsi_filter_enabled': fallback_params.rsi_filter_enabled,
+                    'momentum_confirmation': fallback_params.momentum_confirmation,
+                    'zero_line_filter': fallback_params.zero_line_filter,
+                    'mtf_enabled': fallback_params.mtf_enabled,
+                    'stop_loss_pips': fallback_params.stop_loss_pips,
+                    'take_profit_pips': fallback_params.take_profit_pips
+                }
+            except Exception as fallback_error:
+                self.logger.error(f"All config methods failed: {fallback_error}")
+                # Absolute last resort hardcoded values
+                return {
+                    'fast_ema': 8, 'slow_ema': 17, 'signal_ema': 9,
+                    'confidence_threshold': 0.6, 'histogram_threshold': 0.00005,
+                    'rsi_filter_enabled': False, 'momentum_confirmation': False,
+                    'zero_line_filter': False, 'mtf_enabled': False,
+                    'stop_loss_pips': 10.0, 'take_profit_pips': 20.0
+                }
     
     def _should_enable_mtf_analysis(self, timeframe: str) -> bool:
         """
@@ -263,7 +307,7 @@ class MACDStrategy(BaseStrategy):
             df_enhanced = self.indicator_calculator.ensure_macd_indicators(df.copy(), self.macd_config)
             
             # 2. Detect MACD crossovers (with strength filtering)
-            df_with_signals = self.indicator_calculator.detect_macd_crossovers(df_enhanced, epic)
+            df_with_signals = self.indicator_calculator.detect_macd_crossovers(df_enhanced, epic, is_backtest=self.backtest_mode)
             
             # 3. Check for signals - scan all bars with crossovers (for backtest compatibility)
             if self.backtest_mode:

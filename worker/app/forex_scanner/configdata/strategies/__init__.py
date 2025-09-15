@@ -9,13 +9,15 @@ from .config_macd_strategy import *
 from .config_ema_strategy import *
 from .config_smc_strategy import *
 
-# Import TradingView integration
+# Import TradingView integration (optional)
 try:
     from .tradingview_integration import *
     TRADINGVIEW_INTEGRATION_AVAILABLE = True
 except ImportError as e:
     TRADINGVIEW_INTEGRATION_AVAILABLE = False
-    print(f"⚠️ TradingView integration not available: {e}")
+    # TradingView integration is optional - suppress warning to reduce noise
+    # Uncomment the line below if you want to see the import warning:
+    # print(f"⚠️ TradingView integration not available: {e}")
 
 # Define what gets exported when using "from strategies import *"
 __all__ = [
