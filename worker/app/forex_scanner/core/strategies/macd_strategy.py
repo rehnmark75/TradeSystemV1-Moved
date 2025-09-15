@@ -64,7 +64,7 @@ class MACDStrategy(BaseStrategy):
     Coordinates focused helper modules to keep main class lightweight and maintainable.
     """
     
-    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None, timeframe: str = '15m', use_optimized_parameters: bool = True):
+    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None, timeframe: str = '15m', use_optimized_parameters: bool = False):  # EMERGENCY: Disable optimization
         # Initialize parent  
         self.name = 'macd'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
@@ -156,48 +156,34 @@ class MACDStrategy(BaseStrategy):
                     'take_profit_pips': optimal_params.take_profit_pips
                 }
             
-            # Second priority: Use OptimalParameterService timeframe-aware fallback
+            # EMERGENCY OVERRIDE: Use proven forex MACD settings (8-17-9)
             else:
-                try:
-                    
-                    self.logger.info(f"📋 Using TIMEFRAME-AWARE fallback parameters for {self.epic or 'default'} ({self.timeframe})")
-                    optimal_params = get_macd_optimal_parameters(
-                        epic=self.epic or "CS.D.DEFAULT.MINI.IP",
-                        timeframe=self.timeframe
-                    )
-                    
-                    return {
-                        'fast_ema': optimal_params.fast_ema,
-                        'slow_ema': optimal_params.slow_ema,
-                        'signal_ema': optimal_params.signal_ema,
-                        'confidence_threshold': optimal_params.confidence_threshold,
-                        'histogram_threshold': optimal_params.histogram_threshold,
-                        'rsi_filter_enabled': optimal_params.rsi_filter_enabled,
-                        'momentum_confirmation': optimal_params.momentum_confirmation,
-                        'zero_line_filter': optimal_params.zero_line_filter,
-                        'mtf_enabled': optimal_params.mtf_enabled,
-                        'stop_loss_pips': optimal_params.stop_loss_pips,
-                        'take_profit_pips': optimal_params.take_profit_pips
-                    }
-                    
-                except Exception as fallback_error:
-                    self.logger.warning(f"⚠️ Timeframe-aware fallback failed: {fallback_error}")
-                    
-                    # Final fallback: Use config if available, otherwise defaults
-                    if hasattr(config, 'MACD_PERIODS'):
-                        macd_periods = getattr(config, 'MACD_PERIODS', None)
-                        if macd_periods and isinstance(macd_periods, dict):
-                            self.logger.info(f"📋 Using CONFIG MACD parameters for {self.epic or 'default'}: "
-                                           f"{macd_periods.get('fast_ema', 12)}/{macd_periods.get('slow_ema', 26)}/{macd_periods.get('signal_ema', 9)}")
-                            return macd_periods
-                    
-                    # Ultimate fallback: Standard MACD defaults
-                    self.logger.warning(f"⚠️ Using ULTIMATE FALLBACK MACD parameters: 12/26/9")
-                    return {'fast_ema': 12, 'slow_ema': 26, 'signal_ema': 9}
+                self.logger.info(f"🚨 EMERGENCY: Using PROVEN FOREX MACD settings (8-17-9) for {self.epic or 'default'} ({self.timeframe})")
+
+                return {
+                    'fast_ema': 8,    # Proven forex setting (faster than traditional 12)
+                    'slow_ema': 17,   # Proven forex setting (faster than traditional 26)
+                    'signal_ema': 9,  # Standard signal line
+                    'confidence_threshold': 0.5,
+                    'histogram_threshold': 0.00001,  # Very permissive for emergency
+                    'rsi_filter_enabled': False,    # Disabled for emergency
+                    'momentum_confirmation': False,  # Disabled for emergency
+                    'zero_line_filter': False,      # Disabled for emergency
+                    'mtf_enabled': False,           # Disabled for emergency
+                    'stop_loss_pips': 10.0,
+                    'take_profit_pips': 20.0
+                }
             
         except Exception as e:
-            self.logger.warning(f"Could not load MACD config: {e}, using defaults")
-            return {'fast_ema': 12, 'slow_ema': 26, 'signal_ema': 9}
+            self.logger.warning(f"Could not load MACD config: {e}, using EMERGENCY FOREX defaults")
+            # EMERGENCY: Force proven forex settings even in exception handler
+            return {
+                'fast_ema': 8, 'slow_ema': 17, 'signal_ema': 9,
+                'confidence_threshold': 0.5, 'histogram_threshold': 0.00005,
+                'rsi_filter_enabled': False, 'momentum_confirmation': False,
+                'zero_line_filter': False, 'mtf_enabled': False,
+                'stop_loss_pips': 10.0, 'take_profit_pips': 20.0
+            }
     
     def _should_enable_mtf_analysis(self, timeframe: str) -> bool:
         """
@@ -281,11 +267,14 @@ class MACDStrategy(BaseStrategy):
             
             # 3. Check for signals - scan all bars with crossovers (for backtest compatibility)
             if self.backtest_mode:
-                # BACKTEST MODE: Check all bars that have crossovers in this window
+                # BACKTEST MODE: Collect all signals in this window and return the latest one
+                # This ensures daily limits and filters were already applied in detect_macd_crossovers
+                all_signals = []
+
                 for idx, row in df_with_signals.iterrows():
                     bull_alert = row.get('bull_alert', False)
                     bear_alert = row.get('bear_alert', False)
-                    
+
                     if bull_alert or bear_alert:
                         signal = self._check_immediate_signal(row, epic, timeframe, spread_pips, len(df))
                         if signal:
@@ -294,8 +283,16 @@ class MACDStrategy(BaseStrategy):
                                 signal['signal_time'] = row.name
                             elif 'start_time' in row:
                                 signal['signal_time'] = row['start_time']
-                            return signal
-                
+                            all_signals.append((idx, signal))
+
+                # Return the LATEST signal only (respects the filtering that was already applied)
+                if all_signals:
+                    # Sort by timestamp and return the latest
+                    all_signals.sort(key=lambda x: x[0])
+                    latest_signal = all_signals[-1][1]
+                    self.logger.debug(f"🎯 Backtest: Found {len(all_signals)} valid signals, returning latest at {latest_signal.get('signal_time', 'unknown')}")
+                    return latest_signal
+
                 return None
             else:
                 # LIVE MODE: Only check latest bar (normal behavior)
@@ -325,10 +322,10 @@ class MACDStrategy(BaseStrategy):
             if latest_row.get('bull_alert', False):
                 self.logger.debug(f"🎯 MACD BULL crossover detected at bar {bar_count}")
                 
-                # Validate EMA 200 trend filter
-                if not self.trend_validator.validate_ema_200_trend(latest_row, 'BULL'):
-                    self.logger.warning("❌ MACD BULL signal REJECTED: Price below EMA 200 (against major trend)")
-                    return None
+                # EMA 200 trend filter disabled to allow more signals
+                # if not self.trend_validator.validate_ema_200_trend(latest_row, 'BULL'):
+                #     self.logger.warning("❌ MACD BULL signal REJECTED: Price below EMA 200 (against major trend)")
+                #     return None
                 
                 # Validate MACD histogram direction
                 if not self.trend_validator.validate_macd_histogram_direction(latest_row, 'BULL'):
@@ -362,10 +359,10 @@ class MACDStrategy(BaseStrategy):
             if latest_row.get('bear_alert', False):
                 self.logger.debug(f"🎯 MACD BEAR crossover detected at bar {bar_count}")
                 
-                # Validate EMA 200 trend filter
-                if not self.trend_validator.validate_ema_200_trend(latest_row, 'BEAR'):
-                    self.logger.warning("❌ MACD BEAR signal REJECTED: Price above EMA 200 (against major trend)")
-                    return None
+                # EMA 200 trend filter disabled to allow more signals
+                # if not self.trend_validator.validate_ema_200_trend(latest_row, 'BEAR'):
+                #     self.logger.warning("❌ MACD BEAR signal REJECTED: Price above EMA 200 (against major trend)")
+                #     return None
                 
                 # Validate MACD histogram direction
                 if not self.trend_validator.validate_macd_histogram_direction(latest_row, 'BEAR'):

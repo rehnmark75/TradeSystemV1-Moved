@@ -41,7 +41,8 @@
       "Bash(chmod:*)",
       "Bash(./manage-tradingview.sh:*)",
       "Bash(curl:*)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:www.mindmathmoney.com)"
     ],
     "deny": [],
     "ask": []
