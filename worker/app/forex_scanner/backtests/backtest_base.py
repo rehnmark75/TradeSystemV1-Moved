@@ -8,23 +8,23 @@ from typing import Dict, List, Optional
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from core.database import DatabaseManager
-from core.data_fetcher import DataFetcher
-from core.backtest.performance_analyzer import PerformanceAnalyzer
-from core.backtest.signal_analyzer import SignalAnalyzer
+from forex_scanner.core.database import DatabaseManager
+from forex_scanner.core.data_fetcher import DataFetcher
+from forex_scanner.core.backtest.performance_analyzer import PerformanceAnalyzer
+from forex_scanner.core.backtest.signal_analyzer import SignalAnalyzer
 
 # Import optimization service
 try:
-    from optimization.optimal_parameter_service import OptimalParameterService
+    from forex_scanner.optimization.optimal_parameter_service import OptimalParameterService
     OPTIMIZATION_AVAILABLE = True
 except ImportError:
     OPTIMIZATION_AVAILABLE = False
     logging.getLogger(__name__).warning("Optimization service not available - using fallback parameters")
 
 try:
-    import config
-except ImportError:
     from forex_scanner import config
+except ImportError:
+    import config
 
 
 class BacktestBase(ABC):

@@ -133,7 +133,7 @@ class SignalDetector:
                     active_smc_config = ACTIVE_SMC_CONFIG
                 except ImportError:
                     active_smc_config = 'default'
-                
+
                 self.smc_strategy = SMCStrategyFast(smc_config_name=active_smc_config)
                 self.logger.info("✅ SMC (Smart Money Concepts) strategy initialized")
             except ImportError as e:
@@ -145,6 +145,29 @@ class SignalDetector:
         else:
             self.smc_strategy = None
             self.logger.info("⚪ SMC strategy disabled")
+
+        # Initialize Ichimoku Strategy if enabled
+        if getattr(config, 'ICHIMOKU_CLOUD_STRATEGY', False):
+            try:
+                from .strategies.ichimoku_strategy import IchimokuStrategy
+                # Get the active Ichimoku config name for proper logging
+                try:
+                    from configdata.strategies.config_ichimoku_strategy import ACTIVE_ICHIMOKU_CONFIG
+                    active_ichimoku_config = ACTIVE_ICHIMOKU_CONFIG
+                except ImportError:
+                    active_ichimoku_config = 'traditional'
+
+                self.ichimoku_strategy = IchimokuStrategy(data_fetcher=self.data_fetcher)
+                self.logger.info(f"✅ Ichimoku Cloud strategy initialized with '{active_ichimoku_config}' configuration")
+            except ImportError as e:
+                self.logger.error(f"❌ Failed to import Ichimoku strategy: {e}")
+                self.ichimoku_strategy = None
+            except Exception as e:
+                self.logger.error(f"❌ Failed to initialize Ichimoku strategy: {e}")
+                self.ichimoku_strategy = None
+        else:
+            self.ichimoku_strategy = None
+            self.logger.info("⚪ Ichimoku Cloud strategy disabled")
 
         # Initialize analysis components
         self.backtest_engine = BacktestEngine(self.data_fetcher)
@@ -493,6 +516,42 @@ class SignalDetector:
             self.logger.error(f"Error detecting SMC signals for {epic}: {e}")
             return None
 
+    def detect_ichimoku_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None
+    ) -> Optional[Dict]:
+        """
+        Detect Ichimoku Cloud signals using TK crosses, cloud breakouts, and Chikou confirmation
+        """
+        # Use default timeframe if not specified
+        timeframe = self._get_default_timeframe(timeframe)
+
+        if not self.ichimoku_strategy:
+            return None
+
+        try:
+            # Get enhanced data
+            df = self.data_fetcher.get_enhanced_data(epic, pair, timeframe=timeframe)
+
+            if df is None or len(df) < system_config.MIN_BARS_FOR_SIGNAL:
+                return None
+
+            # Detect Ichimoku signal
+            signal = self.ichimoku_strategy.detect_signal(df, epic, spread_pips, timeframe)
+
+            if signal:
+                # Apply market context
+                signal = self._add_market_context(signal, df)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"Error detecting Ichimoku signals for {epic}: {e}")
+            return None
+
     def detect_combined_signals(
         self, 
         epic: str, 
@@ -690,20 +749,40 @@ class SignalDetector:
                 try:
                     self.logger.debug(f"🔍 [SMC STRATEGY] Starting detection for {epic}")
                     smc_signal = self.detect_smc_signals(epic, pair, spread_pips, timeframe)
-                    
+
                     # Store result for combined strategy
                     individual_results['smc'] = smc_signal
-                    
+
                     if smc_signal:
                         all_signals.append(smc_signal)
                         self.logger.info(f"✅ [SMC STRATEGY] Signal detected for {epic}")
                     else:
                         self.logger.debug(f"📊 [SMC STRATEGY] No signal for {epic}")
-                        
+
                 except Exception as e:
                     self.logger.error(f"❌ [SMC STRATEGY] Error for {epic}: {e}")
                     individual_results['smc'] = None
-            
+
+            # 9. Ichimoku Strategy (if enabled)
+            if (getattr(config, 'ICHIMOKU_CLOUD_STRATEGY', False) and
+                hasattr(self, 'ichimoku_strategy') and self.ichimoku_strategy is not None):
+                try:
+                    self.logger.debug(f"🔍 [ICHIMOKU STRATEGY] Starting detection for {epic}")
+                    ichimoku_signal = self.detect_ichimoku_signals(epic, pair, spread_pips, timeframe)
+
+                    # Store result for combined strategy
+                    individual_results['ichimoku'] = ichimoku_signal
+
+                    if ichimoku_signal:
+                        all_signals.append(ichimoku_signal)
+                        self.logger.info(f"✅ [ICHIMOKU STRATEGY] Signal detected for {epic}")
+                    else:
+                        self.logger.debug(f"📊 [ICHIMOKU STRATEGY] No signal for {epic}")
+
+                except Exception as e:
+                    self.logger.error(f"❌ [ICHIMOKU STRATEGY] Error for {epic}: {e}")
+                    individual_results['ichimoku'] = None
+
             # ========== COMBINED STRATEGY WITH PRECOMPUTED RESULTS ==========
             
             # 8. Combined Strategy - 🔧 UPDATED: Pass precomputed results to prevent duplicates

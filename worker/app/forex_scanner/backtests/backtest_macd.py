@@ -681,7 +681,99 @@ class EnhancedMACDBacktest:
             import traceback
             traceback.print_exc()
             return False
-    
+
+    def run_live_scanner_simulation(
+            self,
+            epic: str = None,
+            days: int = 1,
+            timeframe: str = None,
+            show_signals: bool = True,
+            enable_smart_money: bool = False
+        ) -> bool:
+            """
+            Simulate the exact live scanner behavior using the REAL signal detection path
+            """
+
+            timeframe = timeframe or getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+            epic_list = [epic] if epic else config.EPIC_LIST
+
+            self.logger.info("🔄 LIVE SCANNER SIMULATION MODE")
+            self.logger.info("=" * 50)
+            self.logger.info(f"📊 Epic(s): {epic_list}")
+            self.logger.info(f"⏰ Timeframe: {timeframe}")
+            self.logger.info(f"📅 Days: {days}")
+            self.logger.info(f"🧠 Smart Money analysis: {enable_smart_money}")
+
+            # Initialize Smart Money analysis if enabled
+            if enable_smart_money:
+                self.initialize_smart_money_analysis(enable_smart_money)
+
+            try:
+                # CRITICAL FIX: Use the EXACT same signal detection path as live scanner
+                from core.signal_detector import SignalDetector
+                signal_detector = SignalDetector(self.db_manager, 'UTC')
+
+                self.logger.info("✅ Using real SignalDetector (matches live scanner exactly)")
+                self.logger.info(f"   Smart Money: {'✅ Enabled' if self.smart_money_enabled else '❌ Disabled'}")
+
+                all_signals = []
+
+                for current_epic in epic_list:
+                    self.logger.info(f"\n📈 Simulating live scanner for {current_epic}")
+
+                    # Get pair info (same as live scanner)
+                    pair_info = config.PAIR_INFO.get(current_epic, {'pair': 'EURUSD', 'pip_multiplier': 10000})
+                    pair_name = pair_info['pair']
+
+                    self.logger.info(f"   📊 Pair: {pair_name}")
+                    self.logger.info(f"   📊 Timeframe: {timeframe}")
+                    self.logger.info(f"   📊 BID adjustment: {config.USE_BID_ADJUSTMENT}")
+                    self.logger.info(f"   📊 Spread pips: {config.SPREAD_PIPS}")
+
+                    # CRITICAL FIX: Use EXACT live scanner detection method
+                    if config.USE_BID_ADJUSTMENT:
+                        signal = signal_detector.detect_signals_bid_adjusted(
+                            current_epic, pair_name, config.SPREAD_PIPS, timeframe
+                        )
+                    else:
+                        signal = signal_detector.detect_signals_mid_prices(
+                            current_epic, pair_name, timeframe
+                        )
+
+                    if signal:
+                        self.logger.info(f"   🎯 Live scanner simulation found signal!")
+                        self.logger.info(f"      Type: {signal.get('signal_type')}")
+                        self.logger.info(f"      Strategy: {signal.get('strategy')}")
+                        self.logger.info(f"      Confidence: {signal.get('confidence', signal.get('confidence_score', 0)):.1%}")
+                        self.logger.info(f"      Price: {signal.get('price', 0):.5f}")
+
+                        signal['simulation_mode'] = 'live_scanner'
+                        # Use UTC for consistency
+                        signal['detected_at'] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+
+                        all_signals.append(signal)
+                    else:
+                        self.logger.info(f"   ❌ Live scanner simulation found no signals")
+
+                # Display results
+                if all_signals:
+                    self.logger.info(f"\n✅ LIVE SCANNER SIMULATION RESULTS:")
+                    self.logger.info(f"   📊 Total signals: {len(all_signals)}")
+
+                    if show_signals:
+                        self._display_simulation_signals(all_signals)
+
+                    return True
+                else:
+                    self.logger.warning("❌ Live scanner simulation found no signals")
+                    return False
+
+            except Exception as e:
+                self.logger.error(f"❌ Live scanner simulation failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+
     def _show_raw_data_context(self, df: pd.DataFrame, signal_idx: int, target_time: pd.Timestamp):
         """Show raw OHLC data around the signal point"""
         self.logger.info("\n📊 RAW DATA CONTEXT:")
@@ -2053,7 +2145,25 @@ class EnhancedMACDBacktest:
             self.logger.info(f"   MTF valid signals: {valid_mtf}/{len(mtf_signals)}")
         else:
             self.logger.info(f"\n📊 MTF Summary: No MTF analysis found in signals")
-    
+
+    def _display_simulation_signals(self, signals: List[Dict]):
+        """Display live scanner simulation signals"""
+        self.logger.info("\n🔄 LIVE SCANNER SIMULATION SIGNALS:")
+        self.logger.info("=" * 80)
+        self.logger.info("EPIC                    TYPE  CONF   PRICE     TIMESTAMP")
+        self.logger.info("-" * 80)
+
+        for signal in signals:
+            epic = signal.get('epic', 'Unknown')
+            signal_type = signal.get('signal_type', 'Unknown')
+            confidence = signal.get('confidence', signal.get('confidence_score', 0))
+            price = signal.get('price', 0)
+            timestamp = signal.get('timestamp', 'Unknown')
+
+            self.logger.info(f"{epic:<24} {signal_type:<4} {confidence:<6.1%} {price:<9.5f} {timestamp}")
+
+        self.logger.info("=" * 80)
+
     def _display_signals(self, signals: List[Dict]):
         """Display individual signals using SignalAnalyzer (same as EMA backtest)"""
         self.logger.info("\n🎯 INDIVIDUAL MACD SIGNALS:")
@@ -2508,12 +2618,19 @@ class EnhancedMACDBacktest:
 def main():
     """Main execution function with enhanced Smart Money options and signal validation"""
     parser = argparse.ArgumentParser(description='Enhanced MACD Strategy Backtest with Smart Money Analysis and Signal Validation')
-    
+
+    # Mode selection
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument('--simulate-live', action='store_true',
+                           help='Simulate live scanner behavior using real signal detector')
+    mode_group.add_argument('--backtest', action='store_true', default=True,
+                           help='Run backtest using modular strategy (default)')
+
     # Required arguments
     parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.MINI.IP)')
     parser.add_argument('--days', type=int, default=7, help='Days to backtest (default: 7)')
     parser.add_argument('--timeframe', default=None, help=f'Timeframe (default: {getattr(config, "DEFAULT_TIMEFRAME", "15m")})')
-    
+
     # Optional arguments
     parser.add_argument('--show-signals', action='store_true', help='Show individual signals')
     parser.add_argument('--min-confidence', type=float, help='Minimum confidence threshold')
@@ -2624,20 +2741,29 @@ def main():
         }
         print("🔧 Applied JPY-specific optimizations")
     
-    # Run enhanced backtest with Smart Money
+    # Run enhanced backtest or live scanner simulation with Smart Money
     backtest = EnhancedMACDBacktest()
-    
-    success = backtest.run_backtest(
-        epic=args.epic,
-        days=args.days,
-        timeframe=args.timeframe,
-        show_signals=args.show_signals,
-        min_confidence=args.min_confidence,
-        optimization_config=optimization_config if optimization_config else None,
-        enable_forex_integration=not args.disable_forex_integration,
-        enable_smart_money=enable_smart_money,
-        use_optimal_parameters=not args.no_optimal_params
-    )
+
+    if args.simulate_live:
+        success = backtest.run_live_scanner_simulation(
+            epic=args.epic,
+            days=args.days,
+            timeframe=args.timeframe,
+            show_signals=True,
+            enable_smart_money=enable_smart_money
+        )
+    else:
+        success = backtest.run_backtest(
+            epic=args.epic,
+            days=args.days,
+            timeframe=args.timeframe,
+            show_signals=args.show_signals,
+            min_confidence=args.min_confidence,
+            optimization_config=optimization_config if optimization_config else None,
+            enable_forex_integration=not args.disable_forex_integration,
+            enable_smart_money=enable_smart_money,
+            use_optimal_parameters=not args.no_optimal_params
+        )
     
     if success:
         print("\n✅ Enhanced MACD backtest with Smart Money analysis completed successfully!")

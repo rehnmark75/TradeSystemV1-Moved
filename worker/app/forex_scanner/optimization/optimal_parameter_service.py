@@ -153,7 +153,59 @@ class SMCOptimalParameters:
     
     last_optimized: datetime
     market_conditions: Optional[MarketConditions] = None
-    
+
+
+@dataclass
+class IchimokuOptimalParameters:
+    """Optimal Ichimoku Cloud trading parameters for an epic"""
+    epic: str
+    tenkan_period: int
+    kijun_period: int
+    senkou_b_period: int
+    chikou_shift: int
+    cloud_shift: int
+    confidence_threshold: float
+    timeframe: str
+
+    # Validation thresholds
+    cloud_thickness_threshold: float
+    tk_cross_strength_threshold: float
+    chikou_clear_threshold: float
+    cloud_filter_enabled: bool
+    chikou_filter_enabled: bool
+    tk_filter_enabled: bool
+
+    # Multi-timeframe settings
+    mtf_enabled: bool
+    mtf_timeframes: Optional[str]
+    mtf_min_alignment: float
+    mtf_cloud_weight: float
+    mtf_tk_weight: float
+    mtf_chikou_weight: float
+
+    # Enhancement options
+    momentum_confluence_enabled: bool
+    smart_money_enabled: bool
+    ema_200_trend_filter: bool
+    contradiction_filter_enabled: bool
+
+    # Risk management
+    stop_loss_pips: float
+    take_profit_pips: float
+    risk_reward_ratio: float
+
+    # Performance metrics
+    performance_score: float
+    win_rate: float
+    tk_cross_accuracy: float
+    cloud_breakout_accuracy: float
+    chikou_confirmation_rate: float
+    perfect_alignment_rate: float
+    mtf_alignment_avg: float
+
+    last_optimized: datetime
+    market_conditions: Optional[MarketConditions] = None
+
 
 class OptimalParameterService:
     """
@@ -786,7 +838,158 @@ class OptimalParameterService:
             last_optimized=datetime.now() - timedelta(days=999),  # Very old
             market_conditions=market_conditions
         )
-    
+
+    # =============================================================================
+    # Ichimoku Strategy Parameter Methods
+    # =============================================================================
+
+    def get_ichimoku_epic_parameters(self,
+                                   epic: str,
+                                   market_conditions: Optional[MarketConditions] = None,
+                                   force_refresh: bool = False) -> IchimokuOptimalParameters:
+        """
+        Get optimal Ichimoku parameters for specific epic
+
+        Args:
+            epic: Trading pair epic (e.g. 'CS.D.EURUSD.CEEM.IP')
+            market_conditions: Current market conditions for context-aware selection
+            force_refresh: Force refresh from database even if cached
+
+        Returns:
+            IchimokuOptimalParameters object with all Ichimoku trading settings
+        """
+        cache_key = f"ichimoku_{epic}_{hash(str(market_conditions)) if market_conditions else 'default'}"
+
+        # Check cache first (unless force refresh)
+        if not force_refresh and self._is_cache_valid(cache_key):
+            self.logger.debug(f"📋 Using cached Ichimoku parameters for {epic}")
+            return self._parameter_cache[cache_key]
+
+        # Get from database
+        try:
+            self.logger.debug(f"🔍 Querying Ichimoku parameters for {epic}")
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Primary query: Get best Ichimoku parameters for this epic
+                self.logger.debug("📊 Executing primary Ichimoku query...")
+                cursor.execute("""
+                    SELECT
+                        epic, best_tenkan_period, best_kijun_period, best_senkou_b_period,
+                        best_chikou_shift, best_cloud_shift, best_confidence_threshold, best_timeframe,
+                        best_cloud_thickness_threshold, best_tk_cross_strength_threshold, best_chikou_clear_threshold,
+                        best_cloud_filter_enabled, best_chikou_filter_enabled, best_tk_filter_enabled,
+                        best_mtf_enabled, best_mtf_timeframes, best_mtf_min_alignment,
+                        best_mtf_cloud_weight, best_mtf_tk_weight, best_mtf_chikou_weight,
+                        best_momentum_confluence_enabled, best_smart_money_enabled, best_ema_200_trend_filter,
+                        best_contradiction_filter_enabled, optimal_stop_loss_pips, optimal_take_profit_pips,
+                        ROUND(optimal_take_profit_pips / optimal_stop_loss_pips, 2) as risk_reward,
+                        best_win_rate, best_composite_score, best_tk_cross_accuracy, best_cloud_breakout_accuracy,
+                        best_chikou_confirmation_rate, best_perfect_alignment_rate, best_mtf_alignment_avg, last_updated
+                    FROM ichimoku_best_parameters
+                    WHERE epic = %s
+                    ORDER BY last_updated DESC
+                    LIMIT 1
+                """, (epic,))
+
+                result = cursor.fetchone()
+                self.logger.debug(f"🔍 Primary Ichimoku query result: {bool(result)}")
+
+                if result:
+                    # Create optimal Ichimoku parameters from database result
+                    optimal_params = IchimokuOptimalParameters(
+                        epic=result[0],
+                        tenkan_period=int(result[1]),
+                        kijun_period=int(result[2]),
+                        senkou_b_period=int(result[3]),
+                        chikou_shift=int(result[4]),
+                        cloud_shift=int(result[5]),
+                        confidence_threshold=float(result[6]),
+                        timeframe=result[7],
+                        cloud_thickness_threshold=float(result[8]),
+                        tk_cross_strength_threshold=float(result[9]),
+                        chikou_clear_threshold=float(result[10]),
+                        cloud_filter_enabled=bool(result[11]),
+                        chikou_filter_enabled=bool(result[12]),
+                        tk_filter_enabled=bool(result[13]),
+                        mtf_enabled=bool(result[14]),
+                        mtf_timeframes=result[15],
+                        mtf_min_alignment=float(result[16]),
+                        mtf_cloud_weight=float(result[17]),
+                        mtf_tk_weight=float(result[18]),
+                        mtf_chikou_weight=float(result[19]),
+                        momentum_confluence_enabled=bool(result[20]),
+                        smart_money_enabled=bool(result[21]),
+                        ema_200_trend_filter=bool(result[22]),
+                        contradiction_filter_enabled=bool(result[23]),
+                        stop_loss_pips=float(result[24]),
+                        take_profit_pips=float(result[25]),
+                        risk_reward_ratio=float(result[26]),
+                        win_rate=float(result[27]),
+                        performance_score=float(result[28]),
+                        tk_cross_accuracy=float(result[29]),
+                        cloud_breakout_accuracy=float(result[30]),
+                        chikou_confirmation_rate=float(result[31]),
+                        perfect_alignment_rate=float(result[32]),
+                        mtf_alignment_avg=float(result[33]),
+                        last_optimized=result[34],
+                        market_conditions=market_conditions
+                    )
+
+                    # Cache the result
+                    self._parameter_cache[cache_key] = optimal_params
+                    self._cache_timestamps[cache_key] = datetime.now()
+
+                    self.logger.info(f"✅ Retrieved optimized Ichimoku parameters for {epic}: {optimal_params.tenkan_period}-{optimal_params.kijun_period}-{optimal_params.senkou_b_period}")
+                    return optimal_params
+
+                else:
+                    # No optimization data available - use traditional defaults
+                    self.logger.info(f"⚠️ No Ichimoku optimization data for {epic}, using traditional defaults (9-26-52-26)")
+
+        except Exception as e:
+            self.logger.error(f"❌ Error retrieving Ichimoku parameters for {epic}: {e}")
+
+        # Fallback to traditional Ichimoku defaults (9-26-52-26)
+        return IchimokuOptimalParameters(
+            epic=epic,
+            tenkan_period=9,
+            kijun_period=26,
+            senkou_b_period=52,
+            chikou_shift=26,
+            cloud_shift=26,
+            confidence_threshold=0.55,
+            timeframe='15m',
+            cloud_thickness_threshold=0.0001,
+            tk_cross_strength_threshold=0.5,
+            chikou_clear_threshold=0.0002,
+            cloud_filter_enabled=True,
+            chikou_filter_enabled=True,
+            tk_filter_enabled=True,
+            mtf_enabled=False,
+            mtf_timeframes=None,
+            mtf_min_alignment=0.6,
+            mtf_cloud_weight=0.4,
+            mtf_tk_weight=0.3,
+            mtf_chikou_weight=0.3,
+            momentum_confluence_enabled=False,
+            smart_money_enabled=False,
+            ema_200_trend_filter=False,
+            contradiction_filter_enabled=True,
+            stop_loss_pips=15.0,
+            take_profit_pips=30.0,
+            risk_reward_ratio=2.0,
+            win_rate=0.5,
+            performance_score=0.0,
+            tk_cross_accuracy=0.5,
+            cloud_breakout_accuracy=0.5,
+            chikou_confirmation_rate=0.5,
+            perfect_alignment_rate=0.5,
+            mtf_alignment_avg=0.5,
+            last_optimized=datetime.now() - timedelta(days=999),  # Very old
+            market_conditions=market_conditions
+        )
+
     # =============================================================================
     # SMC Strategy Parameter Methods
     # =============================================================================
@@ -1318,6 +1521,109 @@ def get_smc_system_readiness() -> Dict[str, any]:
         return {
             'error': str(e),
             'system_type': 'SMC'
+        }
+
+
+# =============================================================================
+# Ichimoku Strategy Functions
+# =============================================================================
+def get_ichimoku_optimal_parameters(epic: str, market_conditions: Optional[MarketConditions] = None) -> IchimokuOptimalParameters:
+    """Get optimal Ichimoku parameters for epic (convenience function)"""
+    service = get_optimal_parameter_service()
+    return service.get_ichimoku_epic_parameters(epic, market_conditions)
+
+
+def get_epic_ichimoku_config(epic: str) -> Dict[str, any]:
+    """Get Ichimoku configuration for epic in format compatible with existing strategy"""
+    params = get_ichimoku_optimal_parameters(epic)
+
+    return {
+        'tenkan_period': params.tenkan_period,
+        'kijun_period': params.kijun_period,
+        'senkou_b_period': params.senkou_b_period,
+        'chikou_shift': params.chikou_shift,
+        'cloud_shift': params.cloud_shift,
+        'confidence_threshold': params.confidence_threshold,
+        'timeframe': params.timeframe,
+
+        # Validation thresholds
+        'cloud_thickness_threshold': params.cloud_thickness_threshold,
+        'tk_cross_strength_threshold': params.tk_cross_strength_threshold,
+        'chikou_clear_threshold': params.chikou_clear_threshold,
+        'cloud_filter_enabled': params.cloud_filter_enabled,
+        'chikou_filter_enabled': params.chikou_filter_enabled,
+        'tk_filter_enabled': params.tk_filter_enabled,
+
+        # Multi-timeframe
+        'mtf_enabled': params.mtf_enabled,
+        'mtf_timeframes': params.mtf_timeframes,
+        'mtf_min_alignment': params.mtf_min_alignment,
+        'mtf_cloud_weight': params.mtf_cloud_weight,
+        'mtf_tk_weight': params.mtf_tk_weight,
+        'mtf_chikou_weight': params.mtf_chikou_weight,
+
+        # Enhancement options
+        'momentum_confluence_enabled': params.momentum_confluence_enabled,
+        'smart_money_enabled': params.smart_money_enabled,
+        'ema_200_trend_filter': params.ema_200_trend_filter,
+        'contradiction_filter_enabled': params.contradiction_filter_enabled,
+
+        # Risk management
+        'stop_loss_pips': params.stop_loss_pips,
+        'take_profit_pips': params.take_profit_pips,
+        'risk_reward_ratio': params.risk_reward_ratio,
+    }
+
+
+def is_epic_ichimoku_optimized(epic: str) -> bool:
+    """Check if an epic has Ichimoku optimization data available"""
+    try:
+        params = get_ichimoku_optimal_parameters(epic)
+        # Check if parameters are from optimization (not fallback)
+        return params.performance_score > 0 and params.last_optimized > datetime.now() - timedelta(days=365)
+    except Exception:
+        return False
+
+
+def get_all_optimized_ichimoku_epics() -> List[str]:
+    """Get list of all epics that have Ichimoku optimization data"""
+    try:
+        service = get_optimal_parameter_service()
+        with service.db_manager.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT DISTINCT epic
+                    FROM ichimoku_best_parameters
+                    WHERE best_composite_score > 0
+                    ORDER BY epic
+                """)
+                results = cursor.fetchall()
+                return [row[0] for row in results] if results else []
+    except Exception:
+        return []
+
+
+def get_ichimoku_system_readiness() -> Dict[str, any]:
+    """Check if Ichimoku optimization system is ready for production"""
+    try:
+        configured_epics = set(config.EPIC_LIST)
+        optimized_epics = set(get_all_optimized_ichimoku_epics())
+
+        missing_epics = configured_epics - optimized_epics
+        coverage_ratio = len(optimized_epics & configured_epics) / len(configured_epics) if configured_epics else 0
+
+        return {
+            'configured_epics': len(configured_epics),
+            'optimized_epics': len(optimized_epics),
+            'coverage_ratio': coverage_ratio,
+            'missing_epics': list(missing_epics),
+            'ready_for_production': len(missing_epics) == 0,
+            'system_type': 'Ichimoku'
+        }
+    except Exception as e:
+        return {
+            'error': str(e),
+            'system_type': 'Ichimoku'
         }
 
 

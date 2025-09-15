@@ -92,7 +92,10 @@ class ScannerCommands:
                 'strategies_enabled': {
                     'ema': getattr(config, 'SIMPLE_EMA_STRATEGY', True),
                     'macd': getattr(config, 'MACD_EMA_STRATEGY', False),
-                    'scalping': getattr(config, 'SCALPING_STRATEGY_ENABLED', False)
+                    'ichimoku': getattr(config, 'ICHIMOKU_CLOUD_STRATEGY', False),
+                    'scalping': getattr(config, 'SCALPING_STRATEGY_ENABLED', False),
+                    'zero_lag': getattr(config, 'ZERO_LAG_STRATEGY', False),
+                    'smc': getattr(config, 'SMC_STRATEGY', False)
                 },
                 'timeframe': config.DEFAULT_TIMEFRAME,
                 'timezone': config.USER_TIMEZONE

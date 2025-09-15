@@ -158,7 +158,7 @@ class MACDIndicatorCalculator:
                 (df_copy['macd_histogram'] <= -base_threshold)  # Must exceed minimum strength (negative)
             )
             
-            self.logger.info(f"🔍 RAW MACD crossovers for {epic}: {raw_bull_cross.sum()} bull, {raw_bear_cross.sum()} bear (threshold: {base_threshold:.6f})")
+            self.logger.debug(f"🔍 RAW MACD crossovers for {epic}: {raw_bull_cross.sum()} bull, {raw_bear_cross.sum()} bear (threshold: {base_threshold:.6f})")
 
             # Debug histogram values for diagnostic
             if len(df_copy) > 0:
@@ -167,27 +167,27 @@ class MACDIndicatorCalculator:
                     hist_max = histogram_values.max()
                     hist_min = histogram_values.min()
                     hist_mean = histogram_values.mean()
-                    self.logger.info(f"🔍 HISTOGRAM RANGE for {epic}: min={hist_min:.6f}, max={hist_max:.6f}, mean={hist_mean:.6f}")
+                    self.logger.debug(f"🔍 HISTOGRAM RANGE for {epic}: min={hist_min:.6f}, max={hist_max:.6f}, mean={hist_mean:.6f}")
 
                     # Check how many values exceed thresholds
                     above_threshold = (histogram_values >= base_threshold).sum()
                     below_neg_threshold = (histogram_values <= -base_threshold).sum()
-                    self.logger.info(f"🔍 THRESHOLD ANALYSIS for {epic}: {above_threshold} above +{base_threshold:.6f}, {below_neg_threshold} below -{base_threshold:.6f}")
+                    self.logger.debug(f"🔍 THRESHOLD ANALYSIS for {epic}: {above_threshold} above +{base_threshold:.6f}, {below_neg_threshold} below -{base_threshold:.6f}")
             
             # EMERGENCY: Skip multi-candle confirmation - use raw crossovers
             bull_cross = raw_bull_cross
             bear_cross = raw_bear_cross
-            self.logger.info(f"🚨 EMERGENCY: Using RAW crossovers for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
+            self.logger.debug(f"🚨 EMERGENCY: Using RAW crossovers for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
             
             # Debug RSI and ADX data availability first
             if 'rsi' in df_copy.columns and 'adx' in df_copy.columns:
                 rsi_values = df_copy['rsi'].dropna()
                 adx_values = df_copy['adx'].dropna()
-                self.logger.info(f"🔍 INDICATOR DATA for {epic}: RSI count={len(rsi_values)}, ADX count={len(adx_values)}")
+                self.logger.debug(f"🔍 INDICATOR DATA for {epic}: RSI count={len(rsi_values)}, ADX count={len(adx_values)}")
                 if len(rsi_values) > 0:
-                    self.logger.info(f"🔍 RSI RANGE for {epic}: min={rsi_values.min():.1f}, max={rsi_values.max():.1f}, mean={rsi_values.mean():.1f}")
+                    self.logger.debug(f"🔍 RSI RANGE for {epic}: min={rsi_values.min():.1f}, max={rsi_values.max():.1f}, mean={rsi_values.mean():.1f}")
                 if len(adx_values) > 0:
-                    self.logger.info(f"🔍 ADX RANGE for {epic}: min={adx_values.min():.1f}, max={adx_values.max():.1f}, mean={adx_values.mean():.1f}")
+                    self.logger.debug(f"🔍 ADX RANGE for {epic}: min={adx_values.min():.1f}, max={adx_values.max():.1f}, mean={adx_values.mean():.1f}")
             else:
                 self.logger.error(f"❌ MISSING INDICATORS for {epic}: RSI={'rsi' in df_copy.columns}, ADX={'adx' in df_copy.columns}")
 
@@ -1335,7 +1335,7 @@ class MACDIndicatorCalculator:
             total_after = bull_after + bear_after
 
             if total_before != total_after:
-                self.logger.info(f"🚨 EMERGENCY BRAKE for {epic}: {total_before} -> {total_after} signals (4hr spacing, max 3 total)")
+                self.logger.debug(f"🚨 EMERGENCY BRAKE for {epic}: {total_before} -> {total_after} signals (4hr spacing, max 3 total)")
 
             return filtered_bull, filtered_bear
 
@@ -1493,7 +1493,7 @@ class MACDIndicatorCalculator:
                 post_count = vol_bull_signals.sum()
 
                 if pre_count != post_count:
-                    self.logger.info(f"🌊 BULL volatility filter for {epic}: {pre_count} -> {post_count}")
+                    self.logger.debug(f"🌊 BULL volatility filter for {epic}: {pre_count} -> {post_count}")
 
             if bear_signals.sum() > 0:
                 pre_count = bear_signals.sum()
@@ -1508,7 +1508,7 @@ class MACDIndicatorCalculator:
                 post_count = vol_bear_signals.sum()
 
                 if pre_count != post_count:
-                    self.logger.info(f"🌊 BEAR volatility filter for {epic}: {pre_count} -> {post_count}")
+                    self.logger.debug(f"🌊 BEAR volatility filter for {epic}: {pre_count} -> {post_count}")
 
             return vol_bull_signals, vol_bear_signals
 
@@ -1651,7 +1651,7 @@ class MACDIndicatorCalculator:
                     high_quality_bulls = bull_scores[bull_scores >= min_score].index
                     filtered_bull.loc[high_quality_bulls] = True
 
-                    self.logger.info(f"🎯 BULL adaptive scoring for {epic}: {len(bull_indices)} -> {len(high_quality_bulls)} (min score: {min_score:.1f})")
+                    self.logger.debug(f"🎯 BULL adaptive scoring for {epic}: {len(bull_indices)} -> {len(high_quality_bulls)} (min score: {min_score:.1f})")
 
             if len(bear_indices) > 0:
                 bear_scores = df_score.loc[bear_indices, 'bear_score']
@@ -1660,7 +1660,7 @@ class MACDIndicatorCalculator:
                     high_quality_bears = bear_scores[bear_scores >= min_score].index
                     filtered_bear.loc[high_quality_bears] = True
 
-                    self.logger.info(f"🎯 BEAR adaptive scoring for {epic}: {len(bear_indices)} -> {len(high_quality_bears)} (min score: {min_score:.1f})")
+                    self.logger.debug(f"🎯 BEAR adaptive scoring for {epic}: {len(bear_indices)} -> {len(high_quality_bears)} (min score: {min_score:.1f})")
 
             return filtered_bull, filtered_bear
 

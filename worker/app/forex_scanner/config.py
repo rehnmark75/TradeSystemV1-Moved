@@ -351,6 +351,9 @@ KAMA_STRATEGY = False  # This is the key setting that's missing
 # Enable SMC Strategy
 SMC_STRATEGY = True  # Smart Money Concepts strategy
 
+# Enable Ichimoku Cloud Strategy
+ICHIMOKU_CLOUD_STRATEGY = True  # Ichimoku Kinko Hyo strategy
+
 # KAMA Strategy Configuration
 KAMA_STRATEGY_CONFIG = {
     'default': {

@@ -8,6 +8,7 @@ from .config_zerolag_strategy import *
 from .config_macd_strategy import *
 from .config_ema_strategy import *
 from .config_smc_strategy import *
+from .config_ichimoku_strategy import *
 
 # Import TradingView integration (optional)
 try:
@@ -231,7 +232,110 @@ __all__ = [
     'get_smc_config_for_epic',
     'get_smc_threshold_for_epic',
     'get_smc_confluence_factors',
-    'validate_smc_config'
+    'validate_smc_config',
+
+    # Ichimoku Strategy Core Settings
+    'ICHIMOKU_CLOUD_STRATEGY',
+    'STRATEGY_WEIGHT_ICHIMOKU',
+    'ICHIMOKU_PERIODS',
+
+    # Ichimoku Configuration System
+    'ENABLE_DYNAMIC_ICHIMOKU_CONFIG',
+    'ICHIMOKU_STRATEGY_CONFIG',
+    'ACTIVE_ICHIMOKU_CONFIG',
+
+    # Ichimoku Validation Filters
+    'ICHIMOKU_CLOUD_FILTER_ENABLED',
+    'ICHIMOKU_CLOUD_BUFFER_PIPS',
+    'ICHIMOKU_CLOUD_THICKNESS_FILTER_ENABLED',
+    'ICHIMOKU_MIN_CLOUD_THICKNESS_RATIO',
+    'ICHIMOKU_TK_FILTER_ENABLED',
+    'ICHIMOKU_MIN_TK_SEPARATION',
+    'ICHIMOKU_TK_CROSS_CONFIRMATION_BARS',
+    'ICHIMOKU_CHIKOU_FILTER_ENABLED',
+    'ICHIMOKU_CHIKOU_BUFFER_PIPS',
+    'ICHIMOKU_CHIKOU_PERIODS',
+
+    # Ichimoku Signal Thresholds
+    'ICHIMOKU_CLOUD_THICKNESS_THRESHOLD',
+    'ICHIMOKU_TK_CROSS_STRENGTH_THRESHOLD',
+    'ICHIMOKU_CHIKOU_CLEAR_THRESHOLD',
+
+    # Ichimoku MTF Settings
+    'ICHIMOKU_MTF_ENABLED',
+    'ICHIMOKU_MTF_TIMEFRAMES',
+    'ICHIMOKU_MTF_MIN_ALIGNMENT',
+    'ICHIMOKU_MTF_CLOUD_WEIGHT',
+    'ICHIMOKU_MTF_TK_WEIGHT',
+    'ICHIMOKU_MTF_CHIKOU_WEIGHT',
+    'ICHIMOKU_MTF_DEBUG',
+    'ICHIMOKU_LOG_MTF_DECISIONS',
+    'ICHIMOKU_MTF_LOGGING',
+
+    # Ichimoku Confluence Settings
+    'ICHIMOKU_MOMENTUM_CONFLUENCE_ENABLED',
+    'ICHIMOKU_MIN_CONFLUENCE_RATIO',
+    'ICHIMOKU_EMA_200_TREND_FILTER',
+    'ICHIMOKU_RSI_CONFLUENCE_ENABLED',
+    'ICHIMOKU_MACD_CONFLUENCE_ENABLED',
+
+    # Smart Money Ichimoku Settings
+    'SMART_ICHIMOKU_ORDER_FLOW_VALIDATION',
+    'SMART_ICHIMOKU_REQUIRE_OB_CONFLUENCE',
+    'SMART_ICHIMOKU_FVG_PROXIMITY_PIPS',
+    'SMART_ICHIMOKU_ORDER_FLOW_BOOST',
+    'SMART_ICHIMOKU_ORDER_FLOW_PENALTY',
+    'USE_SMART_MONEY_ICHIMOKU',
+
+    # Ichimoku Signal Quality
+    'ENABLE_ICHIMOKU_CONTRADICTION_FILTER',
+    'ICHIMOKU_SIGNAL_SPACING_MINUTES',
+    'ICHIMOKU_MIN_SIGNAL_CONFIDENCE',
+    'ICHIMOKU_PERFECT_ALIGNMENT_BONUS',
+    'ICHIMOKU_DETECTION_MODE',
+    'ICHIMOKU_REQUIRE_PERFECT_ALIGNMENT',
+    'MIN_BARS_FOR_ICHIMOKU',
+
+    # Ichimoku Risk Management
+    'ICHIMOKU_DEFAULT_STOP_LOSS_PIPS',
+    'ICHIMOKU_DEFAULT_TAKE_PROFIT_PIPS',
+    'ICHIMOKU_DEFAULT_RISK_REWARD_RATIO',
+    'ICHIMOKU_USE_CLOUD_STOPS',
+    'ICHIMOKU_CLOUD_STOP_BUFFER_PIPS',
+
+    # Ichimoku Optimization
+    'ICHIMOKU_USE_OPTIMIZATION_SYSTEM',
+    'ICHIMOKU_OPTIMIZATION_FALLBACK',
+    'ICHIMOKU_TRACK_SIGNAL_QUALITY',
+    'ICHIMOKU_TRACK_CLOUD_PERFORMANCE',
+    'ICHIMOKU_TRACK_TK_PERFORMANCE',
+    'ICHIMOKU_TRACK_CHIKOU_PERFORMANCE',
+
+    # Ichimoku Advanced Features
+    'ICHIMOKU_ADVANCED_CLOUD_ANALYSIS',
+    'ICHIMOKU_CLOUD_TWIST_DETECTION',
+    'ICHIMOKU_CLOUD_COLOR_SIGNIFICANCE',
+    'ICHIMOKU_MARKET_STRUCTURE_INTEGRATION',
+    'ICHIMOKU_SUPPORT_RESISTANCE_LEVELS',
+    'ICHIMOKU_SESSION_FILTERS',
+
+    # Ichimoku Debug Settings
+    'ICHIMOKU_DEBUG_MODE',
+    'ICHIMOKU_LOG_COMPONENT_VALUES',
+    'ICHIMOKU_LOG_SIGNAL_BREAKDOWN',
+    'ICHIMOKU_LOG_CLOUD_ANALYSIS',
+    'ICHIMOKU_LOG_TK_ANALYSIS',
+    'ICHIMOKU_LOG_CHIKOU_ANALYSIS',
+    'ICHIMOKU_LOG_PERFORMANCE_METRICS',
+    'ICHIMOKU_LOG_OPTIMIZATION_USAGE',
+
+    # Ichimoku Compatibility Settings
+    'ICHIMOKU_ALLOW_STRATEGY_COMBINATION',
+    'ICHIMOKU_EMA_COMBINATION_WEIGHT',
+    'ICHIMOKU_MACD_COMBINATION_WEIGHT',
+    'ICHIMOKU_STANDALONE_WEIGHT',
+    'ICHIMOKU_BACKTEST_MODE_ADJUSTMENTS',
+    'ICHIMOKU_SCANNER_INTEGRATION'
 ]
 
 # Add TradingView integration functions if available
@@ -255,11 +359,12 @@ __description__ = "Strategy-specific configuration modules for ZeroLag, MACD, EM
 def get_strategies_summary() -> dict:
     """Get a summary of all loaded strategy configurations"""
     return {
-        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc'],
+        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc', 'ichimoku'],
         'zerolag_enabled': globals().get('ZERO_LAG_STRATEGY', False),
         'macd_enabled': globals().get('MACD_EMA_STRATEGY', False),
         'ema_enabled': globals().get('SIMPLE_EMA_STRATEGY', False),
         'smc_enabled': globals().get('SMC_STRATEGY', False),
+        'ichimoku_enabled': globals().get('ICHIMOKU_CLOUD_STRATEGY', False),
         'total_settings': len(__all__)
     }
 
@@ -269,7 +374,8 @@ def validate_strategy_configs() -> dict:
         'zerolag': validate_zerolag_config(),
         'macd': _validate_macd_config(),
         'ema': _validate_ema_config(),
-        'smc': _validate_smc_config()
+        'smc': _validate_smc_config(),
+        'ichimoku': _validate_ichimoku_config()
     }
     
     # Add TradingView integration validation if available
@@ -400,6 +506,70 @@ def _validate_ema_config() -> bool:
         print(f"❌ EMA config validation failed: {e}")
         return False
 
+def _validate_ichimoku_config() -> bool:
+    """Validate Ichimoku strategy configuration"""
+    try:
+        required_ichimoku_configs = [
+            'ICHIMOKU_CLOUD_STRATEGY', 'ICHIMOKU_PERIODS', 'ICHIMOKU_STRATEGY_CONFIG',
+            'ACTIVE_ICHIMOKU_CONFIG', 'ICHIMOKU_MTF_ENABLED'
+        ]
+
+        for config_name in required_ichimoku_configs:
+            if config_name not in globals():
+                print(f"❌ Missing Ichimoku config: {config_name}")
+                return False
+
+        # Validate Ichimoku periods
+        periods = globals().get('ICHIMOKU_PERIODS', {})
+        required_periods = ['tenkan_period', 'kijun_period', 'senkou_b_period', 'chikou_shift', 'cloud_shift']
+        if not isinstance(periods, dict) or not all(k in periods for k in required_periods):
+            print("❌ ICHIMOKU_PERIODS must contain all required periods")
+            return False
+
+        # Validate Ichimoku strategy config dictionary
+        strategy_config = globals().get('ICHIMOKU_STRATEGY_CONFIG', {})
+        if not isinstance(strategy_config, dict) or len(strategy_config) == 0:
+            print("❌ ICHIMOKU_STRATEGY_CONFIG must be a non-empty dictionary")
+            return False
+
+        # Validate active config exists in strategy config
+        active_config = globals().get('ACTIVE_ICHIMOKU_CONFIG', '')
+        if active_config not in strategy_config:
+            print(f"❌ ACTIVE_ICHIMOKU_CONFIG '{active_config}' not found in ICHIMOKU_STRATEGY_CONFIG")
+            return False
+
+        # Validate threshold values are reasonable
+        cloud_threshold = globals().get('ICHIMOKU_CLOUD_THICKNESS_THRESHOLD', 0)
+        if cloud_threshold < 0:
+            print("❌ ICHIMOKU_CLOUD_THICKNESS_THRESHOLD should be >= 0")
+            return False
+
+        # Validate confidence settings
+        min_confidence = globals().get('ICHIMOKU_MIN_SIGNAL_CONFIDENCE', 0)
+        if not (0 <= min_confidence <= 1):
+            print("❌ ICHIMOKU_MIN_SIGNAL_CONFIDENCE must be between 0 and 1")
+            return False
+
+        # Validate MTF settings if enabled
+        mtf_enabled = globals().get('ICHIMOKU_MTF_ENABLED', False)
+        if mtf_enabled:
+            mtf_timeframes = globals().get('ICHIMOKU_MTF_TIMEFRAMES', [])
+            if not isinstance(mtf_timeframes, list) or len(mtf_timeframes) == 0:
+                print("❌ ICHIMOKU_MTF_TIMEFRAMES must be a non-empty list when MTF is enabled")
+                return False
+
+            mtf_alignment = globals().get('ICHIMOKU_MTF_MIN_ALIGNMENT', 0)
+            if not (0 <= mtf_alignment <= 1):
+                print("❌ ICHIMOKU_MTF_MIN_ALIGNMENT must be between 0 and 1")
+                return False
+
+        print("✅ Ichimoku configuration validation passed")
+        return True
+
+    except Exception as e:
+        print(f"❌ Ichimoku config validation failed: {e}")
+        return False
+
 # Validate configurations on import (can be disabled in production)
 try:
     validation_result = validate_strategy_configs()
@@ -410,4 +580,4 @@ try:
 except Exception as e:
     print(f"⚠️ Strategy configuration validation error: {e}")
 
-print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}")
+print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}")
