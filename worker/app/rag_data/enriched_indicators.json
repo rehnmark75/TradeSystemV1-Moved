@@ -1,0 +1,1945 @@
+[
+  {
+    "id": "lazybear-squeeze-momentum-indicator",
+    "title": "LazyBear Squeeze Momentum Indicator",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "momentum_oscillator",
+    "technical_focus": "oscillator",
+    "embedding_text": "Title: LazyBear Squeeze Momentum Indicator | Description: Popular momentum oscillator based on Bollinger Bands and Keltner Channels squeeze, widely used for identifying volatility breakouts. | Author: LazyBear (LazyBear collection) | Category: momentum_oscillator | Technical Focus: oscillator | Indicators: Squeeze Momentum, BB/KC Squeeze, Momentum Histogram | Signals: Squeeze Release, Momentum Bullish, Momentum Bearish | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: ranging markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Squeeze Momentum",
+        "BB/KC Squeeze",
+        "Momentum Histogram"
+      ],
+      "signals": [
+        "Squeeze Release",
+        "Momentum Bullish",
+        "Momentum Bearish"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.65,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 45820,
+        "views": 312400
+      },
+      "market_context": "ranging markets"
+    }
+  },
+  {
+    "id": "lazybear-market-cipher-b",
+    "title": "LazyBear Market Cipher B",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "comprehensive_suite",
+    "technical_focus": "suite",
+    "embedding_text": "Title: LazyBear Market Cipher B | Description: Comprehensive market analysis suite combining multiple indicators for complete market overview and signal generation. | Author: LazyBear (LazyBear collection) | Category: comprehensive_suite | Technical Focus: suite | Indicators: Multi-Indicator Suite, Signal Confluence, Market Overview | Signals: Cipher Buy, Cipher Sell, Confluence Alert | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Multi-Indicator Suite",
+        "Signal Confluence",
+        "Market Overview"
+      ],
+      "signals": [
+        "Cipher Buy",
+        "Cipher Sell",
+        "Confluence Alert"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.85,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 38920,
+        "views": 289500
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "zeiierman-neural-network-predictor",
+    "title": "Zeiierman Neural Network Predictor",
+    "author": "Zeiierman",
+    "collection": "Zeiierman",
+    "category": "neural_network",
+    "technical_focus": null,
+    "embedding_text": "Title: Zeiierman Neural Network Predictor | Description: Advanced neural network-based price prediction system using deep learning algorithms for market forecasting. | Author: Zeiierman (Zeiierman collection) | Category: neural_network | Indicators: Neural Prediction, Deep Learning Signal, AI Confidence | Signals: Neural Bull, Neural Bear, High Confidence | Timeframes: 1h, 4h, 1d, 1w | Complexity: Expert | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Neural Prediction",
+        "Deep Learning Signal",
+        "AI Confidence"
+      ],
+      "signals": [
+        "Neural Bull",
+        "Neural Bear",
+        "High Confidence"
+      ],
+      "timeframes": [
+        "1h",
+        "4h",
+        "1d",
+        "1w"
+      ],
+      "complexity_score": 0.98,
+      "complexity_level": "Expert",
+      "open_source": false,
+      "popularity": {
+        "likes": 35780,
+        "views": 208450
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "zeiierman-market-maker-model",
+    "title": "Zeiierman Market Maker Model",
+    "author": "Zeiierman",
+    "collection": "Zeiierman",
+    "category": "market_maker",
+    "technical_focus": null,
+    "embedding_text": "Title: Zeiierman Market Maker Model | Description: Advanced market maker algorithm identifying institutional order flow, liquidity zones, and smart money movements with high precision. | Author: Zeiierman (Zeiierman collection) | Category: market_maker | Indicators: Market Maker Zone, Liquidity Pool, Order Flow, Smart Money | Signals: MM Entry, Liquidity Break, Flow Reversal | Timeframes: 5m, 15m, 1h, 4h | Complexity: Expert | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Market Maker Zone",
+        "Liquidity Pool",
+        "Order Flow",
+        "Smart Money"
+      ],
+      "signals": [
+        "MM Entry",
+        "Liquidity Break",
+        "Flow Reversal"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.95,
+      "complexity_level": "Expert",
+      "open_source": false,
+      "popularity": {
+        "likes": 34580,
+        "views": 198750
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "zeiierman-institutional-flow-scanner",
+    "title": "Zeiierman Institutional Flow Scanner",
+    "author": "Zeiierman",
+    "collection": "Zeiierman",
+    "category": "institutional",
+    "technical_focus": null,
+    "embedding_text": "Title: Zeiierman Institutional Flow Scanner | Description: Professional institutional flow analysis tool detecting large order flow, dark pool activity, and institutional sentiment. | Author: Zeiierman (Zeiierman collection) | Category: institutional | Indicators: Institution Flow, Dark Pool, Order Size Analysis | Signals: Large Buy Flow, Large Sell Flow, Flow Imbalance | Timeframes: 15m, 1h, 4h, 1d | Complexity: Expert | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Institution Flow",
+        "Dark Pool",
+        "Order Size Analysis"
+      ],
+      "signals": [
+        "Large Buy Flow",
+        "Large Sell Flow",
+        "Flow Imbalance"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.91,
+      "complexity_level": "Expert",
+      "open_source": false,
+      "popularity": {
+        "likes": 32450,
+        "views": 189600
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "lazybear-wave-trend-oscillator-wto",
+    "title": "LazyBear Wave Trend Oscillator (WTO)",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "trend_momentum",
+    "technical_focus": "hybrid",
+    "embedding_text": "Title: LazyBear Wave Trend Oscillator (WTO) | Description: Innovative oscillator combining trend and momentum analysis with clear entry/exit signals and overbought/oversold levels. | Author: LazyBear (LazyBear collection) | Category: trend_momentum | Technical Focus: hybrid | Indicators: Wave Trend, Momentum Line, Signal Crossover | Signals: WT Bullish, WT Bearish, Trend Change | Timeframes: 5m, 15m, 1h, 4h | Complexity: Intermediate | Best for: trending markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Wave Trend",
+        "Momentum Line",
+        "Signal Crossover"
+      ],
+      "signals": [
+        "WT Bullish",
+        "WT Bearish",
+        "Trend Change"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.72,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 32450,
+        "views": 234800
+      },
+      "market_context": "trending markets"
+    }
+  },
+  {
+    "id": "lazybear-waddah-attar-explosion",
+    "title": "LazyBear Waddah Attar Explosion",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "volatility_breakout",
+    "technical_focus": "volatility",
+    "embedding_text": "Title: LazyBear Waddah Attar Explosion | Description: Volatility and momentum explosion indicator combining MACD, Bollinger Bands for identifying high-probability breakout setups. | Author: LazyBear (LazyBear collection) | Category: volatility_breakout | Technical Focus: volatility | Indicators: Explosion Bars, Trend Power, Dead Zone | Signals: Explosion Long, Explosion Short, Trend Acceleration | Timeframes: 5m, 15m, 1h, 4h | Complexity: Intermediate | Best for: volatile markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Explosion Bars",
+        "Trend Power",
+        "Dead Zone"
+      ],
+      "signals": [
+        "Explosion Long",
+        "Explosion Short",
+        "Trend Acceleration"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.74,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 31580,
+        "views": 223400
+      },
+      "market_context": "volatile markets"
+    }
+  },
+  {
+    "id": "chartprime-volume-profile-pro",
+    "title": "ChartPrime Volume Profile Pro",
+    "author": "ChartPrime",
+    "collection": "ChartPrime",
+    "category": "volume_analysis",
+    "technical_focus": "volume_analysis",
+    "embedding_text": "Title: ChartPrime Volume Profile Pro | Description: Advanced volume profile analysis with POC, value areas, and volume nodes. Professional-grade volume distribution analysis for institutional trading. | Author: ChartPrime (ChartPrime collection) | Category: volume_analysis | Technical Focus: volume_analysis | Indicators: Volume Profile, POC, Value Area, Volume Nodes | Signals: Volume Concentration, Price Rejection, Value Area Break | Timeframes: 1m, 5m, 15m, 1h, 4h, 1d | Complexity: Expert | Best for: high volume periods, experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Volume Profile",
+        "POC",
+        "Value Area",
+        "Volume Nodes"
+      ],
+      "signals": [
+        "Volume Concentration",
+        "Price Rejection",
+        "Value Area Break"
+      ],
+      "timeframes": [
+        "1m",
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.9,
+      "complexity_level": "Expert",
+      "open_source": false,
+      "popularity": {
+        "likes": 31450,
+        "views": 185600
+      },
+      "market_context": "high volume periods, experienced traders"
+    }
+  },
+  {
+    "id": "zeiierman-algorithmic-trend-detector",
+    "title": "Zeiierman Algorithmic Trend Detector",
+    "author": "Zeiierman",
+    "collection": "Zeiierman",
+    "category": "ai_algorithm",
+    "technical_focus": null,
+    "embedding_text": "Title: Zeiierman Algorithmic Trend Detector | Description: AI-powered trend detection system using machine learning algorithms for precise trend identification and momentum analysis. | Author: Zeiierman (Zeiierman collection) | Category: ai_algorithm | Indicators: AI Trend, ML Momentum, Algorithmic Signal | Signals: AI Bullish, AI Bearish, Trend Shift | Timeframes: 15m, 1h, 4h, 1d | Complexity: Expert | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "AI Trend",
+        "ML Momentum",
+        "Algorithmic Signal"
+      ],
+      "signals": [
+        "AI Bullish",
+        "AI Bearish",
+        "Trend Shift"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.92,
+      "complexity_level": "Expert",
+      "open_source": false,
+      "popularity": {
+        "likes": 29875,
+        "views": 176420
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "lazybear-ssl-channel",
+    "title": "LazyBear SSL Channel",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "trend_channel",
+    "technical_focus": "channel",
+    "embedding_text": "Title: LazyBear SSL Channel | Description: Trend channel indicator using SSL (Secure Socket Layer) methodology for identifying trend direction and channel boundaries. | Author: LazyBear (LazyBear collection) | Category: trend_channel | Technical Focus: channel | Indicators: SSL Channel, Trend Direction, Channel Boundaries | Signals: SSL Bullish, SSL Bearish, Channel Break | Timeframes: 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: trending markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "SSL Channel",
+        "Trend Direction",
+        "Channel Boundaries"
+      ],
+      "signals": [
+        "SSL Bullish",
+        "SSL Bearish",
+        "Channel Break"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.63,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 29340,
+        "views": 205700
+      },
+      "market_context": "trending markets"
+    }
+  },
+  {
+    "id": "zeiierman-adaptive-trading-system",
+    "title": "Zeiierman Adaptive Trading System",
+    "author": "Zeiierman",
+    "collection": "Zeiierman",
+    "category": "adaptive_system",
+    "technical_focus": null,
+    "embedding_text": "Title: Zeiierman Adaptive Trading System | Description: Self-adapting trading system that adjusts parameters based on market conditions using advanced algorithmic techniques. | Author: Zeiierman (Zeiierman collection) | Category: adaptive_system | Indicators: Adaptive Signal, Market Regime, Dynamic Parameters | Signals: Adaptive Long, Adaptive Short, Regime Change | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Expert | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "strategy",
+      "indicators": [
+        "Adaptive Signal",
+        "Market Regime",
+        "Dynamic Parameters"
+      ],
+      "signals": [
+        "Adaptive Long",
+        "Adaptive Short",
+        "Regime Change"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.94,
+      "complexity_level": "Expert",
+      "open_source": false,
+      "popularity": {
+        "likes": 28940,
+        "views": 172800
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "chartprime-market-structure-scanner",
+    "title": "ChartPrime Market Structure Scanner",
+    "author": "ChartPrime",
+    "collection": "ChartPrime",
+    "category": "market_structure",
+    "technical_focus": "market_structure",
+    "embedding_text": "Title: ChartPrime Market Structure Scanner | Description: Comprehensive market structure analysis identifying swing highs/lows, trend changes, and structural breaks with precision. | Author: ChartPrime (ChartPrime collection) | Category: market_structure | Technical Focus: market_structure | Indicators: Swing High/Low, BOS, CHoCH, Trend Lines | Signals: Structure Break, Trend Change, Continuation | Timeframes: 5m, 15m, 1h, 4h, 1d, 1w | Complexity: Advanced | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Swing High/Low",
+        "BOS",
+        "CHoCH",
+        "Trend Lines"
+      ],
+      "signals": [
+        "Structure Break",
+        "Trend Change",
+        "Continuation"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d",
+        "1w"
+      ],
+      "complexity_score": 0.85,
+      "complexity_level": "Advanced",
+      "open_source": false,
+      "popularity": {
+        "likes": 28750,
+        "views": 167200
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "bigbeluga-whale-tracker",
+    "title": "BigBeluga Whale Movement Tracker",
+    "author": "BigBeluga",
+    "collection": "BigBeluga",
+    "category": "whale_tracking",
+    "technical_focus": "whale",
+    "embedding_text": "Title: BigBeluga Whale Movement Tracker | Description: Advanced whale detection system tracking large volume transactions and institutional movements with real-time alerts | Author: BigBeluga (BigBeluga collection) | Category: whale_tracking | Technical Focus: whale | Indicators: whale_detection, large_orders, institutional_flow | Signals: whale_buy, whale_sell, accumulation, distribution | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: institutional analysis, experienced traders",
+    "metadata": {
+      "strategy_type": "whale_tracking",
+      "indicators": [
+        "whale_detection",
+        "large_orders",
+        "institutional_flow"
+      ],
+      "signals": [
+        "whale_buy",
+        "whale_sell",
+        "accumulation",
+        "distribution"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.85,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 28750,
+        "views": 567000
+      },
+      "market_context": "institutional analysis, experienced traders"
+    }
+  },
+  {
+    "id": "lazybear-relative-vigor-index-rvi",
+    "title": "LazyBear Relative Vigor Index (RVI)",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "momentum_indicator",
+    "technical_focus": "oscillator",
+    "embedding_text": "Title: LazyBear Relative Vigor Index (RVI) | Description: Enhanced Relative Vigor Index implementation with signal line and divergence detection for momentum analysis. | Author: LazyBear (LazyBear collection) | Category: momentum_indicator | Technical Focus: oscillator | Indicators: RVI, Signal Line, Momentum Strength | Signals: RVI Bullish Cross, RVI Bearish Cross, Momentum Divergence | Timeframes: 1m, 5m, 15m, 1h, 4h | Complexity: Basic | Best for: ranging markets, beginner-friendly",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "RVI",
+        "Signal Line",
+        "Momentum Strength"
+      ],
+      "signals": [
+        "RVI Bullish Cross",
+        "RVI Bearish Cross",
+        "Momentum Divergence"
+      ],
+      "timeframes": [
+        "1m",
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.58,
+      "complexity_level": "Basic",
+      "open_source": true,
+      "popularity": {
+        "likes": 28750,
+        "views": 198600
+      },
+      "market_context": "ranging markets, beginner-friendly"
+    }
+  },
+  {
+    "id": "zeiierman-volatility-breakout-system",
+    "title": "Zeiierman Volatility Breakout System",
+    "author": "Zeiierman",
+    "collection": "Zeiierman",
+    "category": "volatility_system",
+    "technical_focus": null,
+    "embedding_text": "Title: Zeiierman Volatility Breakout System | Description: Advanced volatility-based breakout system with dynamic support/resistance levels and volatility expansion detection. | Author: Zeiierman (Zeiierman collection) | Category: volatility_system | Indicators: Volatility Bands, Breakout Zones, Dynamic S/R | Signals: Breakout Long, Breakout Short, Volatility Alert | Timeframes: 5m, 15m, 1h, 4h | Complexity: Advanced | Best for: volatile markets, experienced traders",
+    "metadata": {
+      "strategy_type": "strategy",
+      "indicators": [
+        "Volatility Bands",
+        "Breakout Zones",
+        "Dynamic S/R"
+      ],
+      "signals": [
+        "Breakout Long",
+        "Breakout Short",
+        "Volatility Alert"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.88,
+      "complexity_level": "Advanced",
+      "open_source": false,
+      "popularity": {
+        "likes": 27650,
+        "views": 164900
+      },
+      "market_context": "volatile markets, experienced traders"
+    }
+  },
+  {
+    "id": "lazybear-range-filter",
+    "title": "LazyBear Range Filter",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "noise_filter",
+    "technical_focus": "filter",
+    "embedding_text": "Title: LazyBear Range Filter | Description: Innovative filter indicator removing market noise while preserving trend signals, ideal for choppy market conditions. | Author: LazyBear (LazyBear collection) | Category: noise_filter | Technical Focus: filter | Indicators: Range Filter, Noise Reduction, Clean Signal | Signals: Filter Bullish, Filter Bearish, Clean Trend | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Range Filter",
+        "Noise Reduction",
+        "Clean Signal"
+      ],
+      "signals": [
+        "Filter Bullish",
+        "Filter Bearish",
+        "Clean Trend"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.64,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 27450,
+        "views": 194800
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "chartprime-smart-money-tracker",
+    "title": "ChartPrime Smart Money Tracker",
+    "author": "ChartPrime",
+    "collection": "ChartPrime",
+    "category": "institutional_flow",
+    "technical_focus": "institutional_flow",
+    "embedding_text": "Title: ChartPrime Smart Money Tracker | Description: Advanced institutional flow tracking with smart money footprints, accumulation/distribution zones, and professional money detection. | Author: ChartPrime (ChartPrime collection) | Category: institutional_flow | Technical Focus: institutional_flow | Indicators: Smart Money Index, Accumulation Zones, Distribution Areas | Signals: Institution Entry, Smart Money Exit, Accumulation Alert | Timeframes: 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: institutional analysis, experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Smart Money Index",
+        "Accumulation Zones",
+        "Distribution Areas"
+      ],
+      "signals": [
+        "Institution Entry",
+        "Smart Money Exit",
+        "Accumulation Alert"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.88,
+      "complexity_level": "Advanced",
+      "open_source": false,
+      "popularity": {
+        "likes": 26890,
+        "views": 154300
+      },
+      "market_context": "institutional analysis, experienced traders"
+    }
+  },
+  {
+    "id": "lazybear-coral-trend-indicator",
+    "title": "LazyBear Coral Trend Indicator",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "trend_following",
+    "technical_focus": "trend",
+    "embedding_text": "Title: LazyBear Coral Trend Indicator | Description: Unique trend-following indicator using advanced smoothing techniques with color-coded trend visualization. | Author: LazyBear (LazyBear collection) | Category: trend_following | Technical Focus: trend | Indicators: Coral Trend, Smoothed Average, Trend Direction | Signals: Trend Up, Trend Down, Trend Neutral | Timeframes: 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: trending markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Coral Trend",
+        "Smoothed Average",
+        "Trend Direction"
+      ],
+      "signals": [
+        "Trend Up",
+        "Trend Down",
+        "Trend Neutral"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.61,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 26890,
+        "views": 187300
+      },
+      "market_context": "trending markets"
+    }
+  },
+  {
+    "id": "zeiierman-quantitative-momentum-oscillator",
+    "title": "Zeiierman Quantitative Momentum Oscillator",
+    "author": "Zeiierman",
+    "collection": "Zeiierman",
+    "category": "quantitative",
+    "technical_focus": null,
+    "embedding_text": "Title: Zeiierman Quantitative Momentum Oscillator | Description: Sophisticated momentum oscillator using quantitative analysis techniques for precise entry and exit signals. | Author: Zeiierman (Zeiierman collection) | Category: quantitative | Indicators: Quant Momentum, Statistical Signal, Probability Bands | Signals: Quant Buy, Quant Sell, Momentum Divergence | Timeframes: 1m, 5m, 15m, 1h, 4h | Complexity: Advanced | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Quant Momentum",
+        "Statistical Signal",
+        "Probability Bands"
+      ],
+      "signals": [
+        "Quant Buy",
+        "Quant Sell",
+        "Momentum Divergence"
+      ],
+      "timeframes": [
+        "1m",
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.86,
+      "complexity_level": "Advanced",
+      "open_source": false,
+      "popularity": {
+        "likes": 26120,
+        "views": 158340
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "lazybear-awesome-oscillator-twin-peaks",
+    "title": "LazyBear Awesome Oscillator Twin Peaks",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "pattern_recognition",
+    "technical_focus": "pattern",
+    "embedding_text": "Title: LazyBear Awesome Oscillator Twin Peaks | Description: Enhanced Awesome Oscillator with twin peaks pattern recognition for identifying high-probability reversal setups. | Author: LazyBear (LazyBear collection) | Category: pattern_recognition | Technical Focus: pattern | Indicators: AO Twin Peaks, Pattern Recognition, Reversal Alert | Signals: Twin Peak Bullish, Twin Peak Bearish, Pattern Confirmed | Timeframes: 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "AO Twin Peaks",
+        "Pattern Recognition",
+        "Reversal Alert"
+      ],
+      "signals": [
+        "Twin Peak Bullish",
+        "Twin Peak Bearish",
+        "Pattern Confirmed"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.67,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 25680,
+        "views": 182400
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "chartprime-trend-momentum-suite",
+    "title": "ChartPrime Trend Momentum Suite",
+    "author": "ChartPrime",
+    "collection": "ChartPrime",
+    "category": "trend_analysis",
+    "technical_focus": "trend_analysis",
+    "embedding_text": "Title: ChartPrime Trend Momentum Suite | Description: Complete trend analysis suite with momentum confirmation, trend strength meter, and advanced trend reversal detection. | Author: ChartPrime (ChartPrime collection) | Category: trend_analysis | Technical Focus: trend_analysis | Indicators: Trend Strength, Momentum Bars, Reversal Detector | Signals: Strong Trend, Trend Reversal, Momentum Shift | Timeframes: 15m, 1h, 4h, 1d, 1w | Complexity: Advanced | Best for: trending markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Trend Strength",
+        "Momentum Bars",
+        "Reversal Detector"
+      ],
+      "signals": [
+        "Strong Trend",
+        "Trend Reversal",
+        "Momentum Shift"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d",
+        "1w"
+      ],
+      "complexity_score": 0.83,
+      "complexity_level": "Advanced",
+      "open_source": false,
+      "popularity": {
+        "likes": 25670,
+        "views": 149500
+      },
+      "market_context": "trending markets"
+    }
+  },
+  {
+    "id": "chrismoody-support-resistance-levels",
+    "title": "ChrisMoody Support Resistance Levels",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "support_resistance",
+    "technical_focus": "levels",
+    "embedding_text": "Title: ChrisMoody Support Resistance Levels | Description: Dynamic support and resistance level calculator with automatic level detection and breakout identification. | Author: ChrisMoody (ChrisMoody collection) | Category: support_resistance | Technical Focus: levels | Indicators: Dynamic S/R, Level Strength, Breakout Detection | Signals: Level Touch, Breakout, False Break | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Dynamic S/R",
+        "Level Strength",
+        "Breakout Detection"
+      ],
+      "signals": [
+        "Level Touch",
+        "Breakout",
+        "False Break"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.65,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 25480,
+        "views": 189600
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "bigbeluga-institutional-flow",
+    "title": "BigBeluga Institutional Flow Scanner",
+    "author": "BigBeluga",
+    "collection": "BigBeluga",
+    "category": "institutional_flow",
+    "technical_focus": "institutional",
+    "embedding_text": "Title: BigBeluga Institutional Flow Scanner | Description: Professional institutional money flow tracking with smart money detection and institutional order block analysis | Author: BigBeluga (BigBeluga collection) | Category: institutional_flow | Technical Focus: institutional | Indicators: institutional_flow, smart_money, order_blocks | Signals: institutional_buy, institutional_sell, smart_money_entry | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: institutional analysis, experienced traders",
+    "metadata": {
+      "strategy_type": "institutional_flow",
+      "indicators": [
+        "institutional_flow",
+        "smart_money",
+        "order_blocks"
+      ],
+      "signals": [
+        "institutional_buy",
+        "institutional_sell",
+        "smart_money_entry"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.85,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 25420,
+        "views": 489000
+      },
+      "market_context": "institutional analysis, experienced traders"
+    }
+  },
+  {
+    "id": "chrismoody-candlestick-pattern-scanner",
+    "title": "ChrisMoody Candlestick Pattern Scanner",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "candlestick",
+    "technical_focus": "price_action",
+    "embedding_text": "Title: ChrisMoody Candlestick Pattern Scanner | Description: Automated candlestick pattern recognition system with pattern strength rating and confirmation signals. | Author: ChrisMoody (ChrisMoody collection) | Category: candlestick | Technical Focus: price_action | Indicators: Pattern Scanner, Pattern Strength, Confirmation Filter | Signals: Bullish Pattern, Bearish Pattern, Pattern Confirmed | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Pattern Scanner",
+        "Pattern Strength",
+        "Confirmation Filter"
+      ],
+      "signals": [
+        "Bullish Pattern",
+        "Bearish Pattern",
+        "Pattern Confirmed"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.69,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 24750,
+        "views": 196300
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "zeiierman-multi-asset-correlation-matrix",
+    "title": "Zeiierman Multi-Asset Correlation Matrix",
+    "author": "Zeiierman",
+    "collection": "Zeiierman",
+    "category": "correlation_analysis",
+    "technical_focus": null,
+    "embedding_text": "Title: Zeiierman Multi-Asset Correlation Matrix | Description: Advanced correlation analysis system tracking relationships between multiple assets for portfolio optimization and risk management. | Author: Zeiierman (Zeiierman collection) | Category: correlation_analysis | Indicators: Correlation Matrix, Asset Strength, Portfolio Risk | Signals: Correlation Break, Risk Alert, Diversification | Timeframes: 1h, 4h, 1d, 1w | Complexity: Advanced | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Correlation Matrix",
+        "Asset Strength",
+        "Portfolio Risk"
+      ],
+      "signals": [
+        "Correlation Break",
+        "Risk Alert",
+        "Diversification"
+      ],
+      "timeframes": [
+        "1h",
+        "4h",
+        "1d",
+        "1w"
+      ],
+      "complexity_score": 0.85,
+      "complexity_level": "Advanced",
+      "open_source": false,
+      "popularity": {
+        "likes": 24680,
+        "views": 145920
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "lazybear-fisher-transform-indicator",
+    "title": "LazyBear Fisher Transform Indicator",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "reversal_indicator",
+    "technical_focus": "reversal",
+    "embedding_text": "Title: LazyBear Fisher Transform Indicator | Description: Enhanced Fisher Transform implementation with signal filtering and divergence detection for precise reversal signals. | Author: LazyBear (LazyBear collection) | Category: reversal_indicator | Technical Focus: reversal | Indicators: Fisher Transform, Signal Filter, Reversal Alert | Signals: Fisher Bullish, Fisher Bearish, Reversal Signal | Timeframes: 1m, 5m, 15m, 1h, 4h | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Fisher Transform",
+        "Signal Filter",
+        "Reversal Alert"
+      ],
+      "signals": [
+        "Fisher Bullish",
+        "Fisher Bearish",
+        "Reversal Signal"
+      ],
+      "timeframes": [
+        "1m",
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.69,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 24670,
+        "views": 172900
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "bigbeluga-liquidity-scanner",
+    "title": "BigBeluga Liquidity Pool Scanner",
+    "author": "BigBeluga",
+    "collection": "BigBeluga",
+    "category": "liquidity_analysis",
+    "technical_focus": "liquidity",
+    "embedding_text": "Title: BigBeluga Liquidity Pool Scanner | Description: Professional liquidity pool detection and sweep analysis with institutional liquidity zones and grab patterns | Author: BigBeluga (BigBeluga collection) | Category: liquidity_analysis | Technical Focus: liquidity | Indicators: liquidity_pools, liquidity_sweeps, institutional_zones | Signals: liquidity_grab, pool_formation, sweep_completion | Timeframes: 5m, 15m, 1h, 4h | Complexity: Advanced | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "liquidity_analysis",
+      "indicators": [
+        "liquidity_pools",
+        "liquidity_sweeps",
+        "institutional_zones"
+      ],
+      "signals": [
+        "liquidity_grab",
+        "pool_formation",
+        "sweep_completion"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.85,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 24180,
+        "views": 478000
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "chartprime-multi-timeframe-oscillator",
+    "title": "ChartPrime Multi-Timeframe Oscillator",
+    "author": "ChartPrime",
+    "collection": "ChartPrime",
+    "category": "momentum",
+    "technical_focus": "momentum",
+    "embedding_text": "Title: ChartPrime Multi-Timeframe Oscillator | Description: Professional multi-timeframe momentum oscillator combining multiple timeframes for comprehensive trend analysis and signal confirmation. | Author: ChartPrime (ChartPrime collection) | Category: momentum | Technical Focus: momentum | Indicators: MTF RSI, Momentum Divergence, Trend Strength | Signals: MTF Bullish, MTF Bearish, Divergence Alert | Timeframes: 1m, 5m, 15m, 1h, 4h | Complexity: Advanced | Best for: ranging markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "MTF RSI",
+        "Momentum Divergence",
+        "Trend Strength"
+      ],
+      "signals": [
+        "MTF Bullish",
+        "MTF Bearish",
+        "Divergence Alert"
+      ],
+      "timeframes": [
+        "1m",
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.82,
+      "complexity_level": "Advanced",
+      "open_source": false,
+      "popularity": {
+        "likes": 24120,
+        "views": 142800
+      },
+      "market_context": "ranging markets"
+    }
+  },
+  {
+    "id": "lazybear-schaff-trend-cycle-stc",
+    "title": "LazyBear Schaff Trend Cycle (STC)",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "trend_cycle",
+    "technical_focus": "cycle",
+    "embedding_text": "Title: LazyBear Schaff Trend Cycle (STC) | Description: Advanced trend cycle indicator combining trend and cycle analysis for early trend change detection with reduced false signals. | Author: LazyBear (LazyBear collection) | Category: trend_cycle | Technical Focus: cycle | Indicators: STC, Trend Cycle, Early Signal | Signals: STC Bullish, STC Bearish, Trend Cycle Change | Timeframes: 1h, 4h, 1d, 1w | Complexity: Intermediate | Best for: trending markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "STC",
+        "Trend Cycle",
+        "Early Signal"
+      ],
+      "signals": [
+        "STC Bullish",
+        "STC Bearish",
+        "Trend Cycle Change"
+      ],
+      "timeframes": [
+        "1h",
+        "4h",
+        "1d",
+        "1w"
+      ],
+      "complexity_score": 0.71,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 23890,
+        "views": 176500
+      },
+      "market_context": "trending markets"
+    }
+  },
+  {
+    "id": "algoalpha-ai-momentum",
+    "title": "AlgoAlpha AI Momentum Predictor",
+    "author": "AlgoAlpha",
+    "collection": "AlgoAlpha",
+    "category": "ai_momentum",
+    "technical_focus": "ai",
+    "embedding_text": "Title: AlgoAlpha AI Momentum Predictor | Description: Machine learning-based momentum predictor using multiple timeframe analysis and neural network signals | Author: AlgoAlpha (AlgoAlpha collection) | Category: ai_momentum | Technical Focus: ai | Indicators: ai_momentum, neural_network, ml_predictor | Signals: buy_signal, sell_signal, trend_change, momentum_shift | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Expert | Best for: ranging markets, experienced traders",
+    "metadata": {
+      "strategy_type": "ai_momentum",
+      "indicators": [
+        "ai_momentum",
+        "neural_network",
+        "ml_predictor"
+      ],
+      "signals": [
+        "buy_signal",
+        "sell_signal",
+        "trend_change",
+        "momentum_shift"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.9,
+      "complexity_level": "Expert",
+      "open_source": true,
+      "popularity": {
+        "likes": 23450,
+        "views": 456000
+      },
+      "market_context": "ranging markets, experienced traders"
+    }
+  },
+  {
+    "id": "bigbeluga-market-maker-detector",
+    "title": "BigBeluga Market Maker Detector",
+    "author": "BigBeluga",
+    "collection": "BigBeluga",
+    "category": "market_maker",
+    "technical_focus": "market_maker",
+    "embedding_text": "Title: BigBeluga Market Maker Detector | Description: Advanced market maker activity detection with stop hunting patterns, fake breakouts, and manipulation identification | Author: BigBeluga (BigBeluga collection) | Category: market_maker | Technical Focus: market_maker | Indicators: market_maker, stop_hunting, manipulation | Signals: stop_hunt, fake_breakout, accumulation_phase | Timeframes: 5m, 15m, 1h, 4h | Complexity: Advanced | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "market_maker",
+      "indicators": [
+        "market_maker",
+        "stop_hunting",
+        "manipulation"
+      ],
+      "signals": [
+        "stop_hunt",
+        "fake_breakout",
+        "accumulation_phase"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.85,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 22890,
+        "views": 445000
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "lazybear-volume-oscillator-vo",
+    "title": "LazyBear Volume Oscillator (VO)",
+    "author": "LazyBear",
+    "collection": "LazyBear",
+    "category": "volume_analysis",
+    "technical_focus": "volume",
+    "embedding_text": "Title: LazyBear Volume Oscillator (VO) | Description: Advanced volume oscillator analyzing volume momentum and flow for confirming price movements and identifying divergences. | Author: LazyBear (LazyBear collection) | Category: volume_analysis | Technical Focus: volume | Indicators: Volume Oscillator, Volume Momentum, Flow Analysis | Signals: Volume Bullish, Volume Bearish, Volume Divergence | Timeframes: 5m, 15m, 1h, 4h | Complexity: Intermediate | Best for: high volume periods",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Volume Oscillator",
+        "Volume Momentum",
+        "Flow Analysis"
+      ],
+      "signals": [
+        "Volume Bullish",
+        "Volume Bearish",
+        "Volume Divergence"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.66,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 22750,
+        "views": 168200
+      },
+      "market_context": "high volume periods"
+    }
+  },
+  {
+    "id": "chartprime-support-resistance-zones",
+    "title": "ChartPrime Support Resistance Zones",
+    "author": "ChartPrime",
+    "collection": "ChartPrime",
+    "category": "support_resistance",
+    "technical_focus": "support_resistance",
+    "embedding_text": "Title: ChartPrime Support Resistance Zones | Description: Dynamic support and resistance zone identification with strength ratings, touch counts, and breakout probability analysis. | Author: ChartPrime (ChartPrime collection) | Category: support_resistance | Technical Focus: support_resistance | Indicators: Dynamic S/R, Zone Strength, Touch Count | Signals: Zone Touch, Breakout Alert, Bounce Signal | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Dynamic S/R",
+        "Zone Strength",
+        "Touch Count"
+      ],
+      "signals": [
+        "Zone Touch",
+        "Breakout Alert",
+        "Bounce Signal"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.75,
+      "complexity_level": "Intermediate",
+      "open_source": false,
+      "popularity": {
+        "likes": 22450,
+        "views": 138900
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "chrismoody-ultimate-ma-cross-system",
+    "title": "ChrisMoody Ultimate MA Cross System",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "moving_average",
+    "technical_focus": "trend",
+    "embedding_text": "Title: ChrisMoody Ultimate MA Cross System | Description: Comprehensive moving average crossover system with multiple MA types, trend filtering, and dynamic signal generation. | Author: ChrisMoody (ChrisMoody collection) | Category: moving_average | Technical Focus: trend | Indicators: Multi-MA Cross, Trend Filter, Signal Strength | Signals: MA Cross Long, MA Cross Short, Trend Change | Timeframes: 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "strategy",
+      "indicators": [
+        "Multi-MA Cross",
+        "Trend Filter",
+        "Signal Strength"
+      ],
+      "signals": [
+        "MA Cross Long",
+        "MA Cross Short",
+        "Trend Change"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.68,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 22140,
+        "views": 168500
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "chrismoody-trend-strength-meter",
+    "title": "ChrisMoody Trend Strength Meter",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "trend_analysis",
+    "technical_focus": "trend",
+    "embedding_text": "Title: ChrisMoody Trend Strength Meter | Description: Comprehensive trend analysis tool measuring trend strength, direction, and sustainability with visual indicators. | Author: ChrisMoody (ChrisMoody collection) | Category: trend_analysis | Technical Focus: trend | Indicators: Trend Strength, Direction Filter, Sustainability Index | Signals: Strong Trend, Weak Trend, Trend Reversal | Timeframes: 15m, 1h, 4h, 1d, 1w | Complexity: Intermediate | Best for: trending markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Trend Strength",
+        "Direction Filter",
+        "Sustainability Index"
+      ],
+      "signals": [
+        "Strong Trend",
+        "Weak Trend",
+        "Trend Reversal"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d",
+        "1w"
+      ],
+      "complexity_score": 0.73,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 21650,
+        "views": 172400
+      },
+      "market_context": "trending markets"
+    }
+  },
+  {
+    "id": "algoalpha-orderflow-analyzer",
+    "title": "AlgoAlpha Order Flow Analyzer",
+    "author": "AlgoAlpha",
+    "collection": "AlgoAlpha",
+    "category": "order_flow",
+    "technical_focus": "algorithmic",
+    "embedding_text": "Title: AlgoAlpha Order Flow Analyzer | Description: Institutional-grade order flow analysis with volume profile, market microstructure, and liquidity detection | Author: AlgoAlpha (AlgoAlpha collection) | Category: order_flow | Technical Focus: algorithmic | Indicators: order_flow, volume_profile, market_microstructure | Signals: institutional_flow, retail_flow, liquidity_event | Timeframes: 5m, 15m, 1h, 4h | Complexity: Expert | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "order_flow",
+      "indicators": [
+        "order_flow",
+        "volume_profile",
+        "market_microstructure"
+      ],
+      "signals": [
+        "institutional_flow",
+        "retail_flow",
+        "liquidity_event"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.9,
+      "complexity_level": "Expert",
+      "open_source": true,
+      "popularity": {
+        "likes": 21350,
+        "views": 412000
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "bigbeluga-dark-pool-detector",
+    "title": "BigBeluga Dark Pool Activity Detector",
+    "author": "BigBeluga",
+    "collection": "BigBeluga",
+    "category": "dark_pool",
+    "technical_focus": "dark_pool",
+    "embedding_text": "Title: BigBeluga Dark Pool Activity Detector | Description: Advanced dark pool trading detection with hidden institutional activity, iceberg orders, and off-exchange flow analysis | Author: BigBeluga (BigBeluga collection) | Category: dark_pool | Technical Focus: dark_pool | Indicators: dark_pool, iceberg_orders, hidden_flow | Signals: dark_pool_activity, iceberg_detected, hidden_accumulation | Timeframes: 5m, 15m, 1h, 4h | Complexity: Advanced | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "dark_pool",
+      "indicators": [
+        "dark_pool",
+        "iceberg_orders",
+        "hidden_flow"
+      ],
+      "signals": [
+        "dark_pool_activity",
+        "iceberg_detected",
+        "hidden_accumulation"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.85,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 20950,
+        "views": 398000
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "chrismoody-volume-price-analysis",
+    "title": "ChrisMoody Volume Price Analysis",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "volume_analysis",
+    "technical_focus": "volume",
+    "embedding_text": "Title: ChrisMoody Volume Price Analysis | Description: Comprehensive volume-price relationship analysis with accumulation/distribution detection and volume confirmation. | Author: ChrisMoody (ChrisMoody collection) | Category: volume_analysis | Technical Focus: volume | Indicators: Volume-Price, Accumulation/Distribution, Volume Confirmation | Signals: Volume Breakout, Accumulation Alert, Distribution Warning | Timeframes: 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: high volume periods",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Volume-Price",
+        "Accumulation/Distribution",
+        "Volume Confirmation"
+      ],
+      "signals": [
+        "Volume Breakout",
+        "Accumulation Alert",
+        "Distribution Warning"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.76,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 20140,
+        "views": 162800
+      },
+      "market_context": "high volume periods"
+    }
+  },
+  {
+    "id": "algoalpha-quant-strategy",
+    "title": "AlgoAlpha Quantitative Strategy Engine",
+    "author": "AlgoAlpha",
+    "collection": "AlgoAlpha",
+    "category": "quantitative",
+    "technical_focus": "quantitative",
+    "embedding_text": "Title: AlgoAlpha Quantitative Strategy Engine | Description: Advanced quantitative trading strategy combining statistical arbitrage, mean reversion, and trend following | Author: AlgoAlpha (AlgoAlpha collection) | Category: quantitative | Technical Focus: quantitative | Indicators: statistical_arbitrage, mean_reversion, trend_following | Signals: entry_long, entry_short, exit_signal, hedge_signal | Timeframes: 15m, 1h, 4h, 1d | Complexity: Expert | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "quantitative",
+      "indicators": [
+        "statistical_arbitrage",
+        "mean_reversion",
+        "trend_following"
+      ],
+      "signals": [
+        "entry_long",
+        "entry_short",
+        "exit_signal",
+        "hedge_signal"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.9,
+      "complexity_level": "Expert",
+      "open_source": true,
+      "popularity": {
+        "likes": 19870,
+        "views": 387000
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "bigbeluga-whale-divergence",
+    "title": "BigBeluga Whale Divergence Analyzer",
+    "author": "BigBeluga",
+    "collection": "BigBeluga",
+    "category": "whale_divergence",
+    "technical_focus": "whale",
+    "embedding_text": "Title: BigBeluga Whale Divergence Analyzer | Description: Advanced whale divergence detection comparing large order flow with price action to identify institutional manipulation | Author: BigBeluga (BigBeluga collection) | Category: whale_divergence | Technical Focus: whale | Indicators: whale_divergence, flow_analysis, manipulation_detection | Signals: bullish_divergence, bearish_divergence, whale_manipulation | Timeframes: 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: institutional analysis, experienced traders",
+    "metadata": {
+      "strategy_type": "whale_divergence",
+      "indicators": [
+        "whale_divergence",
+        "flow_analysis",
+        "manipulation_detection"
+      ],
+      "signals": [
+        "bullish_divergence",
+        "bearish_divergence",
+        "whale_manipulation"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.85,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 19650,
+        "views": 356000
+      },
+      "market_context": "institutional analysis, experienced traders"
+    }
+  },
+  {
+    "id": "chrismoody-bollinger-band-squeeze",
+    "title": "ChrisMoody Bollinger Band Squeeze",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "volatility",
+    "technical_focus": "volatility",
+    "embedding_text": "Title: ChrisMoody Bollinger Band Squeeze | Description: Enhanced Bollinger Band squeeze indicator with momentum confirmation and directional bias detection. | Author: ChrisMoody (ChrisMoody collection) | Category: volatility | Technical Focus: volatility | Indicators: BB Squeeze, Momentum Direction, Expansion Alert | Signals: Squeeze Release, Direction Bias, Volatility Expansion | Timeframes: 5m, 15m, 1h, 4h | Complexity: Intermediate | Best for: volatile markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "BB Squeeze",
+        "Momentum Direction",
+        "Expansion Alert"
+      ],
+      "signals": [
+        "Squeeze Release",
+        "Direction Bias",
+        "Volatility Expansion"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.7,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 19320,
+        "views": 154800
+      },
+      "market_context": "volatile markets"
+    }
+  },
+  {
+    "id": "algoalpha-ml-predictor",
+    "title": "AlgoAlpha Machine Learning Predictor",
+    "author": "AlgoAlpha",
+    "collection": "AlgoAlpha",
+    "category": "machine_learning",
+    "technical_focus": "algorithmic",
+    "embedding_text": "Title: AlgoAlpha Machine Learning Predictor | Description: Advanced machine learning predictor using ensemble methods, feature engineering, and deep learning concepts | Author: AlgoAlpha (AlgoAlpha collection) | Category: machine_learning | Technical Focus: algorithmic | Indicators: ml_ensemble, feature_engineering, deep_learning | Signals: ml_buy, ml_sell, confidence_high, model_uncertainty | Timeframes: 15m, 1h, 4h, 1d | Complexity: Expert | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "machine_learning",
+      "indicators": [
+        "ml_ensemble",
+        "feature_engineering",
+        "deep_learning"
+      ],
+      "signals": [
+        "ml_buy",
+        "ml_sell",
+        "confidence_high",
+        "model_uncertainty"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.9,
+      "complexity_level": "Expert",
+      "open_source": true,
+      "popularity": {
+        "likes": 18900,
+        "views": 345000
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "luxalgo-smart-money-concepts",
+    "title": "LuxAlgo Smart Money Concepts",
+    "author": "LuxAlgo",
+    "collection": "LuxAlgo",
+    "category": "analysis",
+    "technical_focus": null,
+    "embedding_text": "Title: LuxAlgo Smart Money Concepts | Description: Advanced smart money concepts indicator showing order blocks, liquidity zones, and market structure | Author: LuxAlgo (LuxAlgo collection) | Category: analysis | Indicators: order_blocks, liquidity, market_structure | Signals: bos, choch, liquidity_sweep | Timeframes: 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: general trading",
+    "metadata": {
+      "strategy_type": "analysis",
+      "indicators": [
+        "order_blocks",
+        "liquidity",
+        "market_structure"
+      ],
+      "signals": [
+        "bos",
+        "choch",
+        "liquidity_sweep"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.8,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 18750,
+        "views": 298000
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "chrismoody-rsi-ema-divergence-signal",
+    "title": "ChrisMoody RSI-EMA Divergence Signal",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "divergence",
+    "technical_focus": "oscillator",
+    "embedding_text": "Title: ChrisMoody RSI-EMA Divergence Signal | Description: Advanced RSI divergence detector with EMA confirmation, providing high-probability reversal signals with customizable alerts. | Author: ChrisMoody (ChrisMoody collection) | Category: divergence | Technical Focus: oscillator | Indicators: RSI Divergence, EMA Confirmation, Signal Filter | Signals: Bullish Divergence, Bearish Divergence, EMA Confirm | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "RSI Divergence",
+        "EMA Confirmation",
+        "Signal Filter"
+      ],
+      "signals": [
+        "Bullish Divergence",
+        "Bearish Divergence",
+        "EMA Confirm"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.75,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 18750,
+        "views": 142300
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "chrismoody-fibonacci-retracement-auto",
+    "title": "ChrisMoody Fibonacci Retracement Auto",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "fibonacci",
+    "technical_focus": "levels",
+    "embedding_text": "Title: ChrisMoody Fibonacci Retracement Auto | Description: Automatic Fibonacci retracement level calculator with dynamic level updates and confluence zone identification. | Author: ChrisMoody (ChrisMoody collection) | Category: fibonacci | Technical Focus: levels | Indicators: Auto Fibonacci, Confluence Zones, Level Strength | Signals: Fib Bounce, Fib Break, Confluence Touch | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Auto Fibonacci",
+        "Confluence Zones",
+        "Level Strength"
+      ],
+      "signals": [
+        "Fib Bounce",
+        "Fib Break",
+        "Confluence Touch"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.67,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 18560,
+        "views": 145900
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "chrismoody-multi-timeframe-rsi",
+    "title": "ChrisMoody Multi-Timeframe RSI",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "multi_timeframe",
+    "technical_focus": "confluence",
+    "embedding_text": "Title: ChrisMoody Multi-Timeframe RSI | Description: Advanced multi-timeframe RSI analysis with confluence detection and signal filtering across multiple timeframes. | Author: ChrisMoody (ChrisMoody collection) | Category: multi_timeframe | Technical Focus: confluence | Indicators: MTF RSI, Confluence Detector, Signal Filter | Signals: MTF Overbought, MTF Oversold, Confluence Signal | Timeframes: 1m, 5m, 15m, 1h, 4h | Complexity: Intermediate | Best for: general trading",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "MTF RSI",
+        "Confluence Detector",
+        "Signal Filter"
+      ],
+      "signals": [
+        "MTF Overbought",
+        "MTF Oversold",
+        "Confluence Signal"
+      ],
+      "timeframes": [
+        "1m",
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.78,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 17890,
+        "views": 138200
+      },
+      "market_context": "general trading"
+    }
+  },
+  {
+    "id": "chrismoody-volatility-adjusted-momentum",
+    "title": "ChrisMoody Volatility Adjusted Momentum",
+    "author": "ChrisMoody",
+    "collection": "ChrisMoody",
+    "category": "momentum",
+    "technical_focus": "oscillator",
+    "embedding_text": "Title: ChrisMoody Volatility Adjusted Momentum | Description: Innovative momentum oscillator that adjusts for market volatility, providing cleaner signals in all market conditions. | Author: ChrisMoody (ChrisMoody collection) | Category: momentum | Technical Focus: oscillator | Indicators: Vol-Adj Momentum, Volatility Index, Signal Smoother | Signals: Momentum Buy, Momentum Sell, Volatility Alert | Timeframes: 1m, 5m, 15m, 1h, 4h | Complexity: Intermediate | Best for: ranging markets",
+    "metadata": {
+      "strategy_type": "indicator",
+      "indicators": [
+        "Vol-Adj Momentum",
+        "Volatility Index",
+        "Signal Smoother"
+      ],
+      "signals": [
+        "Momentum Buy",
+        "Momentum Sell",
+        "Volatility Alert"
+      ],
+      "timeframes": [
+        "1m",
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.72,
+      "complexity_level": "Intermediate",
+      "open_source": true,
+      "popularity": {
+        "likes": 16890,
+        "views": 128700
+      },
+      "market_context": "ranging markets"
+    }
+  },
+  {
+    "id": "algoalpha-volatility-surface",
+    "title": "AlgoAlpha Volatility Surface Analyzer",
+    "author": "AlgoAlpha",
+    "collection": "AlgoAlpha",
+    "category": "volatility",
+    "technical_focus": "quantitative",
+    "embedding_text": "Title: AlgoAlpha Volatility Surface Analyzer | Description: Advanced volatility analysis with implied volatility surface modeling and volatility clustering detection | Author: AlgoAlpha (AlgoAlpha collection) | Category: volatility | Technical Focus: quantitative | Indicators: volatility_surface, implied_vol, vol_clustering | Signals: vol_expansion, vol_contraction, vol_breakout | Timeframes: 15m, 1h, 4h, 1d | Complexity: Expert | Best for: volatile markets, experienced traders",
+    "metadata": {
+      "strategy_type": "volatility",
+      "indicators": [
+        "volatility_surface",
+        "implied_vol",
+        "vol_clustering"
+      ],
+      "signals": [
+        "vol_expansion",
+        "vol_contraction",
+        "vol_breakout"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.9,
+      "complexity_level": "Expert",
+      "open_source": true,
+      "popularity": {
+        "likes": 16420,
+        "views": 298000
+      },
+      "market_context": "volatile markets, experienced traders"
+    }
+  },
+  {
+    "id": "luxalgo-premium-oscillator",
+    "title": "LuxAlgo Premium Oscillator",
+    "author": "LuxAlgo",
+    "collection": "LuxAlgo",
+    "category": "oscillator",
+    "technical_focus": null,
+    "embedding_text": "Title: LuxAlgo Premium Oscillator | Description: Advanced oscillator with premium features for trend and momentum analysis | Author: LuxAlgo (LuxAlgo collection) | Category: oscillator | Indicators: oscillator, momentum, trend | Signals: overbought, oversold, divergence | Timeframes: 5m, 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: ranging markets",
+    "metadata": {
+      "strategy_type": "oscillator",
+      "indicators": [
+        "oscillator",
+        "momentum",
+        "trend"
+      ],
+      "signals": [
+        "overbought",
+        "oversold",
+        "divergence"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.8,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 15420,
+        "views": 234000
+      },
+      "market_context": "ranging markets"
+    }
+  },
+  {
+    "id": "algoalpha-arbitrage-scanner",
+    "title": "AlgoAlpha Arbitrage Scanner",
+    "author": "AlgoAlpha",
+    "collection": "AlgoAlpha",
+    "category": "arbitrage",
+    "technical_focus": "quantitative",
+    "embedding_text": "Title: AlgoAlpha Arbitrage Scanner | Description: Multi-asset arbitrage opportunity scanner with correlation analysis and statistical arbitrage signals | Author: AlgoAlpha (AlgoAlpha collection) | Category: arbitrage | Technical Focus: quantitative | Indicators: arbitrage, correlation, statistical_arb | Signals: arb_opportunity, correlation_break, pair_trade | Timeframes: 5m, 15m, 1h, 4h | Complexity: Expert | Best for: experienced traders",
+    "metadata": {
+      "strategy_type": "arbitrage",
+      "indicators": [
+        "arbitrage",
+        "correlation",
+        "statistical_arb"
+      ],
+      "signals": [
+        "arb_opportunity",
+        "correlation_break",
+        "pair_trade"
+      ],
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h",
+        "4h"
+      ],
+      "complexity_score": 0.9,
+      "complexity_level": "Expert",
+      "open_source": true,
+      "popularity": {
+        "likes": 14750,
+        "views": 256000
+      },
+      "market_context": "experienced traders"
+    }
+  },
+  {
+    "id": "luxalgo-market-structure",
+    "title": "LuxAlgo Market Structure",
+    "author": "LuxAlgo",
+    "collection": "LuxAlgo",
+    "category": "trend",
+    "technical_focus": null,
+    "embedding_text": "Title: LuxAlgo Market Structure | Description: Market structure analysis with break of structure (BOS) and change of character (CHoCH) detection | Author: LuxAlgo (LuxAlgo collection) | Category: trend | Indicators: market_structure, trend, structure | Signals: bos, choch, hh, ll, lh, hl | Timeframes: 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: trending markets",
+    "metadata": {
+      "strategy_type": "trend",
+      "indicators": [
+        "market_structure",
+        "trend",
+        "structure"
+      ],
+      "signals": [
+        "bos",
+        "choch",
+        "hh",
+        "ll",
+        "lh",
+        "hl"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.8,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 12340,
+        "views": 187000
+      },
+      "market_context": "trending markets"
+    }
+  },
+  {
+    "id": "luxalgo-volume-analysis",
+    "title": "LuxAlgo Volume Analysis",
+    "author": "LuxAlgo",
+    "collection": "LuxAlgo",
+    "category": "volume",
+    "technical_focus": null,
+    "embedding_text": "Title: LuxAlgo Volume Analysis | Description: Advanced volume analysis with volume profile, flow, and accumulation/distribution patterns | Author: LuxAlgo (LuxAlgo collection) | Category: volume | Indicators: volume, volume_profile, flow | Signals: volume_spike, accumulation, distribution | Timeframes: 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: high volume periods",
+    "metadata": {
+      "strategy_type": "volume",
+      "indicators": [
+        "volume",
+        "volume_profile",
+        "flow"
+      ],
+      "signals": [
+        "volume_spike",
+        "accumulation",
+        "distribution"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.8,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 11250,
+        "views": 167000
+      },
+      "market_context": "high volume periods"
+    }
+  },
+  {
+    "id": "luxalgo-support-resistance",
+    "title": "LuxAlgo Support & Resistance",
+    "author": "LuxAlgo",
+    "collection": "LuxAlgo",
+    "category": "support_resistance",
+    "technical_focus": null,
+    "embedding_text": "Title: LuxAlgo Support & Resistance | Description: Dynamic support and resistance levels with strength analysis and breakout detection | Author: LuxAlgo (LuxAlgo collection) | Category: support_resistance | Indicators: support, resistance, levels | Signals: breakout, bounce, test | Timeframes: 15m, 1h, 4h, 1d | Complexity: Advanced | Best for: general trading",
+    "metadata": {
+      "strategy_type": "support_resistance",
+      "indicators": [
+        "support",
+        "resistance",
+        "levels"
+      ],
+      "signals": [
+        "breakout",
+        "bounce",
+        "test"
+      ],
+      "timeframes": [
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "complexity_score": 0.8,
+      "complexity_level": "Advanced",
+      "open_source": true,
+      "popularity": {
+        "likes": 9870,
+        "views": 145000
+      },
+      "market_context": "general trading"
+    }
+  }
+]

@@ -1,0 +1,578 @@
+[
+  {
+    "id": "ema_CS_D_EURJPY_MINI_IP",
+    "strategy_type": "EMA",
+    "epic": "CS.D.EURJPY.MINI.IP",
+    "epic_type": "Minor",
+    "embedding_text": "EMA strategy for CS.D.EURJPY.MINI.IP | Configuration: aggressive | Timeframe: 15m | Confidence threshold: 45.0% | Risk management: 8 SL / 36 TP | Performance: 90.0% win rate | Best for: Minor pairs, London session",
+    "parameters": {
+      "config_preset": "aggressive",
+      "confidence_threshold": "0.450",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "36.0"
+    },
+    "performance": {
+      "win_rate": "0.9000",
+      "profit_factor": "40.5000",
+      "net_pips": "316.00"
+    },
+    "market_context": {
+      "epic_type": "Minor",
+      "session_preference": "London",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "ema_CS_D_GBPUSD_MINI_IP",
+    "strategy_type": "EMA",
+    "epic": "CS.D.GBPUSD.MINI.IP",
+    "epic_type": "Major",
+    "embedding_text": "EMA strategy for CS.D.GBPUSD.MINI.IP | Configuration: default | Timeframe: 15m | Confidence threshold: 45.0% | Risk management: 8 SL / 36 TP | Performance: 100.0% win rate | Best for: Major pairs, London session",
+    "parameters": {
+      "config_preset": "default",
+      "confidence_threshold": "0.450",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "36.0"
+    },
+    "performance": {
+      "win_rate": "1.0000",
+      "profit_factor": "10.0000",
+      "net_pips": "288.00"
+    },
+    "market_context": {
+      "epic_type": "Major",
+      "session_preference": "London",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "ema_CS_D_USDJPY_MINI_IP",
+    "strategy_type": "EMA",
+    "epic": "CS.D.USDJPY.MINI.IP",
+    "epic_type": "Major",
+    "embedding_text": "EMA strategy for CS.D.USDJPY.MINI.IP | Configuration: default | Timeframe: 15m | Confidence threshold: 45.0% | Risk management: 8 SL / 36 TP | Performance: 87.5% win rate | Best for: Major pairs, Asian session",
+    "parameters": {
+      "config_preset": "default",
+      "confidence_threshold": "0.450",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "36.0"
+    },
+    "performance": {
+      "win_rate": "0.8750",
+      "profit_factor": "31.5000",
+      "net_pips": "244.00"
+    },
+    "market_context": {
+      "epic_type": "Major",
+      "session_preference": "Asian",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "ema_CS_D_EURUSD_CEEM_IP",
+    "strategy_type": "EMA",
+    "epic": "CS.D.EURUSD.CEEM.IP",
+    "epic_type": "Major",
+    "embedding_text": "EMA strategy for CS.D.EURUSD.CEEM.IP | Configuration: aggressive | Timeframe: 15m | Confidence threshold: 45.0% | Risk management: 8 SL / 36 TP | Performance: 100.0% win rate | Best for: Major pairs, London session",
+    "parameters": {
+      "config_preset": "aggressive",
+      "confidence_threshold": "0.450",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "36.0"
+    },
+    "performance": {
+      "win_rate": "1.0000",
+      "profit_factor": "10.0000",
+      "net_pips": "180.00"
+    },
+    "market_context": {
+      "epic_type": "Major",
+      "session_preference": "London",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "ema_CS_D_AUDUSD_MINI_IP",
+    "strategy_type": "EMA",
+    "epic": "CS.D.AUDUSD.MINI.IP",
+    "epic_type": "Minor",
+    "embedding_text": "EMA strategy for CS.D.AUDUSD.MINI.IP | Configuration: aggressive | Timeframe: 15m | Confidence threshold: 45.0% | Risk management: 8 SL / 36 TP | Performance: 100.0% win rate | Best for: Minor pairs, Asian session",
+    "parameters": {
+      "config_preset": "aggressive",
+      "confidence_threshold": "0.450",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "36.0"
+    },
+    "performance": {
+      "win_rate": "1.0000",
+      "profit_factor": "10.0000",
+      "net_pips": "144.00"
+    },
+    "market_context": {
+      "epic_type": "Minor",
+      "session_preference": "Asian",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "ema_CS_D_AUDJPY_MINI_IP",
+    "strategy_type": "EMA",
+    "epic": "CS.D.AUDJPY.MINI.IP",
+    "epic_type": "Exotic",
+    "embedding_text": "EMA strategy for CS.D.AUDJPY.MINI.IP | Configuration: aggressive | Timeframe: 15m | Confidence threshold: 45.0% | Risk management: 8 SL / 36 TP | Performance: 80.0% win rate | Best for: Exotic pairs, Asian session",
+    "parameters": {
+      "config_preset": "aggressive",
+      "confidence_threshold": "0.450",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "36.0"
+    },
+    "performance": {
+      "win_rate": "0.8000",
+      "profit_factor": "18.0000",
+      "net_pips": "136.00"
+    },
+    "market_context": {
+      "epic_type": "Exotic",
+      "session_preference": "Asian",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "ema_CS_D_USDCHF_MINI_IP",
+    "strategy_type": "EMA",
+    "epic": "CS.D.USDCHF.MINI.IP",
+    "epic_type": "Major",
+    "embedding_text": "EMA strategy for CS.D.USDCHF.MINI.IP | Configuration: aggressive | Timeframe: 15m | Confidence threshold: 45.0% | Risk management: 8 SL / 36 TP | Performance: 80.0% win rate | Best for: Major pairs, New York session",
+    "parameters": {
+      "config_preset": "aggressive",
+      "confidence_threshold": "0.450",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "36.0"
+    },
+    "performance": {
+      "win_rate": "0.8000",
+      "profit_factor": "18.0000",
+      "net_pips": "136.00"
+    },
+    "market_context": {
+      "epic_type": "Major",
+      "session_preference": "New York",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "ema_CS_D_NZDUSD_MINI_IP",
+    "strategy_type": "EMA",
+    "epic": "CS.D.NZDUSD.MINI.IP",
+    "epic_type": "Minor",
+    "embedding_text": "EMA strategy for CS.D.NZDUSD.MINI.IP | Configuration: conservative | Timeframe: 15m | Confidence threshold: 45.0% | Risk management: 8 SL / 36 TP | Performance: 100.0% win rate | Best for: Minor pairs, Asian session",
+    "parameters": {
+      "config_preset": "conservative",
+      "confidence_threshold": "0.450",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "36.0"
+    },
+    "performance": {
+      "win_rate": "1.0000",
+      "profit_factor": "10.0000",
+      "net_pips": "108.00"
+    },
+    "market_context": {
+      "epic_type": "Minor",
+      "session_preference": "Asian",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "ema_CS_D_USDCAD_MINI_IP",
+    "strategy_type": "EMA",
+    "epic": "CS.D.USDCAD.MINI.IP",
+    "epic_type": "Exotic",
+    "embedding_text": "EMA strategy for CS.D.USDCAD.MINI.IP | Configuration: conservative | Timeframe: 15m | Confidence threshold: 45.0% | Risk management: 8 SL / 36 TP | Performance: 100.0% win rate | Best for: Exotic pairs, New York session",
+    "parameters": {
+      "config_preset": "conservative",
+      "confidence_threshold": "0.450",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "36.0"
+    },
+    "performance": {
+      "win_rate": "1.0000",
+      "profit_factor": "10.0000",
+      "net_pips": "108.00"
+    },
+    "market_context": {
+      "epic_type": "Exotic",
+      "session_preference": "New York",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_EURUSD_CEEM_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.EURUSD.CEEM.IP",
+    "epic_type": "Major",
+    "embedding_text": "MACD strategy for CS.D.EURUSD.CEEM.IP | Parameters: 12/24/8 | Timeframe: 15m | Confidence: 50.0% | Risk: 10 SL / 20 TP | Performance score: 5.656 | Optimized for: Major pairs",
+    "parameters": {
+      "fast_ema": 12,
+      "slow_ema": 24,
+      "signal_ema": 8,
+      "confidence_threshold": "0.500",
+      "timeframe": "15m",
+      "stop_loss_pips": "10.0",
+      "take_profit_pips": "20.0"
+    },
+    "performance": {
+      "win_rate": "0.6748",
+      "performance_score": "5.655990"
+    },
+    "market_context": {
+      "epic_type": "Major",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_EURUSD_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.EURUSD.MINI.IP",
+    "epic_type": "Major",
+    "embedding_text": "MACD strategy for CS.D.EURUSD.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 10 SL / 20 TP | Performance score: 1.170 | Optimized for: Major pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "10.0",
+      "take_profit_pips": "20.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Major",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_GBPUSD_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.GBPUSD.MINI.IP",
+    "epic_type": "Major",
+    "embedding_text": "MACD strategy for CS.D.GBPUSD.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 10 SL / 20 TP | Performance score: 1.170 | Optimized for: Major pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "10.0",
+      "take_profit_pips": "20.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Major",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_USDJPY_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.USDJPY.MINI.IP",
+    "epic_type": "Major",
+    "embedding_text": "MACD strategy for CS.D.USDJPY.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 8 SL / 16 TP | Performance score: 1.170 | Optimized for: Major pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "16.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Major",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_USDCHF_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.USDCHF.MINI.IP",
+    "epic_type": "Major",
+    "embedding_text": "MACD strategy for CS.D.USDCHF.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 10 SL / 20 TP | Performance score: 1.170 | Optimized for: Major pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "10.0",
+      "take_profit_pips": "20.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Major",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_AUDUSD_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.AUDUSD.MINI.IP",
+    "epic_type": "Minor",
+    "embedding_text": "MACD strategy for CS.D.AUDUSD.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 10 SL / 20 TP | Performance score: 1.170 | Optimized for: Minor pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "10.0",
+      "take_profit_pips": "20.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Minor",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_USDCAD_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.USDCAD.MINI.IP",
+    "epic_type": "Exotic",
+    "embedding_text": "MACD strategy for CS.D.USDCAD.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 10 SL / 20 TP | Performance score: 1.170 | Optimized for: Exotic pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "10.0",
+      "take_profit_pips": "20.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Exotic",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_NZDUSD_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.NZDUSD.MINI.IP",
+    "epic_type": "Minor",
+    "embedding_text": "MACD strategy for CS.D.NZDUSD.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 10 SL / 20 TP | Performance score: 1.170 | Optimized for: Minor pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "10.0",
+      "take_profit_pips": "20.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Minor",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_EURGBP_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.EURGBP.MINI.IP",
+    "epic_type": "Exotic",
+    "embedding_text": "MACD strategy for CS.D.EURGBP.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 10 SL / 20 TP | Performance score: 1.170 | Optimized for: Exotic pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "10.0",
+      "take_profit_pips": "20.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Exotic",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_EURJPY_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.EURJPY.MINI.IP",
+    "epic_type": "Minor",
+    "embedding_text": "MACD strategy for CS.D.EURJPY.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 8 SL / 16 TP | Performance score: 1.170 | Optimized for: Minor pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "16.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Minor",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_GBPJPY_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.GBPJPY.MINI.IP",
+    "epic_type": "Minor",
+    "embedding_text": "MACD strategy for CS.D.GBPJPY.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 8 SL / 16 TP | Performance score: 1.170 | Optimized for: Minor pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "16.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Minor",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_AUDJPY_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.AUDJPY.MINI.IP",
+    "epic_type": "Exotic",
+    "embedding_text": "MACD strategy for CS.D.AUDJPY.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 8 SL / 16 TP | Performance score: 1.170 | Optimized for: Exotic pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "16.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Exotic",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_CADJPY_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.CADJPY.MINI.IP",
+    "epic_type": "Exotic",
+    "embedding_text": "MACD strategy for CS.D.CADJPY.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 8 SL / 16 TP | Performance score: 1.170 | Optimized for: Exotic pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "16.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Exotic",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_CHFJPY_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.CHFJPY.MINI.IP",
+    "epic_type": "Exotic",
+    "embedding_text": "MACD strategy for CS.D.CHFJPY.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 8 SL / 16 TP | Performance score: 1.170 | Optimized for: Exotic pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "8.0",
+      "take_profit_pips": "16.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Exotic",
+      "timeframe": "15m"
+    }
+  },
+  {
+    "id": "macd_CS_D_EURAUD_MINI_IP",
+    "strategy_type": "MACD",
+    "epic": "CS.D.EURAUD.MINI.IP",
+    "epic_type": "Exotic",
+    "embedding_text": "MACD strategy for CS.D.EURAUD.MINI.IP | Parameters: 8/17/9 | Timeframe: 15m | Confidence: 60.0% | Risk: 10 SL / 20 TP | Performance score: 1.170 | Optimized for: Exotic pairs",
+    "parameters": {
+      "fast_ema": 8,
+      "slow_ema": 17,
+      "signal_ema": 9,
+      "confidence_threshold": "0.600",
+      "timeframe": "15m",
+      "stop_loss_pips": "10.0",
+      "take_profit_pips": "20.0"
+    },
+    "performance": {
+      "win_rate": "0.6500",
+      "performance_score": "1.170000"
+    },
+    "market_context": {
+      "epic_type": "Exotic",
+      "timeframe": "15m"
+    }
+  }
+]

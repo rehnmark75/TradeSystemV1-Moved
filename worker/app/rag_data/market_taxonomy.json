@@ -1,0 +1,192 @@
+{
+  "market_regimes": {
+    "trending": {
+      "description": "Strong directional movement with clear trend",
+      "best_indicators": [
+        "trend_following",
+        "moving_average",
+        "trend_channel"
+      ],
+      "avoid_indicators": [
+        "oscillator",
+        "reversal_indicator"
+      ],
+      "optimal_timeframes": [
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "risk_characteristics": "Medium volatility, clear direction"
+    },
+    "ranging": {
+      "description": "Sideways movement within defined boundaries",
+      "best_indicators": [
+        "oscillator",
+        "support_resistance",
+        "mean_reversion"
+      ],
+      "avoid_indicators": [
+        "trend_following",
+        "breakout"
+      ],
+      "optimal_timeframes": [
+        "5m",
+        "15m",
+        "1h"
+      ],
+      "risk_characteristics": "Low volatility, range-bound"
+    },
+    "volatile": {
+      "description": "High volatility with rapid price movements",
+      "best_indicators": [
+        "volatility",
+        "breakout",
+        "momentum"
+      ],
+      "avoid_indicators": [
+        "slow_trend",
+        "conservative"
+      ],
+      "optimal_timeframes": [
+        "1m",
+        "5m",
+        "15m"
+      ],
+      "risk_characteristics": "High volatility, requires wider stops"
+    }
+  },
+  "trading_styles": {
+    "scalping": {
+      "timeframes": [
+        "1m",
+        "5m"
+      ],
+      "preferred_indicators": [
+        "momentum",
+        "volume",
+        "scalping"
+      ],
+      "risk_management": "Tight stops, quick exits",
+      "session_preference": [
+        "london",
+        "new_york"
+      ]
+    },
+    "day_trading": {
+      "timeframes": [
+        "5m",
+        "15m",
+        "1h"
+      ],
+      "preferred_indicators": [
+        "trend",
+        "momentum",
+        "support_resistance"
+      ],
+      "risk_management": "Medium stops, intraday focus",
+      "session_preference": [
+        "london",
+        "new_york"
+      ]
+    },
+    "swing_trading": {
+      "timeframes": [
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "preferred_indicators": [
+        "trend",
+        "divergence",
+        "pattern_recognition"
+      ],
+      "risk_management": "Wide stops, multi-day holds",
+      "session_preference": [
+        "any"
+      ]
+    }
+  },
+  "indicator_combinations": {
+    "trend_momentum": {
+      "primary": [
+        "trend_following",
+        "moving_average"
+      ],
+      "confirmation": [
+        "momentum",
+        "volume"
+      ],
+      "filter": [
+        "support_resistance"
+      ],
+      "use_case": "Strong trending markets with momentum confirmation"
+    },
+    "mean_reversion": {
+      "primary": [
+        "oscillator",
+        "reversal_indicator"
+      ],
+      "confirmation": [
+        "support_resistance",
+        "volume"
+      ],
+      "filter": [
+        "trend"
+      ],
+      "use_case": "Range-bound markets with clear levels"
+    },
+    "breakout_system": {
+      "primary": [
+        "volatility",
+        "breakout"
+      ],
+      "confirmation": [
+        "volume",
+        "momentum"
+      ],
+      "filter": [
+        "support_resistance"
+      ],
+      "use_case": "Low volatility compression followed by expansion"
+    }
+  },
+  "complexity_guidelines": {
+    "beginner": {
+      "max_indicators": 2,
+      "preferred_complexity": "Basic",
+      "recommended_collections": [
+        "ChrisMoody",
+        "LazyBear"
+      ],
+      "avoid_collections": [
+        "Zeiierman",
+        "AlgoAlpha"
+      ]
+    },
+    "intermediate": {
+      "max_indicators": 3,
+      "preferred_complexity": "Intermediate",
+      "recommended_collections": [
+        "LuxAlgo",
+        "ChartPrime",
+        "LazyBear"
+      ],
+      "avoid_collections": [
+        "Zeiierman neural networks"
+      ]
+    },
+    "advanced": {
+      "max_indicators": 5,
+      "preferred_complexity": "Advanced",
+      "recommended_collections": [
+        "Zeiierman",
+        "BigBeluga",
+        "AlgoAlpha"
+      ],
+      "special_features": [
+        "AI algorithms",
+        "institutional analysis"
+      ]
+    }
+  }
+}

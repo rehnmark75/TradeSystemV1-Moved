@@ -211,10 +211,40 @@ services:
       - IG_PWD=${PROD_PASSWORD}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
+      - VECTOR_DB_URL=http://vector-db:8090
     networks:
       - lab-net
     depends_on:
       - postgres
+      - vector-db
+
+  vector-db:
+    build:
+      context: ./vector-db
+    container_name: vector-db
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./vector-db/data:/app/data
+      - ./vector-db/vectordb:/app/vectordb
+      - ./logs/vector-db:/app/logs
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
+      - CHROMA_HOST=0.0.0.0
+      - CHROMA_PORT=8090
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+      - tradingview
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 volumes:
   pgadmin_data:
 
