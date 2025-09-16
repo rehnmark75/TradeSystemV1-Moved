@@ -1178,12 +1178,17 @@ class EnhancedTradeProcessor:
                     break_even_stop = trade.entry_price - (1 * point_value)  # Entry - 1 point
                 
                 # ✅ CRITICAL FIX: For profit_protected trades, check if break-even would worsen the position
-                # ✅ REFRESH: Get the actual database value to avoid sync confusion
+                # ✅ FIX: Re-query trade from current session to get fresh data
                 try:
-                    db.refresh(trade)
+                    fresh_trade = db.query(TradeLog).filter(TradeLog.id == trade.id).first()
+                    if fresh_trade:
+                        current_stop = fresh_trade.sl_price or 0.0
+                    else:
+                        self.logger.warning(f"[TRADE NOT FOUND] Trade {trade.id}: Using cached sl_price")
+                        current_stop = trade.sl_price or 0.0
                 except Exception as e:
-                    self.logger.warning(f"[REFRESH WARNING] Trade {trade.id}: Could not refresh, using current value: {e}")
-                current_stop = trade.sl_price or 0.0
+                    self.logger.warning(f"[DB QUERY WARNING] Trade {trade.id}: Could not query fresh data, using current value: {e}")
+                    current_stop = trade.sl_price or 0.0
                 
                 # Check if break-even move would worsen protection
                 if trade.direction.upper() == "BUY":
