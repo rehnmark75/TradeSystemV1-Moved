@@ -1212,8 +1212,19 @@ class EnhancedTradeProcessor:
                             adjustment_distance = break_even_stop - current_stop
                         else:
                             adjustment_distance = current_stop - break_even_stop
-                        
-                        adjustment_points = int(abs(adjustment_distance) / point_value)
+
+                        # ✅ FIX: Use proper rounding instead of truncation to avoid 0-point adjustments
+                        adjustment_points = round(abs(adjustment_distance) / point_value)
+
+                        # ✅ FIX: Handle edge case where adjustment is very small but not zero
+                        if adjustment_points == 0 and abs(adjustment_distance) > 0.00001:
+                            adjustment_points = 1  # Minimum 1-point adjustment for non-zero distances
+                            self.logger.debug(f"[BREAK-EVEN CALC] Trade {trade.id}: Small adjustment rounded up from {abs(adjustment_distance):.6f} to 1pt")
+
+                        # Diagnostic logging for troubleshooting
+                        self.logger.debug(f"[BREAK-EVEN CALC] Trade {trade.id}: current_stop={current_stop:.5f}, "
+                                        f"break_even_stop={break_even_stop:.5f}, adjustment_distance={adjustment_distance:.6f}, "
+                                        f"adjustment_points={adjustment_points}")
                         
                         if adjustment_points > 0:
                             direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"

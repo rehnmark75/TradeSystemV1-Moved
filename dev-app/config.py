@@ -96,30 +96,30 @@ ATR_STOP_MULTIPLIER = 1.5  # ATR multiplier for stop loss distance
 # ================== PROGRESSIVE TRAILING SETTINGS ==================
 # 3-Stage Progressive Trailing System (based on trade data analysis)
 
-# Stage 1: Quick Break-Even Protection
-STAGE1_TRIGGER_POINTS = 3    # Move to break-even after +3 points profit
-STAGE1_LOCK_POINTS = 1       # Guarantee +1 point minimum profit
+# Stage 1: Balanced Break-Even Protection (OPTIMIZED FOR PROFIT CAPTURE)
+STAGE1_TRIGGER_POINTS = 7    # Move to break-even after +7 points profit (was 3)
+STAGE1_LOCK_POINTS = 2       # Guarantee +2 point minimum profit (was 1)
 
-# Stage 2: Profit Lock-In
-STAGE2_TRIGGER_POINTS = 5    # Lock in meaningful profit after +5 points
-STAGE2_LOCK_POINTS = 3       # Guarantee +3 points profit
+# Stage 2: Profit Lock-In (OPTIMIZED FOR TREND FOLLOWING)
+STAGE2_TRIGGER_POINTS = 12   # Lock in meaningful profit after +12 points (was 5)
+STAGE2_LOCK_POINTS = 6       # Guarantee +6 points profit (was 3)
 
-# Stage 3: Dynamic ATR Trailing
-STAGE3_TRIGGER_POINTS = 8    # Start ATR trailing after +8 points
+# Stage 3: Dynamic ATR Trailing (OPTIMIZED FOR LARGER MOVES)
+STAGE3_TRIGGER_POINTS = 20   # Start ATR trailing after +20 points (was 8)
 STAGE3_ATR_MULTIPLIER = 1.5  # ATR multiplier for trailing distance
-STAGE3_MIN_DISTANCE = 2      # Minimum trailing distance in points
+STAGE3_MIN_DISTANCE = 3      # Minimum trailing distance in points (was 2)
 
 # Epic-specific progressive settings (for high-performance pairs)
 PROGRESSIVE_EPIC_SETTINGS = {
     'CS.D.EURUSD.MINI.IP': {
-        'stage1_trigger': 2,  # More aggressive for major pairs
-        'stage2_trigger': 4,
-        'stage3_trigger': 7
+        'stage1_trigger': 6,  # Balanced for major pairs (was 2)
+        'stage2_trigger': 10,  # Allow trends to develop (was 4)
+        'stage3_trigger': 18   # ATR trailing for big moves (was 7)
     },
     'CS.D.GBPUSD.MINI.IP': {
-        'stage1_trigger': 2,
-        'stage2_trigger': 4,
-        'stage3_trigger': 7
+        'stage1_trigger': 6,  # Balanced for major pairs (was 2)
+        'stage2_trigger': 10,  # Allow trends to develop (was 4)
+        'stage3_trigger': 18   # ATR trailing for big moves (was 7)
     },
     'CS.D.USDJPY.MINI.IP': {
         'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
@@ -127,6 +127,37 @@ PROGRESSIVE_EPIC_SETTINGS = {
         'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips
     },
     'CS.D.EURJPY.MINI.IP': {
+        'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
+        'stage2_trigger': 60,  # JPY calibrated: 60 points = 6 real pips
+        'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips
+    },
+    # Additional major and minor pairs with balanced settings
+    'CS.D.USDCHF.MINI.IP': {
+        'stage1_trigger': 6,   # Balanced for major pairs
+        'stage2_trigger': 10,  # Allow trends to develop
+        'stage3_trigger': 18   # ATR trailing for big moves
+    },
+    'CS.D.AUDUSD.MINI.IP': {
+        'stage1_trigger': 6,   # Balanced for major pairs
+        'stage2_trigger': 10,  # Allow trends to develop
+        'stage3_trigger': 18   # ATR trailing for big moves
+    },
+    'CS.D.USDCAD.MINI.IP': {
+        'stage1_trigger': 6,   # Balanced for major pairs
+        'stage2_trigger': 10,  # Allow trends to develop
+        'stage3_trigger': 18   # ATR trailing for big moves
+    },
+    'CS.D.NZDUSD.MINI.IP': {
+        'stage1_trigger': 7,   # Slightly more conservative for minor pairs
+        'stage2_trigger': 12,  # Allow trends to develop
+        'stage3_trigger': 20   # ATR trailing for big moves
+    },
+    'CS.D.AUDJPY.MINI.IP': {
+        'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
+        'stage2_trigger': 60,  # JPY calibrated: 60 points = 6 real pips
+        'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips
+    },
+    'CS.D.GBPJPY.MINI.IP': {
         'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
         'stage2_trigger': 60,  # JPY calibrated: 60 points = 6 real pips
         'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips

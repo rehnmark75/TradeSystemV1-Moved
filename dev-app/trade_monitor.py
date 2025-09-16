@@ -766,13 +766,41 @@ class TradeMonitor:
                 self.logger.error(f"❌ Could not get current price for {trade.symbol}")
                 return False
             
-            # ✅ NEW: Use epic-specific progressive configuration if available
+            # ✅ ADAPTIVE: Use market-condition-aware progressive configuration
             try:
                 from services.progressive_config import get_progressive_config_for_epic, log_progressive_config
-                pair_config = get_progressive_config_for_epic(trade.symbol)
-                log_progressive_config(pair_config, trade.symbol, self.logger)
-            except ImportError:
+
+                # Get recent candle data for market analysis
+                candle_data = None
+                try:
+                    with SessionLocal() as candle_db:
+                        candle_data = (candle_db.query(IGCandle)
+                                     .filter(IGCandle.epic == trade.symbol, IGCandle.timeframe == 60)
+                                     .order_by(IGCandle.start_time.desc())
+                                     .limit(20)
+                                     .all())
+                    self.logger.debug(f"🕯️ [CANDLE DATA] {trade.symbol}: Retrieved {len(candle_data) if candle_data else 0} candles for market analysis")
+                except Exception as candle_error:
+                    self.logger.warning(f"⚠️ [CANDLE DATA] Could not fetch candles for {trade.symbol}: {candle_error}")
+
+                # Get adaptive configuration based on market conditions
+                self.logger.debug(f"🔄 [PROGRESSIVE DEBUG] About to call get_progressive_config_for_epic for {trade.symbol}")
+                pair_config = get_progressive_config_for_epic(
+                    trade.symbol,
+                    candles=candle_data,
+                    current_price=current_price,
+                    enable_adaptive=True  # Enable adaptive system
+                )
+                self.logger.debug(f"🔄 [PROGRESSIVE DEBUG] get_progressive_config_for_epic completed for {trade.symbol}")
+
+                # Enhanced logging with market context
+                market_context = getattr(pair_config, '_market_context', None)
+                self.logger.debug(f"🔄 [PROGRESSIVE DEBUG] About to call log_progressive_config for {trade.symbol}")
+                log_progressive_config(pair_config, trade.symbol, self.logger, market_context)
+                self.logger.debug(f"🔄 [PROGRESSIVE DEBUG] log_progressive_config completed for {trade.symbol}")
+            except ImportError as import_err:
                 # Fallback to pair config manager or default
+                self.logger.warning(f"📋 [IMPORT ERROR] Progressive config import failed: {import_err}, using fallback")
                 if self.pair_config_manager:
                     try:
                         pair_config = self.pair_config_manager.get_optimized_config_for_trade(trade)
