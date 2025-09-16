@@ -15,7 +15,7 @@ async def has_open_position(epic: str, auth_headers: dict) -> bool:
         return any(pos["market"]["epic"] == epic for pos in positions)
 
 
-async def place_market_order(auth_headers, market_epic, direction, currency_code,sl_limit):
+async def place_market_order(auth_headers, market_epic, direction, currency_code, sl_limit, limit_distance=None):
     payload = {
         "epic": market_epic,
         "expiry": "-",
@@ -26,7 +26,7 @@ async def place_market_order(auth_headers, market_epic, direction, currency_code
         "forceOpen": True,
         "currencyCode": currency_code,
         "stopDistance": sl_limit,
-        "limitDistance": 25
+        "limitDistance": limit_distance or 25  # Use provided limit_distance or fallback to 25
     }
 
     async with httpx.AsyncClient() as client:

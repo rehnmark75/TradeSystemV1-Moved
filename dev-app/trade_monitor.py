@@ -483,7 +483,18 @@ class TradeMonitor:
         
         print("✅ Enhanced processor available, continuing initialization...")
         self.monitoring_enabled = True
-        self.trade_config = trade_config or SCALPING_CONFIG_WITH_EMA
+
+        # Use progressive config by default for better performance
+        if trade_config is None:
+            try:
+                from services.progressive_config import DEFAULT_PROGRESSIVE_CONFIG
+                self.trade_config = DEFAULT_PROGRESSIVE_CONFIG
+                print("🎯 Using DEFAULT_PROGRESSIVE_CONFIG for optimal performance")
+            except ImportError:
+                self.trade_config = SCALPING_CONFIG_WITH_EMA
+                print("🔄 Fallback to SCALPING_CONFIG_WITH_EMA")
+        else:
+            self.trade_config = trade_config
         self.api_config = api_config or ApiConfig()
 
         print("🔧 Setting up logger...")
@@ -755,16 +766,22 @@ class TradeMonitor:
                 self.logger.error(f"❌ Could not get current price for {trade.symbol}")
                 return False
             
-            # ✅ NEW: Use pair-specific configuration if available
-            if self.pair_config_manager:
-                try:
-                    pair_config = self.pair_config_manager.get_optimized_config_for_trade(trade)
-                    self.logger.debug(f"📊 Using pair-specific config for {trade.symbol}")
-                except Exception as config_error:
-                    self.logger.warning(f"⚠️ Failed to get pair config for {trade.symbol}, using default: {config_error}")
+            # ✅ NEW: Use epic-specific progressive configuration if available
+            try:
+                from services.progressive_config import get_progressive_config_for_epic, log_progressive_config
+                pair_config = get_progressive_config_for_epic(trade.symbol)
+                log_progressive_config(pair_config, trade.symbol, self.logger)
+            except ImportError:
+                # Fallback to pair config manager or default
+                if self.pair_config_manager:
+                    try:
+                        pair_config = self.pair_config_manager.get_optimized_config_for_trade(trade)
+                        self.logger.debug(f"📊 Using pair-specific config for {trade.symbol}")
+                    except Exception as config_error:
+                        self.logger.warning(f"⚠️ Failed to get pair config for {trade.symbol}, using default: {config_error}")
+                        pair_config = self.trade_config
+                else:
                     pair_config = self.trade_config
-            else:
-                pair_config = self.trade_config
             
             # ✅ FIX: Use correct method name and pass all required parameters
             with SessionLocal() as db:

@@ -76,6 +76,63 @@ EPIC_SPECIFIC_COOLDOWNS = {
     # Others use DEFAULT_TRADE_COOLDOWN_MINUTES
 }
 
+# ================== RISK MANAGEMENT SETTINGS ==================
+# Default risk-reward ratio (take profit will be this multiple of stop loss)
+DEFAULT_RISK_REWARD_RATIO = 2.0
+
+# Epic-specific risk-reward ratios (for fine-tuning based on volatility)
+EPIC_RISK_REWARD_RATIOS = {
+    'CS.D.EURUSD.MINI.IP': 2.5,  # More volatile pairs get higher RR
+    'CS.D.GBPUSD.MINI.IP': 2.5,
+    'CS.D.USDJPY.MINI.IP': 2.0,  # Stable pairs use default
+    'CS.D.AUDUSD.MINI.IP': 2.0,
+    'CS.D.USDCAD.MINI.IP': 2.0,
+}
+
+# ATR calculation settings
+ATR_PERIODS = 14  # Number of periods for ATR calculation
+ATR_STOP_MULTIPLIER = 1.5  # ATR multiplier for stop loss distance
+
+# ================== PROGRESSIVE TRAILING SETTINGS ==================
+# 3-Stage Progressive Trailing System (based on trade data analysis)
+
+# Stage 1: Quick Break-Even Protection
+STAGE1_TRIGGER_POINTS = 3    # Move to break-even after +3 points profit
+STAGE1_LOCK_POINTS = 1       # Guarantee +1 point minimum profit
+
+# Stage 2: Profit Lock-In
+STAGE2_TRIGGER_POINTS = 5    # Lock in meaningful profit after +5 points
+STAGE2_LOCK_POINTS = 3       # Guarantee +3 points profit
+
+# Stage 3: Dynamic ATR Trailing
+STAGE3_TRIGGER_POINTS = 8    # Start ATR trailing after +8 points
+STAGE3_ATR_MULTIPLIER = 1.5  # ATR multiplier for trailing distance
+STAGE3_MIN_DISTANCE = 2      # Minimum trailing distance in points
+
+# Epic-specific progressive settings (for high-performance pairs)
+PROGRESSIVE_EPIC_SETTINGS = {
+    'CS.D.EURUSD.MINI.IP': {
+        'stage1_trigger': 2,  # More aggressive for major pairs
+        'stage2_trigger': 4,
+        'stage3_trigger': 7
+    },
+    'CS.D.GBPUSD.MINI.IP': {
+        'stage1_trigger': 2,
+        'stage2_trigger': 4,
+        'stage3_trigger': 7
+    },
+    'CS.D.USDJPY.MINI.IP': {
+        'stage1_trigger': 4,  # More conservative for JPY pairs
+        'stage2_trigger': 6,
+        'stage3_trigger': 10
+    },
+    'CS.D.EURJPY.MINI.IP': {
+        'stage1_trigger': 4,
+        'stage2_trigger': 6,
+        'stage3_trigger': 10
+    }
+}
+
 # ================== DEFAULT VALUES ==================
 DEFAULT_TEST_EPIC = "CS.D.USDJPY.MINI.IP"
 

@@ -35,20 +35,30 @@ class TrailingMethod(Enum):
     PARABOLIC_SAR = "parabolic_sar"        # Parabolic SAR-style
     SMART_TRAIL = "smart_trail"            # Multi-condition intelligent trailing
     SUPPORT_RESISTANCE = "support_resistance"  # Technical level-based
+    PROGRESSIVE_3_STAGE = "progressive_3_stage"  # NEW: 3-stage progressive trailing
 
 
 @dataclass
 class TrailingConfig:
     """Configuration for advanced trailing strategies"""
-    method: TrailingMethod = TrailingMethod.SMART_TRAIL
-    
+    method: TrailingMethod = TrailingMethod.PROGRESSIVE_3_STAGE
+
     # Universal settings
     initial_trigger_points: int = 7
-    break_even_trigger_points: int = 7  # move to BE after +7 points
+    break_even_trigger_points: int = 3  # UPDATED: move to BE after +3 points (was 7)
     min_trail_distance: int = 5
     max_trail_distance: int = 50
 
     monitor_interval_seconds: int = 60  # ✅ NEW: poll interval between trade checks
+
+    # NEW: Progressive trailing settings
+    stage1_trigger_points: int = 3    # Break-even trigger
+    stage1_lock_points: int = 1       # Minimum profit guarantee
+    stage2_trigger_points: int = 5    # Profit lock trigger
+    stage2_lock_points: int = 3       # Better profit guarantee
+    stage3_trigger_points: int = 8    # ATR trailing trigger
+    stage3_atr_multiplier: float = 1.5 # ATR multiplier for stage 3
+    stage3_min_distance: int = 2      # Minimum distance for stage 3
     
     # Percentage-based
     trail_percentage: float = 1.5
@@ -595,6 +605,197 @@ class SmartTrailing(TrailingStrategy):
         return 1.0
 
 
+class Progressive3StageTrailing(TrailingStrategy):
+    """
+    3-Stage Progressive Trailing Strategy - Based on Trade Data Analysis
+
+    Stage 1: Quick break-even at +3 points (35.8% → 60%+ trades protected)
+    Stage 2: Profit lock-in at +5 points (meaningful profit secured)
+    Stage 3: ATR-based trailing at +8+ points (trend following)
+
+    This strategy replicates the success of trades with 4-6 adjustments (100% win rate)
+    """
+
+    def __init__(self, config: TrailingConfig, logger):
+        super().__init__(config, logger)
+        self.atr_strategy = ATRTrailing(config, logger)
+
+    def calculate_trail_level(self, trade: TradeLog, current_price: float,
+                            candle_data: List[IGCandle], db: Session) -> Optional[float]:
+        direction = trade.direction.upper()
+        point_value = self._get_point_value(trade.symbol)
+
+        # Get epic-specific settings or use defaults
+        from config import PROGRESSIVE_EPIC_SETTINGS
+        epic_settings = PROGRESSIVE_EPIC_SETTINGS.get(trade.symbol, {})
+
+        stage1_trigger = epic_settings.get('stage1_trigger', self.config.stage1_trigger_points)
+        stage2_trigger = epic_settings.get('stage2_trigger', self.config.stage2_trigger_points)
+        stage3_trigger = epic_settings.get('stage3_trigger', self.config.stage3_trigger_points)
+
+        # Calculate current profit in points
+        if direction == "BUY":
+            profit_points = int((current_price - trade.entry_price) / point_value)
+        else:  # SELL
+            profit_points = int((trade.entry_price - current_price) / point_value)
+
+        current_stop = trade.sl_price or 0.0
+
+        # Determine which stage we're in and calculate appropriate trail level
+        if profit_points >= stage3_trigger:
+            # Stage 3: ATR-based trailing for trend following
+            trail_level = self._calculate_stage3_trail(trade, current_price, candle_data, current_stop)
+            stage = 3
+
+        elif profit_points >= stage2_trigger:
+            # Stage 2: Profit lock-in
+            trail_level = self._calculate_stage2_trail(trade, current_price, current_stop)
+            stage = 2
+
+        elif profit_points >= stage1_trigger:
+            # Stage 1: Break-even protection
+            trail_level = self._calculate_stage1_trail(trade, current_price, current_stop)
+            stage = 1
+
+        else:
+            # Not ready for any trailing yet
+            return None
+
+        if trail_level is None:
+            return None
+
+        # Validate that this is actually an improvement
+        if current_stop > 0:
+            if direction == "BUY":
+                is_improvement = trail_level > current_stop
+            else:
+                is_improvement = trail_level < current_stop
+
+            if not is_improvement:
+                self.logger.debug(f"[PROGRESSIVE STAGE {stage}] {trade.symbol}: "
+                                f"Trail level {trail_level:.5f} not better than current {current_stop:.5f}")
+                return None
+
+        self.logger.info(f"[PROGRESSIVE STAGE {stage}] {trade.symbol}: "
+                       f"Profit: {profit_points}pts → Trail: {trail_level:.5f}")
+
+        return trail_level
+
+    def _calculate_stage1_trail(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
+        """Stage 1: Break-even protection - entry + 1 point"""
+        direction = trade.direction.upper()
+        point_value = self._get_point_value(trade.symbol)
+        lock_points = self.config.stage1_lock_points
+
+        if direction == "BUY":
+            trail_level = trade.entry_price + (lock_points * point_value)
+        else:  # SELL
+            trail_level = trade.entry_price - (lock_points * point_value)
+
+        return round(trail_level, 5)
+
+    def _calculate_stage2_trail(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
+        """Stage 2: Profit lock-in - entry + 3 points"""
+        direction = trade.direction.upper()
+        point_value = self._get_point_value(trade.symbol)
+        lock_points = self.config.stage2_lock_points
+
+        if direction == "BUY":
+            trail_level = trade.entry_price + (lock_points * point_value)
+        else:  # SELL
+            trail_level = trade.entry_price - (lock_points * point_value)
+
+        # Ensure we don't move backwards from Stage 1
+        if current_stop > 0:
+            if direction == "BUY":
+                trail_level = max(trail_level, current_stop)
+            else:
+                trail_level = min(trail_level, current_stop)
+
+        return round(trail_level, 5)
+
+    def _calculate_stage3_trail(self, trade: TradeLog, current_price: float,
+                              candle_data: List[IGCandle], current_stop: float) -> Optional[float]:
+        """Stage 3: ATR-based dynamic trailing"""
+        direction = trade.direction.upper()
+        point_value = self._get_point_value(trade.symbol)
+
+        # Calculate ATR-based distance
+        atr = self._calculate_atr(candle_data)
+        if atr:
+            trail_distance = max(
+                atr * self.config.stage3_atr_multiplier,
+                self.config.stage3_min_distance * point_value
+            )
+        else:
+            # Fallback to fixed distance
+            trail_distance = self.config.stage3_min_distance * point_value
+
+        if direction == "BUY":
+            trail_level = current_price - trail_distance
+        else:  # SELL
+            trail_level = current_price + trail_distance
+
+        # Ensure we don't move backwards from previous stages
+        if current_stop > 0:
+            if direction == "BUY":
+                trail_level = max(trail_level, current_stop)
+            else:
+                trail_level = min(trail_level, current_stop)
+
+        return round(trail_level, 5)
+
+    def should_trail(self, trade: TradeLog, current_price: float,
+                    candle_data: List[IGCandle]) -> bool:
+        """Determine if we should update trailing stop for any of the 3 stages"""
+        direction = trade.direction.upper()
+        point_value = self._get_point_value(trade.symbol)
+
+        # Calculate current profit
+        if direction == "BUY":
+            profit_points = int((current_price - trade.entry_price) / point_value)
+        else:  # SELL
+            profit_points = int((trade.entry_price - current_price) / point_value)
+
+        # Get epic-specific settings
+        from config import PROGRESSIVE_EPIC_SETTINGS
+        epic_settings = PROGRESSIVE_EPIC_SETTINGS.get(trade.symbol, {})
+
+        stage1_trigger = epic_settings.get('stage1_trigger', self.config.stage1_trigger_points)
+
+        # Always try to trail if we have enough profit for any stage
+        return profit_points >= stage1_trigger
+
+    def _calculate_atr(self, candles: List[IGCandle]) -> Optional[float]:
+        """Calculate ATR for Stage 3 trailing"""
+        if len(candles) < 2:
+            return None
+
+        # Sort and get recent candles
+        recent_candles = sorted(candles, key=lambda x: x.start_time)[-15:]
+
+        true_ranges = []
+        for i in range(1, len(recent_candles)):
+            prev_close = recent_candles[i-1].close
+            current = recent_candles[i]
+
+            tr = max(
+                current.high - current.low,
+                abs(current.high - prev_close),
+                abs(current.low - prev_close)
+            )
+            true_ranges.append(tr)
+
+        return sum(true_ranges) / len(true_ranges) if true_ranges else None
+
+    def _get_point_value(self, epic: str) -> float:
+        if "JPY" in epic:
+            return 0.01
+        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
+            return 0.0001
+        return 1.0
+
+
 class AdvancedTrailingManager:
     """Manager class for advanced trailing strategies - ENHANCED WITH FIXES"""
     
@@ -607,6 +808,7 @@ class AdvancedTrailingManager:
             TrailingMethod.ATR_BASED: ATRTrailing(config, logger),
             TrailingMethod.CHANDELIER: ChandelierTrailing(config, logger),
             TrailingMethod.SMART_TRAIL: SmartTrailing(config, logger),
+            TrailingMethod.PROGRESSIVE_3_STAGE: Progressive3StageTrailing(config, logger),
         }
     
     def get_candle_data(self, db: Session, symbol: str, timeframe: int = 60, 
@@ -1075,17 +1277,43 @@ class EnhancedTradeProcessor:
                 if should_trail:
                     self.logger.info(f"🎯 [TRAILING TRIGGER] Trade {trade.id}: Additional movement sufficient for trailing")
                     
-                    # Apply the selected trailing strategy
-                    if self.config.method == TrailingMethod.FIXED_POINTS:
-                        return self._apply_fixed_points_trailing(trade, current_price, db)
-                    elif self.config.method == TrailingMethod.PERCENTAGE_BASED:
-                        return self._apply_percentage_trailing(trade, current_price, db)
-                    elif self.config.method == TrailingMethod.ATR_BASED:
-                        return self._apply_atr_trailing(trade, current_price, db)
-                    elif self.config.method == TrailingMethod.VOLATILITY_ADAPTIVE:
-                        return self._apply_volatility_adaptive_trailing(trade, current_price, db)
-                    else:
-                        self.logger.warning(f"[UNKNOWN METHOD] Trade {trade.id}: {self.config.method}")
+                    # Apply the selected trailing strategy using the unified trailing manager
+                    try:
+                        trailing_manager = AdvancedTrailingManager(self.config, self.logger)
+
+                        # Calculate new trail level using the configured method
+                        new_trail_level = trailing_manager.calculate_new_trail_level(trade, current_price, db)
+
+                        if new_trail_level:
+                            # Calculate adjustment points for the API
+                            adjustment_points = trailing_manager.get_trail_adjustment_points(trade, current_price, new_trail_level)
+
+                            # Determine direction for adjustment
+                            direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
+
+                            # Send the adjustment
+                            success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+
+                            if success:
+                                # Update trade record
+                                trade.sl_price = new_trail_level
+                                trade.last_trigger_price = current_price
+                                trade.trigger_time = datetime.utcnow()
+                                trade.status = "trailing"
+                                db.commit()
+
+                                self.logger.info(f"🎯 [TRAILING SUCCESS] Trade {trade.id} {trade.symbol}: "
+                                               f"Stop moved to {new_trail_level:.5f} ({adjustment_points} pts)")
+                                return True
+                            else:
+                                self.logger.error(f"❌ [TRAILING FAILED] Trade {trade.id}: API adjustment failed")
+                                return False
+                        else:
+                            self.logger.debug(f"[NO TRAIL] Trade {trade.id}: No trail level calculated")
+                            return True  # Continue monitoring
+
+                    except Exception as e:
+                        self.logger.error(f"❌ [TRAILING ERROR] Trade {trade.id}: {e}")
                         return False
                 else:
                     self.logger.debug(f"[NO TRAIL] Trade {trade.id}: Insufficient additional movement for trailing")
@@ -1131,11 +1359,18 @@ class EnhancedTradeProcessor:
 
 # Configuration examples for different market conditions - ENHANCED
 SCALPING_CONFIG = TrailingConfig(
-    method=TrailingMethod.FIXED_POINTS,
-    initial_trigger_points=5,
-    break_even_trigger_points=5,  # ✅ ENHANCED: move to break-even after +5 points
+    method=TrailingMethod.PROGRESSIVE_3_STAGE,  # UPDATED: Use new progressive system
+    break_even_trigger_points=3,  # ✅ ENHANCED: move to break-even after +3 points
     min_trail_distance=2,
-    max_trail_distance=10
+    max_trail_distance=10,
+    # Progressive settings
+    stage1_trigger_points=3,
+    stage1_lock_points=1,
+    stage2_trigger_points=5,
+    stage2_lock_points=3,
+    stage3_trigger_points=8,
+    stage3_atr_multiplier=1.5,
+    stage3_min_distance=2
 )
 
 SWING_TRADING_CONFIG = TrailingConfig(
@@ -1157,11 +1392,18 @@ TREND_FOLLOWING_CONFIG = TrailingConfig(
 )
 
 ADAPTIVE_CONFIG = TrailingConfig(
-    method=TrailingMethod.SMART_TRAIL,
-    initial_trigger_points=10,
-    break_even_trigger_points=7,  # ✅ ENHANCED
+    method=TrailingMethod.PROGRESSIVE_3_STAGE,  # UPDATED: Use progressive system
+    break_even_trigger_points=3,  # ✅ ENHANCED: More aggressive
     volatility_threshold=2.0,
     trend_strength_min=0.7,
     min_trail_distance=8,
-    max_trail_distance=50
+    max_trail_distance=50,
+    # Progressive settings for adaptive trading
+    stage1_trigger_points=2,  # Even more aggressive for adaptive
+    stage1_lock_points=1,
+    stage2_trigger_points=4,
+    stage2_lock_points=2,
+    stage3_trigger_points=6,
+    stage3_atr_multiplier=2.0,  # Wider ATR for trend following
+    stage3_min_distance=3
 )

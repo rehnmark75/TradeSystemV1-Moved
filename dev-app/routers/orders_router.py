@@ -6,8 +6,8 @@ import json
 import traceback
 from services.ig_auth import ig_login
 from services.ig_orders import has_open_position, place_market_order, get_deal_confirmation, get_deal_confirmation_and_details, calculate_stop_distance, get_deal_confirmation_simple, get_deal_confirmation_with_fallback, get_deal_confirmation_with_retry
-from services.ig_market import get_current_bid_price, get_last_15m_candle_range,get_last_15m_candle_range_local
-from services.ig_risk_utils import get_stop_distance_from_ema, price_to_ig_points
+from services.sl_tp_calculator import calculate_trade_levels, validate_sl_tp_levels
+from services.ig_market import get_current_bid_price
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from services.db import get_db, engine
@@ -204,35 +204,34 @@ async def ig_place_order(
         min_distance = price_info["min_distance"]
         logger.info(f"this is min_distance for epic {epic}: {min_distance}")
         
-        # Configuration
-        BUFFER_POINTS = 12
-        FALLBACK_SL_LIMIT = 10
+        # Calculate ATR-based stop loss and take profit levels
+        try:
+            trade_levels = await calculate_trade_levels(symbol, trading_headers, rr)
+            sl_limit = trade_levels["stopDistance"]
+            limit_distance = trade_levels["limitDistance"]
 
-        # Calculate stop loss with buffer and fallback
-        stop = None  # This should come from your signal or calculation
+            # Validate and adjust levels based on broker requirements
+            validated_levels = validate_sl_tp_levels(sl_limit, limit_distance, min_distance)
+            sl_limit = validated_levels["stopDistance"]
+            limit_distance = validated_levels["limitDistance"]
 
-        if stop is not None:
-            try:
-                min_distance_with_buffer = min_distance + BUFFER_POINTS if min_distance is not None else FALLBACK_SL_LIMIT
-                sl_limit = min_distance_with_buffer if stop < min_distance_with_buffer else stop
-                logger.info(f"Using stop loss: {sl_limit} (min_distance: {min_distance}, buffer: {BUFFER_POINTS})")
-            except (TypeError, ValueError) as e:
-                logger.warning(f"Failed to calculate stop loss with buffer: {e}")
-                sl_limit = FALLBACK_SL_LIMIT
-                logger.info(f"Using fallback sl_limit: {sl_limit}")
-        else:
-            try:
-                sl_limit = min_distance + BUFFER_POINTS if min_distance is not None else FALLBACK_SL_LIMIT
-                logger.info(f"No stop provided, using min_distance + buffer: {sl_limit}")
-            except (TypeError, ValueError) as e:
-                logger.warning(f"Failed to process min_distance: {e}")
-                sl_limit = FALLBACK_SL_LIMIT
-                logger.info(f"Using fallback sl_limit: {sl_limit}")
+            # Log any adjustments made
+            if validated_levels["adjustments"]:
+                for adjustment in validated_levels["adjustments"]:
+                    logger.info(f"⚙️ {adjustment}")
+
+            logger.info(f"📊 {symbol} ATR-based levels: SL={sl_limit}, TP={limit_distance}, RR={rr:.1f} ({trade_levels['calculationMethod']})")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to calculate ATR-based levels for {symbol}: {e}")
+            # Emergency fallback to conservative levels
+            sl_limit = max(25, min_distance + 10) if min_distance else 25
+            limit_distance = int(sl_limit * rr)
+            logger.info(f"🆘 Using emergency fallback: SL={sl_limit}, TP={limit_distance}")
         
-        # BUGFIX: Ensure result is assigned in all code paths
-        # Place the market order
-        logger.info(f"📤 Placing market order: {symbol} {direction} with SL: {sl_limit}")
-        result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit)
+        # Place the market order with calculated SL and TP
+        logger.info(f"📤 Placing market order: {symbol} {direction} with SL: {sl_limit}, TP: {limit_distance}")
+        result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance)
         
         # BUGFIX: Add validation that result was actually returned
         if result is None:
@@ -318,7 +317,7 @@ async def ig_place_order(
         
         # Convert to actual prices for database
         actual_stop_price = convert_stop_distance_to_price(entry_price, sl_limit, direction, epic)
-        actual_limit_price = convert_limit_distance_to_price(entry_price, 15, direction, epic)
+        actual_limit_price = convert_limit_distance_to_price(entry_price, limit_distance, direction, epic)
         
         logger.info(f"🔍 DEBUG: alert_id parameter value: {alert_id} (type: {type(alert_id)})")
         logger.info(f"🔍 DEBUG: alert_id is None: {alert_id is None}")
