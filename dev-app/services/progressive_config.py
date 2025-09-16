@@ -53,19 +53,19 @@ AGGRESSIVE_PROGRESSIVE_CONFIG = TrailingConfig(
 # Conservative configuration (for JPY pairs and volatile instruments)
 CONSERVATIVE_PROGRESSIVE_CONFIG = TrailingConfig(
     method=TrailingMethod.PROGRESSIVE_3_STAGE,
-    break_even_trigger_points=4,
-    min_trail_distance=3,
-    max_trail_distance=60,
+    break_even_trigger_points=40,  # JPY: 40 points = ~4 real pips
+    min_trail_distance=30,
+    max_trail_distance=600,
     monitor_interval_seconds=45,
 
-    # Conservative progressive settings
-    stage1_trigger_points=4,  # Break-even at +4 points
-    stage1_lock_points=1,
-    stage2_trigger_points=6,  # Profit lock at +6 points
-    stage2_lock_points=3,
-    stage3_trigger_points=10, # ATR trailing at +10 points
+    # Conservative progressive settings - JPY calibrated
+    stage1_trigger_points=40,  # Break-even at +40 JPY points (4 real pips)
+    stage1_lock_points=10,     # Lock 10 JPY points (1 real pip)
+    stage2_trigger_points=60,  # Profit lock at +60 JPY points (6 real pips)
+    stage2_lock_points=30,     # Lock 30 JPY points (3 real pips)
+    stage3_trigger_points=100, # ATR trailing at +100 JPY points (10 real pips)
     stage3_atr_multiplier=2.0, # Wider ATR for volatile pairs
-    stage3_min_distance=3
+    stage3_min_distance=30     # 30 JPY points (3 real pips)
 )
 
 # Configuration mapping based on epic performance data
@@ -76,10 +76,14 @@ PROGRESSIVE_CONFIG_MAP = {
     'CS.D.AUDUSD.MINI.IP': DEFAULT_PROGRESSIVE_CONFIG,
     'CS.D.USDCAD.MINI.IP': DEFAULT_PROGRESSIVE_CONFIG,
 
-    # JPY pairs - use conservative settings
+    # JPY pairs - use conservative settings (calibrated for 2-decimal pip structure)
     'CS.D.USDJPY.MINI.IP': CONSERVATIVE_PROGRESSIVE_CONFIG,
     'CS.D.EURJPY.MINI.IP': CONSERVATIVE_PROGRESSIVE_CONFIG,
+    'CS.D.GBPJPY.MINI.IP': CONSERVATIVE_PROGRESSIVE_CONFIG,
     'CS.D.AUDJPY.MINI.IP': CONSERVATIVE_PROGRESSIVE_CONFIG,
+    'CS.D.NZDJPY.MINI.IP': CONSERVATIVE_PROGRESSIVE_CONFIG,
+    'CS.D.CADJPY.MINI.IP': CONSERVATIVE_PROGRESSIVE_CONFIG,
+    'CS.D.CHFJPY.MINI.IP': CONSERVATIVE_PROGRESSIVE_CONFIG,
 
     # Others - use default
     'CS.D.USDCHF.MINI.IP': DEFAULT_PROGRESSIVE_CONFIG,

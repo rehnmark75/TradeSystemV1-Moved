@@ -359,7 +359,7 @@ class UnifiedTradingDashboard:
                     '90_days': '90 Days'
                 }[x],
                 key='overview_timeframe',
-                index=1
+                index=0
             )
 
         with col2:
