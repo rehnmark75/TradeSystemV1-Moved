@@ -1129,13 +1129,20 @@ class EnhancedTradeProcessor:
 
     def process_trade_with_advanced_trailing(self, trade: TradeLog, current_price: float, db: Session) -> bool:
         """Process trade with break-even logic and then advanced trailing - CRITICALLY FIXED"""
-        
+
         # Diagnostic log
         self.logger.info(f"🔧 [ENHANCED] Processing trade {trade.id} {trade.symbol} status={trade.status}")
-        
+
         try:
+            # ✅ FIX: Use progressive configuration instead of static config
+            from services.progressive_config import get_progressive_config_for_epic
+
             point_value = get_point_value(trade.symbol)
-            break_even_trigger = self.config.break_even_trigger_points * point_value
+
+            # Get dynamic configuration for this epic
+            progressive_config = get_progressive_config_for_epic(trade.symbol, current_price=current_price)
+            break_even_trigger_points = progressive_config.stage1_trigger_points
+            break_even_trigger = break_even_trigger_points * point_value
             
             # Calculate safe trailing distance
             safe_trail_distance = self.calculate_safe_trail_distance(trade)
@@ -1149,7 +1156,7 @@ class EnhancedTradeProcessor:
                 
                 self.logger.info(f"📊 [PROFIT] Trade {trade.id} BUY: "
                             f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
-                            f"profit={profit_points}pts, trigger={self.config.break_even_trigger_points}pts")
+                            f"profit={profit_points}pts, trigger={break_even_trigger_points}pts")
                 
             elif trade.direction.upper() == "SELL":
                 moved_in_favor = trade.entry_price - current_price
@@ -1158,7 +1165,7 @@ class EnhancedTradeProcessor:
                 
                 self.logger.info(f"📊 [PROFIT] Trade {trade.id} SELL: "
                             f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
-                            f"profit={profit_points}pts, trigger={self.config.break_even_trigger_points}pts")
+                            f"profit={profit_points}pts, trigger={break_even_trigger_points}pts")
 
             # --- STEP 1: Break-even logic ---
             # ✅ CRITICAL FIX: Skip break-even logic if already profit_protected
