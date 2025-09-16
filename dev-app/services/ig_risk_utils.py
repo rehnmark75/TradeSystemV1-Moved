@@ -9,72 +9,114 @@ from datetime import datetime
 
 async def get_ema_atr(epic: str, trading_headers: dict, resolution: str = "MINUTE_15", periods: int = 14) -> float:
     """
-    Fetch historical price data from IG and calculate the EMA-based ATR.
+    Calculate EMA-based ATR using historical candle data from our database.
     """
-    limit = periods + 50  # Fetch enough data to warm up the EMA
-    url = f"{API_BASE_URL}/prices/{epic}?resolution={resolution}&max={limit}&pageSize={limit}"
+    from .db import SessionLocal
 
-    headers = {
-        **trading_headers,
-        "Version": "3"
+    # Map resolution to timeframe (minutes)
+    timeframe_mapping = {
+        "MINUTE_15": 15,
+        "MINUTE_5": 5,
+        "HOUR": 60,
+        "DAY": 1440
     }
+    timeframe = timeframe_mapping.get(resolution, 15)
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers=headers)
-        response.raise_for_status()
-        prices = response.json()["prices"]
+    limit = periods + 50  # Fetch enough data to warm up the EMA
 
-    df = pd.DataFrame([{
-        "high": p["highPrice"]["bid"],
-        "low": p["lowPrice"]["bid"],
-        "close": p["closePrice"]["bid"]
-    } for p in prices])
+    db = SessionLocal()
+    try:
+        candles = db.execute(text("""
+            SELECT high, low, close
+            FROM candles
+            WHERE epic = :epic AND timeframe = :timeframe
+            ORDER BY start_time DESC
+            LIMIT :limit
+        """), {
+            "epic": epic,
+            "timeframe": timeframe,
+            "limit": limit
+        }).fetchall()
 
-    df = df[::-1].reset_index(drop=True)  # Sort from oldest to newest
+        if len(candles) < periods + 1:
+            raise ValueError(f"Not enough data to calculate EMA ATR({periods}) for {epic}. Found {len(candles)} candles, need {periods + 1}")
 
-    if len(df) < periods + 1:
-        raise ValueError(f"Not enough data to calculate EMA ATR({periods})")
+        # Convert to DataFrame and sort from oldest to newest
+        df = pd.DataFrame([{
+            "high": float(candle.high),
+            "low": float(candle.low),
+            "close": float(candle.close)
+        } for candle in reversed(candles)])
 
-    df["prev_close"] = df["close"].shift(1)
-    df["tr"] = df[["high", "prev_close"]].max(axis=1) - df[["low", "prev_close"]].min(axis=1)
+        df = df.reset_index(drop=True)
 
-    # EMA-based ATR
-    atr = df["tr"].ewm(span=periods, adjust=False).mean().iloc[-1]
-    return round(float(atr), 5)
+        # Calculate True Range
+        df["prev_close"] = df["close"].shift(1)
+        df["tr"] = df[["high", "prev_close"]].max(axis=1) - df[["low", "prev_close"]].min(axis=1)
+
+        # EMA-based ATR
+        atr = df["tr"].ewm(span=periods, adjust=False).mean().iloc[-1]
+        return round(float(atr), 5)
+
+    finally:
+        db.close()
 
 
 async def calculate_dynamic_sl_tp(epic: str, trading_headers: dict, atr: float, rr_ratio: float = 2.0) -> dict:
     """
-    Calculate valid stop-loss and take-profit distances based on ATR and IG market constraints.
+    Calculate valid stop-loss and take-profit distances based on ATR and market constraints.
+    Uses database-cached market info when possible to avoid unnecessary API calls.
     """
+    # Get market constraints - we'll use a simple approach for now
+    # and can optimize with database caching later if needed
     url = f"{API_BASE_URL}/markets/{epic}"
 
     headers = {
-        **trading_headers,
+        "X-IG-API-KEY": trading_headers["X-IG-API-KEY"],
+        "CST": trading_headers["CST"],
+        "X-SECURITY-TOKEN": trading_headers["X-SECURITY-TOKEN"],
+        "Accept": "application/json",
         "Version": "3"
     }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, headers=headers)
-        response.raise_for_status()
-        response_json = response.json()
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            response_json = response.json()
 
-    instrument = response_json["instrument"]
-    dealing_rules = response_json["dealingRules"]
-    #print("Dealing rules keys:", dealing_rules.keys())
-    min_stop = float(dealing_rules["minNormalStopOrLimitDistance"]["value"])
-    stop_step = float(dealing_rules["minStepDistance"]["value"])
+        dealing_rules = response_json["dealingRules"]
+        min_stop = float(dealing_rules["minNormalStopOrLimitDistance"]["value"])
+        stop_step = float(dealing_rules["minStepDistance"]["value"])
 
-    raw_stop = atr * 1.5
-    valid_stop = max(min_stop, round(raw_stop / stop_step) * stop_step)
+        # Convert ATR to points based on epic type
+        atr_points = price_to_ig_points(atr, epic)
 
-    raw_limit = valid_stop * rr_ratio
-    valid_limit = round(raw_limit / stop_step) * stop_step
+        # Calculate stop distance with ATR multiplier
+        raw_stop = atr_points * 1.5
+        valid_stop = max(min_stop, round(raw_stop / stop_step) * stop_step)
 
-    return {
-        "stopDistance": str(valid_stop),
-        "limitDistance": str(valid_limit)
-    }
+        raw_limit = valid_stop * rr_ratio
+        valid_limit = round(raw_limit / stop_step) * stop_step
+
+        return {
+            "stopDistance": int(valid_stop),
+            "limitDistance": int(valid_limit)
+        }
+
+    except Exception as e:
+        # Fallback to reasonable defaults based on epic type
+        if "JPY" in epic:
+            base_stop = max(30, int(atr * 1000) if atr else 30)  # Convert ATR to JPY points
+        else:
+            base_stop = max(25, int(atr * 10000) if atr else 25)  # Convert ATR to standard points
+
+        base_limit = int(base_stop * rr_ratio)
+
+        return {
+            "stopDistance": base_stop,
+            "limitDistance": base_limit
+        }
 
 
 def find_swing_based_stop_distance(

@@ -122,14 +122,14 @@ PROGRESSIVE_EPIC_SETTINGS = {
         'stage3_trigger': 7
     },
     'CS.D.USDJPY.MINI.IP': {
-        'stage1_trigger': 4,  # More conservative for JPY pairs
-        'stage2_trigger': 6,
-        'stage3_trigger': 10
+        'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
+        'stage2_trigger': 60,  # JPY calibrated: 60 points = 6 real pips
+        'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips
     },
     'CS.D.EURJPY.MINI.IP': {
-        'stage1_trigger': 4,
-        'stage2_trigger': 6,
-        'stage3_trigger': 10
+        'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
+        'stage2_trigger': 60,  # JPY calibrated: 60 points = 6 real pips
+        'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips
     }
 }
 
