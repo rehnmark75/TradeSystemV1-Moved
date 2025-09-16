@@ -102,6 +102,12 @@ if show_market_regime or show_trade_context:
 else:
     intelligence_lookback = 24
 
+# Trade Markers toggle
+st.sidebar.subheader("📈 Trade Markers")
+show_stop_levels = st.sidebar.checkbox("Show Stop Loss Levels", value=True)
+show_tp_levels = st.sidebar.checkbox("Show Take Profit Levels", value=True)
+show_trailing_info = st.sidebar.checkbox("Show Trailing/Breakeven", value=True)
+
 # Other settings
 lookback_days = st.sidebar.slider("Lookback period (days)", 1, 5, 2)
 candles_per_day = (24 * 60) // timeframe
@@ -115,7 +121,7 @@ st.caption(f"Showing {selected_epic} - {selected_tf} timeframe (UTC)")
 
 # Add legend for trade markers
 with st.expander("📊 Chart Legend", expanded=False):
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown("""
         **Trade Arrows:**
@@ -129,6 +135,14 @@ with st.expander("📊 Chart Legend", expanded=False):
         - 🔴 Red = Loss trade
         - 🟡 Yellow = Still running
         - ⚫ Gray = Breakeven
+        """)
+    with col3:
+        st.markdown("""
+        **Risk Management:**
+        - 🔴 Circle = Stop Loss Level
+        - 🟢 Circle = Take Profit Level
+        - 🟡 Circle = Moved to Breakeven
+        - 🟣 Circle = Trailing Active
         """)
 
 # Fetch candle data based on selected timeframe
@@ -258,6 +272,10 @@ if candles and selected_epic:
 
 # Prepare trade markers with strategy labels
 trade_markers = []
+stop_loss_markers = []
+take_profit_markers = []
+trailing_markers = []
+
 for row in trades_df.itertuples():
     # Handle timezone for trade timestamp - keep in UTC
     trade_time = pd.Timestamp(row.timestamp)
@@ -265,10 +283,10 @@ for row in trades_df.itertuples():
         trade_time = trade_time.tz_localize('UTC')
     else:
         trade_time = trade_time.tz_convert('UTC')
-    
+
     timestamp = int(trade_time.timestamp())  # ensure it's in seconds
     direction = row.direction.upper() if row.direction else "UNKNOWN"
-    
+
     # Get strategy name, use short version if available
     strategy_name = ""
     if hasattr(row, 'strategy') and row.strategy:
@@ -292,10 +310,10 @@ for row in trades_df.itertuples():
             "ema": "EMA"
         }
         strategy_name = strategy_map.get(row.strategy, row.strategy[:10])  # Limit to 10 chars if not mapped
-    
+
     # Determine if it's a bull or bear signal
     is_bull = direction == "BUY"
-    
+
     # Determine color based on profit/loss
     # profit_loss > 0: green (profitable)
     # profit_loss < 0: red (loss)
@@ -312,7 +330,7 @@ for row in trades_df.itertuples():
                 marker_color = "gray"  # Exactly zero (breakeven)
         except (ValueError, TypeError):
             marker_color = "yellow"  # Can't determine, treat as running
-    
+
     # Add P&L to text if available
     text_label = f"{strategy_name}" if strategy_name else ("BUY" if is_bull else "SELL")
     if hasattr(row, 'profit_loss') and row.profit_loss is not None:
@@ -322,7 +340,8 @@ for row in trades_df.itertuples():
                 text_label += f" ({pnl_value:+.2f})"
         except (ValueError, TypeError):
             pass
-    
+
+    # Main trade marker (arrow) - keep this clean with just strategy and P&L
     marker = {
         "time": timestamp,
         "position": "aboveBar" if is_bull else "belowBar",
@@ -331,6 +350,79 @@ for row in trades_df.itertuples():
         "text": text_label
     }
     trade_markers.append(marker)
+
+    # Add separate circle markers for risk management
+    # Use small time offsets to avoid exact timestamp conflicts
+
+    # Add Stop Loss circle marker if enabled and available
+    if show_stop_levels and hasattr(row, 'sl_price') and row.sl_price is not None:
+        try:
+            sl_price = float(row.sl_price)
+            # Offset by 30 seconds to avoid conflicts
+            sl_marker = {
+                "time": timestamp + 30,
+                "position": "belowBar" if is_bull else "aboveBar",
+                "color": "#FF4444",  # Red for stop loss
+                "shape": "circle",
+                "text": f"SL: {sl_price:.{price_precision}f}",
+                "size": 1
+            }
+            stop_loss_markers.append(sl_marker)
+        except (ValueError, TypeError):
+            pass
+
+    # Add Take Profit circle marker if enabled and available
+    if show_tp_levels and hasattr(row, 'tp_price') and row.tp_price is not None:
+        try:
+            tp_price = float(row.tp_price)
+            # Offset by 60 seconds to avoid conflicts
+            tp_marker = {
+                "time": timestamp + 60,
+                "position": "aboveBar" if is_bull else "belowBar",
+                "color": "#44FF44",  # Green for take profit
+                "shape": "circle",
+                "text": f"TP: {tp_price:.{price_precision}f}",
+                "size": 1
+            }
+            take_profit_markers.append(tp_marker)
+        except (ValueError, TypeError):
+            pass
+
+    # Add Trailing/Breakeven circle marker if enabled and available
+    if show_trailing_info:
+        if hasattr(row, 'moved_to_breakeven') and row.moved_to_breakeven:
+            try:
+                # Use entry price as breakeven level
+                entry_price = float(row.entry_price)
+                # Offset by 90 seconds to avoid conflicts
+                be_marker = {
+                    "time": timestamp + 90,
+                    "position": "inBar",  # Center position for breakeven
+                    "color": "#FFB000",  # Orange/yellow for breakeven
+                    "shape": "circle",
+                    "text": f"BE: {entry_price:.{price_precision}f}",
+                    "size": 1
+                }
+                trailing_markers.append(be_marker)
+            except (ValueError, TypeError):
+                pass
+        elif hasattr(row, 'trigger_distance') and row.trigger_distance is not None:
+            try:
+                trigger_distance = float(row.trigger_distance)
+                # Only show if there's an actual trailing distance set
+                if trigger_distance > 0:
+                    # Offset by 120 seconds to avoid conflicts
+                    trail_marker = {
+                        "time": timestamp + 120,
+                        "position": "inBar",
+                        "color": "#9966FF",  # Purple for trailing info
+                        "shape": "circle",
+                        "text": f"Trail: {trigger_distance:.0f}pts",
+                        "size": 1
+                    }
+                    trailing_markers.append(trail_marker)
+            except (ValueError, TypeError):
+                pass
 
 # Build chart series with OHLC display enabled and proper precision
 series = [
@@ -607,9 +699,39 @@ if trade_markers and candles:
                     aligned_marker["time"] = candle_time
                     aligned_trade_markers.append(aligned_marker)
 
+# Combine all risk management markers for visibility filtering
+all_risk_markers = stop_loss_markers + take_profit_markers + trailing_markers
+
+# Filter all markers to visible range
 visible_swing_markers = [m for m in markers if m["time"] in visible_candle_times]
 visible_sr_break_markers = [m for m in sr_break_markers if m["time"] in visible_candle_times]
-visible_markers = visible_swing_markers + aligned_trade_markers + visible_sr_break_markers
+
+# For risk management markers, align them to candle times like trade markers
+aligned_risk_markers = []
+if all_risk_markers and candles:
+    candle_times_list = sorted([c["time"] for c in candles])
+
+    for marker in all_risk_markers:
+        marker_time = marker["time"]
+
+        # Find the candle that contains this marker time
+        for i, candle_time in enumerate(candle_times_list):
+            if i < len(candle_times_list) - 1:
+                next_candle_time = candle_times_list[i + 1]
+                if candle_time <= marker_time < next_candle_time:
+                    aligned_marker = marker.copy()
+                    aligned_marker["time"] = candle_time
+                    aligned_risk_markers.append(aligned_marker)
+                    break
+            else:
+                # Last candle - check if marker is within timeframe minutes of it
+                time_diff = marker_time - candle_time
+                if 0 <= time_diff < (timeframe * 60):
+                    aligned_marker = marker.copy()
+                    aligned_marker["time"] = candle_time
+                    aligned_risk_markers.append(aligned_marker)
+
+visible_markers = visible_swing_markers + aligned_trade_markers + visible_sr_break_markers + aligned_risk_markers
 
 # Debug info
 if trade_markers:
@@ -617,7 +739,18 @@ if trade_markers:
     st.sidebar.write(f"Aligned trade markers: {len(aligned_trade_markers)}")
     if aligned_trade_markers:
         st.sidebar.write(f"First marker: {aligned_trade_markers[0]['text']}")
-    
+
+    # Show risk management markers info
+    if show_stop_levels or show_tp_levels or show_trailing_info:
+        st.sidebar.write("--- Risk Management ---")
+        if show_stop_levels:
+            st.sidebar.write(f"Stop Loss markers: {len(stop_loss_markers)}")
+        if show_tp_levels:
+            st.sidebar.write(f"Take Profit markers: {len(take_profit_markers)}")
+        if show_trailing_info:
+            st.sidebar.write(f"Trailing/BE markers: {len(trailing_markers)}")
+        st.sidebar.write(f"Total risk markers: {len(aligned_risk_markers)}")
+
     # Show timestamp comparison
     if trade_markers and candles:
         st.sidebar.write("--- Debug Info ---")
@@ -627,7 +760,7 @@ if trade_markers:
             first_candle = min(candle_times_sorted)
             last_candle = max(candle_times_sorted)
             st.sidebar.write(f"Candle range: {pd.Timestamp(first_candle, unit='s').strftime('%Y-%m-%d %H:%M')} to {pd.Timestamp(last_candle, unit='s').strftime('%Y-%m-%d %H:%M')} UTC")
-        
+
         # Show first trade marker time
         if trade_markers:
             first_trade = trade_markers[0]

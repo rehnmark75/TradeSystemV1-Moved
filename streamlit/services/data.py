@@ -28,14 +28,19 @@ def get_trade_logs(engine, epic, min_time):
     # Convert min_time to a naive datetime if it has timezone info
     if hasattr(min_time, 'tz_localize'):
         min_time = min_time.tz_convert('UTC').tz_localize(None)
-    
+
     query = text("""
-        SELECT 
-            tl.timestamp, 
-            tl.entry_price, 
+        SELECT
+            tl.timestamp,
+            tl.entry_price,
             tl.direction,
             tl.profit_loss,
             tl.status,
+            tl.sl_price,
+            tl.tp_price,
+            tl.moved_to_breakeven,
+            tl.trigger_distance,
+            tl.last_trigger_price,
             ah.strategy,
             ah.signal_type,
             ah.confidence_score
