@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import traceback
 from services.ig_auth import ig_login
@@ -84,33 +84,83 @@ def check_trade_cooldown(epic: str, db: Session) -> dict:
         # Get cooldown period for this epic (epic-specific or default)
         cooldown_minutes = EPIC_SPECIFIC_COOLDOWNS.get(epic, TRADE_COOLDOWN_MINUTES)
         
-        # Query for the most recent closed trade for this epic
-        recent_trade = (
+        # Find the most recent trade regardless of status, prioritizing closed_at when available
+        recent_closed_trade = (
             db.query(TradeLog)
             .filter(
                 TradeLog.symbol == epic,
-                TradeLog.status == "closed",
+                TradeLog.status.in_(["closed", "expired"]),
                 TradeLog.closed_at.isnot(None)
             )
             .order_by(TradeLog.closed_at.desc())
             .first()
         )
-        
-        if not recent_trade:
+
+        recent_expired_trade = (
+            db.query(TradeLog)
+            .filter(
+                TradeLog.symbol == epic,
+                TradeLog.status == "expired",
+                TradeLog.closed_at.is_(None)
+            )
+            .order_by(TradeLog.timestamp.desc())
+            .first()
+        )
+
+        # Determine which trade is more recent
+        most_recent_trade = None
+        effective_close_time = None
+
+        if recent_closed_trade and recent_expired_trade:
+            # Compare the closed trade's closed_at with expired trade's estimated close time
+            estimated_close_1h = recent_expired_trade.timestamp + timedelta(hours=1)
+            recent_expiry = datetime.utcnow() - timedelta(minutes=10)
+            expired_estimated_close = min(estimated_close_1h, recent_expiry)
+
+            if recent_closed_trade.closed_at > expired_estimated_close:
+                most_recent_trade = recent_closed_trade
+                effective_close_time = recent_closed_trade.closed_at
+            else:
+                most_recent_trade = recent_expired_trade
+                effective_close_time = expired_estimated_close
+
+        elif recent_closed_trade:
+            most_recent_trade = recent_closed_trade
+            effective_close_time = recent_closed_trade.closed_at
+
+        elif recent_expired_trade:
+            most_recent_trade = recent_expired_trade
+            # For expired trades, estimate close time as either:
+            # 1. Entry + 1 hour (reasonable trade duration)
+            # 2. Current time - 10 minutes (if trade just expired)
+            # Use whichever is earlier to avoid future timestamps
+            estimated_close_1h = recent_expired_trade.timestamp + timedelta(hours=1)
+            recent_expiry = datetime.utcnow() - timedelta(minutes=10)
+            effective_close_time = min(estimated_close_1h, recent_expiry)
+
+        if not most_recent_trade:
             return {"allowed": True, "message": "No recent closed trades found"}
-            
+
         # Calculate time elapsed since last closure
-        time_elapsed = datetime.utcnow() - recent_trade.closed_at
+        current_time = datetime.utcnow()
+
+        # Handle timezone-naive timestamps by assuming UTC
+        if effective_close_time.tzinfo is None:
+            effective_close_time = effective_close_time.replace(tzinfo=None)
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=None)
+
+        time_elapsed = current_time - effective_close_time
         elapsed_minutes = time_elapsed.total_seconds() / 60
-        
+
         # ✅ TIMESTAMP VALIDATION FIX: Check for invalid future timestamps
-        if recent_trade.closed_at > datetime.utcnow():
-            logger.warning(f"🚨 Invalid future closure timestamp for {epic}: {recent_trade.closed_at} (trade ID: {recent_trade.id})")
+        if effective_close_time > current_time:
+            logger.warning(f"🚨 Invalid future closure timestamp for {epic}: {effective_close_time} (trade ID: {most_recent_trade.id})")
             logger.warning(f"   Current time: {datetime.utcnow()}")
             logger.warning(f"   Ignoring corrupt timestamp and allowing trade")
             return {
                 "allowed": True,
-                "message": f"Trade allowed (ignoring corrupt future timestamp: {recent_trade.closed_at.strftime('%Y-%m-%d %H:%M:%S')} UTC)"
+                "message": f"Trade allowed (ignoring corrupt future timestamp: {effective_close_time.strftime('%Y-%m-%d %H:%M:%S')} UTC)"
             }
 
         if elapsed_minutes < cooldown_minutes:
@@ -119,8 +169,8 @@ def check_trade_cooldown(epic: str, db: Session) -> dict:
             return {
                 "allowed": False,
                 "cooldown_remaining_minutes": remaining_minutes,
-                "last_trade_closed_at": recent_trade.closed_at,
-                "message": f"Epic {epic} is in cooldown for {remaining_minutes} more minutes. Last trade closed at {recent_trade.closed_at.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+                "last_trade_closed_at": effective_close_time,
+                "message": f"Epic {epic} is in cooldown for {remaining_minutes} more minutes. Last trade closed at {effective_close_time.strftime('%Y-%m-%d %H:%M:%S')} UTC"
             }
         else:
             # Cooldown period has expired

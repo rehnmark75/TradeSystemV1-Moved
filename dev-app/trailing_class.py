@@ -1178,6 +1178,11 @@ class EnhancedTradeProcessor:
                     break_even_stop = trade.entry_price - (1 * point_value)  # Entry - 1 point
                 
                 # ✅ CRITICAL FIX: For profit_protected trades, check if break-even would worsen the position
+                # ✅ REFRESH: Get the actual database value to avoid sync confusion
+                try:
+                    db.refresh(trade)
+                except Exception as e:
+                    self.logger.warning(f"[REFRESH WARNING] Trade {trade.id}: Could not refresh, using current value: {e}")
                 current_stop = trade.sl_price or 0.0
                 
                 # Check if break-even move would worsen protection
