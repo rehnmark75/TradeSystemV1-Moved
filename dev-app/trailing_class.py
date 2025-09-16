@@ -59,6 +59,9 @@ class TrailingConfig:
     stage3_trigger_points: int = 8    # ATR trailing trigger
     stage3_atr_multiplier: float = 1.5 # ATR multiplier for stage 3
     stage3_min_distance: int = 2      # Minimum distance for stage 3
+
+    # EMA Exit compatibility (disabled by default for progressive trailing)
+    enable_ema_exit: bool = False
     
     # Percentage-based
     trail_percentage: float = 1.5

@@ -103,6 +103,16 @@ def check_trade_cooldown(epic: str, db: Session) -> dict:
         time_elapsed = datetime.utcnow() - recent_trade.closed_at
         elapsed_minutes = time_elapsed.total_seconds() / 60
         
+        # ✅ TIMESTAMP VALIDATION FIX: Check for invalid future timestamps
+        if recent_trade.closed_at > datetime.utcnow():
+            logger.warning(f"🚨 Invalid future closure timestamp for {epic}: {recent_trade.closed_at} (trade ID: {recent_trade.id})")
+            logger.warning(f"   Current time: {datetime.utcnow()}")
+            logger.warning(f"   Ignoring corrupt timestamp and allowing trade")
+            return {
+                "allowed": True,
+                "message": f"Trade allowed (ignoring corrupt future timestamp: {recent_trade.closed_at.strftime('%Y-%m-%d %H:%M:%S')} UTC)"
+            }
+
         if elapsed_minutes < cooldown_minutes:
             # Still in cooldown period
             remaining_minutes = int(cooldown_minutes - elapsed_minutes)

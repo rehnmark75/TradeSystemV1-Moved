@@ -501,21 +501,27 @@ class IGDealCorrelator:
                             # Add new columns to trade_log table
                             self._add_pnl_columns_to_trade_log()
                         
+                        # ✅ TIMESTAMP FIX: Use explicit UTC timestamp to prevent timezone issues
+                        current_utc = datetime.utcnow()
+                        self.logger.info(f"🕐 Setting closed_at timestamp: {current_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC for deal {correlation.deal_id}")
+
                         # Update the trade with actual P&L
                         self.db_session.execute(
                             text("""
-                                UPDATE trade_log 
+                                UPDATE trade_log
                                 SET profit_loss = :pnl,
                                     pnl_currency = :currency,
                                     status = 'closed',
-                                    closed_at = CURRENT_TIMESTAMP,
-                                    updated_at = CURRENT_TIMESTAMP
+                                    closed_at = :closed_at,
+                                    updated_at = :updated_at
                                 WHERE deal_id = :deal_id
                             """),
                             {
                                 "pnl": correlation.profit_loss,
                                 "currency": "SEK",  # Assuming SEK based on your transaction data
-                                "deal_id": correlation.deal_id
+                                "deal_id": correlation.deal_id,
+                                "closed_at": current_utc,
+                                "updated_at": current_utc
                             }
                         )
                         

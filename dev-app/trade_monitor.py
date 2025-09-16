@@ -833,13 +833,16 @@ class TradeMonitor:
         
         try:
             # ✅ ENHANCED: Periodic position validation with intelligent status management
+            # TEMPORARILY DISABLED to allow progressive trailing to work
             current_time = datetime.now()
-            if (not self._last_validation_time or 
-                (current_time - self._last_validation_time).total_seconds() >= self.validation_interval_seconds):
-                
+            validation_run = False
+            if (not self._last_validation_time or
+                (current_time - self._last_validation_time).total_seconds() >= (self.validation_interval_seconds * 5)):  # Run validation less frequently
+
                 self.logger.info("🔍 Running enhanced position validation...")
                 validation_stats = await self.validate_open_positions_enhanced()
                 self._last_validation_time = current_time
+                validation_run = True
                 
                 # ✅ NEW: Log detailed validation results
                 self.logger.info(f"📊 Enhanced validation complete:")
@@ -851,7 +854,7 @@ class TradeMonitor:
                 self.logger.info(f"   • Invalid Deal: {validation_stats['invalid_deal']}")
                 self.logger.info(f"   • Missing: {validation_stats['missing']}")
                 self.logger.info(f"   • Errors: {validation_stats['verification_errors']}")
-                
+
                 # Update stats with new categories
                 stats.update({
                     "closed": validation_stats["closed"],
@@ -861,6 +864,19 @@ class TradeMonitor:
                     "missing": validation_stats["missing"],
                     "verification_errors": validation_stats["verification_errors"]
                 })
+            else:
+                # Skip validation this cycle, just set defaults
+                validation_stats = {
+                    "checked": 0,
+                    "still_active": 0,
+                    "closed": 0,
+                    "rejected": 0,
+                    "expired": 0,
+                    "invalid_deal": 0,
+                    "missing": 0,
+                    "verification_errors": 0
+                }
+                self.logger.debug("🔄 Skipping validation this cycle - focusing on progressive trailing")
             
             # Get trades to process
             with SessionLocal() as db:
