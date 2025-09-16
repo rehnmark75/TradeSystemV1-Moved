@@ -19,7 +19,7 @@ class GapDetector:
     def __init__(self, max_gap_hours: int = 24):
         """
         Initialize gap detector
-        
+
         Args:
             max_gap_hours: Maximum gap size to consider for backfilling (default 24 hours)
                           Larger gaps are likely intentional (weekend, holidays)
@@ -34,7 +34,29 @@ class GapDetector:
                 "max_gap_hours": 72  # Allow larger gaps for this epic
             }
         }
-        
+        # Track market opening gap attempts to reduce spam
+        # Format: {epic_timeframe_gapstart: attempt_count}
+        self.market_opening_attempts = {}
+
+    def _is_market_opening_gap(self, gap_start: datetime, gap_end: datetime) -> bool:
+        """Check if gap occurs during problematic market opening period"""
+        # Sunday 21:00-21:30 UTC is when markets reopen and often has data issues
+        return (gap_start.weekday() == 6 and  # Sunday
+                21 <= gap_start.hour <= 21 and  # 21:00-21:59 UTC
+                (gap_end - gap_start).total_seconds() <= 1800)  # <= 30 minutes
+
+    def _should_skip_market_opening_gap(self, epic: str, timeframe: int, gap_start: datetime) -> bool:
+        """Check if market opening gap should be skipped due to repeated failures"""
+        gap_key = f"{epic}_{timeframe}m_{gap_start.strftime('%Y-%m-%d_%H:%M')}"
+        attempt_count = self.market_opening_attempts.get(gap_key, 0)
+
+        if attempt_count >= 5:
+            return True
+
+        # Increment attempt count
+        self.market_opening_attempts[gap_key] = attempt_count + 1
+        return False
+
     def detect_gaps(self, epic: str, timeframe: int, 
                     start_time: Optional[datetime] = None,
                     end_time: Optional[datetime] = None) -> List[Dict]:
@@ -122,7 +144,44 @@ class GapDetector:
                         # Skip small gaps during low volatility periods (single candle)
                         if missing_candles < 1:
                             continue
-                            
+
+                        # Skip gaps that occur entirely during market closure to reduce log noise
+                        gap_start_time = prev_time + expected_delta
+                        gap_end_time = curr_time - expected_delta
+
+                        def is_market_closed_time(dt):
+                            """Check if a datetime is during market closure"""
+                            if dt.weekday() == 5:  # Saturday
+                                return True
+                            if dt.weekday() == 4 and dt.hour >= 21:  # Friday >= 21:00 UTC
+                                return True
+                            if dt.weekday() == 6 and dt.hour < 21:  # Sunday < 21:00 UTC
+                                return True
+                            return False
+
+                        # Skip gaps that occur entirely during market closure (reduces log spam)
+                        if is_market_closed_time(gap_start_time) and is_market_closed_time(gap_end_time):
+                            logger.debug(f"Skipping gap during market closure for {epic} {timeframe}m: "
+                                       f"{missing_candles} candles from {gap_start_time} to {gap_end_time}")
+                            continue
+
+                        # Check for market opening gaps and skip if attempted too many times
+                        if self._is_market_opening_gap(gap_start_time, gap_end_time):
+                            if self._should_skip_market_opening_gap(epic, timeframe, gap_start_time):
+                                attempt_count = self.market_opening_attempts.get(
+                                    f"{epic}_{timeframe}m_{gap_start_time.strftime('%Y-%m-%d_%H:%M')}", 0
+                                )
+                                logger.debug(f"Skipping market opening gap for {epic} {timeframe}m after {attempt_count} attempts: "
+                                           f"{missing_candles} candles from {gap_start_time} to {gap_end_time}")
+                                continue
+                            else:
+                                # Log with attempt count for market opening gaps
+                                attempt_count = self.market_opening_attempts.get(
+                                    f"{epic}_{timeframe}m_{gap_start_time.strftime('%Y-%m-%d_%H:%M')}", 0
+                                )
+                                logger.info(f"Market opening gap detected for {epic} {timeframe}m (attempt {attempt_count}/5): "
+                                          f"{missing_candles} candles from {gap_start_time} to {gap_end_time}")
+
                         gap = {
                             "epic": epic,
                             "timeframe": timeframe,
@@ -158,19 +217,63 @@ class GapDetector:
                         gap_age_minutes = (end_time - latest_time).total_seconds() / 60
                         if missing_candles > 0 and actual_delta <= max_gap_delta:
                             if missing_candles > 2 or gap_age_minutes > 15:
-                                gap = {
-                                    "epic": epic,
-                                    "timeframe": timeframe,
-                                    "gap_start": latest_time + expected_delta,
-                                    "gap_end": end_time,
-                                    "missing_candles": missing_candles,
-                                    "gap_duration_minutes": int(actual_delta.total_seconds() / 60) - timeframe,
-                                    "is_recent": True  # Flag for recent data gaps
-                                }
-                                gaps.append(gap)
-                                logger.warning(f"Recent gap detected in {epic} {timeframe}m: "
-                                             f"{missing_candles} candles missing from "
-                                             f"{gap['gap_start']} to now")
+                                recent_gap_start = latest_time + expected_delta
+                                recent_gap_end = end_time
+
+                                # Check if this recent gap is during market closure
+                                def is_market_closed_time(dt):
+                                    """Check if a datetime is during market closure"""
+                                    if dt.weekday() == 5:  # Saturday
+                                        return True
+                                    if dt.weekday() == 4 and dt.hour >= 21:  # Friday >= 21:00 UTC
+                                        return True
+                                    if dt.weekday() == 6 and dt.hour < 21:  # Sunday < 21:00 UTC
+                                        return True
+                                    return False
+
+                                # Skip recent gaps during market closure to reduce log noise
+                                if is_market_closed_time(recent_gap_start) and is_market_closed_time(recent_gap_end):
+                                    logger.debug(f"Skipping recent gap during market closure for {epic} {timeframe}m: "
+                                               f"{missing_candles} candles from {recent_gap_start} to now")
+                                # Check for recent market opening gaps
+                                elif self._is_market_opening_gap(recent_gap_start, recent_gap_end):
+                                    if self._should_skip_market_opening_gap(epic, timeframe, recent_gap_start):
+                                        attempt_count = self.market_opening_attempts.get(
+                                            f"{epic}_{timeframe}m_{recent_gap_start.strftime('%Y-%m-%d_%H:%M')}", 0
+                                        )
+                                        logger.debug(f"Skipping recent market opening gap for {epic} {timeframe}m after {attempt_count} attempts: "
+                                                   f"{missing_candles} candles from {recent_gap_start} to now")
+                                    else:
+                                        # Log with attempt count for recent market opening gaps
+                                        attempt_count = self.market_opening_attempts.get(
+                                            f"{epic}_{timeframe}m_{recent_gap_start.strftime('%Y-%m-%d_%H:%M')}", 0
+                                        )
+                                        logger.info(f"Recent market opening gap detected for {epic} {timeframe}m (attempt {attempt_count}/5): "
+                                                  f"{missing_candles} candles from {recent_gap_start} to now")
+                                        gap = {
+                                            "epic": epic,
+                                            "timeframe": timeframe,
+                                            "gap_start": latest_time + expected_delta,
+                                            "gap_end": end_time,
+                                            "missing_candles": missing_candles,
+                                            "gap_duration_minutes": int(actual_delta.total_seconds() / 60) - timeframe,
+                                            "is_recent": True  # Flag for recent data gaps
+                                        }
+                                        gaps.append(gap)
+                                else:
+                                    gap = {
+                                        "epic": epic,
+                                        "timeframe": timeframe,
+                                        "gap_start": latest_time + expected_delta,
+                                        "gap_end": end_time,
+                                        "missing_candles": missing_candles,
+                                        "gap_duration_minutes": int(actual_delta.total_seconds() / 60) - timeframe,
+                                        "is_recent": True  # Flag for recent data gaps
+                                    }
+                                    gaps.append(gap)
+                                    logger.warning(f"Recent gap detected in {epic} {timeframe}m: "
+                                                 f"{missing_candles} candles missing from "
+                                                 f"{gap['gap_start']} to now")
                             else:
                                 logger.debug(f"Ignoring minor recent gap in {epic} {timeframe}m: "
                                            f"{missing_candles} candles, {gap_age_minutes:.1f} minutes old")
