@@ -111,7 +111,7 @@ STAGE3_MIN_DISTANCE = 2      # Small minimum trailing distance (was 3)
 
 # Epic-specific progressive settings (for high-performance pairs)
 PROGRESSIVE_EPIC_SETTINGS = {
-    'CS.D.EURUSD.MINI.IP': {
+    'CS.D.EURUSD.CEEM.IP': {
         'stage1_trigger': 6,  # Balanced for major pairs (was 2)
         'stage2_trigger': 10,  # Allow trends to develop (was 4)
         'stage3_trigger': 18   # ATR trailing for big moves (was 7)

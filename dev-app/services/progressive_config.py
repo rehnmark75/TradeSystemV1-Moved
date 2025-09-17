@@ -68,6 +68,24 @@ CONSERVATIVE_PROGRESSIVE_CONFIG = TrailingConfig(
     stage3_min_distance=30     # 30 JPY points (3 real pips)
 )
 
+# JPY-optimized configuration (for reasonable risk levels: 15-20 point stops = ¥1500-2000)
+JPY_OPTIMIZED_CONFIG = TrailingConfig(
+    method=TrailingMethod.PROGRESSIVE_3_STAGE,
+    break_even_trigger_points=12,  # JPY: 12 points = ~1.2 real pips
+    min_trail_distance=8,
+    max_trail_distance=200,
+    monitor_interval_seconds=30,
+
+    # JPY-optimized progressive settings - REDUCED RISK LEVELS
+    stage1_trigger_points=12,  # Break-even at +12 JPY points (1.2 real pips)
+    stage1_lock_points=5,      # Lock 5 JPY points (0.5 real pip)
+    stage2_trigger_points=18,  # Profit lock at +18 JPY points (1.8 real pips)
+    stage2_lock_points=10,     # Lock 10 JPY points (1.0 real pip)
+    stage3_trigger_points=25,  # ATR trailing at +25 JPY points (2.5 real pips)
+    stage3_atr_multiplier=0.6, # TIGHT: 0.6x ATR for smaller steps
+    stage3_min_distance=8      # 8 JPY points (0.8 real pips)
+)
+
 # Configuration mapping based on epic performance data
 PROGRESSIVE_CONFIG_MAP = {
     # Major pairs - use balanced settings for better profit capture
@@ -76,14 +94,14 @@ PROGRESSIVE_CONFIG_MAP = {
     'CS.D.AUDUSD.MINI.IP': DEFAULT_PROGRESSIVE_CONFIG,
     'CS.D.USDCAD.MINI.IP': DEFAULT_PROGRESSIVE_CONFIG,
 
-    # JPY pairs - use balanced settings (more practical trailing levels)
-    'CS.D.USDJPY.MINI.IP': BALANCED_PROGRESSIVE_CONFIG,
-    'CS.D.EURJPY.MINI.IP': BALANCED_PROGRESSIVE_CONFIG,
-    'CS.D.GBPJPY.MINI.IP': BALANCED_PROGRESSIVE_CONFIG,
-    'CS.D.AUDJPY.MINI.IP': BALANCED_PROGRESSIVE_CONFIG,
-    'CS.D.NZDJPY.MINI.IP': BALANCED_PROGRESSIVE_CONFIG,
-    'CS.D.CADJPY.MINI.IP': BALANCED_PROGRESSIVE_CONFIG,
-    'CS.D.CHFJPY.MINI.IP': BALANCED_PROGRESSIVE_CONFIG,
+    # JPY pairs - use JPY-optimized settings (reduced risk levels: 15-20 point stops)
+    'CS.D.USDJPY.MINI.IP': JPY_OPTIMIZED_CONFIG,
+    'CS.D.EURJPY.MINI.IP': JPY_OPTIMIZED_CONFIG,
+    'CS.D.GBPJPY.MINI.IP': JPY_OPTIMIZED_CONFIG,
+    'CS.D.AUDJPY.MINI.IP': JPY_OPTIMIZED_CONFIG,
+    'CS.D.NZDJPY.MINI.IP': JPY_OPTIMIZED_CONFIG,
+    'CS.D.CADJPY.MINI.IP': JPY_OPTIMIZED_CONFIG,
+    'CS.D.CHFJPY.MINI.IP': JPY_OPTIMIZED_CONFIG,
 
     # Others - use default
     'CS.D.USDCHF.MINI.IP': DEFAULT_PROGRESSIVE_CONFIG,
@@ -171,7 +189,7 @@ def get_epic_performance_category(epic: str) -> str:
     if epic in ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP']:
         return 'balanced'  # Major pairs with balanced profit capture approach
     elif 'JPY' in epic:
-        return 'conservative'  # JPY pairs need wider stops due to decimal structure
+        return 'jpy_optimized'  # JPY pairs optimized for reasonable risk levels (15-20 points)
     else:
         return 'default'
 
