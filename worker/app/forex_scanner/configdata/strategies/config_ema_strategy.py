@@ -153,7 +153,7 @@ EMA200_DISTANCE_MOMENTUM_MULTIPLIER = 0.8
 # =============================================================================
 
 # Two-Pole Oscillator Configuration (momentum confirmation for EMA signals)
-TWO_POLE_OSCILLATOR_ENABLED = False      # TEMPORARILY DISABLE to test enhanced validation effectiveness
+TWO_POLE_OSCILLATOR_ENABLED = True      # TEMPORARILY DISABLE to test enhanced validation effectiveness
 TWO_POLE_FILTER_LENGTH = 20              # Filter length (default: 20)
 TWO_POLE_SMA_LENGTH = 25                 # SMA length for normalization (default: 25)  
 TWO_POLE_SIGNAL_DELAY = 4                # Signal delay in bars (default: 4)
@@ -264,6 +264,40 @@ MACD_VALIDATION_MODES = {
 
 # MACD Filter Debug and Logging
 MACD_MOMENTUM_DEBUG_LOGGING = True             # Enable detailed MACD momentum logging
+
+# =============================================================================
+# OPTIONAL OVEREXTENSION FILTERS (PRESERVE SIGNAL FREQUENCY)
+# =============================================================================
+
+# Enable/disable individual overextension filters
+STOCHASTIC_OVEREXTENSION_ENABLED = True      # Optional Stochastic extreme overextension filter
+WILLIAMS_R_OVEREXTENSION_ENABLED = True      # Optional Williams %R extreme overextension filter
+RSI_EXTREME_OVEREXTENSION_ENABLED = True     # Optional RSI extreme overextension filter
+COMPOSITE_OVEREXTENSION_ENABLED = True       # Optional composite overextension scoring
+
+# PRODUCTION: Balanced thresholds to catch overextension while preserving signals
+STOCHASTIC_EXTREME_OVERBOUGHT = 80            # Standard overbought threshold
+STOCHASTIC_EXTREME_OVERSOLD = 20              # Standard oversold threshold
+WILLIAMS_R_EXTREME_OVERBOUGHT = -20           # Standard overbought threshold
+WILLIAMS_R_EXTREME_OVERSOLD = -80             # Standard oversold threshold
+RSI_EXTREME_OVERBOUGHT = 80                   # Slightly more permissive than typical 70
+RSI_EXTREME_OVERSOLD = 20                     # Slightly more permissive than typical 30
+
+# Overextension filter behavior settings - PRODUCTION
+OVEREXTENSION_MODE = 'confidence_penalty'     # Use penalty mode to preserve signal frequency
+OVEREXTENSION_CONFIDENCE_PENALTY = 0.1        # 10% confidence reduction for overextended signals
+OVEREXTENSION_COMPOSITE_THRESHOLD = 2         # Require 2+ indicators for consensus
+
+# Overextension filter weights for composite scoring
+OVEREXTENSION_WEIGHTS = {
+    'stochastic': 0.35,                       # Weight for Stochastic in composite score
+    'williams_r': 0.35,                       # Weight for Williams %R in composite score
+    'rsi': 0.30                               # Weight for RSI in composite score
+}
+
+# Debug and monitoring settings
+OVEREXTENSION_DEBUG_LOGGING = True            # Enable detailed overextension filter logging
+OVEREXTENSION_TRACK_FILTERED_SIGNALS = True   # Track signals that would be filtered
 
 # =============================================================================
 # EMA SAFETY FILTER SETTINGS
@@ -377,6 +411,177 @@ EMA_TRACK_FALSE_POSITIVE_REDUCTION = True   # Track reduction in false positives
 EMA_VALIDATION_PERFORMANCE_WINDOW = 100     # Number of signals to track for performance analysis
 
 # =============================================================================
+# OVEREXTENSION VALIDATION HELPER FUNCTIONS
+# =============================================================================
+
+def check_stochastic_overextension(stoch_k: float, stoch_d: float, signal_direction: str) -> dict:
+    """
+    Check if Stochastic indicates extreme overextension
+
+    Args:
+        stoch_k: Stochastic %K value
+        stoch_d: Stochastic %D value
+        signal_direction: 'long' or 'short'
+
+    Returns:
+        Dictionary with overextension status and penalty
+    """
+    if not STOCHASTIC_OVEREXTENSION_ENABLED:
+        return {'overextended': False, 'penalty': 0.0, 'value': stoch_k}
+
+    is_overextended = False
+    penalty = 0.0
+
+    if signal_direction == 'long' and stoch_k > STOCHASTIC_EXTREME_OVERBOUGHT:
+        is_overextended = True
+        penalty = OVEREXTENSION_CONFIDENCE_PENALTY
+    elif signal_direction == 'short' and stoch_k < STOCHASTIC_EXTREME_OVERSOLD:
+        is_overextended = True
+        penalty = OVEREXTENSION_CONFIDENCE_PENALTY
+
+    return {
+        'overextended': is_overextended,
+        'penalty': penalty,
+        'value': stoch_k,
+        'threshold_used': STOCHASTIC_EXTREME_OVERBOUGHT if signal_direction == 'long' else STOCHASTIC_EXTREME_OVERSOLD
+    }
+
+def check_williams_r_overextension(williams_r: float, signal_direction: str) -> dict:
+    """
+    Check if Williams %R indicates extreme overextension
+
+    Args:
+        williams_r: Williams %R value (-100 to 0)
+        signal_direction: 'long' or 'short'
+
+    Returns:
+        Dictionary with overextension status and penalty
+    """
+    if not WILLIAMS_R_OVEREXTENSION_ENABLED:
+        return {'overextended': False, 'penalty': 0.0, 'value': williams_r}
+
+    is_overextended = False
+    penalty = 0.0
+
+    if signal_direction == 'long' and williams_r > WILLIAMS_R_EXTREME_OVERBOUGHT:
+        is_overextended = True
+        penalty = OVEREXTENSION_CONFIDENCE_PENALTY
+    elif signal_direction == 'short' and williams_r < WILLIAMS_R_EXTREME_OVERSOLD:
+        is_overextended = True
+        penalty = OVEREXTENSION_CONFIDENCE_PENALTY
+
+    return {
+        'overextended': is_overextended,
+        'penalty': penalty,
+        'value': williams_r,
+        'threshold_used': WILLIAMS_R_EXTREME_OVERBOUGHT if signal_direction == 'long' else WILLIAMS_R_EXTREME_OVERSOLD
+    }
+
+def check_rsi_extreme_overextension(rsi: float, signal_direction: str) -> dict:
+    """
+    Check if RSI indicates extreme overextension (more permissive than typical RSI)
+
+    Args:
+        rsi: RSI value (0-100)
+        signal_direction: 'long' or 'short'
+
+    Returns:
+        Dictionary with overextension status and penalty
+    """
+    if not RSI_EXTREME_OVEREXTENSION_ENABLED:
+        return {'overextended': False, 'penalty': 0.0, 'value': rsi}
+
+    is_overextended = False
+    penalty = 0.0
+
+    if signal_direction == 'long' and rsi > RSI_EXTREME_OVERBOUGHT:
+        is_overextended = True
+        penalty = OVEREXTENSION_CONFIDENCE_PENALTY
+    elif signal_direction == 'short' and rsi < RSI_EXTREME_OVERSOLD:
+        is_overextended = True
+        penalty = OVEREXTENSION_CONFIDENCE_PENALTY
+
+    return {
+        'overextended': is_overextended,
+        'penalty': penalty,
+        'value': rsi,
+        'threshold_used': RSI_EXTREME_OVERBOUGHT if signal_direction == 'long' else RSI_EXTREME_OVERSOLD
+    }
+
+def calculate_composite_overextension_score(stoch_k: float, stoch_d: float,
+                                          williams_r: float, rsi: float,
+                                          signal_direction: str) -> dict:
+    """
+    Calculate composite overextension score from multiple oscillators
+
+    Args:
+        stoch_k: Stochastic %K value
+        stoch_d: Stochastic %D value
+        williams_r: Williams %R value
+        rsi: RSI value
+        signal_direction: 'long' or 'short'
+
+    Returns:
+        Dictionary with composite score and recommendation
+    """
+    if not COMPOSITE_OVEREXTENSION_ENABLED:
+        return {'composite_overextended': False, 'total_penalty': 0.0, 'indicators_triggered': 0}
+
+    # Check each indicator
+    stoch_result = check_stochastic_overextension(stoch_k, stoch_d, signal_direction)
+    williams_result = check_williams_r_overextension(williams_r, signal_direction)
+    rsi_result = check_rsi_extreme_overextension(rsi, signal_direction)
+
+    # Count triggered indicators
+    triggered_count = sum([
+        stoch_result['overextended'],
+        williams_result['overextended'],
+        rsi_result['overextended']
+    ])
+
+    # Calculate weighted penalty
+    total_penalty = 0.0
+    if triggered_count >= OVEREXTENSION_COMPOSITE_THRESHOLD:
+        # Apply weighted penalties
+        total_penalty = (
+            stoch_result['penalty'] * OVEREXTENSION_WEIGHTS['stochastic'] +
+            williams_result['penalty'] * OVEREXTENSION_WEIGHTS['williams_r'] +
+            rsi_result['penalty'] * OVEREXTENSION_WEIGHTS['rsi']
+        )
+
+    return {
+        'composite_overextended': triggered_count >= OVEREXTENSION_COMPOSITE_THRESHOLD,
+        'total_penalty': total_penalty,
+        'indicators_triggered': triggered_count,
+        'individual_results': {
+            'stochastic': stoch_result,
+            'williams_r': williams_result,
+            'rsi': rsi_result
+        },
+        'recommendation': 'block' if OVEREXTENSION_MODE == 'hard_block' and triggered_count >= OVEREXTENSION_COMPOSITE_THRESHOLD else 'penalty'
+    }
+
+def get_overextension_filter_status() -> dict:
+    """Get current overextension filter configuration status"""
+    return {
+        'stochastic_enabled': STOCHASTIC_OVEREXTENSION_ENABLED,
+        'williams_r_enabled': WILLIAMS_R_OVEREXTENSION_ENABLED,
+        'rsi_extreme_enabled': RSI_EXTREME_OVEREXTENSION_ENABLED,
+        'composite_enabled': COMPOSITE_OVEREXTENSION_ENABLED,
+        'mode': OVEREXTENSION_MODE,
+        'confidence_penalty': OVEREXTENSION_CONFIDENCE_PENALTY,
+        'composite_threshold': OVEREXTENSION_COMPOSITE_THRESHOLD,
+        'thresholds': {
+            'stochastic_overbought': STOCHASTIC_EXTREME_OVERBOUGHT,
+            'stochastic_oversold': STOCHASTIC_EXTREME_OVERSOLD,
+            'williams_r_overbought': WILLIAMS_R_EXTREME_OVERBOUGHT,
+            'williams_r_oversold': WILLIAMS_R_EXTREME_OVERSOLD,
+            'rsi_overbought': RSI_EXTREME_OVERBOUGHT,
+            'rsi_oversold': RSI_EXTREME_OVERSOLD
+        }
+    }
+
+# =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 
@@ -465,7 +670,20 @@ def get_ema_config_summary() -> dict:
         'require_pullback': EMA_REQUIRE_PULLBACK,
         'enhanced_min_confidence': EMA_ENHANCED_MIN_CONFIDENCE,
         'validation_comparison_enabled': EMA_ENABLE_VALIDATION_COMPARISON,
-        'false_positive_tracking': EMA_TRACK_FALSE_POSITIVE_REDUCTION
+        'false_positive_tracking': EMA_TRACK_FALSE_POSITIVE_REDUCTION,
+        # Overextension filter settings
+        'overextension_filters_enabled': any([
+            STOCHASTIC_OVEREXTENSION_ENABLED,
+            WILLIAMS_R_OVEREXTENSION_ENABLED,
+            RSI_EXTREME_OVEREXTENSION_ENABLED,
+            COMPOSITE_OVEREXTENSION_ENABLED
+        ]),
+        'stochastic_overextension': STOCHASTIC_OVEREXTENSION_ENABLED,
+        'williams_r_overextension': WILLIAMS_R_OVEREXTENSION_ENABLED,
+        'rsi_extreme_overextension': RSI_EXTREME_OVEREXTENSION_ENABLED,
+        'composite_overextension': COMPOSITE_OVEREXTENSION_ENABLED,
+        'overextension_mode': OVEREXTENSION_MODE,
+        'overextension_penalty': OVEREXTENSION_CONFIDENCE_PENALTY
     }
 
 # Quick configuration presets for different signal generation frequencies
@@ -560,3 +778,53 @@ def get_enhanced_validation_status():
         'comparison_mode': EMA_ENABLE_VALIDATION_COMPARISON,
         'description': f"Enhanced validation {'ENABLED' if EMA_ENHANCED_VALIDATION else 'DISABLED'} with {EMA_CONFIRMATION_CANDLES} candle confirmation"
     }
+
+def set_overextension_filter_preset(preset: str = 'conservative'):
+    """
+    Quick presets for overextension filter configuration
+
+    Args:
+        preset: 'disabled', 'conservative', 'balanced', 'comprehensive'
+
+    Returns:
+        Dictionary with recommended settings
+    """
+    presets = {
+        'disabled': {
+            'stochastic_enabled': False,
+            'williams_r_enabled': False,
+            'rsi_extreme_enabled': False,
+            'composite_enabled': False,
+            'description': 'All overextension filters disabled - maximum signal frequency'
+        },
+        'conservative': {
+            'stochastic_enabled': True,
+            'williams_r_enabled': False,
+            'rsi_extreme_enabled': False,
+            'composite_enabled': False,
+            'mode': 'confidence_penalty',
+            'stochastic_overbought': 90,  # Very extreme levels only
+            'stochastic_oversold': 10,
+            'description': 'Single Stochastic filter at very extreme levels - minimal impact'
+        },
+        'balanced': {
+            'stochastic_enabled': True,
+            'williams_r_enabled': True,
+            'rsi_extreme_enabled': False,
+            'composite_enabled': True,
+            'mode': 'confidence_penalty',
+            'composite_threshold': 2,  # Both must agree
+            'description': 'Stochastic + Williams %R with composite scoring - moderate filtering'
+        },
+        'comprehensive': {
+            'stochastic_enabled': True,
+            'williams_r_enabled': True,
+            'rsi_extreme_enabled': True,
+            'composite_enabled': True,
+            'mode': 'confidence_penalty',
+            'composite_threshold': 2,  # Any 2 of 3 must agree
+            'description': 'All oscillators enabled with composite scoring - strongest filtering'
+        }
+    }
+
+    return presets.get(preset, presets['conservative'])

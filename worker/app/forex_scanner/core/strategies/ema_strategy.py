@@ -394,6 +394,102 @@ class EMAStrategy(BaseStrategy):
     def _validate_two_pole_oscillator(self, latest_row: pd.Series, signal_type: str) -> float:
         """TWO-POLE OSCILLATOR VALIDATION: Validate EMA signals with momentum oscillator (delegated to helper)"""
         return self.trend_validator.validate_two_pole_oscillator(latest_row, signal_type)
+
+    def _apply_overextension_filters(self, latest_row: pd.Series, signal_type: str, base_confidence: float) -> float:
+        """
+        Apply overextension filters to adjust signal confidence
+
+        Args:
+            latest_row: Latest market data row
+            signal_type: 'bull' or 'bear'
+            base_confidence: Original confidence score
+
+        Returns:
+            Adjusted confidence score after applying overextension filters
+        """
+        try:
+            # Import the config functions we need
+            from configdata.strategies.config_ema_strategy import (
+                check_stochastic_overextension,
+                check_williams_r_overextension,
+                check_rsi_extreme_overextension,
+                calculate_composite_overextension_score,
+                COMPOSITE_OVEREXTENSION_ENABLED,
+                OVEREXTENSION_MODE,
+                OVEREXTENSION_DEBUG_LOGGING
+            )
+
+            # Get indicator values from the data row
+            stoch_k = latest_row.get('stoch_k', 50.0)  # Default to neutral if missing
+            stoch_d = latest_row.get('stoch_d', 50.0)
+            williams_r = latest_row.get('williams_r', -50.0)  # Default to neutral
+            rsi = latest_row.get('rsi', 50.0)  # Default to neutral
+
+            # Convert signal type to direction for overextension functions
+            signal_direction = 'long' if signal_type == 'bull' else 'short'
+
+            adjusted_confidence = base_confidence
+
+            if COMPOSITE_OVEREXTENSION_ENABLED:
+                # Use composite scoring for multiple oscillator agreement
+                composite_result = calculate_composite_overextension_score(
+                    stoch_k, stoch_d, williams_r, rsi, signal_direction
+                )
+
+                if composite_result['composite_overextended']:
+                    if OVEREXTENSION_MODE == 'hard_block':
+                        if OVEREXTENSION_DEBUG_LOGGING:
+                            self.logger.info(f"🚫 {signal_type.upper()} signal BLOCKED by composite overextension "
+                                           f"({composite_result['indicators_triggered']}/3 indicators triggered)")
+                        return 0.0  # Block signal completely
+                    else:
+                        # Apply confidence penalty
+                        penalty = composite_result['total_penalty']
+                        adjusted_confidence = max(0.0, base_confidence - penalty)
+                        if OVEREXTENSION_DEBUG_LOGGING:
+                            self.logger.info(f"⚠️ {signal_type.upper()} confidence reduced by {penalty:.3f} "
+                                           f"due to composite overextension ({composite_result['indicators_triggered']}/3)")
+
+            else:
+                # Check individual filters and apply penalties
+                total_penalty = 0.0
+                triggered_filters = []
+
+                # Check Stochastic
+                stoch_result = check_stochastic_overextension(stoch_k, stoch_d, signal_direction)
+                if stoch_result['overextended']:
+                    total_penalty += stoch_result['penalty']
+                    triggered_filters.append(f"Stochastic({stoch_k:.1f})")
+
+                # Check Williams %R
+                williams_result = check_williams_r_overextension(williams_r, signal_direction)
+                if williams_result['overextended']:
+                    total_penalty += williams_result['penalty']
+                    triggered_filters.append(f"Williams%R({williams_r:.1f})")
+
+                # Check RSI
+                rsi_result = check_rsi_extreme_overextension(rsi, signal_direction)
+                if rsi_result['overextended']:
+                    total_penalty += rsi_result['penalty']
+                    triggered_filters.append(f"RSI({rsi:.1f})")
+
+                # Apply penalties
+                if total_penalty > 0:
+                    if OVEREXTENSION_MODE == 'hard_block' and len(triggered_filters) >= 2:
+                        if OVEREXTENSION_DEBUG_LOGGING:
+                            self.logger.info(f"🚫 {signal_type.upper()} signal BLOCKED by overextension filters: {', '.join(triggered_filters)}")
+                        return 0.0  # Block signal if multiple filters triggered
+                    else:
+                        adjusted_confidence = max(0.0, base_confidence - total_penalty)
+                        if OVEREXTENSION_DEBUG_LOGGING and total_penalty > 0:
+                            self.logger.info(f"⚠️ {signal_type.upper()} confidence reduced by {total_penalty:.3f} "
+                                           f"due to overextension: {', '.join(triggered_filters)}")
+
+            return adjusted_confidence
+
+        except Exception as e:
+            self.logger.error(f"Error applying overextension filters: {e}")
+            return base_confidence  # Return original confidence on error
     
     def _create_signal(
         self,
@@ -421,7 +517,10 @@ class EMAStrategy(BaseStrategy):
             
             # Calculate simple confidence based on EMA alignment and crossover strength
             confidence = self._calculate_simple_confidence(latest_row, signal_type)
-            
+
+            # Apply overextension filters if enabled
+            confidence = self._apply_overextension_filters(latest_row, signal_type, confidence)
+
             # Add confidence and execution prices
             signal['confidence'] = confidence
             signal['confidence_score'] = confidence  # For compatibility

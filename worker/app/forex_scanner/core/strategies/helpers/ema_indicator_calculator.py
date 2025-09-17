@@ -52,7 +52,10 @@ class EMAIndicatorCalculator:
                 last_short = df['ema_short'].iloc[-1]
                 last_long = df['ema_long'].iloc[-1]
                 self.logger.debug(f"EMAs calculated: short={last_short:.5f}, long={last_long:.5f}")
-            
+
+            # Add overextension oscillators if enabled
+            df = self.ensure_overextension_indicators(df)
+
             return df
             
         except Exception as e:
@@ -172,9 +175,86 @@ class EMAIndicatorCalculator:
                 'momentum_bias_is_red',
                 'momentum_bias_above_boundary'
             ])
-        
+
+        # Add overextension indicators if enabled
+        from configdata.strategies.config_ema_strategy import (
+            STOCHASTIC_OVEREXTENSION_ENABLED,
+            WILLIAMS_R_OVEREXTENSION_ENABLED,
+            RSI_EXTREME_OVEREXTENSION_ENABLED
+        )
+
+        if STOCHASTIC_OVEREXTENSION_ENABLED:
+            base_indicators.extend(['stoch_k', 'stoch_d'])
+
+        if WILLIAMS_R_OVEREXTENSION_ENABLED:
+            base_indicators.extend(['williams_r'])
+
+        if RSI_EXTREME_OVEREXTENSION_ENABLED:
+            base_indicators.extend(['rsi'])
+
         return base_indicators
-    
+
+    def ensure_overextension_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate overextension oscillator indicators if enabled and not present
+
+        Args:
+            df: DataFrame with price data
+
+        Returns:
+            DataFrame with oscillator indicators added
+        """
+        try:
+            from configdata.strategies.config_ema_strategy import (
+                STOCHASTIC_OVEREXTENSION_ENABLED,
+                WILLIAMS_R_OVEREXTENSION_ENABLED,
+                RSI_EXTREME_OVEREXTENSION_ENABLED
+            )
+
+            # Calculate Stochastic if enabled
+            if STOCHASTIC_OVEREXTENSION_ENABLED:
+                if 'stoch_k' not in df.columns or 'stoch_d' not in df.columns:
+                    self.logger.debug("Calculating Stochastic indicators")
+                    # Calculate Stochastic %K and %D
+                    period = 14  # Standard Stochastic period
+                    k_period = 3  # %K smoothing
+                    d_period = 3  # %D smoothing
+
+                    # Calculate %K
+                    low_min = df['low'].rolling(window=period).min()
+                    high_max = df['high'].rolling(window=period).max()
+                    k_percent = 100 * (df['close'] - low_min) / (high_max - low_min + self.eps)
+                    df['stoch_k'] = k_percent.rolling(window=k_period).mean()
+
+                    # Calculate %D
+                    df['stoch_d'] = df['stoch_k'].rolling(window=d_period).mean()
+
+            # Calculate Williams %R if enabled
+            if WILLIAMS_R_OVEREXTENSION_ENABLED:
+                if 'williams_r' not in df.columns:
+                    self.logger.debug("Calculating Williams %R indicator")
+                    period = 14  # Standard Williams %R period
+                    high_max = df['high'].rolling(window=period).max()
+                    low_min = df['low'].rolling(window=period).min()
+                    df['williams_r'] = -100 * (high_max - df['close']) / (high_max - low_min + self.eps)
+
+            # Calculate RSI if enabled
+            if RSI_EXTREME_OVEREXTENSION_ENABLED:
+                if 'rsi' not in df.columns:
+                    self.logger.debug("Calculating RSI indicator")
+                    period = 14  # Standard RSI period
+                    delta = df['close'].diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+                    rs = gain / (loss + self.eps)
+                    df['rsi'] = 100 - (100 / (1 + rs))
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error calculating overextension indicators: {e}")
+            return df
+
     def validate_data_requirements(self, df: pd.DataFrame, min_bars: int) -> bool:
         """
         Validate that DataFrame meets minimum requirements
