@@ -789,7 +789,7 @@ class TradeMonitor:
                     trade.symbol,
                     candles=candle_data,
                     current_price=current_price,
-                    enable_adaptive=True  # Enable adaptive system
+                    enable_adaptive=False  # Disable adaptive system - use pure config settings
                 )
                 self.logger.debug(f"🔄 [PROGRESSIVE DEBUG] get_progressive_config_for_epic completed for {trade.symbol}")
 

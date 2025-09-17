@@ -122,14 +122,14 @@ PROGRESSIVE_EPIC_SETTINGS = {
         'stage3_trigger': 18   # ATR trailing for big moves (was 7)
     },
     'CS.D.USDJPY.MINI.IP': {
-        'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
-        'stage2_trigger': 60,  # JPY calibrated: 60 points = 6 real pips
-        'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips
+        'stage1_trigger': 6,   # Changed from 40 to 6 for more practical trading
+        'stage2_trigger': 10,  # Changed from 60 to 10 for more practical trading
+        'stage3_trigger': 18   # Changed from 100 to 18 for more practical trading
     },
     'CS.D.EURJPY.MINI.IP': {
-        'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
-        'stage2_trigger': 60,  # JPY calibrated: 60 points = 6 real pips
-        'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips
+        'stage1_trigger': 6,   # Changed from 40 to 6 for more practical trading
+        'stage2_trigger': 10,  # Changed from 60 to 10 for more practical trading
+        'stage3_trigger': 18   # Changed from 100 to 18 for more practical trading
     },
     # Additional major and minor pairs with balanced settings
     'CS.D.USDCHF.MINI.IP': {
@@ -153,14 +153,14 @@ PROGRESSIVE_EPIC_SETTINGS = {
         'stage3_trigger': 20   # ATR trailing for big moves
     },
     'CS.D.AUDJPY.MINI.IP': {
-        'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
-        'stage2_trigger': 60,  # JPY calibrated: 60 points = 6 real pips
-        'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips
+        'stage1_trigger': 6,   # Changed from 40 to 6 for more practical trading
+        'stage2_trigger': 10,  # Changed from 60 to 10 for more practical trading
+        'stage3_trigger': 18   # Changed from 100 to 18 for more practical trading
     },
     'CS.D.GBPJPY.MINI.IP': {
-        'stage1_trigger': 40,  # JPY calibrated: 40 points = 4 real pips
-        'stage2_trigger': 60,  # JPY calibrated: 60 points = 6 real pips
-        'stage3_trigger': 100  # JPY calibrated: 100 points = 10 real pips
+        'stage1_trigger': 6,   # Changed from 40 to 6 for more practical trading
+        'stage2_trigger': 10,  # Changed from 60 to 10 for more practical trading
+        'stage3_trigger': 18   # Changed from 100 to 18 for more practical trading
     }
 }
 
