@@ -1281,9 +1281,26 @@ class EnhancedTradeProcessor:
                     try:
                         new_trail_level = progressive_strategy.calculate_trail_level(trade, current_price, [], db)
                         if new_trail_level:
-                            adjustment_points = int(abs(new_trail_level - (trade.sl_price or 0)) / point_value)
+                            current_stop = trade.sl_price or 0.0
+                            # ✅ FIXED: Calculate proper directional adjustment
+                            if trade.direction.upper() == "BUY":
+                                # BUY: Trail stop should only move UP (increase)
+                                if new_trail_level > current_stop:
+                                    adjustment_distance = new_trail_level - current_stop
+                                    adjustment_points = int(adjustment_distance / point_value)
+                                    direction_stop = "increase"
+                                else:
+                                    adjustment_points = 0  # Don't move backwards
+                            else:  # SELL
+                                # SELL: Trail stop should only move DOWN (decrease)
+                                if new_trail_level < current_stop:
+                                    adjustment_distance = current_stop - new_trail_level
+                                    adjustment_points = int(adjustment_distance / point_value)
+                                    direction_stop = "decrease"
+                                else:
+                                    adjustment_points = 0  # Don't move backwards
+
                             if adjustment_points > 0:
-                                direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
                                 success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
                                 if success:
                                     trade.sl_price = new_trail_level

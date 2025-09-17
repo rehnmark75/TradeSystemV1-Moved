@@ -501,9 +501,8 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                     return success  # Exit early, don't continue with trailing logic
             
             # --- Continue with existing break-even and trailing logic ---
-            # ✅ CRITICAL FIX: Call the parent class method directly instead of super()
-            # The issue was that super().process_trade_with_advanced_trailing() was calling itself recursively
-            return EnhancedTradeProcessor.process_trade_with_advanced_trailing(self, trade, current_price, db)
+            # ✅ CRITICAL FIX: Call the parent class method using super()
+            return super().process_trade_with_advanced_trailing(trade, current_price, db)
             
         except Exception as e:
             self.logger.error(f"❌ [COMBINED ERROR] Trade {trade.id}: {e}")

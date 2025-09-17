@@ -453,139 +453,210 @@ app = FastAPI(
 monitor_running = False
 
 @app.on_event("startup")
-def startup():
-    from services.db import Base, engine
-    from services import models
-    
-    # Create database tables
-    Base.metadata.create_all(bind=engine)
-    
-    # 🔥 ENHANCED: Initialize trading analytics tables with complete P/L system
-    if ANALYTICS_AVAILABLE:
-        try:
-            from services.broker_transaction_analyzer import BrokerTransactionAnalyzer
-            from services.activity_pnl_correlator import create_activity_pnl_correlator
-            from services.price_based_pnl_calculator import create_price_based_pnl_calculator
-            
-            # 🆕 Try to import your new services
-            try:
-                from services.trade_pnl_correlator import TradePnLCorrelator  # 🆕 YOUR NEW SERVICE
-                from services.trade_automation_service import TradeAutomationService  # 🆕 INTEGRATION SERVICE
-                new_services_available = True
-            except ImportError:
-                new_services_available = False
-            
-            # ✅ FIXED: Use simple database session without lock
-            db = get_db_session_safely()
-            try:
-                # Create a temporary analyzer instance to initialize tables
-                analyzer = BrokerTransactionAnalyzer(db_manager=db, logger=logger)
-                
-                # 🔥 Test service creation to ensure they work
-                test_correlator = create_activity_pnl_correlator(db_session=db, logger=logger)
-                test_calculator = create_price_based_pnl_calculator(db_session=db, logger=logger)
-                
-                # 🆕 Test new services if available
-                if new_services_available:
-                    test_pnl_correlator = TradePnLCorrelator(db_session=db, logger=logger)  # 🆕 YOUR SERVICE
-                    test_automation = TradeAutomationService(db_session=db, logger=logger)  # 🆕 INTEGRATION
-                
-                # 🔥 Initialize enhanced P/L calculation system
-                logger.info("✅ Trading analytics tables initialized")
-                logger.info("✅ Activity-based P/L correlation system initialized")
-                logger.info("✅ Price-based P/L calculation system initialized") 
-                
-                if new_services_available:
-                    logger.info("✅ 🆕 Transaction-based P/L correlation system initialized")  # NEW
-                    logger.info("✅ 🆕 Integrated trade automation service initialized")        # NEW
-                    logger.info("🎯 Complete P/L pipeline ready with all correlation methods")
-                else:
-                    logger.info("⚠️ New transaction-based P/L services not yet available")
-                    logger.info("🎯 Complete P/L pipeline ready (activity + price methods)")
-                
-            except Exception as db_error:
-                logger.warning(f"⚠️ Database connection issue during startup: {db_error}")
-                logger.info("📊 Analytics will be available but database initialization skipped")
-            finally:
-                db.close()  # Ensure session is closed
-            
-        except ImportError as import_error:
-            logger.warning(f"⚠️ Trading analytics modules import failed: {import_error}")
-            logger.info("📊 Some analytics features may not be available")
-        except Exception as e:
-            logger.warning(f"⚠️ Trading analytics initialization failed: {e}")
-            logger.info("📊 Analytics endpoints will still be available but may need manual DB setup")
-    else:
-        logger.info("📊 Enhanced trading analytics not available - skipping initialization")
-    
-    # ✅ Enhanced trade monitor with proper error handling
-    global monitor_running
-    
-    if ENHANCED_MONITOR_AVAILABLE:
-        try:
-            def run_monitor():
-                global monitor_running
-                try:
-                    monitor_running = True
-                    logger.info("🚀 Initializing enhanced trade monitor...")
-                    
-                    thread = start_monitoring_thread(seed_data=False, dry_run=False)
-                    
-                    if thread:
-                        logger.info("🚀 Enhanced trade monitor started successfully in background thread.")
-                    else:
-                        logger.error("❌ Failed to start enhanced trade monitor")
-                        monitor_running = False
-                        
-                except Exception as e:
-                    monitor_running = False
-                    logger.exception(f"❌ Enhanced trade monitor crashed: {e}")
+async def startup_coordinator():
+    """
+    🔄 CONSOLIDATED: Single coordinated startup function with proper phases
+    ✅ FIXED: Eliminates race conditions from multiple startup decorators
+    """
+    logger.info("🚀 Starting Enhanced FastAPI Trading API v3.1.1...")
 
-            Thread(target=run_monitor, daemon=True).start()
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to start trade monitor: {e}")
-            monitor_running = False
-    else:
-        logger.warning("⚠️ Trade monitor not available - monitoring features disabled")
+    startup_errors = []
+
+    try:
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 1: SYNCHRONOUS DATABASE & ANALYTICS INITIALIZATION
+        # ═══════════════════════════════════════════════════════════════
+        logger.info("📊 Phase 1: Database and analytics initialization...")
+
+        try:
+            from services.db import Base, engine
+            from services import models
+
+            # Create database tables
+            Base.metadata.create_all(bind=engine)
+            logger.info("✅ Database tables created/verified")
+
+            # 🔥 ENHANCED: Initialize trading analytics tables with complete P/L system
+            if ANALYTICS_AVAILABLE:
+                try:
+                    from services.broker_transaction_analyzer import BrokerTransactionAnalyzer
+                    from services.activity_pnl_correlator import create_activity_pnl_correlator
+                    from services.price_based_pnl_calculator import create_price_based_pnl_calculator
+
+                    # 🆕 Try to import new services
+                    new_services_available = False
+                    try:
+                        from services.trade_pnl_correlator import TradePnLCorrelator
+                        from services.trade_automation_service import TradeAutomationService
+                        new_services_available = True
+                    except ImportError:
+                        pass
+
+                    # ✅ FIXED: Use simple database session without lock
+                    db = get_db_session_safely()
+                    try:
+                        # Initialize and test services
+                        analyzer = BrokerTransactionAnalyzer(db_manager=db, logger=logger)
+                        test_correlator = create_activity_pnl_correlator(db_session=db, logger=logger)
+                        test_calculator = create_price_based_pnl_calculator(db_session=db, logger=logger)
+
+                        if new_services_available:
+                            test_pnl_correlator = TradePnLCorrelator(db_session=db, logger=logger)
+                            test_automation = TradeAutomationService(db_session=db, logger=logger)
+
+                        logger.info("✅ Trading analytics services initialized")
+                        logger.info("✅ Activity-based P/L correlation ready")
+                        logger.info("✅ Price-based P/L calculation ready")
+
+                        if new_services_available:
+                            logger.info("✅ 🆕 Transaction-based P/L correlation ready")
+                            logger.info("✅ 🆕 Integrated automation service ready")
+                            logger.info("🎯 Complete P/L pipeline ready with ALL methods")
+                        else:
+                            logger.info("⚠️ Transaction-based P/L services not installed")
+                            logger.info("🎯 P/L pipeline ready (activity + price methods)")
+
+                    finally:
+                        db.close()
+
+                except Exception as analytics_error:
+                    startup_errors.append(f"Analytics initialization: {analytics_error}")
+                    logger.warning(f"⚠️ Analytics initialization failed: {analytics_error}")
+            else:
+                logger.info("📊 Enhanced analytics not available - skipping")
+
+        except Exception as db_error:
+            startup_errors.append(f"Database initialization: {db_error}")
+            logger.error(f"❌ Database initialization failed: {db_error}")
+
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 2: TRADE MONITOR INITIALIZATION
+        # ═══════════════════════════════════════════════════════════════
+        logger.info("🤖 Phase 2: Trade monitor initialization...")
+
+        global monitor_running
         monitor_running = False
 
-@app.on_event("startup")
-async def startup_async():
-    """Separate async startup function for background tasks"""
-    
-    # ✅ FIX: Add error handling for background tasks
-    try:
-        # Schedule async IG trade sync
-        asyncio.create_task(periodic_trade_sync())
-        logger.info("🔄 IG trade sync task started (every 5 min)")
-    except Exception as e:
-        logger.warning(f"⚠️ IG trade sync failed to start: {e}")
-    
-    # 🔥 ENHANCED: Start comprehensive trading automation system
-    if ANALYTICS_AVAILABLE:
+        if ENHANCED_MONITOR_AVAILABLE:
+            try:
+                def run_monitor():
+                    global monitor_running
+                    try:
+                        monitor_running = True
+                        logger.info("🚀 Starting enhanced trade monitor...")
+
+                        thread = start_monitoring_thread(seed_data=False, dry_run=False)
+
+                        if thread:
+                            logger.info("✅ Trade monitor started successfully")
+                        else:
+                            logger.error("❌ Trade monitor failed to start")
+                            monitor_running = False
+
+                    except Exception as e:
+                        monitor_running = False
+                        logger.exception(f"❌ Trade monitor crashed: {e}")
+
+                Thread(target=run_monitor, daemon=True).start()
+
+            except Exception as monitor_error:
+                startup_errors.append(f"Monitor initialization: {monitor_error}")
+                logger.error(f"❌ Monitor initialization failed: {monitor_error}")
+                monitor_running = False
+        else:
+            logger.warning("⚠️ Trade monitor not available")
+
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 3: ASYNC BACKGROUND TASK SCHEDULING
+        # ═══════════════════════════════════════════════════════════════
+        logger.info("⚡ Phase 3: Background task scheduling...")
+
         try:
-            # 🔥 Option 1: Complete trading automation with all P/L methods (RECOMMENDED)
-            asyncio.create_task(complete_trading_automation())
-            logger.info("🤖 Enhanced trading automation started (DATABASE LOCK FIXED)")
-            logger.info("   📥 Transaction fetching: Every 30 minutes")
-            logger.info("   🔗 🆕 Transaction P/L correlation: Every 20 minutes")  # NEW
-            logger.info("   🎯 Activity correlation: Every 1 hour")
-            logger.info("   💰 Price-based P/L calculation: Every 1 hour")
-            logger.info("   📊 Complete P/L pipeline automated with all methods")
-            logger.info("   ✅ No more timeout issues from database lock")
-            
-            # 🆕 Option 2: Alternative - standalone transaction P/L automation
-            # Uncomment this if you prefer to run your service independently
-            """
-            asyncio.create_task(transaction_pnl_automation())
-            logger.info("🔗 Standalone transaction P/L automation started (every 30 minutes)")
-            """
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Enhanced analytics background tasks failed to start: {e}")
-    else:
-        logger.info("📊 Enhanced analytics background tasks skipped - analytics not available")
+            # Schedule IG trade sync
+            asyncio.create_task(periodic_trade_sync())
+            logger.info("✅ IG trade sync scheduled (every 5 minutes)")
+
+            # Schedule enhanced trading automation if available
+            if ANALYTICS_AVAILABLE:
+                try:
+                    asyncio.create_task(complete_trading_automation())
+                    logger.info("✅ Enhanced trading automation scheduled")
+                    logger.info("   📥 Transaction fetching: Every 30 minutes")
+                    logger.info("   🔗 🆕 Transaction P/L correlation: Every 20 minutes")
+                    logger.info("   🎯 Activity correlation: Every 1 hour")
+                    logger.info("   💰 Price calculation: Every 1 hour")
+                    logger.info("   📊 Complete P/L pipeline automated")
+
+                except Exception as automation_error:
+                    startup_errors.append(f"Automation scheduling: {automation_error}")
+                    logger.warning(f"⚠️ Automation scheduling failed: {automation_error}")
+            else:
+                logger.info("📊 Analytics automation skipped - not available")
+
+        except Exception as task_error:
+            startup_errors.append(f"Background task scheduling: {task_error}")
+            logger.error(f"❌ Background task scheduling failed: {task_error}")
+
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 4: STARTUP COMPLETION LOGGING
+        # ═══════════════════════════════════════════════════════════════
+        logger.info("🎉 Phase 4: Startup completion...")
+
+        # Log comprehensive feature status
+        logger.info("🎉 Enhanced FastAPI Trading API v3.1.1 startup complete!")
+        logger.info("🚀 DATABASE TIMEOUT ISSUES FIXED!")
+        logger.info("📊 Available features:")
+
+        if ENHANCED_MONITOR_AVAILABLE and monitor_running:
+            logger.info("   • Enhanced trade monitoring ✅ (FAST)")
+        else:
+            logger.info("   • Enhanced trade monitoring ❌")
+
+        logger.info("   • IG trade sync ✅ (FAST)")
+
+        if ANALYTICS_AVAILABLE:
+            logger.info("   • Trading analytics ✅ (FAST)")
+            logger.info("   • Activity-based P/L correlation ✅ (FAST)")
+            logger.info("   • Price-based P/L calculation ✅ (FAST)")
+            logger.info("   • Real market price fetching ✅ (FAST)")
+            logger.info("   • Spread cost analysis ✅ (FAST)")
+            logger.info("   • Complete automated P/L pipeline ✅ (FAST)")
+
+            # Check for new services
+            try:
+                from services.trade_pnl_correlator import TradePnLCorrelator
+                from services.trade_automation_service import TradeAutomationService
+                logger.info("   • 🔗 🆕 Transaction-based P/L correlation ✅ (FAST)")
+                logger.info("   • 🤖 🆕 Integrated automation service ✅ (FAST)")
+                logger.info("   • 🎯 🆕 Close deal ID reference matching ✅ (FAST)")
+                logger.info("🚀 Complete P/L tracking with ALL correlation methods ready!")
+            except ImportError:
+                logger.info("   • 🔗 🆕 Transaction P/L correlation ⚠️ Pending")
+                logger.info("   • 🤖 🆕 Integrated automation ⚠️ Pending")
+                logger.info("🚀 Core P/L tracking ready - install new services for full functionality!")
+        else:
+            logger.info("   • Enhanced trading analytics ❌ Not available")
+
+        logger.info("🎯 Key improvements:")
+        logger.info("   • Removed global asyncio.Lock() causing timeouts")
+        logger.info("   • Consolidated startup functions (no race conditions)")
+        logger.info("   • Proper initialization phases and error handling")
+        logger.info("   • All database operations non-blocking")
+
+        # Report any startup errors
+        if startup_errors:
+            logger.warning(f"⚠️ Startup completed with {len(startup_errors)} warnings:")
+            for error in startup_errors:
+                logger.warning(f"   • {error}")
+        else:
+            logger.info("✅ Startup completed with no errors!")
+
+    except Exception as critical_error:
+        logger.error(f"❌ CRITICAL STARTUP ERROR: {critical_error}")
+        logger.error("🚨 Application may not function properly!")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
 
 # ──────────────────────
 # Middleware
@@ -921,57 +992,6 @@ else:
     print("   • Complete P/L calculation system inactive")
     print("   • Transaction analytics disabled")
 
-# 🔥 ENHANCED: Add startup completion log with complete P/L system features - FIXED
-@app.on_event("startup") 
-def log_startup_complete():
-    """Log successful startup with all enhanced features - FIXED"""
-    logger.info("🎉 Enhanced FastAPI Trading API v3.1.1 startup complete!")
-    logger.info("🚀 DATABASE TIMEOUT ISSUES FIXED!")
-    logger.info("📊 Available features:")
-    
-    if ENHANCED_MONITOR_AVAILABLE:
-        logger.info("   • Enhanced trade monitoring with break-even logic ✅ (FAST)")
-    else:
-        logger.info("   • Enhanced trade monitoring: ❌ Not available")
-    
-    logger.info("   • IG trade sync (every 5 minutes) ✅ (FAST)")
-    
-    if ANALYTICS_AVAILABLE:
-        logger.info("   • Trading analytics with IG API integration ✅ (FAST)")
-        logger.info("   • Signal correlation analysis ✅ (FAST)")
-        logger.info("   • Performance statistics and reporting ✅ (FAST)")
-        logger.info("   • Automated transaction syncing ✅ (FAST)")
-        logger.info("   • 🎯 Activity-based P/L correlation ✅ (FAST)")        # Existing
-        logger.info("   • 💰 Price-based P/L calculation ✅ (FAST)")           # Existing  
-        logger.info("   • 📊 Real market price fetching ✅ (FAST)")            # Existing
-        logger.info("   • 💱 Spread cost analysis ✅ (FAST)")                  # Existing
-        logger.info("   • 🔄 Complete automated P/L pipeline ✅ (FAST)")       # Existing
-        
-        # 🆕 Check for new services
-        try:
-            from services.trade_pnl_correlator import TradePnLCorrelator
-            from services.trade_automation_service import TradeAutomationService
-            logger.info("   • 🔗 🆕 Transaction-based P/L correlation ✅ (FAST)")  # NEW
-            logger.info("   • 🤖 🆕 Integrated automation service ✅ (FAST)")      # NEW
-            logger.info("   • 🎯 🆕 Close deal ID reference matching ✅ (FAST)")   # NEW
-            logger.info("🚀 Enhanced API v3.1.1 ready for complete P/L tracking with ALL correlation methods!")
-            logger.info("✅ No more 45-second timeout issues!")
-        except ImportError:
-            logger.info("   • 🔗 🆕 Transaction-based P/L correlation: ⚠️ Pending installation")
-            logger.info("   • 🤖 🆕 Integrated automation service: ⚠️ Pending installation")
-            logger.info("🚀 Enhanced API v3.1.1 ready - install new P/L services for full functionality!")
-            logger.info("✅ Database timeout issues fixed - ready for new services!")
-    else:
-        logger.info("   • Enhanced trading analytics: ❌ Not available")
-        logger.info("     └─ Create complete P/L calculation files to enable")
-        logger.info("   • Database performance: ✅ Timeout issues fixed")
-    
-    logger.info("🚀 Enhanced API v3.1.1 ready for advanced P/L tracking!")
-    logger.info("🎯 Key improvements in this version:")
-    logger.info("   • Removed global asyncio.Lock() causing 45s timeouts")
-    logger.info("   • Restored concurrent request handling")
-    logger.info("   • Fixed scanner → FastAPI communication issues")
-    logger.info("   • All database operations now non-blocking")
 
 # 🔥 ENHANCED: Graceful shutdown handling - FIXED
 @app.on_event("shutdown")
