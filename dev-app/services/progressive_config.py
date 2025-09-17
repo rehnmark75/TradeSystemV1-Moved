@@ -123,12 +123,28 @@ def get_progressive_config_for_epic(epic: str, candles=None, current_price: floa
     # If adaptive mode is disabled or no market data available, return base config
     if not enable_adaptive or not candles or current_price is None:
         # Store reason for skipping adaptive analysis
-        base_config._adaptive_skip_reason = f"adaptive={enable_adaptive}, candles={len(candles) if candles else 0}, price={current_price is not None}"
+        # ✅ FIX: Defensive check to prevent Session object length error
+        try:
+            candles_count = len(candles) if candles else 0
+        except TypeError:
+            # If len() fails (e.g., Session object), treat as no candles
+            candles_count = 0
+            candles = None  # Reset to None to prevent further issues
+
+        base_config._adaptive_skip_reason = f"adaptive={enable_adaptive}, candles={candles_count}, price={current_price is not None}"
         return base_config
 
     # Perform market analysis and get adaptive configuration
     try:
-        print(f"[ADAPTIVE DEBUG] {epic}: Starting market analysis with {len(candles)} candles")
+        # ✅ FIX: Defensive check to prevent Session object length error
+        try:
+            candles_count = len(candles)
+        except TypeError:
+            # If len() fails (e.g., Session object), treat as no candles
+            print(f"[ADAPTIVE CONFIG ERROR] {epic}: Invalid candles parameter (not iterable), using base config")
+            return base_config
+
+        print(f"[ADAPTIVE DEBUG] {epic}: Starting market analysis with {candles_count} candles")
         market_context = analyze_market_regime(candles, current_price, epic)
         print(f"[ADAPTIVE DEBUG] {epic}: Market analysis complete: {market_context}")
         adaptive_config = get_adaptive_config_for_regime(base_config, market_context, epic)
@@ -380,11 +396,23 @@ def get_adaptive_config_for_regime(base_config: TrailingConfig, market_context: 
     elif volatility == 'low':
         config_dict['min_trail_distance'] = max(int(config_dict['min_trail_distance'] * 0.9), 2)
 
-    # Store adaptation info for logging
-    config_dict['_adaptation'] = adaptation
-    config_dict['_regime'] = regime
+    # Store adaptation info for logging (temporarily)
+    adaptation_info = adaptation
+    regime_info = regime
 
-    return TrailingConfig(**config_dict)
+    # ✅ FIX: Filter out metadata parameters before creating TrailingConfig
+    # Remove any custom parameters that TrailingConfig constructor doesn't accept
+    metadata_params = {'_adaptation', '_regime', '_market_context', '_adaptive_skip_reason'}
+    filtered_config_dict = {k: v for k, v in config_dict.items() if k not in metadata_params}
+
+    # Create the TrailingConfig with only valid parameters
+    adaptive_config = TrailingConfig(**filtered_config_dict)
+
+    # Add metadata as attributes after creation
+    adaptive_config._adaptation = adaptation_info
+    adaptive_config._regime = regime_info
+
+    return adaptive_config
 
 def log_progressive_config(config: TrailingConfig, epic: str, logger, market_context: dict = None) -> None:
     """Log the progressive configuration being used for transparency"""
