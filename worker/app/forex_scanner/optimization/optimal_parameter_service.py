@@ -207,6 +207,105 @@ class IchimokuOptimalParameters:
     market_conditions: Optional[MarketConditions] = None
 
 
+@dataclass
+class MeanReversionOptimalParameters:
+    """Optimal Mean Reversion trading parameters for an epic"""
+    epic: str
+    timeframe: str
+    confidence_threshold: float
+
+    # LuxAlgo Premium Oscillator Parameters
+    luxalgo_length: int
+    luxalgo_smoothing: int
+    luxalgo_overbought_threshold: float
+    luxalgo_oversold_threshold: float
+    luxalgo_extreme_ob_threshold: float
+    luxalgo_extreme_os_threshold: float
+
+    # Multi-timeframe RSI Parameters
+    mtf_rsi_period: int
+    mtf_rsi_timeframes: Optional[str]
+    mtf_min_alignment: float
+    mtf_rsi_overbought: float
+    mtf_rsi_oversold: float
+
+    # RSI-EMA Divergence Parameters
+    rsi_ema_period: int
+    rsi_ema_rsi_period: int
+    rsi_ema_divergence_sensitivity: float
+    rsi_ema_min_divergence_strength: float
+
+    # Squeeze Momentum Parameters
+    squeeze_bb_length: int
+    squeeze_bb_mult: float
+    squeeze_kc_length: int
+    squeeze_kc_mult: float
+    squeeze_momentum_length: int
+    squeeze_require_release: bool
+    squeeze_momentum_threshold: float
+
+    # Oscillator Confluence Parameters
+    bull_confluence_threshold: float
+    bear_confluence_threshold: float
+    luxalgo_weight: float
+    mtf_rsi_weight: float
+    divergence_weight: float
+    squeeze_weight: float
+
+    # Mean Reversion Zone Parameters
+    zone_validation_enabled: bool
+    zone_lookback_periods: int
+    zone_multiplier: float
+    require_zone_touch: bool
+    min_zone_distance: float
+    max_zone_age: int
+    zone_confidence_boost: float
+
+    # Market Regime Parameters
+    market_regime_enabled: bool
+    disable_in_strong_trend: bool
+    trend_strength_threshold: float
+    volatility_period: int
+    trend_period: int
+    ranging_threshold: float
+
+    # Multi-timeframe Analysis Parameters
+    mtf_analysis_enabled: bool
+    mtf_timeframes_list: Optional[str]
+    mtf_min_alignment_score: float
+    require_higher_tf_confluence: bool
+    mtf_confidence_boost_full_alignment: float
+
+    # Signal Quality Parameters
+    min_confidence: float
+    min_risk_reward: float
+    max_signals_per_day: int
+    min_signal_spacing_hours: int
+
+    # Risk Management Parameters
+    stop_loss_pips: float
+    take_profit_pips: float
+    risk_reward_ratio: float
+    position_size_multiplier: float
+    max_drawdown_threshold: float
+    trail_stop_enabled: bool
+
+    # Performance Metrics
+    performance_score: float
+    win_rate: float
+    avg_profit_pips: float
+    max_consecutive_losses: int
+    profit_factor: float
+    sharpe_ratio: float
+    confluence_accuracy: float
+    divergence_success_rate: float
+    zone_touch_accuracy: float
+    regime_filter_effectiveness: float
+
+    last_optimized: datetime
+    market_conditions: Optional[MarketConditions] = None
+
+
 class OptimalParameterService:
     """
     Service for retrieving optimal trading parameters from optimization results
@@ -1255,6 +1354,405 @@ class OptimalParameterService:
             market_conditions=market_conditions
         )
 
+    def get_mean_reversion_epic_parameters(self,
+                                         epic: str,
+                                         timeframe: str = '15m',
+                                         market_conditions: Optional[MarketConditions] = None,
+                                         force_refresh: bool = False) -> MeanReversionOptimalParameters:
+        """
+        Get optimal Mean Reversion parameters for specific epic and timeframe
+
+        Args:
+            epic: Trading pair epic (e.g. 'CS.D.EURUSD.CEEM.IP')
+            timeframe: Trading timeframe (e.g. '15m', '1h', '4h')
+            market_conditions: Current market conditions for context-aware selection
+            force_refresh: Force refresh from database even if cached
+
+        Returns:
+            MeanReversionOptimalParameters object with all mean reversion trading settings
+        """
+        cache_key = f"mean_reversion_{epic}_{timeframe}_{hash(str(market_conditions)) if market_conditions else 'default'}"
+
+        # Check cache first (unless force refresh)
+        if not force_refresh and self._is_cache_valid(cache_key):
+            self.logger.debug(f"📋 Using cached Mean Reversion parameters for {epic} ({timeframe})")
+            return self._parameter_cache[cache_key]
+
+        # Get from database
+        try:
+            self.logger.debug(f"🔍 Querying Mean Reversion parameters for {epic} ({timeframe})")
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Primary query: Get best mean reversion parameters for this epic and timeframe
+                self.logger.debug("📊 Executing primary Mean Reversion query...")
+                cursor.execute("""
+                    SELECT
+                        epic, timeframe, best_confidence_threshold,
+                        best_luxalgo_length, best_luxalgo_smoothing,
+                        best_luxalgo_overbought_threshold, best_luxalgo_oversold_threshold,
+                        best_luxalgo_extreme_ob_threshold, best_luxalgo_extreme_os_threshold,
+                        best_mtf_rsi_period, best_mtf_rsi_timeframes, best_mtf_min_alignment,
+                        best_mtf_rsi_overbought, best_mtf_rsi_oversold,
+                        best_rsi_ema_period, best_rsi_ema_rsi_period,
+                        best_rsi_ema_divergence_sensitivity, best_rsi_ema_min_divergence_strength,
+                        best_squeeze_bb_length, best_squeeze_bb_mult,
+                        best_squeeze_kc_length, best_squeeze_kc_mult, best_squeeze_momentum_length,
+                        best_squeeze_require_release, best_squeeze_momentum_threshold,
+                        best_bull_confluence_threshold, best_bear_confluence_threshold,
+                        best_luxalgo_weight, best_mtf_rsi_weight, best_divergence_weight, best_squeeze_weight,
+                        zone_validation_enabled, zone_lookback_periods, zone_multiplier,
+                        require_zone_touch, min_zone_distance, max_zone_age, zone_confidence_boost,
+                        market_regime_enabled, disable_in_strong_trend, trend_strength_threshold,
+                        volatility_period, trend_period, ranging_threshold,
+                        mtf_analysis_enabled, mtf_timeframes_list, mtf_min_alignment_score,
+                        require_higher_tf_confluence, mtf_confidence_boost_full_alignment,
+                        min_confidence, min_risk_reward, max_signals_per_day, min_signal_spacing_hours,
+                        optimal_stop_loss_pips, optimal_take_profit_pips,
+                        ROUND(optimal_take_profit_pips / optimal_stop_loss_pips, 2) as risk_reward,
+                        position_size_multiplier, max_drawdown_threshold, trail_stop_enabled,
+                        best_win_rate, best_composite_score, avg_profit_pips,
+                        max_consecutive_losses, profit_factor, sharpe_ratio,
+                        confluence_accuracy, divergence_success_rate, zone_touch_accuracy,
+                        regime_filter_effectiveness, last_updated
+                    FROM mean_reversion_best_parameters
+                    WHERE epic = %s AND timeframe = %s
+                    ORDER BY last_updated DESC
+                    LIMIT 1
+                """, (epic, timeframe))
+
+                result = cursor.fetchone()
+                self.logger.debug(f"🔍 Primary query result: {result}")
+
+                # If no timeframe-specific data, try to get any available data for this epic
+                if not result:
+                    self.logger.debug(f"⚠️ ENTERING FALLBACK: No {timeframe} data for {epic}, trying fallback query")
+                    cursor.execute("""
+                        SELECT
+                            epic, timeframe, best_confidence_threshold,
+                            best_luxalgo_length, best_luxalgo_smoothing,
+                            best_luxalgo_overbought_threshold, best_luxalgo_oversold_threshold,
+                            best_luxalgo_extreme_ob_threshold, best_luxalgo_extreme_os_threshold,
+                            best_mtf_rsi_period, best_mtf_rsi_timeframes, best_mtf_min_alignment,
+                            best_mtf_rsi_overbought, best_mtf_rsi_oversold,
+                            best_rsi_ema_period, best_rsi_ema_rsi_period,
+                            best_rsi_ema_divergence_sensitivity, best_rsi_ema_min_divergence_strength,
+                            best_squeeze_bb_length, best_squeeze_bb_mult,
+                            best_squeeze_kc_length, best_squeeze_kc_mult, best_squeeze_momentum_length,
+                            best_squeeze_require_release, best_squeeze_momentum_threshold,
+                            best_bull_confluence_threshold, best_bear_confluence_threshold,
+                            best_luxalgo_weight, best_mtf_rsi_weight, best_divergence_weight, best_squeeze_weight,
+                            zone_validation_enabled, zone_lookback_periods, zone_multiplier,
+                            require_zone_touch, min_zone_distance, max_zone_age, zone_confidence_boost,
+                            market_regime_enabled, disable_in_strong_trend, trend_strength_threshold,
+                            volatility_period, trend_period, ranging_threshold,
+                            mtf_analysis_enabled, mtf_timeframes_list, mtf_min_alignment_score,
+                            require_higher_tf_confluence, mtf_confidence_boost_full_alignment,
+                            min_confidence, min_risk_reward, max_signals_per_day, min_signal_spacing_hours,
+                            optimal_stop_loss_pips, optimal_take_profit_pips,
+                            ROUND(optimal_take_profit_pips / optimal_stop_loss_pips, 2) as risk_reward,
+                            position_size_multiplier, max_drawdown_threshold, trail_stop_enabled,
+                            best_win_rate, best_composite_score, avg_profit_pips,
+                            max_consecutive_losses, profit_factor, sharpe_ratio,
+                            confluence_accuracy, divergence_success_rate, zone_touch_accuracy,
+                            regime_filter_effectiveness, last_updated
+                        FROM mean_reversion_best_parameters
+                        WHERE epic = %s
+                        ORDER BY best_composite_score DESC NULLS LAST
+                        LIMIT 1
+                    """, (epic,))
+
+                    result = cursor.fetchone()
+                    self.logger.debug(f"🔍 Fallback query result: {result}")
+
+                if result:
+                    # Create optimal mean reversion parameters from database result
+                    optimal_params = MeanReversionOptimalParameters(
+                        epic=result[0],
+                        timeframe=result[1],
+                        confidence_threshold=float(result[2]),
+
+                        # LuxAlgo Oscillator parameters
+                        luxalgo_length=int(result[3]),
+                        luxalgo_smoothing=int(result[4]),
+                        luxalgo_overbought_threshold=float(result[5]),
+                        luxalgo_oversold_threshold=float(result[6]),
+                        luxalgo_extreme_ob_threshold=float(result[7]),
+                        luxalgo_extreme_os_threshold=float(result[8]),
+
+                        # MTF RSI parameters
+                        mtf_rsi_period=int(result[9]),
+                        mtf_rsi_timeframes=result[10],
+                        mtf_min_alignment=float(result[11]),
+                        mtf_rsi_overbought=float(result[12]),
+                        mtf_rsi_oversold=float(result[13]),
+
+                        # RSI-EMA Divergence parameters
+                        rsi_ema_period=int(result[14]),
+                        rsi_ema_rsi_period=int(result[15]),
+                        rsi_ema_divergence_sensitivity=float(result[16]),
+                        rsi_ema_min_divergence_strength=float(result[17]),
+
+                        # Squeeze Momentum parameters
+                        squeeze_bb_length=int(result[18]),
+                        squeeze_bb_mult=float(result[19]),
+                        squeeze_kc_length=int(result[20]),
+                        squeeze_kc_mult=float(result[21]),
+                        squeeze_momentum_length=int(result[22]),
+                        squeeze_require_release=bool(result[23]),
+                        squeeze_momentum_threshold=float(result[24]),
+
+                        # Oscillator confluence parameters
+                        bull_confluence_threshold=float(result[25]),
+                        bear_confluence_threshold=float(result[26]),
+                        luxalgo_weight=float(result[27]),
+                        mtf_rsi_weight=float(result[28]),
+                        divergence_weight=float(result[29]),
+                        squeeze_weight=float(result[30]),
+
+                        # Mean reversion zone parameters
+                        zone_validation_enabled=bool(result[31]),
+                        zone_lookback_periods=int(result[32]),
+                        zone_multiplier=float(result[33]),
+                        require_zone_touch=bool(result[34]),
+                        min_zone_distance=float(result[35]),
+                        max_zone_age=int(result[36]),
+                        zone_confidence_boost=float(result[37]),
+
+                        # Market regime parameters
+                        market_regime_enabled=bool(result[38]),
+                        disable_in_strong_trend=bool(result[39]),
+                        trend_strength_threshold=float(result[40]),
+                        volatility_period=int(result[41]),
+                        trend_period=int(result[42]),
+                        ranging_threshold=float(result[43]),
+
+                        # MTF analysis parameters
+                        mtf_analysis_enabled=bool(result[44]),
+                        mtf_timeframes_list=result[45],
+                        mtf_min_alignment_score=float(result[46]),
+                        require_higher_tf_confluence=bool(result[47]),
+                        mtf_confidence_boost_full_alignment=float(result[48]),
+
+                        # Signal quality parameters
+                        min_confidence=float(result[49]),
+                        min_risk_reward=float(result[50]),
+                        max_signals_per_day=int(result[51]),
+                        min_signal_spacing_hours=int(result[52]),
+
+                        # Risk management parameters
+                        stop_loss_pips=float(result[53]),
+                        take_profit_pips=float(result[54]),
+                        risk_reward_ratio=float(result[55]),
+                        position_size_multiplier=float(result[56]),
+                        max_drawdown_threshold=float(result[57]),
+                        trail_stop_enabled=bool(result[58]),
+
+                        # Performance metrics
+                        performance_score=float(result[60]),
+                        win_rate=float(result[59]),
+                        avg_profit_pips=float(result[61]),
+                        max_consecutive_losses=int(result[62]),
+                        profit_factor=float(result[63]),
+                        sharpe_ratio=float(result[64]),
+                        confluence_accuracy=float(result[65]),
+                        divergence_success_rate=float(result[66]),
+                        zone_touch_accuracy=float(result[67]),
+                        regime_filter_effectiveness=float(result[68]),
+
+                        last_optimized=result[69],
+                        market_conditions=market_conditions
+                    )
+
+                    # Apply market condition adjustments if provided
+                    if market_conditions:
+                        optimal_params = self._apply_mean_reversion_market_adjustments(optimal_params, market_conditions)
+
+                    # Cache the result
+                    self._parameter_cache[cache_key] = optimal_params
+                    self._cache_timestamps[cache_key] = datetime.now()
+
+                    self.logger.info(f"✅ Using optimized Mean Reversion parameters for {epic} ({timeframe}): "
+                                   f"Confidence: {optimal_params.confidence_threshold:.1%}, "
+                                   f"Performance: {optimal_params.performance_score:.3f}")
+
+                    return optimal_params
+                else:
+                    # No optimization data found, use fallback
+                    self.logger.info(f"⚠️ No Mean Reversion optimization data for {epic}, using fallback parameters")
+                    return self._get_mean_reversion_fallback_parameters(epic, timeframe, market_conditions)
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to get Mean Reversion parameters for {epic} ({timeframe}): {e}")
+            return self._get_mean_reversion_fallback_parameters(epic, timeframe, market_conditions)
+
+    def _apply_mean_reversion_market_adjustments(self, params: MeanReversionOptimalParameters, conditions: MarketConditions) -> MeanReversionOptimalParameters:
+        """Apply market condition adjustments to mean reversion parameters"""
+
+        # Create a copy of the parameters
+        import copy
+        adjusted_params = copy.deepcopy(params)
+
+        # Volatility adjustments
+        if conditions.volatility_level == 'high':
+            # Increase stop losses and take profits for high volatility
+            adjusted_params.stop_loss_pips *= 1.2
+            adjusted_params.take_profit_pips *= 1.2
+            # Widen oscillator thresholds
+            adjusted_params.luxalgo_overbought_threshold *= 0.95  # Make less sensitive
+            adjusted_params.luxalgo_oversold_threshold *= 1.05
+            # Increase zone distance
+            adjusted_params.min_zone_distance *= 1.3
+
+        elif conditions.volatility_level == 'low':
+            # Decrease stop losses and take profits for low volatility
+            adjusted_params.stop_loss_pips *= 0.8
+            adjusted_params.take_profit_pips *= 0.8
+            # Tighten oscillator thresholds
+            adjusted_params.luxalgo_overbought_threshold *= 1.05  # Make more sensitive
+            adjusted_params.luxalgo_oversold_threshold *= 0.95
+            # Decrease zone distance
+            adjusted_params.min_zone_distance *= 0.8
+
+        # Session adjustments
+        if conditions.session == 'asian':
+            # Asian session: more conservative parameters
+            adjusted_params.bull_confluence_threshold *= 1.1
+            adjusted_params.bear_confluence_threshold *= 1.1
+            adjusted_params.min_confidence *= 1.05
+
+        elif conditions.session in ['london', 'new_york']:
+            # Major sessions: can be slightly more aggressive
+            adjusted_params.bull_confluence_threshold *= 0.95
+            adjusted_params.bear_confluence_threshold *= 0.95
+
+        # Market regime adjustments
+        if conditions.market_regime == 'ranging':
+            # Ranging markets: optimal for mean reversion
+            adjusted_params.zone_confidence_boost *= 1.2
+            adjusted_params.require_zone_touch = True
+
+        elif conditions.market_regime == 'trending':
+            # Trending markets: more cautious mean reversion
+            adjusted_params.trend_strength_threshold *= 0.8  # Lower threshold = more cautious
+            adjusted_params.disable_in_strong_trend = True
+
+        return adjusted_params
+
+    def _get_mean_reversion_fallback_parameters(self, epic: str, timeframe: str = '15m', market_conditions: Optional[MarketConditions] = None) -> MeanReversionOptimalParameters:
+        """Get fallback mean reversion parameters when optimization data is not available"""
+
+        # Epic-specific adjustments
+        if 'JPY' in epic.upper():
+            fallback_sl = 20.0
+            fallback_tp = 35.0
+            luxalgo_overbought = 85
+            luxalgo_oversold = 15
+            min_zone_distance = 15.0
+        else:
+            fallback_sl = 15.0
+            fallback_tp = 25.0
+            luxalgo_overbought = 80
+            luxalgo_oversold = 20
+            min_zone_distance = 10.0
+
+        return MeanReversionOptimalParameters(
+            epic=epic,
+            timeframe=timeframe,
+            confidence_threshold=0.6,
+
+            # LuxAlgo Oscillator parameters
+            luxalgo_length=14,
+            luxalgo_smoothing=3,
+            luxalgo_overbought_threshold=luxalgo_overbought,
+            luxalgo_oversold_threshold=luxalgo_oversold,
+            luxalgo_extreme_ob_threshold=90,
+            luxalgo_extreme_os_threshold=10,
+
+            # MTF RSI parameters
+            mtf_rsi_period=14,
+            mtf_rsi_timeframes='15m,1h,4h',
+            mtf_min_alignment=0.6,
+            mtf_rsi_overbought=70,
+            mtf_rsi_oversold=30,
+
+            # RSI-EMA Divergence parameters
+            rsi_ema_period=21,
+            rsi_ema_rsi_period=14,
+            rsi_ema_divergence_sensitivity=0.6,
+            rsi_ema_min_divergence_strength=0.7,
+
+            # Squeeze Momentum parameters
+            squeeze_bb_length=20,
+            squeeze_bb_mult=2.0,
+            squeeze_kc_length=20,
+            squeeze_kc_mult=1.5,
+            squeeze_momentum_length=12,
+            squeeze_require_release=True,
+            squeeze_momentum_threshold=0.1,
+
+            # Oscillator confluence parameters
+            bull_confluence_threshold=0.65,
+            bear_confluence_threshold=0.65,
+            luxalgo_weight=0.4,
+            mtf_rsi_weight=0.3,
+            divergence_weight=0.2,
+            squeeze_weight=0.1,
+
+            # Mean reversion zone parameters
+            zone_validation_enabled=True,
+            zone_lookback_periods=50,
+            zone_multiplier=1.5,
+            require_zone_touch=True,
+            min_zone_distance=min_zone_distance,
+            max_zone_age=100,
+            zone_confidence_boost=0.1,
+
+            # Market regime parameters
+            market_regime_enabled=True,
+            disable_in_strong_trend=True,
+            trend_strength_threshold=0.7,
+            volatility_period=20,
+            trend_period=50,
+            ranging_threshold=0.3,
+
+            # MTF analysis parameters
+            mtf_analysis_enabled=True,
+            mtf_timeframes_list='15m,1h,4h',
+            mtf_min_alignment_score=0.6,
+            require_higher_tf_confluence=True,
+            mtf_confidence_boost_full_alignment=0.2,
+
+            # Signal quality parameters
+            min_confidence=0.6,
+            min_risk_reward=1.5,
+            max_signals_per_day=5,
+            min_signal_spacing_hours=4,
+
+            # Risk management parameters
+            stop_loss_pips=fallback_sl,
+            take_profit_pips=fallback_tp,
+            risk_reward_ratio=fallback_tp / fallback_sl,
+            position_size_multiplier=0.8,
+            max_drawdown_threshold=0.05,
+            trail_stop_enabled=True,
+
+            # Performance metrics (defaults for fallback)
+            performance_score=0.0,
+            win_rate=0.65,
+            avg_profit_pips=15.0,
+            max_consecutive_losses=3,
+            profit_factor=1.5,
+            sharpe_ratio=1.2,
+            confluence_accuracy=0.7,
+            divergence_success_rate=0.6,
+            zone_touch_accuracy=0.8,
+            regime_filter_effectiveness=0.75,
+
+            last_optimized=datetime.now() - timedelta(days=999),  # Very old
+            market_conditions=market_conditions
+        )
+
 
 def get_optimal_parameter_service() -> OptimalParameterService:
     """Get singleton instance of OptimalParameterService"""
@@ -1521,6 +2019,166 @@ def get_smc_system_readiness() -> Dict[str, any]:
         return {
             'error': str(e),
             'system_type': 'SMC'
+        }
+
+
+# =============================================================================
+# Mean Reversion Strategy Functions
+# =============================================================================
+def get_mean_reversion_optimal_parameters(epic: str, timeframe: str = '15m', market_conditions: Optional[MarketConditions] = None) -> MeanReversionOptimalParameters:
+    """Get optimal Mean Reversion parameters for epic (convenience function)"""
+    service = get_optimal_parameter_service()
+    return service.get_mean_reversion_epic_parameters(epic, timeframe, market_conditions)
+
+
+def get_epic_mean_reversion_config(epic: str, timeframe: str = '15m') -> Dict[str, any]:
+    """Get Mean Reversion configuration for epic in format compatible with existing strategy"""
+    params = get_mean_reversion_optimal_parameters(epic, timeframe)
+
+    return {
+        # Core parameters
+        'confidence_threshold': params.confidence_threshold,
+        'timeframe': params.timeframe,
+
+        # LuxAlgo Oscillator parameters
+        'luxalgo_length': params.luxalgo_length,
+        'luxalgo_smoothing': params.luxalgo_smoothing,
+        'luxalgo_overbought_threshold': params.luxalgo_overbought_threshold,
+        'luxalgo_oversold_threshold': params.luxalgo_oversold_threshold,
+        'luxalgo_extreme_ob_threshold': params.luxalgo_extreme_ob_threshold,
+        'luxalgo_extreme_os_threshold': params.luxalgo_extreme_os_threshold,
+
+        # Multi-timeframe RSI parameters
+        'mtf_rsi_period': params.mtf_rsi_period,
+        'mtf_rsi_timeframes': params.mtf_rsi_timeframes,
+        'mtf_min_alignment': params.mtf_min_alignment,
+        'mtf_rsi_overbought': params.mtf_rsi_overbought,
+        'mtf_rsi_oversold': params.mtf_rsi_oversold,
+
+        # RSI-EMA Divergence parameters
+        'rsi_ema_period': params.rsi_ema_period,
+        'rsi_ema_rsi_period': params.rsi_ema_rsi_period,
+        'rsi_ema_divergence_sensitivity': params.rsi_ema_divergence_sensitivity,
+        'rsi_ema_min_divergence_strength': params.rsi_ema_min_divergence_strength,
+
+        # Squeeze Momentum parameters
+        'squeeze_bb_length': params.squeeze_bb_length,
+        'squeeze_bb_mult': params.squeeze_bb_mult,
+        'squeeze_kc_length': params.squeeze_kc_length,
+        'squeeze_kc_mult': params.squeeze_kc_mult,
+        'squeeze_momentum_length': params.squeeze_momentum_length,
+        'squeeze_require_release': params.squeeze_require_release,
+        'squeeze_momentum_threshold': params.squeeze_momentum_threshold,
+
+        # Oscillator confluence parameters
+        'bull_confluence_threshold': params.bull_confluence_threshold,
+        'bear_confluence_threshold': params.bear_confluence_threshold,
+        'luxalgo_weight': params.luxalgo_weight,
+        'mtf_rsi_weight': params.mtf_rsi_weight,
+        'divergence_weight': params.divergence_weight,
+        'squeeze_weight': params.squeeze_weight,
+
+        # Mean reversion zone parameters
+        'zone_validation_enabled': params.zone_validation_enabled,
+        'zone_lookback_periods': params.zone_lookback_periods,
+        'zone_multiplier': params.zone_multiplier,
+        'require_zone_touch': params.require_zone_touch,
+        'min_zone_distance': params.min_zone_distance,
+        'max_zone_age': params.max_zone_age,
+        'zone_confidence_boost': params.zone_confidence_boost,
+
+        # Market regime parameters
+        'market_regime_enabled': params.market_regime_enabled,
+        'disable_in_strong_trend': params.disable_in_strong_trend,
+        'trend_strength_threshold': params.trend_strength_threshold,
+        'volatility_period': params.volatility_period,
+        'trend_period': params.trend_period,
+        'ranging_threshold': params.ranging_threshold,
+
+        # Multi-timeframe analysis parameters
+        'mtf_analysis_enabled': params.mtf_analysis_enabled,
+        'mtf_timeframes_list': params.mtf_timeframes_list,
+        'mtf_min_alignment_score': params.mtf_min_alignment_score,
+        'require_higher_tf_confluence': params.require_higher_tf_confluence,
+        'mtf_confidence_boost_full_alignment': params.mtf_confidence_boost_full_alignment,
+
+        # Signal quality parameters
+        'min_confidence': params.min_confidence,
+        'min_risk_reward': params.min_risk_reward,
+        'max_signals_per_day': params.max_signals_per_day,
+        'min_signal_spacing_hours': params.min_signal_spacing_hours,
+
+        # Risk management
+        'stop_loss_pips': params.stop_loss_pips,
+        'take_profit_pips': params.take_profit_pips,
+        'risk_reward_ratio': params.risk_reward_ratio,
+        'position_size_multiplier': params.position_size_multiplier,
+        'max_drawdown_threshold': params.max_drawdown_threshold,
+        'trail_stop_enabled': params.trail_stop_enabled,
+
+        # Performance metrics
+        'performance_score': params.performance_score,
+        'win_rate': params.win_rate,
+        'avg_profit_pips': params.avg_profit_pips,
+        'max_consecutive_losses': params.max_consecutive_losses,
+        'profit_factor': params.profit_factor,
+        'sharpe_ratio': params.sharpe_ratio,
+        'confluence_accuracy': params.confluence_accuracy,
+        'divergence_success_rate': params.divergence_success_rate,
+        'zone_touch_accuracy': params.zone_touch_accuracy,
+        'regime_filter_effectiveness': params.regime_filter_effectiveness
+    }
+
+
+def get_all_optimized_mean_reversion_epics() -> List[str]:
+    """Get list of all epics that have Mean Reversion optimization data"""
+    try:
+        service = get_optimal_parameter_service()
+        with service.db_manager.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT DISTINCT epic
+                    FROM mean_reversion_best_parameters
+                    WHERE best_composite_score > 0
+                    ORDER BY epic
+                """)
+                results = cursor.fetchall()
+                return [row[0] for row in results] if results else []
+    except Exception:
+        return []
+
+
+def is_epic_mean_reversion_optimized(epic: str, timeframe: str = '15m') -> bool:
+    """Check if an epic has Mean Reversion optimization data available for specific timeframe"""
+    try:
+        params = get_mean_reversion_optimal_parameters(epic, timeframe)
+        # Check if parameters are from optimization (not fallback)
+        return params.performance_score > 0 and params.last_optimized > datetime.now() - timedelta(days=365)
+    except Exception:
+        return False
+
+
+def get_mean_reversion_system_readiness() -> Dict[str, any]:
+    """Check if Mean Reversion optimization system is ready for production"""
+    try:
+        configured_epics = set(config.EPIC_LIST)
+        optimized_epics = set(get_all_optimized_mean_reversion_epics())
+
+        missing_epics = configured_epics - optimized_epics
+        coverage_ratio = len(optimized_epics & configured_epics) / len(configured_epics) if configured_epics else 0
+
+        return {
+            'configured_epics': len(configured_epics),
+            'optimized_epics': len(optimized_epics),
+            'coverage_ratio': coverage_ratio,
+            'missing_epics': list(missing_epics),
+            'ready_for_production': len(missing_epics) == 0,
+            'system_type': 'Mean Reversion'
+        }
+    except Exception as e:
+        return {
+            'error': str(e),
+            'system_type': 'Mean Reversion'
         }
 
 
