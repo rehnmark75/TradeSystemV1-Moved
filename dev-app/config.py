@@ -38,7 +38,7 @@ BROKER_EPIC_MAP = {
 
 # Default epics for testing and examples
 DEFAULT_EPICS = {
-    'EURUSD': 'CS.D.EURUSD.MINI.IP',
+    'EURUSD': 'CS.D.EURUSD.CEEM.IP',
     'USDJPY': 'CS.D.USDJPY.MINI.IP',
     'GBPUSD': 'CS.D.GBPUSD.MINI.IP'
 }

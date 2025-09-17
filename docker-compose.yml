@@ -226,6 +226,7 @@ services:
     ports:
       - "8090:8090"
     volumes:
+      - ./vector-db:/app:cached
       - ./vector-db/data:/app/data
       - ./vector-db/vectordb:/app/vectordb
       - ./logs/vector-db:/app/logs
