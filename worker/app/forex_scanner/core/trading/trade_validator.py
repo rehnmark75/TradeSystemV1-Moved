@@ -625,17 +625,13 @@ class TradeValidator:
     
     def validate_ema200_trend_filter(self, signal: Dict) -> Tuple[bool, str]:
         """
-        FIXED: EMA 200 trend filter that works with your existing signal format
-        
-        Your strategies include EMA values directly in the signal. Use those!
+        EMA 200 trend filter - ALL strategies must respect major trend direction
+
+        FIXED: Removed mean reversion bypass for consistent risk management
         """
         try:
-            # Check for mean reversion strategy bypass (existing logic)
-            if self._is_mean_reversion_strategy(signal):
-                bypass_reason = signal.get('ema200_bypass_reason', 'Mean reversion strategy')
-                return True, f"EMA200 filter bypassed: {bypass_reason}"
-            
             signal_type = signal.get('signal_type', '').upper()
+            epic = signal.get('epic', 'Unknown')
             
             # GET CURRENT PRICE - flexible approach
             current_price = None
@@ -693,31 +689,40 @@ class TradeValidator:
                             except (ValueError, TypeError):
                                 continue
             
-            # FIXED: REJECT signals with missing data (don't allow invalid signals!)
+            # STRICT: REJECT signals with missing data (no bypass allowed)
             if current_price is None:
-                self.logger.error(f"🚫 EMA200 filter REJECTING: No current price data found")
+                self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: No current price data found")
+                self.logger.debug(f"   Available fields: {list(signal.keys())}")
                 return False, "EMA200 filter: No current price data - REJECTED"
 
             if ema_200 is None:
-                self.logger.error(f"🚫 EMA200 filter REJECTING: No EMA 200 data found")
+                self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: No EMA 200 data found")
+                self.logger.debug(f"   Available fields: {list(signal.keys())}")
                 return False, "EMA200 filter: No EMA 200 data - REJECTED"
+
+            # Validate extracted values are reasonable
+            if current_price <= 0 or ema_200 <= 0:
+                self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: Invalid price values - price: {current_price}, ema200: {ema_200}")
+                return False, "EMA200 filter: Invalid price values - REJECTED"
             
-            # Apply trend filter logic
+            # Apply trend filter logic with comprehensive logging
+            self.logger.info(f"📊 EMA200 validation for {epic} {signal_type}: price={current_price:.5f}, ema200={ema_200:.5f}")
+
             if signal_type in ['BUY', 'BULL']:
                 if current_price > ema_200:
-                    self.logger.debug(f"✅ BUY signal approved: {current_price:.5f} > {ema_200:.5f}")
-                    return True, f"BUY valid: price above EMA200"
+                    self.logger.info(f"✅ BUY signal APPROVED {epic}: {current_price:.5f} > {ema_200:.5f} (price above EMA200)")
+                    return True, f"BUY valid: price {current_price:.5f} above EMA200 {ema_200:.5f}"
                 else:
-                    self.logger.warning(f"🚫 BUY rejected: {current_price:.5f} <= {ema_200:.5f}")
-                    return False, f"BUY rejected: price below EMA200"
-            
+                    self.logger.warning(f"🚫 BUY signal REJECTED {epic}: {current_price:.5f} <= {ema_200:.5f} (price at/below EMA200)")
+                    return False, f"BUY rejected: price {current_price:.5f} at/below EMA200 {ema_200:.5f}"
+
             elif signal_type in ['SELL', 'BEAR']:
                 if current_price < ema_200:
-                    self.logger.debug(f"✅ SELL signal approved: {current_price:.5f} < {ema_200:.5f}")
-                    return True, f"SELL valid: price below EMA200"
+                    self.logger.info(f"✅ SELL signal APPROVED {epic}: {current_price:.5f} < {ema_200:.5f} (price below EMA200)")
+                    return True, f"SELL valid: price {current_price:.5f} below EMA200 {ema_200:.5f}"
                 else:
-                    self.logger.warning(f"🚫 SELL rejected: {current_price:.5f} >= {ema_200:.5f}")
-                    return False, f"SELL rejected: price above EMA200"
+                    self.logger.warning(f"🚫 SELL signal REJECTED {epic}: {current_price:.5f} >= {ema_200:.5f} (price at/above EMA200)")
+                    return False, f"SELL rejected: price {current_price:.5f} at/above EMA200 {ema_200:.5f}"
             
             else:
                 return True, f"Unknown signal type {signal_type} (allowing)"
@@ -793,7 +798,7 @@ class TradeValidator:
                 'Market hours check', 
                 'Epic restrictions',
                 'Freshness validation',
-                'EMA 200 trend filter (with mean reversion bypass)',
+                'EMA 200 trend filter (STRICT - no bypasses)',
                 'Support/Resistance validation',
                 'Claude AI filtering',
                 'Risk management checks'
@@ -810,12 +815,12 @@ class TradeValidator:
         config_summary.append(f"Market hours: {'Enabled' if self.validate_market_hours else 'Disabled'}")
         if self.validate_market_hours:
             config_summary.append(f"Trading hours: {self.trading_start_hour:02d}:00-{self.trading_end_hour:02d}:00")
-        config_summary.append(f"EMA200 filter: {'Enabled' if self.enable_ema200_filter else 'Disabled'} (with mean reversion bypass)")  # 🆕 UPDATED
+        config_summary.append(f"EMA200 filter: {'Enabled' if self.enable_ema200_filter else 'Disabled'} (ALL strategies must follow trend)")  # 🆕 UPDATED
         config_summary.append(f"Freshness: {'Enabled' if self.enable_freshness_check else 'Disabled'}")
         config_summary.append(f"Epic restrictions: {len(self.allowed_epics) if self.allowed_epics else 0} allowed, {len(self.blocked_epics)} blocked")
         config_summary.append(f"S/R validation: {'Enabled' if self.enable_sr_validation else 'Disabled'}")
         config_summary.append(f"Claude filtering: {'Enabled' if self.enable_claude_filtering else 'Disabled'}")  # 🆕 NEW
-        config_summary.append(f"Mean reversion support: ENABLED")  # 🆕 NEW
+        config_summary.append(f"Trend filter: STRICT (no bypasses)")  # 🆕 UPDATED
         
         if self.enable_sr_validation and self.sr_validator:
             config_summary.append(f"S/R config: {self.sr_validator.get_validation_summary()}")
@@ -830,71 +835,6 @@ class TradeValidator:
         
         return "; ".join(config_summary)
 
-    def _is_mean_reversion_strategy(self, signal: Dict) -> bool:
-        """
-        🆕 NEW: Determine if a signal comes from a mean reversion strategy
-        
-        Checks multiple flags and strategy identifiers to determine if this is 
-        a mean reversion strategy that should bypass trend filters.
-        
-        Args:
-            signal: Trading signal dictionary
-            
-        Returns:
-            bool: True if this is a mean reversion strategy
-        """
-        try:
-            # 1. Check explicit bypass flags (most reliable)
-            if signal.get('bypass_ema200_trend_filter', False):
-                return True
-                
-            if signal.get('is_mean_reversion_strategy', False):
-                return True
-                
-            if signal.get('contra_trend_allowed', False):
-                return True
-            
-            # 2. Check strategy type classification
-            strategy_type = signal.get('strategy_type', '').lower()
-            if strategy_type in ['mean_reversion', 'reversal', 'contrarian']:
-                return True
-            
-            # 3. Check strategy name patterns
-            strategy = signal.get('strategy', '').lower()
-            mean_reversion_patterns = [
-                'bollinger',
-                'bb_',
-                'rsi_reversal',
-                'stochastic_reversal',
-                'oversold_reversal',
-                'overbought_reversal',
-                'mean_reversion',
-                'support_resistance',
-                'pivot_reversal'
-            ]
-            
-            for pattern in mean_reversion_patterns:
-                if pattern in strategy:
-                    return True
-            
-            # 4. Check for specific mean reversion indicators
-            if signal.get('bb_validation', False):  # Bollinger Bands validation
-                return True
-            
-            # 5. Check validation reason for mean reversion keywords
-            validation_reason = signal.get('validation_reason', '').lower()
-            if any(keyword in validation_reason for keyword in ['mean reversion', 'bollinger', 'reversal']):
-                return True
-            
-            # 6. Check if trend_following is explicitly set to False
-            if signal.get('trend_following') is False:
-                return True
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error checking mean reversion strategy: {e}")
-            return False  # Default to not bypassing filter if error occurs
 
     def _extract_atr_from_signal(self, signal: Dict) -> Optional[float]:
         """Extract ATR for volatility-based tolerance calculation"""
