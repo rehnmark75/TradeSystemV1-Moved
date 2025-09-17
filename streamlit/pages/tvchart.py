@@ -104,9 +104,9 @@ else:
 
 # Trade Markers toggle
 st.sidebar.subheader("📈 Trade Markers")
-show_stop_levels = st.sidebar.checkbox("Show Stop Loss Levels", value=True)
-show_tp_levels = st.sidebar.checkbox("Show Take Profit Levels", value=True)
-show_trailing_info = st.sidebar.checkbox("Show Trailing/Breakeven", value=True)
+show_stop_levels = st.sidebar.checkbox("Show Stop Loss Levels", value=False)
+show_tp_levels = st.sidebar.checkbox("Show Take Profit Levels", value=False)
+show_trailing_info = st.sidebar.checkbox("Show Trailing/Breakeven", value=False)
 
 # Other settings
 lookback_days = st.sidebar.slider("Lookback period (days)", 1, 5, 2)

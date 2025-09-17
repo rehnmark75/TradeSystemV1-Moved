@@ -260,20 +260,21 @@ class UnifiedTradingDashboard:
         try:
             query = """
             SELECT
-                id, symbol, entry_price, direction, timestamp, status,
-                profit_loss, pnl_currency, deal_id, sl_price, tp_price,
-                closed_at, alert_id
-            FROM trade_log
-            WHERE timestamp >= %s
+                t.id, t.symbol, t.entry_price, t.direction, t.timestamp, t.status,
+                t.profit_loss, t.pnl_currency, t.deal_id, t.sl_price, t.tp_price,
+                t.closed_at, t.alert_id, a.strategy
+            FROM trade_log t
+            LEFT JOIN alert_history a ON t.alert_id = a.id
+            WHERE t.timestamp >= %s
             """
 
             params = [datetime.now() - timedelta(days=days_back)]
 
             if pairs_filter:
-                query += " AND symbol = ANY(%s)"
+                query += " AND t.symbol = ANY(%s)"
                 params.append(pairs_filter)
 
-            query += " ORDER BY timestamp DESC"
+            query += " ORDER BY t.timestamp DESC"
 
             df = pd.read_sql_query(query, conn, params=params)
 
@@ -429,7 +430,7 @@ class UnifiedTradingDashboard:
             st.subheader("📋 Recent Trades Summary")
             recent_trades = trades_df.head(10)
 
-            display_columns = ['timestamp', 'symbol', 'direction', 'profit_loss_formatted', 'trade_result']
+            display_columns = ['timestamp', 'symbol', 'strategy', 'direction', 'profit_loss_formatted', 'trade_result']
             display_columns = [col for col in display_columns if col in recent_trades.columns]
 
             st.dataframe(
@@ -439,6 +440,7 @@ class UnifiedTradingDashboard:
                 column_config={
                     "timestamp": st.column_config.DatetimeColumn("Time", format="MM/DD HH:mm"),
                     "symbol": "Pair",
+                    "strategy": "Strategy",
                     "direction": "Direction",
                     "profit_loss_formatted": "P&L",
                     "trade_result": "Result"
@@ -456,7 +458,7 @@ class UnifiedTradingDashboard:
             days_back = st.selectbox(
                 "📅 Analysis Period",
                 [7, 30, 90],
-                index=1,
+                index=0,
                 format_func=lambda x: f"{x} days",
                 key="strategy_days"
             )
@@ -623,7 +625,7 @@ class UnifiedTradingDashboard:
         st.subheader("📋 Trade Details")
 
         # Filters
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             result_filter = st.multiselect(
@@ -649,6 +651,14 @@ class UnifiedTradingDashboard:
                 key="symbol_filter"
             )
 
+        with col4:
+            strategy_filter = st.multiselect(
+                "Filter by Strategy",
+                options=trades_df['strategy'].dropna().unique() if 'strategy' in trades_df.columns else [],
+                default=trades_df['strategy'].dropna().unique() if 'strategy' in trades_df.columns else [],
+                key="strategy_filter"
+            )
+
         # Apply filters
         filtered_df = trades_df.copy()
         if result_filter and 'trade_result' in filtered_df.columns:
@@ -657,10 +667,12 @@ class UnifiedTradingDashboard:
             filtered_df = filtered_df[filtered_df['direction'].isin(direction_filter)]
         if symbol_filter and 'symbol' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['symbol'].isin(symbol_filter)]
+        if strategy_filter and 'strategy' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['strategy'].isin(strategy_filter)]
 
         # Display table
         if not filtered_df.empty:
-            display_columns = ['timestamp', 'symbol', 'direction', 'entry_price', 'profit_loss_formatted', 'trade_result', 'status']
+            display_columns = ['timestamp', 'symbol', 'strategy', 'direction', 'entry_price', 'profit_loss_formatted', 'trade_result', 'status']
             display_columns = [col for col in display_columns if col in filtered_df.columns]
 
             st.dataframe(
@@ -670,6 +682,7 @@ class UnifiedTradingDashboard:
                 column_config={
                     "timestamp": st.column_config.DatetimeColumn("Trade Time", format="DD/MM/YY HH:mm"),
                     "symbol": "Symbol",
+                    "strategy": "Strategy",
                     "direction": "Direction",
                     "entry_price": st.column_config.NumberColumn("Entry Price", format="%.5f"),
                     "profit_loss_formatted": "P&L",
