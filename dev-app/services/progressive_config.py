@@ -45,9 +45,9 @@ BALANCED_PROGRESSIVE_CONFIG = TrailingConfig(
     stage1_lock_points=2,     # Better profit guarantee (was 1)
     stage2_trigger_points=10, # Profit lock at +10 points (was 4)
     stage2_lock_points=5,     # Better profit guarantee (was 2)
-    stage3_trigger_points=18, # ATR trailing at +18 points (was 7)
-    stage3_atr_multiplier=1.3,  # Slightly wider ATR for major pairs
-    stage3_min_distance=2     # Minimum distance (was 1)
+    stage3_trigger_points=15, # ATR trailing at +15 points (REDUCED from 18)
+    stage3_atr_multiplier=0.7,  # MUCH TIGHTER: 0.7x ATR (was 1.3x)
+    stage3_min_distance=2     # Small minimum steps
 )
 
 # Conservative configuration (for JPY pairs and volatile instruments)

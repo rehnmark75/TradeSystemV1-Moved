@@ -104,10 +104,10 @@ STAGE1_LOCK_POINTS = 2       # Guarantee +2 point minimum profit (was 1)
 STAGE2_TRIGGER_POINTS = 12   # Lock in meaningful profit after +12 points (was 5)
 STAGE2_LOCK_POINTS = 6       # Guarantee +6 points profit (was 3)
 
-# Stage 3: Dynamic ATR Trailing (OPTIMIZED FOR LARGER MOVES)
-STAGE3_TRIGGER_POINTS = 20   # Start ATR trailing after +20 points (was 8)
-STAGE3_ATR_MULTIPLIER = 1.5  # ATR multiplier for trailing distance
-STAGE3_MIN_DISTANCE = 3      # Minimum trailing distance in points (was 2)
+# Stage 3: Dynamic ATR Trailing (OPTIMIZED FOR TIGHTER TRAILING)
+STAGE3_TRIGGER_POINTS = 15   # Start ATR trailing after +15 points (REDUCED from 20)
+STAGE3_ATR_MULTIPLIER = 0.8  # MUCH TIGHTER: 0.8x ATR (was 1.5x)
+STAGE3_MIN_DISTANCE = 2      # Small minimum trailing distance (was 3)
 
 # Epic-specific progressive settings (for high-performance pairs)
 PROGRESSIVE_EPIC_SETTINGS = {
