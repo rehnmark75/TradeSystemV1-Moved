@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🐳 Docker-First System
+
+**CRITICAL: This is a containerized Docker-based trading system. ALL commands, scripts, and operations MUST be executed inside Docker containers.**
+
+Key Docker execution patterns:
+- **Database operations**: `docker exec -it postgres-dev psql -U postgres -d trading_db`
+- **FastAPI backend**: `docker exec -it fastapi-dev python script.py`
+- **Forex scanner CLI**: `docker exec -it fastapi-dev python -m forex_scanner.cli`
+- **Python scripts**: `docker exec -it fastapi-dev python path/to/script.py`
+- **Shell access**: `docker exec -it fastapi-dev bash` or `docker exec -it postgres-dev bash`
+
+Never run commands directly on the host system - always use `docker exec` to run inside the appropriate container.
+
 ## 📋 Documentation Structure
 
 The TradeSystemV1 documentation has been organized into focused, specialized files for better navigation and maintainability:
