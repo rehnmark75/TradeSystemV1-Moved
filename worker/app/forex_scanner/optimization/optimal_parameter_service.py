@@ -1388,33 +1388,19 @@ class OptimalParameterService:
                 self.logger.debug("📊 Executing primary Mean Reversion query...")
                 cursor.execute("""
                     SELECT
-                        epic, timeframe, best_confidence_threshold,
-                        best_luxalgo_length, best_luxalgo_smoothing,
-                        best_luxalgo_overbought_threshold, best_luxalgo_oversold_threshold,
-                        best_luxalgo_extreme_ob_threshold, best_luxalgo_extreme_os_threshold,
-                        best_mtf_rsi_period, best_mtf_rsi_timeframes, best_mtf_min_alignment,
-                        best_mtf_rsi_overbought, best_mtf_rsi_oversold,
-                        best_rsi_ema_period, best_rsi_ema_rsi_period,
-                        best_rsi_ema_divergence_sensitivity, best_rsi_ema_min_divergence_strength,
-                        best_squeeze_bb_length, best_squeeze_bb_mult,
-                        best_squeeze_kc_length, best_squeeze_kc_mult, best_squeeze_momentum_length,
-                        best_squeeze_require_release, best_squeeze_momentum_threshold,
-                        best_bull_confluence_threshold, best_bear_confluence_threshold,
-                        best_luxalgo_weight, best_mtf_rsi_weight, best_divergence_weight, best_squeeze_weight,
-                        zone_validation_enabled, zone_lookback_periods, zone_multiplier,
-                        require_zone_touch, min_zone_distance, max_zone_age, zone_confidence_boost,
-                        market_regime_enabled, disable_in_strong_trend, trend_strength_threshold,
-                        volatility_period, trend_period, ranging_threshold,
-                        mtf_analysis_enabled, mtf_timeframes_list, mtf_min_alignment_score,
-                        require_higher_tf_confluence, mtf_confidence_boost_full_alignment,
-                        min_confidence, min_risk_reward, max_signals_per_day, min_signal_spacing_hours,
-                        optimal_stop_loss_pips, optimal_take_profit_pips,
-                        ROUND(optimal_take_profit_pips / optimal_stop_loss_pips, 2) as risk_reward,
-                        position_size_multiplier, max_drawdown_threshold, trail_stop_enabled,
-                        best_win_rate, best_composite_score, avg_profit_pips,
-                        max_consecutive_losses, profit_factor, sharpe_ratio,
-                        confluence_accuracy, divergence_success_rate, zone_touch_accuracy,
-                        regime_filter_effectiveness, last_updated
+                        epic, timeframe, confidence_threshold,
+                        luxalgo_length, luxalgo_smoothing,
+                        luxalgo_overbought_threshold, luxalgo_oversold_threshold,
+                        luxalgo_extreme_ob_threshold, luxalgo_extreme_os_threshold,
+                        mtf_rsi_period, mtf_rsi_timeframes, mtf_min_alignment,
+                        mtf_rsi_overbought, mtf_rsi_oversold,
+                        rsi_ema_period, rsi_ema_rsi_period,
+                        rsi_ema_divergence_sensitivity, rsi_ema_min_divergence_strength,
+                        squeeze_bb_length, squeeze_bb_stddev,
+                        squeeze_kc_length, squeeze_kc_multiplier, squeeze_momentum_length,
+                        stop_loss_pips, take_profit_pips, risk_reward_ratio,
+                        performance_score, win_rate, profit_factor, net_pips,
+                        last_updated
                     FROM mean_reversion_best_parameters
                     WHERE epic = %s AND timeframe = %s
                     ORDER BY last_updated DESC
@@ -1429,36 +1415,22 @@ class OptimalParameterService:
                     self.logger.debug(f"⚠️ ENTERING FALLBACK: No {timeframe} data for {epic}, trying fallback query")
                     cursor.execute("""
                         SELECT
-                            epic, timeframe, best_confidence_threshold,
-                            best_luxalgo_length, best_luxalgo_smoothing,
-                            best_luxalgo_overbought_threshold, best_luxalgo_oversold_threshold,
-                            best_luxalgo_extreme_ob_threshold, best_luxalgo_extreme_os_threshold,
-                            best_mtf_rsi_period, best_mtf_rsi_timeframes, best_mtf_min_alignment,
-                            best_mtf_rsi_overbought, best_mtf_rsi_oversold,
-                            best_rsi_ema_period, best_rsi_ema_rsi_period,
-                            best_rsi_ema_divergence_sensitivity, best_rsi_ema_min_divergence_strength,
-                            best_squeeze_bb_length, best_squeeze_bb_mult,
-                            best_squeeze_kc_length, best_squeeze_kc_mult, best_squeeze_momentum_length,
-                            best_squeeze_require_release, best_squeeze_momentum_threshold,
-                            best_bull_confluence_threshold, best_bear_confluence_threshold,
-                            best_luxalgo_weight, best_mtf_rsi_weight, best_divergence_weight, best_squeeze_weight,
-                            zone_validation_enabled, zone_lookback_periods, zone_multiplier,
-                            require_zone_touch, min_zone_distance, max_zone_age, zone_confidence_boost,
-                            market_regime_enabled, disable_in_strong_trend, trend_strength_threshold,
-                            volatility_period, trend_period, ranging_threshold,
-                            mtf_analysis_enabled, mtf_timeframes_list, mtf_min_alignment_score,
-                            require_higher_tf_confluence, mtf_confidence_boost_full_alignment,
-                            min_confidence, min_risk_reward, max_signals_per_day, min_signal_spacing_hours,
-                            optimal_stop_loss_pips, optimal_take_profit_pips,
-                            ROUND(optimal_take_profit_pips / optimal_stop_loss_pips, 2) as risk_reward,
-                            position_size_multiplier, max_drawdown_threshold, trail_stop_enabled,
-                            best_win_rate, best_composite_score, avg_profit_pips,
-                            max_consecutive_losses, profit_factor, sharpe_ratio,
-                            confluence_accuracy, divergence_success_rate, zone_touch_accuracy,
-                            regime_filter_effectiveness, last_updated
+                            epic, timeframe, confidence_threshold,
+                            luxalgo_length, luxalgo_smoothing,
+                            luxalgo_overbought_threshold, luxalgo_oversold_threshold,
+                            luxalgo_extreme_ob_threshold, luxalgo_extreme_os_threshold,
+                            mtf_rsi_period, mtf_rsi_timeframes, mtf_min_alignment,
+                            mtf_rsi_overbought, mtf_rsi_oversold,
+                            rsi_ema_period, rsi_ema_rsi_period,
+                            rsi_ema_divergence_sensitivity, rsi_ema_min_divergence_strength,
+                            squeeze_bb_length, squeeze_bb_stddev,
+                            squeeze_kc_length, squeeze_kc_multiplier, squeeze_momentum_length,
+                            stop_loss_pips, take_profit_pips, risk_reward_ratio,
+                            performance_score, win_rate, profit_factor, net_pips,
+                            last_updated
                         FROM mean_reversion_best_parameters
                         WHERE epic = %s
-                        ORDER BY best_composite_score DESC NULLS LAST
+                        ORDER BY performance_score DESC NULLS LAST
                         LIMIT 1
                     """, (epic,))
 

@@ -24,6 +24,7 @@ try:
     from .strategies.bb_supertrend_strategy import BollingerSupertrendStrategy
     from .smart_money_integration import add_smart_money_to_signal, add_smart_money_to_signals
     from .strategies.zero_lag_strategy import ZeroLagStrategy
+    from .strategies.mean_reversion_strategy import MeanReversionStrategy
     from .detection.large_candle_filter import LargeCandleFilter
 except ImportError:
     from forex_scanner.core.database import DatabaseManager
@@ -39,6 +40,7 @@ except ImportError:
     from forex_scanner.core.strategies.bb_supertrend_strategy import BollingerSupertrendStrategy
     from forex_scanner.core.smart_money_integration import add_smart_money_to_signal, add_smart_money_to_signals
     from forex_scanner.core.strategies.zero_lag_strategy import ZeroLagStrategy
+    from forex_scanner.core.strategies.mean_reversion_strategy import MeanReversionStrategy
     from forex_scanner.core.detection.large_candle_filter import LargeCandleFilter
 
 try:
@@ -168,6 +170,21 @@ class SignalDetector:
         else:
             self.ichimoku_strategy = None
             self.logger.info("⚪ Ichimoku Cloud strategy disabled")
+
+        # Initialize Mean Reversion Strategy if enabled
+        if getattr(config, 'MEAN_REVERSION_STRATEGY', False):
+            try:
+                self.mean_reversion_strategy = MeanReversionStrategy()
+                self.logger.info("✅ Mean Reversion strategy initialized")
+            except ImportError as e:
+                self.logger.error(f"❌ Failed to import Mean Reversion strategy: {e}")
+                self.mean_reversion_strategy = None
+            except Exception as e:
+                self.logger.error(f"❌ Failed to initialize Mean Reversion strategy: {e}")
+                self.mean_reversion_strategy = None
+        else:
+            self.mean_reversion_strategy = None
+            self.logger.info("⚪ Mean Reversion strategy disabled")
 
         # Initialize analysis components
         self.backtest_engine = BacktestEngine(self.data_fetcher)
@@ -552,6 +569,42 @@ class SignalDetector:
             self.logger.error(f"Error detecting Ichimoku signals for {epic}: {e}")
             return None
 
+    def detect_mean_reversion_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None
+    ) -> Optional[Dict]:
+        """
+        Detect Mean Reversion signals using multi-oscillator confluence
+        """
+        if not hasattr(self, 'mean_reversion_strategy') or not self.mean_reversion_strategy:
+            self.logger.debug("Mean Reversion strategy not available")
+            return None
+
+        try:
+            # Get enhanced data
+            df = self.data_fetcher.get_enhanced_data(epic, pair, timeframe=timeframe, ema_strategy=self.ema_strategy)
+
+            if df is None or len(df) < system_config.MIN_BARS_FOR_SIGNAL:
+                self.logger.debug(f"Insufficient data for mean reversion analysis: {len(df) if df is not None else 0} bars")
+                return None
+
+            # Use mean reversion strategy
+            signal = self.mean_reversion_strategy.detect_signal(df, epic, spread_pips, timeframe)
+
+            if signal:
+                # Add enhanced market context
+                signal = self._add_market_context(signal, df)
+                signal = add_smart_money_to_signal(signal, epic, self.data_fetcher, self.db_manager)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"Error in mean reversion signal detection for {epic}: {e}")
+            return None
+
     def detect_combined_signals(
         self, 
         epic: str, 
@@ -782,6 +835,26 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [ICHIMOKU STRATEGY] Error for {epic}: {e}")
                     individual_results['ichimoku'] = None
+
+            # 10. Mean Reversion Strategy (if enabled)
+            if (getattr(config, 'MEAN_REVERSION_STRATEGY', False) and
+                hasattr(self, 'mean_reversion_strategy') and self.mean_reversion_strategy is not None):
+                try:
+                    self.logger.debug(f"🔍 [MEAN REVERSION STRATEGY] Starting detection for {epic}")
+                    mean_reversion_signal = self.detect_mean_reversion_signals(epic, pair, spread_pips, timeframe)
+
+                    # Store result for combined strategy
+                    individual_results['mean_reversion'] = mean_reversion_signal
+
+                    if mean_reversion_signal:
+                        all_signals.append(mean_reversion_signal)
+                        self.logger.info(f"✅ [MEAN REVERSION STRATEGY] Signal detected for {epic}")
+                    else:
+                        self.logger.debug(f"📊 [MEAN REVERSION STRATEGY] No signal for {epic}")
+
+                except Exception as e:
+                    self.logger.error(f"❌ [MEAN REVERSION STRATEGY] Error for {epic}: {e}")
+                    individual_results['mean_reversion'] = None
 
             # ========== COMBINED STRATEGY WITH PRECOMPUTED RESULTS ==========
             

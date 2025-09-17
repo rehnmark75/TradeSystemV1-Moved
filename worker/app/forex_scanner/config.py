@@ -354,6 +354,9 @@ SMC_STRATEGY = True  # Smart Money Concepts strategy
 # Enable Ichimoku Cloud Strategy
 ICHIMOKU_CLOUD_STRATEGY = True  # Ichimoku Kinko Hyo strategy
 
+# Mean Reversion Strategy
+MEAN_REVERSION_STRATEGY = True  # Multi-oscillator mean reversion strategy
+
 # KAMA Strategy Configuration
 KAMA_STRATEGY_CONFIG = {
     'default': {

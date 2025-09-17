@@ -36,8 +36,12 @@ else:
 
 sys.path.insert(0, project_root)
 
-from backtests.backtest_base import BacktestBase
-from core.strategies.mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
+try:
+    from backtests.backtest_base import BacktestBase
+    from core.strategies.mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
+except ImportError:
+    from forex_scanner.backtests.backtest_base import BacktestBase
+    from forex_scanner.core.strategies.mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
 
 try:
     import config

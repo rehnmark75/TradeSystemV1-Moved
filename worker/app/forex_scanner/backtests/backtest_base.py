@@ -8,23 +8,33 @@ from typing import Dict, List, Optional
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from forex_scanner.core.database import DatabaseManager
-from forex_scanner.core.data_fetcher import DataFetcher
-from forex_scanner.core.backtest.performance_analyzer import PerformanceAnalyzer
-from forex_scanner.core.backtest.signal_analyzer import SignalAnalyzer
+try:
+    from core.database import DatabaseManager
+    from core.data_fetcher import DataFetcher
+    from core.backtest.performance_analyzer import PerformanceAnalyzer
+    from core.backtest.signal_analyzer import SignalAnalyzer
+except ImportError:
+    from forex_scanner.core.database import DatabaseManager
+    from forex_scanner.core.data_fetcher import DataFetcher
+    from forex_scanner.core.backtest.performance_analyzer import PerformanceAnalyzer
+    from forex_scanner.core.backtest.signal_analyzer import SignalAnalyzer
 
 # Import optimization service
 try:
-    from forex_scanner.optimization.optimal_parameter_service import OptimalParameterService
+    from optimization.optimal_parameter_service import OptimalParameterService
     OPTIMIZATION_AVAILABLE = True
 except ImportError:
-    OPTIMIZATION_AVAILABLE = False
-    logging.getLogger(__name__).warning("Optimization service not available - using fallback parameters")
+    try:
+        from forex_scanner.optimization.optimal_parameter_service import OptimalParameterService
+        OPTIMIZATION_AVAILABLE = True
+    except ImportError:
+        OPTIMIZATION_AVAILABLE = False
+        logging.getLogger(__name__).warning("Optimization service not available - using fallback parameters")
 
 try:
-    from forex_scanner import config
-except ImportError:
     import config
+except ImportError:
+    from forex_scanner import config
 
 
 class BacktestBase(ABC):
@@ -104,14 +114,16 @@ class BacktestBase(ABC):
                 # Initialize strategy with epic for optimal parameters
                 strategy = self.initialize_strategy(current_epic)
                 
-                # Get data
-                df = self.data_fetcher.fetch_enhanced_data(
+                # Get data - extract pair from epic (e.g., CS.D.EURUSD.MINI.IP -> EURUSD)
+                pair = current_epic.split('.')[2] if '.' in current_epic else current_epic
+                df = self.data_fetcher.get_enhanced_data(
                     epic=current_epic,
+                    pair=pair,
                     timeframe=timeframe,
                     lookback_hours=days * 24
                 )
                 
-                if df.empty:
+                if df is None or df.empty:
                     self.logger.warning(f"❌ No data for {current_epic}")
                     continue
                 
@@ -128,10 +140,10 @@ class BacktestBase(ABC):
                 self.logger.info(f"✅ Total signals found: {len(all_signals)}")
                 
                 if show_signals:
-                    self.signal_analyzer.display_signals(all_signals)
+                    self.signal_analyzer.display_signal_list(all_signals)
                 
                 # Performance analysis
-                metrics = self.performance_analyzer.analyze_signals(all_signals)
+                metrics = self.performance_analyzer.analyze_performance(all_signals)
                 self._display_performance(metrics)
                 
                 return True
