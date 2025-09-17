@@ -1176,7 +1176,7 @@ class EnhancedTradeProcessor:
                 # Don't change status if already profit_protected
             elif not getattr(trade, 'moved_to_breakeven', False) and is_profitable_for_breakeven:
                 self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
-                            f"Profit {profit_points}pts >= trigger {self.config.break_even_trigger_points}pts")
+                            f"Profit {profit_points}pts >= trigger {break_even_trigger_points}pts")
                 
                 # Calculate break-even stop level
                 if trade.direction.upper() == "BUY":
@@ -1253,7 +1253,7 @@ class EnhancedTradeProcessor:
                                 
                                 self.logger.info(f"🎉 [BREAK-EVEN] Trade {trade.id} {trade.symbol} "
                                             f"moved to break-even: {break_even_stop:.5f}")
-                                return True
+                                # Don't return early - continue to Stage 2/3 progression check
                             else:
                                 self.logger.error(f"❌ [BREAK-EVEN FAILED] Trade {trade.id}: Stop adjustment failed")
                         else:
@@ -1265,6 +1265,74 @@ class EnhancedTradeProcessor:
                             db.commit()
                     else:
                         self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Break-even level validation failed")
+
+            # --- STEP 1.5: Progressive Stage Check ---
+            # ✅ CRITICAL: Check for Stage 2 and Stage 3 progression after break-even
+            if getattr(trade, 'moved_to_breakeven', False):
+                # Check if we should progress to Stage 2 (profit lock) or Stage 3 (ATR trailing)
+                stage2_trigger = progressive_config.stage2_trigger_points  # 10 points for AUDJPY
+                stage3_trigger = progressive_config.stage3_trigger_points  # 18 points for AUDJPY
+
+                if profit_points >= stage3_trigger:
+                    # Stage 3: ATR trailing
+                    self.logger.info(f"🚀 [STAGE 3 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 3 trigger {stage3_trigger}pts - ATR trailing")
+                    # Use progressive 3-stage strategy directly
+                    progressive_strategy = Progressive3StageTrailing(self.config, self.logger)
+                    try:
+                        new_trail_level = progressive_strategy.calculate_trail_level(trade, current_price, [], db)
+                        if new_trail_level:
+                            adjustment_points = int(abs(new_trail_level - (trade.sl_price or 0)) / point_value)
+                            if adjustment_points > 0:
+                                direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
+                                success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                                if success:
+                                    trade.sl_price = new_trail_level
+                                    trade.status = "stage3_trailing"
+                                    trade.last_trigger_price = current_price
+                                    trade.trigger_time = datetime.utcnow()
+                                    db.commit()
+                                    self.logger.info(f"🎯 [STAGE 3] Trade {trade.id}: ATR trailing to {new_trail_level:.5f}")
+                                    return True
+                    except Exception as e:
+                        self.logger.error(f"❌ [STAGE 3 ERROR] Trade {trade.id}: {e}")
+
+                elif profit_points >= stage2_trigger:
+                    # Stage 2: Profit lock
+                    self.logger.info(f"💰 [STAGE 2 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 2 trigger {stage2_trigger}pts - Profit lock")
+
+                    # Calculate Stage 2 profit lock level (entry + lock points)
+                    lock_points = progressive_config.stage2_lock_points  # 5 points for AUDJPY
+                    if trade.direction.upper() == "BUY":
+                        stage2_stop = trade.entry_price + (lock_points * point_value)
+                    else:
+                        stage2_stop = trade.entry_price - (lock_points * point_value)
+
+                    # Check if this improves current stop
+                    current_stop = trade.sl_price or 0.0
+                    should_update = False
+                    if trade.direction.upper() == "BUY":
+                        should_update = stage2_stop > current_stop
+                    else:
+                        should_update = stage2_stop < current_stop
+
+                    if should_update:
+                        adjustment_distance = abs(stage2_stop - current_stop)
+                        adjustment_points = int(adjustment_distance / point_value)
+                        if adjustment_points > 0:
+                            direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
+                            self.logger.info(f"📤 [STAGE 2 SEND] Trade {trade.id}: Moving to profit lock (+{lock_points}pts), adjustment={adjustment_points}pts")
+                            success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                            if success:
+                                trade.sl_price = stage2_stop
+                                trade.status = "stage2_profit_lock"
+                                trade.last_trigger_price = current_price
+                                trade.trigger_time = datetime.utcnow()
+                                db.commit()
+                                self.logger.info(f"💎 [STAGE 2] Trade {trade.id}: Profit locked at {stage2_stop:.5f} (+{lock_points}pts)")
+                                return True
+                else:
+                    # Still in Stage 1, continue normal processing
+                    self.logger.debug(f"📊 [STAGE 1] Trade {trade.id}: Profit {profit_points}pts < Stage 2 trigger {stage2_trigger}pts")
 
             # --- STEP 2: Advanced trailing logic ---
             should_trail = False
