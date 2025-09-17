@@ -786,6 +786,60 @@ class UnifiedTradingDashboard:
             except Exception as e:
                 st.error(f"❌ Manual connection failed: {e}")
 
+        # API Operations
+        st.subheader("🔗 API Operations")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("💰 Calculate Complete P&L", key="calc_pnl_btn"):
+                try:
+                    import requests
+                    headers = {
+                        "X-APIM-Gateway": "verified",
+                        "X-API-KEY": "436abe054a074894a0517e5172f0e5b6",
+                        "Content-Type": "application/json"
+                    }
+                    payload = {
+                        "days_back": 7,
+                        "update_trade_log": True,
+                        "calculate_prices": True,
+                        "include_detailed_results": False
+                    }
+                    response = requests.post("http://fastapi-dev:8000/api/trading/deals/calculate-complete-pnl", headers=headers, json=payload)
+                    if response.status_code == 200:
+                        result = response.json()
+                        st.success("✅ P&L calculation completed!")
+                        st.json(result)
+                    else:
+                        st.error(f"❌ API call failed: {response.status_code} - {response.text}")
+                except Exception as e:
+                    st.error(f"❌ Error calling API: {e}")
+
+        with col2:
+            if st.button("🔄 Correlate Activities", key="correlate_btn"):
+                try:
+                    import requests
+                    headers = {
+                        "X-APIM-Gateway": "verified",
+                        "X-API-KEY": "436abe054a074894a0517e5172f0e5b6",
+                        "Content-Type": "application/json"
+                    }
+                    payload = {
+                        "days_back": 7,
+                        "update_trade_log": True,
+                        "include_trade_lifecycles": False
+                    }
+                    response = requests.post("http://fastapi-dev:8000/api/trading/deals/correlate-activities", headers=headers, json=payload)
+                    if response.status_code == 200:
+                        result = response.json()
+                        st.success("✅ Activity correlation completed!")
+                        st.json(result)
+                    else:
+                        st.error(f"❌ API call failed: {response.status_code} - {response.text}")
+                except Exception as e:
+                    st.error(f"❌ Error calling API: {e}")
+
         # System information
         st.subheader("ℹ️ System Information")
 
