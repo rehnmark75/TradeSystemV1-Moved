@@ -245,6 +245,32 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  economic-calendar:
+    build:
+      context: ./economic-calendar
+    container_name: economic-calendar
+    restart: unless-stopped
+    ports:
+      - "8091:8091"
+    volumes:
+      - ./economic-calendar/app:/app
+      - ./logs/economic-calendar:/app/logs
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - PORT=8091
+      - PYTHONPATH=/app
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 volumes:
   pgadmin_data:
 
