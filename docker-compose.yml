@@ -271,6 +271,44 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  db-backup:
+    image: postgres:15
+    container_name: db-backup
+    restart: "no"  # Only run when scheduled
+    environment:
+      - BACKUP_SCHEDULE=0 2 * * *  # Daily at 2 AM
+      - BACKUP_RETENTION_DAYS=7
+      - WEEKLY_RETENTION=4
+      - MONTHLY_RETENTION=12
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./postgresbackup:/app/postgresbackup
+      - ./logs/backup:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+    command: >
+      sh -c "
+        apt-get update && apt-get install -y docker.io bc findutils curl &&
+        while true; do
+          echo 'Running scheduled backup...' &&
+          /scripts/simple_backup.sh &&
+          echo 'Backup completed. Sleeping for 24 hours...' &&
+          sleep 86400
+        done
+      "
+    healthcheck:
+      test: ["CMD", "/scripts/backup_health.sh"]
+      interval: 6h
+      timeout: 30s
+      retries: 2
+      start_period: 1h
+
 volumes:
   pgadmin_data:
 

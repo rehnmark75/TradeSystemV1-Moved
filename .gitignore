@@ -45,8 +45,17 @@
 secrets.toml
 backup*
 old_data/
-postgresbackup/*.sql
 **/config.py
+
+# 💾 Database backups
+postgresbackup/
+**/backup_*.sql
+**/backup_*.sql.gz
+**/*_backup_*.sql
+**/*_backup_*.sql.gz
+**/*.sql.tmp
+**/restore_*.sql
+**/*_restore_*.sql
 
 # 🔐 Certificates and keys
 **/*.pem

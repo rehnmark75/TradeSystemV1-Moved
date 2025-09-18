@@ -48,7 +48,8 @@
       "Bash(while read script)",
       "Bash(./download_luxalgo_collection.sh:*)",
       "Bash(echo:*)",
-      "WebFetch(domain:www.forexfactory.com)"
+      "WebFetch(domain:www.forexfactory.com)",
+      "Bash(git check-ignore:*)"
     ],
     "deny": [],
     "ask": []
