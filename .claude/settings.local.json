@@ -56,7 +56,8 @@
       "Bash(sudo umount:*)",
       "Read(//media/hr/**)",
       "Bash(udisksctl unmount:*)",
-      "Bash(killall:*)"
+      "Bash(killall:*)",
+      "Bash(tail:*)"
     ],
     "deny": [],
     "ask": []

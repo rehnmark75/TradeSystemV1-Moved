@@ -286,7 +286,8 @@ services:
     volumes:
       - ./scripts:/scripts:ro
       - /media/hr/Data/TradeSystemV1-Backups/postgresbackup:/app/postgresbackup
-      - ./logs/backup:/app/logs
+      - ./logs:/app/logs:ro
+      - ./vector-db:/app/vector-db:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - lab-net
@@ -296,9 +297,9 @@ services:
       sh -c "
         apt-get update && apt-get install -y docker.io bc findutils curl &&
         while true; do
-          echo 'Running scheduled backup...' &&
-          /scripts/simple_backup.sh &&
-          echo 'Backup completed. Sleeping for 24 hours...' &&
+          echo 'Running scheduled enhanced backup...' &&
+          /scripts/enhanced_backup.sh &&
+          echo 'Enhanced backup completed. Sleeping for 24 hours...' &&
           sleep 86400
         done
       "

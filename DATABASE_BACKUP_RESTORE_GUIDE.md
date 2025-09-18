@@ -6,6 +6,9 @@ This guide provides comprehensive instructions for backing up and restoring Post
 
 The TradeSystemV1 backup system provides:
 - **Automated daily backups** of both `forex` and `forex_config` databases
+- **Vector database backup** (ChromaDB embeddings and indexes)
+- **Application logs backup** (all service logs for debugging)
+- **PgAdmin configuration backup** (saved queries and settings)
 - **Intelligent retention policies** (7 daily, 4 weekly, 12 monthly backups)
 - **Compression and integrity verification**
 - **Comprehensive monitoring and health checks**
@@ -22,15 +25,17 @@ The TradeSystemV1 backup system provides:
 ### File Structure
 ```
 scripts/
-├── backup_database.sh      # Main backup script
+├── backup_database.sh      # Original backup script
+├── enhanced_backup.sh      # Enhanced backup script (currently used)
+├── simple_backup.sh        # Simple backup script
 ├── backup_monitor.py       # Monitoring and health checks
 ├── backup_health.sh        # Simple health check for Docker
-├── simple_backup.sh        # Simplified backup script (currently used)
 └── restore_database.sh     # Restore script
 
 External Drive: /media/hr/Data/TradeSystemV1-Backups/postgresbackup/
-├── forex_backup_YYYYMMDD_HHMMSS.sql.gz
-└── forex_config_backup_YYYYMMDD_HHMMSS.sql.gz
+├── forex_backup_YYYYMMDD_HHMMSS.sql.gz           # PostgreSQL forex database
+├── forex_config_backup_YYYYMMDD_HHMMSS.sql.gz    # PostgreSQL config database
+└── additional_backup_YYYYMMDD_HHMMSS.tar.gz      # Vector DB + Logs + PgAdmin config
 ```
 
 ## 🚀 Quick Start
@@ -86,13 +91,16 @@ The system automatically creates backups daily at 2 AM UTC. The backup service:
 ### Manual Backup Commands
 
 ```bash
-# Standard backup
-docker exec db-backup /scripts/backup_database.sh
+# Enhanced backup (includes PostgreSQL + Vector DB + Logs + PgAdmin)
+docker exec db-backup /scripts/enhanced_backup.sh
 
-# Backup with options
+# Simple backup (PostgreSQL databases only)
+docker exec db-backup /scripts/simple_backup.sh
+
+# Original backup with options
 docker exec db-backup /scripts/backup_database.sh [OPTIONS]
 
-# Available options:
+# Available options for backup_database.sh:
 #   -h, --help     Show help message
 #   -d, --dry-run  Show what would be done
 #   -v, --verify   Verify existing backups only
@@ -105,11 +113,30 @@ docker exec db-backup /scripts/backup_database.sh [OPTIONS]
 Backup files follow the pattern:
 ```
 {database}_backup_{YYYYMMDD}_{HHMMSS}.sql.gz
+additional_backup_{YYYYMMDD}_{HHMMSS}.tar.gz
 ```
 
 Examples:
-- `forex_backup_20250918_120000.sql.gz`
-- `forex_config_backup_20250918_120003.sql.gz`
+- `forex_backup_20250918_120000.sql.gz` (PostgreSQL forex database)
+- `forex_config_backup_20250918_120003.sql.gz` (PostgreSQL config database)
+- `additional_backup_20250918_120000.tar.gz` (Vector DB + Logs + PgAdmin config)
+
+### Enhanced Backup Contents
+
+The **additional_backup_*.tar.gz** file contains:
+```
+./vectordb/                    # ChromaDB vector database
+./data/                        # Vector database data files
+./logs/worker/                 # Task worker logs
+./logs/vector-db/              # Vector database logs
+./logs/tradingview/            # TradingView service logs
+./logs/economic-calendar/      # Economic calendar logs
+./logs/dev/                    # Development FastAPI logs
+./logs/prod/                   # Production FastAPI logs
+./logs/stream/                 # Streaming service logs
+./logs/backup/                 # Backup operation logs
+./pgadmin_config_*.tar.gz      # PgAdmin configuration backup
+```
 
 ### Retention Policy
 
