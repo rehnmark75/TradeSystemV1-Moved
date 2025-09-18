@@ -36,6 +36,15 @@ class SimpleLogParser:
                 ],
                 'trade_monitor': [
                     '/logs/dev/trade_monitor.log'
+                ],
+                'fastapi_dev': [
+                    '/logs/dev/fastapi-dev.log'
+                ],
+                'dev_trade': [
+                    '/logs/dev/dev-trade.log'
+                ],
+                'trade_sync': [
+                    '/logs/dev/trade_sync.log'
                 ]
             }
         else:  # Host
@@ -50,6 +59,15 @@ class SimpleLogParser:
                 ],
                 'trade_monitor': [
                     'logs/dev/trade_monitor.log'
+                ],
+                'fastapi_dev': [
+                    'logs/dev/fastapi-dev.log'
+                ],
+                'dev_trade': [
+                    'logs/dev/dev-trade.log'
+                ],
+                'trade_sync': [
+                    'logs/dev/trade_sync.log'
                 ]
             }
 
@@ -68,6 +86,47 @@ class SimpleLogParser:
             ]
         }
 
+        # Trade event patterns
+        self.trade_patterns = {
+            'trade_opened': [
+                r'✅ Trade logged: CS\.D\.[A-Z]{6}\.MINI\.IP.*?(BUY|SELL)',
+                r'Place-Order: Parsed EPIC.*Direction: (BUY|SELL)',
+                r'No open position for CS\.D\.[A-Z]{6}\.MINI\.IP, placing order'
+            ],
+            'trade_closed': [
+                r'Trade.*closed.*profit',
+                r'Position closed.*CS\.D\.[A-Z]{6}\.MINI\.IP',
+                r'Deal closed.*CS\.D\.[A-Z]{6}\.MINI\.IP'
+            ],
+            'trade_monitoring': [
+                r'📊 \[PROFIT\] Trade \d+.*(BUY|SELL): entry=.*profit=.*pts',
+                r'🔧 \[COMBINED\] Processing trade \d+ CS\.D\.[A-Z]{6}\.MINI\.IP',
+                r'📊 \[TRAILING CONFIG\] CS\.D\.[A-Z]{6}\.MINI\.IP'
+            ],
+            'trade_adjustments': [
+                r'\[ADJUST-STOP\] CS\.D\.[A-Z]{6}\.MINI\.IP',
+                r'Stop level.*→ New:',
+                r'Limit level.*→ New:'
+            ],
+            'trailing_events': [
+                r'🎯 \[BREAK-EVEN TRIGGER\] Trade \d+:',
+                r'💰 \[STAGE 2 TRIGGER\] Trade \d+:',
+                r'🚀 \[STAGE 3 TRIGGER\] Trade \d+:',
+                r'🎉 \[BREAK-EVEN\] Trade \d+',
+                r'💎 \[STAGE 2\] Trade \d+:',
+                r'🎯 \[STAGE 3\] Trade \d+:',
+                r'🎯 \[TRAILING SUCCESS\] Trade \d+',
+                r'\[PROGRESSIVE STAGE \d+\] CS\.D\.[A-Z]{6}\.MINI\.IP',
+                r'\[PERCENTAGE TRAIL\] CS\.D\.[A-Z]{6}\.MINI\.IP:',
+                r'\[INTELLIGENT TRAIL\] CS\.D\.[A-Z]{6}\.MINI\.IP',
+                r'📊 \[TRAILING CONFIG\] CS\.D\.[A-Z]{6}\.MINI\.IP',
+                r'\[SAFE DISTANCE RESULT\] Trade \d+',
+                r'Stage \d+:.*trailing',
+                r'trailingStopDistance',
+                r'trailingStep'
+            ]
+        }
+
         # Health patterns
         self.health_patterns = {
             'scanner_healthy': [
@@ -82,6 +141,17 @@ class SimpleLogParser:
                 r'✅ No gaps detected',
                 r'Database stats',
                 r'🟢.*candle'
+            ],
+            'trade_monitor_healthy': [
+                r'🔄 === Enhanced Monitoring Cycle',
+                r'Processing \d+ active trades',
+                r'✅ \[ACTIVE\] Trade \d+ position still active',
+                r'Cycle #\d+ complete'
+            ],
+            'fastapi_healthy': [
+                r'HTTP Request:.*200 OK',
+                r'Processing trade \d+.*status=tracking',
+                r'Successfully.*trade'
             ]
         }
 
@@ -94,8 +164,9 @@ class SimpleLogParser:
         confidences = []
         epics = set()
 
-        # Read forex scanner logs
-        for log_file in self.log_files['forex_scanner']:
+        # Read all signal-related logs (scanner + trade events)
+        all_signal_sources = self.log_files['forex_scanner'] + self.log_files.get('dev_trade', [])
+        for log_file in all_signal_sources:
             if self.base_log_dir == "":  # Container - use absolute paths
                 file_path = log_file
             else:  # Host - join with base dir
@@ -172,6 +243,94 @@ class SimpleLogParser:
             'active_pairs': len(epics)
         }
 
+    def get_recent_trade_events(self, hours_back: int = 4) -> Dict[str, Any]:
+        """Get recent trade events from dev logs"""
+        cutoff_time = datetime.now() - timedelta(hours=hours_back)
+
+        trade_opened = 0
+        trade_closed = 0
+        trade_monitoring = 0
+        trade_adjustments = 0
+        active_trades = set()
+
+        # Read trade-related logs
+        trade_sources = (self.log_files.get('fastapi_dev', []) +
+                        self.log_files.get('dev_trade', []) +
+                        self.log_files.get('trade_monitor', []))
+
+        for log_file in trade_sources:
+            if self.base_log_dir == "":
+                file_path = log_file
+            else:
+                file_path = os.path.join(self.base_log_dir, log_file)
+
+            if not os.path.exists(file_path):
+                continue
+
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        # Parse timestamp (handle different formats)
+                        timestamp_match = (re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line) or
+                                         re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+', line))
+                        if not timestamp_match:
+                            continue
+
+                        try:
+                            log_time = datetime.strptime(timestamp_match.group(1), '%Y-%m-%d %H:%M:%S')
+                            if log_time < cutoff_time:
+                                continue
+                        except ValueError:
+                            continue
+
+                        # Check for trade events
+                        for pattern in self.trade_patterns['trade_opened']:
+                            if re.search(pattern, line, re.IGNORECASE):
+                                trade_opened += 1
+                                # Extract epic
+                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                                if epic_match:
+                                    active_trades.add(epic_match.group(1))
+                                break
+
+                        for pattern in self.trade_patterns['trade_closed']:
+                            if re.search(pattern, line, re.IGNORECASE):
+                                trade_closed += 1
+                                break
+
+                        for pattern in self.trade_patterns['trade_monitoring']:
+                            if re.search(pattern, line, re.IGNORECASE):
+                                trade_monitoring += 1
+                                # Extract epic and trade ID
+                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                                if epic_match:
+                                    active_trades.add(epic_match.group(1))
+                                break
+
+                        for pattern in self.trade_patterns['trade_adjustments']:
+                            if re.search(pattern, line, re.IGNORECASE):
+                                trade_adjustments += 1
+                                break
+
+                        # Count trailing events
+                        for pattern in self.trade_patterns.get('trailing_events', []):
+                            if re.search(pattern, line, re.IGNORECASE):
+                                trade_adjustments += 1  # Include in adjustments count
+                                break
+
+            except Exception as e:
+                logger.error(f"Error reading {file_path}: {e}")
+                continue
+
+        return {
+            'trade_opened': trade_opened,
+            'trade_closed': trade_closed,
+            'trade_monitoring': trade_monitoring,
+            'trade_adjustments': trade_adjustments,
+            'active_trades': len(active_trades),
+            'active_trade_pairs': list(active_trades)
+        }
+
     def get_system_health(self, hours_back: int = 2) -> Dict[str, Any]:
         """Get system health status"""
         cutoff_time = datetime.now() - timedelta(hours=hours_back)
@@ -180,6 +339,10 @@ class SimpleLogParser:
         scanner_error_count = 0
         stream_healthy_count = 0
         stream_error_count = 0
+        trade_monitor_healthy_count = 0
+        trade_monitor_error_count = 0
+        fastapi_healthy_count = 0
+        fastapi_error_count = 0
 
         total_errors = 0
         total_warnings = 0
@@ -272,9 +435,85 @@ class SimpleLogParser:
                 logger.error(f"Error reading {file_path}: {e}")
                 continue
 
+        # Check trade monitor health
+        for log_file in self.log_files.get('trade_monitor', []):
+            if self.base_log_dir == "":
+                file_path = log_file
+            else:
+                file_path = os.path.join(self.base_log_dir, log_file)
+
+            if not os.path.exists(file_path):
+                continue
+
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        timestamp_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
+                        if not timestamp_match:
+                            continue
+
+                        try:
+                            log_time = datetime.strptime(timestamp_match.group(1), '%Y-%m-%d %H:%M:%S')
+                            if log_time < cutoff_time:
+                                continue
+                        except ValueError:
+                            continue
+
+                        for pattern in self.health_patterns['trade_monitor_healthy']:
+                            if re.search(pattern, line, re.IGNORECASE):
+                                trade_monitor_healthy_count += 1
+                                break
+
+                        if ' - ERROR - ' in line or ' | ERROR |' in line:
+                            total_errors += 1
+                            trade_monitor_error_count += 1
+
+            except Exception as e:
+                logger.error(f"Error reading {file_path}: {e}")
+                continue
+
+        # Check FastAPI dev health
+        for log_file in self.log_files.get('fastapi_dev', []):
+            if self.base_log_dir == "":
+                file_path = log_file
+            else:
+                file_path = os.path.join(self.base_log_dir, log_file)
+
+            if not os.path.exists(file_path):
+                continue
+
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        timestamp_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
+                        if not timestamp_match:
+                            continue
+
+                        try:
+                            log_time = datetime.strptime(timestamp_match.group(1), '%Y-%m-%d %H:%M:%S')
+                            if log_time < cutoff_time:
+                                continue
+                        except ValueError:
+                            continue
+
+                        for pattern in self.health_patterns['fastapi_healthy']:
+                            if re.search(pattern, line, re.IGNORECASE):
+                                fastapi_healthy_count += 1
+                                break
+
+                        if ' - ERROR - ' in line:
+                            total_errors += 1
+                            fastapi_error_count += 1
+
+            except Exception as e:
+                logger.error(f"Error reading {file_path}: {e}")
+                continue
+
         # Determine health status
         scanner_health = "healthy" if scanner_healthy_count > scanner_error_count and scanner_healthy_count > 0 else "unknown"
         stream_health = "healthy" if stream_healthy_count > stream_error_count and stream_healthy_count > 0 else "unknown"
+        trade_monitor_health = "healthy" if trade_monitor_healthy_count > trade_monitor_error_count and trade_monitor_healthy_count > 0 else "unknown"
+        fastapi_health = "healthy" if fastapi_healthy_count > fastapi_error_count and fastapi_healthy_count > 0 else "unknown"
 
         # Overall status
         if total_errors > 10:
@@ -288,12 +527,16 @@ class SimpleLogParser:
             'overall_status': overall_status,
             'forex_scanner_health': scanner_health,
             'stream_health': stream_health,
+            'trade_monitor_health': trade_monitor_health,
+            'fastapi_health': fastapi_health,
             'error_count_24h': total_errors,
             'warning_count_24h': total_warnings,
             'last_error': last_error,
             'last_warning': last_warning,
             'scanner_indicators': scanner_healthy_count,
-            'stream_indicators': stream_healthy_count
+            'stream_indicators': stream_healthy_count,
+            'trade_monitor_indicators': trade_monitor_healthy_count,
+            'fastapi_indicators': fastapi_healthy_count
         }
 
     def get_recent_activity(self, hours_back: int = 1, max_entries: int = 10) -> List[Dict[str, Any]]:
@@ -301,8 +544,13 @@ class SimpleLogParser:
         cutoff_time = datetime.now() - timedelta(hours=hours_back)
         activities = []
 
-        # Read recent forex scanner logs (try multiple files)
-        for log_file in self.log_files['forex_scanner']:
+        # Read recent logs from multiple sources
+        all_activity_sources = (self.log_files['forex_scanner'] +
+                               self.log_files.get('dev_trade', []) +
+                               self.log_files.get('fastapi_dev', []) +
+                               self.log_files.get('trade_monitor', []))
+
+        for log_file in all_activity_sources:
             if self.base_log_dir == "":  # Container - use absolute paths
                 file_path = log_file
             else:  # Host - join with base dir
@@ -358,6 +606,338 @@ class SimpleLogParser:
                             'type': 'signal_rejected',
                             'epic': epic_match.group(1) if epic_match else 'Unknown',
                             'reason': reason_match.group(1).strip() if reason_match else 'Validation failed',
+                            'message': line.strip()
+                        }
+
+                    # Trade opened - enhanced extraction
+                    elif re.search(r'✅ Trade logged: CS\.D\.[A-Z]{6}\.MINI\.IP.*?(BUY|SELL)', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        direction_match = re.search(r'(BUY|SELL)', line)
+                        price_match = re.search(r'(\d+\.?\d*)\s+(BUY|SELL)', line)
+
+                        # Try to extract deal reference from next lines or context
+                        deal_ref_match = re.search(r'"dealReference": "([^"]+)"', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trade_opened',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'direction': direction_match.group(1) if direction_match else 'Unknown',
+                            'entry_price': float(price_match.group(1)) if price_match else None,
+                            'deal_reference': deal_ref_match.group(1) if deal_ref_match else None,
+                            'message': line.strip()
+                        }
+
+                    # Trade monitoring/profit update - enhanced extraction
+                    elif re.search(r'📊 \[PROFIT\] Trade \d+.*(BUY|SELL): entry=.*profit=.*pts', line):
+                        # Extract all available data from the profit line
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        direction_match = re.search(r'(BUY|SELL)', line)
+                        entry_match = re.search(r'entry=([0-9.]+)', line)
+                        current_match = re.search(r'current=([0-9.]+)', line)
+                        profit_match = re.search(r'profit=([+-]?\d+)pts', line)
+                        trigger_match = re.search(r'trigger=(\d+)pts', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+
+                        # Calculate additional metrics
+                        entry_price = float(entry_match.group(1)) if entry_match else None
+                        current_price = float(current_match.group(1)) if current_match else None
+                        profit_pts = int(profit_match.group(1)) if profit_match else 0
+                        trigger_pts = int(trigger_match.group(1)) if trigger_match else 0
+
+                        # Calculate percentage move if prices available
+                        price_move_pct = None
+                        if entry_price and current_price and entry_price > 0:
+                            price_move = ((current_price - entry_price) / entry_price) * 100
+                            if direction_match and direction_match.group(1) == 'SELL':
+                                price_move = -price_move  # Invert for SELL positions
+                            price_move_pct = round(price_move, 4)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trade_monitoring',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'direction': direction_match.group(1) if direction_match else 'Unknown',
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'profit_pts': profit_pts,
+                            'trigger_pts': trigger_pts,
+                            'price_move_pct': price_move_pct,
+                            'progress_to_trigger': round((profit_pts / max(1, trigger_pts)) * 100, 1) if trigger_pts > 0 else 0,
+                            'message': line.strip()
+                        }
+
+                    # Trade adjustments - enhanced extraction
+                    elif re.search(r'\[ADJUST-STOP\] CS\.D\.[A-Z]{6}\.MINI\.IP', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        direction_match = re.search(r'Direction: (BUY|SELL)', line)
+
+                        # Extract stop level changes
+                        old_stop_match = re.search(r'Old stop level: ([0-9.]+)', line)
+                        new_stop_match = re.search(r'New: ([0-9.]+)', line)
+
+                        # Extract limit level changes
+                        old_limit_match = re.search(r'Old limit level: ([0-9.]+)', line)
+                        new_limit_match = re.search(r'New: ([0-9.]+)', line)
+
+                        # Determine adjustment type
+                        adjustment_type = 'stop_loss'
+                        if 'limit' in line.lower():
+                            adjustment_type = 'take_profit'
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trade_adjustment',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'direction': direction_match.group(1) if direction_match else 'Unknown',
+                            'adjustment_type': adjustment_type,
+                            'old_stop_level': float(old_stop_match.group(1)) if old_stop_match else None,
+                            'new_stop_level': float(new_stop_match.group(1)) if new_stop_match else None,
+                            'old_limit_level': float(old_limit_match.group(1)) if old_limit_match else None,
+                            'new_limit_level': float(new_limit_match.group(1)) if new_limit_match else None,
+                            'message': line.strip()
+                        }
+
+                    # Trailing events - break-even triggers
+                    elif re.search(r'🎯 \[BREAK-EVEN TRIGGER\] Trade \d+:', line):
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        profit_match = re.search(r'Profit (\d+)pts', line)
+                        trigger_match = re.search(r'trigger (\d+)pts', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_breakeven_trigger',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'profit_pts': int(profit_match.group(1)) if profit_match else None,
+                            'trigger_pts': int(trigger_match.group(1)) if trigger_match else None,
+                            'stage': 'stage1_breakeven',
+                            'message': line.strip()
+                        }
+
+                    # Stage 2 profit lock triggers
+                    elif re.search(r'💰 \[STAGE 2 TRIGGER\] Trade \d+:', line):
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        profit_match = re.search(r'Profit (\d+)pts', line)
+                        trigger_match = re.search(r'trigger (\d+)pts', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_stage2_trigger',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'profit_pts': int(profit_match.group(1)) if profit_match else None,
+                            'trigger_pts': int(trigger_match.group(1)) if trigger_match else None,
+                            'stage': 'stage2_profit_lock',
+                            'message': line.strip()
+                        }
+
+                    # Stage 3 percentage trailing triggers
+                    elif re.search(r'🚀 \[STAGE 3 TRIGGER\] Trade \d+:', line):
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        profit_match = re.search(r'Profit (\d+)pts', line)
+                        trigger_match = re.search(r'trigger (\d+)pts', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_stage3_trigger',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'profit_pts': int(profit_match.group(1)) if profit_match else None,
+                            'trigger_pts': int(trigger_match.group(1)) if trigger_match else None,
+                            'stage': 'stage3_percentage_trailing',
+                            'message': line.strip()
+                        }
+
+                    # Break-even execution
+                    elif re.search(r'🎉 \[BREAK-EVEN\] Trade \d+', line):
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        stop_level_match = re.search(r'(\d+\.\d+)', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_breakeven_executed',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'new_stop_level': float(stop_level_match.group(1)) if stop_level_match else None,
+                            'stage': 'stage1_breakeven',
+                            'message': line.strip()
+                        }
+
+                    # Stage 2 profit lock execution
+                    elif re.search(r'💎 \[STAGE 2\] Trade \d+:', line):
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        stop_level_match = re.search(r'locked at ([0-9.]+)', line)
+                        lock_points_match = re.search(r'\+(\d+)pts', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_stage2_executed',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'new_stop_level': float(stop_level_match.group(1)) if stop_level_match else None,
+                            'lock_points': int(lock_points_match.group(1)) if lock_points_match else None,
+                            'stage': 'stage2_profit_lock',
+                            'message': line.strip()
+                        }
+
+                    # Stage 3 percentage trailing execution
+                    elif re.search(r'🎯 \[STAGE 3\] Trade \d+:', line):
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        stop_level_match = re.search(r'trailing to ([0-9.]+)', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_stage3_executed',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'new_stop_level': float(stop_level_match.group(1)) if stop_level_match else None,
+                            'stage': 'stage3_percentage_trailing',
+                            'message': line.strip()
+                        }
+
+                    # General trailing success events
+                    elif re.search(r'🎯 \[TRAILING SUCCESS\] Trade \d+', line):
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        stop_level_match = re.search(r'Stop moved to ([0-9.]+)', line)
+                        adjustment_match = re.search(r'\((\d+) pts\)', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_success',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'new_stop_level': float(stop_level_match.group(1)) if stop_level_match else None,
+                            'adjustment_pts': int(adjustment_match.group(1)) if adjustment_match else None,
+                            'stage': 'general_trailing',
+                            'message': line.strip()
+                        }
+
+                    # Progressive stage events
+                    elif re.search(r'\[PROGRESSIVE STAGE \d+\] CS\.D\.[A-Z]{6}\.MINI\.IP', line):
+                        stage_match = re.search(r'STAGE (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        profit_match = re.search(r'Profit: (\d+)pts', line)
+                        trail_match = re.search(r'Trail: ([0-9.]+)', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_progressive_stage',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'stage_number': int(stage_match.group(1)) if stage_match else None,
+                            'profit_pts': int(profit_match.group(1)) if profit_match else None,
+                            'trail_level': float(trail_match.group(1)) if trail_match else None,
+                            'stage': f'progressive_stage_{stage_match.group(1) if stage_match else "unknown"}',
+                            'message': line.strip()
+                        }
+
+                    # Percentage trail calculations
+                    elif re.search(r'\[PERCENTAGE TRAIL\] CS\.D\.[A-Z]{6}\.MINI\.IP:', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        profit_match = re.search(r'Profit ([0-9.]+)pts', line)
+                        retracement_match = re.search(r'(\d+)% retracement', line)
+                        distance_match = re.search(r'([0-9.]+)pts trail distance', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_percentage_calculation',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'profit_pts': float(profit_match.group(1)) if profit_match else None,
+                            'retracement_percentage': int(retracement_match.group(1)) if retracement_match else None,
+                            'trail_distance_pts': float(distance_match.group(1)) if distance_match else None,
+                            'stage': 'percentage_calculation',
+                            'message': line.strip()
+                        }
+
+                    # Intelligent trail calculations
+                    elif re.search(r'\[INTELLIGENT TRAIL\] CS\.D\.[A-Z]{6}\.MINI\.IP', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        direction_match = re.search(r'(BUY|SELL)', line)
+                        current_match = re.search(r'current=([0-9.]+)', line)
+                        stop_match = re.search(r'current_stop=([0-9.]+)', line)
+                        trail_match = re.search(r'trail_level=([0-9.]+)', line)
+                        distance_match = re.search(r'distance_from_current=([0-9.]+)pts', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_intelligent_calculation',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'direction': direction_match.group(1) if direction_match else 'Unknown',
+                            'current_price': float(current_match.group(1)) if current_match else None,
+                            'current_stop': float(stop_match.group(1)) if stop_match else None,
+                            'calculated_trail_level': float(trail_match.group(1)) if trail_match else None,
+                            'distance_from_current_pts': float(distance_match.group(1)) if distance_match else None,
+                            'stage': 'intelligent_calculation',
+                            'message': line.strip()
+                        }
+
+                    # Trailing configuration events
+                    elif re.search(r'📊 \[TRAILING CONFIG\] CS\.D\.[A-Z]{6}\.MINI\.IP', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_config',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'stage': 'configuration',
+                            'message': line.strip()
+                        }
+
+                    # Safe distance calculation events
+                    elif re.search(r'\[SAFE DISTANCE RESULT\] Trade \d+', line):
+                        trade_id_match = re.search(r'Trade (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        distance_match = re.search(r'Returning ([0-9.]+) points', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_safe_distance',
+                            'trade_id': trade_id_match.group(1) if trade_id_match else 'Unknown',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'safe_distance_pts': float(distance_match.group(1)) if distance_match else None,
+                            'stage': 'distance_calculation',
+                            'message': line.strip()
+                        }
+
+                    # Stage configuration lines (e.g., "Stage 1: Break-even at +6pts")
+                    elif re.search(r'Stage \d+:.*trailing|Stage \d+:.*Break-even|Stage \d+:.*Profit lock', line):
+                        stage_match = re.search(r'Stage (\d+)', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_stage_config',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'stage_number': int(stage_match.group(1)) if stage_match else None,
+                            'stage': f'stage_{stage_match.group(1) if stage_match else "unknown"}_config',
+                            'message': line.strip()
+                        }
+
+                    # Trailing stop details (trailingStopDistance, trailingStep)
+                    elif re.search(r'trailingStopDistance|trailingStep', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        trailing_distance_match = re.search(r'trailingStopDistance["\']?\s*:\s*([0-9.]+)', line)
+                        trailing_step_match = re.search(r'trailingStep["\']?\s*:\s*([0-9.]+)', line)
+
+                        activity = {
+                            'timestamp': log_time,
+                            'type': 'trailing_api_details',
+                            'epic': epic_match.group(1) if epic_match else 'Unknown',
+                            'trailing_stop_distance': float(trailing_distance_match.group(1)) if trailing_distance_match else None,
+                            'trailing_step': float(trailing_step_match.group(1)) if trailing_step_match else None,
+                            'stage': 'api_details',
                             'message': line.strip()
                         }
 

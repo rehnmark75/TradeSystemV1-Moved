@@ -10,6 +10,7 @@ import sys
 import os
 import re
 from collections import defaultdict, Counter
+import json
 
 # Add services to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'services'))
@@ -169,12 +170,61 @@ st.markdown("""
         margin: 1rem 0;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
+
+    .search-result {
+        background: #fff;
+        padding: 1rem;
+        border-left: 4px solid #007bff;
+        border-radius: 4px;
+        margin: 0.5rem 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        font-family: 'Courier New', monospace;
+        font-size: 0.85rem;
+    }
+
+    .search-result-error {
+        border-left-color: #dc3545;
+        background: #fff5f5;
+    }
+
+    .search-result-warning {
+        border-left-color: #ffc107;
+        background: #fffcf0;
+    }
+
+    .search-result-signal {
+        border-left-color: #28a745;
+        background: #f0fff4;
+    }
+
+    .search-meta {
+        color: #6c757d;
+        font-size: 0.75rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .search-content {
+        color: #333;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .highlight {
+        background-color: #ffeb3b;
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 @st.cache_resource
 def get_log_parser():
     """Get cached log parser instance"""
+    return SimpleLogParser()
+
+def get_log_parser_fresh():
+    """Get fresh log parser instance (for testing new methods)"""
     return SimpleLogParser()
 
 def format_confidence(confidence):
@@ -269,6 +319,17 @@ def filter_activities(activities, epic_filter=None, signal_type_filter=None, con
             filtered = [a for a in filtered if a['type'] == 'signal_detected']
         elif signal_type_filter == "Rejected":
             filtered = [a for a in filtered if a['type'] == 'signal_rejected']
+        elif signal_type_filter == "Trade Events":
+            filtered = [a for a in filtered if a['type'] in ['trade_opened', 'trade_monitoring', 'trade_adjustment']]
+        elif signal_type_filter == "Trailing Events":
+            trailing_types = [
+                'trailing_breakeven_trigger', 'trailing_stage2_trigger', 'trailing_stage3_trigger',
+                'trailing_breakeven_executed', 'trailing_stage2_executed', 'trailing_stage3_executed',
+                'trailing_success', 'trailing_progressive_stage', 'trailing_percentage_calculation',
+                'trailing_intelligent_calculation', 'trailing_config', 'trailing_safe_distance',
+                'trailing_stage_config', 'trailing_api_details'
+            ]
+            filtered = [a for a in filtered if a['type'] in trailing_types]
 
     if confidence_filter:
         min_conf, max_conf = confidence_filter
@@ -391,21 +452,220 @@ def render_signal_activity_card(activity):
     """Render a signal activity card"""
     if activity['type'] == 'signal_detected':
         icon = "🚀"
-        status_text = "DETECTED"
+        status_text = "SIGNAL DETECTED"
         card_class = "signal-detected"
 
         details = f"**Epic:** {activity['epic']} | **Type:** {activity.get('signal_type', 'N/A')}"
         if activity.get('confidence'):
             details += f" | **Confidence:** {format_confidence(activity['confidence'])}"
 
-    else:  # signal_rejected
+    elif activity['type'] == 'signal_rejected':
         icon = "🚫"
-        status_text = "REJECTED"
+        status_text = "SIGNAL REJECTED"
         card_class = "signal-rejected"
 
         details = f"**Epic:** {activity['epic']}"
         if activity.get('reason'):
             details += f" | **Reason:** {activity['reason'][:50]}..."
+
+    elif activity['type'] == 'trade_opened':
+        icon = "💰"
+        status_text = "TRADE OPENED"
+        card_class = "signal-detected"  # Use green styling
+
+        details = f"**Epic:** {activity['epic']} | **Direction:** {activity.get('direction', 'N/A')}"
+        if activity.get('entry_price'):
+            details += f" | **Entry Price:** {activity['entry_price']:.5f}"
+        if activity.get('deal_reference'):
+            details += f"<br>**Deal Ref:** {activity['deal_reference']}"
+
+    elif activity['type'] == 'trade_monitoring':
+        icon = "📊"
+        status_text = f"TRADE MONITORING #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-card"  # Use neutral styling
+
+        details = f"**Epic:** {activity['epic']} | **Direction:** {activity.get('direction', 'N/A')}"
+
+        # Enhanced profit display with rich information
+        if activity.get('profit_pts') is not None:
+            profit_pts = activity['profit_pts']
+            profit_color = "green" if profit_pts > 0 else "red" if profit_pts < 0 else "gray"
+            details += f" | **Profit:** <span style='color:{profit_color}'>{profit_pts}pts</span>"
+
+        # Add entry and current prices
+        if activity.get('entry_price') and activity.get('current_price'):
+            details += f"<br>**Entry:** {activity['entry_price']:.5f} | **Current:** {activity['current_price']:.5f}"
+
+        # Add trigger progress
+        if activity.get('trigger_pts') and activity.get('progress_to_trigger'):
+            details += f" | **Trigger:** {activity['trigger_pts']}pts ({activity['progress_to_trigger']}%)"
+
+        # Add percentage move if available
+        if activity.get('price_move_pct') is not None:
+            move_color = "green" if activity['price_move_pct'] > 0 else "red" if activity['price_move_pct'] < 0 else "gray"
+            details += f"<br>**Price Move:** <span style='color:{move_color}'>{activity['price_move_pct']:+.4f}%</span>"
+
+    elif activity['type'] == 'trade_adjustment':
+        icon = "🔧"
+        status_text = "TRADE ADJUSTMENT"
+        card_class = "signal-card"  # Use neutral styling
+
+        details = f"**Epic:** {activity['epic']} | **Direction:** {activity.get('direction', 'N/A')}"
+        if activity.get('adjustment_type'):
+            details += f" | **Type:** {activity['adjustment_type'].replace('_', ' ').title()}"
+
+        # Add stop level changes
+        if activity.get('old_stop_level') and activity.get('new_stop_level'):
+            old_stop = activity['old_stop_level']
+            new_stop = activity['new_stop_level']
+            change = new_stop - old_stop
+            change_color = "green" if change > 0 else "red" if change < 0 else "gray"
+            details += f"<br>**Stop:** {old_stop:.5f} → {new_stop:.5f} "
+            details += f"(<span style='color:{change_color}'>{change:+.5f}</span>)"
+
+        # Add limit level changes
+        if activity.get('old_limit_level') and activity.get('new_limit_level'):
+            old_limit = activity['old_limit_level']
+            new_limit = activity['new_limit_level']
+            change = new_limit - old_limit
+            change_color = "green" if change > 0 else "red" if change < 0 else "gray"
+            details += f"<br>**Limit:** {old_limit:.5f} → {new_limit:.5f} "
+            details += f"(<span style='color:{change_color}'>{change:+.5f}</span>)"
+
+    # Trailing Events
+    elif activity['type'] == 'trailing_breakeven_trigger':
+        icon = "🎯"
+        status_text = f"BREAK-EVEN TRIGGER - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-detected"
+
+        details = f"**Epic:** {activity['epic']} | **Stage:** Stage 1 (Break-even)"
+        if activity.get('profit_pts') and activity.get('trigger_pts'):
+            details += f"<br>**Profit:** <span style='color:green'>{activity['profit_pts']}pts</span> | **Trigger:** {activity['trigger_pts']}pts"
+
+    elif activity['type'] == 'trailing_stage2_trigger':
+        icon = "💰"
+        status_text = f"STAGE 2 TRIGGER - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-detected"
+
+        details = f"**Epic:** {activity['epic']} | **Stage:** Stage 2 (Profit Lock)"
+        if activity.get('profit_pts') and activity.get('trigger_pts'):
+            details += f"<br>**Profit:** <span style='color:green'>{activity['profit_pts']}pts</span> | **Trigger:** {activity['trigger_pts']}pts"
+
+    elif activity['type'] == 'trailing_stage3_trigger':
+        icon = "🚀"
+        status_text = f"STAGE 3 TRIGGER - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-detected"
+
+        details = f"**Epic:** {activity['epic']} | **Stage:** Stage 3 (Percentage Trailing)"
+        if activity.get('profit_pts') and activity.get('trigger_pts'):
+            details += f"<br>**Profit:** <span style='color:green'>{activity['profit_pts']}pts</span> | **Trigger:** {activity['trigger_pts']}pts"
+
+    elif activity['type'] == 'trailing_breakeven_executed':
+        icon = "🎉"
+        status_text = f"BREAK-EVEN EXECUTED - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-detected"
+
+        details = f"**Epic:** {activity['epic']} | **Stage:** Stage 1 Complete"
+        if activity.get('new_stop_level'):
+            details += f"<br>**New Stop:** {activity['new_stop_level']:.5f} (Break-even + 1pt)"
+
+    elif activity['type'] == 'trailing_stage2_executed':
+        icon = "💎"
+        status_text = f"PROFIT LOCKED - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-detected"
+
+        details = f"**Epic:** {activity['epic']} | **Stage:** Stage 2 Complete"
+        if activity.get('new_stop_level') and activity.get('lock_points'):
+            details += f"<br>**New Stop:** {activity['new_stop_level']:.5f} (+{activity['lock_points']}pts locked)"
+
+    elif activity['type'] == 'trailing_stage3_executed':
+        icon = "🎯"
+        status_text = f"PERCENTAGE TRAILING - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-detected"
+
+        details = f"**Epic:** {activity['epic']} | **Stage:** Stage 3 Active"
+        if activity.get('new_stop_level'):
+            details += f"<br>**New Stop:** {activity['new_stop_level']:.5f} (Percentage-based)"
+
+    elif activity['type'] == 'trailing_success':
+        icon = "🎯"
+        status_text = f"TRAILING SUCCESS - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-detected"
+
+        details = f"**Epic:** {activity['epic']}"
+        if activity.get('new_stop_level') and activity.get('adjustment_pts'):
+            details += f"<br>**New Stop:** {activity['new_stop_level']:.5f} ({activity['adjustment_pts']}pts adjustment)"
+
+    elif activity['type'] == 'trailing_progressive_stage':
+        icon = "⚡"
+        status_text = f"PROGRESSIVE STAGE {activity.get('stage_number', '?')} - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-card"
+
+        details = f"**Epic:** {activity['epic']} | **Stage:** Progressive Stage {activity.get('stage_number', '?')}"
+        if activity.get('profit_pts') and activity.get('trail_level'):
+            details += f"<br>**Profit:** <span style='color:green'>{activity['profit_pts']}pts</span> | **Trail Level:** {activity['trail_level']:.5f}"
+
+    elif activity['type'] == 'trailing_percentage_calculation':
+        icon = "📊"
+        status_text = f"PERCENTAGE CALC - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-card"
+
+        details = f"**Epic:** {activity['epic']}"
+        if activity.get('profit_pts') and activity.get('retracement_percentage'):
+            details += f"<br>**Profit:** <span style='color:green'>{activity['profit_pts']:.1f}pts</span> | **Retracement:** {activity['retracement_percentage']}%"
+        if activity.get('trail_distance_pts'):
+            details += f" | **Trail Distance:** {activity['trail_distance_pts']:.1f}pts"
+
+    elif activity['type'] == 'trailing_intelligent_calculation':
+        icon = "🧠"
+        status_text = "INTELLIGENT TRAIL CALC"
+        card_class = "signal-card"
+
+        details = f"**Epic:** {activity['epic']} | **Direction:** {activity.get('direction', 'N/A')}"
+        if activity.get('current_price') and activity.get('calculated_trail_level'):
+            details += f"<br>**Current:** {activity['current_price']:.5f} | **Calculated Trail:** {activity['calculated_trail_level']:.5f}"
+        if activity.get('distance_from_current_pts'):
+            details += f" | **Distance:** {activity['distance_from_current_pts']:.1f}pts"
+
+    elif activity['type'] == 'trailing_config':
+        icon = "⚙️"
+        status_text = "TRAILING CONFIG"
+        card_class = "signal-card"
+
+        details = f"**Epic:** {activity['epic']} | **Stage:** Configuration Setup"
+
+    elif activity['type'] == 'trailing_safe_distance':
+        icon = "📏"
+        status_text = f"SAFE DISTANCE CALC - Trade #{activity.get('trade_id', 'N/A')}"
+        card_class = "signal-card"
+
+        details = f"**Epic:** {activity['epic']}"
+        if activity.get('safe_distance_pts'):
+            details += f"<br>**Safe Distance:** {activity['safe_distance_pts']:.1f}pts for trailing"
+
+    elif activity['type'] == 'trailing_stage_config':
+        icon = "🎛️"
+        status_text = f"STAGE {activity.get('stage_number', '?')} CONFIG"
+        card_class = "signal-card"
+
+        details = f"**Epic:** {activity['epic']} | **Stage:** Stage {activity.get('stage_number', '?')} Configuration"
+
+    elif activity['type'] == 'trailing_api_details':
+        icon = "🔗"
+        status_text = "TRAILING API DETAILS"
+        card_class = "signal-card"
+
+        details = f"**Epic:** {activity['epic']}"
+        if activity.get('trailing_stop_distance'):
+            details += f"<br>**Stop Distance:** {activity['trailing_stop_distance']:.1f}"
+        if activity.get('trailing_step'):
+            details += f" | **Step:** {activity['trailing_step']:.1f}"
+
+    else:
+        icon = "ℹ️"
+        status_text = activity['type'].upper().replace('_', ' ')
+        card_class = "signal-card"
+        details = f"**Epic:** {activity.get('epic', 'N/A')}"
 
     st.markdown(f"""
     <div class="signal-card {card_class}">
@@ -429,7 +689,7 @@ def render_dashboard():
 
     # Initialize parser
     try:
-        parser = get_log_parser()
+        parser = get_log_parser_fresh()  # Use fresh parser to avoid cache issues
     except Exception as e:
         st.error(f"Failed to initialize log parser: {e}")
         return
@@ -449,6 +709,8 @@ def render_dashboard():
 
     with col3:
         if st.button("🔄 Refresh Now"):
+            # Clear cache and rerun
+            st.cache_resource.clear()
             st.rerun()
 
     # Get data
@@ -458,6 +720,21 @@ def render_dashboard():
         recent_activity = parser.get_recent_activity(hours_back=2, max_entries=20)
         alerts = check_alerts(signal_data, health_data)
         quick_stats = get_quick_stats(parser, time_range_hours)
+
+        # Get trade data with fallback
+        try:
+            trade_data = parser.get_recent_trade_events(hours_back=time_range_hours)
+        except Exception as trade_error:
+            st.warning(f"Trade data unavailable: {trade_error}")
+            trade_data = {
+                'trade_opened': 0,
+                'trade_closed': 0,
+                'trade_monitoring': 0,
+                'trade_adjustments': 0,
+                'active_trades': 0,
+                'active_trade_pairs': []
+            }
+
     except Exception as e:
         st.error(f"Error fetching data: {e}")
         return
@@ -507,9 +784,43 @@ def render_dashboard():
             format_confidence(signal_data['success_rate'])
         )
 
+    # Trade Activity Row
+    st.subheader("💼 Trade Activity")
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        st.metric(
+            "🚀 Trades Opened",
+            trade_data['trade_opened']
+        )
+
+    with col2:
+        st.metric(
+            "📊 Trade Monitoring",
+            trade_data['trade_monitoring']
+        )
+
+    with col3:
+        st.metric(
+            "🔧 Adjustments",
+            trade_data['trade_adjustments']
+        )
+
+    with col4:
+        st.metric(
+            "📈 Active Trades",
+            trade_data['active_trades']
+        )
+
+    with col5:
+        st.metric(
+            "💰 Trade Closed",
+            trade_data['trade_closed']
+        )
+
     # System Health Row
     st.subheader("🔧 System Health")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
 
     with col1:
         status_class = get_status_color(health_data['overall_status'])
@@ -542,6 +853,26 @@ def render_dashboard():
         """, unsafe_allow_html=True)
 
     with col4:
+        trade_monitor_class = get_status_color(health_data['trade_monitor_health'])
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="{trade_monitor_class}">
+                Trade Monitor: {health_data['trade_monitor_health'].title()}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col5:
+        fastapi_class = get_status_color(health_data['fastapi_health'])
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="{fastapi_class}">
+                FastAPI: {health_data['fastapi_health'].title()}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col6:
         st.metric(
             "❌ Errors (24h)",
             health_data['error_count_24h']
@@ -567,6 +898,10 @@ def render_dashboard():
     if signal_data['top_epic']:
         st.info(f"🏆 **Most Active Pair:** {signal_data['top_epic']} | **Active Pairs:** {signal_data['active_pairs']}")
 
+    # Active trade information
+    if trade_data['active_trade_pairs']:
+        st.info(f"💼 **Active Trade Pairs:** {', '.join(trade_data['active_trade_pairs'])} | **Total Active:** {trade_data['active_trades']}")
+
     # Real-time Activity Feed with Filters
     st.subheader("🚀 Recent Signal Activity")
 
@@ -583,7 +918,7 @@ def render_dashboard():
             epic_filter = st.selectbox("🌍 Currency Pair", ["All"] + sorted(unique_epics))
 
         with filter_cols[1]:
-            signal_type_filter = st.selectbox("📊 Signal Type", ["All", "Detected", "Rejected"])
+            signal_type_filter = st.selectbox("📊 Event Type", ["All", "Detected", "Rejected", "Trade Events", "Trailing Events"])
 
         with filter_cols[2]:
             confidence_range = st.slider("🎯 Confidence Range", 0.0, 1.0, (0.0, 1.0), step=0.05)
@@ -631,9 +966,9 @@ def render_dashboard():
                 "health_data": health_data
             })
 
-    # Auto-refresh logic
+    # Auto-refresh logic - much less frequent
     if auto_refresh:
-        time.sleep(5)
+        time.sleep(30)  # Refresh every 30 seconds instead of 5
         st.rerun()
 
 def render_health_details():
@@ -707,6 +1042,283 @@ def render_health_details():
             """)
         else:
             st.success("No recent warnings! 👍")
+
+def search_logs(parser, search_term, log_types, start_date, end_date, regex_mode=False, case_sensitive=False, max_results=500):
+    """Search through log files with advanced filtering"""
+    results = []
+
+    # Prepare search pattern
+    if regex_mode:
+        try:
+            flags = 0 if case_sensitive else re.IGNORECASE
+            pattern = re.compile(search_term, flags)
+        except re.error as e:
+            st.error(f"Invalid regex pattern: {e}")
+            return []
+    else:
+        if case_sensitive:
+            search_func = lambda text: search_term in text
+        else:
+            search_func = lambda text: search_term.lower() in text.lower()
+
+    # Define log file mappings
+    log_files_to_search = []
+    if 'forex_scanner' in log_types:
+        log_files_to_search.extend(parser.log_files['forex_scanner'])
+    if 'stream_service' in log_types:
+        log_files_to_search.extend(parser.log_files['stream_service'])
+    if 'trade_monitor' in log_types:
+        log_files_to_search.extend(parser.log_files['trade_monitor'])
+    if 'fastapi_dev' in log_types:
+        log_files_to_search.extend(parser.log_files.get('fastapi_dev', []))
+    if 'dev_trade' in log_types:
+        log_files_to_search.extend(parser.log_files.get('dev_trade', []))
+
+    for log_file in log_files_to_search:
+        if parser.base_log_dir == "":
+            file_path = log_file
+        else:
+            file_path = os.path.join(parser.base_log_dir, log_file)
+
+        if not os.path.exists(file_path):
+            continue
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                line_number = 0
+                for line in f:
+                    line_number += 1
+
+                    # Parse timestamp for filtering
+                    timestamp_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
+                    if timestamp_match:
+                        try:
+                            log_time = datetime.strptime(timestamp_match.group(1), '%Y-%m-%d %H:%M:%S')
+
+                            # Filter by date range
+                            if log_time.date() < start_date or log_time.date() > end_date:
+                                continue
+                        except ValueError:
+                            continue
+                    else:
+                        continue
+
+                    # Search in line
+                    match_found = False
+                    if regex_mode:
+                        match = pattern.search(line)
+                        if match:
+                            match_found = True
+                    else:
+                        if search_func(line):
+                            match_found = True
+
+                    if match_found:
+                        # Determine log type with more granularity
+                        log_type = 'info'
+                        if ' - ERROR - ' in line:
+                            log_type = 'error'
+                        elif ' - WARNING - ' in line:
+                            log_type = 'warning'
+                        elif '📊 [PROFIT]' in line:
+                            log_type = 'trade_monitoring'
+                        elif '✅ Trade logged' in line:
+                            log_type = 'trade_opened'
+                        elif '[ADJUST-STOP]' in line:
+                            log_type = 'trade_adjustment'
+                        elif '📊' in line or 'signal' in line.lower():
+                            log_type = 'signal'
+                        elif 'trade' in line.lower():
+                            log_type = 'trade'
+
+                        results.append({
+                            'file': os.path.basename(file_path),
+                            'line_number': line_number,
+                            'timestamp': log_time if timestamp_match else None,
+                            'content': line.strip(),
+                            'log_type': log_type
+                        })
+
+                        if len(results) >= max_results:
+                            break
+
+        except Exception as e:
+            st.warning(f"Error reading {file_path}: {e}")
+            continue
+
+        if len(results) >= max_results:
+            break
+
+    return results
+
+def highlight_search_term(text, search_term, regex_mode=False, case_sensitive=False):
+    """Highlight search term in text"""
+    if not search_term:
+        return text
+
+    if regex_mode:
+        try:
+            flags = 0 if case_sensitive else re.IGNORECASE
+            pattern = re.compile(f'({search_term})', flags)
+            return pattern.sub(r'<span class="highlight">\1</span>', text)
+        except re.error:
+            return text
+    else:
+        if case_sensitive:
+            return text.replace(search_term, f'<span class="highlight">{search_term}</span>')
+        else:
+            # Case insensitive replacement
+            pattern = re.compile(re.escape(search_term), re.IGNORECASE)
+            return pattern.sub(lambda m: f'<span class="highlight">{m.group()}</span>', text)
+
+def render_search_interface():
+    """Render search interface within logs page"""
+    st.markdown('<div class="main-header">🔍 Advanced Log Search</div>', unsafe_allow_html=True)
+
+    # Initialize parser
+    try:
+        parser = get_log_parser_fresh()
+    except Exception as e:
+        st.error(f"Failed to initialize log parser: {e}")
+        return
+
+    # Search Controls
+    st.subheader("🎯 Search Configuration")
+
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        search_term = st.text_input(
+            "🔍 Search Term",
+            placeholder="Enter search term or regex pattern...",
+            help="Enter text to search for, or enable regex mode for pattern matching"
+        )
+
+    with col2:
+        search_button = st.button("🔍 Search", type="primary", use_container_width=True)
+
+    # Advanced Filters
+    st.markdown("**🔧 Advanced Filters**")
+
+    filter_cols = st.columns(4)
+
+    with filter_cols[0]:
+        log_types = st.multiselect(
+            "📁 Log Sources",
+            options=['forex_scanner', 'stream_service', 'trade_monitor', 'fastapi_dev', 'dev_trade'],
+            default=['forex_scanner', 'fastapi_dev'],
+            help="Select which log sources to search"
+        )
+
+    with filter_cols[1]:
+        regex_mode = st.checkbox("🔧 Regex Mode", help="Enable regular expression patterns")
+        case_sensitive = st.checkbox("🔤 Case Sensitive", help="Case sensitive search")
+
+    with filter_cols[2]:
+        start_date = st.date_input(
+            "📅 Start Date",
+            value=datetime.now().date() - timedelta(days=1),
+            help="Search from this date"
+        )
+
+    with filter_cols[3]:
+        end_date = st.date_input(
+            "📅 End Date",
+            value=datetime.now().date(),
+            help="Search until this date"
+        )
+
+    max_results = st.slider("📊 Max Results", min_value=50, max_value=500, value=100, step=25)
+
+    # Quick Search Buttons
+    st.write("**⚡ Quick Searches**")
+    quick_cols = st.columns(8)
+
+    quick_searches = [
+        ("🚀 Signals", "📊.*CS\\.D\\.[A-Z]{6}\\.MINI\\.IP", True),
+        ("❌ Errors", "ERROR", False),
+        ("⚠️ Warnings", "WARNING", False),
+        ("🚫 Rejected", "REJECTED", False),
+        ("🎯 High Confidence", "\\(9[0-9]\\.[0-9]%\\)", True),
+        ("💰 Trade Opened", "✅ Trade logged", False),
+        ("📊 Trade Monitoring", "\\[PROFIT\\] Trade", True),
+        ("🔧 Adjustments", "ADJUST-STOP", False)
+    ]
+
+    for idx, (label, term, is_regex) in enumerate(quick_searches):
+        with quick_cols[idx]:
+            if st.button(label, use_container_width=True, key=f"quick_{idx}"):
+                st.session_state.search_term = term
+                st.session_state.regex_mode = is_regex
+                st.rerun()
+
+    # Update search term from session state
+    if 'search_term' in st.session_state:
+        search_term = st.session_state.search_term
+        regex_mode = st.session_state.get('regex_mode', False)
+
+    # Perform search
+    results = []
+    if search_button and search_term:
+        with st.spinner("🔍 Searching logs..."):
+            results = search_logs(
+                parser, search_term, log_types, start_date, end_date,
+                regex_mode, case_sensitive, max_results
+            )
+
+        # Display search statistics
+        if results:
+            st.success(f"📊 Found {len(results)} matches for '{search_term}'")
+
+            # Filter results by type
+            type_filter = st.selectbox(
+                "Filter by log type:",
+                options=["all", "signal", "trade_monitoring", "trade_opened", "trade_adjustment", "trade", "error", "warning", "info"],
+                index=0
+            )
+
+            if type_filter != "all":
+                results = [r for r in results if r['log_type'] == type_filter]
+
+            # Display results
+            st.subheader(f"📋 Search Results ({len(results)} items)")
+
+            for idx, result in enumerate(results):
+                # Determine CSS class based on log type
+                css_class_map = {
+                    'error': 'search-result-error',
+                    'warning': 'search-result-warning',
+                    'signal': 'search-result-signal',
+                    'trade': 'search-result-signal'
+                }
+                css_class = css_class_map.get(result['log_type'], 'search-result')
+
+                # Highlight search term
+                highlighted_content = highlight_search_term(
+                    result['content'], search_term, regex_mode, case_sensitive
+                )
+
+                timestamp_str = result['timestamp'].strftime('%Y-%m-%d %H:%M:%S') if result['timestamp'] else 'Unknown'
+
+                st.markdown(f"""
+                <div class="search-result {css_class}">
+                    <div class="search-meta">
+                        📁 {result['file']} | 📍 Line {result['line_number']} |
+                        🕒 {timestamp_str} | 🏷️ {result['log_type'].upper()}
+                    </div>
+                    <div class="search-content">{highlighted_content}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Add separator every 10 results for better readability
+                if (idx + 1) % 10 == 0 and idx + 1 < len(results):
+                    st.markdown("---")
+
+        else:
+            st.info(f"No results found for '{search_term}' in the selected date range and log sources.")
+
+    elif search_term and not search_button:
+        st.info("👆 Click the Search button to start searching")
 
 def render_analytics_dashboard():
     """Render analytics dashboard with deep insights"""
@@ -883,9 +1495,9 @@ def render_analytics_dashboard():
 
         st.dataframe(table_data, use_container_width=True)
 
-    # Auto-refresh logic
+    # Auto-refresh logic - much less frequent
     if auto_refresh:
-        time.sleep(10)
+        time.sleep(60)  # Refresh every 60 seconds for analytics
         st.rerun()
 
 def main():
@@ -901,21 +1513,24 @@ def main():
     # Additional sidebar info
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 🔄 Auto-Refresh")
-    st.sidebar.info("Dashboard auto-refreshes every 5 seconds when enabled")
+    st.sidebar.info("Dashboard auto-refreshes every 30 seconds when enabled (Analytics: 60s)")
 
     st.sidebar.markdown("### 📊 Data Sources")
     st.sidebar.info("""
     - **Forex Scanner Logs**
     - **Stream Service Logs**
-    - **Real-time Signal Feed**
+    - **FastAPI Dev Logs**
+    - **Trade Monitor Logs**
+    - **Dev Trade Logs**
     """)
 
     st.sidebar.markdown("### 🎯 Features")
     st.sidebar.success("""
     ✅ Real-time monitoring
-    ✅ Signal intelligence
+    ✅ Signal & trade intelligence
     ✅ System health tracking
-    ✅ Lightweight & fast
+    ✅ Advanced log search
+    ✅ Analytics & insights
     """)
 
     # Route to appropriate page
@@ -926,7 +1541,7 @@ def main():
     elif page == "📈 Analytics":
         render_analytics_dashboard()
     elif page == "🔍 Search Logs":
-        st.info("🔗 **Search Page Available** - Navigate to the Search page from the main Streamlit sidebar for advanced log exploration.")
+        render_search_interface()
 
 if __name__ == "__main__":
     main()

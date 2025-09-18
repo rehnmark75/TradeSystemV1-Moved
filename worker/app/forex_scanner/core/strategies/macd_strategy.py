@@ -172,8 +172,9 @@ class MACDStrategy(BaseStrategy):
 
                 # Try to get from database fallback method
                 try:
-                    from optimization.optimal_parameter_service import _get_macd_fallback_parameters
-                    fallback_params = _get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.MINI.IP', self.timeframe)
+                    from optimization.optimal_parameter_service import OptimalParameterService
+                    service = OptimalParameterService()
+                    fallback_params = service._get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.MINI.IP', self.timeframe)
 
                     return {
                         'fast_ema': fallback_params.fast_ema,
@@ -203,8 +204,9 @@ class MACDStrategy(BaseStrategy):
             self.logger.warning(f"Could not load MACD config: {e}, using DATABASE defaults")
             # Last resort: Use database stored defaults
             try:
-                from optimization.optimal_parameter_service import _get_macd_fallback_parameters
-                fallback_params = _get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.MINI.IP', self.timeframe)
+                from optimization.optimal_parameter_service import OptimalParameterService
+                service = OptimalParameterService()
+                fallback_params = service._get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.MINI.IP', self.timeframe)
                 return {
                     'fast_ema': fallback_params.fast_ema,
                     'slow_ema': fallback_params.slow_ema,
