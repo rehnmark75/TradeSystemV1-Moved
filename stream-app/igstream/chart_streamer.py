@@ -404,8 +404,10 @@ class StreamManager:
     
     def setup_subscriptions(self):
         """Set up chart subscriptions for multiple timeframes"""
-        # UPDATED: Only 5-minute timeframe - 60m candles are now synthesized from 5m data
-        timeframes = {5: "5MINUTE"}
+        # UPDATED: 5-minute + 1-minute for future migration - 60m synthesized from 5m data
+        # 1-minute data will allow us to eventually synthesize ALL timeframes from 1m base
+        # CORRECTED: IG uses "1MINUTE" format, not "MINUTE"
+        timeframes = {5: "5MINUTE", 1: "1MINUTE"}
         
         for tf_minutes, tf_str in timeframes.items():
             try:

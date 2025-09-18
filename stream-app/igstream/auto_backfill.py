@@ -99,9 +99,11 @@ class AutoBackfillService:
     def _timeframe_to_resolution(self, timeframe: int) -> str:
         """Convert timeframe in minutes to IG API resolution string"""
         # Use correct resolution format as per IG API docs
+        # NOTE: Chart streaming uses "1MINUTE" but REST API uses "MINUTE"
         mapping = {
+            1: "MINUTE",      # REST API format for 1-minute backfill
             5: "MINUTE_5",
-            15: "MINUTE_15", 
+            15: "MINUTE_15",
             60: "HOUR"
         }
         return mapping.get(timeframe, "MINUTE_5")
@@ -363,8 +365,9 @@ class AutoBackfillService:
             max_gaps: Maximum number of gaps to process in one run
         """
         try:
-            # Detect all gaps (removed 15m and 60m - both should be synthesized from 5m data)
-            all_gaps = self.gap_detector.detect_all_gaps(self.epics, timeframes=[5])
+            # Detect all gaps (removed 15m and 60m - both should be synthesized from base data)
+            # Added 1m for parallel collection and future migration to 1m base
+            all_gaps = self.gap_detector.detect_all_gaps(self.epics, timeframes=[1, 5])
             
             # Flatten and prioritize gaps
             gaps_list = []

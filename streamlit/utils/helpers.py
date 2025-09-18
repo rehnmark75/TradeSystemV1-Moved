@@ -63,6 +63,34 @@ def synthesize_60m_from_5m(engine, epic: str, lookback_candles: int) -> pd.DataF
     return df_60m
 
 
+def synthesize_5m_from_1m(engine, epic: str, lookback_candles: int) -> pd.DataFrame:
+    """
+    Synthesize 5-minute candles from 1-minute candle data
+    This will be used for validation and future migration
+
+    Args:
+        engine: Database engine
+        epic: Trading pair epic code
+        lookback_candles: Number of 5m candles to synthesize
+
+    Returns:
+        DataFrame with synthesized 5-minute candles
+    """
+    # Need 5x more 1m candles to create the requested 5m candles
+    df_1m = get_candle_data(engine, 1, epic, limit=lookback_candles * 5)
+    df_1m = clean_candle_data(df_1m)
+    df_1m.set_index("start_time", inplace=True)
+
+    df_5m = df_1m.resample("5min").agg({
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last"
+    }).dropna().reset_index()
+
+    return df_5m
+
+
 def compute_trend_bias(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
     trend_1h = trend_4h = overall_trend = None
 
