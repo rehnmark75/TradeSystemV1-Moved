@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc
+from sqlalchemy import and_, or_, desc, func
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 import logging
@@ -73,7 +73,7 @@ async def get_service_status(db: Session = Depends(get_db)):
         latest_scrapes = db.query(ScrapeLog).order_by(desc(ScrapeLog.scrape_date)).limit(5).all()
 
         # Get event counts by currency
-        event_counts = db.query(EconomicEvent.currency, db.func.count(EconomicEvent.id)).group_by(
+        event_counts = db.query(EconomicEvent.currency, func.count(EconomicEvent.id)).group_by(
             EconomicEvent.currency
         ).all()
 

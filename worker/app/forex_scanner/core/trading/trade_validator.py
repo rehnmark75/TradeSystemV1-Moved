@@ -55,6 +55,14 @@ except ImportError:
     DATA_FETCHER_AVAILABLE = False
     logging.warning("⚠️ DataFetcher not available - S/R validation will use provided data only")
 
+# NEW: Import economic news filter for fundamental analysis
+try:
+    from core.trading.economic_news_filter import EconomicNewsFilter
+    NEWS_FILTER_AVAILABLE = True
+except ImportError:
+    NEWS_FILTER_AVAILABLE = False
+    logging.warning("⚠️ Economic news filter not available - news filtering disabled")
+
 
 class TradeValidator:
     """
@@ -122,6 +130,12 @@ class TradeValidator:
         # NEW: Claude filtering configuration
         self.enable_claude_filtering = bool(getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False))
         self.min_claude_score = int(getattr(config, 'MIN_CLAUDE_QUALITY_SCORE', 6))
+
+        # NEW: Economic news filtering configuration
+        self.enable_news_filtering = (
+            getattr(config, 'ENABLE_NEWS_FILTERING', True) and
+            NEWS_FILTER_AVAILABLE
+        )
         
         # NEW: Initialize data fetcher and S/R validator with safe fallbacks
         self.db_manager = db_manager
@@ -132,6 +146,11 @@ class TradeValidator:
         self.claude_analyzer = None
         if self.enable_claude_filtering:
             self._initialize_claude_analyzer()
+
+        # NEW: Initialize economic news filter
+        self.news_filter = None
+        if self.enable_news_filtering:
+            self._initialize_news_filter()
         
         if self.enable_sr_validation:
             try:
@@ -220,7 +239,10 @@ class TradeValidator:
             'failed_claude_score': 0,
             'failed_claude_error': 0,
             'claude_approved': 0,
-            'claude_analyzed': 0
+            'claude_analyzed': 0,
+            # NEW: News filtering stats
+            'failed_news_filtering': 0,
+            'news_confidence_reductions': 0
         }
         
         self.logger.info("✅ TradeValidator initialized (duplicate detection handled by Scanner)")
@@ -235,6 +257,11 @@ class TradeValidator:
             self.logger.info(f"   Min Claude score: {self.min_claude_score}/10")
         else:
             self.logger.info("   Claude filtering: ❌ Disabled")
+
+        if self.enable_news_filtering:
+            self.logger.info(f"   News filtering: {'✅ Enabled' if self.news_filter else '❌ Failed to initialize'}")
+        else:
+            self.logger.info("   News filtering: ❌ Disabled")
 
     def _initialize_claude_analyzer(self):
         """Initialize Claude analyzer for signal filtering"""
@@ -262,6 +289,69 @@ class TradeValidator:
         except Exception as e:
             self.logger.error(f"❌ Failed to initialize Claude analyzer: {e}")
             self.claude_analyzer = None
+
+    def _initialize_news_filter(self):
+        """Initialize economic news filter for fundamental analysis"""
+        try:
+            self.news_filter = EconomicNewsFilter(logger=self.logger)
+
+            # Test connection to economic calendar service
+            is_connected, message = self.news_filter.test_service_connection()
+
+            if is_connected:
+                self.logger.info("✅ Economic news filter initialized and connected")
+            else:
+                self.logger.warning(f"⚠️ Economic news filter initialized but service unavailable: {message}")
+                # Keep the filter but it will gracefully degrade
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize economic news filter: {e}")
+            self.news_filter = None
+
+    def _validate_with_news_filter(self, signal: Dict) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        Validate signal using economic news filter
+
+        Args:
+            signal: Signal to validate
+
+        Returns:
+            Tuple of (is_valid, validation_message, news_context)
+        """
+        if not self.news_filter:
+            return True, "News filtering disabled", None
+
+        try:
+            # Perform news validation
+            is_valid, reason, news_context = self.news_filter.validate_signal_against_news(signal)
+
+            # Adjust confidence if enabled and signal is valid
+            if is_valid and getattr(config, 'REDUCE_CONFIDENCE_NEAR_NEWS', True):
+                original_confidence = signal.get('confidence_score', 0.0)
+                adjusted_confidence, adjustment_reason = self.news_filter.adjust_confidence_for_news(
+                    signal, original_confidence
+                )
+
+                if adjusted_confidence != original_confidence:
+                    self.validation_stats['news_confidence_reductions'] += 1
+                    signal['confidence_score'] = adjusted_confidence
+                    signal['original_confidence'] = original_confidence
+                    signal['confidence_adjustment_reason'] = adjustment_reason
+
+                    epic = signal.get('epic', 'Unknown')
+                    self.logger.info(f"📰 Confidence adjusted: {epic} {original_confidence:.1%} → {adjusted_confidence:.1%} ({adjustment_reason})")
+
+            return is_valid, reason, news_context
+
+        except Exception as e:
+            self.logger.error(f"❌ News validation error: {e}")
+
+            # Configurable fail mode
+            fail_secure = getattr(config, 'NEWS_FILTER_FAIL_SECURE', False)
+            if fail_secure:
+                return False, f"News validation error (fail-secure mode): {str(e)}", None
+            else:
+                return True, f"News validation error (allowing signal): {str(e)}", None
 
     def _validate_with_claude(self, signal: Dict) -> Tuple[bool, str, Optional[Dict]]:
         """
@@ -431,7 +521,21 @@ class TradeValidator:
                     self.validation_stats['failed_sr_validation'] += 1
                     return False, f"S/R Level: {msg}"
             
-            # 9. ⭐ NEW: Claude filtering (if enabled) ⭐
+            # 9. ⭐ NEW: Economic News filtering (if enabled) ⭐
+            if self.enable_news_filtering:
+                valid, msg, news_context = self._validate_with_news_filter(signal)
+                if not valid:
+                    self.validation_stats['failed_news_filtering'] += 1
+                    epic = signal.get('epic', 'Unknown')
+                    signal_type = signal.get('signal_type', 'Unknown')
+                    self.logger.info(f"📰 NEWS BLOCKED: {epic} {signal_type} - {msg}")
+                    return False, f"News filtering: {msg}"
+                else:
+                    # Add news context to signal for later use
+                    if news_context:
+                        signal['news_validation_context'] = news_context
+
+            # 10. ⭐ NEW: Claude filtering (if enabled) ⭐
             if self.enable_claude_filtering:
                 valid, msg, claude_result = self._validate_with_claude(signal)
                 if not valid:
@@ -439,11 +543,11 @@ class TradeValidator:
                     epic = signal.get('epic', 'Unknown')
                     signal_type = signal.get('signal_type', 'Unknown')
                     self.logger.info(f"🚫 Claude REJECTED: {epic} {signal_type} - {msg}")
-                    
+
                     # OPTIONAL: Save rejected signals for analysis
                     if getattr(config, 'SAVE_CLAUDE_REJECTIONS', False) and claude_result:
                         self._save_claude_rejection(signal, claude_result)
-                    
+
                     return False, f"Claude filtering: {msg}"
                 else:
                     # Log Claude approval
@@ -451,12 +555,12 @@ class TradeValidator:
                     signal_type = signal.get('signal_type', 'Unknown')
                     score = claude_result.get('score', 'N/A') if claude_result else 'N/A'
                     self.logger.info(f"✅ Claude APPROVED: {epic} {signal_type} - Score: {score}/10")
-                    
+
                     # Add Claude result to signal for later use
                     if claude_result:
                         signal['claude_validation_result'] = claude_result
-            
-            # 10. Final trading suitability check
+
+            # 11. Final trading suitability check
             valid, msg = self.check_trading_suitability(signal)
             if not valid:
                 self.validation_stats['failed_other'] += 1
@@ -774,7 +878,7 @@ class TradeValidator:
                 'is_active': True,
                 # THIS IS THE EXACT STRING THE ORCHESTRATOR LOOKS FOR:
                 'duplicate_detection': 'Removed - handled by Scanner',  # ← CRITICAL: Must be exact
-                'validation_focus': 'Quality, Market Conditions, Risk Management, Mean Reversion Support, Claude Filtering',
+                'validation_focus': 'Quality, Market Conditions, Risk Management, Mean Reversion Support, Economic News Filtering, Claude Filtering',
                 'timezone_fix': 'Applied to all timestamp fields',
                 'sr_validation': 'Safe integration with DataFetcher',
                 'claude_filtering': 'Integrated for signal approval/rejection',
@@ -793,6 +897,7 @@ class TradeValidator:
                 'mean_reversion_bypass': 'ENABLED',
                 'claude_filtering': self.enable_claude_filtering,
                 'min_claude_score': self.min_claude_score if self.enable_claude_filtering else None,
+                'news_filtering': self.enable_news_filtering,
                 # Additional expected fields for comprehensive configuration reporting
                 'max_risk_percent': self.max_risk_percent,
                 'min_risk_reward_ratio': self.min_risk_reward_ratio,
@@ -809,6 +914,7 @@ class TradeValidator:
                 'format_failure_rate': f"{(self.validation_stats['failed_format'] / total) * 100:.1f}%",
                 'ema200_failure_rate': f"{(self.validation_stats['failed_ema200_filter'] / total) * 100:.1f}%",
                 'sr_failure_rate': f"{(self.validation_stats['failed_sr_validation'] / total) * 100:.1f}%",
+                'news_failure_rate': f"{(self.validation_stats['failed_news_filtering'] / total) * 100:.1f}%",
                 'claude_failure_rate': f"{(self.validation_stats['failed_claude_rejection'] + self.validation_stats['failed_claude_score']) / total * 100:.1f}%",
                 'risk_failure_rate': f"{(self.validation_stats['failed_risk_management'] / total) * 100:.1f}%"
             },
@@ -824,13 +930,21 @@ class TradeValidator:
                     self.validation_stats.get('claude_analyzed', 1)
                 ) if self.validation_stats.get('claude_analyzed', 0) > 0 else 0
             },
+            'news_metrics': {
+                'enabled': self.enable_news_filtering,
+                'signals_blocked': self.validation_stats.get('failed_news_filtering', 0),
+                'confidence_reductions': self.validation_stats.get('news_confidence_reductions', 0),
+                'filter_available': NEWS_FILTER_AVAILABLE,
+                'service_connected': bool(self.news_filter) if self.enable_news_filtering else False
+            },
             'validation_filters': [
                 'Structure validation',
-                'Market hours check', 
+                'Market hours check',
                 'Epic restrictions',
                 'Freshness validation',
                 'EMA 200 trend filter (STRICT - no bypasses)',
                 'Support/Resistance validation',
+                'Economic news filtering',
                 'Claude AI filtering',
                 'Risk management checks'
             ]
@@ -850,6 +964,7 @@ class TradeValidator:
         config_summary.append(f"Freshness: {'Enabled' if self.enable_freshness_check else 'Disabled'}")
         config_summary.append(f"Epic restrictions: {len(self.allowed_epics) if self.allowed_epics else 0} allowed, {len(self.blocked_epics)} blocked")
         config_summary.append(f"S/R validation: {'Enabled' if self.enable_sr_validation else 'Disabled'}")
+        config_summary.append(f"News filtering: {'Enabled' if self.enable_news_filtering else 'Disabled'}")  # 🆕 NEW
         config_summary.append(f"Claude filtering: {'Enabled' if self.enable_claude_filtering else 'Disabled'}")  # 🆕 NEW
         config_summary.append(f"Trend filter: STRICT (no bypasses)")  # 🆕 UPDATED
         

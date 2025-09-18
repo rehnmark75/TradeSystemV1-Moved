@@ -5,6 +5,7 @@ FastAPI service for scraping and serving economic calendar data
 
 import asyncio
 import logging
+import logging.handlers
 import signal
 import sys
 from contextlib import asynccontextmanager

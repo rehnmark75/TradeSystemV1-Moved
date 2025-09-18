@@ -312,9 +312,19 @@ class ForexFactoryScraper:
             if not event_name:
                 return None
 
-            # Parse time
-            date_str = current_date.strftime("%Y-%m-%d") if current_date else datetime.now().strftime("%Y-%m-%d")
+            # Parse time - ensure we always have a valid date
+            if current_date:
+                date_str = current_date.strftime("%Y-%m-%d")
+                base_date = current_date
+            else:
+                # Fallback to today if no current_date
+                base_date = datetime.now()
+                date_str = base_date.strftime("%Y-%m-%d")
+
             event_datetime, time_str = self.parse_event_time(time_cell, date_str)
+
+            # Ensure we have a valid event_date - fallback to base_date if parsing failed
+            final_event_date = event_datetime or base_date
 
             # Extract actual, forecast, and previous values
             actual_cell = row.find('td', class_=re.compile(r'actual'))
@@ -335,7 +345,7 @@ class ForexFactoryScraper:
             return {
                 'event_name': event_name,
                 'currency': currency,
-                'event_date': event_datetime or current_date,
+                'event_date': final_event_date,
                 'event_time': time_str,
                 'impact_level': impact_level,
                 'actual_value': actual_value,
@@ -410,8 +420,21 @@ class ForexFactoryScraper:
         """Save scraped events to database"""
         try:
             with db_manager.get_session() as session:
+                # Create a new scrape log instance to avoid session issues
+                new_scrape_log = ScrapeLog(
+                    scrape_date=scrape_log.scrape_date,
+                    data_source=scrape_log.data_source,
+                    scrape_type=scrape_log.scrape_type,
+                    start_time=scrape_log.start_time,
+                    status=scrape_log.status,
+                    end_time=scrape_log.end_time,
+                    duration_seconds=scrape_log.duration_seconds,
+                    date_from=scrape_log.date_from,
+                    date_to=scrape_log.date_to
+                )
+
                 # Save scrape log first
-                session.add(scrape_log)
+                session.add(new_scrape_log)
                 session.flush()  # Get the ID
 
                 events_new = 0
@@ -420,6 +443,12 @@ class ForexFactoryScraper:
 
                 for event_data in events_data:
                     try:
+                        # Skip events with invalid required data
+                        if not event_data.get('event_name') or not event_data.get('currency') or not event_data.get('event_date'):
+                            logger.warning(f"Skipping event with missing required data: {event_data.get('event_name', 'Unknown')}")
+                            events_failed += 1
+                            continue
+
                         # Check if event already exists
                         existing_event = session.query(EconomicEvent).filter(
                             EconomicEvent.event_name == event_data['event_name'],
@@ -445,11 +474,16 @@ class ForexFactoryScraper:
                         events_failed += 1
 
                 # Update scrape log with final counts
+                new_scrape_log.events_new = events_new
+                new_scrape_log.events_updated = events_updated
+                new_scrape_log.events_failed = events_failed
+
+                session.commit()
+
+                # Update the original scrape_log for return reference
                 scrape_log.events_new = events_new
                 scrape_log.events_updated = events_updated
                 scrape_log.events_failed = events_failed
-
-                session.commit()
 
                 logger.info(f"Saved events to database: {events_new} new, {events_updated} updated, {events_failed} failed")
 

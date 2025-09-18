@@ -179,8 +179,8 @@ class NewsImpactAnalysis(Base):
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        Index('idx_currency_impact', 'currency_pair', 'impact_detected'),
-        Index('idx_event_alert', 'economic_event_id', 'alert_id'),
+        Index('idx_economic_currency_impact', 'currency_pair', 'impact_detected'),
+        Index('idx_economic_event_alert', 'economic_event_id', 'alert_id'),
     )
 
     def __repr__(self):

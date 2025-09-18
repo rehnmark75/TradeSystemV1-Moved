@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 from contextlib import contextmanager
@@ -57,7 +57,7 @@ class DatabaseManager:
     def create_tables(self):
         """Create all tables"""
         try:
-            Base.metadata.create_all(bind=self.engine)
+            Base.metadata.create_all(bind=self.engine, checkfirst=True)
             logger.info("Database tables created successfully")
         except Exception as e:
             logger.error(f"Failed to create tables: {e}")
@@ -94,7 +94,7 @@ class DatabaseManager:
         """Test database connection"""
         try:
             with self.get_session() as session:
-                session.execute("SELECT 1")
+                session.execute(text("SELECT 1"))
             logger.info("Database connection test successful")
             return True
         except Exception as e:
@@ -105,7 +105,7 @@ class DatabaseManager:
         """Get database health status for monitoring"""
         try:
             with self.get_session() as session:
-                result = session.execute("SELECT version()")
+                result = session.execute(text("SELECT version()"))
                 version = result.scalar()
 
                 # Get connection pool status
