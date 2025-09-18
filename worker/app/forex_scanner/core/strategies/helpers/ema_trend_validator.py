@@ -185,57 +185,6 @@ class EMATrendValidator:
             self.logger.error(f"Error validating Two-Pole Oscillator: {e}")
             return 0.0  # Safe fallback
     
-    def validate_momentum_bias(self, latest_row: pd.Series, signal_type: str) -> bool:
-        """
-        Validate signal against Momentum Bias Index indicator
-        
-        Args:
-            latest_row: DataFrame row with indicator data
-            signal_type: 'BULL' or 'BEAR'
-            
-        Returns:
-            True if momentum bias allows signal, False otherwise
-        """
-        if not getattr(config, 'MOMENTUM_BIAS_ENABLED', False):
-            return True
-        
-        if signal_type == 'BULL':
-            # Check if momentum bias is green for BULL signal
-            momentum_is_green = latest_row.get('momentum_bias_is_green', False)
-            if not momentum_is_green:
-                self.logger.warning(f"❌ EMA BULL signal REJECTED: Momentum Bias is RED (bearish)")
-                return False
-            
-            # Check if momentum is above boundary (strong momentum)
-            if getattr(config, 'MOMENTUM_BIAS_REQUIRE_ABOVE_BOUNDARY', True):
-                momentum_above_boundary = latest_row.get('momentum_bias_above_boundary', False)
-                if not momentum_above_boundary:
-                    self.logger.warning(f"❌ EMA BULL signal REJECTED: Momentum Bias below boundary (weak momentum)")
-                    return False
-                else:
-                    self.logger.info(f"✅ Momentum Bias is GREEN and above boundary - BULL signal confirmed")
-            else:
-                self.logger.debug(f"✅ Momentum Bias is GREEN - BULL signal allowed")
-        
-        elif signal_type == 'BEAR':
-            # Check if momentum bias is red for BEAR signal
-            momentum_is_red = latest_row.get('momentum_bias_is_red', False)
-            if not momentum_is_red:
-                self.logger.warning(f"❌ EMA BEAR signal REJECTED: Momentum Bias is GREEN (bullish)")
-                return False
-            
-            # Check if momentum is above boundary (strong momentum)
-            if getattr(config, 'MOMENTUM_BIAS_REQUIRE_ABOVE_BOUNDARY', True):
-                momentum_above_boundary = latest_row.get('momentum_bias_above_boundary', False)
-                if not momentum_above_boundary:
-                    self.logger.warning(f"❌ EMA BEAR signal REJECTED: Momentum Bias below boundary (weak momentum)")
-                    return False
-                else:
-                    self.logger.info(f"✅ Momentum Bias is RED and above boundary - BEAR signal confirmed")
-            else:
-                self.logger.debug(f"✅ Momentum Bias is RED - BEAR signal allowed")
-        
-        return True
     
     def validate_two_pole_color(self, latest_row: pd.Series, signal_type: str) -> bool:
         """

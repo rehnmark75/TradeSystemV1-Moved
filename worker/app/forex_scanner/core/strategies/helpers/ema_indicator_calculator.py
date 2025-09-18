@@ -168,13 +168,6 @@ class EMAIndicatorCalculator:
                 'two_pole_zone'
             ])
         
-        # Add Momentum Bias indicators if enabled
-        if getattr(config, 'MOMENTUM_BIAS_ENABLED', False):
-            base_indicators.extend([
-                'momentum_bias_is_green',
-                'momentum_bias_is_red',
-                'momentum_bias_above_boundary'
-            ])
 
         # Add overextension indicators if enabled
         from configdata.strategies.config_ema_strategy import (

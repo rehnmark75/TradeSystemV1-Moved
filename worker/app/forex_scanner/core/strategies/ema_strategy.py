@@ -279,9 +279,6 @@ class EMAStrategy(BaseStrategy):
                     if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BULL'):
                         return None
                 
-                # Momentum Bias Index validation
-                if not self.trend_validator.validate_momentum_bias(latest_row, 'BULL'):
-                    return None
                 
                 # MACD momentum validation
                 if not self.trend_validator.validate_macd_momentum(df_with_signals, 'BULL'):
@@ -333,9 +330,6 @@ class EMAStrategy(BaseStrategy):
                     if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BEAR'):
                         return None
                 
-                # Momentum Bias Index validation
-                if not self.trend_validator.validate_momentum_bias(latest_row, 'BEAR'):
-                    return None
                 
                 # MACD momentum validation
                 if not self.trend_validator.validate_macd_momentum(df_with_signals, 'BEAR'):

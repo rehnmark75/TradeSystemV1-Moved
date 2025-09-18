@@ -298,15 +298,6 @@ class DataFetcher:
                 self.logger.info("🔄 Adding BB+Supertrend indicators (BB+Supertrend strategy enabled)")
                 df_enhanced = self._add_bb_supertrend_indicators(df_enhanced)
             
-            # ========== FIXED: MOMENTUM BIAS INDICATORS ==========
-            # ONLY check config.py - ignore configdata files when explicitly disabled
-            momentum_bias_enabled = getattr(config, 'MOMENTUM_BIAS_STRATEGY', False)
-            
-            if momentum_bias_enabled:
-                self.logger.info("🔄 Adding Momentum Bias indicators (Momentum Bias strategy enabled)")
-                df_enhanced = self._add_momentum_bias_indicators(df_enhanced)
-            else:
-                self.logger.debug("⏩ Momentum Bias indicators skipped (strategy disabled in config.py)")
             
             # ========== FIXED: ZERO LAG EMA INDICATORS ==========  
             # ONLY check config.py - ignore configdata files when explicitly disabled
@@ -328,13 +319,6 @@ class DataFetcher:
             else:
                 self.logger.debug("⏩ Two-Pole Oscillator indicators skipped (disabled in config.py)")
             
-            # Add Momentum Bias Index indicators if enabled
-            momentum_bias_enabled = getattr(config, 'MOMENTUM_BIAS_ENABLED', False)
-            if momentum_bias_enabled:
-                self.logger.info("🔄 Adding Momentum Bias Index indicators (Momentum Bias enabled)")
-                df_enhanced = self._add_momentum_bias_indicators(df_enhanced)
-            else:
-                self.logger.debug("⏩ Momentum Bias Index indicators skipped (disabled in config.py)")
             
             # Add other indicators conditionally using methods that actually exist
             if getattr(config, 'ENABLE_SUPPORT_RESISTANCE', True):
@@ -697,51 +681,6 @@ class DataFetcher:
             self.logger.error(f"❌ Error calculating BB+Supertrend indicators: {e}")
             return df
 
-    def _add_momentum_bias_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add Momentum Bias indicators to DataFrame
-        This mirrors the calculation in MomentumBiasStrategy
-        FIXED: Only executes when called (config.py check already done)
-        """
-        try:
-            # Import configdata only when we know the strategy is enabled
-            from configdata import config_momentum_bias
-            
-            # Get parameters
-            momentum_length = config_momentum_bias.MOMENTUM_BIAS_MOMENTUM_LENGTH
-            bias_length = config_momentum_bias.MOMENTUM_BIAS_BIAS_LENGTH
-            smooth_length = config_momentum_bias.MOMENTUM_BIAS_SMOOTH_LENGTH
-            impulse_boundary_length = config_momentum_bias.MOMENTUM_BIAS_IMPULSE_BOUNDARY_LENGTH
-            std_dev_multiplier = config_momentum_bias.MOMENTUM_BIAS_STD_DEV_MULTIPLIER
-            
-            # Step 1: Calculate momentum (source - source[momentumLength])
-            df['momentum'] = df['close'] - df['close'].shift(momentum_length)
-            
-            # Step 2: Calculate standardized deviation
-            hl_range = df['high'] - df['low']
-            ema_hl = df['close'].ewm(span=momentum_length).mean()  # Simplified EMA
-            df['std_dev'] = (df['momentum'] / ema_hl) * 100
-            
-            # Step 3: Split into up and down momentum
-            df['momentum_up'] = np.maximum(df['std_dev'], 0)
-            df['momentum_down'] = np.minimum(df['std_dev'], 0)
-            
-            # Step 4: Calculate bias sums
-            df['momentum_up_bias'] = df['momentum_up'].rolling(window=bias_length).sum()
-            df['momentum_down_bias'] = df['momentum_down'].rolling(window=bias_length).sum().abs()
-            
-            # Step 5: Calculate boundary
-            df['average_bias'] = (df['momentum_up_bias'] + df['momentum_down_bias']) / 2
-            avg_bias_ema = df['average_bias'].ewm(span=impulse_boundary_length).mean()
-            avg_bias_std = df['average_bias'].rolling(window=impulse_boundary_length).std()
-            df['boundary'] = avg_bias_ema + (avg_bias_std * std_dev_multiplier)
-            
-            self.logger.debug(f"✅ Momentum Bias indicators added successfully")
-            return df
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error adding Momentum Bias indicators: {e}")
-            return df
 
     def _add_zero_lag_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -820,94 +759,6 @@ class DataFetcher:
             self.logger.error(f"❌ Error adding Zero Lag EMA indicators: {e}")
             return df
 
-    def _add_momentum_bias_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add Momentum Bias Index indicators to DataFrame
-        Based on AlgoAlpha's Momentum Bias Index for Pine Script
-        """
-        try:
-            # Get configuration parameters
-            momentum_length = getattr(config, 'MOMENTUM_BIAS_LENGTH', 10)
-            bias_length = getattr(config, 'MOMENTUM_BIAS_BIAS_LENGTH', 5)
-            smooth_length = getattr(config, 'MOMENTUM_BIAS_SMOOTH_LENGTH', 10)
-            boundary_length = getattr(config, 'MOMENTUM_BIAS_BOUNDARY_LENGTH', 30)
-            std_multiplier = getattr(config, 'MOMENTUM_BIAS_STD_MULTIPLIER', 3.0)
-            smooth_indicator = getattr(config, 'MOMENTUM_BIAS_SMOOTH', True)
-            
-            self.logger.debug(f"🔄 Calculating Momentum Bias Index indicators")
-            
-            if len(df) < max(momentum_length * 2, boundary_length * 2):
-                self.logger.warning(f"⚠️ Insufficient data for Momentum Bias Index: {len(df)} bars")
-                return df
-            
-            df_enhanced = df.copy()
-            
-            # Calculate momentum
-            momentum = df_enhanced['close'] - df_enhanced['close'].shift(momentum_length)
-            
-            # Calculate standard deviation normalized momentum
-            hl_ema = (df_enhanced['high'] - df_enhanced['low']).ewm(span=momentum_length, adjust=False).mean()
-            std_dev = (momentum / hl_ema) * 100
-            
-            # Split into up and down momentum
-            momentum_up = std_dev.apply(lambda x: max(x, 0))
-            momentum_down = std_dev.apply(lambda x: min(x, 0))
-            
-            # Calculate biases
-            momentum_up_sum = momentum_up.rolling(window=bias_length).sum()
-            momentum_down_sum = momentum_down.rolling(window=bias_length).sum()
-            
-            if smooth_indicator:
-                # Hull Moving Average (HMA) smoothing approximation
-                # HMA = WMA(2*WMA(n/2) - WMA(n), sqrt(n))
-                # Simplified to EMA for computational efficiency
-                momentum_up_bias = momentum_up_sum.ewm(span=smooth_length, adjust=False).mean().apply(lambda x: max(x, 0))
-                momentum_down_bias = (-momentum_down_sum).ewm(span=smooth_length, adjust=False).mean().apply(lambda x: max(x, 0))
-            else:
-                momentum_up_bias = momentum_up_sum
-                momentum_down_bias = -momentum_down_sum
-                
-            # Calculate average bias and boundary
-            average_bias = (momentum_down_bias + momentum_up_bias) / 2
-            
-            # Calculate boundary (EMA + StdDev * multiplier)
-            boundary_ema = average_bias.ewm(span=boundary_length, adjust=False).mean()
-            boundary_std = average_bias.rolling(window=boundary_length).std()
-            boundary = boundary_ema + (boundary_std * std_multiplier)
-            
-            # Determine momentum color (green for up bias, red for down bias)
-            df_enhanced['momentum_bias_up'] = momentum_up_bias
-            df_enhanced['momentum_bias_down'] = momentum_down_bias
-            df_enhanced['momentum_bias_boundary'] = boundary
-            
-            # Color determination: green when up > down, red when down > up
-            df_enhanced['momentum_bias_is_green'] = momentum_up_bias > momentum_down_bias
-            df_enhanced['momentum_bias_is_red'] = momentum_down_bias > momentum_up_bias
-            
-            # Check if momentum is above boundary (strong momentum)
-            df_enhanced['momentum_bias_above_boundary'] = (
-                (momentum_up_bias > boundary) | (momentum_down_bias > boundary)
-            )
-            
-            # Generate signals for debugging
-            df_enhanced['momentum_bias_bull_signal'] = (
-                (momentum_down_bias < momentum_down_bias.shift(1)) & 
-                (momentum_down_bias > boundary) & 
-                (momentum_down_bias > momentum_up_bias)
-            )
-            
-            df_enhanced['momentum_bias_bear_signal'] = (
-                (momentum_up_bias < momentum_up_bias.shift(1)) & 
-                (momentum_up_bias > boundary) & 
-                (momentum_up_bias > momentum_down_bias)
-            )
-            
-            self.logger.debug(f"✅ Momentum Bias Index indicators added successfully")
-            return df_enhanced
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error calculating Momentum Bias Index: {e}")
-            return df
     
     def _add_two_pole_oscillator_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -1058,12 +909,6 @@ class DataFetcher:
                 self.logger.debug(f"🔄 Adding behavior analysis (lazy)")
                 df_enhanced = self.behavior_analyzer.add_behavior_analysis(df_enhanced, pair)
             
-            # FIXED: Only add if strategy is enabled in config.py
-            if ('momentum_bias' in required_indicators and getattr(config, 'MOMENTUM_BIAS_STRATEGY', False)):
-                self.logger.info(f"🔄 Adding Momentum Bias indicators (Momentum Bias strategy enabled)")
-                df_enhanced = self._add_momentum_bias_indicators(df_enhanced)
-            elif 'momentum_bias' in required_indicators:
-                self.logger.info(f"⚪ Momentum Bias indicators NOT added (strategy disabled)")
             
             # FIXED: Only add if strategy is enabled in config.py
             if ('zero_lag_ema' in required_indicators and getattr(config, 'ZERO_LAG_STRATEGY', False)):

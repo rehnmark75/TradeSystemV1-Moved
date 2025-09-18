@@ -170,28 +170,6 @@ TWO_POLE_STRENGTH_MULTIPLIER = 0.5       # Multiplier for oscillator strength
 TWO_POLE_MTF_VALIDATION = False          # Disable 1H timeframe Two-Pole validation to reduce delays
 TWO_POLE_MTF_TIMEFRAME = '1h'            # Higher timeframe for confirmation (1h, 4h, etc.)
 
-# =============================================================================
-# MOMENTUM BIAS INDEX (EMA INTEGRATION)
-# =============================================================================
-
-# Momentum Bias Index Configuration (momentum confirmation for EMA signals)
-MOMENTUM_BIAS_ENABLED = False                   # Enable Momentum Bias Index validation
-MOMENTUM_BIAS_LENGTH = 10                      # Momentum calculation length
-MOMENTUM_BIAS_BIAS_LENGTH = 5                  # Bias calculation length
-MOMENTUM_BIAS_SMOOTH_LENGTH = 10               # Smoothing length
-MOMENTUM_BIAS_BOUNDARY_LENGTH = 30             # Impulse boundary length
-MOMENTUM_BIAS_STD_MULTIPLIER = 3.0             # Standard deviation multiplier for boundary
-MOMENTUM_BIAS_SMOOTH = True                    # Enable smoothing (HMA approximation)
-
-# Momentum Bias Validation Settings
-MOMENTUM_BIAS_REQUIRE_ABOVE_BOUNDARY = False   # Require bias above boundary for signals
-MOMENTUM_BIAS_VALIDATION_ENABLED = True        # Use bias for signal validation
-MOMENTUM_BIAS_MIN_STRENGTH = 0.1               # Minimum bias strength for signals
-
-# Momentum Bias Confidence Scoring
-MOMENTUM_BIAS_CONFIDENCE_WEIGHT = 0.15         # Weight in overall confidence calculation
-MOMENTUM_BIAS_BOUNDARY_BONUS = 0.1             # Confidence bonus for above boundary signals
-MOMENTUM_BIAS_STRENGTH_MULTIPLIER = 0.3        # Multiplier for bias strength
 
 # =============================================================================
 # MACD MOMENTUM FILTER (EMA INTEGRATION)
@@ -655,7 +633,6 @@ def get_ema_config_summary() -> dict:
         'active_config': ACTIVE_EMA_CONFIG,
         'ema200_distance_enabled': EMA200_MIN_DISTANCE_ENABLED,
         'two_pole_enabled': TWO_POLE_OSCILLATOR_ENABLED,
-        'momentum_bias_enabled': MOMENTUM_BIAS_ENABLED,
         'macd_momentum_filter_enabled': MACD_MOMENTUM_FILTER_ENABLED,
         'macd_trend_sensitivity': MACD_TREND_SENSITIVITY,
         'macd_validation_mode': MACD_VALIDATION_MODE,
