@@ -209,8 +209,8 @@ MACD_MIN_SLOPE_THRESHOLD = 0.00001              # Minimum slope threshold to avo
 
 # MACD Momentum Filter Settings - RELAXED FOR BETTER SIGNAL GENERATION
 MACD_MOMENTUM_VALIDATION_ENABLED = False        # Use MACD for signal validation
-MACD_TREND_SENSITIVITY = 'permissive'          # Sensitivity: 'strict', 'normal', 'permissive', 'neutral_bias'
-MACD_VALIDATION_MODE = 'neutral_friendly'      # Mode: 'strict_blocking', 'slope_aware', 'neutral_friendly'
+MACD_TREND_SENSITIVITY = 'normal'          # Sensitivity: 'strict', 'normal', 'permissive', 'neutral_bias'
+MACD_VALIDATION_MODE = 'slope_aware'      # Mode: 'strict_blocking', 'slope_aware', 'neutral_friendly'
 
 # MACD trend sensitivity mappings (affects lookback and threshold)
 MACD_SENSITIVITY_SETTINGS = {
