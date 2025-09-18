@@ -404,7 +404,8 @@ class StreamManager:
     
     def setup_subscriptions(self):
         """Set up chart subscriptions for multiple timeframes"""
-        timeframes = {5: "5MINUTE", 60: "HOUR"}
+        # UPDATED: Only 5-minute timeframe - 60m candles are now synthesized from 5m data
+        timeframes = {5: "5MINUTE"}
         
         for tf_minutes, tf_str in timeframes.items():
             try:

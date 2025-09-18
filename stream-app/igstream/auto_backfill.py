@@ -363,8 +363,8 @@ class AutoBackfillService:
             max_gaps: Maximum number of gaps to process in one run
         """
         try:
-            # Detect all gaps (removed 15m - should be synthesized from 5m data)
-            all_gaps = self.gap_detector.detect_all_gaps(self.epics, timeframes=[5, 60])
+            # Detect all gaps (removed 15m and 60m - both should be synthesized from 5m data)
+            all_gaps = self.gap_detector.detect_all_gaps(self.epics, timeframes=[5])
             
             # Flatten and prioritize gaps
             gaps_list = []

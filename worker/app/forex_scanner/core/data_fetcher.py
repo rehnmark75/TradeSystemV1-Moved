@@ -1265,9 +1265,186 @@ class DataFetcher:
                         self.logger.debug(f"⚠️ Could not resample timezone column {col}: {tz_error}")
             
             return df_15m_reset
-            
+
         except Exception as e:
             self.logger.error(f"❌ Error in 15m resampling: {e}")
+            return df
+
+    def _resample_to_60m_optimized(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Enhanced 60m resampling optimized for real-time trading
+
+        Key improvements:
+        - Detects incomplete periods for current candle awareness
+        - Validates data completeness for trading accuracy
+        - Adds confidence scores for each 60m candle
+        - Handles real-time vs historical data differently
+        """
+        try:
+            # Validate input data
+            if df is None or len(df) == 0:
+                self.logger.warning("⚠️ Empty dataframe provided for resampling")
+                return df
+
+            if len(df) < 12:
+                self.logger.warning("⚠️ Insufficient 5m data for 60m resampling (need at least 12 bars)")
+                return df
+
+            # Ensure start_time is datetime and timezone-aware
+            if 'start_time' not in df.columns:
+                self.logger.error("❌ Missing 'start_time' column for resampling")
+                return df
+
+            # Sort by time to ensure proper order
+            df = df.sort_values('start_time')
+
+            # Create indexed dataframe
+            df_indexed = df.set_index('start_time')
+
+            # Standard resampling
+            df_60m = df_indexed.resample(
+                '60min',
+                label='left',
+                closed='left',
+                origin='epoch'
+            ).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'ltv': 'sum'
+            })
+
+            # Add data completeness analysis
+            def calculate_completeness(group):
+                """Calculate how complete each 60m period is"""
+                expected_candles = 12  # 12 x 5m candles per 60m period
+                actual_candles = len(group)
+                return {
+                    'actual_5m_candles': actual_candles,
+                    'expected_5m_candles': expected_candles,
+                    'completeness_ratio': actual_candles / expected_candles,
+                    'is_complete': actual_candles == expected_candles,
+                    'missing_minutes': (expected_candles - actual_candles) * 5
+                }
+
+            # Calculate completeness for each 60m period
+            completeness_data = []
+            for timestamp in df_60m.index:
+                # Get 5m candles that belong to this 60m period
+                period_start = timestamp
+                period_end = timestamp + pd.Timedelta(minutes=60)
+
+                period_candles = df_indexed[
+                    (df_indexed.index >= period_start) &
+                    (df_indexed.index < period_end)
+                ]
+
+                completeness = calculate_completeness(period_candles)
+                completeness['period_start'] = timestamp
+                completeness_data.append(completeness)
+
+            # Convert to DataFrame and merge
+            completeness_df = pd.DataFrame(completeness_data).set_index('period_start')
+            df_60m = df_60m.join(completeness_df)
+
+            # Add trading confidence score
+            def calculate_trading_confidence(row):
+                """
+                Calculate confidence score for trading decisions
+                100% = complete data, perfect for trading
+                90%+ = minor gaps, good for trading
+                80%+ = some gaps, caution advised
+                <80% = significant gaps, avoid trading
+                """
+                base_score = row['completeness_ratio'] * 100
+
+                # Penalize if missing recent data (affects current market state)
+                try:
+                    # Get current time in same timezone as the data
+                    current_time = pd.Timestamp.now()
+                    if row.name.tz is not None:
+                        # If data is timezone-aware, make current_time timezone-aware too
+                        if current_time.tz is None:
+                            current_time = current_time.tz_localize('UTC')
+                        current_time = current_time.tz_convert(row.name.tz)
+                    elif current_time.tz is not None:
+                        # If data is timezone-naive but current_time is aware, make it naive
+                        current_time = current_time.tz_localize(None)
+
+                    if current_time - row.name < pd.Timedelta(hours=2):
+                        # Current or very recent candle - penalize incomplete data more
+                        if not row['is_complete']:
+                            base_score *= 0.8  # 20% penalty for incomplete current data
+                except Exception as e:
+                    # If timezone handling fails, skip the recent data penalty
+                    pass
+
+                # Boost score if we have the close (most important for signals)
+                if pd.notna(row['close']):
+                    base_score = min(100, base_score * 1.05)  # 5% bonus for having close
+
+                return round(base_score, 1)
+
+            df_60m['trading_confidence'] = df_60m.apply(calculate_trading_confidence, axis=1)
+
+            # Add trading suitability flags
+            df_60m['suitable_for_entry'] = df_60m['trading_confidence'] >= 90.0
+            df_60m['suitable_for_analysis'] = df_60m['trading_confidence'] >= 80.0
+            df_60m['data_warning'] = df_60m['trading_confidence'] < 85.0
+
+            # Only drop rows where ALL OHLC values are missing
+            df_60m = df_60m.dropna(subset=['open', 'high', 'low', 'close'], how='all')
+
+            # Reset index to get start_time back as column
+            df_60m_reset = df_60m.reset_index()
+
+            # Log quality metrics
+            total_candles = len(df_60m_reset)
+            complete_candles = len(df_60m_reset[df_60m_reset['is_complete']])
+            high_confidence = len(df_60m_reset[df_60m_reset['trading_confidence'] >= 90])
+
+            self.logger.info(f"✅ 60m synthesis quality:")
+            self.logger.info(f"   Total 60m candles: {total_candles}")
+            self.logger.info(f"   Complete candles: {complete_candles}/{total_candles} ({complete_candles/total_candles*100:.1f}%)")
+            self.logger.info(f"   High confidence (90%+): {high_confidence}/{total_candles} ({high_confidence/total_candles*100:.1f}%)")
+
+            # Warning for recent incomplete data
+            try:
+                current_time_for_filter = pd.Timestamp.now()
+                if len(df_60m_reset) > 0 and df_60m_reset['start_time'].dt.tz is not None:
+                    current_time_for_filter = current_time_for_filter.tz_localize('UTC').tz_convert(df_60m_reset['start_time'].dt.tz)
+                elif len(df_60m_reset) > 0 and current_time_for_filter.tz is not None:
+                    current_time_for_filter = current_time_for_filter.tz_localize(None)
+
+                recent_candles = df_60m_reset[
+                    df_60m_reset['start_time'] >= current_time_for_filter - pd.Timedelta(hours=4)
+                ]
+                incomplete_recent = recent_candles[~recent_candles['is_complete']]
+
+                if len(incomplete_recent) > 0:
+                    self.logger.warning(f"⚠️ {len(incomplete_recent)} incomplete 60m candles in last 4 hours")
+                    self.logger.warning("   Consider waiting for complete data before trading signals")
+            except Exception as e:
+                self.logger.debug(f"Could not check recent incomplete candles: {e}")
+
+            # Add timezone columns if they were in original data
+            timezone_columns = ['local_time', 'market_session', 'user_time']
+            for col in timezone_columns:
+                if col in df.columns:
+                    try:
+                        df_with_tz = df.set_index('start_time')
+                        tz_resampled = df_with_tz[col].resample(
+                            '60min', label='left', closed='left', origin='epoch'
+                        ).first()
+                        df_60m_reset[col] = df_60m_reset['start_time'].map(tz_resampled).fillna(method='ffill')
+                    except Exception as tz_error:
+                        self.logger.debug(f"⚠️ Could not resample timezone column {col}: {tz_error}")
+
+            return df_60m_reset
+
+        except Exception as e:
+            self.logger.error(f"❌ Error in 60m resampling: {e}")
             return df
 
     def should_trade_on_candle(self, candle_row) -> Dict[str, any]:
@@ -1412,11 +1589,17 @@ class DataFetcher:
         # Calculate lookback time in UTC (database time)
         since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
         
-        # FIXED: Handle 15m data by resampling 5m data if needed
+        # FIXED: Handle 15m and 60m data by resampling 5m data if needed
         if timeframe == '15m':
             source_tf = 5  # Always fetch 5m data for 15m resampling
             # Increase lookback to ensure we have enough 5m data
             # 15m needs 3x more 5m bars, so increase lookback accordingly
+            adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
+            since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+        elif timeframe == '1h':
+            source_tf = 5  # Always fetch 5m data for 60m resampling
+            # Increase lookback to ensure we have enough 5m data
+            # 60m needs 12x more 5m bars, so increase lookback accordingly
             adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
             since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
         else:
@@ -1538,13 +1721,20 @@ class DataFetcher:
             # Add timezone columns using the correct method
             df = tz_manager.add_timezone_columns_to_df(df)
             
-            # FIXED: Complete 15m resampling implementation
+            # FIXED: Complete 15m and 60m resampling implementation
             if timeframe == '15m' and source_tf == 5:
                 self.logger.info(f"🔄 Resampling 5m data to 15m for {epic}")
                 df = self._resample_to_15m_optimized(df)
-                
+
                 if df is None or len(df) == 0:
                     self.logger.error(f"❌ 15m resampling failed for {epic}")
+                    return None
+            elif timeframe == '1h' and source_tf == 5:
+                self.logger.info(f"🔄 Resampling 5m data to 60m for {epic}")
+                df = self._resample_to_60m_optimized(df)
+
+                if df is None or len(df) == 0:
+                    self.logger.error(f"❌ 60m resampling failed for {epic}")
                     return None
             
             return df.reset_index(drop=True)
