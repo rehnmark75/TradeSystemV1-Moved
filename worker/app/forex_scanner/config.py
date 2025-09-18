@@ -1477,6 +1477,11 @@ SR_LOOKBACK_HOURS = 72
 MIN_BARS_FOR_SR_ANALYSIS = 100
 SR_CACHE_DURATION_MINUTES = 10
 
+# Enhanced S/R Validation with Level Flip Detection
+ENABLE_ENHANCED_SR_VALIDATION = True  # Use enhanced validator with SMC integration
+SR_RECENT_FLIP_BARS = 50             # Consider flips within last 50 bars as "recent"
+SR_MIN_FLIP_STRENGTH = 0.6           # Minimum strength to consider a level flip significant
+
 
 
 

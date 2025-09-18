@@ -26,13 +26,25 @@ try:
 except ImportError:
     from forex_scanner import config
 
-# Import the S/R validator (optional - graceful degradation if not available)
+# Import the S/R validators (optional - graceful degradation if not available)
 try:
-    from core.detection.support_resistance_validator import SupportResistanceValidator
-    SR_VALIDATOR_AVAILABLE = True
+    # Try enhanced validator first (with level flip detection)
+    from core.detection.enhanced_support_resistance_validator import EnhancedSupportResistanceValidator
+    ENHANCED_SR_VALIDATOR_AVAILABLE = True
+    try:
+        from core.detection.support_resistance_validator import SupportResistanceValidator
+        SR_VALIDATOR_AVAILABLE = True
+    except ImportError:
+        SR_VALIDATOR_AVAILABLE = False
 except ImportError:
-    SR_VALIDATOR_AVAILABLE = False
-    logging.warning("⚠️ SupportResistanceValidator not available - S/R validation disabled")
+    ENHANCED_SR_VALIDATOR_AVAILABLE = False
+    try:
+        # Fallback to basic validator
+        from core.detection.support_resistance_validator import SupportResistanceValidator
+        SR_VALIDATOR_AVAILABLE = True
+    except ImportError:
+        SR_VALIDATOR_AVAILABLE = False
+        logging.warning("⚠️ No S/R validators available - S/R validation disabled")
 
 # NEW: Import data fetcher for S/R market data (optional - safe fallback)
 try:
@@ -96,9 +108,15 @@ class TradeValidator:
         
         # ENHANCED: Support/Resistance validation configuration with safe initialization
         self.enable_sr_validation = (
-            getattr(config, 'ENABLE_SR_VALIDATION', True) and 
-            SR_VALIDATOR_AVAILABLE and 
+            getattr(config, 'ENABLE_SR_VALIDATION', True) and
+            (ENHANCED_SR_VALIDATOR_AVAILABLE or SR_VALIDATOR_AVAILABLE) and
             DATA_FETCHER_AVAILABLE
+        )
+
+        # Prefer enhanced validator with level flip detection
+        self.use_enhanced_sr_validation = (
+            getattr(config, 'ENABLE_ENHANCED_SR_VALIDATION', True) and
+            ENHANCED_SR_VALIDATOR_AVAILABLE
         )
         
         # NEW: Claude filtering configuration
@@ -117,15 +135,28 @@ class TradeValidator:
         
         if self.enable_sr_validation:
             try:
-                # Initialize S/R validator
-                self.sr_validator = SupportResistanceValidator(
-                    left_bars=getattr(config, 'SR_LEFT_BARS', 15),
-                    right_bars=getattr(config, 'SR_RIGHT_BARS', 15),
-                    volume_threshold=getattr(config, 'SR_VOLUME_THRESHOLD', 20.0),
-                    level_tolerance_pips=getattr(config, 'SR_LEVEL_TOLERANCE_PIPS', 5.0),
-                    min_level_distance_pips=getattr(config, 'SR_MIN_LEVEL_DISTANCE_PIPS', 10.0),
-                    logger=self.logger
-                )
+                # Initialize S/R validator (enhanced if available, fallback to basic)
+                sr_config = {
+                    'left_bars': getattr(config, 'SR_LEFT_BARS', 15),
+                    'right_bars': getattr(config, 'SR_RIGHT_BARS', 15),
+                    'volume_threshold': getattr(config, 'SR_VOLUME_THRESHOLD', 20.0),
+                    'level_tolerance_pips': getattr(config, 'SR_LEVEL_TOLERANCE_PIPS', 3.0),  # More sensitive for flip detection
+                    'min_level_distance_pips': getattr(config, 'SR_MIN_LEVEL_DISTANCE_PIPS', 20.0),
+                    'logger': self.logger
+                }
+
+                if self.use_enhanced_sr_validation:
+                    # Enhanced validator with level flip detection
+                    self.sr_validator = EnhancedSupportResistanceValidator(
+                        recent_flip_bars=getattr(config, 'SR_RECENT_FLIP_BARS', 50),
+                        min_flip_strength=getattr(config, 'SR_MIN_FLIP_STRENGTH', 0.6),
+                        **sr_config
+                    )
+                    self.logger.info("✅ Enhanced S/R Validator with level flip detection initialized")
+                else:
+                    # Basic S/R validator
+                    self.sr_validator = SupportResistanceValidator(**sr_config)
+                    self.logger.info("✅ Basic S/R Validator initialized")
                 
                 # Initialize data fetcher for market data (with fallback)
                 if self.db_manager:
