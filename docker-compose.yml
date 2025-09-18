@@ -285,7 +285,7 @@ services:
       - POSTGRES_PASSWORD=postgres
     volumes:
       - ./scripts:/scripts:ro
-      - ./postgresbackup:/app/postgresbackup
+      - /media/hr/Data/TradeSystemV1-Backups/postgresbackup:/app/postgresbackup
       - ./logs/backup:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:

@@ -49,7 +49,14 @@
       "Bash(./download_luxalgo_collection.sh:*)",
       "Bash(echo:*)",
       "WebFetch(domain:www.forexfactory.com)",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "Bash(lsblk:*)",
+      "Read(//media/hr/Data/**)",
+      "Bash(mount)",
+      "Bash(sudo umount:*)",
+      "Read(//media/hr/**)",
+      "Bash(udisksctl unmount:*)",
+      "Bash(killall:*)"
     ],
     "deny": [],
     "ask": []

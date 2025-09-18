@@ -16,7 +16,7 @@ The TradeSystemV1 backup system provides:
 ### Components
 - **`db-backup` service**: Automated backup container running daily at 2 AM
 - **Backup scripts**: Located in `scripts/` directory
-- **Storage**: Backups stored in `postgresbackup/` directory (excluded from git)
+- **Storage**: Backups stored on external drive at `/media/hr/Data/TradeSystemV1-Backups/postgresbackup/`
 - **Monitoring**: Health checks and status monitoring included
 
 ### File Structure
@@ -25,9 +25,10 @@ scripts/
 ├── backup_database.sh      # Main backup script
 ├── backup_monitor.py       # Monitoring and health checks
 ├── backup_health.sh        # Simple health check for Docker
+├── simple_backup.sh        # Simplified backup script (currently used)
 └── restore_database.sh     # Restore script
 
-postgresbackup/
+External Drive: /media/hr/Data/TradeSystemV1-Backups/postgresbackup/
 ├── forex_backup_YYYYMMDD_HHMMSS.sql.gz
 └── forex_config_backup_YYYYMMDD_HHMMSS.sql.gz
 ```
@@ -369,10 +370,10 @@ command: >
 
 ### Storage Location
 
-Backups are stored in `./postgresbackup/` which:
-- Is excluded from git via `.gitignore`
-- Is mounted as a volume in the backup container
-- Should be included in your system-level backups
+Backups are stored on external drive at `/media/hr/Data/TradeSystemV1-Backups/postgresbackup/` which:
+- Is mounted directly from external drive in the backup container
+- Provides additional storage capacity separate from system drive
+- Should be safely unmounted when disconnecting external drive
 
 ## 📈 Best Practices
 
