@@ -94,7 +94,18 @@ async def calculate_dynamic_sl_tp(epic: str, trading_headers: dict, atr: float, 
 
         # Calculate stop distance with ATR multiplier
         raw_stop = atr_points * 1.5
-        valid_stop = max(min_stop, round(raw_stop / stop_step) * stop_step)
+
+        # Use sane trading minimums and maximums for account preservation
+        if "JPY" in epic:
+            sane_minimum = 30   # JPY pairs need larger point values
+            sane_maximum = 50   # Cap at 50 points for JPY pairs
+        else:
+            sane_minimum = 25   # Standard pairs minimum for safety
+            sane_maximum = 40   # Cap at 40 points for standard pairs
+
+        # Apply both minimum and maximum bounds
+        calculated_stop = round(raw_stop / stop_step) * stop_step
+        valid_stop = max(sane_minimum, min(sane_maximum, calculated_stop))
 
         raw_limit = valid_stop * rr_ratio
         valid_limit = round(raw_limit / stop_step) * stop_step
@@ -106,6 +117,7 @@ async def calculate_dynamic_sl_tp(epic: str, trading_headers: dict, atr: float, 
 
     except Exception as e:
         # Fallback to reasonable defaults based on epic type
+        # (using same sane minimums as main logic above)
         if "JPY" in epic:
             base_stop = max(30, int(atr * 1000) if atr else 30)  # Convert ATR to JPY points
         else:

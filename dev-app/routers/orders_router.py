@@ -67,13 +67,17 @@ async def get_cached_positions(headers: dict, cache_ttl: int = 5):
 
 def check_trade_cooldown(epic: str, db: Session) -> dict:
     """
-    Check if an epic is still in cooldown period after a recent trade closure.
-    
+    Check if an epic is still in cooldown period after a recent trade closure OR opening.
+
+    UPDATED: Now checks both trade closures AND trade openings to prevent back-to-back entries.
+
     Returns:
         dict: {
             "allowed": bool,
             "cooldown_remaining_minutes": int,
             "last_trade_closed_at": datetime,
+            "last_trade_opened_at": datetime,
+            "cooldown_type": str,  # "closure", "opening", "none", or "expired"
             "message": str
         }
     """
@@ -138,46 +142,138 @@ def check_trade_cooldown(epic: str, db: Session) -> dict:
             recent_expiry = datetime.utcnow() - timedelta(minutes=10)
             effective_close_time = min(estimated_close_1h, recent_expiry)
 
-        if not most_recent_trade:
-            return {"allowed": True, "message": "No recent closed trades found"}
+        # === NEW: Check for recent trade OPENINGS ===
+        recent_opened_trade = (
+            db.query(TradeLog)
+            .filter(
+                TradeLog.symbol == epic,
+                TradeLog.timestamp.isnot(None)
+            )
+            .order_by(TradeLog.timestamp.desc())
+            .first()
+        )
 
-        # Calculate time elapsed since last closure
         current_time = datetime.utcnow()
 
-        # Handle timezone-naive timestamps by assuming UTC
-        if effective_close_time.tzinfo is None:
-            effective_close_time = effective_close_time.replace(tzinfo=None)
-        if current_time.tzinfo is None:
-            current_time = current_time.replace(tzinfo=None)
+        # === Check closure-based cooldown ===
+        closure_cooldown_active = False
+        closure_remaining_minutes = 0
+        if most_recent_trade and effective_close_time:
+            # Handle timezone-naive timestamps by assuming UTC
+            if effective_close_time.tzinfo is None:
+                effective_close_time = effective_close_time.replace(tzinfo=None)
+            if current_time.tzinfo is None:
+                current_time = current_time.replace(tzinfo=None)
 
-        time_elapsed = current_time - effective_close_time
-        elapsed_minutes = time_elapsed.total_seconds() / 60
+            # ✅ TIMESTAMP VALIDATION FIX: Check for invalid future timestamps
+            if effective_close_time > current_time:
+                logger.warning(f"🚨 Invalid future closure timestamp for {epic}: {effective_close_time} (trade ID: {most_recent_trade.id})")
+                logger.warning(f"   Current time: {datetime.utcnow()}")
+                logger.warning(f"   Ignoring corrupt timestamp")
+            else:
+                time_elapsed = current_time - effective_close_time
+                elapsed_minutes = time_elapsed.total_seconds() / 60
 
-        # ✅ TIMESTAMP VALIDATION FIX: Check for invalid future timestamps
-        if effective_close_time > current_time:
-            logger.warning(f"🚨 Invalid future closure timestamp for {epic}: {effective_close_time} (trade ID: {most_recent_trade.id})")
-            logger.warning(f"   Current time: {datetime.utcnow()}")
-            logger.warning(f"   Ignoring corrupt timestamp and allowing trade")
-            return {
-                "allowed": True,
-                "message": f"Trade allowed (ignoring corrupt future timestamp: {effective_close_time.strftime('%Y-%m-%d %H:%M:%S')} UTC)"
-            }
+                if elapsed_minutes < cooldown_minutes:
+                    closure_cooldown_active = True
+                    closure_remaining_minutes = int(cooldown_minutes - elapsed_minutes)
 
-        if elapsed_minutes < cooldown_minutes:
-            # Still in cooldown period
-            remaining_minutes = int(cooldown_minutes - elapsed_minutes)
+        # === Check opening-based cooldown (NEW LOGIC) ===
+        opening_cooldown_active = False
+        opening_remaining_minutes = 0
+        if recent_opened_trade and recent_opened_trade.timestamp:
+            opening_time = recent_opened_trade.timestamp
+
+            # Handle timezone-naive timestamps by assuming UTC
+            if opening_time.tzinfo is None:
+                opening_time = opening_time.replace(tzinfo=None)
+            if current_time.tzinfo is None:
+                current_time = current_time.replace(tzinfo=None)
+
+            # ✅ TIMESTAMP VALIDATION FIX: Check for invalid future timestamps
+            if opening_time > current_time:
+                logger.warning(f"🚨 Invalid future opening timestamp for {epic}: {opening_time} (trade ID: {recent_opened_trade.id})")
+                logger.warning(f"   Current time: {datetime.utcnow()}")
+                logger.warning(f"   Ignoring corrupt timestamp")
+            else:
+                time_elapsed = current_time - opening_time
+                elapsed_minutes = time_elapsed.total_seconds() / 60
+
+                if elapsed_minutes < cooldown_minutes:
+                    opening_cooldown_active = True
+                    opening_remaining_minutes = int(cooldown_minutes - elapsed_minutes)
+
+        # === Return result based on which cooldown is active ===
+        if closure_cooldown_active and opening_cooldown_active:
+            # Both are active, return the one with more time remaining
+            if closure_remaining_minutes >= opening_remaining_minutes:
+                return {
+                    "allowed": False,
+                    "cooldown_remaining_minutes": closure_remaining_minutes,
+                    "last_trade_closed_at": effective_close_time,
+                    "last_trade_opened_at": recent_opened_trade.timestamp if recent_opened_trade else None,
+                    "cooldown_type": "closure",
+                    "message": f"Epic {epic} is in cooldown for {closure_remaining_minutes} more minutes. Last trade closed at {effective_close_time.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+                }
+            else:
+                return {
+                    "allowed": False,
+                    "cooldown_remaining_minutes": opening_remaining_minutes,
+                    "last_trade_closed_at": effective_close_time,
+                    "last_trade_opened_at": recent_opened_trade.timestamp,
+                    "cooldown_type": "opening",
+                    "message": f"Epic {epic} is in cooldown for {opening_remaining_minutes} more minutes. Last trade opened at {recent_opened_trade.timestamp.strftime('%Y-%m-%d %H:%M:%S')} UTC (prevents back-to-back entries)"
+                }
+        elif closure_cooldown_active:
             return {
                 "allowed": False,
-                "cooldown_remaining_minutes": remaining_minutes,
+                "cooldown_remaining_minutes": closure_remaining_minutes,
                 "last_trade_closed_at": effective_close_time,
-                "message": f"Epic {epic} is in cooldown for {remaining_minutes} more minutes. Last trade closed at {effective_close_time.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+                "last_trade_opened_at": recent_opened_trade.timestamp if recent_opened_trade else None,
+                "cooldown_type": "closure",
+                "message": f"Epic {epic} is in cooldown for {closure_remaining_minutes} more minutes. Last trade closed at {effective_close_time.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+            }
+        elif opening_cooldown_active:
+            return {
+                "allowed": False,
+                "cooldown_remaining_minutes": opening_remaining_minutes,
+                "last_trade_closed_at": effective_close_time,
+                "last_trade_opened_at": recent_opened_trade.timestamp,
+                "cooldown_type": "opening",
+                "message": f"Epic {epic} is in cooldown for {opening_remaining_minutes} more minutes. Last trade opened at {recent_opened_trade.timestamp.strftime('%Y-%m-%d %H:%M:%S')} UTC (prevents back-to-back entries)"
             }
         else:
-            # Cooldown period has expired
-            return {
-                "allowed": True,
-                "message": f"Cooldown expired ({int(elapsed_minutes)} minutes ago)"
-            }
+            # No cooldown active
+            if not most_recent_trade and not recent_opened_trade:
+                return {
+                    "allowed": True,
+                    "message": "No recent trades found",
+                    "cooldown_type": "none"
+                }
+            else:
+                # Calculate how long ago the most recent action was
+                last_action_time = None
+                if effective_close_time and recent_opened_trade:
+                    last_action_time = max(effective_close_time, recent_opened_trade.timestamp)
+                elif effective_close_time:
+                    last_action_time = effective_close_time
+                elif recent_opened_trade:
+                    last_action_time = recent_opened_trade.timestamp
+
+                if last_action_time:
+                    time_elapsed = current_time - last_action_time
+                    elapsed_minutes = int(time_elapsed.total_seconds() / 60)
+                    return {
+                        "allowed": True,
+                        "message": f"Cooldown expired ({elapsed_minutes} minutes ago)",
+                        "cooldown_type": "expired"
+                    }
+                else:
+                    return {
+                        "allowed": True,
+                        "message": "Cooldown expired",
+                        "cooldown_type": "expired"
+                    }
             
     except Exception as e:
         # Log error but allow trade to proceed (fail-open for safety)
