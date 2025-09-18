@@ -295,31 +295,38 @@ class OrderSender:
                 if status == "updated":
                     self.logger.info(f"[✅ SENT] {epic} stop={stop_offset_points}, limit={limit_offset_points}")
                     self.logger.info(f"[RESPONSE] {epic} {json.dumps(result.get('sentPayload', {}), indent=2)}")
-                    
+
+                    # Extract actual levels set by IG from the API response
+                    api_response = result.get('apiResponse', {})
+                    if api_response and 'stopLevel' in result.get('sentPayload', {}):
+                        actual_stop = result.get('sentPayload', {}).get('stopLevel')
+                        actual_limit = result.get('sentPayload', {}).get('limitLevel')
+                        self.logger.info(f"[IG ACTUAL] {epic} stopLevel={actual_stop}, limitLevel={actual_limit}")
+
                     with self._lock:
                         self._last_sent_offsets[epic] = current_offsets
-                    return True
+                    return result  # Return full result instead of just True
                     
                 elif status == "closed":
                     self.logger.info(f"[❌ CLOSED] {epic} {result.get('message', 'Position closed')}")
                     self._mark_trade_closed(epic)
-                    return False
-                    
+                    return {"status": "closed", "message": result.get('message')}
+
                 elif status == "dry_run":
                     self.logger.info(f"[DRY RUN] {epic} {json.dumps(result.get('sentPayload', {}), indent=2)}")
-                    return True
-                    
+                    return result
+
                 else:
                     self.logger.warning(f"[UNEXPECTED] {epic} Status: {status}, Response: {result}")
-                    return False
+                    return {"status": "error", "message": f"Unexpected status: {status}"}
 
             else:
                 self.logger.error(f"[ERROR] {epic} HTTP {response.status_code}: {response.text}")
-                return False
+                return {"status": "error", "message": f"HTTP {response.status_code}: {response.text}"}
 
         except Exception as e:
             self.logger.error(f"[EXCEPTION] {epic} Failed to send adjustment: {e}")
-            return False
+            return {"status": "error", "message": str(e)}
 
     def get_trade_by_deal_id(self, deal_id: str) -> Optional[TradeLog]:
         """Get trade record by deal ID - ADDED MISSING HELPER METHOD"""

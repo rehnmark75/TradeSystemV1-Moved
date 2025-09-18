@@ -45,7 +45,7 @@ BALANCED_PROGRESSIVE_CONFIG = TrailingConfig(
     stage1_lock_points=2,     # Better profit guarantee (was 1)
     stage2_trigger_points=10, # Profit lock at +10 points (was 4)
     stage2_lock_points=5,     # Better profit guarantee (was 2)
-    stage3_trigger_points=15, # ATR trailing at +15 points (REDUCED from 18)
+    stage3_trigger_points=15, # Percentage trailing at +15 points (REDUCED from 18)
     stage3_atr_multiplier=0.7,  # MUCH TIGHTER: 0.7x ATR (was 1.3x)
     stage3_min_distance=2     # Small minimum steps
 )
@@ -63,7 +63,7 @@ CONSERVATIVE_PROGRESSIVE_CONFIG = TrailingConfig(
     stage1_lock_points=10,     # Lock 10 JPY points (1 real pip)
     stage2_trigger_points=60,  # Profit lock at +60 JPY points (6 real pips)
     stage2_lock_points=30,     # Lock 30 JPY points (3 real pips)
-    stage3_trigger_points=100, # ATR trailing at +100 JPY points (10 real pips)
+    stage3_trigger_points=100, # Percentage trailing at +100 JPY points (10 real pips)
     stage3_atr_multiplier=2.0, # Wider ATR for volatile pairs
     stage3_min_distance=30     # 30 JPY points (3 real pips)
 )
@@ -81,7 +81,7 @@ JPY_OPTIMIZED_CONFIG = TrailingConfig(
     stage1_lock_points=5,      # Lock 5 JPY points (0.5 real pip)
     stage2_trigger_points=18,  # Profit lock at +18 JPY points (1.8 real pips)
     stage2_lock_points=10,     # Lock 10 JPY points (1.0 real pip)
-    stage3_trigger_points=25,  # ATR trailing at +25 JPY points (2.5 real pips)
+    stage3_trigger_points=25,  # Percentage trailing at +25 JPY points (2.5 real pips)
     stage3_atr_multiplier=0.6, # TIGHT: 0.6x ATR for smaller steps
     stage3_min_distance=8      # 8 JPY points (0.8 real pips)
 )
@@ -460,5 +460,5 @@ def log_progressive_config(config: TrailingConfig, epic: str, logger, market_con
     logger.info(f"📊 [TRAILING CONFIG] {epic} ({config_type}):")
     logger.info(f"   • Stage 1: Break-even at +{config.stage1_trigger_points}pts → +{config.stage1_lock_points}pt profit")
     logger.info(f"   • Stage 2: Profit lock at +{config.stage2_trigger_points}pts → +{config.stage2_lock_points}pts profit")
-    logger.info(f"   • Stage 3: ATR trailing at +{config.stage3_trigger_points}pts (ATR×{config.stage3_atr_multiplier:.1f})")
+    logger.info(f"   • Stage 3: Percentage-based trailing at +{config.stage3_trigger_points}pts (tiered retracement: 25%/20%/15%)")
     logger.info(f"   • Monitor interval: {config.monitor_interval_seconds}s")

@@ -35,7 +35,7 @@ class TrailingMethod(Enum):
     PARABOLIC_SAR = "parabolic_sar"        # Parabolic SAR-style
     SMART_TRAIL = "smart_trail"            # Multi-condition intelligent trailing
     SUPPORT_RESISTANCE = "support_resistance"  # Technical level-based
-    PROGRESSIVE_3_STAGE = "progressive_3_stage"  # NEW: 3-stage progressive trailing
+    PROGRESSIVE_3_STAGE = "progressive_3_stage"  # 3-stage progressive trailing (Stage 3: percentage-based)
 
 
 @dataclass
@@ -56,7 +56,7 @@ class TrailingConfig:
     stage1_lock_points: int = 1       # Minimum profit guarantee
     stage2_trigger_points: int = 5    # Profit lock trigger
     stage2_lock_points: int = 3       # Better profit guarantee
-    stage3_trigger_points: int = 8    # ATR trailing trigger
+    stage3_trigger_points: int = 8    # Percentage-based trailing trigger
     stage3_atr_multiplier: float = 1.5 # ATR multiplier for stage 3
     stage3_min_distance: int = 2      # Minimum distance for stage 3
 
@@ -612,16 +612,21 @@ class Progressive3StageTrailing(TrailingStrategy):
     """
     3-Stage Progressive Trailing Strategy - Based on Trade Data Analysis
 
-    Stage 1: Quick break-even at +3 points (35.8% → 60%+ trades protected)
-    Stage 2: Profit lock-in at +5 points (meaningful profit secured)
-    Stage 3: ATR-based trailing at +8+ points (trend following)
+    Stage 1: Quick break-even at +6 points (35.8% → 60%+ trades protected)
+    Stage 2: Profit lock-in at +10 points (meaningful profit secured)
+    Stage 3: Percentage-based trailing at +18+ points (reliable trend following)
+
+    Stage 3 uses tiered percentage retracement:
+    - 50+ points profit: 15% retracement allowed
+    - 25-49 points profit: 20% retracement allowed
+    - 18-24 points profit: 25% retracement allowed
 
     This strategy replicates the success of trades with 4-6 adjustments (100% win rate)
     """
 
     def __init__(self, config: TrailingConfig, logger):
         super().__init__(config, logger)
-        self.atr_strategy = ATRTrailing(config, logger)
+        # No longer using ATR strategy - Stage 3 now uses percentage-based trailing
 
     def calculate_trail_level(self, trade: TradeLog, current_price: float,
                             candle_data: List[IGCandle], db: Session) -> Optional[float]:
@@ -719,32 +724,72 @@ class Progressive3StageTrailing(TrailingStrategy):
 
     def _calculate_stage3_trail(self, trade: TradeLog, current_price: float,
                               candle_data: List[IGCandle], current_stop: float) -> Optional[float]:
-        """Stage 3: ATR-based dynamic trailing"""
+        """Stage 3: Percentage-based dynamic trailing (replaces ATR-based)"""
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
 
-        # Calculate ATR-based distance
-        atr = self._calculate_atr(candle_data)
-        if atr:
-            trail_distance = max(
-                atr * self.config.stage3_atr_multiplier,
-                self.config.stage3_min_distance * point_value
-            )
+        # Calculate current profit in points
+        if direction == "BUY":
+            current_profit_points = (current_price - trade.entry_price) / point_value
+        else:  # SELL
+            current_profit_points = (trade.entry_price - current_price) / point_value
+
+        # Calculate maximum achieved profit (from current stop level)
+        if current_stop > 0:
+            if direction == "BUY":
+                max_profit_from_stop = (current_stop - trade.entry_price) / point_value
+            else:  # SELL
+                max_profit_from_stop = (trade.entry_price - current_stop) / point_value
+
+            # Use the better of current profit or profit implied by current stop
+            effective_profit = max(current_profit_points, max_profit_from_stop + 2)  # +2pts buffer
         else:
-            # Fallback to fixed distance
-            trail_distance = self.config.stage3_min_distance * point_value
+            effective_profit = current_profit_points
+
+        # Tiered percentage trailing based on effective profit level
+        if effective_profit >= 50:
+            retracement_percentage = 0.15  # 15% retracement for big profits (50+ points)
+        elif effective_profit >= 25:
+            retracement_percentage = 0.20  # 20% retracement for medium profits (25-49 points)
+        else:
+            retracement_percentage = 0.25  # 25% retracement for smaller profits (18-24 points)
+
+        # Calculate trail distance in points, with minimum protection
+        trail_distance_points = max(
+            self.config.stage3_min_distance,  # Minimum trailing distance
+            effective_profit * retracement_percentage  # Percentage-based distance
+        )
+
+        trail_distance_price = trail_distance_points * point_value
 
         if direction == "BUY":
-            trail_level = current_price - trail_distance
+            trail_level = current_price - trail_distance_price
         else:  # SELL
-            trail_level = current_price + trail_distance
+            trail_level = current_price + trail_distance_price
+
+        self.logger.debug(f"[TRAIL CALC] {trade.symbol}: current_profit={current_profit_points:.1f}pts, "
+                         f"effective_profit={effective_profit:.1f}pts, retracement={retracement_percentage:.0%}, "
+                         f"trail_distance={trail_distance_points:.1f}pts")
 
         # Ensure we don't move backwards from previous stages
         if current_stop > 0:
             if direction == "BUY":
-                trail_level = max(trail_level, current_stop)
-            else:
-                trail_level = min(trail_level, current_stop)
+                # For BUY: only move stop UP (higher) - trail_level should be higher than current_stop
+                if trail_level > current_stop:
+                    self.logger.debug(f"[TRAIL MOVE] BUY: Moving stop UP from {current_stop:.5f} to {trail_level:.5f}")
+                else:
+                    self.logger.debug(f"[TRAIL HOLD] BUY: Keeping stop at {current_stop:.5f} (calculated {trail_level:.5f} not better)")
+                    trail_level = current_stop  # Don't move backwards
+            else:  # SELL
+                # For SELL: only move stop DOWN (lower) - trail_level should be lower than current_stop
+                if trail_level < current_stop:
+                    self.logger.debug(f"[TRAIL MOVE] SELL: Moving stop DOWN from {current_stop:.5f} to {trail_level:.5f}")
+                else:
+                    self.logger.debug(f"[TRAIL HOLD] SELL: Keeping stop at {current_stop:.5f} (calculated {trail_level:.5f} not better)")
+                    trail_level = current_stop  # Don't move backwards
+
+        self.logger.info(f"[PERCENTAGE TRAIL] {trade.symbol}: Profit {current_profit_points:.1f}pts → "
+                        f"{retracement_percentage*100:.0f}% retracement = {trail_distance_points:.1f}pts trail distance")
 
         return round(trail_level, 5)
 
@@ -1173,6 +1218,7 @@ class EnhancedTradeProcessor:
                 self.logger.info(f"🛡️ [PROFIT PROTECTED] Trade {trade.id}: Skipping break-even check, already protected at +10pts")
                 # Set moved_to_breakeven to True to allow trailing
                 trade.moved_to_breakeven = True
+                db.commit()
                 # Don't change status if already profit_protected
             elif not getattr(trade, 'moved_to_breakeven', False) and is_profitable_for_breakeven:
                 self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
@@ -1212,8 +1258,31 @@ class EnhancedTradeProcessor:
                         trade.status = "break_even"
                     db.commit()
                 else:
-                    # Proceed with normal break-even logic
-                    if self.validate_stop_level(trade, current_price, break_even_stop):
+                    # ✅ CRITICAL FIX: Enhanced validation for break-even stops
+                    is_valid_stop = self.validate_stop_level(trade, current_price, break_even_stop)
+
+                    # Additional validation: For SELL trades, stop cannot be above current price
+                    if trade.direction.upper() == "SELL" and break_even_stop >= current_price:
+                        self.logger.warning(f"⚠️ [BREAK-EVEN INVALID] Trade {trade.id}: Break-even stop {break_even_stop:.5f} >= current price {current_price:.5f}")
+                        self.logger.warning(f"📍 [SKIP TO STAGE 2/3] Trade {trade.id}: Setting moved_to_breakeven=True and progressing to higher stages")
+                        # Set the flag to progress to Stage 2/3 even though we can't set break-even
+                        trade.moved_to_breakeven = True
+                        if trade.status != "profit_protected":
+                            trade.status = "break_even"
+                        db.commit()
+                        is_valid_stop = False  # Skip the API call
+
+                    # For BUY trades, stop cannot be below current price
+                    elif trade.direction.upper() == "BUY" and break_even_stop <= current_price:
+                        self.logger.warning(f"⚠️ [BREAK-EVEN INVALID] Trade {trade.id}: Break-even stop {break_even_stop:.5f} <= current price {current_price:.5f}")
+                        self.logger.warning(f"📍 [SKIP TO STAGE 2/3] Trade {trade.id}: Setting moved_to_breakeven=True and progressing to higher stages")
+                        trade.moved_to_breakeven = True
+                        if trade.status != "profit_protected":
+                            trade.status = "break_even"
+                        db.commit()
+                        is_valid_stop = False  # Skip the API call
+
+                    if is_valid_stop:
                         # Calculate adjustment needed
                         if trade.direction.upper() == "BUY":
                             adjustment_distance = break_even_stop - current_stop
@@ -1239,23 +1308,36 @@ class EnhancedTradeProcessor:
                             self.logger.info(f"📤 [BREAK-EVEN SEND] Trade {trade.id}: "
                                         f"Moving stop to break-even (+1pt), adjustment={adjustment_points}pts")
                             
-                            success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
-                            
-                            if success:
+                            api_result = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+
+                            if isinstance(api_result, dict) and api_result.get("status") == "updated":
+                                # Extract IG's actual stop level for break-even
+                                sent_payload = api_result.get("sentPayload", {})
+                                ig_actual_stop = sent_payload.get("stopLevel")
+
                                 trade.moved_to_breakeven = True
                                 # ✅ IMPORTANT: Don't change status if already profit_protected
                                 if trade.status != "profit_protected":
                                     trade.status = "break_even"
-                                trade.sl_price = break_even_stop
+
+                                # Use IG's actual stop level
+                                if ig_actual_stop:
+                                    trade.sl_price = float(ig_actual_stop)
+                                    self.logger.info(f"📍 [IG ACTUAL BE] Trade {trade.id}: IG set break-even to {ig_actual_stop:.5f}")
+                                else:
+                                    trade.sl_price = break_even_stop
+                                    self.logger.warning(f"⚠️ [FALLBACK BE] Trade {trade.id}: Using calculated BE {break_even_stop:.5f}")
+
                                 trade.last_trigger_price = current_price
                                 trade.trigger_time = datetime.utcnow()
                                 db.commit()
-                                
+
                                 self.logger.info(f"🎉 [BREAK-EVEN] Trade {trade.id} {trade.symbol} "
-                                            f"moved to break-even: {break_even_stop:.5f}")
+                                            f"moved to break-even: {trade.sl_price:.5f}")
                                 # Don't return early - continue to Stage 2/3 progression check
                             else:
-                                self.logger.error(f"❌ [BREAK-EVEN FAILED] Trade {trade.id}: Stop adjustment failed")
+                                error_msg = api_result.get("message", "Unknown error") if isinstance(api_result, dict) else "API call failed"
+                                self.logger.error(f"❌ [BREAK-EVEN FAILED] Trade {trade.id}: {error_msg}")
                         else:
                             self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Adjustment points = 0")
                             # Set flag anyway to prevent repeated attempts
@@ -1274,8 +1356,8 @@ class EnhancedTradeProcessor:
                 stage3_trigger = progressive_config.stage3_trigger_points  # 18 points for AUDJPY
 
                 if profit_points >= stage3_trigger:
-                    # Stage 3: ATR trailing
-                    self.logger.info(f"🚀 [STAGE 3 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 3 trigger {stage3_trigger}pts - ATR trailing")
+                    # Stage 3: Percentage-based trailing
+                    self.logger.info(f"🚀 [STAGE 3 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 3 trigger {stage3_trigger}pts - Percentage trailing")
                     # Use progressive 3-stage strategy directly
                     progressive_strategy = Progressive3StageTrailing(self.config, self.logger)
                     try:
@@ -1308,7 +1390,7 @@ class EnhancedTradeProcessor:
                                     trade.last_trigger_price = current_price
                                     trade.trigger_time = datetime.utcnow()
                                     db.commit()
-                                    self.logger.info(f"🎯 [STAGE 3] Trade {trade.id}: ATR trailing to {new_trail_level:.5f}")
+                                    self.logger.info(f"🎯 [STAGE 3] Trade {trade.id}: Percentage trailing to {new_trail_level:.5f}")
                                     return True
                     except Exception as e:
                         self.logger.error(f"❌ [STAGE 3 ERROR] Trade {trade.id}: {e}")
@@ -1408,21 +1490,33 @@ class EnhancedTradeProcessor:
                             direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
 
                             # Send the adjustment
-                            success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                            api_result = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
 
-                            if success:
-                                # Update trade record
-                                trade.sl_price = new_trail_level
+                            if isinstance(api_result, dict) and api_result.get("status") == "updated":
+                                # Extract IG's actual stop level from the API response
+                                sent_payload = api_result.get("sentPayload", {})
+                                ig_actual_stop = sent_payload.get("stopLevel")
+
+                                if ig_actual_stop:
+                                    # Use IG's actual stop level instead of our calculation
+                                    trade.sl_price = float(ig_actual_stop)
+                                    self.logger.info(f"📍 [IG ACTUAL] Trade {trade.id}: IG set stop to {ig_actual_stop:.5f} (calculated {new_trail_level:.5f})")
+                                else:
+                                    # Fallback to our calculation if IG's response is missing
+                                    trade.sl_price = new_trail_level
+                                    self.logger.warning(f"⚠️ [FALLBACK] Trade {trade.id}: Using calculated stop {new_trail_level:.5f}")
+
                                 trade.last_trigger_price = current_price
                                 trade.trigger_time = datetime.utcnow()
                                 trade.status = "trailing"
                                 db.commit()
 
                                 self.logger.info(f"🎯 [TRAILING SUCCESS] Trade {trade.id} {trade.symbol}: "
-                                               f"Stop moved to {new_trail_level:.5f} ({adjustment_points} pts)")
+                                               f"Stop moved to {trade.sl_price:.5f} ({adjustment_points} pts)")
                                 return True
                             else:
-                                self.logger.error(f"❌ [TRAILING FAILED] Trade {trade.id}: API adjustment failed")
+                                error_msg = api_result.get("message", "Unknown error") if isinstance(api_result, dict) else "API call failed"
+                                self.logger.error(f"❌ [TRAILING FAILED] Trade {trade.id}: {error_msg}")
                                 return False
                         else:
                             self.logger.debug(f"[NO TRAIL] Trade {trade.id}: No trail level calculated")
@@ -1443,8 +1537,8 @@ class EnhancedTradeProcessor:
             return False
 
     
-    def _send_stop_adjustment(self, trade: TradeLog, stop_points: int, 
-                            direction_stop: str, limit_points: int) -> bool:
+    def _send_stop_adjustment(self, trade: TradeLog, stop_points: int,
+                            direction_stop: str, limit_points: int):
         """Send stop adjustment to order system - ENHANCED"""
         try:
             payload = {
@@ -1461,12 +1555,12 @@ class EnhancedTradeProcessor:
             self.logger.info(f"[SENDING TO] {ADJUST_STOP_URL}")
             
             # Use the order sender to send the adjustment
-            result = self.order_sender.send_adjustment(trade.symbol, trade.direction, 
+            result = self.order_sender.send_adjustment(trade.symbol, trade.direction,
                                                      stop_points, limit_points)
-            
+
             self.logger.info(f"[✅ SENT] {trade.symbol} stop={stop_points}, limit={limit_points}")
-            
-            return True
+
+            return result  # Return the full API response instead of just True
             
         except Exception as e:
             self.logger.error(f"❌ [SEND ERROR] Trade {trade.id}: {e}")
