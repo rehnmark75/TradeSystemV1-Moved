@@ -1091,21 +1091,41 @@ class TradeValidator:
             return False, f"Structure validation error: {str(e)}"
     
     def check_trading_hours(self) -> Tuple[bool, str]:
-        """Check if current time is within trading hours"""
+        """Check if current time is within trading hours and before daily cutoff"""
         try:
-            current_hour = datetime.now().hour
-            
-            if self.trading_start_hour <= self.trading_end_hour:
-                # Normal case: 9-17
-                if not (self.trading_start_hour <= current_hour < self.trading_end_hour):
-                    return False, f"Outside trading hours ({self.trading_start_hour}-{self.trading_end_hour}), current hour: {current_hour}"
-            else:
-                # Overnight case: 22-6
-                if not (current_hour >= self.trading_start_hour or current_hour < self.trading_end_hour):
-                    return False, f"Outside trading hours ({self.trading_start_hour}-{self.trading_end_hour}), current hour: {current_hour}"
-            
-            return True, f"Within trading hours ({self.trading_start_hour}-{self.trading_end_hour})"
-            
+            # Use UTC time for consistent global operation
+            now_utc = datetime.now(timezone.utc)
+            current_hour = now_utc.hour
+            current_minute = now_utc.minute
+            weekday = now_utc.weekday()  # 0 = Monday, 6 = Sunday
+
+            # Get trading cutoff time from config (default 20:00 UTC)
+            trading_cutoff_hour = getattr(config, 'TRADING_CUTOFF_TIME_UTC', 20)
+
+            # Check daily trading cutoff (no new trades after cutoff time)
+            if getattr(config, 'ENABLE_TRADING_TIME_CONTROLS', True):
+                if current_hour >= trading_cutoff_hour:
+                    return False, f"Trading cutoff reached: {current_hour:02d}:{current_minute:02d} UTC >= {trading_cutoff_hour:02d}:00 UTC (no new trades after cutoff)"
+
+            # Weekend check - no trading on Saturday (5) and Sunday (6) before 21:00 UTC
+            if weekday == 5:  # Saturday
+                return False, f"Weekend: No trading on Saturday"
+            elif weekday == 6 and current_hour < 21:  # Sunday before 21:00 UTC
+                return False, f"Weekend: Markets closed until Sunday 21:00 UTC (currently {current_hour:02d}:{current_minute:02d} UTC)"
+
+            # Original trading hours validation (if enabled)
+            if self.validate_market_hours:
+                if self.trading_start_hour <= self.trading_end_hour:
+                    # Normal case: 9-17
+                    if not (self.trading_start_hour <= current_hour < self.trading_end_hour):
+                        return False, f"Outside trading hours ({self.trading_start_hour}-{self.trading_end_hour}), current hour: {current_hour}"
+                else:
+                    # Overnight case: 22-6
+                    if not (current_hour >= self.trading_start_hour or current_hour < self.trading_end_hour):
+                        return False, f"Outside trading hours ({self.trading_start_hour}-{self.trading_end_hour}), current hour: {current_hour}"
+
+            return True, f"Within trading hours (cutoff: {trading_cutoff_hour:02d}:00 UTC, current: {current_hour:02d}:{current_minute:02d} UTC)"
+
         except Exception as e:
             self.logger.error(f"Trading hours check error: {e}")
             return True, "Trading hours check failed, allowing"  # Fail-safe

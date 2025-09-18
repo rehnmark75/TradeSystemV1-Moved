@@ -16,4 +16,16 @@ IG_USERNAME = "rehnmarkh"
 IG_API_KEY = "prodapikey"
 IG_PWD = "prodpwd"
 
+# ================== POSITION CLOSER CONFIGURATION ==================
+# Weekend protection - automatically close positions on Fridays
+ENABLE_POSITION_CLOSER = True         # Enable/disable automatic position closure
+POSITION_CLOSURE_HOUR_UTC = 20        # Hour to close positions (UTC)
+POSITION_CLOSURE_MINUTE_UTC = 30      # Minute to close positions (UTC)
+POSITION_CLOSURE_WEEKDAY = 4          # Day of week to close positions (4 = Friday, 0 = Monday)
+
+# Position closer safety settings
+POSITION_CLOSER_TIMEOUT_SECONDS = 60  # Timeout for position closure operations
+POSITION_CLOSER_MAX_RETRY_ATTEMPTS = 3  # Max retries for failed closures
+POSITION_CLOSER_RETRY_DELAY_SECONDS = 5  # Delay between retry attempts
+
 

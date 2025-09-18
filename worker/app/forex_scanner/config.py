@@ -291,6 +291,11 @@ DATA_QUALITY_LOG_LEVEL = 'WARNING'  # INFO, WARNING, ERROR
 TRADING_SAFETY_CHECKS_ENABLED = True
 BLOCK_TRADING_ON_DATA_ISSUES = True  # Block trades when data quality is poor
 
+# Time-based trading controls (Weekend protection)
+ENABLE_TRADING_TIME_CONTROLS = True    # Enable/disable time-based trading controls
+TRADING_CUTOFF_TIME_UTC = 20           # No new trades after this hour UTC (20:00 UTC)
+# Note: Position closure happens in fastapi-dev container at 20:30 UTC on Fridays
+
 # ==============================================
 # STREAM VS API VALIDATION SETTINGS
 # ==============================================
