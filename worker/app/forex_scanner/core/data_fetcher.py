@@ -1682,7 +1682,7 @@ class DataFetcher:
                 return None
 
             # Data quality filtering for trading safety
-            if getattr(config, 'ENABLE_DATA_QUALITY_FILTERING', True):
+            if getattr(config, 'ENABLE_DATA_QUALITY_FILTERING', False):
                 if 'is_safe_for_trading' in df.columns:
                     unsafe_count = len(df[df['is_safe_for_trading'] == False])
                     if unsafe_count > 0:
