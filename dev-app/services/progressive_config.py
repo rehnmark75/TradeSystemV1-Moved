@@ -22,9 +22,9 @@ DEFAULT_PROGRESSIVE_CONFIG = TrailingConfig(
     max_trail_distance=50,
     monitor_interval_seconds=30,  # More frequent monitoring for progressive system
 
-    # Progressive stage settings
+    # Progressive stage settings (ENHANCED: Stage 1 uses IG minimum distance when available)
     stage1_trigger_points=STAGE1_TRIGGER_POINTS,
-    stage1_lock_points=STAGE1_LOCK_POINTS,
+    stage1_lock_points=STAGE1_LOCK_POINTS,  # Fallback when IG minimum not available
     stage2_trigger_points=STAGE2_TRIGGER_POINTS,
     stage2_lock_points=STAGE2_LOCK_POINTS,
     stage3_trigger_points=STAGE3_TRIGGER_POINTS,

@@ -690,10 +690,18 @@ class Progressive3StageTrailing(TrailingStrategy):
         return trail_level
 
     def _calculate_stage1_trail(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
-        """Stage 1: Break-even protection - entry + 1 point"""
+        """Stage 1: Break-even protection - uses IG minimum distance"""
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
-        lock_points = self.config.stage1_lock_points
+
+        # ✅ ENHANCEMENT: Use IG's minimum stop distance for better trade evolution
+        ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+        if ig_min_distance:
+            lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
+            self.logger.info(f"🎯 [STAGE 1 IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts")
+        else:
+            lock_points = self.config.stage1_lock_points
+            self.logger.info(f"⚠️ [STAGE 1 FALLBACK] Trade {trade.id}: No IG minimum distance, using config {lock_points}pts")
 
         if direction == "BUY":
             trail_level = trade.entry_price + (lock_points * point_value)
@@ -1224,15 +1232,28 @@ class EnhancedTradeProcessor:
                 self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
                             f"Profit {profit_points}pts >= trigger {break_even_trigger_points}pts")
                 
-                # Calculate break-even stop level using progressive config
-                lock_points = progressive_config.stage1_lock_points
+                # Calculate break-even stop level using IG's minimum distance if available
+                # ✅ ENHANCEMENT: Use IG's minimum stop distance for better trade evolution
+                ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+                if ig_min_distance:
+                    lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
+                    self.logger.info(f"🎯 [USING IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts instead of config {progressive_config.stage1_lock_points}pts")
+                else:
+                    lock_points = progressive_config.stage1_lock_points
+                    self.logger.info(f"⚠️ [FALLBACK CONFIG] Trade {trade.id}: No IG minimum distance, using config {lock_points}pts")
                 if trade.direction.upper() == "BUY":
                     break_even_stop = trade.entry_price + (lock_points * point_value)  # Entry + lock_points
                 else:
                     break_even_stop = trade.entry_price - (lock_points * point_value)  # Entry - lock_points
 
-                self.logger.info(f"💰 [BREAK-EVEN CALC] Trade {trade.id}: entry={trade.entry_price:.5f}, "
-                               f"lock_points={lock_points}, break_even_stop={break_even_stop:.5f}")
+                # Calculate actual currency amount for JPY pairs
+                if "JPY" in trade.symbol:
+                    currency_amount = int(lock_points * 100)  # 2 points = 200 JPY
+                    self.logger.info(f"💰 [BREAK-EVEN CALC] Trade {trade.id}: entry={trade.entry_price:.5f}, "
+                                   f"lock_points={lock_points} ({currency_amount} JPY), break_even_stop={break_even_stop:.5f}")
+                else:
+                    self.logger.info(f"💰 [BREAK-EVEN CALC] Trade {trade.id}: entry={trade.entry_price:.5f}, "
+                                   f"lock_points={lock_points}, break_even_stop={break_even_stop:.5f}")
                 
                 # ✅ CRITICAL FIX: For profit_protected trades, check if break-even would worsen the position
                 # ✅ FIX: Re-query trade from current session to get fresh data

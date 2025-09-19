@@ -98,7 +98,7 @@ ATR_STOP_MULTIPLIER = 1.5  # ATR multiplier for stop loss distance
 
 # Stage 1: Balanced Break-Even Protection (OPTIMIZED FOR PROFIT CAPTURE)
 STAGE1_TRIGGER_POINTS = 7    # Move to break-even after +7 points profit (was 3)
-STAGE1_LOCK_POINTS = 2       # Guarantee +2 point minimum profit (was 1)
+STAGE1_LOCK_POINTS = 2       # Fallback: +2 point minimum profit (ENHANCED: uses IG min distance when available)
 
 # Stage 2: Profit Lock-In (OPTIMIZED FOR TREND FOLLOWING)
 STAGE2_TRIGGER_POINTS = 12   # Lock in meaningful profit after +12 points (was 5)
