@@ -26,14 +26,15 @@ class ZeroLagSignalCalculator:
                                     signal_data: Dict = None) -> float:
         """
         Calculate comprehensive confidence score for Zero Lag signals
-        
+
         Factors considered:
-        1. Zero Lag trend alignment (30% weight)
-        2. Price position relative to ZLEMA (20% weight)  
+        1. Zero Lag trend alignment (25% weight)
+        2. Price position relative to ZLEMA (15% weight)
         3. EMA 200 trend filter (15% weight)
         4. Squeeze Momentum confirmation (20% weight)
-        5. Volatility conditions (10% weight)
-        6. Signal strength (5% weight)
+        5. RSI validation (15% weight)
+        6. Volatility conditions (5% weight)
+        7. Signal strength (5% weight)
         
         Args:
             latest_row: DataFrame row with indicator data
@@ -56,45 +57,51 @@ class ZeroLagSignalCalculator:
             if close == 0 or zlema == 0:
                 return 0.3  # Low confidence if key data missing
             
-            # 1. ZERO LAG TREND ALIGNMENT (30% weight)
+            # 1. ZERO LAG TREND ALIGNMENT (25% weight)
             trend_factor = self._calculate_trend_alignment_factor(
                 close, zlema, trend_state, signal_type, volatility
             )
-            
-            # 2. PRICE POSITION RELATIVE TO ZLEMA (20% weight)  
+
+            # 2. PRICE POSITION RELATIVE TO ZLEMA (15% weight)
             position_factor = self._calculate_position_factor(
                 close, zlema, signal_type, volatility
             )
-            
+
             # 3. EMA 200 TREND FILTER (15% weight)
             ema200_factor = self._calculate_ema200_factor(
                 close, ema_200, signal_type
             )
-            
+
             # 4. SQUEEZE MOMENTUM CONFIRMATION (20% weight)
             squeeze_factor = 0.0
             if self.squeeze_analyzer:
                 squeeze_factor = self._calculate_squeeze_factor(
                     latest_row, signal_type
                 )
-            
-            # 5. VOLATILITY CONDITIONS (10% weight)
+
+            # 5. RSI VALIDATION (15% weight)
+            rsi_factor = self._calculate_rsi_factor(
+                latest_row, signal_type
+            )
+
+            # 6. VOLATILITY CONDITIONS (5% weight)
             volatility_factor = self._calculate_volatility_factor(
                 close, volatility
             )
-            
-            # 6. SIGNAL STRENGTH (5% weight)
+
+            # 7. SIGNAL STRENGTH (5% weight)
             strength_factor = self._calculate_strength_factor(
                 latest_row, signal_data
             )
             
             # Calculate total confidence
             total_confidence = (
-                base_confidence + 
-                trend_factor + 
-                position_factor + 
+                base_confidence +
+                trend_factor +
+                position_factor +
                 ema200_factor +
                 squeeze_factor +
+                rsi_factor +
                 volatility_factor +
                 strength_factor
             )
@@ -106,9 +113,10 @@ class ZeroLagSignalCalculator:
             self._log_confidence_breakdown({
                 'base': base_confidence,
                 'trend_alignment': trend_factor,
-                'position': position_factor, 
+                'position': position_factor,
                 'ema_200': ema200_factor,
                 'squeeze_momentum': squeeze_factor,
+                'rsi': rsi_factor,
                 'volatility': volatility_factor,
                 'strength': strength_factor,
                 'final': final_confidence
@@ -132,31 +140,31 @@ class ZeroLagSignalCalculator:
             
             if signal_type == 'BULL':
                 if trend_state == 1 and price_above_zlema:
-                    factor += 0.25  # Perfect alignment
-                    self.logger.debug("Trend alignment: Perfect bull alignment (+25%)")
+                    factor += 0.20  # Perfect alignment (reduced from 25% to 20%)
+                    self.logger.debug("Trend alignment: Perfect bull alignment (+20%)")
                 elif price_above_zlema:
-                    factor += 0.15  # Good price position
-                    self.logger.debug("Trend alignment: Price above ZLEMA (+15%)")
+                    factor += 0.12  # Good price position (reduced from 15% to 12%)
+                    self.logger.debug("Trend alignment: Price above ZLEMA (+12%)")
                 elif trend_state == 1:
-                    factor += 0.08  # Trend is up but price below ZLEMA
-                    self.logger.debug("Trend alignment: Uptrend but price below ZLEMA (+8%)")
+                    factor += 0.06  # Trend is up but price below ZLEMA (reduced from 8% to 6%)
+                    self.logger.debug("Trend alignment: Uptrend but price below ZLEMA (+6%)")
                 else:
-                    factor -= 0.1  # Poor alignment
-                    self.logger.debug("Trend alignment: Poor bull alignment (-10%)")
+                    factor -= 0.08  # Poor alignment (reduced from -10% to -8%)
+                    self.logger.debug("Trend alignment: Poor bull alignment (-8%)")
             
             else:  # BEAR
                 if trend_state == -1 and not price_above_zlema:
-                    factor += 0.25  # Perfect alignment
-                    self.logger.debug("Trend alignment: Perfect bear alignment (+25%)")
+                    factor += 0.20  # Perfect alignment (reduced from 25% to 20%)
+                    self.logger.debug("Trend alignment: Perfect bear alignment (+20%)")
                 elif not price_above_zlema:
-                    factor += 0.15  # Good price position
-                    self.logger.debug("Trend alignment: Price below ZLEMA (+15%)")
+                    factor += 0.12  # Good price position (reduced from 15% to 12%)
+                    self.logger.debug("Trend alignment: Price below ZLEMA (+12%)")
                 elif trend_state == -1:
-                    factor += 0.08  # Trend is down but price above ZLEMA
-                    self.logger.debug("Trend alignment: Downtrend but price above ZLEMA (+8%)")
+                    factor += 0.06  # Trend is down but price above ZLEMA (reduced from 8% to 6%)
+                    self.logger.debug("Trend alignment: Downtrend but price above ZLEMA (+6%)")
                 else:
-                    factor -= 0.1  # Poor alignment
-                    self.logger.debug("Trend alignment: Poor bear alignment (-10%)")
+                    factor -= 0.08  # Poor alignment (reduced from -10% to -8%)
+                    self.logger.debug("Trend alignment: Poor bear alignment (-8%)")
             
             return factor
             
@@ -176,21 +184,21 @@ class ZeroLagSignalCalculator:
             
             if signal_type == 'BULL':
                 if close > zlema:
-                    # Price above ZLEMA is good for bull signals
-                    position_factor = min(0.15, distance * 0.05)
+                    # Price above ZLEMA is good for bull signals (reduced from 15% to 12%)
+                    position_factor = min(0.12, distance * 0.04)
                     self.logger.debug(f"Position: Bull price above ZLEMA (+{position_factor:.1%})")
                 else:
-                    # Price below ZLEMA reduces confidence
-                    position_factor = -min(0.08, distance * 0.03)
+                    # Price below ZLEMA reduces confidence (reduced from -8% to -6%)
+                    position_factor = -min(0.06, distance * 0.02)
                     self.logger.debug(f"Position: Bull price below ZLEMA ({position_factor:.1%})")
             else:  # BEAR
                 if close < zlema:
-                    # Price below ZLEMA is good for bear signals
-                    position_factor = min(0.15, distance * 0.05)
+                    # Price below ZLEMA is good for bear signals (reduced from 15% to 12%)
+                    position_factor = min(0.12, distance * 0.04)
                     self.logger.debug(f"Position: Bear price below ZLEMA (+{position_factor:.1%})")
                 else:
-                    # Price above ZLEMA reduces confidence
-                    position_factor = -min(0.08, distance * 0.03)
+                    # Price above ZLEMA reduces confidence (reduced from -8% to -6%)
+                    position_factor = -min(0.06, distance * 0.02)
                     self.logger.debug(f"Position: Bear price above ZLEMA ({position_factor:.1%})")
             
             return position_factor
@@ -261,18 +269,18 @@ class ZeroLagSignalCalculator:
             
             volatility_ratio = volatility / close
             
-            if 0.003 <= volatility_ratio <= 0.025:  # Good volatility range
-                volatility_factor = 0.08
-                self.logger.debug(f"Volatility: Optimal ({volatility_ratio:.4f}) (+8%)")
-            elif volatility_ratio < 0.001:  # Too low volatility
-                volatility_factor = -0.05
-                self.logger.debug(f"Volatility: Too low ({volatility_ratio:.4f}) (-5%)")
-            elif volatility_ratio > 0.04:  # Too high volatility
+            if 0.003 <= volatility_ratio <= 0.025:  # Good volatility range (reduced from 8% to 4%)
+                volatility_factor = 0.04
+                self.logger.debug(f"Volatility: Optimal ({volatility_ratio:.4f}) (+4%)")
+            elif volatility_ratio < 0.001:  # Too low volatility (reduced from -5% to -3%)
                 volatility_factor = -0.03
-                self.logger.debug(f"Volatility: Too high ({volatility_ratio:.4f}) (-3%)")
+                self.logger.debug(f"Volatility: Too low ({volatility_ratio:.4f}) (-3%)")
+            elif volatility_ratio > 0.04:  # Too high volatility (reduced from -3% to -2%)
+                volatility_factor = -0.02
+                self.logger.debug(f"Volatility: Too high ({volatility_ratio:.4f}) (-2%)")
             else:
-                volatility_factor = 0.03  # Acceptable
-                self.logger.debug(f"Volatility: Acceptable ({volatility_ratio:.4f}) (+3%)")
+                volatility_factor = 0.02  # Acceptable (reduced from 3% to 2%)
+                self.logger.debug(f"Volatility: Acceptable ({volatility_ratio:.4f}) (+2%)")
             
             return volatility_factor
             
@@ -313,6 +321,7 @@ class ZeroLagSignalCalculator:
             self.logger.debug(f"   Price Position: {factors['position']:+.1%}")
             self.logger.debug(f"   EMA 200 Filter: {factors['ema_200']:+.1%}")
             self.logger.debug(f"   Squeeze Momentum: {factors['squeeze_momentum']:+.1%}")
+            self.logger.debug(f"   RSI Validation: {factors['rsi']:+.1%}")
             self.logger.debug(f"   Volatility: {factors['volatility']:+.1%}")
             self.logger.debug(f"   Signal Strength: {factors['strength']:+.1%}")
             self.logger.debug(f"   === FINAL: {factors['final']:.1%} ===")
@@ -410,3 +419,103 @@ class ZeroLagSignalCalculator:
             self.logger.debug(f"Signal confidence {confidence:.1%} below threshold {self.min_confidence:.1%}")
             return False
         return True
+
+    def validate_rsi_conditions(self, latest_row: pd.Series, signal_type: str) -> bool:
+        """
+        Validate RSI conditions for signal filtering
+
+        RSI Rules:
+        - BULL signals: RSI must be under 70 (not overbought)
+        - BEAR signals: RSI must be over 30 (not oversold)
+
+        Args:
+            latest_row: DataFrame row with RSI data
+            signal_type: 'BULL' or 'BEAR'
+
+        Returns:
+            True if RSI conditions are met, False otherwise
+        """
+        try:
+            rsi = latest_row.get('rsi', 50.0)
+
+            if signal_type == 'BULL':
+                if rsi >= 70:
+                    self.logger.debug(f"❌ BULL signal blocked: RSI {rsi:.1f} >= 70 (overbought)")
+                    return False
+                else:
+                    self.logger.debug(f"✅ RSI validation passed for BULL: RSI {rsi:.1f} < 70")
+                    return True
+
+            elif signal_type == 'BEAR':
+                if rsi <= 30:
+                    self.logger.debug(f"❌ BEAR signal blocked: RSI {rsi:.1f} <= 30 (oversold)")
+                    return False
+                else:
+                    self.logger.debug(f"✅ RSI validation passed for BEAR: RSI {rsi:.1f} > 30")
+                    return True
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Error validating RSI conditions: {e}")
+            return True  # Allow signal on error to avoid blocking strategy
+
+    def _calculate_rsi_factor(self, latest_row: pd.Series, signal_type: str) -> float:
+        """
+        Calculate confidence factor based on RSI position
+
+        RSI Confidence Boost Logic:
+        - BULL signals: Higher confidence when RSI is 40-65 (good buying zone)
+        - BEAR signals: Higher confidence when RSI is 35-60 (good selling zone)
+
+        Args:
+            latest_row: DataFrame row with RSI data
+            signal_type: 'BULL' or 'BEAR'
+
+        Returns:
+            RSI confidence factor between -0.1 and +0.1
+        """
+        try:
+            rsi = latest_row.get('rsi', 50.0)
+
+            if signal_type == 'BULL':
+                if 40 <= rsi <= 65:
+                    # Optimal RSI range for bull signals
+                    factor = 0.08
+                    self.logger.debug(f"RSI factor: Optimal bull range RSI={rsi:.1f} (+8%)")
+                elif 30 <= rsi < 40:
+                    # Good oversold recovery
+                    factor = 0.05
+                    self.logger.debug(f"RSI factor: Oversold recovery RSI={rsi:.1f} (+5%)")
+                elif 65 < rsi < 70:
+                    # Getting expensive but still acceptable
+                    factor = 0.02
+                    self.logger.debug(f"RSI factor: Getting expensive RSI={rsi:.1f} (+2%)")
+                else:
+                    # Neutral or poor RSI
+                    factor = 0.0
+                    self.logger.debug(f"RSI factor: Neutral/poor RSI={rsi:.1f} (0%)")
+
+            else:  # BEAR
+                if 35 <= rsi <= 60:
+                    # Optimal RSI range for bear signals
+                    factor = 0.08
+                    self.logger.debug(f"RSI factor: Optimal bear range RSI={rsi:.1f} (+8%)")
+                elif 60 < rsi <= 70:
+                    # Good overbought reversal
+                    factor = 0.05
+                    self.logger.debug(f"RSI factor: Overbought reversal RSI={rsi:.1f} (+5%)")
+                elif 30 < rsi < 35:
+                    # Getting cheap but still acceptable
+                    factor = 0.02
+                    self.logger.debug(f"RSI factor: Getting cheap RSI={rsi:.1f} (+2%)")
+                else:
+                    # Neutral or poor RSI
+                    factor = 0.0
+                    self.logger.debug(f"RSI factor: Neutral/poor RSI={rsi:.1f} (0%)")
+
+            return factor
+
+        except Exception as e:
+            self.logger.debug(f"RSI factor calculation failed: {e}")
+            return 0.0

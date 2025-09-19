@@ -1260,7 +1260,7 @@ class DataFetcher:
                         tz_resampled = df_with_tz[col].resample(
                             '15min', label='left', closed='left', origin='epoch'
                         ).first()
-                        df_15m_reset[col] = df_15m_reset['start_time'].map(tz_resampled).fillna(method='ffill')
+                        df_15m_reset[col] = df_15m_reset['start_time'].map(tz_resampled).ffill()
                     except Exception as tz_error:
                         self.logger.debug(f"⚠️ Could not resample timezone column {col}: {tz_error}")
             
@@ -1437,7 +1437,7 @@ class DataFetcher:
                         tz_resampled = df_with_tz[col].resample(
                             '60min', label='left', closed='left', origin='epoch'
                         ).first()
-                        df_60m_reset[col] = df_60m_reset['start_time'].map(tz_resampled).fillna(method='ffill')
+                        df_60m_reset[col] = df_60m_reset['start_time'].map(tz_resampled).ffill()
                     except Exception as tz_error:
                         self.logger.debug(f"⚠️ Could not resample timezone column {col}: {tz_error}")
 

@@ -368,11 +368,19 @@ class ZeroLagStrategy(BaseStrategy):
                 momentum_color = "RED" if is_red else "MAROON"
                 
             self.logger.debug(f"✅ Squeeze validation passed: {momentum_color} color + NO squeeze")
-            
+
+            # VALIDATION 4: RSI CONDITIONS
+            # BULL: RSI must be under 70 (not overbought)
+            # BEAR: RSI must be over 30 (not oversold)
+            if not self.signal_calculator.validate_rsi_conditions(latest_row, signal_type):
+                return None
+
+            self.logger.debug(f"✅ RSI validation passed")
+
             # ALL VALIDATIONS PASSED - CREATE HIGH-QUALITY SIGNAL
             signal = self._create_base_signal(signal_type, epic, timeframe, latest_row, df, spread_pips)
-            
-            # VALIDATION 4: MULTI-TIMEFRAME ALIGNMENT (1H + 4H)
+
+            # VALIDATION 5: MULTI-TIMEFRAME ALIGNMENT (1H + 4H)
             if self.data_fetcher:
                 import pandas as pd
                 current_timestamp = pd.Timestamp(signal['timestamp']) if isinstance(signal.get('timestamp'), str) else latest_row.name
@@ -413,8 +421,9 @@ class ZeroLagStrategy(BaseStrategy):
                 'ema200_filter': True,             # Already validated
                 'squeeze_momentum_aligned': True,  # Already validated
                 'squeeze_off': True,               # Already validated
+                'rsi_validation': True,            # Already validated
                 'multi_timeframe_validation': signal.get('mtf_validation', {}).get('overall_valid', False),
-                'validation_level': 'strict_4_component_with_mtf'  # Updated to reflect MTF
+                'validation_level': 'strict_5_component_with_mtf'  # Updated to reflect RSI and MTF
             }
             
             # Add strategy metadata
@@ -443,12 +452,16 @@ class ZeroLagStrategy(BaseStrategy):
                 h4_status = "4H✓" if mtf_info.get('h4_validation') else "4H✗"
                 mtf_status = f" + MTF({h1_status},{h4_status})"
             
-            self.logger.info(f"🎯 HIGH-QUALITY {signal_type} signal: ribbon={trend} + EMA200 + squeeze={momentum_color} + NO_SQUEEZE{mtf_status}")
+            # Add RSI info to signal for logging
+            rsi_value = latest_row.get('rsi', 50.0)
+
+            self.logger.info(f"🎯 HIGH-QUALITY {signal_type} signal: ribbon={trend} + EMA200 + squeeze={momentum_color} + NO_SQUEEZE + RSI={rsi_value:.1f}{mtf_status}")
             self.logger.info(f"   📊 DEBUG VALUES for TradingView comparison:")
             self.logger.info(f"   📊 Close: {close:.5f}, ZLEMA: {zlema:.5f}")
             self.logger.info(f"   📊 Upper Band: {upper_band:.5f}, Lower Band: {lower_band:.5f}")
             self.logger.info(f"   📊 Volatility: {volatility:.5f}, Trend: {trend}")
             self.logger.info(f"   📊 Squeeze Momentum: {squeeze_momentum_val:.6f}")
+            self.logger.info(f"   📊 RSI: {rsi_value:.1f}")
             self.logger.info(f"   📊 EMA200: {ema_200:.5f}, Close vs EMA200: {'+' if close > ema_200 else '-'}{abs(close-ema_200)*10000:.1f} pips")
             return signal
             
@@ -490,6 +503,9 @@ class ZeroLagStrategy(BaseStrategy):
                 'squeeze_is_green': latest_row.get('squeeze_is_green', False),
                 'squeeze_is_red': latest_row.get('squeeze_is_red', False),
                 'squeeze_is_maroon': latest_row.get('squeeze_is_maroon', False),
+
+                # RSI data
+                'rsi': float(latest_row.get('rsi', 50.0)),
                 
                 # Analysis summaries
                 'trend_summary': self.trend_validator.get_trend_summary(latest_row),
@@ -548,6 +564,7 @@ class ZeroLagStrategy(BaseStrategy):
                 'squeeze_is_green': signal_data.get('squeeze_is_green', False),
                 'squeeze_is_red': signal_data.get('squeeze_is_red', False),
                 'squeeze_is_maroon': signal_data.get('squeeze_is_maroon', False),
+                'rsi': signal_data.get('rsi', 50.0),
             }
             
             # Convert to Series for compatibility

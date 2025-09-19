@@ -64,7 +64,11 @@ class ZeroLagIndicatorCalculator:
             # Add EMA 200 for macro trend filter
             if 'ema_200' not in df.columns:
                 df['ema_200'] = df['close'].ewm(span=200).mean()
-            
+
+            # Add RSI for signal validation
+            if 'rsi' not in df.columns:
+                df = self._calculate_rsi(df, 14)  # Standard 14-period RSI
+
             self.logger.debug(f"Zero Lag indicators calculated for {len(df)} bars")
             return df
             
@@ -390,7 +394,7 @@ class ZeroLagIndicatorCalculator:
             'zlema',
             f'ema_200',
             'close',
-            'open', 
+            'open',
             'high',
             'low',
             'start_time',
@@ -398,7 +402,8 @@ class ZeroLagIndicatorCalculator:
             'lower_band',
             'volatility',
             'trend',
-            'zlema_slope'
+            'zlema_slope',
+            'rsi'
         ]
         
         # Add ATR if available
@@ -446,5 +451,57 @@ class ZeroLagIndicatorCalculator:
         if missing:
             self.logger.error(f"Missing required columns: {missing}")
             return False
-        
+
         return True
+
+    def _calculate_rsi(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+        """
+        Calculate RSI (Relative Strength Index) using the standard formula
+
+        RSI = 100 - (100 / (1 + RS))
+        RS = Average Gain / Average Loss
+
+        Args:
+            df: DataFrame with price data
+            period: RSI period (default 14)
+
+        Returns:
+            DataFrame with RSI added
+        """
+        try:
+            if len(df) < period + 1:
+                self.logger.debug(f"Insufficient data for RSI calculation: {len(df)} < {period + 1}")
+                df['rsi'] = 50.0  # Neutral RSI value
+                return df
+
+            # Calculate price changes
+            close = df['close']
+            delta = close.diff()
+
+            # Separate gains and losses
+            gains = delta.where(delta > 0, 0)
+            losses = -delta.where(delta < 0, 0)
+
+            # Calculate average gains and losses using EMA (Wilder's smoothing)
+            # Wilder's smoothing uses alpha = 1/period
+            alpha = 1.0 / period
+            avg_gains = gains.ewm(alpha=alpha, adjust=False).mean()
+            avg_losses = losses.ewm(alpha=alpha, adjust=False).mean()
+
+            # Calculate RS and RSI
+            rs = avg_gains / avg_losses.replace(0, np.finfo(float).eps)  # Avoid division by zero
+            rsi = 100 - (100 / (1 + rs))
+
+            # Handle edge cases
+            rsi = rsi.fillna(50.0)  # Fill NaN with neutral value
+            rsi = rsi.clip(0, 100)  # Ensure RSI stays in 0-100 range
+
+            df['rsi'] = rsi
+
+            self.logger.debug(f"RSI calculated with period {period}")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error calculating RSI: {e}")
+            df['rsi'] = 50.0  # Fallback to neutral RSI
+            return df
