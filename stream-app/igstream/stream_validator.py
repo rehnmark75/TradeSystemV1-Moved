@@ -295,8 +295,25 @@ class StreamValidatorService:
                         last_error = e
                         logger.debug(f"Resolution '{resolution_attempt}' failed for {request.epic}: {e.response.status_code}")
                         continue  # Try next resolution
-                
+
                 if data is None:
+                    # Handle 404 errors gracefully - they indicate no data available, not a validation failure
+                    if last_error and hasattr(last_error, 'response') and last_error.response.status_code == 404:
+                        logger.debug(f"No API data available for {request.epic} (404 - instrument may be inactive)")
+                        return ValidationResult(
+                            epic=request.epic,
+                            timeframe=request.timeframe,
+                            timestamp=request.timestamp,
+                            validation_time=datetime.utcnow(),
+                            stream_close=request.streamed_ohlc['close'],
+                            api_close=0.0,
+                            price_diff_pips=0.0,
+                            is_valid=True,  # Valid - 404 means no data, not incorrect data
+                            confidence_score=0.8,  # Reduced confidence but still valid
+                            discrepancy_level='NONE',
+                            api_data_available=False
+                        )
+                    # For other errors, raise them
                     raise last_error or Exception("All resolution formats failed")
                 
                 candles = data.get("prices", [])
