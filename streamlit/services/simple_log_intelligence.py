@@ -23,12 +23,16 @@ class SimpleLogParser:
             else:
                 self.base_log_dir = "/home/hr/Projects/TradeSystemV1"  # Host path
 
+        # Generate today's and yesterday's log file names dynamically
+        today = datetime.now().strftime("%Y%m%d")
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+
         # Log file paths (absolute paths for container compatibility)
         if self.base_log_dir == "":  # Container
             self.log_files = {
                 'forex_scanner': [
-                    '/logs/worker/forex_scanner_20250918.log',  # Today's file
-                    '/logs/worker/forex_scanner_20250917.log',  # Yesterday
+                    f'/logs/worker/forex_scanner_{today}.log',  # Today's file
+                    f'/logs/worker/forex_scanner_{yesterday}.log',  # Yesterday
                     '/logs/worker/trading-signals.log'
                 ],
                 'stream_service': [
@@ -50,8 +54,8 @@ class SimpleLogParser:
         else:  # Host
             self.log_files = {
                 'forex_scanner': [
-                    'logs/worker/forex_scanner_20250918.log',  # Today's file
-                    'logs/worker/forex_scanner_20250917.log',  # Yesterday
+                    f'logs/worker/forex_scanner_{today}.log',  # Today's file
+                    f'logs/worker/forex_scanner_{yesterday}.log',  # Yesterday
                     'logs/worker/trading-signals.log'
                 ],
                 'stream_service': [
@@ -134,7 +138,11 @@ class SimpleLogParser:
                 r'IntelligentForexScanner initialized',
                 r'✅.*initialized',
                 r'Database connection established',
-                r'Scan completed.*signals'
+                r'Scan completed.*signals',
+                r'Scanner detected.*signals',
+                r'Enhanced data for.*bars',
+                r'EMA validation passed',
+                r'✅.*validation passed'
             ],
             'stream_healthy': [
                 r'candle completed',
@@ -509,8 +517,58 @@ class SimpleLogParser:
                 logger.error(f"Error reading {file_path}: {e}")
                 continue
 
-        # Determine health status
-        scanner_health = "healthy" if scanner_healthy_count > scanner_error_count and scanner_healthy_count > 0 else "unknown"
+        # Determine health status with recent activity weighting
+        # Check recent activity (last 30 minutes) to prioritize current status
+        recent_cutoff = datetime.now() - timedelta(minutes=30)
+
+        # Get recent health indicators for more accurate current status
+        recent_scanner_healthy = 0
+        recent_scanner_errors = 0
+
+        # Quick check of recent activity for scanner
+        for log_file in self.log_files['forex_scanner']:
+            if self.base_log_dir == "":
+                file_path = log_file
+            else:
+                file_path = os.path.join(self.base_log_dir, log_file)
+
+            if not os.path.exists(file_path):
+                continue
+
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    # Read last 100 lines for recent activity
+                    lines = f.readlines()
+                    for line in lines[-100:]:
+                        timestamp_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
+                        if timestamp_match:
+                            try:
+                                log_time = datetime.strptime(timestamp_match.group(1), '%Y-%m-%d %H:%M:%S')
+                                if log_time >= recent_cutoff:
+                                    # Check for recent healthy patterns
+                                    for pattern in self.health_patterns['scanner_healthy']:
+                                        if re.search(pattern, line, re.IGNORECASE):
+                                            recent_scanner_healthy += 1
+                                            break
+                                    # Check for recent errors
+                                    if ' - ERROR - ' in line:
+                                        recent_scanner_errors += 1
+                            except ValueError:
+                                continue
+            except Exception:
+                continue
+
+        # Enhanced health logic: If recent activity is healthy, consider service healthy
+        # even if historical errors exist
+        if recent_scanner_healthy > 0 and recent_scanner_errors == 0:
+            scanner_health = "healthy"
+        elif scanner_healthy_count > scanner_error_count and scanner_healthy_count > 0:
+            scanner_health = "healthy"
+        elif recent_scanner_healthy > recent_scanner_errors and recent_scanner_healthy > 0:
+            scanner_health = "healthy"
+        else:
+            scanner_health = "unknown"
+
         stream_health = "healthy" if stream_healthy_count > stream_error_count and stream_healthy_count > 0 else "unknown"
         trade_monitor_health = "healthy" if trade_monitor_healthy_count > trade_monitor_error_count and trade_monitor_healthy_count > 0 else "unknown"
         fastapi_health = "healthy" if fastapi_healthy_count > fastapi_error_count and fastapi_healthy_count > 0 else "unknown"
