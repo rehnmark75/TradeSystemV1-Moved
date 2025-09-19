@@ -1224,11 +1224,15 @@ class EnhancedTradeProcessor:
                 self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
                             f"Profit {profit_points}pts >= trigger {break_even_trigger_points}pts")
                 
-                # Calculate break-even stop level
+                # Calculate break-even stop level using progressive config
+                lock_points = progressive_config.stage1_lock_points
                 if trade.direction.upper() == "BUY":
-                    break_even_stop = trade.entry_price + (1 * point_value)  # Entry + 1 point
+                    break_even_stop = trade.entry_price + (lock_points * point_value)  # Entry + lock_points
                 else:
-                    break_even_stop = trade.entry_price - (1 * point_value)  # Entry - 1 point
+                    break_even_stop = trade.entry_price - (lock_points * point_value)  # Entry - lock_points
+
+                self.logger.info(f"💰 [BREAK-EVEN CALC] Trade {trade.id}: entry={trade.entry_price:.5f}, "
+                               f"lock_points={lock_points}, break_even_stop={break_even_stop:.5f}")
                 
                 # ✅ CRITICAL FIX: For profit_protected trades, check if break-even would worsen the position
                 # ✅ FIX: Re-query trade from current session to get fresh data
