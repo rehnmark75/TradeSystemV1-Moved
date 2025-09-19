@@ -150,19 +150,19 @@ class FixedPointsTrailing(TrailingStrategy):
         else:
             trail_from_stop = trail_from_current
         
-        # ✅ CHOOSE THE BETTER OPTION: 
+        # ✅ CHOOSE THE BETTER OPTION:
         # For BUY: higher stop is better
         # For SELL: lower stop is better
         if direction == "BUY":
-            # Choose the higher (better) stop level
+            # Only move stop UP (higher) for BUY positions
             if current_stop > 0:
-                trail_level = max(trail_from_current, current_stop + (1 * point_value))
+                trail_level = max(trail_from_current, current_stop)  # Don't force +1pt increment
             else:
                 trail_level = trail_from_current
         else:
-            # Choose the lower (better) stop level  
+            # Only move stop DOWN (lower) for SELL positions
             if current_stop > 0:
-                trail_level = min(trail_from_current, current_stop - (1 * point_value))
+                trail_level = min(trail_from_current, current_stop)  # Don't force -1pt increment
             else:
                 trail_level = trail_from_current
         
@@ -1265,9 +1265,9 @@ class EnhancedTradeProcessor:
                     # ✅ CRITICAL FIX: Enhanced validation for break-even stops
                     is_valid_stop = self.validate_stop_level(trade, current_price, break_even_stop)
 
-                    # Additional validation: For SELL trades, stop cannot be above current price
-                    if trade.direction.upper() == "SELL" and break_even_stop >= current_price:
-                        self.logger.warning(f"⚠️ [BREAK-EVEN INVALID] Trade {trade.id}: Break-even stop {break_even_stop:.5f} >= current price {current_price:.5f}")
+                    # Additional validation: For SELL trades, stop cannot be below current price
+                    if trade.direction.upper() == "SELL" and break_even_stop <= current_price:
+                        self.logger.warning(f"⚠️ [BREAK-EVEN INVALID] Trade {trade.id}: Break-even stop {break_even_stop:.5f} <= current price {current_price:.5f}")
                         self.logger.info(f"🚀 [IMMEDIATE TRAILING] Trade {trade.id}: Implementing immediate trailing since break-even is invalid")
 
                         # Calculate immediate trailing stop level using safe distance
