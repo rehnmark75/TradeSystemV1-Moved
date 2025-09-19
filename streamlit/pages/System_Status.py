@@ -391,7 +391,7 @@ def render_candle_health():
     ]
     
     # Timeframe selection
-    timeframe = st.selectbox("Select Timeframe (minutes):", [1, 5, 15, 30, 60], index=1)
+    timeframe = st.selectbox("Select Timeframe (minutes):", [1, 5, 15, 30], index=1)
     
     # Create health check results
     health_results = []
@@ -731,7 +731,7 @@ def main():
     show_detailed_gaps = st.sidebar.checkbox("Show Detailed Gap Analysis", value=False)
     
     # Timeframe selection
-    timeframe = st.sidebar.selectbox("Candle Timeframe (min):", [1, 5, 15, 30, 60], index=1)
+    timeframe = st.sidebar.selectbox("Candle Timeframe (min):", [1, 5, 15, 30], index=1)
     
     # Last updated timestamp
     st.sidebar.markdown("---")

@@ -65,7 +65,7 @@ class GapDetector:
         
         Args:
             epic: The trading pair (e.g., "CS.D.EURUSD.CEEM.IP")
-            timeframe: Timeframe in minutes (5, 15, 60)
+            timeframe: Timeframe in minutes (1, 5, 15, 30)
             start_time: Start of detection range (default: 48 hours ago)
             end_time: End of detection range (default: now)
             
@@ -283,13 +283,13 @@ class GapDetector:
             
         return gaps
     
-    def detect_all_gaps(self, epics: List[str], timeframes: List[int] = [5, 60]) -> Dict[str, List[Dict]]:
+    def detect_all_gaps(self, epics: List[str], timeframes: List[int] = [5]) -> Dict[str, List[Dict]]:
         """
         Detect gaps for multiple epics and timeframes
         
         Args:
             epics: List of trading pairs to check
-            timeframes: List of timeframes in minutes (default: [5, 60])
+            timeframes: List of timeframes in minutes (default: [5])
             
         Returns:
             Dictionary mapping "epic_timeframe" to list of gaps
@@ -323,21 +323,21 @@ class GapDetector:
             "total_gaps": 0,
             "total_missing_candles": 0,
             "gaps_by_epic": {},
-            "gaps_by_timeframe": {5: 0, 60: 0},
+            "gaps_by_timeframe": {5: 0},
             "recent_gaps": 0,
             "largest_gap_minutes": 0,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
         try:
-            all_gaps = self.detect_all_gaps(epics, [5, 60])
+            all_gaps = self.detect_all_gaps(epics, [5])
             
             for key, gaps in all_gaps.items():
                 epic = key.rsplit("_", 1)[0]
                 timeframe = int(key.rsplit("_", 1)[1].replace("m", ""))
                 
                 if epic not in stats["gaps_by_epic"]:
-                    stats["gaps_by_epic"][epic] = {"5m": 0, "60m": 0, "missing_candles": 0}
+                    stats["gaps_by_epic"][epic] = {"5m": 0, "missing_candles": 0}
                 
                 stats["gaps_by_epic"][epic][f"{timeframe}m"] = len(gaps)
                 stats["gaps_by_timeframe"][timeframe] += len(gaps)
