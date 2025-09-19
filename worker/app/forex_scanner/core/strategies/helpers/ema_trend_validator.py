@@ -355,17 +355,27 @@ class EMATrendValidator:
             
             # Detect current MACD histogram trend
             macd_trend = self.detect_macd_histogram_trend(df, lookback_periods)
-            
+
             # Get recent MACD values to calculate slope strength
             recent_values = df['macd_histogram'].tail(lookback_periods + 1).dropna()
             if len(recent_values) >= 2:
                 x = np.arange(len(recent_values))
                 slope, _ = np.polyfit(x, recent_values.values, 1)
                 slope_strength = abs(slope)
+
+                # Enhanced logging with MACD values
+                latest_macd = recent_values.iloc[-1] if len(recent_values) > 0 else 0.0
+                previous_macd = recent_values.iloc[-2] if len(recent_values) > 1 else latest_macd
+                macd_change = latest_macd - previous_macd
+
+                self.logger.info(f"🔍 MACD VALIDATION for {signal_type} signal:")
+                self.logger.info(f"   📊 MACD values: [{', '.join(f'{v:.6f}' for v in recent_values.values)}]")
+                self.logger.info(f"   📈 Latest MACD: {latest_macd:.6f}, Change: {macd_change:+.6f}")
+                self.logger.info(f"   📉 Trend: {macd_trend}, Slope: {slope:.6f}, Strength: {slope_strength:.6f}")
+                self.logger.info(f"   ⚙️ Settings: mode={validation_mode}, sensitivity={sensitivity}, lookback={lookback_periods}")
             else:
                 slope_strength = 0.0
-            
-            self.logger.debug(f"📊 MACD histogram trend: {macd_trend} (slope: {slope:.6f}, strength: {slope_strength:.6f}) for {signal_type} signal")
+                self.logger.warning(f"⚠️ Insufficient MACD data for validation: {len(recent_values)} values")
             
             # Get validation mode settings
             mode_settings = validation_modes.get(validation_mode, validation_modes.get('slope_aware', {}))
@@ -375,10 +385,20 @@ class EMATrendValidator:
                 # Original strict logic - block all opposing momentum
                 if signal_type == 'BULL' and macd_trend == 'DESCENDING':
                     self.logger.warning(f"❌ EMA BULL signal REJECTED: MACD histogram descending (strict mode)")
+                    self.logger.warning(f"   🔴 CONTRADICTION: BULL signal but MACD momentum is NEGATIVE (slope: {slope:.6f})")
+                    self.logger.warning(f"   📉 This prevents trading against momentum - signal blocked for safety")
                     return False
                 elif signal_type == 'BEAR' and macd_trend == 'RISING':
                     self.logger.warning(f"❌ EMA BEAR signal REJECTED: MACD histogram rising (strict mode)")
+                    self.logger.warning(f"   🔴 CONTRADICTION: BEAR signal but MACD momentum is POSITIVE (slope: {slope:.6f})")
+                    self.logger.warning(f"   📈 This prevents trading against momentum - signal blocked for safety")
                     return False
+                elif signal_type == 'BULL' and macd_trend in ['RISING', 'NEUTRAL']:
+                    self.logger.info(f"✅ EMA BULL signal ALLOWED: MACD momentum is {macd_trend} (slope: {slope:.6f})")
+                    self.logger.info(f"   🟢 MOMENTUM ALIGNMENT: BULL signal with compatible MACD direction")
+                elif signal_type == 'BEAR' and macd_trend in ['DESCENDING', 'NEUTRAL']:
+                    self.logger.info(f"✅ EMA BEAR signal ALLOWED: MACD momentum is {macd_trend} (slope: {slope:.6f})")
+                    self.logger.info(f"   🟢 MOMENTUM ALIGNMENT: BEAR signal with compatible MACD direction")
                 
             elif validation_mode == 'slope_aware':
                 # Only block strong opposing momentum

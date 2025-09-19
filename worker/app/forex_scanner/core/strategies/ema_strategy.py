@@ -111,6 +111,9 @@ class EMAStrategy(BaseStrategy):
             
         if backtest_mode:
             self.logger.info("🔥 BACKTEST MODE: Time restrictions disabled")
+
+        # Configuration validation check
+        self._validate_macd_configuration()
     
     def _get_ema_periods(self, epic: str = None) -> Dict:
         """Get EMA periods - now with dynamic optimization support"""
@@ -177,6 +180,39 @@ class EMAStrategy(BaseStrategy):
         if self.optimal_params:
             return self.optimal_params.timeframe
         return None
+
+    def _validate_macd_configuration(self):
+        """Validate that MACD momentum filter configuration is loaded correctly"""
+        try:
+            macd_enabled = getattr(config, 'MACD_MOMENTUM_FILTER_ENABLED', None)
+            validation_mode = getattr(config, 'MACD_VALIDATION_MODE', None)
+            lookback = getattr(config, 'MACD_HISTOGRAM_LOOKBACK', None)
+
+            self.logger.info("🔧 MACD Configuration Validation:")
+            self.logger.info(f"   🎛️ MACD Filter Enabled: {macd_enabled}")
+            self.logger.info(f"   ⚙️ Validation Mode: {validation_mode}")
+            self.logger.info(f"   📊 Histogram Lookback: {lookback}")
+
+            if macd_enabled is None:
+                self.logger.warning("⚠️ WARNING: MACD_MOMENTUM_FILTER_ENABLED not found in config!")
+                self.logger.warning("   This means MACD validation might be disabled by default")
+                return False
+
+            if not macd_enabled:
+                self.logger.warning("⚠️ WARNING: MACD momentum filter is DISABLED in configuration")
+                self.logger.warning("   Bear signals may be generated even with positive MACD momentum")
+                return False
+
+            if validation_mode != 'strict_blocking':
+                self.logger.warning(f"⚠️ WARNING: MACD validation mode is '{validation_mode}', not 'strict_blocking'")
+                self.logger.warning("   This may allow signals with opposing momentum to pass through")
+
+            self.logger.info("✅ MACD configuration validation passed")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"❌ MACD configuration validation failed: {e}")
+            return False
     
     def should_enable_smart_money(self) -> bool:
         """Check if smart money analysis should be enabled"""

@@ -177,18 +177,18 @@ TWO_POLE_MTF_TIMEFRAME = '1h'            # Higher timeframe for confirmation (1h
 
 # MACD Momentum Filter Configuration (momentum confirmation for EMA signals)
 MACD_MOMENTUM_FILTER_ENABLED = True            # Enable MACD histogram momentum validation
-MACD_HISTOGRAM_LOOKBACK = 1                   # Number of periods to analyze for histogram trend
-MACD_MIN_SLOPE_THRESHOLD = 0.00001              # Minimum slope threshold to avoid noise
+MACD_HISTOGRAM_LOOKBACK = 3                   # Number of periods to analyze for histogram trend (INCREASED FOR BETTER TREND DETECTION)
+MACD_MIN_SLOPE_THRESHOLD = 0.00005              # Minimum slope threshold to avoid noise (MORE SENSITIVE)
 
 # MACD Momentum Filter Rules:
 # - BULL signals rejected if MACD histogram is descending (momentum against signal)  
 # - BEAR signals rejected if MACD histogram is rising (momentum against signal)
 # - NEUTRAL trends allow all signals
 
-# MACD Momentum Filter Settings - RELAXED FOR BETTER SIGNAL GENERATION
+# MACD Momentum Filter Settings - STRICT FOR RELIABLE MOMENTUM VALIDATION
 MACD_MOMENTUM_VALIDATION_ENABLED = True        # Use MACD for signal validation
 MACD_TREND_SENSITIVITY = 'normal'          # Sensitivity: 'strict', 'normal', 'permissive', 'neutral_bias'
-MACD_VALIDATION_MODE = 'slope_aware'      # Mode: 'strict_blocking', 'slope_aware', 'neutral_friendly'
+MACD_VALIDATION_MODE = 'strict_blocking'      # Mode: 'strict_blocking', 'slope_aware', 'neutral_friendly' (CHANGED TO STRICT)
 
 # MACD trend sensitivity mappings (affects lookback and threshold)
 MACD_SENSITIVITY_SETTINGS = {
@@ -198,8 +198,8 @@ MACD_SENSITIVITY_SETTINGS = {
         'description': 'Conservative - requires clear momentum direction'
     },
     'normal': {
-        'lookback': 3,                          # Standard periods for trend detection  
-        'min_slope': 0.0001,                    # Standard threshold
+        'lookback': 3,                          # Standard periods for trend detection
+        'min_slope': 0.00005,                    # More sensitive threshold (IMPROVED)
         'description': 'Balanced - moderate sensitivity to momentum changes'
     },
     'permissive': {

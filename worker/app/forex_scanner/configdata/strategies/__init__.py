@@ -9,6 +9,7 @@ from .config_macd_strategy import *
 from .config_ema_strategy import *
 from .config_smc_strategy import *
 from .config_ichimoku_strategy import *
+from .config_mean_reversion_strategy import *
 
 # Import TradingView integration (optional)
 try:
@@ -321,7 +322,124 @@ __all__ = [
     'ICHIMOKU_MACD_COMBINATION_WEIGHT',
     'ICHIMOKU_STANDALONE_WEIGHT',
     'ICHIMOKU_BACKTEST_MODE_ADJUSTMENTS',
-    'ICHIMOKU_SCANNER_INTEGRATION'
+    'ICHIMOKU_SCANNER_INTEGRATION',
+
+    # Mean Reversion Strategy Core Settings
+    'MEAN_REVERSION_STRATEGY',
+    'STRATEGY_WEIGHT_MEAN_REVERSION',
+    'MEAN_REVERSION_STRATEGY_WEIGHT',
+    'MEAN_REVERSION_ALLOW_COMBINED',
+    'MEAN_REVERSION_PRIORITY_LEVEL',
+
+    # LuxAlgo Oscillator Settings
+    'LUXALGO_OSCILLATOR_ENABLED',
+    'LUXALGO_LENGTH',
+    'LUXALGO_SOURCE',
+    'LUXALGO_SMOOTHING',
+    'LUXALGO_OVERBOUGHT_THRESHOLD',
+    'LUXALGO_OVERSOLD_THRESHOLD',
+    'LUXALGO_EXTREME_OB_THRESHOLD',
+    'LUXALGO_EXTREME_OS_THRESHOLD',
+    'LUXALGO_REQUIRE_DIVERGENCE',
+    'LUXALGO_MIN_DIVERGENCE_BARS',
+    'LUXALGO_DIVERGENCE_LOOKBACK',
+
+    # Multi-Timeframe RSI Settings
+    'MTF_RSI_ENABLED',
+    'MTF_RSI_PERIOD',
+    'MTF_RSI_TIMEFRAMES',
+    'MTF_RSI_MIN_ALIGNMENT',
+    'MTF_RSI_OVERBOUGHT',
+    'MTF_RSI_OVERSOLD',
+    'MTF_RSI_EXTREME_OB',
+    'MTF_RSI_EXTREME_OS',
+    'MTF_RSI_REQUIRE_HIGHER_TF_CONFIRMATION',
+    'MTF_RSI_CONFIDENCE_BOOST_ALIGNMENT',
+    'MTF_RSI_WEIGHT_BY_TIMEFRAME',
+
+    # RSI-EMA Divergence Settings
+    'RSI_EMA_DIVERGENCE_ENABLED',
+    'RSI_EMA_PERIOD',
+    'RSI_EMA_RSI_PERIOD',
+    'RSI_EMA_DIVERGENCE_SENSITIVITY',
+    'RSI_EMA_MIN_DIVERGENCE_STRENGTH',
+    'RSI_EMA_REQUIRE_HIGHER_HIGHS',
+    'RSI_EMA_REQUIRE_LOWER_LOWS',
+    'RSI_EMA_MIN_PATTERN_BARS',
+    'RSI_EMA_MAX_PATTERN_BARS',
+    'RSI_EMA_DIVERGENCE_CONFIRMATION_BARS',
+
+    # Squeeze Momentum Settings
+    'SQUEEZE_MOMENTUM_ENABLED',
+    'SQUEEZE_BB_LENGTH',
+    'SQUEEZE_BB_MULT',
+    'SQUEEZE_KC_LENGTH',
+    'SQUEEZE_KC_MULT',
+    'SQUEEZE_MOMENTUM_LENGTH',
+    'SQUEEZE_REQUIRE_SQUEEZE_RELEASE',
+    'SQUEEZE_MIN_SQUEEZE_BARS',
+    'SQUEEZE_MOMENTUM_THRESHOLD',
+    'SQUEEZE_CONFIRMATION_BARS',
+
+    # Oscillator Confluence Settings
+    'OSCILLATOR_CONFLUENCE_ENABLED',
+    'OSCILLATOR_MIN_CONFIRMATIONS',
+    'OSCILLATOR_WEIGHTS',
+    'OSCILLATOR_BULL_CONFLUENCE_THRESHOLD',
+    'OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD',
+    'OSCILLATOR_EXTREME_CONFLUENCE_BOOST',
+
+    # Mean Reversion Zone Settings
+    'MEAN_REVERSION_ZONE_ENABLED',
+    'MEAN_REVERSION_LOOKBACK_PERIODS',
+    'MEAN_REVERSION_ZONE_MULTIPLIER',
+    'MEAN_REVERSION_REQUIRE_ZONE_TOUCH',
+    'MEAN_REVERSION_MIN_ZONE_DISTANCE',
+    'MEAN_REVERSION_MAX_ZONE_AGE',
+    'MEAN_REVERSION_ZONE_CONFIDENCE_BOOST',
+
+    # Market Regime Detection Settings
+    'MARKET_REGIME_DETECTION_ENABLED',
+    'MARKET_REGIME_VOLATILITY_PERIOD',
+    'MARKET_REGIME_TREND_PERIOD',
+    'MARKET_REGIME_RANGING_THRESHOLD',
+    'MARKET_REGIME_DISABLE_IN_STRONG_TREND',
+    'MARKET_REGIME_BOOST_IN_RANGING',
+    'MARKET_REGIME_TREND_STRENGTH_THRESHOLD',
+
+    # Multi-Timeframe Analysis Settings
+    'MTF_ANALYSIS_ENABLED',
+    'MTF_TIMEFRAMES',
+    'MTF_MIN_ALIGNMENT_SCORE',
+    'MTF_HIGHER_TF_WEIGHT',
+    'MTF_REQUIRE_HIGHER_TF_CONFLUENCE',
+    'MTF_ALLOW_LOWER_TF_ENTRY',
+    'MTF_CONFIDENCE_BOOST_FULL_ALIGNMENT',
+
+    # Signal Quality and Filtering
+    'SIGNAL_QUALITY_MIN_CONFIDENCE',
+    'SIGNAL_QUALITY_REQUIRE_VOLUME_CONFIRMATION',
+    'SIGNAL_QUALITY_MIN_RISK_REWARD',
+    'SIGNAL_FILTER_MAX_SIGNALS_PER_DAY',
+    'SIGNAL_FILTER_MIN_SIGNAL_SPACING',
+    'SIGNAL_FILTER_AVOID_NEWS_EVENTS',
+
+    # Risk Management
+    'MEAN_REVERSION_POSITION_SIZE_MULTIPLIER',
+    'MEAN_REVERSION_MAX_DRAWDOWN_THRESHOLD',
+    'MEAN_REVERSION_DEFAULT_SL_PIPS',
+    'MEAN_REVERSION_DEFAULT_TP_PIPS',
+    'MEAN_REVERSION_DYNAMIC_SL_TP',
+    'MEAN_REVERSION_TRAIL_STOP_ENABLED',
+    'MEAN_REVERSION_SAFETY_PRESETS',
+
+    # Performance and Debug Settings
+    'MEAN_REVERSION_ENABLE_BACKTESTING',
+    'MEAN_REVERSION_MIN_DATA_PERIODS',
+    'MEAN_REVERSION_ENABLE_PERFORMANCE_TRACKING',
+    'MEAN_REVERSION_DEBUG_LOGGING',
+    'MEAN_REVERSION_LOG_OSCILLATOR_VALUES',
+    'MEAN_REVERSION_LOG_CONFLUENCE_SCORES'
 ]
 
 # Add TradingView integration functions if available
@@ -345,12 +463,13 @@ __description__ = "Strategy-specific configuration modules for ZeroLag, MACD, EM
 def get_strategies_summary() -> dict:
     """Get a summary of all loaded strategy configurations"""
     return {
-        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc', 'ichimoku'],
+        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc', 'ichimoku', 'mean_reversion'],
         'zerolag_enabled': globals().get('ZERO_LAG_STRATEGY', False),
         'macd_enabled': globals().get('MACD_EMA_STRATEGY', False),
         'ema_enabled': globals().get('SIMPLE_EMA_STRATEGY', False),
         'smc_enabled': globals().get('SMC_STRATEGY', False),
         'ichimoku_enabled': globals().get('ICHIMOKU_CLOUD_STRATEGY', False),
+        'mean_reversion_enabled': globals().get('MEAN_REVERSION_STRATEGY', False),
         'total_settings': len(__all__)
     }
 
@@ -361,7 +480,8 @@ def validate_strategy_configs() -> dict:
         'macd': _validate_macd_config(),
         'ema': _validate_ema_config(),
         'smc': _validate_smc_config(),
-        'ichimoku': _validate_ichimoku_config()
+        'ichimoku': _validate_ichimoku_config(),
+        'mean_reversion': _validate_mean_reversion_config()
     }
     
     # Add TradingView integration validation if available
@@ -556,6 +676,54 @@ def _validate_ichimoku_config() -> bool:
         print(f"❌ Ichimoku config validation failed: {e}")
         return False
 
+def _validate_mean_reversion_config() -> bool:
+    """Validate Mean Reversion strategy configuration"""
+    try:
+        required_mean_reversion_configs = [
+            'MEAN_REVERSION_STRATEGY', 'STRATEGY_WEIGHT_MEAN_REVERSION',
+            'LUXALGO_OSCILLATOR_ENABLED', 'MTF_RSI_ENABLED',
+            'OSCILLATOR_CONFLUENCE_ENABLED', 'SIGNAL_QUALITY_MIN_CONFIDENCE'
+        ]
+
+        for config_name in required_mean_reversion_configs:
+            if config_name not in globals():
+                print(f"❌ Missing Mean Reversion config: {config_name}")
+                return False
+
+        # Validate weight values are reasonable
+        strategy_weight = globals().get('STRATEGY_WEIGHT_MEAN_REVERSION', 0)
+        if not (0 <= strategy_weight <= 1):
+            print("❌ STRATEGY_WEIGHT_MEAN_REVERSION must be between 0 and 1")
+            return False
+
+        # Validate confidence settings
+        min_confidence = globals().get('SIGNAL_QUALITY_MIN_CONFIDENCE', 0)
+        if not (0 <= min_confidence <= 1):
+            print("❌ SIGNAL_QUALITY_MIN_CONFIDENCE must be between 0 and 1")
+            return False
+
+        # Validate oscillator thresholds
+        ob_threshold = globals().get('LUXALGO_OVERBOUGHT_THRESHOLD', 0)
+        os_threshold = globals().get('LUXALGO_OVERSOLD_THRESHOLD', 0)
+        if not (0 <= os_threshold < ob_threshold <= 100):
+            print("❌ LuxAlgo thresholds must be: 0 <= oversold < overbought <= 100")
+            return False
+
+        # Validate MTF settings if enabled
+        mtf_enabled = globals().get('MTF_RSI_ENABLED', False)
+        if mtf_enabled:
+            mtf_timeframes = globals().get('MTF_RSI_TIMEFRAMES', [])
+            if not isinstance(mtf_timeframes, list) or len(mtf_timeframes) == 0:
+                print("❌ MTF_RSI_TIMEFRAMES must be a non-empty list when MTF is enabled")
+                return False
+
+        print("✅ Mean Reversion configuration validation passed")
+        return True
+
+    except Exception as e:
+        print(f"❌ Mean Reversion config validation failed: {e}")
+        return False
+
 # Validate configurations on import (can be disabled in production)
 try:
     validation_result = validate_strategy_configs()
@@ -566,4 +734,4 @@ try:
 except Exception as e:
     print(f"⚠️ Strategy configuration validation error: {e}")
 
-print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}")
+print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}, Mean Reversion: {globals().get('MEAN_REVERSION_STRATEGY', False)}")
