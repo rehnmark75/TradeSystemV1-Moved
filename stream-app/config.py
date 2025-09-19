@@ -11,7 +11,7 @@ DATABASE_URL = "postgresql://postgres:postgres@postgres:5432/forex"
 
 # Stream vs API validation settings
 ENABLE_STREAM_API_VALIDATION = True
-STREAM_VALIDATION_DELAY_SECONDS = 300 
+STREAM_VALIDATION_DELAY_SECONDS = 1800  # 30 minutes - allow IG API time to make historical data available 
 STREAM_VALIDATION_FREQUENCY = 3
 ENABLE_AUTOMATIC_PRICE_CORRECTION = True
 
