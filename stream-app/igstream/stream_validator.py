@@ -240,9 +240,17 @@ class StreamValidatorService:
             resolution = resolution_map.get(request.timeframe, "MINUTE_5")
             possible_resolutions = [resolution]
             
-            # Calculate API request time range (get exact candle)
-            from_time = request.timestamp
-            to_time = request.timestamp + timedelta(minutes=request.timeframe)
+            # Calculate API request time range aligned to candle boundaries
+            # For 5-minute candles: align to 00, 05, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55
+            # For 15-minute candles: align to 00, 15, 30, 45
+            # etc.
+
+            # Round down to nearest candle boundary
+            minutes_since_hour = request.timestamp.minute
+            aligned_minute = (minutes_since_hour // request.timeframe) * request.timeframe
+
+            from_time = request.timestamp.replace(minute=aligned_minute, second=0, microsecond=0)
+            to_time = from_time + timedelta(minutes=request.timeframe)
             
             async with httpx.AsyncClient(base_url=self.api_base_url, headers=self.headers, timeout=10.0) as client:
                 url = f"/prices/{request.epic}"
