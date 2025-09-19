@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 from services.db import SessionLocal
-from services.models import IGCandle
+from services.models import IGCandle, FailedGap
 from igstream.gap_detector import GapDetector
 from igstream.ig_auth_prod import ig_login
 from services.keyvault import get_secret
@@ -95,7 +95,73 @@ class AutoBackfillService:
             return datetime.fromisoformat(ts_str)
         except ValueError:
             return datetime.strptime(ts_str, "%Y/%m/%d %H:%M:%S")
-    
+
+    def record_failed_gap(self, gap: Dict, failure_reason: str):
+        """Record a gap that couldn't be backfilled to avoid repeated attempts"""
+        try:
+            with SessionLocal() as session:
+                now = datetime.now(timezone.utc)
+
+                # Check if this gap already exists
+                existing = session.query(FailedGap).filter(
+                    FailedGap.epic == gap["epic"],
+                    FailedGap.timeframe == gap["timeframe"],
+                    FailedGap.gap_start == gap["gap_start"]
+                ).first()
+
+                if existing:
+                    # Update existing record
+                    existing.last_attempted_at = now
+                    existing.attempt_count += 1
+                    logger.debug(f"Updated failed gap record for {gap['epic']} (attempt {existing.attempt_count})")
+                else:
+                    # Create new record
+                    failed_gap = FailedGap(
+                        epic=gap["epic"],
+                        timeframe=gap["timeframe"],
+                        gap_start=gap["gap_start"],
+                        gap_end=gap["gap_end"],
+                        failure_reason=failure_reason,
+                        first_failed_at=now,
+                        last_attempted_at=now,
+                        attempt_count=1,
+                        missing_candles=gap.get("missing_candles"),
+                        gap_duration_minutes=gap.get("gap_duration_minutes")
+                    )
+                    session.add(failed_gap)
+                    logger.info(f"Recorded failed gap for {gap['epic']} {gap['timeframe']}m: {failure_reason}")
+
+                session.commit()
+        except Exception as e:
+            logger.error(f"Error recording failed gap: {e}")
+
+    def is_gap_known_failed(self, gap: Dict) -> bool:
+        """Check if a gap is already recorded as failed and should be skipped"""
+        try:
+            with SessionLocal() as session:
+                existing = session.query(FailedGap).filter(
+                    FailedGap.epic == gap["epic"],
+                    FailedGap.timeframe == gap["timeframe"],
+                    FailedGap.gap_start == gap["gap_start"]
+                ).first()
+
+                if existing:
+                    # Only skip if it failed recently and with certain reasons
+                    days_since_last_attempt = (datetime.now(timezone.utc) - existing.last_attempted_at).days
+
+                    # Skip permanently failed gaps (no data available)
+                    if existing.failure_reason == 'no_data_available':
+                        return True
+
+                    # Skip recently failed gaps (within 7 days) with high attempt count
+                    if existing.attempt_count >= 3 and days_since_last_attempt < 7:
+                        return True
+
+                return False
+        except Exception as e:
+            logger.error(f"Error checking failed gap: {e}")
+            return False
+
     def _timeframe_to_resolution(self, timeframe: int) -> str:
         """Convert timeframe in minutes to IG API resolution string"""
         # Use correct resolution format as per IG API docs
@@ -276,8 +342,10 @@ class AutoBackfillService:
                                          (dt.weekday() == 6 and dt.hour < 21))  # Sunday < 21:00 UTC
                         if is_closure_time:
                             logger.debug(f"No candles returned for gap in {epic} during market closure ({gap_start_str}, {gap['missing_candles']} candles)")
+                            self.record_failed_gap(gap, 'market_closed')
                         else:
                             logger.warning(f"No candles returned for gap in {epic} ({gap['missing_candles']} candles at {gap_start_str})")
+                            self.record_failed_gap(gap, 'no_data_available')
                     return 'failed'
                 
                 # Store the candles
@@ -352,8 +420,10 @@ class AutoBackfillService:
             # Check if it's a 400 error for market closed periods - suppress noise
             if "400 Bad Request" in str(e) and not self.market_is_open():
                 logger.debug(f"Backfill failed for {epic} (market closed): {e}")
+                self.record_failed_gap(gap, 'market_closed')
             else:
                 logger.error(f"Error backfilling gap for {epic}: {e}")
+                self.record_failed_gap(gap, 'api_error')
             self.backfill_stats["failures"] += 1
             return 'failed'
     
@@ -412,9 +482,14 @@ class AutoBackfillService:
             successful_fills = 0
             
             for gap in gaps_to_process:
+                # Skip gaps that are known to have failed
+                if self.is_gap_known_failed(gap):
+                    logger.debug(f"Skipping known failed gap: {gap['epic']} {gap['timeframe']}m at {gap['gap_start']}")
+                    continue
+
                 # Rate limiting
                 await asyncio.sleep(BACKFILL_RATE_LIMIT_DELAY)
-                
+
                 # Attempt backfill with retries (fewer retries for single-candle gaps)
                 max_attempts = 1 if gap["missing_candles"] == 1 else MAX_BACKFILL_ATTEMPTS
                 success = False
@@ -518,10 +593,28 @@ class AutoBackfillService:
     
     def get_statistics(self) -> Dict:
         """Get current backfill statistics"""
+        now = datetime.now(timezone.utc)
+
+        # Calculate next run time (approximate, since this depends on continuous loop)
+        next_run = now + timedelta(minutes=5)  # Default check interval is 5 minutes
+
+        # Prepare statistics in the format expected by Streamlit
+        statistics = {
+            "total_gaps_detected": self.backfill_stats["gaps_detected"],
+            "total_gaps_filled": self.backfill_stats["gaps_filled"],
+            "total_candles_recovered": self.backfill_stats["candles_recovered"],
+            "total_failures": self.backfill_stats["failures"],
+            "total_epics_monitored": len(self.epics)
+        }
+
         return {
             "is_running": self.is_running,
-            "stats": self.backfill_stats.copy(),
-            "last_check": datetime.now(timezone.utc).isoformat(),
+            "stats": self.backfill_stats.copy(),  # Keep original format for compatibility
+            "statistics": statistics,  # Add expected format for Streamlit
+            "last_check": now.isoformat(),
+            "last_run": now.isoformat(),  # Add expected timing fields
+            "next_run": next_run.isoformat(),
+            "run_interval": 5,  # Default check interval in minutes
             "monitored_epics": len(self.epics)
         }
 

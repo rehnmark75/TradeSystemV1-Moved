@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Tuple, Optional
 from sqlalchemy import select, func
 from services.db import SessionLocal
-from services.models import IGCandle
+from services.models import IGCandle, FailedGap
 from config import DEFAULT_TEST_EPIC
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,31 @@ class GapDetector:
         # Increment attempt count
         self.market_opening_attempts[gap_key] = attempt_count + 1
         return False
+
+    def _is_gap_known_failed(self, epic: str, timeframe: int, gap_start: datetime) -> bool:
+        """Check if a gap is already recorded as failed and should be excluded from reports"""
+        try:
+            with SessionLocal() as session:
+                existing = session.query(FailedGap).filter(
+                    FailedGap.epic == epic,
+                    FailedGap.timeframe == timeframe,
+                    FailedGap.gap_start == gap_start
+                ).first()
+
+                if existing:
+                    # Exclude permanently failed gaps (no data available)
+                    if existing.failure_reason == 'no_data_available':
+                        return True
+
+                    # Exclude recently failed gaps (within 7 days) with high attempt count
+                    days_since_last_attempt = (datetime.now(timezone.utc) - existing.last_attempted_at).days
+                    if existing.attempt_count >= 3 and days_since_last_attempt < 7:
+                        return True
+
+                return False
+        except Exception as e:
+            logger.error(f"Error checking failed gap: {e}")
+            return False
 
     def detect_gaps(self, epic: str, timeframe: int, 
                     start_time: Optional[datetime] = None,
@@ -182,17 +207,24 @@ class GapDetector:
                                 logger.info(f"Market opening gap detected for {epic} {timeframe}m (attempt {attempt_count}/5): "
                                           f"{missing_candles} candles from {gap_start_time} to {gap_end_time}")
 
+                        gap_start = prev_time + expected_delta
+
+                        # Skip gaps that are known to have failed
+                        if self._is_gap_known_failed(epic, timeframe, gap_start):
+                            logger.debug(f"Skipping known failed gap: {epic} {timeframe}m at {gap_start}")
+                            continue
+
                         gap = {
                             "epic": epic,
                             "timeframe": timeframe,
-                            "gap_start": prev_time + expected_delta,
+                            "gap_start": gap_start,
                             "gap_end": curr_time - expected_delta,
                             "missing_candles": missing_candles,
                             "gap_duration_minutes": int(actual_delta.total_seconds() / 60) - timeframe,
                             "is_epic_change": is_epic_change,  # Flag for epic change gaps
                             "priority": 1 if is_epic_change else 2  # Higher priority for epic changes
                         }
-                        
+
                         gaps.append(gap)
                         logger.warning(f"Gap detected in {epic} {timeframe}m: "
                                      f"{missing_candles} candles missing from "
@@ -250,30 +282,41 @@ class GapDetector:
                                         )
                                         logger.info(f"Recent market opening gap detected for {epic} {timeframe}m (attempt {attempt_count}/5): "
                                                   f"{missing_candles} candles from {recent_gap_start} to now")
+
+                                        # Check if this recent gap is known to have failed
+                                        recent_gap_start_actual = latest_time + expected_delta
+                                        if not self._is_gap_known_failed(epic, timeframe, recent_gap_start_actual):
+                                            gap = {
+                                                "epic": epic,
+                                                "timeframe": timeframe,
+                                                "gap_start": recent_gap_start_actual,
+                                                "gap_end": end_time,
+                                                "missing_candles": missing_candles,
+                                                "gap_duration_minutes": int(actual_delta.total_seconds() / 60) - timeframe,
+                                                "is_recent": True  # Flag for recent data gaps
+                                            }
+                                            gaps.append(gap)
+                                        else:
+                                            logger.debug(f"Skipping known failed recent gap: {epic} {timeframe}m at {recent_gap_start_actual}")
+                                else:
+                                    # Check if this recent gap is known to have failed
+                                    recent_gap_start_actual = latest_time + expected_delta
+                                    if not self._is_gap_known_failed(epic, timeframe, recent_gap_start_actual):
                                         gap = {
                                             "epic": epic,
                                             "timeframe": timeframe,
-                                            "gap_start": latest_time + expected_delta,
+                                            "gap_start": recent_gap_start_actual,
                                             "gap_end": end_time,
                                             "missing_candles": missing_candles,
                                             "gap_duration_minutes": int(actual_delta.total_seconds() / 60) - timeframe,
                                             "is_recent": True  # Flag for recent data gaps
                                         }
                                         gaps.append(gap)
-                                else:
-                                    gap = {
-                                        "epic": epic,
-                                        "timeframe": timeframe,
-                                        "gap_start": latest_time + expected_delta,
-                                        "gap_end": end_time,
-                                        "missing_candles": missing_candles,
-                                        "gap_duration_minutes": int(actual_delta.total_seconds() / 60) - timeframe,
-                                        "is_recent": True  # Flag for recent data gaps
-                                    }
-                                    gaps.append(gap)
-                                    logger.warning(f"Recent gap detected in {epic} {timeframe}m: "
-                                                 f"{missing_candles} candles missing from "
-                                                 f"{gap['gap_start']} to now")
+                                        logger.warning(f"Recent gap detected in {epic} {timeframe}m: "
+                                                     f"{missing_candles} candles missing from "
+                                                     f"{gap['gap_start']} to now")
+                                    else:
+                                        logger.debug(f"Skipping known failed recent gap: {epic} {timeframe}m at {recent_gap_start_actual}")
                             else:
                                 logger.debug(f"Ignoring minor recent gap in {epic} {timeframe}m: "
                                            f"{missing_candles} candles, {gap_age_minutes:.1f} minutes old")

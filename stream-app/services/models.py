@@ -39,5 +39,24 @@ class IGCandle(Base):
     validation_flags = Column(String, nullable=True)  # PostgreSQL array stored as string
 
 
+class FailedGap(Base):
+    """Track gaps that couldn't be backfilled to avoid repeatedly reporting them"""
+    __tablename__ = "failed_gaps"
+
+    # Composite primary key to uniquely identify the gap
+    epic = Column(String, primary_key=True, nullable=False)
+    timeframe = Column(Integer, primary_key=True, nullable=False)
+    gap_start = Column(DateTime, primary_key=True, nullable=False)
+    gap_end = Column(DateTime, nullable=False)
+
+    # Tracking information
+    failure_reason = Column(String, nullable=False)  # 'no_data_available', 'market_closed', 'api_error', etc.
+    first_failed_at = Column(DateTime, nullable=False)
+    last_attempted_at = Column(DateTime, nullable=False)
+    attempt_count = Column(Integer, nullable=False, default=1)
+
+    # Optional metadata
+    missing_candles = Column(Integer, nullable=True)
+    gap_duration_minutes = Column(Integer, nullable=True)
 
 
