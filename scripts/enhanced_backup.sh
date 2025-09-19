@@ -5,10 +5,14 @@
 
 set -euo pipefail
 
-BACKUP_DIR="/app/postgresbackup"
+BACKUP_BASE_DIR="/app/postgresbackup"
 POSTGRES_CONTAINER="postgres"
 POSTGRES_USER="postgres"
+DATE_FOLDER=$(date '+%Y-%m-%d')
 TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+
+# Create daily backup directory
+BACKUP_DIR="${BACKUP_BASE_DIR}/${DATE_FOLDER}"
 
 # Color codes
 GREEN='\033[0;32m'
@@ -18,8 +22,10 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 echo "🚀 Starting enhanced TradeSystemV1 backup..."
+echo "📁 Backup date folder: ${DATE_FOLDER}"
 
-# Create backup directory
+# Create backup directories
+mkdir -p "${BACKUP_BASE_DIR}"
 mkdir -p "${BACKUP_DIR}"
 
 # ======================
@@ -187,6 +193,92 @@ if [[ -f "${BACKUP_DIR}/additional_backup_${TIMESTAMP}.tar.gz" ]]; then
         exit 1
     fi
 fi
+
+# ======================
+# 8. Cleanup Old Backups (Retention Policy)
+# ======================
+echo
+echo -e "${BLUE}🧹 Applying retention policy...${NC}"
+
+# Retention settings
+DAILY_RETENTION=7    # Keep 7 daily backups
+WEEKLY_RETENTION=4   # Keep 4 weekly backups (Sundays)
+MONTHLY_RETENTION=12 # Keep 12 monthly backups (1st of month)
+
+cleanup_old_backups() {
+    echo "  → Scanning backup folders..."
+
+    # Get all backup date folders sorted by date (newest first)
+    local -a all_folders
+    mapfile -t all_folders < <(find "${BACKUP_BASE_DIR}" -maxdepth 1 -type d -name "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]" | sort -r)
+
+    local total_folders=${#all_folders[@]}
+    echo "  → Found ${total_folders} backup folders"
+
+    if [[ ${total_folders} -le ${DAILY_RETENTION} ]]; then
+        echo -e "${GREEN}  ✅ All folders within retention policy (${total_folders}/${DAILY_RETENTION})${NC}"
+        return 0
+    fi
+
+    # Arrays to track which folders to keep
+    local -a keep_folders=()
+
+    # Keep daily backups (last N days)
+    local daily_count=0
+    for folder in "${all_folders[@]}"; do
+        if [[ ${daily_count} -lt ${DAILY_RETENTION} ]]; then
+            keep_folders+=("${folder}")
+            daily_count=$((daily_count + 1))
+        fi
+    done
+
+    # Keep weekly backups (Sundays) - check folders older than daily retention
+    local weekly_count=0
+    for folder in "${all_folders[@]:${DAILY_RETENTION}}"; do
+        # Extract date from folder name (YYYY-MM-DD)
+        local folder_date=$(basename "${folder}")
+        # Check if this date was a Sunday (day of week = 0)
+        local day_of_week=$(date -d "${folder_date}" '+%w' 2>/dev/null || echo "1")
+
+        if [[ ${day_of_week} -eq 0 ]] && [[ ${weekly_count} -lt ${WEEKLY_RETENTION} ]]; then
+            if [[ ! " ${keep_folders[*]} " =~ " ${folder} " ]]; then
+                keep_folders+=("${folder}")
+                weekly_count=$((weekly_count + 1))
+            fi
+        fi
+    done
+
+    # Keep monthly backups (1st of month) - check all folders
+    local monthly_count=0
+    for folder in "${all_folders[@]}"; do
+        # Extract date from folder name (YYYY-MM-DD)
+        local folder_date=$(basename "${folder}")
+        # Check if this is the 1st of the month
+        local day_of_month=$(date -d "${folder_date}" '+%d' 2>/dev/null || echo "02")
+
+        if [[ ${day_of_month} -eq 01 ]] && [[ ${monthly_count} -lt ${MONTHLY_RETENTION} ]]; then
+            if [[ ! " ${keep_folders[*]} " =~ " ${folder} " ]]; then
+                keep_folders+=("${folder}")
+                monthly_count=$((monthly_count + 1))
+            fi
+        fi
+    done
+
+    # Remove folders not in keep list
+    local removed_count=0
+    for folder in "${all_folders[@]}"; do
+        if [[ ! " ${keep_folders[*]} " =~ " ${folder} " ]]; then
+            echo "  → Removing old backup folder: $(basename "${folder}")"
+            rm -rf "${folder}"
+            removed_count=$((removed_count + 1))
+        fi
+    done
+
+    echo -e "${GREEN}  ✅ Retention cleanup completed: kept ${#keep_folders[@]} folders, removed ${removed_count} folders${NC}"
+}
+
+# Run cleanup
+cleanup_old_backups
 
 echo
 echo -e "${GREEN}✨ All backup integrity checks passed!${NC}"

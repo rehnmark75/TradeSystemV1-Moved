@@ -33,9 +33,14 @@ scripts/
 └── restore_database.sh     # Restore script
 
 External Drive: /media/hr/Data/TradeSystemV1-Backups/postgresbackup/
-├── forex_backup_YYYYMMDD_HHMMSS.sql.gz           # PostgreSQL forex database
-├── forex_config_backup_YYYYMMDD_HHMMSS.sql.gz    # PostgreSQL config database
-└── additional_backup_YYYYMMDD_HHMMSS.tar.gz      # Vector DB + Logs + PgAdmin config
+├── 2025-09-19/                                    # Daily backup folder
+│   ├── forex_backup_YYYYMMDD_HHMMSS.sql.gz       # PostgreSQL forex database
+│   ├── forex_config_backup_YYYYMMDD_HHMMSS.sql.gz # PostgreSQL config database
+│   └── additional_backup_YYYYMMDD_HHMMSS.tar.gz  # Vector DB + Logs + PgAdmin config
+├── 2025-09-18/                                    # Previous day backups
+│   └── ... (same structure)
+└── 2025-09-17/                                    # Older backups
+    └── ... (same structure)
 ```
 
 ## 🚀 Quick Start
@@ -117,9 +122,12 @@ additional_backup_{YYYYMMDD}_{HHMMSS}.tar.gz
 ```
 
 Examples:
-- `forex_backup_20250918_120000.sql.gz` (PostgreSQL forex database)
-- `forex_config_backup_20250918_120003.sql.gz` (PostgreSQL config database)
-- `additional_backup_20250918_120000.tar.gz` (Vector DB + Logs + PgAdmin config)
+```
+2025-09-18/
+├── forex_backup_20250918_120000.sql.gz           (PostgreSQL forex database)
+├── forex_config_backup_20250918_120003.sql.gz    (PostgreSQL config database)
+└── additional_backup_20250918_120000.tar.gz      (Vector DB + Logs + PgAdmin config)
+```
 
 ### Enhanced Backup Contents
 
@@ -140,9 +148,19 @@ The **additional_backup_*.tar.gz** file contains:
 
 ### Retention Policy
 
-- **Daily**: Keep 7 most recent daily backups
-- **Weekly**: Keep 4 Sunday backups (monthly retention)
-- **Monthly**: Keep 12 backups from the 1st of each month (yearly retention)
+**Daily Folder Structure:** Backups are organized in `YYYY-MM-DD` folders
+
+- **Daily**: Keep 7 most recent daily folders
+- **Weekly**: Keep 4 Sunday backup folders (extended retention)
+- **Monthly**: Keep 12 backup folders from the 1st of each month (long-term retention)
+
+**Example folder retention:**
+```
+2025-09-19/  ← Today (always kept)
+2025-09-18/  ← Yesterday (daily retention)
+2025-09-15/  ← Last Sunday (weekly retention)
+2025-09-01/  ← First of month (monthly retention)
+```
 
 ## 🔄 Restore Operations
 
