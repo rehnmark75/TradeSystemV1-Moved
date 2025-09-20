@@ -51,7 +51,94 @@ epics = get_epics(engine)
 
 # Sidebar controls
 st.sidebar.header("Chart Settings")
-selected_epic = st.sidebar.selectbox("Select Symbol (Epic)", epics)
+
+# Quick Setup Presets
+st.sidebar.subheader("🚀 Quick Setup")
+preset_options = [
+    "Custom Setup",
+    "🎯 Scalping Mode",
+    "📈 Trend Following",
+    "💹 Breakout Analysis",
+    "🧠 Full Analysis"
+]
+
+selected_preset = st.sidebar.selectbox("Quick Preset", preset_options)
+
+if selected_preset != "Custom Setup":
+    preset_configs = {
+        "🎯 Scalping Mode": {
+            'lookback_days': 1,
+            'indicators': ['Zero Lag EMA', 'Two-Pole Oscillator', 'S/R Levels'],
+            'timeframe_index': 0,  # 5m
+            'description': 'Fast-paced scalping with quick indicators'
+        },
+        "📈 Trend Following": {
+            'lookback_days': 3,
+            'indicators': ['MACD', 'Market Regime'],
+            'timeframe_index': 1,  # 15m
+            'description': 'Medium-term trend analysis'
+        },
+        "💹 Breakout Analysis": {
+            'lookback_days': 2,
+            'indicators': ['S/R Levels', 'Zero Lag EMA', 'Session Info'],
+            'timeframe_index': 1,  # 15m
+            'description': 'Key level breakout identification'
+        },
+        "🧠 Full Analysis": {
+            'lookback_days': 3,
+            'indicators': ['MACD', 'S/R Levels', 'Market Regime', 'Session Info'],
+            'timeframe_index': 1,  # 15m
+            'description': 'Comprehensive market analysis'
+        }
+    }
+
+    preset_config = preset_configs[selected_preset]
+    st.sidebar.info(f"**{selected_preset}**: {preset_config['description']}")
+
+    # Store preset in session state
+    st.session_state.active_preset = preset_config
+else:
+    st.session_state.active_preset = None
+
+st.sidebar.divider()
+# Smart Epic Selector with categories
+epic_categories = {
+    'Major Pairs': [epic for epic in epics if any(pair in epic for pair in ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF'])],
+    'Minor Pairs': [epic for epic in epics if any(pair in epic for pair in ['EURGBP', 'EURAUD', 'GBPAUD'])],
+    'Yen Crosses': [epic for epic in epics if 'JPY' in epic and not epic.startswith('CS.D.USD')],
+    'Commodity Pairs': [epic for epic in epics if any(pair in epic for pair in ['AUDUSD', 'NZDUSD', 'USDCAD'])],
+}
+
+# Filter out empty categories and create flattened list
+epic_options = []
+for category, category_epics in epic_categories.items():
+    if category_epics:  # Only add non-empty categories
+        epic_options.append(f"📂 {category}")
+        epic_options.extend(category_epics)
+
+# Add remaining epics under "Other"
+categorized_epics = set()
+for cat_epics in epic_categories.values():
+    categorized_epics.update(cat_epics)
+
+other_epics = [epic for epic in epics if epic not in categorized_epics]
+if other_epics:
+    epic_options.append("📂 Other")
+    epic_options.extend(other_epics)
+
+selected_epic_display = st.sidebar.selectbox("Select Symbol (Epic)", epic_options)
+
+# Handle category headers
+if selected_epic_display.startswith("📂"):
+    # If a category header is selected, pick the first epic from that category
+    category_name = selected_epic_display.replace("📂", "").strip()
+    if category_name in epic_categories:
+        selected_epic = epic_categories[category_name][0]
+    else:  # "Other" category
+        selected_epic = other_epics[0]
+    st.sidebar.info(f"Auto-selected: {selected_epic}")
+else:
+    selected_epic = selected_epic_display
 
 # Load dynamic EMA configuration for selected epic
 ema_config = None
@@ -80,7 +167,10 @@ except Exception as e:
 
 # Timeframe selector for both 5m and 15m
 timeframe_options = ["5m", "15m"]
-selected_tf = st.sidebar.radio("Chart Timeframe", timeframe_options, index=1)
+active_preset = st.session_state.get('active_preset')
+default_tf_index = active_preset['timeframe_index'] if active_preset else 1
+
+selected_tf = st.sidebar.radio("Chart Timeframe", timeframe_options, index=default_tf_index)
 timeframe_minutes = {"5m": 5, "15m": 15}
 timeframe = timeframe_minutes[selected_tf]
 
@@ -152,58 +242,172 @@ with st.sidebar.expander("🔧 EMA Configuration Details", expanded=False):
         st.write("• Trend EMA: 200")
         st.caption("*Standard EMA periods*")
 
-# Zero Lag EMA toggle
-st.sidebar.subheader("Zero Lag EMA")
-show_zlema = st.sidebar.checkbox("Show Zero Lag EMA", value=False)
-show_zlema_bands = st.sidebar.checkbox("Show ZLEMA Bands", value=False)
+# Smart Indicator Recommendations
+st.sidebar.subheader("🎯 Smart Recommendations")
+if ema_config:
+    # Get recommendations based on config type
+    config_name = ema_config.config_name
+    recommendations = {
+        'aggressive': {
+            'suggested_indicators': ['Zero Lag EMA', 'MACD'],
+            'reasoning': 'Fast configs work well with momentum indicators',
+            'trade_markers': True,
+            'lookback_days': 1
+        },
+        'scalping': {
+            'suggested_indicators': ['Two-Pole Oscillator', 'S/R Levels'],
+            'reasoning': 'Scalping benefits from quick signals and key levels',
+            'trade_markers': True,
+            'lookback_days': 1
+        },
+        'conservative': {
+            'suggested_indicators': ['S/R Levels', 'Market Regime'],
+            'reasoning': 'Conservative setups need broader market context',
+            'trade_markers': False,
+            'lookback_days': 3
+        },
+        'default': {
+            'suggested_indicators': ['MACD', 'Session Info'],
+            'reasoning': 'Standard indicators for balanced analysis',
+            'trade_markers': True,
+            'lookback_days': 2
+        }
+    }
 
-# MACD toggle
-st.sidebar.subheader("MACD Indicator")
-show_macd = st.sidebar.checkbox("Show MACD", value=False)
+    rec = recommendations.get(config_name, recommendations['default'])
 
-# Two-Pole Oscillator toggle
-st.sidebar.subheader("Two-Pole Oscillator")
-show_two_pole = st.sidebar.checkbox("Show Two-Pole Oscillator", value=False)
+    with st.sidebar.expander("💡 Suggested for this Epic", expanded=True):
+        st.write(f"**For {config_name} strategy:**")
+        for indicator in rec['suggested_indicators']:
+            st.write(f"• {indicator}")
+        st.caption(f"*{rec['reasoning']}*")
 
-# Support/Resistance toggle
-st.sidebar.subheader("Support & Resistance")
-show_sr_levels = st.sidebar.checkbox("Show S/R Levels", value=False)
-show_sr_breaks = st.sidebar.checkbox("Show Break Markers", value=False)
-if show_sr_levels or show_sr_breaks:
-    sr_left_bars = st.sidebar.number_input("Left Bars", value=15, min_value=5, max_value=50, step=1)
-    sr_right_bars = st.sidebar.number_input("Right Bars", value=15, min_value=5, max_value=50, step=1)
-    sr_volume_thresh = st.sidebar.slider("Volume Threshold %", 0, 50, 20)
-    sr_max_levels = st.sidebar.number_input("Max Levels", value=5, min_value=1, max_value=10, step=1)
+        if st.button("📋 Apply Suggestions"):
+            # Set session state for suggested settings
+            st.session_state.apply_suggestions = True
+            st.session_state.suggested_config = rec
+
+# Check if we should apply suggestions or presets
+apply_suggestions = st.session_state.get('apply_suggestions', False)
+suggested_config = st.session_state.get('suggested_config', {})
+active_preset = st.session_state.get('active_preset')
+
+# Use preset indicators if available
+preset_indicators = active_preset['indicators'] if active_preset else []
+
+# Advanced Indicators Section with collapsible categories
+st.sidebar.subheader("📊 Advanced Indicators")
+
+# Momentum Indicators
+momentum_expanded = any(indicator in preset_indicators for indicator in ['Zero Lag EMA', 'MACD', 'Two-Pole Oscillator'])
+with st.sidebar.expander("⚡ Momentum Indicators", expanded=momentum_expanded):
+    show_zlema = st.checkbox(
+        "Show Zero Lag EMA",
+        value=(apply_suggestions and 'Zero Lag EMA' in suggested_config.get('suggested_indicators', [])) or
+              ('Zero Lag EMA' in preset_indicators)
+    )
+    show_zlema_bands = st.checkbox("Show ZLEMA Bands", value=False)
+
+    show_macd = st.checkbox(
+        "Show MACD",
+        value=(apply_suggestions and 'MACD' in suggested_config.get('suggested_indicators', [])) or
+              ('MACD' in preset_indicators)
+    )
+
+    show_two_pole = st.checkbox(
+        "Show Two-Pole Oscillator",
+        value=(apply_suggestions and 'Two-Pole Oscillator' in suggested_config.get('suggested_indicators', [])) or
+              ('Two-Pole Oscillator' in preset_indicators)
+    )
+
+# Price Action Indicators
+price_action_expanded = any(indicator in preset_indicators for indicator in ['S/R Levels'])
+with st.sidebar.expander("📈 Price Action", expanded=price_action_expanded):
+    show_sr_levels = st.checkbox(
+        "Show S/R Levels",
+        value=(apply_suggestions and 'S/R Levels' in suggested_config.get('suggested_indicators', [])) or
+              ('S/R Levels' in preset_indicators)
+    )
+    show_sr_breaks = st.checkbox("Show Break Markers", value=False)
+    show_swings = st.checkbox("Show Swing Labels", value=False)
+
+    if show_sr_levels or show_sr_breaks:
+        sr_left_bars = st.number_input("Left Bars", value=15, min_value=5, max_value=50, step=1)
+        sr_right_bars = st.number_input("Right Bars", value=15, min_value=5, max_value=50, step=1)
+        sr_volume_thresh = st.slider("Volume Threshold %", 0, 50, 20)
+        sr_max_levels = st.number_input("Max Levels", value=5, min_value=1, max_value=10, step=1)
+    else:
+        # Default values when not shown
+        sr_left_bars = 15
+        sr_right_bars = 15
+        sr_volume_thresh = 20
+        sr_max_levels = 5
+
+# Market Context
+market_expanded = any(indicator in preset_indicators for indicator in ['Market Regime', 'Session Info'])
+with st.sidebar.expander("🧠 Market Intelligence", expanded=market_expanded):
+    show_market_regime = st.checkbox(
+        "Show Market Regime",
+        value=(apply_suggestions and 'Market Regime' in suggested_config.get('suggested_indicators', [])) or
+              ('Market Regime' in preset_indicators)
+    )
+    show_session_analysis = st.checkbox(
+        "Show Session Info",
+        value=(apply_suggestions and 'Session Info' in suggested_config.get('suggested_indicators', [])) or
+              ('Session Info' in preset_indicators) or True
+    )
+    show_trade_context = st.checkbox("Analyze Trade Context", value=False)
+
+    if show_market_regime or show_trade_context:
+        intelligence_lookback = st.slider("Analysis Lookback (hours)", 6, 48, 24, step=2)
+    else:
+        intelligence_lookback = 24
+
+# Trading Tools
+with st.sidebar.expander("🎯 Trading Tools", expanded=False):
+    show_stop_levels = st.checkbox("Show Stop Loss Levels", value=False)
+    show_tp_levels = st.checkbox("Show Take Profit Levels", value=False)
+    show_trailing_info = st.checkbox("Show Trailing/Breakeven", value=False)
+
+# Chart Settings with smart defaults
+st.sidebar.subheader("⚙️ Chart Settings")
+
+# Use preset, suggestions, or default for lookback
+if active_preset:
+    default_lookback = active_preset['lookback_days']
+elif apply_suggestions:
+    default_lookback = suggested_config.get('lookback_days', 2)
 else:
-    # Default values when not shown
-    sr_left_bars = 15
-    sr_right_bars = 15
-    sr_volume_thresh = 20
-    sr_max_levels = 5
+    default_lookback = 2
 
-# Market Intelligence toggle
-st.sidebar.subheader("🧠 Market Intelligence")
-show_market_regime = st.sidebar.checkbox("Show Market Regime", value=False)
-show_session_analysis = st.sidebar.checkbox("Show Session Info", value=True)
-show_trade_context = st.sidebar.checkbox("Analyze Trade Context", value=False)
-if show_market_regime or show_trade_context:
-    intelligence_lookback = st.sidebar.slider("Analysis Lookback (hours)", 6, 48, 24, step=2)
-else:
-    intelligence_lookback = 24
-
-# Trade Markers toggle
-st.sidebar.subheader("📈 Trade Markers")
-show_stop_levels = st.sidebar.checkbox("Show Stop Loss Levels", value=False)
-show_tp_levels = st.sidebar.checkbox("Show Take Profit Levels", value=False)
-show_trailing_info = st.sidebar.checkbox("Show Trailing/Breakeven", value=False)
-
-# Other settings
-lookback_days = st.sidebar.slider("Lookback period (days)", 1, 5, 2)
+lookback_days = st.sidebar.slider("Lookback period (days)", 1, 5, default_lookback)
 candles_per_day = (24 * 60) // timeframe
 lookback_candles = lookback_days * candles_per_day
 
 refresh_minutes = st.sidebar.selectbox("Auto-refresh interval (minutes)", [0, 1, 2, 5, 10], index=2)
-show_swings = st.sidebar.checkbox("Show Swing Labels", value=False)
+
+# Performance Metrics (if available)
+if ema_config_summary and 'performance' in ema_config_summary:
+    st.sidebar.subheader("📊 Configuration Performance")
+    perf = ema_config_summary['performance']
+
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if perf.get('performance_score'):
+            score = perf['performance_score']
+            st.metric("Score", f"{score:.3f}")
+        if perf.get('confidence_threshold'):
+            confidence = perf['confidence_threshold']
+            st.metric("Confidence", f"{confidence:.1%}")
+
+    with col2:
+        if perf.get('risk_reward_ratio'):
+            rr = perf['risk_reward_ratio']
+            st.metric("Risk/Reward", f"{rr:.2f}")
+
+# Clear suggestions after applying
+if apply_suggestions:
+    st.session_state.apply_suggestions = False
 
 st.title("📈 TradingView Style Chart")
 st.caption(f"Showing {selected_epic} - {selected_tf} timeframe (UTC)")
@@ -262,13 +466,20 @@ with st.expander("📊 Chart Legend", expanded=False):
         """)
     with col4:
         ema_periods = (ema_config.short_period, ema_config.long_period, ema_config.trend_period) if ema_config else (21, 50, 200)
-        st.markdown(f"""
+        legend_text = f"""
         **EMA Indicators:**
         - 🟢 Green Line = EMA {ema_periods[0]}
         - 🟠 Orange Line = EMA {ema_periods[1]}
-        - 🔵 Blue Line = EMA {ema_periods[2]}
-        - *Periods adapt per epic*
-        """)
+        - 🔵 Blue Line = EMA {ema_periods[2]}"""
+
+        if show_zlema:
+            legend_text += "\n        - 🟣 Purple Line = Zero Lag EMA"
+            if show_zlema_bands:
+                legend_text += "\n        - 🟣 Purple Dashed = ZLEMA Bands"
+
+        legend_text += "\n        - *Periods adapt per epic*"
+
+        st.markdown(legend_text)
 
 # Fetch candle data based on selected timeframe
 if selected_tf == "5m":
@@ -661,7 +872,7 @@ if show_zlema and "zlema" in df_display.columns:
                 if len(current_segment) > 1:
                     all_segments.append({
                         "data": current_segment.copy(),
-                        "color": "#26a69a" if current_trend else "#ef5350",  # Green for bull, red for bear
+                        "color": "#9c27b0" if current_trend else "#f44336",  # Purple for bull, red for bear
                         "title": "ZLEMA Bull" if current_trend else "ZLEMA Bear"
                     })
                 
@@ -673,7 +884,7 @@ if show_zlema and "zlema" in df_display.columns:
     if current_segment and len(current_segment) > 1:
         all_segments.append({
             "data": current_segment,
-            "color": "#26a69a" if current_trend else "#ef5350",
+            "color": "#9c27b0" if current_trend else "#f44336",
             "title": "ZLEMA Bull" if current_trend else "ZLEMA Bear"
         })
     
@@ -706,7 +917,7 @@ if show_zlema and "zlema" in df_display.columns:
             "type": "Line",
             "data": zlema_upper_data,
             "options": {
-                "color": "#e91e63",
+                "color": "#9c27b0",
                 "lineWidth": 1,
                 "lineStyle": 2,  # Dashed
                 "title": "ZLEMA Upper"
@@ -717,7 +928,7 @@ if show_zlema and "zlema" in df_display.columns:
             "type": "Line",
             "data": zlema_lower_data,
             "options": {
-                "color": "#e91e63",
+                "color": "#9c27b0",
                 "lineWidth": 1,
                 "lineStyle": 2,  # Dashed
                 "title": "ZLEMA Lower"
