@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 import httpx
 from .ig_orders import has_open_position
-from .ig_auth import get_authenticated_headers
+from dependencies import get_ig_auth_headers as get_authenticated_headers
 import config
 
 logger = logging.getLogger(__name__)
@@ -345,7 +345,7 @@ class PositionCloser:
             "current_time_utc": now_utc.isoformat(),
             "next_closure_time": "Fridays at 20:30 UTC",
             "closure_schedule": {
-                "weekday": self.friday_weekday,
+                "weekday": self.closure_weekday,
                 "hour": self.closure_hour,
                 "minute": self.closure_minute,
                 "timezone": "UTC"
