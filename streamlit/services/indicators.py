@@ -115,41 +115,118 @@ def get_recent_swing_bounds(df, swings, hours=4):
         "end_time": end_time
     }
 
-def apply_indicators(df: pd.DataFrame, ema1_period: int = 21, ema2_period: int = 50, ema3_period: int = 200, indicators: list = None) -> pd.DataFrame:
-    """Calculate EMAs and MACD with configurable periods."""
+def apply_indicators(df: pd.DataFrame, ema1_period: int = 21, ema2_period: int = 50, ema3_period: int = 200, indicators: list = None,
+                     ema_short: int = None, ema_long: int = None, ema_trend: int = None, epic: str = None) -> pd.DataFrame:
+    """
+    Calculate EMAs and MACD with configurable periods.
+    Supports both legacy static periods and new dynamic epic-specific periods.
+
+    Args:
+        df: DataFrame with OHLC data
+        ema1_period: Legacy EMA1 period (default: 21)
+        ema2_period: Legacy EMA2 period (default: 50)
+        ema3_period: Legacy EMA3 period (default: 200)
+        indicators: List of indicators to calculate
+        ema_short: Dynamic short EMA period (overrides ema1_period if provided)
+        ema_long: Dynamic long EMA period (overrides ema2_period if provided)
+        ema_trend: Dynamic trend EMA period (overrides ema3_period if provided)
+        epic: Epic code for dynamic configuration lookup
+
+    Returns:
+        DataFrame with calculated indicators
+    """
     if indicators is None:
         indicators = ["EMA21", "EMA50", "EMA200"]
-    
-    # Calculate EMA 21
-    if "EMA21" in indicators:
-        df["ema21"] = df["close"].ewm(span=ema1_period, adjust=False).mean()
-    
-    # Calculate EMA 50
-    if "EMA50" in indicators:
-        df["ema50"] = df["close"].ewm(span=ema2_period, adjust=False).mean()
-    
-    # Calculate EMA 200
-    if "EMA200" in indicators:
-        df["ema200"] = df["close"].ewm(span=ema3_period, adjust=False).mean()
-    
+
+    # Use dynamic periods if provided, otherwise fall back to legacy periods
+    # If epic is provided but dynamic periods are not, try to get them from the config service
+    if epic and (ema_short is None or ema_long is None or ema_trend is None):
+        try:
+            # Use simple service directly since worker files aren't available in container
+            from .ema_config_simple import get_ema_periods_for_chart_simple as get_ema_periods_for_chart
+
+            dynamic_short, dynamic_long, dynamic_trend = get_ema_periods_for_chart(epic)
+            ema_short = ema_short or dynamic_short
+            ema_long = ema_long or dynamic_long
+            ema_trend = ema_trend or dynamic_trend
+        except Exception as e:
+            # Fallback to legacy periods if dynamic lookup fails
+            print(f"Warning: Could not get dynamic EMA periods for {epic}: {e}")
+            pass
+
+    # Final fallback to legacy parameters
+    final_short = ema_short or ema1_period
+    final_long = ema_long or ema2_period
+    final_trend = ema_trend or ema3_period
+
+    # Calculate EMA short (previously EMA21)
+    if "EMA21" in indicators or "EMA_SHORT" in indicators:
+        df["ema21"] = df["close"].ewm(span=final_short, adjust=False).mean()
+        # Also create generic columns for dynamic usage
+        df["ema_short"] = df["ema21"]
+
+    # Calculate EMA long (previously EMA50)
+    if "EMA50" in indicators or "EMA_LONG" in indicators:
+        df["ema50"] = df["close"].ewm(span=final_long, adjust=False).mean()
+        # Also create generic columns for dynamic usage
+        df["ema_long"] = df["ema50"]
+
+    # Calculate EMA trend (previously EMA200)
+    if "EMA200" in indicators or "EMA_TREND" in indicators:
+        df["ema200"] = df["close"].ewm(span=final_trend, adjust=False).mean()
+        # Also create generic columns for dynamic usage
+        df["ema_trend"] = df["ema200"]
+
     # Calculate MACD
     if "MACD" in indicators:
         # Standard MACD parameters: 12, 26, 9
         ema12 = df["close"].ewm(span=12, adjust=False).mean()
         ema26 = df["close"].ewm(span=26, adjust=False).mean()
-        
+
         df["macd_line"] = ema12 - ema26
         df["macd_signal"] = df["macd_line"].ewm(span=9, adjust=False).mean()
         df["macd_histogram"] = df["macd_line"] - df["macd_signal"]
-    
+
     # Keep backward compatibility
-    if "EMA1" in indicators and ema1_period:
-        df["ema1"] = df["close"].ewm(span=ema1_period, adjust=False).mean()
-    
-    if "EMA2" in indicators and ema2_period:
-        df["ema2"] = df["close"].ewm(span=ema2_period, adjust=False).mean()
+    if "EMA1" in indicators and final_short:
+        df["ema1"] = df["close"].ewm(span=final_short, adjust=False).mean()
+
+    if "EMA2" in indicators and final_long:
+        df["ema2"] = df["close"].ewm(span=final_long, adjust=False).mean()
 
     return df
+
+
+def apply_dynamic_indicators(df: pd.DataFrame, epic: str, indicators: list = None) -> pd.DataFrame:
+    """
+    Convenience function to apply indicators using dynamic epic-specific configuration.
+
+    Args:
+        df: DataFrame with OHLC data
+        epic: Epic code for configuration lookup
+        indicators: List of indicators to calculate (optional)
+
+    Returns:
+        DataFrame with calculated indicators using epic-specific parameters
+    """
+    try:
+        # Use simple service directly since worker files aren't available in container
+        from .ema_config_simple import get_ema_periods_for_chart_simple as get_ema_periods_for_chart
+
+        ema_short, ema_long, ema_trend = get_ema_periods_for_chart(epic)
+
+        return apply_indicators(
+            df=df,
+            ema_short=ema_short,
+            ema_long=ema_long,
+            ema_trend=ema_trend,
+            epic=epic,
+            indicators=indicators
+        )
+    except Exception as e:
+        # Fallback to legacy behavior
+        print(f"Warning: Could not apply dynamic indicators for {epic}: {e}")
+        return apply_indicators(df=df, indicators=indicators)
 
 
 def calculate_two_pole_oscillator(df: pd.DataFrame, filter_length: int = 20, sma_length: int = 25, signal_delay: int = 4) -> pd.DataFrame:

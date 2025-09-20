@@ -57,7 +57,10 @@
       "Read(//media/hr/**)",
       "Bash(udisksctl unmount:*)",
       "Bash(killall:*)",
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "Read(//home/hr/Pictures/Screenshots/**)",
+      "Bash(pip3 list:*)",
+      "Bash(dpkg:*)"
     ],
     "deny": [],
     "ask": []

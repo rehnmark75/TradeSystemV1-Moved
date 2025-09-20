@@ -9,6 +9,8 @@ from streamlit_lightweight_charts_ntf import renderLightweightCharts
 
 from services.data import get_candle_data, get_trade_logs, get_epics
 from services.indicators import apply_indicators, calculate_two_pole_oscillator, calculate_zero_lag_ema, calculate_support_resistance
+# Use the simple service directly for now since worker files aren't available in container
+from services.ema_config_simple import get_ema_config_service_simple as get_ema_config_service, get_ema_config_summary_simple as get_ema_config_summary
 from services.smc_structure import (
     detect_pivots, classify_pivots, convert_swings_to_plot_shapes
 )
@@ -51,17 +53,104 @@ epics = get_epics(engine)
 st.sidebar.header("Chart Settings")
 selected_epic = st.sidebar.selectbox("Select Symbol (Epic)", epics)
 
+# Load dynamic EMA configuration for selected epic
+ema_config = None
+ema_config_summary = None
+
+try:
+    ema_config_service = get_ema_config_service()
+    ema_config = ema_config_service.get_ema_config(selected_epic)
+    ema_config_summary = get_ema_config_summary(selected_epic)
+
+    # Cache the configuration for use in indicators
+    st.session_state.current_ema_config = ema_config
+    st.session_state.current_ema_summary = ema_config_summary
+
+    # Debug info
+    st.sidebar.success(f"✅ Config loaded: {ema_config.source} - {ema_config.short_period}/{ema_config.long_period}/{ema_config.trend_period}")
+
+except Exception as e:
+    st.sidebar.error(f"Error loading EMA config: {str(e)}")
+    import traceback
+    st.sidebar.text("Full error:")
+    st.sidebar.code(traceback.format_exc())
+    # Fallback to default values
+    ema_config = None
+    ema_config_summary = None
+
 # Timeframe selector for both 5m and 15m
 timeframe_options = ["5m", "15m"]
 selected_tf = st.sidebar.radio("Chart Timeframe", timeframe_options, index=1)
 timeframe_minutes = {"5m": 5, "15m": 15}
 timeframe = timeframe_minutes[selected_tf]
 
-# EMA toggles
+# EMA toggles - now shows actual periods for selected epic
 st.sidebar.subheader("EMA Indicators")
-show_ema21 = st.sidebar.checkbox("Show EMA 21", value=True)
-show_ema50 = st.sidebar.checkbox("Show EMA 50", value=True)
-show_ema200 = st.sidebar.checkbox("Show EMA 200", value=True)
+
+# Get actual EMA periods to display
+if ema_config:
+    short_label = f"Show EMA {ema_config.short_period}"
+    long_label = f"Show EMA {ema_config.long_period}"
+    trend_label = f"Show EMA {ema_config.trend_period}"
+
+    # Show configuration source
+    if ema_config.source == "optimal":
+        config_status = "🎯 Optimized"
+    elif ema_config.source == "config":
+        config_status = "⚙️ Configured"
+    else:
+        config_status = "📋 Default"
+
+    st.sidebar.caption(f"Configuration: {config_status}")
+else:
+    # Fallback labels
+    short_label = "Show EMA 21 (default)"
+    long_label = "Show EMA 50 (default)"
+    trend_label = "Show EMA 200 (default)"
+
+show_ema21 = st.sidebar.checkbox(short_label, value=True)
+show_ema50 = st.sidebar.checkbox(long_label, value=True)
+show_ema200 = st.sidebar.checkbox(trend_label, value=True)
+
+# Add configuration details section
+with st.sidebar.expander("🔧 EMA Configuration Details", expanded=False):
+    if ema_config and ema_config_summary:
+        st.write("**Current Configuration:**")
+        st.write(f"• Short EMA: {ema_config.short_period}")
+        st.write(f"• Long EMA: {ema_config.long_period}")
+        st.write(f"• Trend EMA: {ema_config.trend_period}")
+        st.write(f"• Source: {ema_config.source.title()}")
+        st.write(f"• Config: {ema_config.config_name}")
+
+        if ema_config.description:
+            st.caption(f"*{ema_config.description}*")
+
+        # Performance metrics if available
+        if 'performance' in ema_config_summary:
+            perf = ema_config_summary['performance']
+            st.write("**Performance Metrics:**")
+            if perf.get('performance_score'):
+                st.write(f"• Score: {perf['performance_score']:.3f}")
+            if perf.get('confidence_threshold'):
+                st.write(f"• Confidence: {perf['confidence_threshold']:.1%}")
+            if perf.get('risk_reward_ratio'):
+                st.write(f"• Risk/Reward: {perf['risk_reward_ratio']:.2f}")
+
+        # Last updated info
+        if ema_config.last_updated:
+            st.caption(f"Last updated: {ema_config.last_updated.strftime('%Y-%m-%d %H:%M')}")
+
+        # Refresh button
+        if st.button("🔄 Refresh Config"):
+            ema_config_service.refresh_cache(selected_epic)
+            st.rerun()
+
+    else:
+        st.write("**Using Default Configuration**")
+        st.write("• Short EMA: 21")
+        st.write("• Long EMA: 50")
+        st.write("• Trend EMA: 200")
+        st.caption("*Standard EMA periods*")
 
 # Zero Lag EMA toggle
 st.sidebar.subheader("Zero Lag EMA")
@@ -119,9 +208,36 @@ show_swings = st.sidebar.checkbox("Show Swing Labels", value=False)
 st.title("📈 TradingView Style Chart")
 st.caption(f"Showing {selected_epic} - {selected_tf} timeframe (UTC)")
 
+# Display EMA configuration summary prominently
+if ema_config:
+    config_color = {
+        'optimal': 'success',
+        'config': 'info',
+        'default': 'secondary'
+    }.get(ema_config.source, 'secondary')
+
+    config_icon = {
+        'optimal': '🎯',
+        'config': '⚙️',
+        'default': '📋'
+    }.get(ema_config.source, '📋')
+
+    config_message = (
+        f"{config_icon} **EMA Configuration:** "
+        f"{ema_config.short_period}/{ema_config.long_period}/{ema_config.trend_period} "
+        f"({ema_config.source.title()} - {ema_config.config_name})"
+    )
+
+    if config_color == 'success':
+        st.success(config_message)
+    elif config_color == 'info':
+        st.info(config_message)
+    else:
+        st.info(config_message)
+
 # Add legend for trade markers
 with st.expander("📊 Chart Legend", expanded=False):
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.markdown("""
         **Trade Arrows:**
@@ -143,6 +259,15 @@ with st.expander("📊 Chart Legend", expanded=False):
         - 🟢 Circle = Take Profit Level
         - 🟡 Circle = Moved to Breakeven
         - 🟣 Circle = Trailing Active
+        """)
+    with col4:
+        ema_periods = (ema_config.short_period, ema_config.long_period, ema_config.trend_period) if ema_config else (21, 50, 200)
+        st.markdown(f"""
+        **EMA Indicators:**
+        - 🟢 Green Line = EMA {ema_periods[0]}
+        - 🟠 Orange Line = EMA {ema_periods[1]}
+        - 🔵 Blue Line = EMA {ema_periods[2]}
+        - *Periods adapt per epic*
         """)
 
 # Fetch candle data based on selected timeframe
@@ -184,7 +309,19 @@ if show_ema200:
 if show_macd:
     indicators_to_apply.append("MACD")
 
-df_display = apply_indicators(df_display, indicators=indicators_to_apply)
+# Apply indicators with dynamic EMA configuration
+if ema_config:
+    df_display = apply_indicators(
+        df_display,
+        ema_short=ema_config.short_period,
+        ema_long=ema_config.long_period,
+        ema_trend=ema_config.trend_period,
+        epic=selected_epic,
+        indicators=indicators_to_apply
+    )
+else:
+    # Fallback to legacy behavior
+    df_display = apply_indicators(df_display, indicators=indicators_to_apply)
 
 # Calculate Two-Pole Oscillator if enabled
 if show_two_pole:
@@ -444,19 +581,22 @@ series = [
     }
 ]
 
-# Add EMAs as line series based on toggles
+# Add EMAs as line series based on toggles - now with dynamic periods and labels
 if show_ema21 and "ema21" in df_display.columns:
     ema21_data = [
         {"time": int(row.start_time.timestamp()), "value": row.ema21}
         for row in df_display.itertuples() if not pd.isna(row.ema21)
     ]
+
+    # Dynamic label based on actual period
+    ema_short_period = ema_config.short_period if ema_config else 21
     series.append({
         "type": "Line",
         "data": ema21_data,
         "options": {
-            "color": "#4caf50",  # Green for EMA 21
+            "color": "#4caf50",  # Green for EMA short
             "lineWidth": 2,
-            "title": "EMA 21"
+            "title": f"EMA {ema_short_period}"
         }
     })
 
@@ -465,13 +605,16 @@ if show_ema50 and "ema50" in df_display.columns:
         {"time": int(row.start_time.timestamp()), "value": row.ema50}
         for row in df_display.itertuples() if not pd.isna(row.ema50)
     ]
+
+    # Dynamic label based on actual period
+    ema_long_period = ema_config.long_period if ema_config else 50
     series.append({
         "type": "Line",
         "data": ema50_data,
         "options": {
-            "color": "#ff9800",  # Orange for EMA 50
+            "color": "#ff9800",  # Orange for EMA long
             "lineWidth": 2,
-            "title": "EMA 50"
+            "title": f"EMA {ema_long_period}"
         }
     })
 
@@ -480,13 +623,16 @@ if show_ema200 and "ema200" in df_display.columns:
         {"time": int(row.start_time.timestamp()), "value": row.ema200}
         for row in df_display.itertuples() if not pd.isna(row.ema200)
     ]
+
+    # Dynamic label based on actual period
+    ema_trend_period = ema_config.trend_period if ema_config else 200
     series.append({
         "type": "Line",
         "data": ema200_data,
         "options": {
-            "color": "#2196f3",  # Blue for EMA 200
+            "color": "#2196f3",  # Blue for EMA trend
             "lineWidth": 2,
-            "title": "EMA 200"
+            "title": f"EMA {ema_trend_period}"
         }
     })
 
@@ -1133,18 +1279,24 @@ if not df_display.empty:
     if has_indicators:
         st.subheader("Technical Indicators")
         
-        # EMAs row
+        # EMAs row - now with dynamic periods
         if any([show_ema21, show_ema50, show_ema200]):
             ema_cols = st.columns(4)
+
+            # Get dynamic periods for display
+            ema_short_period = ema_config.short_period if ema_config else 21
+            ema_long_period = ema_config.long_period if ema_config else 50
+            ema_trend_period = ema_config.trend_period if ema_config else 200
+
             if show_ema21 and 'ema21' in latest_candle and not pd.isna(latest_candle['ema21']):
                 with ema_cols[0]:
-                    st.metric("EMA 21", f"{latest_candle['ema21']:.{decimal_places}f}")
+                    st.metric(f"EMA {ema_short_period}", f"{latest_candle['ema21']:.{decimal_places}f}")
             if show_ema50 and 'ema50' in latest_candle and not pd.isna(latest_candle['ema50']):
                 with ema_cols[1]:
-                    st.metric("EMA 50", f"{latest_candle['ema50']:.{decimal_places}f}")
+                    st.metric(f"EMA {ema_long_period}", f"{latest_candle['ema50']:.{decimal_places}f}")
             if show_ema200 and 'ema200' in latest_candle and not pd.isna(latest_candle['ema200']):
                 with ema_cols[2]:
-                    st.metric("EMA 200", f"{latest_candle['ema200']:.{decimal_places}f}")
+                    st.metric(f"EMA {ema_trend_period}", f"{latest_candle['ema200']:.{decimal_places}f}")
             if show_zlema and 'zlema' in latest_candle and not pd.isna(latest_candle['zlema']):
                 with ema_cols[3]:
                     zlema_trend = "↗️" if latest_candle['close'] > latest_candle['zlema'] else "↘️"
