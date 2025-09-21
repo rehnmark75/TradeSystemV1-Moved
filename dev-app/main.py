@@ -19,7 +19,7 @@ except ImportError as e:
     print(f"⚠️ Trading analytics router not available: {e}")
     print("📝 To enable enhanced analytics, ensure:")
     print("   1. Create routers/trading_analytics_router.py")
-    print("   2. Create services/broker_transaction_analyzer.py") 
+    print("   2. Create services/broker_transaction_analyzer.py")
     print("   3. Create services/activity_pnl_correlator.py")     # NEW
     print("   4. Create services/price_based_pnl_calculator.py") # NEW
     print("   5. Create services/trade_pnl_correlator.py")       # NEW - YOUR NEW SERVICE
@@ -27,6 +27,20 @@ except ImportError as e:
     print("   7. Install dependencies: pip install httpx pandas")
     ANALYTICS_AVAILABLE = False
     trading_analytics_router = None
+
+# 🧪 BACKTEST: Safe import of backtest router for strategy execution
+try:
+    from routers.backtest_router import router as backtest_router
+    BACKTEST_AVAILABLE = True
+    print("✅ Backtest router imported successfully")
+    print("   🎯 Existing strategy execution available")
+    print("   📊 EMA, MACD, Combined strategies accessible")
+    print("   🔄 Unified backtest API endpoints available")
+except ImportError as e:
+    print(f"⚠️ Backtest router not available: {e}")
+    print("📝 To enable backtest features, ensure backtest router is properly configured")
+    BACKTEST_AVAILABLE = False
+    backtest_router = None
 
 from threading import Thread
 import logging
@@ -969,8 +983,17 @@ if ANALYTICS_AVAILABLE and trading_analytics_router:
     print("✅ Enhanced trading analytics router registered with /api/trading prefix")
     print("🎯 Activity-based P/L correlation endpoints available (FAST):")
     print("   • POST /api/trading/deals/correlate-activities")
-    print("   • POST /api/trading/deals/calculate-complete-pnl") 
+    print("   • POST /api/trading/deals/calculate-complete-pnl")
     print("   • GET  /api/trading/deals/pnl-calculation-status")
+
+# 🧪 BACKTEST: Add backtest router for existing strategy execution
+if BACKTEST_AVAILABLE and backtest_router:
+    app.include_router(backtest_router, tags=["backtest"])
+    print("✅ Backtest router registered with /api/backtest prefix")
+    print("🎯 Strategy execution endpoints available:")
+    print("   • GET  /api/backtest/strategies")
+    print("   • POST /api/backtest/run")
+    print("   • GET  /api/backtest/health")
     print("🔗 🆕 Transaction-based P/L correlation endpoints available (FAST):")  # NEW
     print("   • POST /api/trading/transactions/correlate-pnl")           # NEW
     print("   • POST /api/trading/automation/run-complete-sync")         # NEW

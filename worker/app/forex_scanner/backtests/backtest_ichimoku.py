@@ -157,7 +157,7 @@ class IchimokuBacktest:
             self.logger.info("⚠️ Smart Money modules not available")
             self.smart_money_enabled = False
 
-    def run_backtest(self, epic: str, days: int, timeframe: str = None,
+    def run_backtest(self, epic: str = None, days: int = 7, timeframe: str = None,
                     show_signals: bool = False, ichimoku_config: str = None,
                     min_confidence: float = None, use_optimal_params: bool = True,
                     validate_signal: str = None) -> Dict:
@@ -166,10 +166,20 @@ class IchimokuBacktest:
         self.logger.info("🌥️ Starting Ichimoku Cloud Strategy Backtest")
         self.logger.info(f"Epic: {epic}, Days: {days}, Timeframe: {timeframe}")
 
+        # Handle ALL EPICS mode (epic=None) by using config.EPIC_LIST
+        import config
+        epic_list = [epic] if epic else config.EPIC_LIST
+        self.logger.info(f"📊 Epic(s): {epic_list}")
+
+        # For now, use the first epic for pair extraction (TODO: improve for multi-epic support)
+        first_epic = epic_list[0] if epic_list else None
+        if not first_epic:
+            raise ValueError("No epics available for backtesting")
+
         # Extract pair for data fetching
-        pair = self._extract_pair_from_epic(epic)
+        pair = self._extract_pair_from_epic(first_epic)
         if not pair:
-            raise ValueError(f"Could not extract pair from epic: {epic}")
+            raise ValueError(f"Could not extract pair from epic: {first_epic}")
 
         self.logger.info(f"📊 Pair: {pair}")
 
@@ -177,7 +187,7 @@ class IchimokuBacktest:
         self.strategy = IchimokuStrategy(
             data_fetcher=self.data_fetcher,
             backtest_mode=True,
-            epic=epic,
+            epic=first_epic,
             timeframe=timeframe or '15m',
             use_optimized_parameters=use_optimal_params
         )
@@ -197,14 +207,14 @@ class IchimokuBacktest:
         # Get data
         self.logger.info("📈 Fetching market data...")
         df = self.data_fetcher.get_enhanced_data(
-            epic=epic,
+            epic=first_epic,
             pair=pair,
             timeframe=timeframe or '15m',
             lookback_hours=days * 24
         )
 
         if df is None or df.empty:
-            raise ValueError(f"No data available for {epic}")
+            raise ValueError(f"No data available for {first_epic}")
 
         self.logger.info(f"📊 Data loaded: {len(df)} candles from {df.iloc[0]['start_time']} to {df.iloc[-1]['start_time']}")
 

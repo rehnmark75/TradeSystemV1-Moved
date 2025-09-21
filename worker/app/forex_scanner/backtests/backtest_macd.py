@@ -1404,11 +1404,15 @@ class EnhancedMACDBacktest:
                 # Smart Money specific analysis
                 if self.smart_money_enabled:
                     self._analyze_smart_money_performance(all_signals)
-                
+
+                # CRITICAL FIX: Store signals as instance attribute for API access
+                self.all_signals = all_signals
+                self.logger.info(f"✅ Stored {len(all_signals)} signals in instance attribute for API access")
+
                 # Restore original config
                 if original_min_conf is not None:
                     config.MIN_CONFIDENCE = original_min_conf
-                
+
                 return True
             else:
                 self.logger.warning("❌ No MACD signals found in backtest period")

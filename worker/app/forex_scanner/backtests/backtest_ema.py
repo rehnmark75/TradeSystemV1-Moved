@@ -410,12 +410,16 @@ class EMABacktest:
                 
                 if show_signals:
                     self._display_signals(all_signals)
-                
+
                 self._analyze_performance(all_signals)
-                
+
+                # CRITICAL FIX: Store signals as instance attribute for API access
+                self.all_signals = all_signals
+                self.logger.info(f"✅ Stored {len(all_signals)} signals in instance attribute for API access")
+
                 if original_config:
                     config.ACTIVE_EMA_CONFIG = original_config
-                
+
                 self.log_performance_summary()
                 return True
             else:
