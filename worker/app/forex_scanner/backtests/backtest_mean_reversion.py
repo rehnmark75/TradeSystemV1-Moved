@@ -37,11 +37,13 @@ else:
 sys.path.insert(0, project_root)
 
 try:
-    from backtests.backtest_base import BacktestBase
+    from backtests.backtest_base import BacktestBase, StandardSignal, SignalType, MarketConditions
     from core.strategies.mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
+    from core.market_intelligence import MarketIntelligenceEngine
 except ImportError:
-    from forex_scanner.backtests.backtest_base import BacktestBase
+    from forex_scanner.backtests.backtest_base import BacktestBase, StandardSignal, SignalType, MarketConditions
     from forex_scanner.core.strategies.mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
+    from forex_scanner.core.market_intelligence import MarketIntelligenceEngine
 
 try:
     import config
@@ -52,8 +54,48 @@ except ImportError:
 class MeanReversionBacktest(BacktestBase):
     """Mean Reversion Strategy Backtesting with Multi-Oscillator Confluence Analysis"""
 
-    def __init__(self, use_optimal_parameters: bool = True):
-        super().__init__('mean_reversion', use_optimal_parameters)
+    def __init__(self, use_optimal_parameters: bool = True, **kwargs):
+        # Extract new parameters while maintaining backwards compatibility
+        enable_market_intelligence = kwargs.get('enable_market_intelligence', True)
+        enable_smart_money = kwargs.get('enable_smart_money', True)
+        enable_caching = kwargs.get('enable_caching', False)
+
+        super().__init__(
+            strategy_name='mean_reversion',
+            use_optimal_parameters=use_optimal_parameters,
+            enable_caching=enable_caching
+        )
+
+        # Override the base class market intelligence setting
+        self.market_intelligence_enabled = enable_market_intelligence
+        self.smart_money_enabled = enable_smart_money
+
+        # Initialize market intelligence if enabled
+        if enable_market_intelligence:
+            try:
+                self.market_intelligence = MarketIntelligenceEngine()
+                self.logger.info("✅ Market intelligence enabled for mean reversion")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Market intelligence initialization failed: {e}")
+                self.market_intelligence_enabled = False
+                self.market_intelligence = None
+        else:
+            self.market_intelligence = None
+
+        # Initialize Smart Money if enabled
+        if enable_smart_money:
+            try:
+                from core.smart_money_readonly_analyzer import SmartMoneyReadOnlyAnalyzer
+                from core.smart_money_integration import SmartMoneyIntegration
+                self.smart_money_analyzer = SmartMoneyReadOnlyAnalyzer()
+                self.smart_money_integration = SmartMoneyIntegration(self.smart_money_analyzer, self.data_fetcher)
+                self.logger.info("✅ Smart Money analysis enabled for mean reversion")
+            except ImportError as e:
+                self.logger.warning(f"⚠️ Smart Money modules not available: {e}")
+                self.smart_money_enabled = False
+        else:
+            self.smart_money_analyzer = None
+            self.smart_money_integration = None
         self.logger = logging.getLogger('mean_reversion_backtest')
         self.setup_logging()
 
@@ -97,7 +139,7 @@ class MeanReversionBacktest(BacktestBase):
             self.logger.error(f"❌ Failed to initialize Mean Reversion strategy: {e}")
             raise
 
-    def run_strategy_backtest(self, df: pd.DataFrame, epic: str, spread_pips: float, timeframe: str) -> List[Dict]:
+    def run_strategy_backtest(self, df: pd.DataFrame, epic: str, spread_pips: float, timeframe: str) -> List[StandardSignal]:
         """
         Run mean reversion strategy backtest on given data
 
@@ -108,7 +150,7 @@ class MeanReversionBacktest(BacktestBase):
             timeframe: Trading timeframe
 
         Returns:
-            List of signal dictionaries
+            List of StandardSignal objects
         """
         try:
             self.logger.info(f"🎯 Running Mean Reversion backtest for {epic}")
@@ -129,15 +171,35 @@ class MeanReversionBacktest(BacktestBase):
 
             signals = []
             if signal:
-                # Enhance signal with backtest-specific information
-                enhanced_signal = self._enhance_signal_for_backtest(signal, df, epic)
-                signals.append(enhanced_signal)
+                # Convert to StandardSignal format with enhanced information
+                enhanced_signal_dict = self._enhance_signal_for_backtest(signal, df, epic)
+
+                # Get market conditions for this timeframe
+                market_conditions = self.get_market_conditions(datetime.now(), df) if hasattr(self, 'get_market_conditions') else MarketConditions()
+
+                # Create StandardSignal object
+                standard_signal = self.standardize_signal(
+                    raw_signal=enhanced_signal_dict,
+                    epic=epic,
+                    timeframe=timeframe,
+                    market_conditions=market_conditions
+                )
+
+                # Add mean reversion specific metadata
+                standard_signal.technical_indicators.update({
+                    'mean_reversion_analysis': enhanced_signal_dict.get('mean_reversion_analysis', {}),
+                    'oscillator_confluence': enhanced_signal_dict.get('oscillator_confluence', {}),
+                    'execution_analysis': enhanced_signal_dict.get('execution_analysis', {}),
+                    'performance_prediction': enhanced_signal_dict.get('performance_prediction', {})
+                })
+
+                signals.append(standard_signal)
 
                 # Update performance statistics
-                self._update_performance_stats(enhanced_signal)
+                self._update_performance_stats(enhanced_signal_dict)
 
-                self.logger.info(f"✅ Found Mean Reversion signal: {signal['signal_type']} at "
-                               f"{signal.get('price', 'N/A')} (confidence: {signal.get('confidence', 0):.1%})")
+                self.logger.info(f"✅ Found Mean Reversion signal: {standard_signal.signal_type.value} at "
+                               f"{standard_signal.price} (confidence: {standard_signal.confidence:.1%})")
             else:
                 self.logger.debug(f"   No signals detected for {epic}")
 

@@ -60,7 +60,8 @@
       "Bash(tail:*)",
       "Read(//home/hr/Pictures/Screenshots/**)",
       "Bash(pip3 list:*)",
-      "Bash(dpkg:*)"
+      "Bash(dpkg:*)",
+      "Bash(time curl:*)"
     ],
     "deny": [],
     "ask": []

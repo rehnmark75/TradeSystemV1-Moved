@@ -271,47 +271,234 @@ def run_backtest_with_progress(config: BacktestConfig, service_type: str):
 
 
 def render_results_summary(result: BacktestResult):
-    """Render backtest results summary"""
+    """Render enhanced backtest results summary with market intelligence"""
     if not result.success:
         st.error(f"❌ Backtest failed: {result.error_message}")
         return
 
-    st.success(f"✅ Backtest completed in {result.execution_time:.2f} seconds")
+    # Handle execution time formatting safely
+    exec_time = result.execution_time if result.execution_time is not None else 0
+    st.success(f"✅ Backtest completed in {exec_time:.2f} seconds")
 
     # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         st.metric("Strategy", result.strategy_name.upper())
     with col2:
         st.metric("Total Signals", result.total_signals)
     with col3:
-        st.metric("Epic", result.epic.split('.')[-3] if '.' in result.epic else result.epic)
+        # Handle None epic for "All Epics" runs
+        if result.epic is None:
+            epic_display = "ALL EPICS"
+        elif '.' in result.epic:
+            epic_display = result.epic.split('.')[-3]
+        else:
+            epic_display = result.epic
+        st.metric("Epic", epic_display)
     with col4:
         st.metric("Timeframe", result.timeframe)
+    with col5:
+        # Check if this is an enhanced result (from StandardBacktestResult)
+        enhanced = "✅ Enhanced" if hasattr(result, 'market_intelligence_summary') else "⚠️ Legacy"
+        st.metric("Framework", enhanced)
+
+    # Enhanced feature detection
+    enhanced_features = []
+    if hasattr(result, 'market_intelligence_summary'):
+        enhanced_features.append("🧠 Market Intelligence")
+    if result.signals and any(signal.get('smart_money_analysis') for signal in result.signals[:5]):
+        enhanced_features.append("💰 Smart Money Analysis")
+    if result.signals and any(signal.get('market_conditions') for signal in result.signals[:5]):
+        enhanced_features.append("🌐 Market Conditions")
+
+    if enhanced_features:
+        st.info(f"**Enhanced Features Active:** {', '.join(enhanced_features)}")
 
     # Performance metrics
     if result.performance_metrics:
         st.subheader("📊 Performance Metrics")
 
         metrics = result.performance_metrics
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
-            win_rate = metrics.get('win_rate', 0) * 100
-            st.metric("Win Rate", f"{win_rate:.1f}%")
+            win_rate = metrics.get('win_rate', 0)
+            if win_rate > 1:
+                win_rate = win_rate / 100  # Handle percentage vs decimal
+            st.metric("Win Rate", f"{win_rate:.1%}")
 
         with col2:
-            avg_confidence = metrics.get('avg_confidence', 0) * 100
-            st.metric("Avg Confidence", f"{avg_confidence:.1f}%")
+            avg_confidence = metrics.get('avg_confidence', 0)
+            if avg_confidence > 1:
+                avg_confidence = avg_confidence / 100
+            st.metric("Avg Confidence", f"{avg_confidence:.1%}")
 
         with col3:
             avg_profit = metrics.get('avg_profit_pips', 0)
             st.metric("Avg Profit", f"{avg_profit:.1f} pips")
 
         with col4:
-            avg_rr = metrics.get('avg_risk_reward', 0)
-            st.metric("Risk/Reward", f"{avg_rr:.2f}")
+            avg_rr = metrics.get('risk_reward_ratio', metrics.get('avg_risk_reward', 0))
+            # Handle None values for risk/reward ratio
+            if avg_rr is None or avg_rr == 0:
+                st.metric("Risk/Reward", "N/A")
+            else:
+                st.metric("Risk/Reward", f"{avg_rr:.2f}")
+
+        with col5:
+            # Show market regime distribution if available
+            if hasattr(result, 'market_intelligence_summary') and result.market_intelligence_summary:
+                market_summary = result.market_intelligence_summary
+                regime_analysis = market_summary.get('regime_analysis', {})
+                most_common_regime = regime_analysis.get('most_common_regime', 'unknown')
+                st.metric("Market Regime", most_common_regime.replace('_', ' ').title())
+
+    # Enhanced Market Intelligence Section
+    if hasattr(result, 'market_intelligence_summary') and result.market_intelligence_summary:
+        render_market_intelligence_summary(result.market_intelligence_summary)
+
+    # All Epics Results Breakdown
+    if result.epic == "ALL_EPICS" and hasattr(result, 'epic_results'):
+        render_all_epics_breakdown(result)
+
+
+def render_market_intelligence_summary(market_summary: dict):
+    """Render market intelligence analysis"""
+    st.subheader("🧠 Market Intelligence Analysis")
+
+    if not market_summary.get('market_conditions_detected', False):
+        st.info("ℹ️ Market intelligence not available for this backtest")
+        return
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Market Regime Analysis**")
+        regime_analysis = market_summary.get('regime_analysis', {})
+        if regime_analysis:
+            regime_dist = regime_analysis.get('distribution', {})
+            if regime_dist:
+                # Create a simple visualization of regime distribution
+                regime_df = pd.DataFrame([
+                    {'Regime': k.replace('_', ' ').title(), 'Count': v}
+                    for k, v in regime_dist.items()
+                ])
+                st.dataframe(regime_df, hide_index=True)
+
+                most_common = regime_analysis.get('most_common_regime', 'unknown')
+                st.info(f"🎯 **Dominant Regime:** {most_common.replace('_', ' ').title()}")
+
+    with col2:
+        st.markdown("**Volatility & Session Analysis**")
+        vol_analysis = market_summary.get('volatility_analysis', {})
+        session_analysis = market_summary.get('session_analysis', {})
+
+        if vol_analysis:
+            avg_vol = vol_analysis.get('average_volatility_percentile', 0.5)
+            st.metric("Avg Volatility Percentile", f"{avg_vol:.1%}")
+
+        if session_analysis:
+            session_dist = session_analysis.get('distribution', {})
+            most_active = session_analysis.get('most_active_session', 'unknown')
+            st.info(f"📅 **Most Active Session:** {most_active.replace('_', ' ').title()}")
+
+
+def render_all_epics_breakdown(result: BacktestResult):
+    """Render breakdown of All Epics results"""
+    if not hasattr(result, 'epic_results'):
+        return
+
+    st.subheader("🌍 All Epics Results Breakdown")
+
+    epic_results = getattr(result, 'epic_results', {})
+    if not epic_results:
+        st.warning("No epic-specific results available")
+        return
+
+    # Create summary table
+    summary_data = []
+    for epic, epic_result in epic_results.items():
+        summary_data.append({
+            'Epic': epic.split('.')[-3] if '.' in epic else epic,
+            'Signals': len(epic_result.signals) if hasattr(epic_result, 'signals') else 0,
+            'Status': '✅ Success' if not getattr(epic_result, 'error_message', None) else '❌ Failed',
+            'Avg Confidence': f"{getattr(epic_result, 'performance_metrics', {}).get('avg_confidence', 0):.1%}",
+            'Market Regime': getattr(epic_result, 'market_conditions_summary', {}).get('regime', 'unknown') if hasattr(epic_result, 'market_conditions_summary') else 'N/A'
+        })
+
+    if summary_data:
+        df = pd.DataFrame(summary_data)
+        st.dataframe(df, hide_index=True, use_container_width=True)
+
+        # Epic selection for detailed view
+        st.subheader("📊 Epic-Specific Analysis")
+        selected_epic_display = st.selectbox(
+            "Select Epic for Detailed Analysis",
+            [row['Epic'] for row in summary_data],
+            key="epic_detail_selector"
+        )
+
+        # Find the full epic name
+        selected_full_epic = None
+        for epic in epic_results.keys():
+            if epic.split('.')[-3] == selected_epic_display or epic == selected_epic_display:
+                selected_full_epic = epic
+                break
+
+        if selected_full_epic and selected_full_epic in epic_results:
+            epic_detail = epic_results[selected_full_epic]
+            render_epic_detail(selected_full_epic, epic_detail)
+
+
+def render_epic_detail(epic: str, epic_result):
+    """Render detailed analysis for a specific epic"""
+    st.markdown(f"### 📈 {epic}")
+
+    if hasattr(epic_result, 'error_message') and epic_result.error_message:
+        st.error(f"❌ Error: {epic_result.error_message}")
+        return
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        signal_count = len(epic_result.signals) if hasattr(epic_result, 'signals') else 0
+        st.metric("Signals", signal_count)
+
+    with col2:
+        if hasattr(epic_result, 'performance_metrics') and epic_result.performance_metrics:
+            avg_conf = epic_result.performance_metrics.get('avg_confidence', 0)
+            st.metric("Avg Confidence", f"{avg_conf:.1%}")
+
+    with col3:
+        if hasattr(epic_result, 'market_conditions_summary') and epic_result.market_conditions_summary:
+            regime = getattr(epic_result.market_conditions_summary, 'regime', 'unknown')
+            if hasattr(regime, 'value'):
+                regime = regime.value
+            st.metric("Market Regime", regime.replace('_', ' ').title())
+
+    # Show signals for this epic if available
+    if hasattr(epic_result, 'signals') and epic_result.signals:
+        st.markdown("**Recent Signals:**")
+        signals_to_show = epic_result.signals[:5]  # Show latest 5 signals
+
+        signal_data = []
+        for signal in signals_to_show:
+            if hasattr(signal, 'to_dict'):
+                signal_dict = signal.to_dict()
+            else:
+                signal_dict = signal
+
+            signal_data.append({
+                'Type': signal_dict.get('signal_type', 'N/A'),
+                'Price': f"{signal_dict.get('price', 0):.5f}",
+                'Confidence': f"{signal_dict.get('confidence', 0):.1%}",
+                'Timestamp': signal_dict.get('timestamp', 'N/A')[:19] if signal_dict.get('timestamp') else 'N/A'
+            })
+
+        if signal_data:
+            signals_df = pd.DataFrame(signal_data)
+            st.dataframe(signals_df, hide_index=True, use_container_width=True)
 
 
 def render_chart(result: BacktestResult):

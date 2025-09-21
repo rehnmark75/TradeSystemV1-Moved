@@ -161,18 +161,28 @@ class WorkerBacktestService:
                     success=True
                 )
             else:
-                error_msg = data.get('error_message', 'Unknown error')
-                self.logger.error(f"❌ Worker backtest failed: {error_msg}")
+                error_msg = data.get('error_message')
+                total_signals = data.get('total_signals', 0)
+
+                if error_msg:
+                    # Actual error occurred
+                    self.logger.error(f"❌ Worker backtest failed: {error_msg}")
+                    success = False
+                else:
+                    # No signals found, but execution was successful
+                    self.logger.info(f"✅ Backtest completed successfully with {total_signals} signals found")
+                    success = True
+                    error_msg = None  # No error message for successful execution
 
                 return BacktestResult(
                     strategy_name=config.strategy_name,
                     epic=config.epic,
                     timeframe=config.timeframe,
-                    total_signals=0,
-                    signals=[],
-                    performance_metrics={},
+                    total_signals=total_signals,
+                    signals=data.get('signals', []),
+                    performance_metrics=data.get('performance_metrics', {}),
                     execution_time=data.get('execution_time', 0),
-                    success=False,
+                    success=success,
                     error_message=error_msg
                 )
 

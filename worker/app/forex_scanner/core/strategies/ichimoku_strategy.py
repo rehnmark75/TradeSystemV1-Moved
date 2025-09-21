@@ -85,7 +85,7 @@ class IchimokuStrategy(BaseStrategy):
 
         # Basic parameters
         self.eps = 1e-8  # Epsilon for stability
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.55)  # Ichimoku needs higher confidence
+        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.85)  # Ichimoku needs much higher confidence (was 0.55)
         self.min_bars = 80  # Minimum bars for stable Ichimoku (52 + 26 + buffer)
 
         # Strategy-specific thresholds

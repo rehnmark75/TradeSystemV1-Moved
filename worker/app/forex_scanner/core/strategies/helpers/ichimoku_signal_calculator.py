@@ -28,7 +28,7 @@ class IchimokuSignalCalculator:
     def __init__(self, logger: logging.Logger = None, trend_validator=None):
         self.logger = logger or logging.getLogger(__name__)
         self.trend_validator = trend_validator
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.55)  # Ichimoku needs higher confidence
+        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.85)  # Ichimoku needs much higher confidence (was 0.55)
 
     def calculate_ichimoku_confidence(self, latest_row: pd.Series, signal_type: str) -> float:
         """

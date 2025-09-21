@@ -98,7 +98,7 @@ SPREAD_PIPS = 1.5   # default spread for BID/ASK adjustment
 USE_BID_ADJUSTMENT = False  # whether to adjust BID prices to MID
 DEFAULT_TIMEFRAME = '15m'  # Default timeframe for signals ('5m', '15m', '1h')
 # Signal confidence threshold
-MIN_CONFIDENCE = 0.45  # 45% confidence (relaxed for more signals)
+MIN_CONFIDENCE = 0.85  # 85% confidence for quality signals (was 0.45)
 #=============================================================================
 # DATA FETCHER OPTIMIZATION CONFIGURATION
 # =============================================================================

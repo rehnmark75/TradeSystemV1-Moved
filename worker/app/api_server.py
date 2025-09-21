@@ -199,10 +199,10 @@ class BacktestExecutor:
                     }
                 },
                 'ichimoku': {
-                    'module': 'backtests.backtest_ichimoku',
-                    'class': 'IchimokuBacktest',
-                    'display_name': 'Ichimoku Cloud Strategy',
-                    'description': 'Traditional Ichimoku Kinko Hyo analysis with cloud breakouts and TK line crossovers',
+                    'module': 'backtests.backtest_ichimoku_enhanced',
+                    'class': 'EnhancedIchimokuStrategyBacktest',
+                    'display_name': 'Ichimoku Cloud Strategy (Enhanced)',
+                    'description': 'Enhanced Ichimoku Kinko Hyo analysis with unified framework integration',
                     'parameters': {
                         'min_confidence': {
                             'type': 'number',
@@ -251,8 +251,8 @@ class BacktestExecutor:
                 'mean_reversion': {
                     'module': 'backtests.backtest_mean_reversion',
                     'class': 'MeanReversionBacktest',
-                    'display_name': 'Mean Reversion Strategy',
-                    'description': 'Multi-oscillator confluence mean reversion strategy with LuxAlgo Premium Oscillator',
+                    'display_name': 'Mean Reversion Strategy (Enhanced)',
+                    'description': 'Multi-oscillator confluence mean reversion strategy with enhanced framework integration',
                     'parameters': {
                         'min_confidence': {
                             'type': 'number',
@@ -270,6 +270,92 @@ class BacktestExecutor:
                             'type': 'boolean',
                             'default': True,
                             'description': 'Use database-optimized parameters'
+                        }
+                    }
+                },
+                'ema_enhanced': {
+                    'module': 'backtests.backtest_ema_enhanced',
+                    'class': 'EnhancedEmaBacktest',
+                    'display_name': 'EMA Strategy (Enhanced Framework)',
+                    'description': 'Enhanced EMA strategy with unified framework, market intelligence, and standardized output',
+                    'parameters': {
+                        'ema_config': {
+                            'type': 'select',
+                            'options': ['aggressive', 'conservative', 'scalping'],
+                            'default': 'aggressive',
+                            'description': 'EMA configuration preset'
+                        },
+                        'min_confidence': {
+                            'type': 'number',
+                            'default': 0.7,
+                            'min': 0.1,
+                            'max': 1.0,
+                            'description': 'Minimum confidence threshold'
+                        },
+                        'enable_smart_money': {
+                            'type': 'boolean',
+                            'default': False,
+                            'description': 'Enable Smart Money Concepts analysis'
+                        },
+                        'use_optimal_parameters': {
+                            'type': 'boolean',
+                            'default': True,
+                            'description': 'Use database-optimized parameters'
+                        }
+                    }
+                },
+                'macd_enhanced': {
+                    'module': 'backtests.backtest_macd_enhanced',
+                    'class': 'EnhancedMacdBacktest',
+                    'display_name': 'MACD Strategy (Enhanced Framework)',
+                    'description': 'Enhanced MACD strategy with unified framework, market intelligence, and standardized output',
+                    'parameters': {
+                        'min_confidence': {
+                            'type': 'number',
+                            'default': 0.7,
+                            'min': 0.1,
+                            'max': 1.0,
+                            'description': 'Minimum confidence threshold'
+                        },
+                        'enable_smart_money': {
+                            'type': 'boolean',
+                            'default': False,
+                            'description': 'Enable Smart Money Concepts analysis'
+                        },
+                        'enable_forex_integration': {
+                            'type': 'boolean',
+                            'default': True,
+                            'description': 'Enable forex-specific optimizations'
+                        },
+                        'use_optimal_parameters': {
+                            'type': 'boolean',
+                            'default': True,
+                            'description': 'Use database-optimized parameters'
+                        }
+                    }
+                },
+                'ichimoku_enhanced': {
+                    'module': 'backtests.backtest_ichimoku_enhanced',
+                    'class': 'EnhancedIchimokuStrategyBacktest',
+                    'display_name': 'Ichimoku Strategy (Enhanced Framework)',
+                    'description': 'Enhanced Ichimoku strategy with unified framework, market intelligence, and standardized output',
+                    'parameters': {
+                        'min_confidence': {
+                            'type': 'number',
+                            'default': 0.7,
+                            'min': 0.1,
+                            'max': 1.0,
+                            'description': 'Minimum confidence threshold'
+                        },
+                        'enable_smart_money': {
+                            'type': 'boolean',
+                            'default': False,
+                            'description': 'Enable Smart Money Concepts analysis'
+                        },
+                        'cloud_breakout_only': {
+                            'type': 'boolean',
+                            'default': False,
+                            'description': 'Only trade cloud breakouts (ignore TK line crossovers)'
                         }
                     }
                 },
@@ -338,7 +424,7 @@ class BacktestExecutor:
         return strategies
 
     def execute_backtest(self, request: BacktestRequest) -> BacktestResponse:
-        """Execute a backtest using the specified strategy"""
+        """Execute a backtest using the specified strategy with enhanced format support"""
         start_time = datetime.now()
 
         try:
@@ -355,15 +441,14 @@ class BacktestExecutor:
                     detail=f"Strategy '{request.strategy_name}' is not available"
                 )
 
-            # Get the backtest class (not strategy class)
+            # Get the backtest class
             backtest_class = strategy_config['strategy_class']
 
-            # Initialize the complete backtest class
+            # Initialize the backtest class
             backtest_instance = backtest_class()
             logger.info(f"✅ Initialized {request.strategy_name} backtest class")
 
-            # Prepare parameters for the backtest - map API parameters to backtest method parameters
-            # If epic is None, the backtest will run on all epics from config.EPIC_LIST
+            # Prepare parameters for the backtest
             backtest_params = {
                 'epic': request.epic,  # None means all epics
                 'days': request.days,
@@ -371,7 +456,7 @@ class BacktestExecutor:
                 'show_signals': request.show_signals
             }
 
-            # Add strategy-specific parameters - but only if the method supports them
+            # Add strategy-specific parameters
             import inspect
             run_backtest_method = getattr(backtest_instance, 'run_backtest')
             method_signature = inspect.signature(run_backtest_method)
@@ -379,52 +464,64 @@ class BacktestExecutor:
 
             logger.info(f"ℹ️ Strategy {request.strategy_name} supports parameters: {supported_params}")
 
+            # Add user parameters to backtest
             for param_name, param_value in request.parameters.items():
                 if param_name in supported_params:
                     backtest_params[param_name] = param_value
                     logger.info(f"✅ Added supported parameter: {param_name}={param_value}")
-                else:
-                    logger.info(f"ℹ️ Strategy {request.strategy_name} doesn't support parameter '{param_name}' - skipping")
+
+            # Pass user parameters to backtest for ParameterManager
+            if hasattr(backtest_instance, 'parameter_manager') and backtest_instance.parameter_manager:
+                backtest_params['user_parameters'] = request.parameters
 
             logger.info(f"📊 Backtest parameters: {backtest_params}")
 
-            # Execute the complete backtest using the real backtest method
-            logger.info(f"🚀 Running complete {request.strategy_name} backtest on {request.epic}")
-            success = backtest_instance.run_backtest(**backtest_params)
+            # Execute the backtest
+            logger.info(f"🚀 Running {request.strategy_name} backtest on {request.epic}")
+            result = backtest_instance.run_backtest(**backtest_params)
 
-            if not success:
-                raise Exception("Backtest execution returned False")
+            # Handle both new StandardBacktestResult and legacy boolean returns
+            if hasattr(result, 'success'):
+                # New enhanced format - StandardBacktestResult
+                logger.info("✅ Received StandardBacktestResult format")
 
-            # CRITICAL FIX: After running the backtest, we need to extract signals properly
-            # The backtest classes generate signals during execution but don't always store them as attributes
-            # Let's try a few different approaches to get the signals
+                return BacktestResponse(
+                    success=result.success,
+                    strategy_name=result.strategy_name,
+                    epic=result.epic,
+                    timeframe=result.timeframe,
+                    total_signals=result.total_signals,
+                    signals=result.signals,  # Uses properties for compatibility
+                    performance_metrics=result.performance_metrics,
+                    execution_time=result.execution_time,
+                    error_message=result.error_message
+                )
 
-            logger.info("🔍 Attempting to extract signals from completed backtest...")
+            elif isinstance(result, bool):
+                # Legacy format - boolean return
+                logger.info("⚠️ Received legacy boolean format, extracting signals manually")
 
-            # Extract signals from all_signals attribute (this is where real backtests store results)
-            signals = self._extract_signals_from_backtest(backtest_instance)
+                if not result:
+                    raise Exception("Backtest execution returned False")
 
-            # If no signals found, the backtest may have worked but signals were not stored as attributes
-            # This is a known issue with the original backtest design
-            if not signals:
-                logger.warning("⚠️ No signals found in backtest instance attributes after successful execution")
-                logger.warning("   This suggests the backtest worked but signals are not being stored as instance attributes")
-                logger.warning("   The original backtest scripts store signals in local variables, not instance attributes")
+                # Extract signals using legacy method
+                signals = self._extract_signals_from_backtest(backtest_instance)
+                performance_metrics = self._extract_performance_metrics_from_backtest(backtest_instance)
+                execution_time = (datetime.now() - start_time).total_seconds()
 
-            performance_metrics = self._extract_performance_metrics_from_backtest(backtest_instance)
+                return BacktestResponse(
+                    success=True,
+                    strategy_name=request.strategy_name,
+                    epic=request.epic or "ALL_EPICS",
+                    timeframe=request.timeframe,
+                    total_signals=len(signals),
+                    signals=signals,
+                    performance_metrics=performance_metrics,
+                    execution_time=execution_time
+                )
 
-            execution_time = (datetime.now() - start_time).total_seconds()
-
-            return BacktestResponse(
-                success=True,
-                strategy_name=request.strategy_name,
-                epic=request.epic or "ALL_EPICS",  # Show ALL_EPICS if None was passed
-                timeframe=request.timeframe,
-                total_signals=len(signals),
-                signals=signals,
-                performance_metrics=performance_metrics,
-                execution_time=execution_time
-            )
+            else:
+                raise Exception(f"Unexpected result type from backtest: {type(result)}")
 
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds()
@@ -433,7 +530,7 @@ class BacktestExecutor:
             return BacktestResponse(
                 success=False,
                 strategy_name=request.strategy_name,
-                epic=request.epic or "ALL_EPICS",  # Show ALL_EPICS if None was passed
+                epic=request.epic or "ALL_EPICS",
                 timeframe=request.timeframe,
                 total_signals=0,
                 signals=[],
