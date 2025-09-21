@@ -38,28 +38,34 @@ import traceback
 
 # Add project root to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
+forex_scanner_dir = os.path.dirname(script_dir)
+app_dir = os.path.dirname(forex_scanner_dir)
 sys.path.insert(0, script_dir)
+sys.path.insert(0, forex_scanner_dir)
+sys.path.insert(0, app_dir)
 
 try:
-    from core.backtest.unified_backtest_engine import UnifiedBacktestEngine, BacktestMode
-    from core.backtest.strategy_registry import get_strategy_registry
-    from core.backtest.parameter_manager import ParameterManager, OptimizationMethod
-    from core.backtest.backtest_config import (
+    from unified_backtest_engine import UnifiedBacktestEngine, BacktestMode
+    from strategy_registry import get_strategy_registry
+    from parameter_manager import ParameterManager, OptimizationMethod
+    from backtest_config import (
         UnifiedBacktestConfig, BacktestConfigManager, ConfigTemplates,
         SmartMoneyConfig, OptimizationConfig, OutputConfig, ValidationConfig
     )
-    from core.backtest.report_generator import BacktestReportGenerator
+    from report_generator import BacktestReportGenerator
+    import sys
+    sys.path.append('..')
     import config
 except ImportError as e:
     try:
-        from forex_scanner.core.backtest.unified_backtest_engine import UnifiedBacktestEngine, BacktestMode
-        from forex_scanner.core.backtest.strategy_registry import get_strategy_registry
-        from forex_scanner.core.backtest.parameter_manager import ParameterManager, OptimizationMethod
-        from forex_scanner.core.backtest.backtest_config import (
+        from forex_scanner.backtests.unified_backtest_engine import UnifiedBacktestEngine, BacktestMode
+        from forex_scanner.backtests.strategy_registry import get_strategy_registry
+        from forex_scanner.backtests.parameter_manager import ParameterManager, OptimizationMethod
+        from forex_scanner.backtests.backtest_config import (
             UnifiedBacktestConfig, BacktestConfigManager, ConfigTemplates,
             SmartMoneyConfig, OptimizationConfig, OutputConfig, ValidationConfig
         )
-        from forex_scanner.core.backtest.report_generator import BacktestReportGenerator
+        from forex_scanner.backtests.report_generator import BacktestReportGenerator
         from forex_scanner import config
     except ImportError:
         print(f"❌ Failed to import required modules: {e}")
@@ -224,7 +230,14 @@ Available Templates: quick_test, comprehensive, optimization, validation, compar
     def parse_epics(self, epics_str: str) -> List[str]:
         """Parse epics string into list"""
         if not epics_str:
-            return [getattr(config, 'DEFAULT_EPIC', 'CS.D.EURUSD.CEEM.IP')]
+            # When no epic specified, use all epics from config.EPIC_LIST (like old backtest files)
+            epic_list = getattr(config, 'EPIC_LIST', None)
+            if epic_list:
+                print(f"🔍 Using all epics from config.EPIC_LIST: {len(epic_list)} epics")
+                return epic_list
+            else:
+                print("⚠️ config.EPIC_LIST not found, using default")
+                return [getattr(config, 'DEFAULT_EPIC', 'CS.D.EURUSD.CEEM.IP')]
 
         if epics_str.lower() == 'all':
             return getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
@@ -236,7 +249,11 @@ Available Templates: quick_test, comprehensive, optimization, validation, compar
 
             # Convert simple pair to full epic format
             if len(epic) == 6 and epic.isalpha():  # e.g., EURUSD
-                epic = f"CS.D.{epic}.MINI.IP"
+                # EURUSD uses CEEM format, all others use MINI
+                if epic.upper() == 'EURUSD':
+                    epic = f"CS.D.{epic}.CEEM.IP"
+                else:
+                    epic = f"CS.D.{epic}.MINI.IP"
 
             epics.append(epic)
 

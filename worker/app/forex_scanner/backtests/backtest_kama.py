@@ -27,8 +27,8 @@ sys.path.insert(0, project_root)
 from core.database import DatabaseManager
 from core.data_fetcher import DataFetcher
 from core.strategies.kama_strategy import KAMAStrategy, create_kama_strategy
-from core.backtest.performance_analyzer import PerformanceAnalyzer
-from core.backtest.signal_analyzer import SignalAnalyzer
+from performance_analyzer import PerformanceAnalyzer
+from signal_analyzer import SignalAnalyzer
 try:
     import config
 except ImportError:

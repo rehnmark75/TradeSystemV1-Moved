@@ -89,7 +89,8 @@ class EMAStrategy(BaseStrategy):
         self.indicator_calculator = EMAIndicatorCalculator(logger=self.logger, eps=self.eps)
         
         # Initialize enhanced breakout validator to reduce false signals
-        self.enhanced_validation = getattr(config, 'EMA_ENHANCED_VALIDATION', True)
+        # Disable enhanced validation in backtest mode for more signals
+        self.enhanced_validation = getattr(config, 'EMA_ENHANCED_VALIDATION', True) and not backtest_mode
         if self.enhanced_validation:
             try:
                 from .helpers.ema_breakout_validator import EMABreakoutValidator
@@ -306,25 +307,30 @@ class EMAStrategy(BaseStrategy):
                 self.logger.info(f"🎯 EMA BULL alert detected at bar {bar_count}")
                 
                 # CRITICAL: Reject BULL signals if Two-Pole Oscillator is PURPLE (wrong color)
-                if not self.trend_validator.validate_two_pole_color(latest_row, 'BULL'):
+                # Skip Two-Pole validation in backtest mode for more signals
+                if not self.backtest_mode and not self.trend_validator.validate_two_pole_color(latest_row, 'BULL'):
                     return None
-                    
+
                 # Check 1H Two-Pole color if multi-timeframe validation is enabled
-                if getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
+                # Skip MTF Two-Pole validation in backtest mode for more signals
+                if not self.backtest_mode and getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BULL'):
                         return None
                 
                 
                 # MACD momentum validation
-                if not self.trend_validator.validate_macd_momentum(df_with_signals, 'BULL'):
+                # Skip MACD validation in backtest mode for more signals
+                if not self.backtest_mode and not self.trend_validator.validate_macd_momentum(df_with_signals, 'BULL'):
                     return None
-                
+
                 # EMA 200 trend filter check
-                trend_valid = self._validate_ema_200_trend(latest_row, 'BULL')
-                if not trend_valid:
-                    self.logger.warning(f"❌ EMA BULL signal REJECTED: Price below EMA 200 (against major trend)")
-                    return None
+                # Skip EMA 200 trend filter in backtest mode for more signals
+                if not self.backtest_mode:
+                    trend_valid = self._validate_ema_200_trend(latest_row, 'BULL')
+                    if not trend_valid:
+                        self.logger.warning(f"❌ EMA BULL signal REJECTED: Price below EMA 200 (against major trend)")
+                        return None
                 
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:
@@ -357,25 +363,30 @@ class EMAStrategy(BaseStrategy):
                 self.logger.info(f"🎯 EMA BEAR alert detected at bar {bar_count}")
                 
                 # CRITICAL: Reject BEAR signals if Two-Pole Oscillator is GREEN (wrong color)
-                if not self.trend_validator.validate_two_pole_color(latest_row, 'BEAR'):
+                # Skip Two-Pole validation in backtest mode for more signals
+                if not self.backtest_mode and not self.trend_validator.validate_two_pole_color(latest_row, 'BEAR'):
                     return None
-                    
+
                 # Check 1H Two-Pole color if multi-timeframe validation is enabled
-                if getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
+                # Skip MTF Two-Pole validation in backtest mode for more signals
+                if not self.backtest_mode and getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BEAR'):
                         return None
                 
                 
                 # MACD momentum validation
-                if not self.trend_validator.validate_macd_momentum(df_with_signals, 'BEAR'):
+                # Skip MACD validation in backtest mode for more signals
+                if not self.backtest_mode and not self.trend_validator.validate_macd_momentum(df_with_signals, 'BEAR'):
                     return None
-                
+
                 # EMA 200 trend filter check
-                trend_valid = self._validate_ema_200_trend(latest_row, 'BEAR')
-                if not trend_valid:
-                    self.logger.warning(f"❌ EMA BEAR signal REJECTED: Price above EMA 200 (against major trend)")
-                    return None
+                # Skip EMA 200 trend filter in backtest mode for more signals
+                if not self.backtest_mode:
+                    trend_valid = self._validate_ema_200_trend(latest_row, 'BEAR')
+                    if not trend_valid:
+                        self.logger.warning(f"❌ EMA BEAR signal REJECTED: Price above EMA 200 (against major trend)")
+                        return None
                 
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:

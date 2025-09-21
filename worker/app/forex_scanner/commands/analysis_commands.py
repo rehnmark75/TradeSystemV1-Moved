@@ -127,7 +127,7 @@ class AnalysisCommands:
                 )
                 
                 # Analyze results
-                from core.backtest.performance_analyzer import PerformanceAnalyzer
+                from forex_scanner.backtests.performance_analyzer import PerformanceAnalyzer
                 performance_analyzer = PerformanceAnalyzer()
                 performance = performance_analyzer.analyze_performance(results)
                 
@@ -602,7 +602,7 @@ class AnalysisCommands:
                 )
                 
                 # Analyze performance
-                from core.backtest.performance_analyzer import PerformanceAnalyzer
+                from forex_scanner.backtests.performance_analyzer import PerformanceAnalyzer
                 performance_analyzer = PerformanceAnalyzer()
                 performance = performance_analyzer.analyze_performance(results)
                 

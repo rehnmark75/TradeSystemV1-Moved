@@ -26,17 +26,19 @@ import json
 import traceback
 
 try:
+    import sys
+    sys.path.append('..')
     from core.database import DatabaseManager
     from core.data_fetcher import DataFetcher
-    from core.backtest.performance_analyzer import PerformanceAnalyzer
-    from core.backtest.signal_analyzer import SignalAnalyzer
+    from performance_analyzer import PerformanceAnalyzer
+    from signal_analyzer import SignalAnalyzer
     from core.signal_detector import SignalDetector
     import config
 except ImportError:
     from forex_scanner.core.database import DatabaseManager
     from forex_scanner.core.data_fetcher import DataFetcher
-    from forex_scanner.core.backtest.performance_analyzer import PerformanceAnalyzer
-    from forex_scanner.core.backtest.signal_analyzer import SignalAnalyzer
+    from forex_scanner.backtests.performance_analyzer import PerformanceAnalyzer
+    from forex_scanner.backtests.signal_analyzer import SignalAnalyzer
     from forex_scanner.core.signal_detector import SignalDetector
     from forex_scanner import config
 
@@ -312,10 +314,14 @@ class UnifiedBacktestEngine:
         try:
             self.logger.info(f"   📊 {strategy_name} - {epic} ({timeframe})")
 
-            # Get strategy instance
-            strategy = self._get_strategy_instance(
-                strategy_name, epic, timeframe, config.use_optimal_parameters
-            )
+            # Get strategy instance (bypass registry for EMA to match old backtest exactly)
+            if strategy_name == 'ema':
+                from core.strategies.ema_strategy import EMAStrategy
+                strategy = EMAStrategy(data_fetcher=self.data_fetcher, backtest_mode=True)
+            else:
+                strategy = self._get_strategy_instance(
+                    strategy_name, epic, timeframe, config.use_optimal_parameters
+                )
 
             if not strategy:
                 return BacktestResult(
@@ -402,10 +408,10 @@ class UnifiedBacktestEngine:
             # This is a simplified version - will be enhanced with strategy registry
             if strategy_name == 'ema':
                 from core.strategies.ema_strategy import EMAStrategy
+                # Use same initialization as old backtest_ema.py for compatibility
                 return EMAStrategy(
                     data_fetcher=self.data_fetcher,
-                    backtest_mode=True,
-                    use_optimal_parameters=use_optimal_parameters
+                    backtest_mode=True
                 )
             elif strategy_name == 'macd':
                 from core.strategies.macd_strategy import MACDStrategy
@@ -451,41 +457,25 @@ class UnifiedBacktestEngine:
         signals = []
         min_bars = getattr(config, 'MIN_BARS_FOR_SIGNAL', 50)
 
-        # Use the modular strategy approach (similar to enhanced backtest files)
+        # Use EXACT same loop as working old backtest (from test_exact_old_method.py)
         for i in range(min_bars, len(df)):
             try:
                 # Get data up to current point (simulate real-time)
                 current_data = df.iloc[:i+1].copy()
 
-                # Get timestamp for this iteration
-                current_timestamp = self._get_proper_timestamp(df.iloc[i], i)
+                # Use EXACT same method as working old backtest
+                if strategy.enable_mtf_analysis and strategy.mtf_analyzer:
+                    signal = strategy.detect_signal_with_mtf(
+                        current_data, epic, config.SPREAD_PIPS, timeframe
+                    )
+                else:
+                    # Get current timestamp (old backtest method)
+                    current_timestamp = df.index[i] if i < len(df) else df.index[-1]
 
-                # Detect signal using strategy
-                signal = None
-
-                # Try MTF-enhanced detection first if available
-                if (hasattr(strategy, 'enable_mtf_analysis') and
-                    getattr(strategy, 'enable_mtf_analysis', False) and
-                    hasattr(strategy, 'detect_signal_with_mtf')):
-                    try:
-                        signal = strategy.detect_signal_with_mtf(
-                            current_data, epic, config.SPREAD_PIPS, timeframe
-                        )
-                    except Exception as e:
-                        self.logger.debug(f"MTF detection failed, falling back to standard: {e}")
-
-                # Fallback to standard detection
-                if not signal and hasattr(strategy, 'detect_signal'):
-                    try:
-                        signal = strategy.detect_signal(
-                            current_data, epic, config.SPREAD_PIPS, timeframe,
-                            evaluation_time=current_timestamp
-                        )
-                    except TypeError:
-                        # Some strategies don't accept evaluation_time
-                        signal = strategy.detect_signal(
-                            current_data, epic, config.SPREAD_PIPS, timeframe
-                        )
+                    signal = strategy.detect_signal(
+                        current_data, epic, config.SPREAD_PIPS, timeframe,
+                        evaluation_time=current_timestamp
+                    )
 
                 if signal:
                     # Apply Smart Money enhancement if enabled
@@ -770,11 +760,18 @@ class UnifiedBacktestEngine:
     def _extract_pair_from_epic(self, epic: str) -> str:
         """Extract currency pair from epic"""
         try:
-            if '.D.' in epic and '.MINI.IP' in epic:
+            # Handle both CEEM (EURUSD only) and MINI (all other pairs) formats
+            if '.D.' in epic:
                 parts = epic.split('.D.')
                 if len(parts) > 1:
-                    pair_part = parts[1].split('.MINI.IP')[0]
-                    return pair_part
+                    # Check for CEEM format (EURUSD only)
+                    if '.CEEM.IP' in epic:
+                        pair_part = parts[1].split('.CEEM.IP')[0]
+                        return pair_part
+                    # Check for MINI format (all other pairs)
+                    elif '.MINI.IP' in epic:
+                        pair_part = parts[1].split('.MINI.IP')[0]
+                        return pair_part
 
             # Fallback to config
             pair_info = getattr(config, 'PAIR_INFO', {})

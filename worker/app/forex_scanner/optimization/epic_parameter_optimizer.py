@@ -23,7 +23,7 @@ sys.path.insert(0, project_root)
 from core.database import DatabaseManager
 from core.data_fetcher import DataFetcher
 from core.strategies.ema_strategy import EMAStrategy
-from core.backtest.performance_analyzer import PerformanceAnalyzer
+from forex_scanner.backtests.performance_analyzer import PerformanceAnalyzer
 
 # Import backtest engine
 from backtests.backtest_ema import EMABacktest

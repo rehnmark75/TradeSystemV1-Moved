@@ -610,7 +610,7 @@ Examples:
         try:
             from core.database import DatabaseManager
             from core.signal_detector import SignalDetector
-            from core.backtest.performance_analyzer import PerformanceAnalyzer
+            from forex_scanner.backtests.performance_analyzer import PerformanceAnalyzer
             import config
             
             self.logger.info(f"📈 Backtesting BB+Supertrend Strategy")
@@ -705,7 +705,7 @@ Examples:
         try:
             from core.database import DatabaseManager
             from core.signal_detector import SignalDetector
-            from core.backtest.performance_analyzer import PerformanceAnalyzer
+            from forex_scanner.backtests.performance_analyzer import PerformanceAnalyzer
             import config
             
             self.logger.info(f"📈 Backtesting KAMA Strategy")

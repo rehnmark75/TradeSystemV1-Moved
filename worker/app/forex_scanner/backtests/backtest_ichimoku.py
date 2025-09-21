@@ -39,14 +39,14 @@ try:
     from core.database import DatabaseManager
     from core.data_fetcher import DataFetcher
     from core.strategies.ichimoku_strategy import IchimokuStrategy
-    from core.backtest.performance_analyzer import PerformanceAnalyzer
-    from core.backtest.signal_analyzer import SignalAnalyzer
+    from performance_analyzer import PerformanceAnalyzer
+    from signal_analyzer import SignalAnalyzer
 except ImportError:
     from forex_scanner.core.database import DatabaseManager
     from forex_scanner.core.data_fetcher import DataFetcher
     from forex_scanner.core.strategies.ichimoku_strategy import IchimokuStrategy
-    from forex_scanner.core.backtest.performance_analyzer import PerformanceAnalyzer
-    from forex_scanner.core.backtest.signal_analyzer import SignalAnalyzer
+    from forex_scanner.backtests.performance_analyzer import PerformanceAnalyzer
+    from forex_scanner.backtests.signal_analyzer import SignalAnalyzer
 
 # Smart Money Integration imports (with fallback handling)
 try:

@@ -38,8 +38,8 @@ sys.path.insert(0, project_root)
 from core.database import DatabaseManager
 from core.data_fetcher import DataFetcher
 from core.strategies.macd_strategy import create_macd_strategy, MACDStrategy
-from core.backtest.performance_analyzer import PerformanceAnalyzer
-from core.backtest.signal_analyzer import SignalAnalyzer
+from performance_analyzer import PerformanceAnalyzer
+from signal_analyzer import SignalAnalyzer
 
 # Smart Money Integration imports (with fallback handling)
 try:

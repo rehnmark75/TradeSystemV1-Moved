@@ -10,8 +10,8 @@ from typing import List, Dict, Optional
 try:
     from core.database import DatabaseManager
     from core.signal_detector import SignalDetector
-    from core.backtest.performance_analyzer import PerformanceAnalyzer
-    from core.backtest.signal_analyzer import SignalAnalyzer
+    from forex_scanner.backtests.performance_analyzer import PerformanceAnalyzer
+    from forex_scanner.backtests.signal_analyzer import SignalAnalyzer
     import config
 except ImportError:
     try:

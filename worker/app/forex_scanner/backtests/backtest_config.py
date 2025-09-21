@@ -25,12 +25,12 @@ from datetime import datetime, timedelta
 import copy
 
 try:
-    from core.backtest.unified_backtest_engine import BacktestMode
-    from core.backtest.parameter_manager import OptimizationMethod
+    from unified_backtest_engine import BacktestMode
+    from parameter_manager import OptimizationMethod
     import config
 except ImportError:
-    from forex_scanner.core.backtest.unified_backtest_engine import BacktestMode
-    from forex_scanner.core.backtest.parameter_manager import OptimizationMethod
+    from forex_scanner.backtests.unified_backtest_engine import BacktestMode
+    from forex_scanner.backtests.parameter_manager import OptimizationMethod
     from forex_scanner import config
 
 
@@ -144,7 +144,18 @@ class UnifiedBacktestConfig:
         if not self.strategies:
             self.strategies = ['ema']
         if not self.epics:
-            self.epics = ['CS.D.EURUSD.CEEM.IP']
+            # Use all epics from config like the old backtest files did
+            try:
+                epic_list = getattr(config, 'EPIC_LIST', None)
+                if epic_list:
+                    self.epics = epic_list
+                    print(f"🔍 Using EPIC_LIST from config: {len(epic_list)} epics")
+                else:
+                    self.epics = ['CS.D.EURUSD.CEEM.IP']
+                    print("⚠️ EPIC_LIST not found in config, using default")
+            except Exception as e:
+                print(f"❌ Error accessing config.EPIC_LIST: {e}")
+                self.epics = ['CS.D.EURUSD.CEEM.IP']
         if not self.timeframes:
             self.timeframes = ['15m']
 

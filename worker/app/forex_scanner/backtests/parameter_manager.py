@@ -27,10 +27,10 @@ import json
 import math
 
 try:
-    from core.backtest.strategy_registry import get_strategy_registry
+    from strategy_registry import get_strategy_registry
     import config
 except ImportError:
-    from forex_scanner.core.backtest.strategy_registry import get_strategy_registry
+    from forex_scanner.backtests.strategy_registry import get_strategy_registry
     from forex_scanner import config
 
 

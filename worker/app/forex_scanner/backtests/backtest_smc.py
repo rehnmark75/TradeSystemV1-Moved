@@ -35,8 +35,8 @@ sys.path.insert(0, project_root)
 from core.database import DatabaseManager
 from core.data_fetcher import DataFetcher
 from core.strategies.smc_strategy_fast import SMCStrategyFast
-from core.backtest.performance_analyzer import PerformanceAnalyzer
-from core.backtest.signal_analyzer import SignalAnalyzer
+from performance_analyzer import PerformanceAnalyzer
+from signal_analyzer import SignalAnalyzer
 
 from configdata import config as strategy_config
 try:

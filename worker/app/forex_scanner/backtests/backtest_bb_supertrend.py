@@ -37,8 +37,8 @@ except ImportError as e:
     MODULAR_VERSION_AVAILABLE = False
     print("⚠️ Falling back to legacy BB+Supertrend strategy")
 
-from core.backtest.performance_analyzer import PerformanceAnalyzer
-from core.backtest.signal_analyzer import SignalAnalyzer
+from performance_analyzer import PerformanceAnalyzer
+from signal_analyzer import SignalAnalyzer
 try:
     import config
 except ImportError:

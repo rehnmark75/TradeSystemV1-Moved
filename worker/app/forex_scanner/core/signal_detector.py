@@ -33,8 +33,8 @@ except ImportError:
     from forex_scanner.core.strategies.macd_strategy import MACDStrategy
     from forex_scanner.core.strategies.combined_strategy import CombinedStrategy
     from forex_scanner.core.backtest.backtest_engine import BacktestEngine
-    from forex_scanner.core.backtest.performance_analyzer import PerformanceAnalyzer
-    from forex_scanner.core.backtest.signal_analyzer import SignalAnalyzer
+    from forex_scanner.backtests.performance_analyzer import PerformanceAnalyzer
+    from forex_scanner.backtests.signal_analyzer import SignalAnalyzer
     from forex_scanner.core.detection.price_adjuster import PriceAdjuster
     from forex_scanner.core.strategies.scalping_strategy import ScalpingStrategy
     from forex_scanner.core.strategies.bb_supertrend_strategy import BollingerSupertrendStrategy

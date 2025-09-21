@@ -25,14 +25,14 @@ import pandas as pd
 from dataclasses import asdict
 
 try:
-    from core.backtest.unified_backtest_engine import BacktestResult, BacktestMode
-    from core.backtest.backtest_config import UnifiedBacktestConfig
-    from core.backtest.parameter_manager import OptimizationResult
+    from unified_backtest_engine import BacktestResult, BacktestMode
+    from backtest_config import UnifiedBacktestConfig
+    from parameter_manager import OptimizationResult
     import config
 except ImportError:
-    from forex_scanner.core.backtest.unified_backtest_engine import BacktestResult, BacktestMode
-    from forex_scanner.core.backtest.backtest_config import UnifiedBacktestConfig
-    from forex_scanner.core.backtest.parameter_manager import OptimizationResult
+    from forex_scanner.backtests.unified_backtest_engine import BacktestResult, BacktestMode
+    from forex_scanner.backtests.backtest_config import UnifiedBacktestConfig
+    from forex_scanner.backtests.parameter_manager import OptimizationResult
     from forex_scanner import config
 
 
