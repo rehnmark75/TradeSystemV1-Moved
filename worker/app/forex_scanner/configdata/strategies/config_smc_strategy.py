@@ -81,7 +81,7 @@ SMC_STRATEGY_CONFIG = {
         'best_trend_strength': 'strong',
         'best_market_regime': 'trending',
         'best_session': ['london', 'new_york'],
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP'],
         'min_pip_volatility': 10.0,
         'max_pip_volatility': 80.0
     },
@@ -151,7 +151,7 @@ SMC_STRATEGY_CONFIG = {
         'best_trend_strength': 'medium',
         'best_market_regime': 'trending_or_ranging',
         'best_session': ['all_sessions'],
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP', 'CS.D.EURJPY.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP', 'CS.D.EURJPY.MINI.IP'],
         'min_pip_volatility': 5.0,
         'max_pip_volatility': 100.0
     },
@@ -182,7 +182,7 @@ SMC_STRATEGY_CONFIG = {
         'best_volatility_regime': 'low_to_medium',
         'best_trend_strength': 'strong',
         'best_market_regime': 'trending',
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP'],
         'min_pip_volatility': 5.0,
         'max_pip_volatility': 40.0
     },
@@ -213,7 +213,7 @@ SMC_STRATEGY_CONFIG = {
         'best_volatility_regime': 'high',
         'best_trend_strength': 'any',
         'best_market_regime': 'any',
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP', 'CS.D.AUDUSD.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP', 'CS.D.AUDUSD.MINI.IP'],
         'min_pip_volatility': 8.0,
         'max_pip_volatility': 120.0
     },
@@ -244,7 +244,7 @@ SMC_STRATEGY_CONFIG = {
         'best_volatility_regime': 'any',
         'best_trend_strength': 'any',
         'best_market_regime': 'any',
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP'],
         'min_pip_volatility': 3.0,
         'max_pip_volatility': 200.0
     },
@@ -275,7 +275,7 @@ SMC_STRATEGY_CONFIG = {
         'best_volatility_regime': 'low_to_medium',
         'best_trend_strength': 'very_strong',
         'best_market_regime': 'strongly_trending',
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP'],
         'min_pip_volatility': 15.0,
         'max_pip_volatility': 60.0
     },
@@ -306,7 +306,7 @@ SMC_STRATEGY_CONFIG = {
         'best_volatility_regime': 'low',
         'best_trend_strength': 'medium_to_strong',
         'best_market_regime': 'trending',
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP'],
         'min_pip_volatility': 3.0,
         'max_pip_volatility': 30.0
     },

@@ -101,7 +101,7 @@ def test_claude_file_saving():
     print("\nStep 4: Testing manual file saving")
     
     test_signal = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BUY',
         'confidence_score': 0.85,
         'price': 1.1234,
@@ -170,7 +170,7 @@ def test_analyze_signal_minimal():
         analyzer = ClaudeAnalyzer(api_key=api_key, auto_save=True, save_directory="claude_analysis")
         
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BUY',
             'confidence_score': 0.85,
             'price': 1.1234,

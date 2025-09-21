@@ -70,7 +70,7 @@ def analyze_zero_lag_calculations():
         
         # Fetch data using the correct method
         df = fetcher.get_enhanced_data(
-            epic='CS.D.EURUSD.MINI.IP',
+            epic='CS.D.EURUSD.CEEM.IP',
             start_time=start_dt,
             end_time=end_dt, 
             timeframe='15m',

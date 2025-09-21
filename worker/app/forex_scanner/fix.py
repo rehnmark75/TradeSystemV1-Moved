@@ -44,7 +44,7 @@ class SignalInvestigator:
         # Note: Removed backtest_engine due to import issues
         
     def investigate_missing_signal(self, 
-                                 epic='CS.D.EURUSD.MINI.IP', 
+                                 epic='CS.D.EURUSD.CEEM.IP', 
                                  alert_timestamp='2025-08-11 17:48:27',
                                  timeframe='15m'):
         """
@@ -326,19 +326,19 @@ class SignalInvestigator:
         print("   - Ensure both use same detection logic")
         
         print("\n4. 🛠️ Debugging commands to run:")
-        print("   python main.py debug --epic CS.D.EURUSD.MINI.IP")
-        print("   python main.py debug-ema --epic CS.D.EURUSD.MINI.IP")
-        print("   python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 1 --show-signals")
+        print("   python main.py debug --epic CS.D.EURUSD.CEEM.IP")
+        print("   python main.py debug-ema --epic CS.D.EURUSD.CEEM.IP")
+        print("   python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 1 --show-signals")
 
 def main():
     """Main investigation function"""
     if len(sys.argv) < 2:
         print("Usage: python signal_investigation.py <alert_timestamp> [epic] [timeframe]")
-        print("Example: python signal_investigation.py '2025-08-11 17:48:27' CS.D.EURUSD.MINI.IP 15m")
+        print("Example: python signal_investigation.py '2025-08-11 17:48:27' CS.D.EURUSD.CEEM.IP 15m")
         sys.exit(1)
     
     alert_timestamp = sys.argv[1]
-    epic = sys.argv[2] if len(sys.argv) > 2 else 'CS.D.EURUSD.MINI.IP'
+    epic = sys.argv[2] if len(sys.argv) > 2 else 'CS.D.EURUSD.CEEM.IP'
     timeframe = sys.argv[3] if len(sys.argv) > 3 else '15m'
     
     investigator = SignalInvestigator()

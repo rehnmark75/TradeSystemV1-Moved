@@ -217,7 +217,7 @@ class ConfigMigrator:
             "EPIC_LIST": ConfigSetting(
                 name="EPIC_LIST",
                 value=[
-                    "CS.D.EURUSD.MINI.IP",
+                    "CS.D.EURUSD.CEEM.IP",
                     "CS.D.GBPUSD.MINI.IP", 
                     "CS.D.USDJPY.MINI.IP",
                     "CS.D.USDCHF.MINI.IP",

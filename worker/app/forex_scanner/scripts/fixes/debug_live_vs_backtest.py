@@ -23,7 +23,7 @@ def compare_live_vs_backtest():
         db_manager = DatabaseManager(config.DATABASE_URL)
         
         # Test the specific pairs from your backtest
-        test_pairs = ['CS.D.EURUSD.MINI.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP']
+        test_pairs = ['CS.D.EURUSD.CEEM.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP']
         
         print("📊 Testing specific pairs that showed signals in backtest:")
         print(f"   Pairs: {test_pairs}")
@@ -226,7 +226,7 @@ def test_manual_signal_detection():
         
         # Test each pair individually
         test_pairs = [
-            ('CS.D.EURUSD.MINI.IP', 'EURUSD'),
+            ('CS.D.EURUSD.CEEM.IP', 'EURUSD'),
             ('CS.D.EURJPY.MINI.IP', 'EURJPY'), 
             ('CS.D.AUDJPY.MINI.IP', 'AUDJPY')
         ]

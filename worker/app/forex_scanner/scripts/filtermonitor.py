@@ -84,7 +84,7 @@ class FilterManager:
         
         # Use MINI epics by default (correct format for this system)
         epic_map = {
-            "EURUSD": "CS.D.EURUSD.MINI.IP",
+            "EURUSD": "CS.D.EURUSD.CEEM.IP",
             "GBPUSD": "CS.D.GBPUSD.MINI.IP", 
             "USDJPY": "CS.D.USDJPY.MINI.IP",
             "AUDUSD": "CS.D.AUDUSD.MINI.IP",
@@ -248,7 +248,7 @@ class FilterManager:
         
         # Use MINI epics by default (correct format for this system)
         epic_map = {
-            "EURUSD": "CS.D.EURUSD.MINI.IP",
+            "EURUSD": "CS.D.EURUSD.CEEM.IP",
             "GBPUSD": "CS.D.GBPUSD.MINI.IP", 
             "USDJPY": "CS.D.USDJPY.MINI.IP",
             "AUDUSD": "CS.D.AUDUSD.MINI.IP",
@@ -492,7 +492,7 @@ class FilterManager:
             
             # Use correct MINI epic mapping
             epic_map = {
-                'EURUSD': 'CS.D.EURUSD.MINI.IP',
+                'EURUSD': 'CS.D.EURUSD.CEEM.IP',
                 'GBPUSD': 'CS.D.GBPUSD.MINI.IP', 
                 'USDJPY': 'CS.D.USDJPY.MINI.IP',
                 'AUDUSD': 'CS.D.AUDUSD.MINI.IP',
@@ -587,14 +587,14 @@ Examples:
     
     # Analyze command
     analyze_parser = subparsers.add_parser('analyze', help='Analyze recent price movement')
-    analyze_parser.add_argument('--epic', default='CS.D.EURUSD.MINI.IP', help='Trading epic (will auto-convert from pair)')
+    analyze_parser.add_argument('--epic', default='CS.D.EURUSD.CEEM.IP', help='Trading epic (will auto-convert from pair)')
     analyze_parser.add_argument('--pair', default='EURUSD', help='Currency pair')
     analyze_parser.add_argument('--timeframe', default='5m', help='Timeframe')
     analyze_parser.add_argument('--periods', type=int, default=50, help='Periods to analyze')
     
     # Test command
     test_parser = subparsers.add_parser('test', help='Test filter conditions')
-    test_parser.add_argument('--epic', default='CS.D.EURUSD.MINI.IP', help='Trading epic (will auto-convert from pair)')
+    test_parser.add_argument('--epic', default='CS.D.EURUSD.CEEM.IP', help='Trading epic (will auto-convert from pair)')
     test_parser.add_argument('--pair', default='EURUSD', help='Currency pair')
     test_parser.add_argument('--timeframe', default='5m', help='Timeframe')
     test_parser.add_argument('--signal', choices=['BULL', 'BEAR'], default='BULL', help='Signal type')

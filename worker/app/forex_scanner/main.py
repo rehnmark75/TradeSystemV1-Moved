@@ -103,16 +103,16 @@ class ForexScannerCLI:
 Examples:
   python main.py scan                                    # Single scan
   python main.py live                                    # Live scanning
-  python main.py backtest --epic CS.D.EURUSD.MINI.IP    # Backtest
-  python main.py debug --epic CS.D.EURUSD.MINI.IP       # Debug signals
-  python main.py debug-bb-supertrend --epic CS.D.EURUSD.MINI.IP  # Debug BB+Supertrend
-  python main.py test-bb-supertrend --epic CS.D.EURUSD.MINI.IP   # Test BB+Supertrend
-  python main.py backtest-kama --epic CS.D.EURUSD.MINI.IP --days 14  # KAMA Backtest
+  python main.py backtest --epic CS.D.EURUSD.CEEM.IP    # Backtest
+  python main.py debug --epic CS.D.EURUSD.CEEM.IP       # Debug signals
+  python main.py debug-bb-supertrend --epic CS.D.EURUSD.CEEM.IP  # Debug BB+Supertrend
+  python main.py test-bb-supertrend --epic CS.D.EURUSD.CEEM.IP   # Test BB+Supertrend
+  python main.py backtest-kama --epic CS.D.EURUSD.CEEM.IP --days 14  # KAMA Backtest
   
   # NEW: Smart Money Commands
-  python main.py debug-smart-money --epic CS.D.EURUSD.MINI.IP    # Debug smart money analysis
-  python main.py compare-strategies --epic CS.D.EURUSD.MINI.IP --days 7  # Compare regular vs smart
-  python main.py test-smart-validation --epic CS.D.EURUSD.MINI.IP --signal-type BUY --price 1.0950
+  python main.py debug-smart-money --epic CS.D.EURUSD.CEEM.IP    # Debug smart money analysis
+  python main.py compare-strategies --epic CS.D.EURUSD.CEEM.IP --days 7  # Compare regular vs smart
+  python main.py test-smart-validation --epic CS.D.EURUSD.CEEM.IP --signal-type BUY --price 1.0950
   python main.py smart-money-status                              # Check smart money system status
             """
         )
@@ -346,7 +346,7 @@ Examples:
             
             # Analysis commands
             elif args.command == 'test-bb':
-                return self.analysis_commands.test_bb_data(epic=args.epic or 'CS.D.EURUSD.MINI.IP')
+                return self.analysis_commands.test_bb_data(epic=args.epic or 'CS.D.EURUSD.CEEM.IP')
             elif args.command == 'compare-bb':
                 return self.analysis_commands.compare_bb_filters(epic=args.epic, days=args.days)
             elif args.command == 'list-ema-configs':
@@ -762,7 +762,7 @@ Examples:
             performance_analyzer = PerformanceAnalyzer()
             
             # Set epic list
-            epic_list = [args.epic] if args.epic else ['CS.D.EURUSD.MINI.IP']  # Default to EURUSD
+            epic_list = [args.epic] if args.epic else ['CS.D.EURUSD.CEEM.IP']  # Default to EURUSD
             days = args.days or 14  # Default to 2 weeks
             timeframe = args.timeframe or '15m'
             
@@ -956,7 +956,7 @@ Examples:
             detector = SignalDetector(db_manager, config.USER_TIMEZONE)
             
             # Set test parameters
-            epic_list = [args.epic] if args.epic else ['CS.D.EURUSD.MINI.IP']
+            epic_list = [args.epic] if args.epic else ['CS.D.EURUSD.CEEM.IP']
             days = args.days or 7
             
             self.logger.info(f"🔍 Testing {len(epic_list)} epic(s) over {days} days")

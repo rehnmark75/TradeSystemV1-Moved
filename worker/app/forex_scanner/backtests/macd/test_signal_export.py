@@ -27,7 +27,7 @@ def main():
         'end_date': datetime(2024, 1, 3),  # Just 2 days for quick test
         'timeframe': '15m',
         'test_pairs': [
-            'CS.D.EURUSD.MINI.IP'  # Just one pair for speed
+            'CS.D.EURUSD.CEEM.IP'  # Just one pair for speed
         ],
         'initial_balance': 10000.0,
         'max_trades_per_day': 3,

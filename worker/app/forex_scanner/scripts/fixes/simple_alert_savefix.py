@@ -107,7 +107,7 @@ def test_working_saver():
     
     # Test 1: Simple signal
     simple_signal = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BULL',
         'confidence_score': 0.75,
         'strategy': 'test_working',

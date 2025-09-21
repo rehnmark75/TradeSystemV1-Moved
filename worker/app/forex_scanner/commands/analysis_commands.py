@@ -88,7 +88,7 @@ class AnalysisCommands:
     
     def compare_bb_filters(self, epic: str = None, days: int = 7) -> bool:
         """Compare signal performance with and without BB filters"""
-        test_epic = epic or 'CS.D.EURUSD.MINI.IP'
+        test_epic = epic or 'CS.D.EURUSD.CEEM.IP'
         self.logger.info(f"🔬 Comparing BB filter performance for {test_epic}")
         
         try:
@@ -195,7 +195,7 @@ class AnalysisCommands:
     
     def analyze_market_conditions(self, epic: str = None, hours: int = 24) -> bool:
         """Analyze current market conditions for trading"""
-        test_epic = epic or 'CS.D.EURUSD.MINI.IP'
+        test_epic = epic or 'CS.D.EURUSD.CEEM.IP'
         self.logger.info(f"🌍 Analyzing market conditions for {test_epic}")
         
         try:
@@ -230,7 +230,7 @@ class AnalysisCommands:
     
     def test_indicator_calculations(self, epic: str = None) -> bool:
         """Test various technical indicator calculations"""
-        test_epic = epic or 'CS.D.EURUSD.MINI.IP'
+        test_epic = epic or 'CS.D.EURUSD.CEEM.IP'
         self.logger.info(f"🧮 Testing indicator calculations for {test_epic}")
         
         try:
@@ -562,7 +562,7 @@ class AnalysisCommands:
     
     def benchmark_indicator_performance(self, epic: str = None, days: int = 30) -> bool:
         """Benchmark different indicator combinations"""
-        test_epic = epic or 'CS.D.EURUSD.MINI.IP'
+        test_epic = epic or 'CS.D.EURUSD.CEEM.IP'
         self.logger.info(f"⚡ Benchmarking indicator performance for {test_epic}")
         
         try:

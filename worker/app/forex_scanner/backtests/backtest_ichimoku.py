@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Ichimoku Cloud Strategy Backtest - Complete Integration
-Run: python backtest_ichimoku.py --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+Run: python backtest_ichimoku.py --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 
 ICHIMOKU FEATURES:
 - Traditional Ichimoku Kinko Hyo (One Glance Equilibrium Chart) analysis

@@ -29,7 +29,7 @@ def test_news_filter_integration():
 
         # Test currency pair extraction
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BUY',
             'confidence_score': 0.85
         }
@@ -91,7 +91,7 @@ def test_trade_validator_integration():
 
         # Test a signal validation that would use news filter
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BUY',
             'confidence_score': 0.85,
             'current_price': 1.1234,

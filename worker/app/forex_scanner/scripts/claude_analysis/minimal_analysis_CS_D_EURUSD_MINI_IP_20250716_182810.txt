@@ -1,6 +1,6 @@
 Claude Minimal Analysis
 Generated: 2025-07-16 18:28:10
-Epic: CS.D.EURUSD.MINI.IP
+Epic: CS.D.EURUSD.CEEM.IP
 Signal: BUY
 Price: 1.085
 

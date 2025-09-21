@@ -1,28 +1,28 @@
 2025-07-22 07:07:39,570 - core.scanner - INFO - 📊 Scanner: 1 raw signals detected
 2025-07-22 07:07:39,570 - core.scanner - INFO - 📊 Confidence filter: 1/1 signals passed (≥70.0%)
 2025-07-22 07:07:39,570 - core.scanner - INFO - 🧠 Applying minimal intelligence filtering
-2025-07-22 07:07:39,570 - core.scanner - INFO - ✅ PASSED CS.D.EURUSD.MINI.IP: Intelligence 95.0% ≥ 30.0% (preset: minimal)
+2025-07-22 07:07:39,570 - core.scanner - INFO - ✅ PASSED CS.D.EURUSD.CEEM.IP: Intelligence 95.0% ≥ 30.0% (preset: minimal)
 2025-07-22 07:07:39,571 - core.scanner - INFO - 🧠 Intelligence filtering: 1/1 signals passed
 2025-07-22 07:07:39,571 - core.scanner - INFO - 🛡️ Applying deduplication to 1 signals
-2025-07-22 07:07:39,571 - core.scanner - INFO - ✅ Signal approved: CS.D.EURUSD.MINI.IP BULL (enhanced_ema_simple)
+2025-07-22 07:07:39,571 - core.scanner - INFO - ✅ Signal approved: CS.D.EURUSD.CEEM.IP BULL (enhanced_ema_simple)
 2025-07-22 07:07:39,571 - core.scanner - INFO - 🛡️ Deduplication result: 1/1 signals passed
-2025-07-22 07:07:39,571 - core.scanner - INFO - 📊 Processing signal 1/1: CS.D.EURUSD.MINI.IP
+2025-07-22 07:07:39,571 - core.scanner - INFO - 📊 Processing signal 1/1: CS.D.EURUSD.CEEM.IP
 2025-07-22 07:07:39,572 - core.scanner - INFO -    Type: BULL
 2025-07-22 07:07:39,572 - core.scanner - INFO -    Strategy: enhanced_ema_simple
 2025-07-22 07:07:39,572 - core.scanner - INFO -    Confidence: 90.0%
-2025-07-22 07:07:39,572 - core.scanner - INFO - ✅ Signal 1 prepared: CS.D.EURUSD.MINI.IP
+2025-07-22 07:07:39,572 - core.scanner - INFO - ✅ Signal 1 prepared: CS.D.EURUSD.CEEM.IP
 2025-07-22 07:07:39,572 - core.scanner - INFO - ✅ Scanner result: 1 clean signals ready for TradingOrchestrator
 2025-07-22 07:07:39,573 - core.scanner - INFO - ✅ Scan completed in 0.05s
 2025-07-22 07:07:39,573 - core.scanner - INFO - 📤 Signals will be processed by TradingOrchestrator (Claude analysis, database saving)
-2025-07-22 07:07:39,573 - core.scanner - INFO -    📊 CS.D.EURUSD.MINI.IP BULL (90.0%) - enhanced_ema_simple
+2025-07-22 07:07:39,573 - core.scanner - INFO -    📊 CS.D.EURUSD.CEEM.IP BULL (90.0%) - enhanced_ema_simple
 2025-07-22 07:07:39,573 - core.trading.trading_orchestrator - INFO - 📊 Scanner detected 1 signals
 2025-07-22 07:07:39,573 - core.trading.trading_orchestrator - INFO - 🔍 Validating 1 signals for trading...
-2025-07-22 07:07:39,573 - core.trading.trading_orchestrator - WARNING - ❌ Signal 1 INVALID: CS.D.EURUSD.MINI.IP BULL - Duplicate: Duplicate signal detected within 1.0 minutes (sensitivity: smart)
+2025-07-22 07:07:39,573 - core.trading.trading_orchestrator - WARNING - ❌ Signal 1 INVALID: CS.D.EURUSD.CEEM.IP BULL - Duplicate: Duplicate signal detected within 1.0 minutes (sensitivity: smart)
 2025-07-22 07:07:39,574 - core.trading.trading_orchestrator - INFO - 📊 Validation complete: 0 valid, 1 invalid
 2025-07-22 07:07:39,574 - core.trading.trading_orchestrator - INFO - 📊 Validation failure breakdown:
 2025-07-22 07:07:39,574 - core.trading.trading_orchestrator - INFO -    Duplicate: 1 signals
 2025-07-22 07:07:39,574 - core.trading.trading_orchestrator - INFO - ❌ Invalid signals summary:
-2025-07-22 07:07:39,575 - core.trading.trading_orchestrator - INFO -    CS.D.EURUSD.MINI.IP: Duplicate: Duplicate signal detected within 1.0 minutes (sensitivity: smart)
+2025-07-22 07:07:39,575 - core.trading.trading_orchestrator - INFO -    CS.D.EURUSD.CEEM.IP: Duplicate: Duplicate signal detected within 1.0 minutes (sensitivity: smart)
 2025-07-22 07:07:39,575 - core.trading.trading_orchestrator - INFO - ❌ Filtered out 1 invalid signals
 2025-07-22 07:07:39,575 - core.trading.trading_orchestrator - INFO - 📊 No valid signals after validation
 2025-07-22 07:07:39,575 - core.trading.trading_orchestrator - INFO - ⏰ Waiting 60s until next scan...

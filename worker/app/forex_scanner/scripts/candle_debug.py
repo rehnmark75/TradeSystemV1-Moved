@@ -59,7 +59,7 @@ class CandleDebugger:
         """Investigate a specific candle that was flagged as large"""
         
         epic_map = {
-            "EURUSD": "CS.D.EURUSD.MINI.IP",
+            "EURUSD": "CS.D.EURUSD.CEEM.IP",
             "GBPUSD": "CS.D.GBPUSD.MINI.IP", 
             "USDJPY": "CS.D.USDJPY.MINI.IP"
         }
@@ -221,7 +221,7 @@ class CandleDebugger:
         """Analyze ATR calculation across different periods"""
         
         epic_map = {
-            "EURUSD": "CS.D.EURUSD.MINI.IP",
+            "EURUSD": "CS.D.EURUSD.CEEM.IP",
             "GBPUSD": "CS.D.GBPUSD.MINI.IP", 
             "USDJPY": "CS.D.USDJPY.MINI.IP"
         }

@@ -1248,7 +1248,7 @@ class SignalDetector:
         try:
             # Get epic list from config
             epic_list = getattr(config, 'EPIC_LIST', [
-                'CS.D.EURUSD.MINI.IP',
+                'CS.D.EURUSD.CEEM.IP',
                 'CS.D.GBPUSD.MINI.IP',
                 'CS.D.USDJPY.MINI.IP',
                 'CS.D.AUDUSD.MINI.IP',
@@ -1280,7 +1280,7 @@ class SignalDetector:
         Detect signals for a single epic
         
         Args:
-            epic: Currency pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+            epic: Currency pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
             intelligence_mode: Intelligence filtering mode
             min_confidence: Minimum confidence threshold
             

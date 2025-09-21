@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Combined Strategy Backtest - Standalone Module with CONFIDENCE FIX
-Run: python backtest_combined.py --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+Run: python backtest_combined.py --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 
 FIXES:
 1. Fixed confidence field mapping issue - signals showing 0.0% confidence
@@ -244,7 +244,7 @@ class CombinedBacktest:
                 self.logger.info(f"\n📈 Processing {current_epic}")
                 
                 # Get enhanced data - Need to extract pair from epic
-                # Convert epic like "CS.D.EURUSD.MINI.IP" to pair like "EURUSD"
+                # Convert epic like "CS.D.EURUSD.CEEM.IP" to pair like "EURUSD"
                 pair = self._extract_pair_from_epic(current_epic)
                 
                 df = self.data_fetcher.get_enhanced_data(
@@ -311,7 +311,7 @@ class CombinedBacktest:
     def _extract_pair_from_epic(self, epic: str) -> str:
         """Extract currency pair from epic code"""
         try:
-            # Convert "CS.D.EURUSD.MINI.IP" to "EURUSD"
+            # Convert "CS.D.EURUSD.CEEM.IP" to "EURUSD"
             if '.D.' in epic and '.MINI.IP' in epic:
                 parts = epic.split('.D.')
                 if len(parts) > 1:
@@ -527,7 +527,7 @@ def main():
     parser = argparse.ArgumentParser(description='Combined Strategy Backtest (Confidence Fixed)')
     
     # Required arguments
-    parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.MINI.IP)')
+    parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.CEEM.IP)')
     parser.add_argument('--days', type=int, default=7, help='Days to backtest (default: 7)')
     parser.add_argument('--timeframe', default='15m', help='Timeframe (default: 15m)')
     

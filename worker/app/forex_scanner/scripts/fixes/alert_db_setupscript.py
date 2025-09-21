@@ -243,7 +243,7 @@ def insert_test_data(database_url):
         logger.info("🧪 Inserting test data...")
         
         test_alert = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'pair': 'EURUSD',
             'signal_type': 'BULL',
             'strategy': 'enhanced_simple_ema',

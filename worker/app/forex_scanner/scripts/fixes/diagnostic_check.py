@@ -76,7 +76,7 @@ def check_implementation():
     # Check 3: Debug Output Format
     print("3️⃣ Debug Output Format Check:")
     try:
-        debug_info = detector.debug_signal_detection('CS.D.EURUSD.MINI.IP', 'EURUSD')
+        debug_info = detector.debug_signal_detection('CS.D.EURUSD.CEEM.IP', 'EURUSD')
         
         if 'error' in debug_info:
             print(f"   ❌ Debug failed: {debug_info['error']}")
@@ -126,7 +126,7 @@ def check_implementation():
     print("4️⃣ Signal Detection Path Check:")
     try:
         # Test if the enhanced path is being called
-        signal = detector.detect_signals_bid_adjusted('CS.D.EURUSD.MINI.IP', 'EURUSD')
+        signal = detector.detect_signals_bid_adjusted('CS.D.EURUSD.CEEM.IP', 'EURUSD')
         
         if signal:
             strategy = signal.get('strategy', 'unknown')

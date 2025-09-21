@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 KAMA Strategy Backtest - Standalone Module
-Run: python backtest_kama.py --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+Run: python backtest_kama.py --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 """
 
 import sys
@@ -576,7 +576,7 @@ class KAMABacktest:
     def _extract_pair_from_epic(self, epic: str) -> str:
         """Extract currency pair from epic code"""
         try:
-            # Convert "CS.D.EURUSD.MINI.IP" to "EURUSD"
+            # Convert "CS.D.EURUSD.CEEM.IP" to "EURUSD"
             if '.D.' in epic and '.MINI.IP' in epic:
                 parts = epic.split('.D.')
                 if len(parts) > 1:
@@ -602,7 +602,7 @@ def main():
     parser = argparse.ArgumentParser(description='KAMA Strategy Backtest')
     
     # Required arguments
-    parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.MINI.IP)')
+    parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.CEEM.IP)')
     parser.add_argument('--days', type=int, default=7, help='Days to backtest (default: 7)')
     parser.add_argument('--timeframe', default='15m', help='Timeframe (default: 15m)')
     

@@ -371,7 +371,7 @@ def main():
     print(f"   • Overall: {'✅ READY' if readiness['system_ready'] else '❌ NOT READY'}")
     
     # Test strategy creation for a sample epic
-    test_epic = "CS.D.EURUSD.MINI.IP"
+    test_epic = "CS.D.EURUSD.CEEM.IP"
     print(f"\n🧪 Testing strategy creation for {test_epic}...")
     
     strategy = scanner.create_optimized_macd_strategy(test_epic)

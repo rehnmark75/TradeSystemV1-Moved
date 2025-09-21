@@ -58,7 +58,7 @@ class ThresholdManager:
         """Populate default CORRECTED thresholds"""
         defaults = {
             # Major USD pairs - CORRECTED values
-            'CS.D.EURUSD.MINI.IP': {
+            'CS.D.EURUSD.CEEM.IP': {
                 'base_threshold': 0.00005,
                 'strength_thresholds': {'moderate': 0.0004, 'strong': 0.0008, 'very_strong': 0.0012},
                 'pair_type': 'eur_major',
@@ -233,7 +233,7 @@ class ThresholdManager:
             
             # Expected epics
             expected_epics = [
-                'CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.AUDUSD.MINI.IP',
+                'CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.AUDUSD.MINI.IP',
                 'CS.D.NZDUSD.MINI.IP', 'CS.D.USDCAD.MINI.IP', 'CS.D.USDCHF.MINI.IP',
                 'CS.D.USDJPY.MINI.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.GBPJPY.MINI.IP'
             ]

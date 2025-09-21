@@ -82,7 +82,7 @@ def test_different_timeframes():
         db = DatabaseManager(config.DATABASE_URL)
         
         timeframes = ['5m', '15m', '1h']
-        test_pairs = ['CS.D.EURUSD.MINI.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP']
+        test_pairs = ['CS.D.EURUSD.CEEM.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP']
         
         for timeframe in timeframes:
             print(f"\n📊 Testing {timeframe} timeframe:")
@@ -131,7 +131,7 @@ def test_lower_confidence_thresholds():
         import config
         
         db = DatabaseManager(config.DATABASE_URL)
-        test_pairs = ['CS.D.EURUSD.MINI.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP']
+        test_pairs = ['CS.D.EURUSD.CEEM.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP']
         
         # Test different confidence thresholds
         confidence_levels = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3]
@@ -179,7 +179,7 @@ def check_current_market_data():
         import config
         
         db = DatabaseManager(config.DATABASE_URL)
-        test_pairs = ['CS.D.EURUSD.MINI.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP']
+        test_pairs = ['CS.D.EURUSD.CEEM.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP']
         
         for epic in test_pairs:
             pair = epic.replace('CS.D.', '').replace('.MINI.IP', '')

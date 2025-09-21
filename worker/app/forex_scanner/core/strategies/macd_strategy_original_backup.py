@@ -172,7 +172,7 @@ class MACDStrategy(BaseStrategy):
         try:
             # Test critical epics
             test_epics = [
-                'CS.D.EURUSD.MINI.IP',
+                'CS.D.EURUSD.CEEM.IP',
                 'CS.D.GBPUSD.MINI.IP', 
                 'CS.D.USDJPY.MINI.IP'
             ]
@@ -1902,7 +1902,7 @@ class MACDStrategy(BaseStrategy):
             self.cache.cache_result(test_key, "test_value")
             
             # Test forex optimizer
-            test_threshold = self.forex_optimizer.get_macd_threshold_for_epic("CS.D.EURUSD.MINI.IP")
+            test_threshold = self.forex_optimizer.get_macd_threshold_for_epic("CS.D.EURUSD.CEEM.IP")
             
             # Test MTF integration
             mtf_enabled = getattr(self, 'enable_mtf_analysis', False)

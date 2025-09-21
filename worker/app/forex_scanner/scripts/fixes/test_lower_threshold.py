@@ -23,7 +23,7 @@ def test_macd_integration():
         print(f"   MACD methods: {macd_methods}")
         
         # Test if MACD is called in detect_signals_bid_adjusted
-        epic = 'CS.D.EURUSD.MINI.IP'
+        epic = 'CS.D.EURUSD.CEEM.IP'
         pair = 'EURUSD'
         
         print(f"\n🧪 Testing MACD through different methods:")

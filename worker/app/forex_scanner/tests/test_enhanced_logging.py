@@ -56,13 +56,13 @@ def test_logging_scenarios():
         },
         {
             'name': 'EURUSD - Should be REJECTED (at boundary)',
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'histogram_change': 0.00005,  # Exactly at threshold
             'expected_decision': 'REJECTED'
         },
         {
             'name': 'EURUSD - Should be APPROVED (above buffer)',
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'histogram_change': 0.00006,  # Above threshold + buffer
             'expected_decision': 'APPROVED'
         }

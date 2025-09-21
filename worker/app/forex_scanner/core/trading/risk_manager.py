@@ -69,7 +69,7 @@ class RiskManager:
         
         # PIP value configuration for different pairs
         self.pip_values = {
-            'CS.D.EURUSD.MINI.IP': getattr(config, 'PIP_VALUE', 1.0),
+            'CS.D.EURUSD.CEEM.IP': getattr(config, 'PIP_VALUE', 1.0),
             'CS.D.GBPUSD.MINI.IP': getattr(config, 'PIP_VALUE', 1.0),
             'CS.D.USDJPY.MINI.IP': 0.1,  # Different pip value for JPY pairs
             'default': getattr(config, 'PIP_VALUE', 1.0)

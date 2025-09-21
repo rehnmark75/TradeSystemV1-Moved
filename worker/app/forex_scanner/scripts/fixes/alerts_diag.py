@@ -93,7 +93,7 @@ def test_notification_manager():
         
         # Test signal
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BULL',
             'confidence_score': 0.85,
             'strategy': 'diagnostic_test',

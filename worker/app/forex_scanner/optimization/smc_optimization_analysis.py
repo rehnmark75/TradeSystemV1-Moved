@@ -18,16 +18,16 @@ Usage:
     python smc_optimization_analysis.py --summary
     
     # Detailed analysis for specific epic
-    python smc_optimization_analysis.py --epic CS.D.EURUSD.MINI.IP --detailed
+    python smc_optimization_analysis.py --epic CS.D.EURUSD.CEEM.IP --detailed
     
     # Top performing configurations
     python smc_optimization_analysis.py --top-performers --limit 10
     
     # Parameter impact analysis
-    python smc_optimization_analysis.py --parameter-analysis --epic CS.D.EURUSD.MINI.IP
+    python smc_optimization_analysis.py --parameter-analysis --epic CS.D.EURUSD.CEEM.IP
     
     # Compare configurations
-    python smc_optimization_analysis.py --compare-configs --epic CS.D.EURUSD.MINI.IP
+    python smc_optimization_analysis.py --compare-configs --epic CS.D.EURUSD.CEEM.IP
 """
 
 import argparse

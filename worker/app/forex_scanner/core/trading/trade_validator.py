@@ -667,7 +667,7 @@ class TradeValidator:
                 
             self.logger.debug(f"📊 Fetching fresh S/R data for {epic}")
             
-            # Extract pair from epic (e.g., 'CS.D.EURUSD.MINI.IP' -> 'EURUSD')
+            # Extract pair from epic (e.g., 'CS.D.EURUSD.CEEM.IP' -> 'EURUSD')
             pair = epic.split('.')[2] if len(epic.split('.')) > 2 else epic
             
             # Fetch enhanced data with required indicators
@@ -1656,7 +1656,7 @@ if __name__ == "__main__":
     
     # Test BUY signal with valid EMA 200 trend (using specific ema_200 field)
     test_buy_signal = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BUY',
         'confidence_score': 0.85,
         'strategy': 'EMA',
@@ -1681,7 +1681,7 @@ if __name__ == "__main__":
     
     # Test signal without 'price' field but with 'current_price' - FIXED
     test_signal_flexible_price = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BUY',
         'confidence_score': 0.85,
         'strategy': 'EMA',
@@ -1755,12 +1755,12 @@ if __name__ == "__main__":
     
     # Test signal with different price field names
     price_test_signals = [
-        {'epic': 'CS.D.EURUSD.MINI.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'price': 1.1234},
-        {'epic': 'CS.D.EURUSD.MINI.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'current_price': 1.1234},
-        {'epic': 'CS.D.EURUSD.MINI.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'entry_price': 1.1234},
-        {'epic': 'CS.D.EURUSD.MINI.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'signal_price': 1.1234},
-        {'epic': 'CS.D.EURUSD.MINI.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'ema_data': {'current_price': 1.1234}},
-        {'epic': 'CS.D.EURUSD.MINI.IP', 'signal_type': 'BUY', 'confidence_score': 0.8},  # No price - should fail
+        {'epic': 'CS.D.EURUSD.CEEM.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'price': 1.1234},
+        {'epic': 'CS.D.EURUSD.CEEM.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'current_price': 1.1234},
+        {'epic': 'CS.D.EURUSD.CEEM.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'entry_price': 1.1234},
+        {'epic': 'CS.D.EURUSD.CEEM.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'signal_price': 1.1234},
+        {'epic': 'CS.D.EURUSD.CEEM.IP', 'signal_type': 'BUY', 'confidence_score': 0.8, 'ema_data': {'current_price': 1.1234}},
+        {'epic': 'CS.D.EURUSD.CEEM.IP', 'signal_type': 'BUY', 'confidence_score': 0.8},  # No price - should fail
     ]
     
     for i, test_signal in enumerate(price_test_signals, 1):

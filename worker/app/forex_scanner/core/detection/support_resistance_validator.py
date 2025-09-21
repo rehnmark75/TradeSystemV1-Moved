@@ -520,17 +520,17 @@ if __name__ == "__main__":
         {
             'signal_type': 'BUY',
             'current_price': 1.1245,  # Near resistance
-            'epic': 'CS.D.EURUSD.MINI.IP'
+            'epic': 'CS.D.EURUSD.CEEM.IP'
         },
         {
             'signal_type': 'SELL', 
             'current_price': 1.1185,  # Near support
-            'epic': 'CS.D.EURUSD.MINI.IP'
+            'epic': 'CS.D.EURUSD.CEEM.IP'
         },
         {
             'signal_type': 'BUY',
             'current_price': 1.1220,  # Safe distance
-            'epic': 'CS.D.EURUSD.MINI.IP'
+            'epic': 'CS.D.EURUSD.CEEM.IP'
         }
     ]
     

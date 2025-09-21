@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Mean Reversion Strategy Backtest with Multi-Oscillator Confluence Analysis
-Run: python backtest_mean_reversion.py --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+Run: python backtest_mean_reversion.py --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 
 FEATURES:
 - Multi-oscillator confluence approach based on RAG analysis findings
@@ -471,7 +471,7 @@ class MeanReversionBacktest(BacktestBase):
 def main():
     """Main execution function with command line arguments"""
     parser = argparse.ArgumentParser(description='Mean Reversion Strategy Backtest')
-    parser.add_argument('--epic', type=str, help='Epic to backtest (e.g., CS.D.EURUSD.MINI.IP)')
+    parser.add_argument('--epic', type=str, help='Epic to backtest (e.g., CS.D.EURUSD.CEEM.IP)')
     parser.add_argument('--days', type=int, default=7, help='Number of days to backtest (default: 7)')
     parser.add_argument('--timeframe', type=str, default='15m', help='Timeframe (default: 15m)')
     parser.add_argument('--show-signals', action='store_true', help='Show detailed signal information')

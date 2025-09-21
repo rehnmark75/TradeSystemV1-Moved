@@ -75,14 +75,14 @@ def test_threshold_buffer():
         },
         {
             'name': 'EURUSD at boundary',
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'histogram': 0.00005,  # Exactly at threshold
             'threshold': 0.00005,
             'should_pass': False  # Should reject with 1.1x buffer
         },
         {
             'name': 'EURUSD above buffer zone',
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'histogram': 0.00006,  # 20% above threshold
             'threshold': 0.00005,
             'should_pass': True  # Should pass with 1.1x buffer (needs 0.000055)

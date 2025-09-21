@@ -24,7 +24,7 @@ def debug_data_timestamps():
         return
     
     # Test EUR/USD data fetching
-    epic = 'CS.D.EURUSD.MINI.IP'
+    epic = 'CS.D.EURUSD.CEEM.IP'
     pair = 'EURUSD'
     
     print(f"\n🔍 Testing data fetcher for {epic}...")

@@ -2,7 +2,7 @@
 """
 Zero Lag + Squeeze Momentum Strategy Backtest - Enhanced Edition
 Features: Trailing stops, exit tracking, Smart Money integration, comprehensive analysis
-Run: python backtest_zero_lag.py --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m --squeeze-momentum
+Run: python backtest_zero_lag.py --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m --squeeze-momentum
 """
 
 import sys
@@ -985,7 +985,7 @@ class ZeroLagBacktest:
         """Extract trading pair from IG epic format"""
         try:
             if 'CS.D.' in epic and '.MINI.IP' in epic:
-                # Format: CS.D.EURUSD.MINI.IP -> EURUSD
+                # Format: CS.D.EURUSD.CEEM.IP -> EURUSD
                 return epic.split('.D.')[1].split('.MINI.IP')[0]
             elif 'CS.D.' in epic:
                 # Format: CS.D.EURUSD.TODAY.IP -> EURUSD
@@ -1319,7 +1319,7 @@ def main():
     """Main entry point for Zero Lag + Squeeze Momentum backtest"""
     parser = argparse.ArgumentParser(description='Zero Lag + Squeeze Momentum + EMA200 Strategy Backtest')
     
-    parser.add_argument('--epic', type=str, help='Specific epic to test (e.g., CS.D.EURUSD.MINI.IP)')
+    parser.add_argument('--epic', type=str, help='Specific epic to test (e.g., CS.D.EURUSD.CEEM.IP)')
     parser.add_argument('--days', type=int, default=7, help='Days of historical data (default: 7)')
     parser.add_argument('--timeframe', type=str, default='15m', choices=['1m', '5m', '15m', '1h', '4h', '1d'], 
                         help='Timeframe (default: 15m)')

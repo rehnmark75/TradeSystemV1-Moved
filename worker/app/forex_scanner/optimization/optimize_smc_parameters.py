@@ -14,13 +14,13 @@ Features:
 
 Usage:
     # Smart Presets mode (8 configurations)
-    python optimize_smc_parameters.py --smart-presets --days 30 --epic CS.D.EURUSD.MINI.IP
+    python optimize_smc_parameters.py --smart-presets --days 30 --epic CS.D.EURUSD.CEEM.IP
     
     # Fast mode (432 combinations) 
-    python optimize_smc_parameters.py --fast-mode --days 30 --epic CS.D.EURUSD.MINI.IP
+    python optimize_smc_parameters.py --fast-mode --days 30 --epic CS.D.EURUSD.CEEM.IP
     
     # Full optimization (47,040 combinations)
-    python optimize_smc_parameters.py --days 30 --epic CS.D.EURUSD.MINI.IP
+    python optimize_smc_parameters.py --days 30 --epic CS.D.EURUSD.CEEM.IP
     
     # Optimize all epics
     python optimize_smc_parameters.py --all-epics --smart-presets --days 30
@@ -1040,7 +1040,7 @@ def main():
             if not epics:
                 logger.warning("No epics found in database, using default list")
                 epics = [
-                    'CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP',
+                    'CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP',
                     'CS.D.USDCHF.MINI.IP', 'CS.D.AUDUSD.MINI.IP', 'CS.D.EURJPY.MINI.IP'
                 ]
         elif args.epic:

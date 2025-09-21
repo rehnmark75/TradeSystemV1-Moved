@@ -59,7 +59,7 @@ def test_individual_strategies():
         db = DatabaseManager(config.DATABASE_URL)
         detector = SignalDetector(db, 'Europe/Stockholm')
         
-        epic = 'CS.D.EURUSD.MINI.IP'
+        epic = 'CS.D.EURUSD.CEEM.IP'
         pair = 'EURUSD'
         spread_pips = 1.5
         timeframe = '15m'
@@ -143,8 +143,8 @@ def test_debug_commands():
     print("-" * 30)
     
     print("Try these commands to get more specific information:")
-    print("   python main.py debug-combined --epic CS.D.EURUSD.MINI.IP")
-    print("   python main.py debug-macd --epic CS.D.EURUSD.MINI.IP")
+    print("   python main.py debug-combined --epic CS.D.EURUSD.CEEM.IP")
+    print("   python main.py debug-macd --epic CS.D.EURUSD.CEEM.IP")
     
     # Test if combined debug works
     try:
@@ -152,7 +152,7 @@ def test_debug_commands():
         debug_cmd = DebugCommands()
         
         print("\n🔄 Testing combined strategy debug...")
-        success = debug_cmd.debug_combined_strategies('CS.D.EURUSD.MINI.IP')
+        success = debug_cmd.debug_combined_strategies('CS.D.EURUSD.CEEM.IP')
         
         if success:
             print("✅ Combined strategy debug completed")
@@ -194,7 +194,7 @@ def main():
         print("   2. Check strategy enable/disable settings")
     
     print("\n📋 RECOMMENDED NEXT STEPS:")
-    print("   1. Run: python main.py debug-combined --epic CS.D.EURUSD.MINI.IP")
+    print("   1. Run: python main.py debug-combined --epic CS.D.EURUSD.CEEM.IP")
     print("   2. Temporarily disable combined mode to test individual strategies")
     print("   3. Lower confidence thresholds for testing")
     print("   4. Check if missing required config settings")

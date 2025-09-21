@@ -169,7 +169,7 @@ class IntelligentForexScanner:
     
     def __init__(self, db_manager, epic_list=None, **kwargs):
         self.db_manager = db_manager
-        self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP'])
+        self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
         self.intelligence_mode = kwargs.get('intelligence_mode', 'backtest_consistent')
         self.scan_interval = kwargs.get('scan_interval', 60)
         self.min_confidence = kwargs.get('min_confidence', 0.7)

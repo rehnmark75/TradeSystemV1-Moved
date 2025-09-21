@@ -427,7 +427,7 @@ if __name__ == "__main__":
     
     # Test signal timestamp validation
     test_signal = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'timestamp': datetime.now(),
         'market_timestamp': "1970-01-01 00:00:00",  # Stale timestamp
         'signal_timestamp': "2025-07-31T07:15:00Z",

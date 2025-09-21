@@ -175,7 +175,7 @@ try:
     # Test Claude with dummy signal
     test_result = test_analyzer.analyze_signal({
         'signal_type': 'BULL',
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'confidence_score': 0.75,
         'price': 1.0850
     })
@@ -194,7 +194,7 @@ except Exception as e:
 # Create scanner with explicit Claude settings
 scanner = IntelligentForexScanner(
     db_manager=db_manager,
-    epic_list=['CS.D.EURUSD.MINI.IP'],  # Hard-coded for testing
+    epic_list=['CS.D.EURUSD.CEEM.IP'],  # Hard-coded for testing
     claude_api_key=claude_api_key,      # Direct variable
     enable_claude_analysis=enable_claude, # Direct variable
     use_bid_adjustment=True,
@@ -223,7 +223,7 @@ if hasattr(scanner, 'claude_analyzer') and scanner.claude_analyzer:
     try:
         test_signal = {
             'signal_type': 'BULL',
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'confidence_score': 0.85,
             'price': 1.0875
         }
@@ -273,7 +273,7 @@ def test_claude_integration():
         
         test_signal = {
             'signal_type': 'BULL',
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'confidence_score': 0.75,
             'price': 1.0850
         }
@@ -290,7 +290,7 @@ def test_claude_integration():
         
         scanner = IntelligentForexScanner(
             db_manager=db_manager,
-            epic_list=['CS.D.EURUSD.MINI.IP'],
+            epic_list=['CS.D.EURUSD.CEEM.IP'],
             claude_api_key=api_key,
             enable_claude_analysis=True
         )

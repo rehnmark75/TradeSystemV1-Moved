@@ -47,7 +47,7 @@ class KAMAForexOptimizer:
         # 🔥 Forex-specific KAMA thresholds (optimized for each pair)
         self.forex_kama_thresholds = {
             # === MAJOR USD PAIRS ===
-            'CS.D.EURUSD.MINI.IP': {
+            'CS.D.EURUSD.CEEM.IP': {
                 'min_efficiency': 0.12,
                 'trend_threshold': 0.04,
                 'volatility_multiplier': 1.0,

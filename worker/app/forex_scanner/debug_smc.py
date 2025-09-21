@@ -28,7 +28,7 @@ def test_your_problematic_signal():
     
     # Your exact problematic signal data in the format it likely appears
     problematic_signal = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BUY',  # This should be REJECTED!
         'confidence_score': 0.85,
         'strategy': 'combined_strategy',

@@ -53,7 +53,7 @@ def test_basic_functionality():
         from utils.helpers import extract_pair_from_epic, get_pip_multiplier
         
         # Test utility functions
-        pair = extract_pair_from_epic('CS.D.EURUSD.MINI.IP')
+        pair = extract_pair_from_epic('CS.D.EURUSD.CEEM.IP')
         print(f"  ✓ Pair extraction: {pair}")
         
         pip_mult = get_pip_multiplier('EURUSD')

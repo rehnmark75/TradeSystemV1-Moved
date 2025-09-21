@@ -287,7 +287,7 @@ def create_enhanced_scanner(intelligence_mode='backtest_consistent', auto_tradin
         # Prepare scanner parameters (only use parameters that the scanner actually accepts)
         scanner_params = {
             'db_manager': db_manager,
-            'epic_list': getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP']),
+            'epic_list': getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP']),
             'intelligence_mode': intelligence_mode,
             'scan_interval': getattr(config, 'SCAN_INTERVAL', 60),
             'min_confidence': getattr(config, 'MIN_CONFIDENCE', 0.6),

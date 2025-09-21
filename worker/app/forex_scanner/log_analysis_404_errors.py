@@ -37,7 +37,7 @@ def analyze_404_errors():
     print("🎯 FOCUS ON MAIN PAIRS:")
     print("=" * 80)
     print("The important thing is that our main trading pairs work:")
-    print("✅ CS.D.EURUSD.MINI.IP - Should have successful API calls")
+    print("✅ CS.D.EURUSD.CEEM.IP - Should have successful API calls")
     print("✅ CS.D.GBPUSD.MINI.IP - Should have successful API calls")
     print("✅ CS.D.USDJPY.MINI.IP - Should have successful API calls")
     print("✅ CS.D.AUDUSD.MINI.IP - Should have successful API calls")

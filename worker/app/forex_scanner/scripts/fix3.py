@@ -60,7 +60,7 @@ def debug_specific_crossover():
     strategy = MACDStrategy(data_fetcher=data_fetcher)
     
     # Get data
-    epic = "CS.D.EURUSD.MINI.IP"
+    epic = "CS.D.EURUSD.CEEM.IP"
     df = data_fetcher.get_enhanced_data(epic, "EURUSD", "15m", lookback_hours=168)
     
     print(f"📊 Testing known crossover at bar 437 (Bullish)")

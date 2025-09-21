@@ -408,7 +408,7 @@ class SignalValidator:
         return missing
     
     def _is_valid_epic_format(self, epic: str) -> bool:
-        """Validate epic format (e.g., CS.D.EURUSD.MINI.IP)"""
+        """Validate epic format (e.g., CS.D.EURUSD.CEEM.IP)"""
         if not epic:
             return False
         
@@ -670,7 +670,7 @@ if __name__ == "__main__":
     
     # Test signal with nested structure (your format)
     test_signal_nested = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BUY',
         'timestamp': datetime.now(),
         'strategy': 'ema',
@@ -694,7 +694,7 @@ if __name__ == "__main__":
     
     # Test signal with flat structure (legacy format)
     test_signal_flat = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BULL',
         'price': 1.0850,
         'timestamp': datetime.now(),

@@ -179,7 +179,7 @@ class CombinedForexOptimizer:
         
         Args:
             base_confidence: Base confidence score
-            epic: Trading epic (e.g., 'CS.D.EURUSD.MINI.IP')
+            epic: Trading epic (e.g., 'CS.D.EURUSD.CEEM.IP')
             
         Returns:
             Adjusted confidence score

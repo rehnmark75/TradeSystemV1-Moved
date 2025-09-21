@@ -26,7 +26,7 @@ def create_test_scenarios() -> List[Dict]:
     # Scenario 1: Price too close to EMA200 (should reject)
     scenarios.append({
         'name': 'Price 2 pips above EMA200 (too close)',
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'current_price': 1.0852,  # 2 pips above EMA200
         'ema_200': 1.0850,
         'signal_type': 'BULL',
@@ -38,7 +38,7 @@ def create_test_scenarios() -> List[Dict]:
     # Scenario 2: Price at minimum distance (should pass)
     scenarios.append({
         'name': 'Price 5 pips above EMA200 (at minimum)',
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'current_price': 1.0855,  # 5 pips above EMA200
         'ema_200': 1.0850,
         'signal_type': 'BULL',
@@ -50,7 +50,7 @@ def create_test_scenarios() -> List[Dict]:
     # Scenario 3: Strong momentum reduces distance requirement
     scenarios.append({
         'name': 'Price 4 pips above EMA200 with strong momentum',
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'current_price': 1.0854,  # 4 pips above EMA200
         'ema_200': 1.0850,
         'signal_type': 'BULL',
@@ -187,8 +187,8 @@ def test_ema200_distance_validation():
     logger.info("=" * 60)
     
     test_pairs = [
-        ('CS.D.EURUSD.MINI.IP', 0.00005, 5.0),   # Normal threshold
-        ('CS.D.EURUSD.MINI.IP', 0.00012, 4.0),   # Strong momentum (5.0 * 0.8)
+        ('CS.D.EURUSD.CEEM.IP', 0.00005, 5.0),   # Normal threshold
+        ('CS.D.EURUSD.CEEM.IP', 0.00012, 4.0),   # Strong momentum (5.0 * 0.8)
         ('CS.D.GBPUSD.MINI.IP', 0.00008, 8.0),   # GBP higher requirement
         ('CS.D.USDJPY.MINI.IP', 0.003, 50.0),    # JPY different scale
     ]

@@ -38,7 +38,7 @@ class EMAMultiTimeframeAnalyzer:
                 self.logger.debug("No data fetcher available for 1H data")
                 return None
             
-            # Extract pair from epic (e.g., "CS.D.EURUSD.MINI.IP" -> "EURUSD")
+            # Extract pair from epic (e.g., "CS.D.EURUSD.CEEM.IP" -> "EURUSD")
             parts = epic.split('.')
             if len(parts) >= 3:
                 pair = parts[2].replace('MINI', '').replace('CFD', '')

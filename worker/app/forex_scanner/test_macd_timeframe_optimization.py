@@ -32,7 +32,7 @@ def test_timeframe_aware_parameter_service():
     print("🔧 TESTING TIMEFRAME-AWARE MACD PARAMETER SERVICE")
     print("="*80)
     
-    test_epic = "CS.D.EURUSD.MINI.IP"
+    test_epic = "CS.D.EURUSD.CEEM.IP"
     timeframes = ['5m', '15m', '1h', '4h']
     
     for timeframe in timeframes:
@@ -68,7 +68,7 @@ def test_macd_strategy_timeframe_initialization():
     print("🎯 TESTING MACD STRATEGY TIMEFRAME INITIALIZATION")
     print("="*80)
     
-    test_epic = "CS.D.EURUSD.MINI.IP"
+    test_epic = "CS.D.EURUSD.CEEM.IP"
     timeframes = ['5m', '15m', '1h']
     
     for timeframe in timeframes:
@@ -133,7 +133,7 @@ def test_mtf_logic():
     print("⏱️ TESTING MTF VALIDATION LOGIC")
     print("="*80)
     
-    test_epic = "CS.D.EURUSD.MINI.IP"
+    test_epic = "CS.D.EURUSD.CEEM.IP"
     timeframes = ['5m', '15m', '1h', '4h']
     
     for timeframe in timeframes:
@@ -169,7 +169,7 @@ def test_market_conditions():
     print("🌊 TESTING MARKET CONDITION AWARENESS")
     print("="*80)
     
-    test_epic = "CS.D.EURUSD.MINI.IP"
+    test_epic = "CS.D.EURUSD.CEEM.IP"
     timeframe = "15m"
     
     conditions = [

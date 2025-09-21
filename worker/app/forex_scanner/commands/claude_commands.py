@@ -60,7 +60,7 @@ class ClaudeCommands:
             # Test with dummy signal
             test_signal = {
                 'signal_type': 'BULL',
-                'epic': 'CS.D.EURUSD.MINI.IP',
+                'epic': 'CS.D.EURUSD.CEEM.IP',
                 'price': 1.0850,
                 'timestamp': '2025-01-01 12:00:00',
                 'confidence_score': 0.75,

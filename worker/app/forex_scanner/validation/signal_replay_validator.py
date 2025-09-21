@@ -9,7 +9,7 @@ and provides comprehensive reporting.
 Usage:
     python -m forex_scanner.validation.signal_replay_validator \
         --timestamp "2025-01-15 14:30:00" \
-        --epic "CS.D.EURUSD.MINI.IP" \
+        --epic "CS.D.EURUSD.CEEM.IP" \
         --show-calculations \
         --show-raw-data
 
@@ -851,7 +851,7 @@ Examples:
   # Validate single signal
   python -m forex_scanner.validation.signal_replay_validator \\
     --timestamp "2025-01-15 14:30:00" \\
-    --epic "CS.D.EURUSD.MINI.IP" \\
+    --epic "CS.D.EURUSD.CEEM.IP" \\
     --show-calculations \\
     --show-raw-data
 
@@ -864,14 +864,14 @@ Examples:
   # Debug specific strategy
   python -m forex_scanner.validation.signal_replay_validator \\
     --timestamp "2025-01-15 14:30:00" \\
-    --epic "CS.D.EURUSD.MINI.IP" \\
+    --epic "CS.D.EURUSD.CEEM.IP" \\
     --strategy "EMA" \\
     --debug-mode \\
     --show-intermediate-steps
 
   # Time series analysis
   python -m forex_scanner.validation.signal_replay_validator \\
-    --epic "CS.D.EURUSD.MINI.IP" \\
+    --epic "CS.D.EURUSD.CEEM.IP" \\
     --start-time "2025-01-15 08:00:00" \\
     --end-time "2025-01-15 18:00:00" \\
     --interval 30 \\
@@ -880,7 +880,7 @@ Examples:
   # Real trade analysis (NEW)
   python -m forex_scanner.validation.signal_replay_validator \\
     --timestamp "2025-09-04 17:31:42" \\
-    --epic "CS.D.EURUSD.MINI.IP" \\
+    --epic "CS.D.EURUSD.CEEM.IP" \\
     --real-trade \\
     --show-trade-outcome \\
     --compare-with-live \\
@@ -889,7 +889,7 @@ Examples:
   # Comprehensive outcome analysis
   python -m forex_scanner.validation.signal_replay_validator \\
     --timestamp "2025-09-04 17:31:42" \\
-    --epic "CS.D.EURUSD.MINI.IP" \\
+    --epic "CS.D.EURUSD.CEEM.IP" \\
     --real-trade \\
     --analyze-outcome \\
     --timeframe-context "15m,1h,4h" \\
@@ -907,7 +907,7 @@ Examples:
     # Epic selection
     epic_group = parser.add_mutually_exclusive_group()
     epic_group.add_argument('--epic', type=str,
-                           help='Single epic to validate (e.g., "CS.D.EURUSD.MINI.IP")')
+                           help='Single epic to validate (e.g., "CS.D.EURUSD.CEEM.IP")')
     epic_group.add_argument('--all-epics', action='store_true',
                            help='Validate all configured epics')
     epic_group.add_argument('--epic-list', type=str, nargs='+',
@@ -1022,7 +1022,7 @@ def get_epic_list(args) -> List[str]:
         return ReplayConfig.DEFAULT_EPIC_LIST
     else:
         # Default to EURUSD if no epic specified for time series
-        return ['CS.D.EURUSD.MINI.IP']
+        return ['CS.D.EURUSD.CEEM.IP']
 
 
 def main():

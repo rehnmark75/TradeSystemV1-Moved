@@ -72,7 +72,7 @@ def test_scanner_initialization():
         # Test scanner creation
         scanner = IntelligentForexScanner(
             db_manager=db_manager,
-            epic_list=getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP'])[:1],  # Just one pair for testing
+            epic_list=getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])[:1],  # Just one pair for testing
             claude_api_key=None,  # Disable Claude for testing
             enable_claude_analysis=False
         )

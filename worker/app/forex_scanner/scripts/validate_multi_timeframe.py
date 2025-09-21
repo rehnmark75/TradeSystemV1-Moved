@@ -53,7 +53,7 @@ def validate_data_fetcher_methods():
                 logger.info(f"✅ Optional parameters available: {optional_params}")
             
             # Test method call
-            test_epic = 'CS.D.EURUSD.MINI.IP'
+            test_epic = 'CS.D.EURUSD.CEEM.IP'
             test_pair = 'EURUSD'
             
             logger.info(f"🧪 Testing get_enhanced_data with {test_epic}...")
@@ -98,7 +98,7 @@ def validate_multi_timeframe_analyzer():
         mt_analyzer = MultiTimeframeAnalyzer(data_fetcher)
         
         # Test data for validation
-        test_epic = 'CS.D.EURUSD.MINI.IP'
+        test_epic = 'CS.D.EURUSD.CEEM.IP'
         test_pair = 'EURUSD'
         
         logger.info("🧪 Testing multi-timeframe data fetching...")
@@ -182,7 +182,7 @@ def validate_signal_detector_integration():
         db_manager = DatabaseManager(config.DATABASE_URL)
         signal_detector = SignalDetector(db_manager, config.USER_TIMEZONE)
         
-        test_epic = 'CS.D.EURUSD.MINI.IP'
+        test_epic = 'CS.D.EURUSD.CEEM.IP'
         test_pair = 'EURUSD'
         
         # Test if detect_signals_multi_timeframe exists

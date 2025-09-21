@@ -29,7 +29,7 @@ def test_macd_detection():
     
     # Test both JPY and non-JPY pairs
     test_pairs = [
-        ("CS.D.EURUSD.MINI.IP", "EURUSD"),  # Non-JPY (threshold: 0.00010) 
+        ("CS.D.EURUSD.CEEM.IP", "EURUSD"),  # Non-JPY (threshold: 0.00010) 
         ("CS.D.USDJPY.MINI.IP", "USDJPY")   # JPY (threshold: 0.010)
     ]
     

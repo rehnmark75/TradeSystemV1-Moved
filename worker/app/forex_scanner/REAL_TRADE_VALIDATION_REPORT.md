@@ -44,7 +44,7 @@ This report documents the successful implementation of an enhanced real trade si
 # Basic real trade analysis
 python -m forex_scanner.validation.signal_replay_validator \
     --timestamp "2025-09-04 17:31:42" \
-    --epic "CS.D.EURUSD.MINI.IP" \
+    --epic "CS.D.EURUSD.CEEM.IP" \
     --real-trade \
     --show-trade-outcome \
     --compare-with-live \
@@ -53,7 +53,7 @@ python -m forex_scanner.validation.signal_replay_validator \
 # Comprehensive outcome analysis
 python -m forex_scanner.validation.signal_replay_validator \
     --timestamp "2025-09-04 17:31:42" \
-    --epic "CS.D.EURUSD.MINI.IP" \
+    --epic "CS.D.EURUSD.CEEM.IP" \
     --real-trade \
     --analyze-outcome \
     --timeframe-context "15m,1h,4h" \
@@ -62,7 +62,7 @@ python -m forex_scanner.validation.signal_replay_validator \
 # Multi-timeframe analysis with full reporting
 python -m forex_scanner.validation.signal_replay_validator \
     --timestamp "2025-09-04 17:31:42" \
-    --epic "CS.D.EURUSD.MINI.IP" \
+    --epic "CS.D.EURUSD.CEEM.IP" \
     --real-trade \
     --show-trade-outcome \
     --analyze-outcome \

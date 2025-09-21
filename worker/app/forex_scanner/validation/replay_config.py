@@ -137,7 +137,7 @@ FEATURE_FLAGS = {
 
 # Default epic list for batch operations
 DEFAULT_EPIC_LIST = [
-    "CS.D.EURUSD.MINI.IP",
+    "CS.D.EURUSD.CEEM.IP",
     "CS.D.GBPUSD.MINI.IP", 
     "CS.D.USDJPY.MINI.IP",
     "CS.D.AUDUSD.MINI.IP",

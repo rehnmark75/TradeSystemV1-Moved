@@ -114,7 +114,7 @@ class BacktestBase(ABC):
                 # Initialize strategy with epic for optimal parameters
                 strategy = self.initialize_strategy(current_epic)
                 
-                # Get data - extract pair from epic (e.g., CS.D.EURUSD.MINI.IP -> EURUSD)
+                # Get data - extract pair from epic (e.g., CS.D.EURUSD.CEEM.IP -> EURUSD)
                 pair = current_epic.split('.')[2] if '.' in current_epic else current_epic
                 df = self.data_fetcher.get_enhanced_data(
                     epic=current_epic,

@@ -98,7 +98,7 @@ def extract_pair_from_epic(epic: str) -> str:
     Extract currency pair from IG epic format
     
     Args:
-        epic: IG epic code (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: IG epic code (e.g., 'CS.D.EURUSD.CEEM.IP')
         
     Returns:
         Currency pair (e.g., 'EURUSD')

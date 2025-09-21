@@ -88,7 +88,7 @@ class ScalpingCommands:
                     self.logger.info(f"    Target: {target_pips} pips, Stop: {stop_pips} pips")
             else:
                 self.logger.info("No 5-minute scalping signals detected")
-                self._log_scalping_market_state(epic_list[0] if epic_list else 'CS.D.EURUSD.MINI.IP')
+                self._log_scalping_market_state(epic_list[0] if epic_list else 'CS.D.EURUSD.CEEM.IP')
             
             return True
             

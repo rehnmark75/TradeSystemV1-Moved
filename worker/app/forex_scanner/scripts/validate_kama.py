@@ -42,7 +42,7 @@ def test_fixed_kama():
         data_fetcher = DataFetcher(db_manager)
         
         # Get data
-        epic = 'CS.D.EURUSD.MINI.IP'
+        epic = 'CS.D.EURUSD.CEEM.IP'
         pair = 'EURUSD'
         timeframe = '15m'
         
@@ -163,7 +163,7 @@ def test_backtest():
         # Run the backtest command
         result = subprocess.run([
             'python', 'main.py', 'backtest-kama',
-            '--epic', 'CS.D.EURUSD.MINI.IP',
+            '--epic', 'CS.D.EURUSD.CEEM.IP',
             '--days', '14',
             '--kama-min-efficiency', '0.001',
             '--kama-trend-threshold', '0.0001',

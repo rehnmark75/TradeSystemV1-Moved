@@ -37,7 +37,7 @@ class IntelligentForexScanner:
     ):
         # Core configuration
         self.db_manager = db_manager
-        self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP'])
+        self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
         self.intelligence_mode = intelligence_mode
         self.scan_interval = scan_interval
         self.min_confidence = min_confidence or getattr(config, 'MIN_CONFIDENCE', 0.7)

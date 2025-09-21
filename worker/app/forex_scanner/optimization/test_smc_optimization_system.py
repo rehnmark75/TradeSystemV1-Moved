@@ -146,7 +146,7 @@ class SMCOptimizationSystemTester:
             )
             
             # Test parameter retrieval (should use fallback)
-            test_epic = 'CS.D.EURUSD.MINI.IP'
+            test_epic = 'CS.D.EURUSD.CEEM.IP'
             params = get_smc_optimal_parameters(test_epic)
             
             # Validate parameter structure
@@ -230,7 +230,7 @@ class SMCOptimizationSystemTester:
                 return False
             
             # Test strategy creation with epic (should attempt optimization)
-            test_epic = 'CS.D.EURUSD.MINI.IP'
+            test_epic = 'CS.D.EURUSD.CEEM.IP'
             strategy_optimized = SMCStrategy(
                 epic=test_epic,
                 use_optimized_parameters=True
@@ -426,7 +426,7 @@ class SMCOptimizationSystemTester:
                 'risk_reward_ratio': 2.0
             }
             
-            backtest_result = optimizer.run_smc_backtest('CS.D.EURUSD.MINI.IP', test_params, 30)
+            backtest_result = optimizer.run_smc_backtest('CS.D.EURUSD.CEEM.IP', test_params, 30)
             
             # Validate backtest result structure
             required_result_keys = [
@@ -482,7 +482,7 @@ class SMCOptimizationSystemTester:
                 return False
             
             # Test parameter retrieval without market conditions
-            test_epic = 'CS.D.EURUSD.MINI.IP'
+            test_epic = 'CS.D.EURUSD.CEEM.IP'
             params_basic = service.get_smc_epic_parameters(test_epic)
             
             if not params_basic or not hasattr(params_basic, 'epic'):

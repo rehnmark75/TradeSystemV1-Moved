@@ -314,7 +314,7 @@ def test_fix():
         
         # Test 4: Create a test signal and see if it processes without error
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BUY',
             'confidence_score': 0.85,
             'strategy': 'ema_strategy',
@@ -378,7 +378,7 @@ def main():
         print("   4. Scanner properly integrates with signal processor")
         print("   5. Backup alert saver created for fallback")
         print("\n🚀 Next steps:")
-        print("   1. Test the scanner: python main.py scan --epic CS.D.EURUSD.MINI.IP")
+        print("   1. Test the scanner: python main.py scan --epic CS.D.EURUSD.CEEM.IP")
         print("   2. Check database: SELECT COUNT(*) FROM alert_history;")
         print("   3. Look for '💾 Signal saved to alert_history' in logs")
         print("\n🔍 If still no alerts:")

@@ -62,7 +62,7 @@ class ProvenMACDParameterInserter:
 
         # Major currency pairs to insert defaults for
         self.major_pairs = [
-            'CS.D.EURUSD.MINI.IP',  # EUR/USD
+            'CS.D.EURUSD.CEEM.IP',  # EUR/USD
             'CS.D.GBPUSD.MINI.IP',  # GBP/USD
             'CS.D.USDJPY.MINI.IP',  # USD/JPY
             'CS.D.USDCHF.MINI.IP',  # USD/CHF

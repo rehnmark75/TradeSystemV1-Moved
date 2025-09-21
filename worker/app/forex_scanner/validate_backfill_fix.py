@@ -62,7 +62,7 @@ def validate_fix():
     print("   - Let system backfill with correct data")
     print("   - Example SQL:")
     print("     DELETE FROM ig_candles")
-    print("     WHERE epic = 'CS.D.EURUSD.MINI.IP'")
+    print("     WHERE epic = 'CS.D.EURUSD.CEEM.IP'")
     print("       AND timeframe = 5") 
     print("       AND data_source = 'chart_streamer'")
     print("       AND start_time BETWEEN '2025-08-30' AND '2025-09-01';")

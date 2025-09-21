@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def diagnose_confidence_scoring(epic: str = 'CS.D.EURUSD.MINI.IP'):
+def diagnose_confidence_scoring(epic: str = 'CS.D.EURUSD.CEEM.IP'):
     """Diagnose why confidence scoring is rejecting signals"""
     logger.info("🔍 BB+Supertrend Confidence Scoring Diagnostic...")
     
@@ -264,11 +264,11 @@ def suggest_immediate_fixes():
     logger.info("   SUPERTREND_MULTIPLIER = 2.5")
     
     logger.info("\n4. Test command after changes:")
-    logger.info("   python main.py debug-bb-supertrend --epic CS.D.EURUSD.MINI.IP")
+    logger.info("   python main.py debug-bb-supertrend --epic CS.D.EURUSD.CEEM.IP")
 
 if __name__ == '__main__':
     try:
-        epic = sys.argv[1] if len(sys.argv) > 1 else 'CS.D.EURUSD.MINI.IP'
+        epic = sys.argv[1] if len(sys.argv) > 1 else 'CS.D.EURUSD.CEEM.IP'
         
         logger.info(f"🔍 Starting confidence diagnostic for {epic}")
         

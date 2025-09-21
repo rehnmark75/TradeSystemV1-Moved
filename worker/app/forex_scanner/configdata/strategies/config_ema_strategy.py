@@ -33,7 +33,7 @@ EMA_STRATEGY_CONFIG = {
         'best_trend_strength': 'medium',
         'best_market_regime': 'trending',
         'best_session': ['london', 'new_york'],
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.USDJPY.MINI.IP'],
         'min_pip_volatility': 8.0,
         'max_pip_volatility': 50.0
     },
@@ -57,7 +57,7 @@ EMA_STRATEGY_CONFIG = {
         'best_trend_strength': 'weak',
         'best_market_regime': 'breakout',
         'best_session': ['overlap', 'new_york'],
-        'preferred_pairs': ['CS.D.GBPUSD.MINI.IP', 'CS.D.EURUSD.MINI.IP'],
+        'preferred_pairs': ['CS.D.GBPUSD.MINI.IP', 'CS.D.EURUSD.CEEM.IP'],
         'min_pip_volatility': 20.0,
         'max_pip_volatility': 100.0
     },
@@ -69,7 +69,7 @@ EMA_STRATEGY_CONFIG = {
         'best_trend_strength': 'weak',
         'best_market_regime': 'ranging',
         'best_session': ['london', 'new_york', 'overlap'],
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP'],
         'min_pip_volatility': 15.0,
         'max_pip_volatility': 80.0
     },
@@ -105,7 +105,7 @@ EMA_STRATEGY_CONFIG = {
         'best_trend_strength': 'medium',
         'best_market_regime': 'breakout',
         'best_session': ['overlap', 'new_york'],
-        'preferred_pairs': ['CS.D.EURUSD.MINI.IP'],  # Most liquid
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP'],  # Most liquid
         'min_pip_volatility': 25.0,
         'max_pip_volatility': 150.0
     }
@@ -568,7 +568,7 @@ def get_ema_config_for_epic(epic: str, market_condition: str = 'default') -> dic
     Get EMA configuration for specific epic and market condition
     
     Args:
-        epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
         market_condition: Market condition ('default', 'conservative', 'aggressive', etc.)
         
     Returns:
@@ -587,12 +587,12 @@ def get_ema_distance_for_epic(epic: str) -> float:
     Get minimum EMA200 distance for specific epic
     
     Args:
-        epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
         
     Returns:
         Minimum distance in pips
     """
-    # Extract currency pair from epic (e.g., 'EURUSD' from 'CS.D.EURUSD.MINI.IP')
+    # Extract currency pair from epic (e.g., 'EURUSD' from 'CS.D.EURUSD.CEEM.IP')
     try:
         if 'CS.D.' in epic and '.MINI.IP' in epic:
             pair = epic.replace('CS.D.', '').replace('.MINI.IP', '')
@@ -608,7 +608,7 @@ def get_ema_separation_for_epic(epic: str) -> float:
     Get minimum EMA separation distance for specific epic
     
     Args:
-        epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
         
     Returns:
         Minimum separation in pips

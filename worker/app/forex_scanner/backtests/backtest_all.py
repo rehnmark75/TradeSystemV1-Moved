@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 All Strategies Comparison Backtest - Master Module
-Run: python backtest_all.py --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+Run: python backtest_all.py --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 """
 
 import sys
@@ -390,7 +390,7 @@ def main():
     parser = argparse.ArgumentParser(description='All Strategies Comparison Backtest')
     
     # Required arguments
-    parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.MINI.IP)')
+    parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.CEEM.IP)')
     parser.add_argument('--days', type=int, default=7, help='Days to backtest (default: 7)')
     parser.add_argument('--timeframe', default='15m', help='Timeframe (default: 15m)')
     

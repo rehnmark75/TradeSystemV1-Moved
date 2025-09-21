@@ -16,7 +16,7 @@ Components:
 Usage:
     python -m forex_scanner.validation.signal_replay_validator \
         --timestamp "2025-01-15 14:30:00" \
-        --epic "CS.D.EURUSD.MINI.IP"
+        --epic "CS.D.EURUSD.CEEM.IP"
 """
 
 __version__ = "1.0.0"

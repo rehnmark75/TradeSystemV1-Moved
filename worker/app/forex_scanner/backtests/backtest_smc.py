@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Smart Money Concepts (SMC) Strategy Backtest
-Run: python backtest_smc.py --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+Run: python backtest_smc.py --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 
 Features:
 - SMC market structure analysis (BOS, ChoCH, swing points)
