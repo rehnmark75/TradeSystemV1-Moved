@@ -804,11 +804,16 @@ class UnifiedTradingDashboard:
                 if 'session' in mi_data.columns:
                     st.subheader("🕐 Trading Session Analysis")
                     session_counts = mi_data['session'].value_counts()
+                    session_df = pd.DataFrame({
+                        'session': session_counts.index,
+                        'count': session_counts.values
+                    })
                     fig_session = px.bar(
-                        x=session_counts.index,
-                        y=session_counts.values,
+                        session_df,
+                        x='session',
+                        y='count',
                         title="Signals by Trading Session",
-                        labels={'x': 'Session', 'y': 'Signal Count'}
+                        labels={'count': 'Signal Count', 'session': 'Session'}
                     )
                     st.plotly_chart(fig_session, use_container_width=True)
 
@@ -816,12 +821,17 @@ class UnifiedTradingDashboard:
                 if 'volatility_level' in mi_data.columns:
                     st.subheader("📊 Volatility Level Distribution")
                     vol_counts = mi_data['volatility_level'].value_counts()
+                    vol_df = pd.DataFrame({
+                        'volatility': vol_counts.index,
+                        'count': vol_counts.values
+                    })
                     fig_vol = px.bar(
-                        x=vol_counts.index,
-                        y=vol_counts.values,
+                        vol_df,
+                        x='volatility',
+                        y='count',
                         title="Signals by Volatility Level",
-                        labels={'x': 'Volatility', 'y': 'Signal Count'},
-                        color=vol_counts.index,
+                        labels={'count': 'Signal Count', 'volatility': 'Volatility Level'},
+                        color='volatility',
                         color_discrete_map={'high': 'red', 'medium': 'orange', 'low': 'green'}
                     )
                     st.plotly_chart(fig_vol, use_container_width=True)

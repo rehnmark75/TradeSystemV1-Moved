@@ -264,6 +264,7 @@ class TradeValidator:
             'failed_market_hours': 0,
             'failed_epic_blocked': 0,
             'failed_ema200_filter': 0,
+            'failed_ema200_error': 0,  # NEW: EMA200 validation exceptions
             'failed_sr_validation': 0,  # NEW
             'failed_risk_management': 0,
             'failed_other': 0,
@@ -865,12 +866,18 @@ class TradeValidator:
             # STRICT: REJECT signals with missing data (no bypass allowed)
             if current_price is None:
                 self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: No current price data found")
-                self.logger.debug(f"   Available fields: {list(signal.keys())}")
+                self.logger.error(f"   Signal structure debug: {list(signal.keys())}")
+                self.logger.error(f"   Price fields checked: {price_candidates}")
+                if 'ema_data' in signal:
+                    self.logger.error(f"   EMA data fields: {list(signal['ema_data'].keys()) if isinstance(signal['ema_data'], dict) else 'Not a dict'}")
                 return False, "EMA200 filter: No current price data - REJECTED"
 
             if ema_200 is None:
                 self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: No EMA 200 data found")
-                self.logger.debug(f"   Available fields: {list(signal.keys())}")
+                self.logger.error(f"   Signal structure debug: {list(signal.keys())}")
+                self.logger.error(f"   EMA200 fields checked: {ema_200_candidates}")
+                if 'ema_data' in signal:
+                    self.logger.error(f"   EMA data fields: {list(signal['ema_data'].keys()) if isinstance(signal['ema_data'], dict) else 'Not a dict'}")
                 return False, "EMA200 filter: No EMA 200 data - REJECTED"
 
             # Validate extracted values are reasonable
@@ -902,7 +909,9 @@ class TradeValidator:
             
         except Exception as e:
             self.logger.error(f"❌ EMA200 trend filter error: {e}")
-            return True, f"EMA200 filter error (allowing): {str(e)}"
+            self.logger.error(f"🚫 CRITICAL: Rejecting trade due to EMA200 validation failure - fail-safe mode")
+            self.validation_stats['failed_ema200_error'] += 1
+            return False, f"EMA200 filter error (REJECTED for safety): {str(e)}"
     
     def get_validation_statistics(self) -> Dict:
         """
@@ -951,6 +960,7 @@ class TradeValidator:
                 'confidence_failure_rate': f"{(self.validation_stats['failed_confidence'] / total) * 100:.1f}%",
                 'format_failure_rate': f"{(self.validation_stats['failed_format'] / total) * 100:.1f}%",
                 'ema200_failure_rate': f"{(self.validation_stats['failed_ema200_filter'] / total) * 100:.1f}%",
+                'ema200_error_rate': f"{(self.validation_stats['failed_ema200_error'] / total) * 100:.1f}%",
                 'sr_failure_rate': f"{(self.validation_stats['failed_sr_validation'] / total) * 100:.1f}%",
                 'news_failure_rate': f"{(self.validation_stats['failed_news_filtering'] / total) * 100:.1f}%",
                 'claude_failure_rate': f"{(self.validation_stats['failed_claude_rejection'] + self.validation_stats['failed_claude_score']) / total * 100:.1f}%",
