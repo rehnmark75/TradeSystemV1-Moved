@@ -33,12 +33,12 @@ class AutoBackfillService:
     def market_is_open(self) -> bool:
         """Check if forex market is open"""
         now = datetime.now(timezone.utc)
-        # IG closes Friday 21:00 UTC and reopens Sunday 21:00 UTC
+        # IG closes Friday 20:30 UTC and reopens Sunday 22:00 UTC (extended for data stability)
         if now.weekday() == 5:  # Saturday
             return False
-        if now.weekday() == 6 and now.hour < 21:  # Sunday before 21:00 UTC
+        if now.weekday() == 6 and now.hour < 22:  # Sunday before 22:00 UTC (extended for market reopening buffer)
             return False
-        if now.weekday() == 4 and now.hour >= 21:  # Friday after 21:00 UTC
+        if now.weekday() == 4 and (now.hour >= 21 or (now.hour == 20 and now.minute >= 30)):  # Friday after 20:30 UTC
             return False
         return True
     
@@ -274,11 +274,11 @@ class AutoBackfillService:
             # Saturday - always closed
             if dt.weekday() == 5:  # Saturday
                 return True
-            # Friday after 21:00 UTC - market closed
-            if dt.weekday() == 4 and dt.hour >= 21:  # Friday >= 21:00 UTC
+            # Friday after 20:30 UTC - market closed (extended buffer)
+            if dt.weekday() == 4 and (dt.hour >= 21 or (dt.hour == 20 and dt.minute >= 30)):  # Friday >= 20:30 UTC
                 return True
-            # Sunday before 21:00 UTC - market closed
-            if dt.weekday() == 6 and dt.hour < 21:  # Sunday < 21:00 UTC
+            # Sunday before 22:00 UTC - market closed (extended for market reopening buffer)
+            if dt.weekday() == 6 and dt.hour < 22:  # Sunday < 22:00 UTC
                 return True
             return False
         
@@ -338,8 +338,8 @@ class AutoBackfillService:
                         # Check if gap occurred during likely market closure
                         dt = gap["gap_start"]
                         is_closure_time = (dt.weekday() == 5 or  # Saturday
-                                         (dt.weekday() == 4 and dt.hour >= 21) or  # Friday >= 21:00 UTC
-                                         (dt.weekday() == 6 and dt.hour < 21))  # Sunday < 21:00 UTC
+                                         (dt.weekday() == 4 and (dt.hour >= 21 or (dt.hour == 20 and dt.minute >= 30))) or  # Friday >= 20:30 UTC
+                                         (dt.weekday() == 6 and dt.hour < 22))  # Sunday < 22:00 UTC
                         if is_closure_time:
                             logger.debug(f"No candles returned for gap in {epic} during market closure ({gap_start_str}, {gap['missing_candles']} candles)")
                             self.record_failed_gap(gap, 'market_closed')

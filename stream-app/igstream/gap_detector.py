@@ -178,9 +178,9 @@ class GapDetector:
                             """Check if a datetime is during market closure"""
                             if dt.weekday() == 5:  # Saturday
                                 return True
-                            if dt.weekday() == 4 and dt.hour >= 21:  # Friday >= 21:00 UTC
+                            if dt.weekday() == 4 and (dt.hour >= 21 or (dt.hour == 20 and dt.minute >= 30)):  # Friday >= 20:30 UTC
                                 return True
-                            if dt.weekday() == 6 and dt.hour < 21:  # Sunday < 21:00 UTC
+                            if dt.weekday() == 6 and dt.hour < 22:  # Sunday < 22:00 UTC (extended for market reopening buffer)
                                 return True
                             return False
 
@@ -257,9 +257,9 @@ class GapDetector:
                                     """Check if a datetime is during market closure"""
                                     if dt.weekday() == 5:  # Saturday
                                         return True
-                                    if dt.weekday() == 4 and dt.hour >= 21:  # Friday >= 21:00 UTC
+                                    if dt.weekday() == 4 and (dt.hour >= 21 or (dt.hour == 20 and dt.minute >= 30)):  # Friday >= 20:30 UTC
                                         return True
-                                    if dt.weekday() == 6 and dt.hour < 21:  # Sunday < 21:00 UTC
+                                    if dt.weekday() == 6 and dt.hour < 22:  # Sunday < 22:00 UTC (extended for market reopening buffer)
                                         return True
                                     return False
 
