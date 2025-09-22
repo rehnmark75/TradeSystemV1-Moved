@@ -1193,7 +1193,7 @@ class EnhancedTradeProcessor:
             point_value = get_point_value(trade.symbol)
 
             # Get dynamic configuration for this epic
-            progressive_config = get_progressive_config_for_epic(trade.symbol, current_price=current_price)
+            progressive_config = get_progressive_config_for_epic(trade.symbol, current_price=current_price, trade=trade)
             break_even_trigger_points = progressive_config.stage1_trigger_points
             break_even_trigger = break_even_trigger_points * point_value
             

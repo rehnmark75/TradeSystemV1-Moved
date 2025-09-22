@@ -108,7 +108,7 @@ PROGRESSIVE_CONFIG_MAP = {
     'CS.D.NZDUSD.MINI.IP': DEFAULT_PROGRESSIVE_CONFIG,
 }
 
-def get_progressive_config_for_epic(epic: str, candles=None, current_price: float = None, enable_adaptive: bool = True) -> TrailingConfig:
+def get_progressive_config_for_epic(epic: str, candles=None, current_price: float = None, enable_adaptive: bool = True, trade=None) -> TrailingConfig:
     """
     Get optimized progressive trailing configuration for a specific epic with adaptive market analysis.
 
@@ -117,6 +117,7 @@ def get_progressive_config_for_epic(epic: str, candles=None, current_price: floa
         candles: Recent candle data for market analysis (optional)
         current_price: Current market price (optional)
         enable_adaptive: Whether to use adaptive configuration (default: True)
+        trade: TradeLog object for dynamic break-even calculation (optional)
     Returns:
         TrailingConfig: Optimized configuration for the epic and current market conditions
     """
@@ -137,6 +138,36 @@ def get_progressive_config_for_epic(epic: str, candles=None, current_price: floa
             config_dict['stage3_trigger_points'] = epic_overrides['stage3_trigger']
 
         base_config = TrailingConfig(**config_dict)
+
+    # ✅ ENHANCEMENT: Dynamic break-even calculation using IG minimum distance
+    if trade and hasattr(trade, 'min_stop_distance_points') and trade.min_stop_distance_points is not None:
+        # Calculate dynamic break-even trigger: IG minimum + 4 points buffer
+        dynamic_trigger = trade.min_stop_distance_points + 4
+
+        # Apply bounds: minimum 3 points, maximum 15 points
+        bounded_trigger = min(max(dynamic_trigger, 3), 15)
+        bounded_trigger = int(round(bounded_trigger))
+
+        # Update base config with dynamic values
+        config_dict = base_config.__dict__.copy()
+        config_dict['break_even_trigger_points'] = bounded_trigger
+        config_dict['stage1_trigger_points'] = bounded_trigger  # Keep them in sync
+
+        # Log the dynamic calculation for transparency
+        print(f"[DYNAMIC BREAK-EVEN] {epic}: IG min {trade.min_stop_distance_points:.1f} + 4 = {dynamic_trigger:.1f}")
+        if bounded_trigger != dynamic_trigger:
+            print(f"[DYNAMIC BREAK-EVEN] {epic}: Applied bounds {dynamic_trigger:.1f} → {bounded_trigger} points")
+        else:
+            print(f"[DYNAMIC BREAK-EVEN] {epic}: Using calculated {bounded_trigger} points")
+
+        # ✅ FIX: Filter out metadata parameters before creating TrailingConfig
+        metadata_params = {'_adaptation', '_regime', '_market_context', '_adaptive_skip_reason'}
+        filtered_config_dict = {k: v for k, v in config_dict.items() if k not in metadata_params}
+
+        # Create updated base config
+        base_config = TrailingConfig(**filtered_config_dict)
+    elif trade:
+        print(f"[DYNAMIC BREAK-EVEN] {epic}: No IG minimum available, using fixed config values")
 
     # If adaptive mode is disabled or no market data available, return base config
     if not enable_adaptive or not candles or current_price is None:
