@@ -449,7 +449,11 @@ class AlertHistoryManager:
                 # Process Claude analysis result
                 claude_data = self._extract_claude_analysis(signal, claude_result)
                 alert_data.update(claude_data)
-                
+
+                # Process Market Intelligence data
+                intelligence_data = self._extract_market_intelligence_data(signal)
+                alert_data.update(intelligence_data)
+
                 # Add deduplication metadata fields
                 alert_data['signal_hash'] = signal.get('signal_hash')
                 alert_data['data_source'] = signal.get('data_source', 'scanner')
@@ -650,7 +654,84 @@ class AlertHistoryManager:
         except Exception as e:
             self.logger.warning(f"⚠️ Error updating Claude analysis summary: {e}")
             # Don't raise - this is secondary functionality, main alert save should continue
-    
+
+    def _extract_market_intelligence_data(self, signal: Dict) -> Dict:
+        """
+        Extract market intelligence data from signal and incorporate into strategy_metadata
+
+        Args:
+            signal: Signal dictionary containing market intelligence data
+
+        Returns:
+            Dictionary with enhanced strategy_metadata including market intelligence
+        """
+        try:
+            # Get existing strategy metadata
+            existing_metadata = signal.get('strategy_metadata', {})
+
+            # Extract market intelligence data from signal
+            market_intelligence = signal.get('market_intelligence', {})
+
+            # If no market intelligence data, return existing metadata
+            if not market_intelligence:
+                return {'strategy_metadata': existing_metadata}
+
+            # Create enhanced metadata with market intelligence
+            enhanced_metadata = existing_metadata.copy() if existing_metadata else {}
+
+            # Add market intelligence section
+            enhanced_metadata['market_intelligence'] = {
+                'regime_analysis': market_intelligence.get('regime_analysis', {}),
+                'session_analysis': market_intelligence.get('session_analysis', {}),
+                'market_context': market_intelligence.get('market_context', {}),
+                'strategy_adaptation': market_intelligence.get('strategy_adaptation', {}),
+                'intelligence_applied': True,
+                'intelligence_source': market_intelligence.get('intelligence_source', 'MarketIntelligenceEngine'),
+                'analysis_timestamp': market_intelligence.get('analysis_timestamp')
+            }
+
+            # Extract key values for potential indexing (future Phase 2)
+            regime_analysis = market_intelligence.get('regime_analysis', {})
+            market_context = market_intelligence.get('market_context', {})
+
+            # Determine volatility level from regime scores or explicit field
+            volatility_level = 'medium'  # default
+            if 'volatility_level' in market_intelligence:
+                volatility_level = market_intelligence['volatility_level']
+            elif 'regime_scores' in regime_analysis:
+                regime_scores = regime_analysis['regime_scores']
+                high_vol = regime_scores.get('high_volatility', 0)
+                low_vol = regime_scores.get('low_volatility', 0)
+                if high_vol > 0.6:
+                    volatility_level = 'high'
+                elif low_vol > 0.6:
+                    volatility_level = 'low'
+
+            # Get market bias
+            market_bias = 'neutral'  # default
+            market_strength = market_context.get('market_strength', {})
+            if 'market_bias' in market_strength:
+                market_bias = market_strength['market_bias']
+
+            # Store additional fields for future indexing
+            enhanced_metadata['market_intelligence']['_indexable_fields'] = {
+                'regime_confidence': regime_analysis.get('confidence', 0.5),
+                'volatility_level': volatility_level,
+                'market_bias': market_bias,
+                'dominant_regime': regime_analysis.get('dominant_regime', 'unknown'),
+                'intelligence_applied': True
+            }
+
+            self.logger.debug(f"📊 Market intelligence data extracted: regime={regime_analysis.get('dominant_regime', 'unknown')}, "
+                            f"confidence={regime_analysis.get('confidence', 0.5):.1%}, volatility={volatility_level}")
+
+            return {'strategy_metadata': enhanced_metadata}
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Error extracting market intelligence data: {e}")
+            # Return existing metadata if extraction fails
+            return {'strategy_metadata': signal.get('strategy_metadata', {})}
+
     def _extract_claude_analysis(self, signal: Dict, claude_result: Dict = None) -> Dict:
         """
         ENHANCED: Extract Claude analysis data from signal and/or claude_result

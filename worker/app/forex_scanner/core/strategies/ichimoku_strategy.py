@@ -539,6 +539,62 @@ class IchimokuStrategy(BaseStrategy):
             if not self.signal_calculator.validate_confidence_threshold(confidence, self.min_confidence):
                 return None
 
+            # Add market intelligence data if available
+            if self.market_intelligence_adapter:
+                try:
+                    # Get market conditions analysis
+                    market_conditions = self.market_intelligence_adapter.analyze_market_conditions(epic, timeframe)
+
+                    # Get adapted configuration if RAG enhancer is available
+                    adapted_config = {}
+                    if self.rag_enhancer:
+                        try:
+                            base_config = {'confidence_threshold': self.min_confidence}
+                            adapted_config = self.market_intelligence_adapter.adapt_ichimoku_parameters(
+                                base_config=base_config,
+                                market_conditions=market_conditions,
+                                rag_recommendations={}  # Could be enhanced with RAG data
+                            )
+                        except Exception as e:
+                            self.logger.debug(f"RAG adaptation failed: {e}")
+
+                    # Create market intelligence data structure
+                    signal['market_intelligence'] = {
+                        'regime_analysis': {
+                            'dominant_regime': market_conditions.get('regime', 'unknown'),
+                            'confidence': market_conditions.get('regime_confidence', 0.5),
+                            'regime_scores': market_conditions.get('regime_scores', {})
+                        },
+                        'session_analysis': {
+                            'current_session': market_conditions.get('trading_session', 'unknown'),
+                            'volatility_level': market_conditions.get('volatility_level', 'medium'),
+                            'session_characteristics': []
+                        },
+                        'market_context': {
+                            'volatility_percentile': 50.0,  # Default, could be enhanced
+                            'market_strength': {
+                                'market_bias': 'neutral'  # Default, could be enhanced
+                            }
+                        },
+                        'strategy_adaptation': {
+                            'applied_regime': adapted_config.get('applied_regime', market_conditions.get('regime', 'unknown')),
+                            'confidence_threshold_used': adapted_config.get('final_confidence_threshold', self.min_confidence),
+                            'regime_suitable': True,  # Could be enhanced with regime-signal alignment check
+                            'adaptation_summary': f"Ichimoku parameters adapted for {market_conditions.get('regime', 'unknown')} regime"
+                        },
+                        'intelligence_source': 'MarketIntelligenceEngine',
+                        'analysis_timestamp': market_conditions.get('analysis_timestamp'),
+                        'volatility_level': market_conditions.get('volatility_level', 'medium')
+                    }
+
+                    self.logger.debug(f"🧠 Market intelligence added to signal: regime={market_conditions.get('regime')}, "
+                                    f"session={market_conditions.get('trading_session')}, "
+                                    f"volatility={market_conditions.get('volatility_level')}")
+
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Failed to add market intelligence to signal: {e}")
+                    # Continue without market intelligence if it fails
+
             self.logger.info(f"🌥️ Ichimoku {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}")
             return signal
 

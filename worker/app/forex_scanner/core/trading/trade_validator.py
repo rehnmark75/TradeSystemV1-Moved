@@ -63,6 +63,15 @@ except ImportError:
     NEWS_FILTER_AVAILABLE = False
     logging.warning("⚠️ Economic news filter not available - news filtering disabled")
 
+# NEW: Import market intelligence for universal signal context capture
+try:
+    from core.intelligence.market_intelligence import MarketIntelligenceEngine
+    from core.intelligence import create_intelligence_engine
+    MARKET_INTELLIGENCE_AVAILABLE = True
+except ImportError:
+    MARKET_INTELLIGENCE_AVAILABLE = False
+    logging.warning("⚠️ Market intelligence not available - signals will be saved without market context")
+
 
 class TradeValidator:
     """
@@ -221,6 +230,30 @@ class TradeValidator:
         self.sr_data_cache = {}
         self.sr_cache_expiry = {}
         self.sr_cache_duration_minutes = getattr(config, 'SR_CACHE_DURATION_MINUTES', 10)
+
+        # NEW: Market Intelligence for universal signal context capture
+        self.market_intelligence_engine = None
+        self.enable_market_intelligence_capture = (
+            getattr(config, 'ENABLE_MARKET_INTELLIGENCE_CAPTURE', True) and
+            MARKET_INTELLIGENCE_AVAILABLE
+        )
+
+        if self.enable_market_intelligence_capture:
+            try:
+                # Initialize market intelligence engine
+                self.market_intelligence_engine = create_intelligence_engine(
+                    data_fetcher=self.data_fetcher  # Reuse the same data fetcher if available
+                )
+                self.logger.info("✅ Market Intelligence Engine initialized for universal signal context")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to initialize Market Intelligence Engine: {e}")
+                self.market_intelligence_engine = None
+                self.enable_market_intelligence_capture = False
+        else:
+            if not MARKET_INTELLIGENCE_AVAILABLE:
+                self.logger.info("📊 Market Intelligence unavailable - signals will be saved without market context")
+            else:
+                self.logger.info("📊 Market Intelligence capture disabled in config")
         
         # Validation statistics
         self.validation_stats = {
@@ -565,7 +598,12 @@ class TradeValidator:
             if not valid:
                 self.validation_stats['failed_other'] += 1
                 return False, f"Trading: {msg}"
-            
+
+            # 12. ⭐ NEW: Universal Market Intelligence Capture ⭐
+            # Capture market intelligence for ALL validated signals, regardless of strategy
+            if self.enable_market_intelligence_capture:
+                self._capture_market_intelligence_context(signal)
+
             # All validations passed
             self.validation_stats['passed_validations'] += 1
             return True, "Signal valid for trading"
@@ -1600,6 +1638,98 @@ class TradeValidator:
             self.logger.info(f"✅ Updated TradeValidator configuration: {', '.join(updated)}")
         
         return len(updated) > 0
+
+    def _capture_market_intelligence_context(self, signal: Dict) -> None:
+        """
+        🧠 UNIVERSAL MARKET INTELLIGENCE CAPTURE
+
+        Captures market intelligence context for ALL validated signals,
+        regardless of whether the strategy itself uses market intelligence.
+
+        This ensures every alert has market context for later analysis,
+        even if the strategy doesn't natively support intelligence features.
+
+        Args:
+            signal: Trading signal dictionary (modified in place)
+        """
+        try:
+            if not self.market_intelligence_engine:
+                self.logger.debug("📊 Market intelligence engine not available for context capture")
+                return
+
+            epic = signal.get('epic', 'Unknown')
+            timeframe = signal.get('timeframe', '15m')
+
+            # Skip if signal already has market intelligence (e.g., from Ichimoku strategy)
+            if 'market_intelligence' in signal:
+                self.logger.debug(f"📊 {epic}: Market intelligence already present in signal, skipping capture")
+                return
+
+            self.logger.debug(f"🧠 Capturing market intelligence context for {epic} ({signal.get('strategy', 'unknown')} strategy)")
+
+            # Get comprehensive market analysis
+            epic_list = [epic]
+            intelligence_report = self.market_intelligence_engine.generate_market_intelligence_report(epic_list)
+
+            if intelligence_report:
+                # Extract key components from the intelligence report
+                market_regime = intelligence_report.get('market_regime', {})
+                session_analysis = intelligence_report.get('session_analysis', {})
+
+                # Create market intelligence data structure for signal
+                signal['market_intelligence'] = {
+                    'regime_analysis': {
+                        'dominant_regime': market_regime.get('dominant_regime', 'unknown'),
+                        'confidence': market_regime.get('confidence', 0.5),
+                        'regime_scores': market_regime.get('regime_scores', {})
+                    },
+                    'session_analysis': {
+                        'current_session': session_analysis.get('current_session', 'unknown'),
+                        'session_config': session_analysis.get('session_config', {}),
+                        'optimal_timeframes': session_analysis.get('optimal_timeframes', [timeframe])
+                    },
+                    'market_context': {
+                        'market_strength': market_regime.get('market_strength', {}),
+                        'correlation_analysis': market_regime.get('correlation_analysis', {}),
+                        'volatility_percentile': 50.0  # Default, could be enhanced
+                    },
+                    'strategy_adaptation': {
+                        'applied_regime': market_regime.get('dominant_regime', 'unknown'),
+                        'confidence_threshold_used': self.min_confidence,
+                        'regime_suitable': True,  # Could be enhanced with strategy-regime alignment
+                        'adaptation_summary': f"Universal market context captured for {signal.get('strategy', 'unknown')} strategy",
+                        'universal_capture': True  # Flag to indicate this was added by validator
+                    },
+                    'intelligence_source': 'TradeValidator_UniversalCapture',
+                    'analysis_timestamp': intelligence_report.get('timestamp'),
+                    'volatility_level': self._determine_volatility_level(market_regime.get('regime_scores', {}))
+                }
+
+                self.logger.debug(f"🧠 {epic}: Market intelligence captured - "
+                                f"regime={market_regime.get('dominant_regime', 'unknown')}, "
+                                f"session={session_analysis.get('current_session', 'unknown')}, "
+                                f"confidence={market_regime.get('confidence', 0.5):.1%}")
+            else:
+                self.logger.warning(f"⚠️ {epic}: Failed to get market intelligence report")
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Error capturing market intelligence context for {signal.get('epic', 'Unknown')}: {e}")
+            # Don't let intelligence capture errors affect signal validation
+
+    def _determine_volatility_level(self, regime_scores: Dict) -> str:
+        """Determine volatility level from regime scores"""
+        try:
+            high_vol_score = regime_scores.get('high_volatility', 0.3)
+            low_vol_score = regime_scores.get('low_volatility', 0.3)
+
+            if high_vol_score > 0.6:
+                return 'high'
+            elif low_vol_score > 0.6:
+                return 'low'
+            else:
+                return 'medium'
+        except:
+            return 'medium'
 
 
 # Compatibility functions for integration
