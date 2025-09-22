@@ -887,6 +887,10 @@ INTELLIGENCE_WEIGHTS = {
 
 ENABLE_MARKET_INTELLIGENCE = True
 
+# Market Intelligence Storage Configuration
+ENABLE_MARKET_INTELLIGENCE_STORAGE = True  # Store market intelligence for every scan cycle
+MARKET_INTELLIGENCE_CLEANUP_DAYS = 30      # Auto-cleanup old records after N days
+
 # Force analysis even when market is closed
 FORCE_INTELLIGENCE_ANALYSIS = True
 INTELLIGENCE_OVERRIDE_MARKET_HOURS = True

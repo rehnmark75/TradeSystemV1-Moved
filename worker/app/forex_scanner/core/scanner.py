@@ -56,6 +56,21 @@ except ImportError:
         SIGNAL_PROCESSOR_AVAILABLE = False
         SignalProcessor = None
 
+# ADD: Import Market Intelligence components for comprehensive market analysis
+try:
+    from core.intelligence.market_intelligence import MarketIntelligenceEngine
+    from core.intelligence.market_intelligence_history_manager import MarketIntelligenceHistoryManager
+    MARKET_INTELLIGENCE_AVAILABLE = True
+except ImportError:
+    try:
+        from forex_scanner.core.intelligence.market_intelligence import MarketIntelligenceEngine
+        from forex_scanner.core.intelligence.market_intelligence_history_manager import MarketIntelligenceHistoryManager
+        MARKET_INTELLIGENCE_AVAILABLE = True
+    except ImportError:
+        MARKET_INTELLIGENCE_AVAILABLE = False
+        MarketIntelligenceEngine = None
+        MarketIntelligenceHistoryManager = None
+
 
 class IntelligentForexScanner:
     """
@@ -145,7 +160,47 @@ class IntelligentForexScanner:
         self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', False) and SMART_MONEY_AVAILABLE
         if self.enable_smart_money:
             self.logger.info("✅ Smart money analysis enabled")
-        
+
+        # ADD: Initialize Market Intelligence components for comprehensive market analysis
+        self.market_intelligence_engine = None
+        self.market_intelligence_history = None
+        self.enable_market_intelligence = getattr(config, 'ENABLE_MARKET_INTELLIGENCE_STORAGE', True) and MARKET_INTELLIGENCE_AVAILABLE
+
+        if self.enable_market_intelligence and db_manager and MARKET_INTELLIGENCE_AVAILABLE:
+            try:
+                # Get data_fetcher from signal_detector if available
+                data_fetcher = getattr(self.signal_detector, 'data_fetcher', None)
+
+                # If no data_fetcher from signal_detector, create one
+                if not data_fetcher and db_manager:
+                    try:
+                        from core.data_fetcher import DataFetcher
+                        data_fetcher = DataFetcher(db_manager)
+                    except ImportError:
+                        try:
+                            from forex_scanner.core.data_fetcher import DataFetcher
+                            data_fetcher = DataFetcher(db_manager)
+                        except ImportError:
+                            data_fetcher = None
+
+                if data_fetcher:
+                    # Initialize Market Intelligence Engine
+                    self.market_intelligence_engine = MarketIntelligenceEngine(data_fetcher)
+
+                    # Initialize Market Intelligence History Manager
+                    self.market_intelligence_history = MarketIntelligenceHistoryManager(db_manager)
+
+                    self.logger.info("🧠 Market Intelligence components initialized")
+                    self.logger.info(f"   Engine: {'✅' if self.market_intelligence_engine else '❌'}")
+                    self.logger.info(f"   History: {'✅' if self.market_intelligence_history else '❌'}")
+                else:
+                    self.logger.warning("⚠️ DataFetcher not available for Market Intelligence")
+                    self.enable_market_intelligence = False
+
+            except Exception as e:
+                self.logger.warning(f"⚠️ Could not initialize Market Intelligence: {e}")
+                self.enable_market_intelligence = False
+
         # Scanner state
         self.running = False
         self.last_signals = {}
@@ -161,15 +216,19 @@ class IntelligentForexScanner:
             'timestamp_conversions': 0,
             'smart_money_enhanced': 0,
             'signal_processor_used': 0,  # ADD: Track SignalProcessor usage
-            'smart_money_validated': 0   # ADD: Track validated signals
+            'smart_money_validated': 0,  # ADD: Track validated signals
+            'market_intelligence_generated': 0,  # ADD: Track market intelligence generation
+            'market_intelligence_stored': 0,     # ADD: Track successful storage
+            'market_intelligence_errors': 0     # ADD: Track storage errors
         }
-        
+
         self.logger.info(f"🔍 IntelligentForexScanner initialized")
         self.logger.info(f"   Epics: {len(self.epic_list)}")
         self.logger.info(f"   Min confidence: {self.min_confidence:.1%}")
         self.logger.info(f"   Deduplication: {'✅' if self.enable_deduplication else '❌'}")
         self.logger.info(f"   Smart money: {'✅' if self.enable_smart_money else '❌'}")
         self.logger.info(f"   SignalProcessor: {'✅' if self.use_signal_processor else '❌'}")
+        self.logger.info(f"   Market Intelligence: {'✅' if self.enable_market_intelligence else '❌'}")
 
     def _initialize_signal_detector(self, db_manager, user_timezone):
         """Initialize signal detector with fallback"""
@@ -411,6 +470,9 @@ class IntelligentForexScanner:
                 # NEW: Log Market Intelligence summary for analysis
                 self._log_market_intelligence_summary(clean_signals)
 
+            # ADD: Generate and store market intelligence for this scan cycle
+            self._capture_scan_market_intelligence(scan_start, clean_signals)
+
             return clean_signals
             
         except Exception as e:
@@ -580,6 +642,68 @@ class IntelligentForexScanner:
 
         except Exception as e:
             self.logger.warning(f"⚠️ Error logging market intelligence summary: {e}")
+
+    def _capture_scan_market_intelligence(self, scan_start: datetime, signals: List[Dict]) -> None:
+        """
+        🧠 Generate and store comprehensive market intelligence for this scan cycle
+        This captures market conditions regardless of whether signals were detected
+        """
+        if not self.enable_market_intelligence or not self.market_intelligence_engine or not self.market_intelligence_history:
+            return
+
+        try:
+            scan_duration = (datetime.now() - scan_start).total_seconds()
+            self.logger.debug(f"🧠 Generating market intelligence for scan cycle...")
+
+            # Generate comprehensive market intelligence report
+            intelligence_report = self.market_intelligence_engine.generate_market_intelligence_report(self.epic_list)
+
+            if intelligence_report:
+                self.stats['market_intelligence_generated'] += 1
+
+                # Generate unique scan cycle ID
+                scan_cycle_id = f"scan_{scan_start.strftime('%Y%m%d_%H%M%S')}_{len(signals)}signals"
+
+                # Store market intelligence in dedicated table
+                record_id = self.market_intelligence_history.save_market_intelligence(
+                    intelligence_report=intelligence_report,
+                    epic_list=self.epic_list,
+                    scan_cycle_id=scan_cycle_id
+                )
+
+                if record_id:
+                    self.stats['market_intelligence_stored'] += 1
+
+                    # Extract key information for logging
+                    market_regime = intelligence_report.get('market_regime', {})
+                    dominant_regime = market_regime.get('dominant_regime', 'unknown')
+                    confidence = market_regime.get('confidence', 0.5)
+
+                    session_analysis = intelligence_report.get('session_analysis', {})
+                    current_session = session_analysis.get('current_session', 'unknown')
+
+                    self.logger.info(f"🧠 Market Intelligence stored: {dominant_regime} regime ({confidence:.1%}) "
+                                   f"during {current_session} session - Record #{record_id}")
+
+                    # Log additional insights if confidence is high
+                    if confidence > 0.8:
+                        market_strength = market_regime.get('market_strength', {})
+                        market_bias = market_strength.get('market_bias', 'neutral')
+                        self.logger.info(f"   🎯 High confidence analysis: Market bias = {market_bias}")
+
+                else:
+                    self.stats['market_intelligence_errors'] += 1
+                    self.logger.warning("⚠️ Failed to store market intelligence data")
+
+            else:
+                self.stats['market_intelligence_errors'] += 1
+                self.logger.warning("⚠️ Failed to generate market intelligence report")
+
+        except Exception as e:
+            self.stats['market_intelligence_errors'] += 1
+            self.logger.error(f"❌ Error capturing market intelligence: {e}")
+            import traceback
+            self.logger.debug(f"   Traceback: {traceback.format_exc()}")
 
     def start_continuous_scanning(self):
         """Start continuous scanning"""
