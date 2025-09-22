@@ -725,12 +725,32 @@ class AlertHistoryManager:
             self.logger.debug(f"📊 Market intelligence data extracted: regime={regime_analysis.get('dominant_regime', 'unknown')}, "
                             f"confidence={regime_analysis.get('confidence', 0.5):.1%}, volatility={volatility_level}")
 
-            return {'strategy_metadata': enhanced_metadata}
+            # JSON serialize the enhanced metadata to match database expectations
+            try:
+                from forex_scanner.utils.scanner_utils import make_json_serializable
+                cleaned_metadata = make_json_serializable(enhanced_metadata)
+                serialized_metadata = json.dumps(cleaned_metadata) if cleaned_metadata else None
+                return {'strategy_metadata': serialized_metadata}
+            except Exception as e:
+                self.logger.warning(f"⚠️ Error serializing market intelligence metadata: {e}")
+                # Fallback to string conversion
+                return {'strategy_metadata': json.dumps(str(enhanced_metadata)) if enhanced_metadata else None}
 
         except Exception as e:
             self.logger.warning(f"⚠️ Error extracting market intelligence data: {e}")
-            # Return existing metadata if extraction fails
-            return {'strategy_metadata': signal.get('strategy_metadata', {})}
+            # Return existing metadata if extraction fails - properly serialized
+            try:
+                existing_metadata = signal.get('strategy_metadata', {})
+                if existing_metadata:
+                    from forex_scanner.utils.scanner_utils import make_json_serializable
+                    cleaned_metadata = make_json_serializable(existing_metadata)
+                    serialized_metadata = json.dumps(cleaned_metadata) if cleaned_metadata else None
+                    return {'strategy_metadata': serialized_metadata}
+                else:
+                    return {'strategy_metadata': None}
+            except Exception as fallback_error:
+                self.logger.warning(f"⚠️ Error serializing fallback metadata: {fallback_error}")
+                return {'strategy_metadata': None}
 
     def _extract_claude_analysis(self, signal: Dict, claude_result: Dict = None) -> Dict:
         """
