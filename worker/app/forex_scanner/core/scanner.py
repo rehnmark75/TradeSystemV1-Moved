@@ -407,7 +407,10 @@ class IntelligentForexScanner:
                 # Log Smart Money statistics if any
                 if self.stats['smart_money_validated'] > 0:
                     self.logger.info(f"🧠 Smart Money validated: {self.stats['smart_money_validated']}/{len(clean_signals)} signals")
-            
+
+                # NEW: Log Market Intelligence summary for analysis
+                self._log_market_intelligence_summary(clean_signals)
+
             return clean_signals
             
         except Exception as e:
@@ -470,7 +473,114 @@ class IntelligentForexScanner:
         }
         
         return clean_signal
-    
+
+    def _log_market_intelligence_summary(self, signals: List[Dict]) -> None:
+        """
+        📊 Log market intelligence summary for analysis
+        Shows market conditions captured during this scan
+        """
+        try:
+            if not signals:
+                return
+
+            # Collect market intelligence data from signals
+            regimes = []
+            sessions = []
+            volatility_levels = []
+            intelligence_sources = []
+            strategies_with_intelligence = set()
+
+            for signal in signals:
+                epic = signal.get('epic', 'Unknown')
+                strategy = signal.get('strategy', 'unknown')
+
+                # Check if signal has market intelligence
+                market_intelligence = signal.get('market_intelligence', {})
+                if market_intelligence:
+                    strategies_with_intelligence.add(strategy)
+
+                    # Collect regime data
+                    regime_analysis = market_intelligence.get('regime_analysis', {})
+                    if regime_analysis.get('dominant_regime'):
+                        regimes.append({
+                            'epic': epic,
+                            'regime': regime_analysis.get('dominant_regime'),
+                            'confidence': regime_analysis.get('confidence', 0.5)
+                        })
+
+                    # Collect session data
+                    session_analysis = market_intelligence.get('session_analysis', {})
+                    if session_analysis.get('current_session'):
+                        sessions.append(session_analysis.get('current_session'))
+
+                    # Collect volatility data
+                    volatility = market_intelligence.get('volatility_level')
+                    if volatility:
+                        volatility_levels.append(volatility)
+
+                    # Collect intelligence source
+                    source = market_intelligence.get('intelligence_source')
+                    if source:
+                        intelligence_sources.append(source)
+
+            # Log summary if any intelligence was captured
+            if regimes or sessions or volatility_levels:
+                self.logger.info("📊 Market Intelligence Summary:")
+
+                # Log strategies with intelligence
+                if strategies_with_intelligence:
+                    self.logger.info(f"   🧠 Strategies with intelligence: {', '.join(sorted(strategies_with_intelligence))}")
+
+                # Log regime distribution
+                if regimes:
+                    regime_counts = {}
+                    total_confidence = 0
+                    for r in regimes:
+                        regime = r['regime']
+                        regime_counts[regime] = regime_counts.get(regime, 0) + 1
+                        total_confidence += r['confidence']
+
+                    avg_confidence = total_confidence / len(regimes) if regimes else 0
+                    regime_summary = ', '.join([f"{regime}({count})" for regime, count in regime_counts.items()])
+                    self.logger.info(f"   📈 Market Regimes: {regime_summary} | Avg Confidence: {avg_confidence:.1%}")
+
+                # Log session distribution
+                if sessions:
+                    session_counts = {}
+                    for session in sessions:
+                        session_counts[session] = session_counts.get(session, 0) + 1
+                    session_summary = ', '.join([f"{session}({count})" for session, count in session_counts.items()])
+                    self.logger.info(f"   🕐 Trading Sessions: {session_summary}")
+
+                # Log volatility distribution
+                if volatility_levels:
+                    vol_counts = {}
+                    for vol in volatility_levels:
+                        vol_counts[vol] = vol_counts.get(vol, 0) + 1
+                    vol_summary = ', '.join([f"{vol}({count})" for vol, count in vol_counts.items()])
+                    self.logger.info(f"   📊 Volatility Levels: {vol_summary}")
+
+                # Log intelligence sources
+                if intelligence_sources:
+                    source_counts = {}
+                    for source in intelligence_sources:
+                        source_type = 'Strategy' if 'MarketIntelligenceEngine' in source else 'Universal'
+                        source_counts[source_type] = source_counts.get(source_type, 0) + 1
+                    source_summary = ', '.join([f"{source}({count})" for source, count in source_counts.items()])
+                    self.logger.info(f"   🔍 Intelligence Sources: {source_summary}")
+
+                # Log specific regime details for analysis
+                if regimes:
+                    self.logger.info("   📋 Regime Details:")
+                    for r in regimes:
+                        self.logger.info(f"      {r['epic']}: {r['regime']} ({r['confidence']:.1%})")
+
+            else:
+                self.logger.info("📊 Market Intelligence: No intelligence data captured (engine may be disabled)")
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Error logging market intelligence summary: {e}")
+
     def start_continuous_scanning(self):
         """Start continuous scanning"""
         self.running = True

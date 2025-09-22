@@ -1665,7 +1665,7 @@ class TradeValidator:
                 self.logger.debug(f"📊 {epic}: Market intelligence already present in signal, skipping capture")
                 return
 
-            self.logger.debug(f"🧠 Capturing market intelligence context for {epic} ({signal.get('strategy', 'unknown')} strategy)")
+            self.logger.info(f"🧠 Capturing market intelligence context for {epic} ({signal.get('strategy', 'unknown')} strategy)")
 
             # Get comprehensive market analysis
             epic_list = [epic]
@@ -1705,10 +1705,10 @@ class TradeValidator:
                     'volatility_level': self._determine_volatility_level(market_regime.get('regime_scores', {}))
                 }
 
-                self.logger.debug(f"🧠 {epic}: Market intelligence captured - "
-                                f"regime={market_regime.get('dominant_regime', 'unknown')}, "
-                                f"session={session_analysis.get('current_session', 'unknown')}, "
-                                f"confidence={market_regime.get('confidence', 0.5):.1%}")
+                self.logger.info(f"📊 {epic}: Market intelligence captured - "
+                               f"Regime: {market_regime.get('dominant_regime', 'unknown')} ({market_regime.get('confidence', 0.5):.1%}), "
+                               f"Session: {session_analysis.get('current_session', 'unknown')}, "
+                               f"Volatility: {self._determine_volatility_level(market_regime.get('regime_scores', {}))}")
             else:
                 self.logger.warning(f"⚠️ {epic}: Failed to get market intelligence report")
 
