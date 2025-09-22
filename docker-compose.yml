@@ -275,7 +275,7 @@ services:
   db-backup:
     image: postgres:15
     container_name: db-backup
-    restart: "no"  # Only run when scheduled
+    restart: unless-stopped  # Auto-restart for continuous backup service
     environment:
       - BACKUP_SCHEDULE=0 2 * * *  # Daily at 2 AM
       - BACKUP_RETENTION_DAYS=7
