@@ -251,7 +251,7 @@ class OrderSender:
 
     def send_adjustment(self, epic: str, direction: str, stop_offset_points: int,
                         limit_offset_points: int = 0) -> bool:
-        """Send stop/limit adjustment using direct service call (FIXED: No more HTTP authentication issues)"""
+        """Send stop/limit adjustment to FastAPI /adjust-stop endpoint"""
 
         # Validate inputs
         if stop_offset_points <= 0:
@@ -264,61 +264,65 @@ class OrderSender:
                 self.logger.debug(f"[SKIP] Already sent {epic} stop={stop_offset_points}, limit={limit_offset_points}")
                 return True
 
+        body = {
+            "epic": epic,
+            "adjustDirectionStop": self._get_adjust_direction(direction, "stop"),
+            "adjustDirectionLimit": self._get_adjust_direction(direction, "limit"),
+            "stop_offset_points": stop_offset_points,
+            "limit_offset_points": limit_offset_points,
+            "dry_run": self.config.dry_run
+        }
+
+        headers = {
+            "X-APIM-Gateway": "verified",
+            "X-API-KEY": self.config.subscription_key,
+            "Content-Type": "application/json"
+        }
+
         try:
-            # ✅ FIXED: Use direct service call instead of HTTP request
-            from services.adjust_stop_service import adjust_stop_sync
+            adjust_stop_url = self.config.adjust_stop_url
+            
+            # Log the payload we're sending
+            self.logger.info(f"[TRAILING PAYLOAD] {epic} {json.dumps(body, indent=2)}")
+            self.logger.info(f"[SENDING TO] {adjust_stop_url}")
+            
+            response = requests.post(adjust_stop_url, json=body, headers=headers)
 
-            # Log what we're doing
-            adjust_direction_stop = self._get_adjust_direction(direction, "stop")
-            adjust_direction_limit = self._get_adjust_direction(direction, "limit")
+            if response.status_code == 200:
+                result = response.json()
+                status = result.get("status", "unknown")
+                
+                if status == "updated":
+                    self.logger.info(f"[✅ SENT] {epic} stop={stop_offset_points}, limit={limit_offset_points}")
+                    self.logger.info(f"[RESPONSE] {epic} {json.dumps(result.get('sentPayload', {}), indent=2)}")
 
-            self.logger.info(f"[TRAILING DIRECT] {epic} stop_offset={stop_offset_points}, limit_offset={limit_offset_points}")
-            self.logger.info(f"[TRAILING DIRECT] {epic} stop_direction={adjust_direction_stop}, limit_direction={adjust_direction_limit}")
-
-            # Call the service directly (no HTTP, no authentication issues)
-            result = adjust_stop_sync(
-                epic=epic,
-                stop_offset_points=stop_offset_points,
-                limit_offset_points=limit_offset_points,
-                adjust_direction_stop=adjust_direction_stop,
-                adjust_direction_limit=adjust_direction_limit,
-                dry_run=self.config.dry_run
-            )
-
-            status = result.get("status", "unknown")
-
-            if status == "updated":
-                self.logger.info(f"[✅ DIRECT SUCCESS] {epic} stop={stop_offset_points}, limit={limit_offset_points}")
-                self.logger.info(f"[RESPONSE] {epic} {json.dumps(result.get('sentPayload', {}), indent=2)}")
-
-                # Extract actual levels set by IG from the API response
-                if 'sentPayload' in result:
-                    payload = result.get('sentPayload', {})
-                    if 'stopLevel' in payload:
-                        actual_stop = payload.get('stopLevel')
-                        actual_limit = payload.get('limitLevel')
+                    # Extract actual levels set by IG from the API response
+                    api_response = result.get('apiResponse', {})
+                    if api_response and 'stopLevel' in result.get('sentPayload', {}):
+                        actual_stop = result.get('sentPayload', {}).get('stopLevel')
+                        actual_limit = result.get('sentPayload', {}).get('limitLevel')
                         self.logger.info(f"[IG ACTUAL] {epic} stopLevel={actual_stop}, limitLevel={actual_limit}")
 
-                with self._lock:
-                    self._last_sent_offsets[epic] = current_offsets
-                return result  # Return full result instead of just True
+                    with self._lock:
+                        self._last_sent_offsets[epic] = current_offsets
+                    return result  # Return full result instead of just True
+                    
+                elif status == "closed":
+                    self.logger.info(f"[❌ CLOSED] {epic} {result.get('message', 'Position closed')}")
+                    self._mark_trade_closed(epic)
+                    return {"status": "closed", "message": result.get('message')}
 
-            elif status == "closed":
-                self.logger.info(f"[❌ CLOSED] {epic} {result.get('message', 'Position closed')}")
-                self._mark_trade_closed(epic)
-                return {"status": "closed", "message": result.get('message')}
+                elif status == "dry_run":
+                    self.logger.info(f"[DRY RUN] {epic} {json.dumps(result.get('sentPayload', {}), indent=2)}")
+                    return result
 
-            elif status == "dry_run":
-                self.logger.info(f"[DRY RUN] {epic} {json.dumps(result.get('sentPayload', {}), indent=2)}")
-                return result
-
-            elif status == "error":
-                self.logger.error(f"[DIRECT ERROR] {epic} {result.get('message', 'Unknown error')}")
-                return result
+                else:
+                    self.logger.warning(f"[UNEXPECTED] {epic} Status: {status}, Response: {result}")
+                    return {"status": "error", "message": f"Unexpected status: {status}"}
 
             else:
-                self.logger.warning(f"[UNEXPECTED] {epic} Status: {status}, Response: {result}")
-                return {"status": "error", "message": f"Unexpected status: {status}"}
+                self.logger.error(f"[ERROR] {epic} HTTP {response.status_code}: {response.text}")
+                return {"status": "error", "message": f"HTTP {response.status_code}: {response.text}"}
 
         except Exception as e:
             self.logger.error(f"[EXCEPTION] {epic} Failed to send adjustment: {e}")
