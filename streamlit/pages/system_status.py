@@ -1219,6 +1219,9 @@ def search_logs(parser, search_term, log_types, start_date, end_date, regex_mode
         if len(results) >= max_results:
             break
 
+    # Sort results by timestamp in descending order (newest first)
+    results.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min, reverse=True)
+
     return results
 
 def highlight_search_term(text, search_term, regex_mode=False, case_sensitive=False):
