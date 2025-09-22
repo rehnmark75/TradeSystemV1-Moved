@@ -705,6 +705,278 @@ class UnifiedTradingDashboard:
         else:
             st.info("No trades match the selected filters.")
 
+    def render_market_intelligence_tab(self):
+        """Render the Market Intelligence analysis tab"""
+        st.header("🧠 Market Intelligence Analysis")
+        st.markdown("*Analyze market conditions and regime patterns from captured signals*")
+
+        conn = self.get_database_connection()
+        if not conn:
+            st.error("❌ Database connection failed. Cannot load market intelligence data.")
+            return
+
+        try:
+            # Date range selector
+            col1, col2, col3 = st.columns([2, 2, 1])
+
+            with col1:
+                start_date = st.date_input(
+                    "Start Date",
+                    value=datetime.now() - timedelta(days=7),
+                    key="mi_start_date"
+                )
+
+            with col2:
+                end_date = st.date_input(
+                    "End Date",
+                    value=datetime.now(),
+                    key="mi_end_date"
+                )
+
+            with col3:
+                if st.button("🔄 Refresh", key="mi_refresh"):
+                    st.rerun()
+
+            # Query market intelligence data
+            mi_data = self.get_market_intelligence_data(conn, start_date, end_date)
+
+            if mi_data.empty:
+                st.warning("⚠️ No market intelligence data found for the selected period.")
+                st.info("💡 Market intelligence data is captured automatically when signals are validated. Run the forex scanner to generate data.")
+                return
+
+            # Market Intelligence Overview
+            st.subheader("📊 Market Intelligence Overview")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                total_signals = len(mi_data)
+                st.metric("Total Signals with Intelligence", total_signals)
+
+            with col2:
+                unique_strategies = mi_data['strategy'].nunique()
+                st.metric("Strategies Covered", unique_strategies)
+
+            with col3:
+                unique_regimes = mi_data['regime'].nunique() if 'regime' in mi_data.columns else 0
+                st.metric("Market Regimes Detected", unique_regimes)
+
+            with col4:
+                avg_confidence = mi_data['regime_confidence'].mean() if 'regime_confidence' in mi_data.columns else 0
+                st.metric("Avg Regime Confidence", f"{avg_confidence:.1%}")
+
+            # Market Regime Analysis
+            if 'regime' in mi_data.columns:
+                st.subheader("📈 Market Regime Distribution")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    # Regime distribution pie chart
+                    regime_counts = mi_data['regime'].value_counts()
+                    fig_regime = px.pie(
+                        values=regime_counts.values,
+                        names=regime_counts.index,
+                        title="Market Regime Distribution"
+                    )
+                    st.plotly_chart(fig_regime, use_container_width=True)
+
+                with col2:
+                    # Regime confidence by strategy
+                    if 'regime_confidence' in mi_data.columns:
+                        regime_conf_by_strategy = mi_data.groupby(['strategy', 'regime'])['regime_confidence'].mean().reset_index()
+                        fig_conf = px.bar(
+                            regime_conf_by_strategy,
+                            x='strategy',
+                            y='regime_confidence',
+                            color='regime',
+                            title="Average Regime Confidence by Strategy",
+                            labels={'regime_confidence': 'Confidence'}
+                        )
+                        fig_conf.update_layout(yaxis_tickformat='.1%')
+                        st.plotly_chart(fig_conf, use_container_width=True)
+
+            # Session and Volatility Analysis
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if 'session' in mi_data.columns:
+                    st.subheader("🕐 Trading Session Analysis")
+                    session_counts = mi_data['session'].value_counts()
+                    fig_session = px.bar(
+                        x=session_counts.index,
+                        y=session_counts.values,
+                        title="Signals by Trading Session",
+                        labels={'x': 'Session', 'y': 'Signal Count'}
+                    )
+                    st.plotly_chart(fig_session, use_container_width=True)
+
+            with col2:
+                if 'volatility_level' in mi_data.columns:
+                    st.subheader("📊 Volatility Level Distribution")
+                    vol_counts = mi_data['volatility_level'].value_counts()
+                    fig_vol = px.bar(
+                        x=vol_counts.index,
+                        y=vol_counts.values,
+                        title="Signals by Volatility Level",
+                        labels={'x': 'Volatility', 'y': 'Signal Count'},
+                        color=vol_counts.index,
+                        color_discrete_map={'high': 'red', 'medium': 'orange', 'low': 'green'}
+                    )
+                    st.plotly_chart(fig_vol, use_container_width=True)
+
+            # Strategy Performance by Market Conditions
+            st.subheader("🎯 Strategy Performance by Market Conditions")
+
+            if 'confidence_score' in mi_data.columns and 'regime' in mi_data.columns:
+                strategy_performance = mi_data.groupby(['strategy', 'regime']).agg({
+                    'confidence_score': ['mean', 'count'],
+                    'regime_confidence': 'mean' if 'regime_confidence' in mi_data.columns else lambda x: 0
+                }).round(3)
+
+                strategy_performance.columns = ['Avg_Signal_Confidence', 'Signal_Count', 'Avg_Regime_Confidence']
+                strategy_performance = strategy_performance.reset_index()
+
+                st.dataframe(strategy_performance, use_container_width=True)
+
+            # Intelligence Source Analysis
+            if 'intelligence_source' in mi_data.columns:
+                st.subheader("🔍 Intelligence Source Analysis")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    source_counts = mi_data['intelligence_source'].value_counts()
+                    st.write("**Intelligence Sources:**")
+                    for source, count in source_counts.items():
+                        source_type = "🧠 Strategy-Specific" if "MarketIntelligenceEngine" in source else "🌐 Universal Capture"
+                        st.write(f"{source_type}: {count} signals")
+
+                with col2:
+                    # Source distribution by strategy
+                    source_by_strategy = mi_data.groupby('strategy')['intelligence_source'].value_counts().reset_index()
+                    fig_source = px.bar(
+                        source_by_strategy,
+                        x='strategy',
+                        y='count',
+                        color='intelligence_source',
+                        title="Intelligence Source by Strategy",
+                        labels={'count': 'Signal Count'}
+                    )
+                    st.plotly_chart(fig_source, use_container_width=True)
+
+            # Market Intelligence Search
+            st.subheader("🔍 Market Intelligence Search")
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                search_strategy = st.selectbox(
+                    "Filter by Strategy",
+                    options=['All'] + sorted(mi_data['strategy'].unique().tolist()),
+                    key="mi_search_strategy"
+                )
+
+            with col2:
+                search_regime = st.selectbox(
+                    "Filter by Regime",
+                    options=['All'] + sorted(mi_data['regime'].unique().tolist()) if 'regime' in mi_data.columns else ['All'],
+                    key="mi_search_regime"
+                )
+
+            with col3:
+                search_session = st.selectbox(
+                    "Filter by Session",
+                    options=['All'] + sorted(mi_data['session'].unique().tolist()) if 'session' in mi_data.columns else ['All'],
+                    key="mi_search_session"
+                )
+
+            # Apply filters
+            filtered_data = mi_data.copy()
+            if search_strategy != 'All':
+                filtered_data = filtered_data[filtered_data['strategy'] == search_strategy]
+            if search_regime != 'All' and 'regime' in filtered_data.columns:
+                filtered_data = filtered_data[filtered_data['regime'] == search_regime]
+            if search_session != 'All' and 'session' in filtered_data.columns:
+                filtered_data = filtered_data[filtered_data['session'] == search_session]
+
+            st.write(f"**Showing {len(filtered_data)} signals matching filters:**")
+
+            # Display filtered results
+            if not filtered_data.empty:
+                display_columns = ['alert_timestamp', 'epic', 'strategy', 'signal_type', 'confidence_score']
+                if 'regime' in filtered_data.columns:
+                    display_columns.extend(['regime', 'regime_confidence'])
+                if 'session' in filtered_data.columns:
+                    display_columns.append('session')
+                if 'volatility_level' in filtered_data.columns:
+                    display_columns.append('volatility_level')
+
+                available_columns = [col for col in display_columns if col in filtered_data.columns]
+                st.dataframe(filtered_data[available_columns].sort_values('alert_timestamp', ascending=False),
+                           use_container_width=True)
+
+                # Export functionality
+                if st.button("📥 Export Filtered Data as CSV"):
+                    csv = filtered_data.to_csv(index=False)
+                    st.download_button(
+                        label="Download CSV",
+                        data=csv,
+                        file_name=f"market_intelligence_{start_date}_{end_date}.csv",
+                        mime="text/csv"
+                    )
+            else:
+                st.info("No signals match the selected filters.")
+
+        except Exception as e:
+            st.error(f"❌ Error loading market intelligence data: {e}")
+
+        finally:
+            conn.close()
+
+    def get_market_intelligence_data(self, conn, start_date, end_date):
+        """Query market intelligence data from alert_history"""
+        try:
+            query = """
+            SELECT
+                a.id,
+                a.alert_timestamp,
+                a.epic,
+                a.strategy,
+                a.signal_type,
+                a.confidence_score,
+                a.strategy_metadata,
+                (a.strategy_metadata::json->'market_intelligence'->'regime_analysis'->>'dominant_regime') as regime,
+                (a.strategy_metadata::json->'market_intelligence'->'regime_analysis'->>'confidence')::float as regime_confidence,
+                (a.strategy_metadata::json->'market_intelligence'->'session_analysis'->>'current_session') as session,
+                (a.strategy_metadata::json->'market_intelligence'->>'volatility_level') as volatility_level,
+                (a.strategy_metadata::json->'market_intelligence'->>'intelligence_source') as intelligence_source
+            FROM alert_history a
+            WHERE a.alert_timestamp >= %s
+              AND a.alert_timestamp <= %s
+              AND a.strategy_metadata IS NOT NULL
+              AND (a.strategy_metadata::json->'market_intelligence') IS NOT NULL
+            ORDER BY a.alert_timestamp DESC
+            """
+
+            df = pd.read_sql_query(
+                query,
+                conn,
+                params=[start_date, end_date + timedelta(days=1)]
+            )
+
+            # Clean and convert data types
+            if not df.empty:
+                # Handle None values
+                df = df.where(pd.notnull(df), None)
+
+            return df
+
+        except Exception as e:
+            st.error(f"Database query error: {e}")
+            return pd.DataFrame()
+
     def render_settings_debug_tab(self):
         """Render the settings and debug tab"""
         st.header("🔧 Settings & Debug")
@@ -955,7 +1227,7 @@ class UnifiedTradingDashboard:
         st.markdown("*Unified dashboard for comprehensive trading analysis*")
 
         # Tab navigation
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🎯 Strategy Analysis", "💰 Trade Performance", "🔧 Settings & Debug"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "🎯 Strategy Analysis", "💰 Trade Performance", "🧠 Market Intelligence", "🔧 Settings & Debug"])
 
         with tab1:
             self.render_overview_tab()
@@ -967,6 +1239,9 @@ class UnifiedTradingDashboard:
             self.render_trade_performance_tab()
 
         with tab4:
+            self.render_market_intelligence_tab()
+
+        with tab5:
             self.render_settings_debug_tab()
 
         # Footer
