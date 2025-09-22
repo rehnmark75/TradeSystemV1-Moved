@@ -911,7 +911,16 @@ class TradingOrchestrator:
                 valid_signals, invalid_signals = self.trade_validator.validate_signals_batch(intelligence_filtered_signals)
                 
                 if invalid_signals and len(invalid_signals) > 0:
-                    self.logger.info(f"❌ Filtered out {len(invalid_signals)} invalid signals")
+                    # Create summary of rejected signals with epic names
+                    rejected_epics = []
+                    for invalid_signal in invalid_signals:
+                        epic = invalid_signal.get('epic', 'Unknown')
+                        signal_type = invalid_signal.get('signal_type', 'Unknown')
+                        reason = invalid_signal.get('validation_error', 'Unknown reason')
+                        rejected_epics.append(f"{epic} {signal_type} ({reason})")
+
+                    epics_summary = ', '.join(rejected_epics)
+                    self.logger.warning(f"❌ Filtered out {len(invalid_signals)} invalid signals: {epics_summary}")
                    
                 
                 if not valid_signals:
