@@ -899,7 +899,27 @@ class MarketIntelligenceEngine:
             # FIXED: Safe access to correlation analysis
             correlation_analysis = market_regime.get('correlation_analysis', {})
             risk_sentiment = correlation_analysis.get('risk_on_off', 'neutral')
-            
+
+            # Generate individual epic regime summary
+            pair_analyses = market_regime.get('pair_analyses', {})
+            individual_regimes = []
+            regime_counts = {'trending': 0, 'ranging': 0, 'breakout': 0, 'reversal': 0}
+
+            for epic, analysis in pair_analyses.items():
+                if isinstance(analysis, dict) and 'regime_scores' in analysis:
+                    regime_scores = analysis['regime_scores']
+                    epic_regime = max(regime_scores, key=regime_scores.get) if regime_scores else 'unknown'
+                    epic_confidence = regime_scores.get(epic_regime, 0.5) if regime_scores else 0.5
+
+                    clean_epic = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                    individual_regimes.append(f"{clean_epic}: {epic_regime} ({epic_confidence:.1%})")
+
+                    # Count regimes for distribution
+                    if epic_regime in regime_counts:
+                        regime_counts[epic_regime] += 1
+
+            epic_breakdown = "\n".join([f"  • {regime_info}" for regime_info in individual_regimes[:8]])  # Limit to 8 pairs
+
             summary = f"""
 MARKET INTELLIGENCE SUMMARY
 
@@ -913,6 +933,11 @@ Key Insights:
 
 Market Strength: {market_bias.title()} bias detected
 Risk Sentiment: {risk_sentiment.replace('_', ' ').title()}
+
+Individual Epic Regimes:
+{epic_breakdown}
+
+Regime Distribution: Trending({regime_counts['trending']}), Ranging({regime_counts['ranging']}), Breakout({regime_counts['breakout']}), Reversal({regime_counts['reversal']})
             """
             
             return summary.strip()

@@ -234,8 +234,34 @@ class MarketIntelligenceHistoryManager:
                 session = data.get('current_session', 'unknown')
                 epic_count = data.get('epic_count', 0)
 
+                # Generate individual epic regime breakdown
+                pair_analyses = data.get('pair_analyses', {})
+                if isinstance(pair_analyses, str):
+                    import json
+                    try:
+                        pair_analyses = json.loads(pair_analyses)
+                    except:
+                        pair_analyses = {}
+
+                epic_breakdown = []
+                for epic, analysis in pair_analyses.items():
+                    if isinstance(analysis, dict) and 'regime_scores' in analysis:
+                        regime_scores = analysis['regime_scores']
+                        # Determine dominant regime for this epic
+                        epic_regime = max(regime_scores, key=regime_scores.get) if regime_scores else 'unknown'
+                        epic_confidence = regime_scores.get(epic_regime, 0.5) if regime_scores else 0.5
+
+                        # Extract clean epic name
+                        clean_epic = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                        epic_breakdown.append(f"{clean_epic}({epic_regime[:4]},{epic_confidence:.1%})")
+
                 self.logger.info(f"✅ Saved market intelligence #{record_id}: {regime} regime ({confidence:.1%}) "
                                f"during {session} session - {epic_count} epics analyzed")
+
+                # Log individual epic breakdown if available
+                if epic_breakdown:
+                    breakdown_str = ", ".join(epic_breakdown)
+                    self.logger.info(f"📊 Epic breakdown: {breakdown_str}")
 
                 return record_id
 
@@ -324,12 +350,30 @@ class MarketIntelligenceHistoryManager:
                 'pair_analyses': self._safe_json_serialize(market_regime.get('pair_analyses', {}))
             })
 
-            # Analysis metadata
+            # Analysis metadata and individual epic regimes
             pair_analyses = market_regime.get('pair_analyses', {})
             data.update({
                 'successful_pair_analyses': len([a for a in pair_analyses.values() if a.get('current_price')]),
                 'failed_pair_analyses': len(pair_analyses) - len([a for a in pair_analyses.values() if a.get('current_price')])
             })
+
+            # Extract individual epic regimes for easier querying
+            individual_epic_regimes = {}
+            for epic, analysis in pair_analyses.items():
+                if isinstance(analysis, dict) and 'regime_scores' in analysis:
+                    regime_scores = analysis['regime_scores']
+                    epic_regime = max(regime_scores, key=regime_scores.get) if regime_scores else 'unknown'
+                    epic_confidence = regime_scores.get(epic_regime, 0.5) if regime_scores else 0.5
+
+                    # Clean epic name for consistent key
+                    clean_epic = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                    individual_epic_regimes[clean_epic] = {
+                        'regime': epic_regime,
+                        'confidence': float(epic_confidence),
+                        'regime_scores': regime_scores
+                    }
+
+            data['individual_epic_regimes'] = self._safe_json_serialize(individual_epic_regimes)
 
             return data
 

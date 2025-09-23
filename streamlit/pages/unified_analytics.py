@@ -1136,30 +1136,55 @@ class UnifiedTradingDashboard:
     def get_comprehensive_market_intelligence_data(self, conn, start_date, end_date):
         """Query comprehensive market intelligence data from market_intelligence_history table"""
         try:
-            query = """
+            # First check which columns exist in the table
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'market_intelligence_history'
+            """)
+            existing_columns = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+
+            # Base columns that should always exist
+            base_columns = [
+                "mih.id",
+                "mih.scan_timestamp",
+                "mih.scan_cycle_id",
+                "mih.epic_list",
+                "mih.epic_count",
+                "mih.dominant_regime as regime",
+                "mih.regime_confidence",
+                "mih.current_session as session",
+                "mih.session_volatility as volatility_level",
+                "mih.market_bias",
+                "mih.average_trend_strength",
+                "mih.average_volatility",
+                "mih.risk_sentiment",
+                "mih.recommended_strategy",
+                "mih.confidence_threshold",
+                "mih.intelligence_source",
+                "mih.regime_trending_score",
+                "mih.regime_ranging_score",
+                "mih.regime_breakout_score",
+                "mih.regime_reversal_score",
+                "mih.regime_high_vol_score",
+                "mih.regime_low_vol_score"
+            ]
+
+            # Add new columns only if they exist
+            optional_columns = []
+            if 'individual_epic_regimes' in existing_columns:
+                optional_columns.append("mih.individual_epic_regimes")
+            if 'pair_analyses' in existing_columns:
+                optional_columns.append("mih.pair_analyses")
+
+            # Combine all columns
+            all_columns = base_columns + optional_columns
+
+            query = f"""
             SELECT
-                mih.id,
-                mih.scan_timestamp,
-                mih.scan_cycle_id,
-                mih.epic_list,
-                mih.epic_count,
-                mih.dominant_regime as regime,
-                mih.regime_confidence,
-                mih.current_session as session,
-                mih.session_volatility as volatility_level,
-                mih.market_bias,
-                mih.average_trend_strength,
-                mih.average_volatility,
-                mih.risk_sentiment,
-                mih.recommended_strategy,
-                mih.confidence_threshold,
-                mih.intelligence_source,
-                mih.regime_trending_score,
-                mih.regime_ranging_score,
-                mih.regime_breakout_score,
-                mih.regime_reversal_score,
-                mih.regime_high_vol_score,
-                mih.regime_low_vol_score
+                {', '.join(all_columns)}
             FROM market_intelligence_history mih
             WHERE mih.scan_timestamp >= %s
               AND mih.scan_timestamp <= %s
@@ -1352,6 +1377,9 @@ class UnifiedTradingDashboard:
             fig_matrix.update_layout(width=700, height=400)
             st.plotly_chart(fig_matrix, use_container_width=True)
 
+        # Individual Epic Regimes Analysis
+        self.render_individual_epic_regimes(mi_data)
+
         # Summary statistics table
         if len(mi_data) > 0:
             st.subheader("📊 Comprehensive Market Intelligence Summary")
@@ -1380,6 +1408,249 @@ class UnifiedTradingDashboard:
                 col = [col1, col2, col3][i % 3]
                 with col:
                     st.metric(key, value)
+
+    def render_individual_epic_regimes(self, mi_data):
+        """Render individual epic regime analysis"""
+        if mi_data.empty:
+            return
+
+        # Check if individual epic regimes data is available
+        if 'individual_epic_regimes' not in mi_data.columns:
+            st.info("💡 Individual epic regime analysis will be available after the next market intelligence scan with the enhanced system.")
+            st.markdown("*This feature shows detailed regime analysis for each currency pair individually*")
+            return
+
+        st.subheader("🌍 Individual Epic Regime Analysis")
+        st.markdown("*Detailed regime analysis for each currency pair across all market scans*")
+
+        try:
+            import json
+
+            # Process individual epic regimes data
+            all_epic_regimes = {}
+            regime_timeline = []
+
+            for idx, row in mi_data.iterrows():
+                if pd.notna(row['individual_epic_regimes']):
+                    try:
+                        epic_regimes = json.loads(row['individual_epic_regimes']) if isinstance(row['individual_epic_regimes'], str) else row['individual_epic_regimes']
+                        timestamp = row['scan_timestamp']
+
+                        for epic, data in epic_regimes.items():
+                            if epic not in all_epic_regimes:
+                                all_epic_regimes[epic] = {'regimes': [], 'confidences': [], 'timestamps': []}
+
+                            all_epic_regimes[epic]['regimes'].append(data.get('regime', 'unknown'))
+                            all_epic_regimes[epic]['confidences'].append(data.get('confidence', 0.5))
+                            all_epic_regimes[epic]['timestamps'].append(timestamp)
+
+                            # Add to timeline data
+                            regime_timeline.append({
+                                'epic': epic,
+                                'regime': data.get('regime', 'unknown'),
+                                'confidence': data.get('confidence', 0.5),
+                                'timestamp': timestamp,
+                                'scan_id': row['id']
+                            })
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+
+            if not all_epic_regimes:
+                st.info("💡 Individual epic regime data not available for selected period.")
+                return
+
+            # Epic regime distribution overview
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.subheader("📊 Current Epic Regimes")
+
+                # Get latest regime for each epic
+                latest_regimes = {}
+                for epic, data in all_epic_regimes.items():
+                    if data['regimes']:
+                        latest_regimes[epic] = {
+                            'regime': data['regimes'][-1],
+                            'confidence': data['confidences'][-1]
+                        }
+
+                # Display as colored badges
+                for epic, regime_data in sorted(latest_regimes.items()):
+                    regime = regime_data['regime']
+                    confidence = regime_data['confidence']
+
+                    # Color coding for regimes
+                    color_map = {
+                        'trending': '#28a745',      # Green
+                        'ranging': '#007bff',       # Blue
+                        'breakout': '#ff6b6b',      # Red
+                        'reversal': '#ffc107',      # Yellow
+                        'low_volatility': '#6c757d', # Gray
+                        'high_volatility': '#e83e8c' # Pink
+                    }
+                    color = color_map.get(regime, '#6c757d')
+
+                    st.markdown(f"""
+                    <div style="
+                        background: {color};
+                        color: white;
+                        padding: 8px 12px;
+                        border-radius: 6px;
+                        margin: 4px 0;
+                        display: inline-block;
+                        font-weight: bold;
+                        min-width: 120px;
+                        text-align: center;
+                    ">
+                        {epic}: {regime.upper()} ({confidence:.1%})
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            with col2:
+                # Regime distribution pie chart
+                if latest_regimes:
+                    regime_counts = {}
+                    for data in latest_regimes.values():
+                        regime = data['regime']
+                        regime_counts[regime] = regime_counts.get(regime, 0) + 1
+
+                    fig_pie = px.pie(
+                        values=list(regime_counts.values()),
+                        names=list(regime_counts.keys()),
+                        title="Current Regime Distribution",
+                        color_discrete_map={
+                            'trending': '#28a745',
+                            'ranging': '#007bff',
+                            'breakout': '#ff6b6b',
+                            'reversal': '#ffc107',
+                            'low_volatility': '#6c757d',
+                            'high_volatility': '#e83e8c'
+                        }
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True)
+
+            # Epic regime timeline
+            if regime_timeline:
+                st.subheader("📈 Epic Regime Evolution Timeline")
+
+                # Convert to DataFrame for plotting
+                timeline_df = pd.DataFrame(regime_timeline)
+                timeline_df['timestamp'] = pd.to_datetime(timeline_df['timestamp'])
+
+                # Epic selector for focused view
+                selected_epics = st.multiselect(
+                    "Select Epics to View",
+                    options=sorted(timeline_df['epic'].unique()),
+                    default=sorted(timeline_df['epic'].unique())[:5],  # Show first 5 by default
+                    help="Select which currency pairs to display in the timeline"
+                )
+
+                if selected_epics:
+                    filtered_timeline = timeline_df[timeline_df['epic'].isin(selected_epics)]
+
+                    # Create timeline scatter plot
+                    fig_timeline = px.scatter(
+                        filtered_timeline,
+                        x='timestamp',
+                        y='epic',
+                        color='regime',
+                        size='confidence',
+                        title="Epic Regime Timeline",
+                        labels={
+                            'timestamp': 'Time',
+                            'epic': 'Currency Pair',
+                            'confidence': 'Confidence',
+                            'regime': 'Market Regime'
+                        },
+                        hover_data=['confidence'],
+                        color_discrete_map={
+                            'trending': '#28a745',
+                            'ranging': '#007bff',
+                            'breakout': '#ff6b6b',
+                            'reversal': '#ffc107',
+                            'low_volatility': '#6c757d',
+                            'high_volatility': '#e83e8c'
+                        }
+                    )
+                    fig_timeline.update_layout(height=400)
+                    st.plotly_chart(fig_timeline, use_container_width=True)
+
+            # Epic-specific strategy recommendations
+            st.subheader("🎯 Epic-Specific Strategy Recommendations")
+
+            strategy_recommendations = {
+                'trending': {
+                    'strategy': 'Trend Following',
+                    'description': 'Use momentum strategies, trend confirmations, and trailing stops',
+                    'icon': '📈',
+                    'color': '#28a745'
+                },
+                'ranging': {
+                    'strategy': 'Range Trading',
+                    'description': 'Trade support/resistance bounces, use mean reversion strategies',
+                    'icon': '↔️',
+                    'color': '#007bff'
+                },
+                'breakout': {
+                    'strategy': 'Breakout Trading',
+                    'description': 'Monitor for volume confirmation, use wider stops, expect volatility',
+                    'icon': '🚀',
+                    'color': '#ff6b6b'
+                },
+                'reversal': {
+                    'strategy': 'Reversal Trading',
+                    'description': 'Look for reversal patterns, use conservative position sizing',
+                    'icon': '🔄',
+                    'color': '#ffc107'
+                },
+                'low_volatility': {
+                    'strategy': 'Conservative Trading',
+                    'description': 'Use smaller position sizes, tighter stops, range strategies',
+                    'icon': '🐌',
+                    'color': '#6c757d'
+                },
+                'high_volatility': {
+                    'strategy': 'Volatility Trading',
+                    'description': 'Reduce position size, use wider stops, consider straddles',
+                    'icon': '⚡',
+                    'color': '#e83e8c'
+                }
+            }
+
+            # Group epics by regime for recommendations
+            regime_groups = {}
+            for epic, regime_data in latest_regimes.items():
+                regime = regime_data['regime']
+                if regime not in regime_groups:
+                    regime_groups[regime] = []
+                regime_groups[regime].append(epic)
+
+            for regime, epics in regime_groups.items():
+                if regime in strategy_recommendations:
+                    rec = strategy_recommendations[regime]
+
+                    st.markdown(f"""
+                    <div style="
+                        border-left: 4px solid {rec['color']};
+                        background: #f8f9fa;
+                        padding: 1rem;
+                        margin: 1rem 0;
+                        border-radius: 4px;
+                    ">
+                        <h4 style="margin: 0; color: {rec['color']};">
+                            {rec['icon']} {rec['strategy']} - {regime.upper()} Regime
+                        </h4>
+                        <p style="margin: 0.5rem 0; color: #6c757d;">
+                            <strong>Pairs:</strong> {', '.join(epics)}
+                        </p>
+                        <p style="margin: 0; color: #333;">
+                            {rec['description']}
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        except Exception as e:
+            st.error(f"❌ Error rendering individual epic regimes: {e}")
 
     def render_settings_debug_tab(self):
         """Render the settings and debug tab"""

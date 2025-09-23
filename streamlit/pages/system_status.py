@@ -1332,12 +1332,19 @@ def render_search_interface():
 
     # Perform search
     results = []
-    if search_button and search_term:
+    # Search when button is clicked OR when there's a search term (from quick search or session state)
+    if (search_button and search_term) or (search_term and 'search_term' in st.session_state):
         with st.spinner("🔍 Searching logs..."):
             results = search_logs(
                 parser, search_term, log_types, start_date, end_date,
                 regex_mode, case_sensitive, max_results
             )
+
+        # Clear session state after search to prevent auto-search on reload
+        if 'search_term' in st.session_state:
+            del st.session_state.search_term
+        if 'regex_mode' in st.session_state:
+            del st.session_state.regex_mode
 
         # Display search statistics
         if results:
