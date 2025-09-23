@@ -321,9 +321,27 @@ class AutoBackfillService:
         
         try:
             async with httpx.AsyncClient(base_url=API_BASE_URL, headers=self.headers) as client:
-                # Adjust request time range slightly to ensure we get all data
-                from_dt = gap["gap_start"] - timedelta(minutes=timeframe)
-                to_dt = gap["gap_end"] + timedelta(minutes=timeframe)
+                # Align timestamps to candle boundaries for IG API compatibility
+                # For 5-minute candles: align to 00, 05, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55
+                def align_to_candle_boundary(dt: datetime, timeframe_minutes: int) -> datetime:
+                    """Align datetime to the nearest candle boundary (round down)"""
+                    minutes_since_hour = dt.minute
+                    aligned_minute = (minutes_since_hour // timeframe_minutes) * timeframe_minutes
+                    return dt.replace(minute=aligned_minute, second=0, microsecond=0)
+
+                # Align gap times to candle boundaries and expand range slightly
+                aligned_gap_start = align_to_candle_boundary(gap["gap_start"], timeframe)
+                aligned_gap_end = align_to_candle_boundary(gap["gap_end"], timeframe)
+
+                # Log alignment for debugging
+                if gap["gap_start"] != aligned_gap_start or gap["gap_end"] != aligned_gap_end:
+                    logger.debug(f"Aligned timestamps for IG API: "
+                               f"{gap['gap_start'].strftime('%H:%M:%S')} → {aligned_gap_start.strftime('%H:%M:%S')}, "
+                               f"{gap['gap_end'].strftime('%H:%M:%S')} → {aligned_gap_end.strftime('%H:%M:%S')}")
+
+                # Expand range to ensure we get all data
+                from_dt = aligned_gap_start - timedelta(minutes=timeframe)
+                to_dt = aligned_gap_end + timedelta(minutes=timeframe)
 
                 url = f"/prices/{epic}"
                 # Format dates as IG API expects (no timezone info)
