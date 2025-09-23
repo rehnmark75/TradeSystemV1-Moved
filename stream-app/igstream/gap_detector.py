@@ -73,7 +73,12 @@ class GapDetector:
                         return True
 
                     # Exclude recently failed gaps (within 7 days) with high attempt count
-                    days_since_last_attempt = (datetime.now(timezone.utc) - existing.last_attempted_at).days
+                    # Ensure timezone consistency for datetime comparison
+                    now_utc = datetime.now(timezone.utc)
+                    last_attempted = existing.last_attempted_at
+                    if last_attempted.tzinfo is None:
+                        last_attempted = last_attempted.replace(tzinfo=timezone.utc)
+                    days_since_last_attempt = (now_utc - last_attempted).days
                     if existing.attempt_count >= 3 and days_since_last_attempt < 7:
                         return True
 
@@ -226,9 +231,23 @@ class GapDetector:
                         }
 
                         gaps.append(gap)
-                        logger.warning(f"Gap detected in {epic} {timeframe}m: "
-                                     f"{missing_candles} candles missing from "
-                                     f"{gap['gap_start']} to {gap['gap_end']}")
+
+                        # Check if gap is during market closure to reduce log noise
+                        gap_start_dt = gap['gap_start']
+                        is_market_closure = (gap_start_dt.weekday() == 5 or  # Saturday
+                                           (gap_start_dt.weekday() == 4 and (gap_start_dt.hour >= 21 or (gap_start_dt.hour == 20 and gap_start_dt.minute >= 30))) or  # Friday >= 20:30 UTC
+                                           gap_start_dt.weekday() == 6)  # Sunday - market closed all day
+
+                        if is_market_closure:
+                            # Log weekend gaps at debug level to reduce noise
+                            logger.debug(f"Weekend gap detected in {epic} {timeframe}m: "
+                                       f"{missing_candles} candles missing from "
+                                       f"{gap['gap_start']} to {gap['gap_end']}")
+                        else:
+                            # Log normal trading hour gaps as warnings
+                            logger.warning(f"Gap detected in {epic} {timeframe}m: "
+                                         f"{missing_candles} candles missing from "
+                                         f"{gap['gap_start']} to {gap['gap_end']}")
                 
                 # Check for gap at the beginning (missing recent data)
                 if candles:

@@ -33,10 +33,10 @@ class AutoBackfillService:
     def market_is_open(self) -> bool:
         """Check if forex market is open"""
         now = datetime.now(timezone.utc)
-        # IG closes Friday 20:30 UTC and reopens Sunday 22:00 UTC (extended for data stability)
+        # IG closes Friday 20:30 UTC and reopens Monday 00:00 UTC (conservative for stable data)
         if now.weekday() == 5:  # Saturday
             return False
-        if now.weekday() == 6 and now.hour < 22:  # Sunday before 22:00 UTC (extended for market reopening buffer)
+        if now.weekday() == 6:  # Sunday - market closed all day for conservative gap detection
             return False
         if now.weekday() == 4 and (now.hour >= 21 or (now.hour == 20 and now.minute >= 30)):  # Friday after 20:30 UTC
             return False
@@ -165,7 +165,12 @@ class AutoBackfillService:
 
                 if existing:
                     # Only skip if it failed recently and with certain reasons
-                    days_since_last_attempt = (datetime.now(timezone.utc) - existing.last_attempted_at).days
+                    # Ensure timezone consistency for datetime comparison
+                    now_utc = datetime.now(timezone.utc)
+                    last_attempted = existing.last_attempted_at
+                    if last_attempted.tzinfo is None:
+                        last_attempted = last_attempted.replace(tzinfo=timezone.utc)
+                    days_since_last_attempt = (now_utc - last_attempted).days
 
                     # Skip permanently failed gaps (no data available)
                     if existing.failure_reason == 'no_data_available':
@@ -406,21 +411,31 @@ class AutoBackfillService:
                 if not candles:
                     # This can happen for very recent data, during low liquidity, or market closure
                     gap_start_str = gap["gap_start"].strftime("%A %H:%M UTC")
+
+                    # Check if gap occurred during likely market closure
+                    dt = gap["gap_start"]
+                    is_closure_time = (dt.weekday() == 5 or  # Saturday
+                                     (dt.weekday() == 4 and (dt.hour >= 21 or (dt.hour == 20 and dt.minute >= 30))) or  # Friday >= 20:30 UTC
+                                     dt.weekday() == 6)  # Sunday - market closed all day for conservative gap detection
+
                     if gap["missing_candles"] == 1:
-                        logger.debug(f"No candles returned for single-candle gap in {epic} at {gap_start_str} - likely false positive or market closure")
-                    else:
-                        # Check if gap occurred during likely market closure
-                        dt = gap["gap_start"]
-                        is_closure_time = (dt.weekday() == 5 or  # Saturday
-                                         (dt.weekday() == 4 and (dt.hour >= 21 or (dt.hour == 20 and dt.minute >= 30))) or  # Friday >= 20:30 UTC
-                                         (dt.weekday() == 6 and dt.hour < 22))  # Sunday < 22:00 UTC
+                        # Single candle gaps are often false positives, especially during market closures
                         if is_closure_time:
-                            logger.debug(f"No candles returned for gap in {epic} during market closure ({gap_start_str}, {gap['missing_candles']} candles)")
+                            logger.debug(f"Skipping single-candle gap in {epic} at {gap_start_str} - market was closed")
                             self.record_failed_gap(gap, 'market_closed')
+                            return 'skipped'  # Don't retry market closure gaps
+                        else:
+                            logger.debug(f"No candles returned for single-candle gap in {epic} at {gap_start_str} - likely false positive")
+                            return 'failed'
+                    else:
+                        if is_closure_time:
+                            logger.debug(f"Skipping gap in {epic} during market closure ({gap_start_str}, {gap['missing_candles']} candles)")
+                            self.record_failed_gap(gap, 'market_closed')
+                            return 'skipped'  # Don't retry market closure gaps
                         else:
                             logger.warning(f"No candles returned for gap in {epic} ({gap['missing_candles']} candles at {gap_start_str})")
                             self.record_failed_gap(gap, 'no_data_available')
-                    return 'failed'
+                            return 'failed'
                 
                 # Store the candles
                 saved_count = 0
@@ -487,8 +502,22 @@ class AutoBackfillService:
                 
                 logger.info(f"Successfully backfilled {saved_count} candles for {epic} {timeframe}m")
                 self.backfill_stats["candles_recovered"] += saved_count
-                
-                return 'success' if saved_count > 0 else 'failed'
+
+                if saved_count > 0:
+                    return 'success'
+                else:
+                    # Check if this was due to market closure
+                    dt = gap["gap_start"]
+                    is_closure_time = (dt.weekday() == 5 or  # Saturday
+                                     (dt.weekday() == 4 and (dt.hour >= 21 or (dt.hour == 20 and dt.minute >= 30))) or  # Friday >= 20:30 UTC
+                                     dt.weekday() == 6)  # Sunday - market closed all day for conservative gap detection
+
+                    if is_closure_time:
+                        gap_start_str = gap["gap_start"].strftime("%A %H:%M UTC")
+                        logger.debug(f"Skipping gap in {epic} during market closure ({gap_start_str}, {gap['missing_candles']} candles) - no data to save")
+                        return 'skipped'  # Don't retry market closure gaps
+                    else:
+                        return 'failed'
                 
         except Exception as e:
             # Enhanced error logging with detailed context
