@@ -245,12 +245,17 @@ class StreamValidatorService:
             # For 15-minute candles: align to 00, 15, 30, 45
             # etc.
 
-            # Round down to nearest candle boundary
+            # The request.timestamp represents the candle END time, so we need to calculate the START time
+            # For a 5-minute candle ending at 13:15:00, we need to request data from 13:10:00 to 13:15:00
             minutes_since_hour = request.timestamp.minute
             aligned_minute = (minutes_since_hour // request.timeframe) * request.timeframe
 
-            from_time = request.timestamp.replace(minute=aligned_minute, second=0, microsecond=0)
-            to_time = from_time + timedelta(minutes=request.timeframe)
+            # Calculate the candle start time (timeframe minutes before the end time)
+            candle_end_time = request.timestamp.replace(minute=aligned_minute, second=0, microsecond=0)
+            candle_start_time = candle_end_time - timedelta(minutes=request.timeframe)
+
+            from_time = candle_start_time
+            to_time = candle_end_time
             
             async with httpx.AsyncClient(base_url=self.api_base_url, headers=self.headers, timeout=10.0) as client:
                 url = f"/prices/{request.epic}"
