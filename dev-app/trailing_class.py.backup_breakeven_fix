@@ -698,14 +698,6 @@ class Progressive3StageTrailing(TrailingStrategy):
         ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
         if ig_min_distance:
             lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
-
-                # ✅ VALIDATION: Ensure we're using lock points, not trigger points
-                if lock_points == progressive_config.stage1_trigger_points:
-                    self.logger.warning(f"⚠️ [VALIDATION] Trade {trade.id}: lock_points ({lock_points}) equals trigger_points! This might be incorrect.")
-                    if ig_min_distance and ig_min_distance != progressive_config.stage1_trigger_points:
-                        self.logger.info(f"🔧 [FIX] Trade {trade.id}: Using IG minimum ({ig_min_distance}) instead of trigger value")
-                        lock_points = max(1, round(ig_min_distance))
-
             self.logger.info(f"🎯 [STAGE 1 IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts")
         else:
             lock_points = self.config.stage1_lock_points
@@ -1254,17 +1246,7 @@ class EnhancedTradeProcessor:
                 else:
                     break_even_stop = trade.entry_price - (lock_points * point_value)  # Entry - lock_points
 
-                
-                # ✅ ENHANCED LOGGING: Track exact values used
-                self.logger.info(f"💰 [BREAK-EVEN DETAILED] Trade {trade.id}:")
-                self.logger.info(f"   → IG minimum: {ig_min_distance} points")
-                self.logger.info(f"   → Config lock: {progressive_config.stage1_lock_points} points")
-                self.logger.info(f"   → Config trigger: {progressive_config.stage1_trigger_points} points")
-                self.logger.info(f"   → Using lock_points: {lock_points} points")
-                self.logger.info(f"   → Entry: {trade.entry_price:.5f}")
-                self.logger.info(f"   → Break-even stop: {break_even_stop:.5f}")
-                self.logger.info(f"   → Distance from entry: {((break_even_stop - trade.entry_price) / point_value):.1f} points")
-# Calculate actual currency amount for JPY pairs
+                # Calculate actual currency amount for JPY pairs
                 if "JPY" in trade.symbol:
                     currency_amount = int(lock_points * 100)  # 2 points = 200 JPY
                     self.logger.info(f"💰 [BREAK-EVEN CALC] Trade {trade.id}: entry={trade.entry_price:.5f}, "
