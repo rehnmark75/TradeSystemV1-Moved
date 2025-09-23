@@ -8,15 +8,18 @@ Smart Money Concepts (SMC) and Strategy configurations
 try:
     from forex_scanner.configdata.smc.smc_configdata import *
     from forex_scanner.configdata.strategies import *
+    from forex_scanner.configdata.market_intelligence_config import *
 except ImportError:
     # Fallback for different execution contexts (e.g., Docker container)
     try:
         from .smc.smc_configdata import *
         from .strategies import *
+        from .market_intelligence_config import *
     except ImportError:
         # Last resort - try relative imports
         from smc.smc_configdata import *
         from strategies import *
+        from market_intelligence_config import *
 
 # Future config imports (examples for the pattern)
 # from configdata.support_and_resistance.sr_config import *
@@ -40,26 +43,30 @@ class Config:
     """
     
     def __init__(self):
-        # Import SMC config module (first real implementation)
+        # Import all config modules
         try:
             from forex_scanner.configdata.smc import smc_configdata
             from forex_scanner.configdata import strategies
+            from forex_scanner.configdata import market_intelligence_config
         except ImportError:
             # Fallback for different execution contexts
             try:
                 from .smc import smc_configdata
                 from . import strategies
+                from . import market_intelligence_config
             except ImportError:
                 # Last resort
                 import smc.smc_configdata as smc_configdata
                 import strategies
-        
+                import market_intelligence_config
+
         # Store module references for dot notation access
         self.smc = smc_configdata
         self.strategies = strategies
-        
-        # For backward compatibility, add all SMC and strategy attributes to self
-        for module in [smc_configdata, strategies]:
+        self.intelligence = market_intelligence_config
+
+        # For backward compatibility, add all module attributes to self
+        for module in [smc_configdata, strategies, market_intelligence_config]:
             for attr in dir(module):
                 if not attr.startswith('_') and attr.isupper():
                     setattr(self, attr, getattr(module, attr))
@@ -84,9 +91,10 @@ class Config:
         Get a summary of all loaded configurations
         """
         summary = {
-            'loaded_modules': ['smc', 'strategies'],
+            'loaded_modules': ['smc', 'strategies', 'intelligence'],
             'smc_config': self.smc.get_smart_money_config_summary() if hasattr(self.smc, 'get_smart_money_config_summary') else {},
             'strategies_config': self.strategies.get_strategies_summary() if hasattr(self.strategies, 'get_strategies_summary') else {},
+            'intelligence_config': self.intelligence.get_market_intelligence_config_summary() if hasattr(self.intelligence, 'get_market_intelligence_config_summary') else {},
             'total_configs': len([attr for attr in dir(self) if not attr.startswith('_') and attr.isupper()])
         }
         
@@ -102,13 +110,14 @@ class Config:
         """
         validation_results = {
             'smc': self._validate_smc_config(),
-            'strategies': self._validate_strategies_config()
+            'strategies': self._validate_strategies_config(),
+            'intelligence': self._validate_intelligence_config()
         }
-        
+
         # Future validations:
         # validation_results['trading'] = self._validate_trading_config()
         # validation_results['api'] = self._validate_api_config()
-        
+
         validation_results['overall_valid'] = all(validation_results.values())
         return validation_results
     
@@ -165,9 +174,33 @@ class Config:
             else:
                 print("⚠️ Strategy validation method not available")
                 return True  # Don't fail if validation method is missing
-                
+
         except Exception as e:
             print(f"❌ Strategy config validation failed: {e}")
+            return False
+
+    def _validate_intelligence_config(self) -> bool:
+        """
+        Validate market intelligence configuration completeness and correctness
+        """
+        try:
+            # Delegate to the intelligence module validation
+            if hasattr(self.intelligence, 'validate_market_intelligence_config'):
+                validation_result = self.intelligence.validate_market_intelligence_config()
+                if validation_result.get('valid', False):
+                    print("✅ Market intelligence configuration validation passed")
+                    return True
+                else:
+                    print("❌ Market intelligence configuration validation failed:")
+                    for error in validation_result.get('errors', []):
+                        print(f"   {error}")
+                    return False
+            else:
+                print("⚠️ Intelligence validation method not available")
+                return True  # Don't fail if validation method is missing
+
+        except Exception as e:
+            print(f"❌ Intelligence config validation failed: {e}")
             return False
     
     def reload_configs(self):
@@ -175,23 +208,26 @@ class Config:
         Reload all configuration modules (useful for development)
         """
         import importlib
-        
-        # Reload SMC config
+
+        # Reload all config modules
         from forex_scanner.configdata.smc import smc_configdata
         from forex_scanner.configdata import strategies
-        
+        from forex_scanner.configdata import market_intelligence_config
+
         importlib.reload(smc_configdata)
         importlib.reload(strategies)
-        
+        importlib.reload(market_intelligence_config)
+
         self.smc = smc_configdata
         self.strategies = strategies
-        
+        self.intelligence = market_intelligence_config
+
         # Update direct attributes from all modules
-        for module in [smc_configdata, strategies]:
+        for module in [smc_configdata, strategies, market_intelligence_config]:
             for attr in dir(module):
                 if not attr.startswith('_') and attr.isupper():
                     setattr(self, attr, getattr(module, attr))
-        
+
         print("✅ Configuration modules reloaded")
         
         # Future reloads will follow this pattern:
@@ -306,6 +342,49 @@ class Config:
             
             return config
 
+    # ==================== MARKET INTELLIGENCE CONVENIENCE METHODS ====================
+
+    def get_intelligence_preset(self) -> str:
+        """
+        Convenience method to get current intelligence preset
+        """
+        if hasattr(self.intelligence, 'INTELLIGENCE_PRESET'):
+            return self.intelligence.INTELLIGENCE_PRESET
+        else:
+            return 'minimal'  # Default fallback
+
+    def set_intelligence_preset(self, preset_name: str):
+        """
+        Convenience method to set intelligence preset (delegates to intelligence config)
+        """
+        if hasattr(self.intelligence, 'set_intelligence_preset'):
+            return self.intelligence.set_intelligence_preset(preset_name)
+        else:
+            print(f"⚠️ Intelligence preset switching not available")
+
+    def get_intelligence_summary(self) -> dict:
+        """
+        Convenience method to get intelligence configuration summary
+        """
+        if hasattr(self.intelligence, 'get_market_intelligence_config_summary'):
+            return self.intelligence.get_market_intelligence_config_summary()
+        else:
+            return {'error': 'Intelligence summary not available'}
+
+    def is_intelligence_enabled(self) -> bool:
+        """
+        Convenience method to check if market intelligence is enabled
+        """
+        return getattr(self.intelligence, 'ENABLE_MARKET_INTELLIGENCE', False)
+
+    def get_intelligence_threshold(self) -> float:
+        """
+        Convenience method to get current intelligence threshold
+        """
+        mode = getattr(self.intelligence, 'INTELLIGENCE_MODE', 'live_only')
+        thresholds = getattr(self.intelligence, 'INTELLIGENCE_THRESHOLDS', {})
+        return thresholds.get(mode, 0.5)
+
 # Create singleton instance
 config = Config()
 
@@ -314,7 +393,7 @@ __all__ = ['config']
 
 # Module metadata
 __version__ = "1.0.0"
-__description__ = "Modular configuration system with SMC, MACD, and EMA strategies"
+__description__ = "Modular configuration system with SMC, strategies, and market intelligence"
 
 # Validate configuration on import (optional - can be disabled in production)
 try:
@@ -326,3 +405,4 @@ except Exception as e:
 
 print(f"📊 ConfigData system loaded - SMC enabled: {getattr(config, 'SMART_MONEY_ENABLED', False)}")
 print(f"📈 Strategy configs loaded - ZeroLag: {getattr(config, 'ZERO_LAG_STRATEGY', False)}, MACD: {getattr(config, 'MACD_EMA_STRATEGY', False)}, EMA: {getattr(config, 'SIMPLE_EMA_STRATEGY', False)}")
+print(f"🧠 Intelligence config loaded - Enabled: {getattr(config, 'ENABLE_MARKET_INTELLIGENCE', False)}, Preset: {getattr(config, 'INTELLIGENCE_PRESET', 'unknown')}")

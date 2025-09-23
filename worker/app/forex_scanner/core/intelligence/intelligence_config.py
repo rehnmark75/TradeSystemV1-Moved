@@ -1,41 +1,76 @@
 # core/intelligence/intelligence_config.py
 """
-Configuration Wrapper for Existing Market Intelligence Engine
-Works with your existing MarketIntelligenceEngine to make thresholds configurable
+Configuration Wrapper for Market Intelligence Engine
+Runtime configuration manager that uses the new configdata system as its source.
+This provides backward compatibility while leveraging the centralized configuration approach.
 """
 
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+# Import from the new configdata system
+try:
+    from forex_scanner.configdata import config as configdata_config
+    HAS_CONFIGDATA = True
+except ImportError:
+    HAS_CONFIGDATA = False
+    print("⚠️ ConfigData system not available, falling back to standalone mode")
+
 
 class IntelligenceConfigManager:
     """
-    Configuration manager that wraps your existing MarketIntelligenceEngine
-    Makes the intelligence thresholds configurable to solve zero-alert problem
+    Runtime configuration manager for Market Intelligence Engine
+    Uses the new configdata system as its source for configuration values.
+    Provides backward compatibility and runtime preset switching capabilities.
     """
-    
-    def __init__(self, preset: str = 'balanced'):
+
+    def __init__(self, preset: str = None):
         self.logger = logging.getLogger(__name__)
-        self.preset = preset
-        self.config = {}
-        self.load_preset(preset)
-        
+
+        # Use configdata system if available, otherwise fall back to standalone mode
+        if HAS_CONFIGDATA:
+            self.config_source = configdata_config
+            # Use the preset from configdata if not specified
+            if preset is None:
+                preset = self.config_source.get_intelligence_preset()
+            self.preset = preset
+            self.logger.info(f"🧠 Intelligence Config Manager: Using configdata system with preset '{preset}'")
+        else:
+            self.config_source = None
+            self.preset = preset or 'balanced'
+            self.config = {}
+            self.load_preset_fallback(self.preset)
+            self.logger.warning(f"⚠️ Intelligence Config Manager: Using fallback mode with preset '{self.preset}'")
+
         # Try to import existing intelligence engine
         try:
             from .market_intelligence import MarketIntelligenceEngine
             self.intelligence_engine_class = MarketIntelligenceEngine
             self.has_intelligence_engine = True
-            self.logger.info(f"🧠 Intelligence Config: {preset} mode with MarketIntelligenceEngine")
+            self.logger.info(f"✅ MarketIntelligenceEngine available")
         except ImportError:
             self.intelligence_engine_class = None
             self.has_intelligence_engine = False
             self.logger.warning("⚠️ MarketIntelligenceEngine not available")
     
     def load_preset(self, preset_name: str):
-        """Load a configuration preset that solves the zero-alert problem"""
-        
-        # Define presets with configurable thresholds (much lower than original 70-80%)
+        """Load a configuration preset using the configdata system"""
+
+        if HAS_CONFIGDATA and self.config_source:
+            # Use configdata system to switch preset
+            self.config_source.set_intelligence_preset(preset_name)
+            self.preset = preset_name
+            self.logger.info(f"✅ Loaded preset '{preset_name}' via configdata system")
+            return
+        else:
+            # Fall back to standalone mode
+            self.load_preset_fallback(preset_name)
+
+    def load_preset_fallback(self, preset_name: str):
+        """Fallback preset loading when configdata system is not available"""
+
+        # Define fallback presets (only used when configdata is not available)
         presets = {
             'disabled': {
                 'mode': 'disabled',
@@ -143,35 +178,62 @@ class IntelligenceConfigManager:
     
     def get_effective_threshold(self) -> float:
         """Get the current intelligence threshold"""
-        return self.config.get('threshold', 0.5)
+        if HAS_CONFIGDATA and self.config_source:
+            return self.config_source.get_intelligence_threshold()
+        else:
+            return self.config.get('threshold', 0.5)
     
     def should_use_intelligence_engine(self) -> bool:
         """Check if we should use your MarketIntelligenceEngine"""
-        return (
-            self.config.get('use_intelligence_engine', False) and 
-            self.has_intelligence_engine
-        )
+        if HAS_CONFIGDATA and self.config_source:
+            # Check if intelligence is enabled in configdata
+            preset_info = getattr(self.config_source.intelligence, 'INTELLIGENCE_PRESETS', {}).get(self.preset, {})
+            use_engine = preset_info.get('use_intelligence_engine', True)
+            return use_engine and self.has_intelligence_engine
+        else:
+            return (
+                self.config.get('use_intelligence_engine', False) and
+                self.has_intelligence_engine
+            )
     
     def get_intelligence_weight(self) -> float:
         """Get weight for intelligence engine in overall scoring"""
-        return self.config.get('intelligence_weight', 0.4)
+        if HAS_CONFIGDATA and self.config_source:
+            preset_info = getattr(self.config_source.intelligence, 'INTELLIGENCE_PRESETS', {}).get(self.preset, {})
+            return preset_info.get('intelligence_weight', 0.4)
+        else:
+            return self.config.get('intelligence_weight', 0.4)
     
     def is_component_enabled(self, component_name: str) -> bool:
         """Check if a specific intelligence component is enabled"""
-        return self.config.get('components_enabled', {}).get(component_name, True)
+        if HAS_CONFIGDATA and self.config_source:
+            components = getattr(self.config_source.intelligence, 'INTELLIGENCE_COMPONENTS_ENABLED', {})
+            return components.get(component_name, True)
+        else:
+            return self.config.get('components_enabled', {}).get(component_name, True)
     
     def get_component_weight(self, component_name: str) -> float:
         """Get weight for a component"""
         # Remove '_filter' suffix if present
         clean_name = component_name.replace('_filter', '')
-        return self.config.get('weights', {}).get(clean_name, 0.2)
+
+        if HAS_CONFIGDATA and self.config_source:
+            weights = getattr(self.config_source.intelligence, 'INTELLIGENCE_WEIGHTS', {})
+            return weights.get(clean_name, 0.2)
+        else:
+            return self.config.get('weights', {}).get(clean_name, 0.2)
     
     def calculate_weighted_score(self, component_scores: Dict[str, float]) -> float:
         """
         Calculate final intelligence score using configured weights
         Only includes enabled components
         """
-        if self.config['mode'] == 'disabled':
+        # Check if intelligence is disabled
+        if HAS_CONFIGDATA and self.config_source:
+            mode = getattr(self.config_source.intelligence, 'INTELLIGENCE_MODE', 'live_only')
+            if mode == 'disabled':
+                return 1.0  # Always pass when disabled
+        elif self.config.get('mode') == 'disabled':
             return 1.0  # Always pass when disabled
         
         total_score = 0.0
@@ -194,7 +256,12 @@ class IntelligenceConfigManager:
     
     def should_filter_signal(self, intelligence_score: float) -> bool:
         """Determine if signal should be filtered out"""
-        if self.config['mode'] == 'disabled':
+        # Check if intelligence is disabled
+        if HAS_CONFIGDATA and self.config_source:
+            mode = getattr(self.config_source.intelligence, 'INTELLIGENCE_MODE', 'live_only')
+            if mode == 'disabled':
+                return False  # Never filter when disabled
+        elif self.config.get('mode') == 'disabled':
             return False  # Never filter when disabled
         
         threshold = self.get_effective_threshold()
@@ -202,23 +269,28 @@ class IntelligenceConfigManager:
     
     def get_status_summary(self) -> Dict[str, Any]:
         """Get current configuration status"""
-        enabled_components = [
-            comp.replace('_filter', '') 
-            for comp, enabled in self.config.get('components_enabled', {}).items() 
-            if enabled
-        ]
-        
-        return {
-            'preset': self.preset,
-            'mode': self.config.get('mode', 'unknown'),
-            'threshold': self.get_effective_threshold(),
-            'enabled_components': enabled_components,
-            'component_count': len(enabled_components),
-            'description': self.config.get('description', 'No description'),
-            'is_disabled': self.config['mode'] == 'disabled',
-            'uses_intelligence_engine': self.should_use_intelligence_engine(),
-            'intelligence_weight': self.get_intelligence_weight()
-        }
+        if HAS_CONFIGDATA and self.config_source:
+            # Use configdata system
+            return self.config_source.get_intelligence_summary()
+        else:
+            # Fall back to local config
+            enabled_components = [
+                comp.replace('_filter', '')
+                for comp, enabled in self.config.get('components_enabled', {}).items()
+                if enabled
+            ]
+
+            return {
+                'preset': self.preset,
+                'mode': self.config.get('mode', 'unknown'),
+                'threshold': self.get_effective_threshold(),
+                'enabled_components': enabled_components,
+                'component_count': len(enabled_components),
+                'description': self.config.get('description', 'No description'),
+                'is_disabled': self.config.get('mode') == 'disabled',
+                'uses_intelligence_engine': self.should_use_intelligence_engine(),
+                'intelligence_weight': self.get_intelligence_weight()
+            }
     
     def log_signal_decision(self, epic: str, intelligence_score: float, passed: bool):
         """Log intelligence filtering decision"""
@@ -235,16 +307,49 @@ class IntelligenceConfigManager:
     
     def get_market_regime_threshold(self) -> float:
         """Get threshold for market regime analysis from your intelligence engine"""
-        return self.config.get('market_regime_threshold', 0.5)
+        if HAS_CONFIGDATA and self.config_source:
+            return getattr(self.config_source.intelligence, 'MARKET_INTELLIGENCE_MIN_CONFIDENCE', 0.5)
+        else:
+            return self.config.get('market_regime_threshold', 0.5)
 
+
+# =====================================================================================
+# INTEGRATION STATUS
+# =====================================================================================
+"""
+✅ INTEGRATION COMPLETE: This intelligence config manager now uses the new configdata system!
+
+The IntelligenceConfigManager has been updated to:
+1. Use configdata system as primary source when available
+2. Fall back to standalone mode when configdata is not available
+3. Provide backward compatibility for existing code
+4. Support runtime preset switching via configdata
+
+Usage:
+    # Create manager (automatically uses configdata if available)
+    manager = IntelligenceConfigManager()
+
+    # Switch presets (delegates to configdata system)
+    manager.load_preset('minimal')
+
+    # Get configuration values (from configdata)
+    threshold = manager.get_effective_threshold()
+    enabled = manager.is_component_enabled('volatility_filter')
+
+Integration Benefits:
+- Centralized configuration in configdata system
+- Runtime preset switching capabilities
+- Backward compatibility for existing intelligence code
+- Automatic fallback when configdata not available
+"""
 
 # Update your existing __init__.py to export the new config manager
 def update_intelligence_init():
     """
     Add this to your existing core/intelligence/__init__.py:
-    
+
     from .intelligence_config import IntelligenceConfigManager
-    
+
     __all__ = [
         'MarketIntelligenceEngine',
         'IntelligenceConfigManager',  # Add this line
