@@ -83,10 +83,28 @@ class AutoBackfillService:
             track_auth_refresh(success=True)
             return True
         except Exception as e:
-            logger.error(f"Failed to authenticate for auto-backfill: {e}")
-            
-            # Track failed authentication
-            track_auth_refresh(success=False, error_message=str(e))
+            # Enhanced authentication error logging
+            auth_context = {
+                "api_url": API_BASE_URL,
+                "username": ig_usr,
+                "error_type": type(e).__name__
+            }
+
+            # Check for HTTP-specific authentication errors
+            if hasattr(e, 'response'):
+                status_code = getattr(e.response, 'status_code', 'unknown')
+                response_text = getattr(e.response, 'text', 'no response text')
+                auth_context.update({
+                    "http_status": status_code,
+                    "response_text": response_text[:300]  # Limit response text length
+                })
+                logger.error(f"Authentication HTTP error: {auth_context}")
+            else:
+                # Non-HTTP authentication errors
+                logger.error(f"Authentication error ({type(e).__name__}): {auth_context} - Exception: {str(e)[:300]}")
+
+            # Track failed authentication with detailed error
+            track_auth_refresh(success=False, error_message=f"{type(e).__name__}: {str(e)[:200]}")
             return False
     
     def parse_snapshot_time(self, ts_str):
@@ -306,29 +324,67 @@ class AutoBackfillService:
                 # Adjust request time range slightly to ensure we get all data
                 from_dt = gap["gap_start"] - timedelta(minutes=timeframe)
                 to_dt = gap["gap_end"] + timedelta(minutes=timeframe)
-                
+
                 url = f"/prices/{epic}"
                 # Format dates as IG API expects (no timezone info)
                 # Ensure we work with naive datetime objects
                 from_naive = from_dt.replace(tzinfo=None) if from_dt.tzinfo else from_dt
                 to_naive = to_dt.replace(tzinfo=None) if to_dt.tzinfo else to_dt
-                
+
                 from_str = from_naive.strftime("%Y-%m-%dT%H:%M:%S")
                 to_str = to_naive.strftime("%Y-%m-%dT%H:%M:%S")
-                
+
                 params = {
                     "resolution": resolution,
                     "from": from_str,
                     "to": to_str,
                     "max": min(MAX_CANDLES_PER_REQUEST, gap["missing_candles"] + 2)
                 }
-                
+
+                # Log API request details (sanitized)
+                request_context = {
+                    "url": f"{API_BASE_URL}{url}",
+                    "epic": epic,
+                    "params": params,
+                    "headers_present": {
+                        "CST": bool(self.headers.get("CST")),
+                        "X-SECURITY-TOKEN": bool(self.headers.get("X-SECURITY-TOKEN")),
+                        "X-IG-API-KEY": bool(self.headers.get("X-IG-API-KEY"))
+                    }
+                }
+                logger.debug(f"Making IG API request: {request_context}")
+
+                # Record request start time
+                request_start = datetime.now()
+
                 response = await client.get(url, params=params)
+
+                # Record request timing
+                request_duration = (datetime.now() - request_start).total_seconds()
+
+                # Log response details
+                response_context = {
+                    "status_code": response.status_code,
+                    "duration_seconds": round(request_duration, 3),
+                    "content_length": len(response.content) if response.content else 0
+                }
+                logger.debug(f"IG API response: {response_context}")
+
                 response.raise_for_status()
                 
                 data = response.json()
                 candles = data.get("prices", [])
-                
+
+                # Log API response data summary
+                data_summary = {
+                    "candles_returned": len(candles),
+                    "expected_candles": gap["missing_candles"],
+                    "response_keys": list(data.keys()) if data else [],
+                    "first_candle_time": candles[0].get("snapshotTime") if candles else None,
+                    "last_candle_time": candles[-1].get("snapshotTime") if candles else None
+                }
+                logger.debug(f"IG API data received: {data_summary}")
+
                 if not candles:
                     # This can happen for very recent data, during low liquidity, or market closure
                     gap_start_str = gap["gap_start"].strftime("%A %H:%M UTC")
@@ -417,13 +473,46 @@ class AutoBackfillService:
                 return 'success' if saved_count > 0 else 'failed'
                 
         except Exception as e:
-            # Check if it's a 400 error for market closed periods - suppress noise
-            if "400 Bad Request" in str(e) and not self.market_is_open():
-                logger.debug(f"Backfill failed for {epic} (market closed): {e}")
-                self.record_failed_gap(gap, 'market_closed')
+            # Enhanced error logging with detailed context
+            error_context = {
+                "epic": epic,
+                "timeframe": timeframe,
+                "gap_start": gap["gap_start"].isoformat(),
+                "gap_end": gap["gap_end"].isoformat(),
+                "missing_candles": gap["missing_candles"],
+                "resolution": resolution,
+                "market_open": self.market_is_open()
+            }
+
+            # Check for HTTP-specific errors
+            if hasattr(e, 'response'):
+                # httpx.HTTPStatusError or similar
+                status_code = getattr(e.response, 'status_code', 'unknown')
+                response_text = getattr(e.response, 'text', 'no response text')
+                error_context.update({
+                    "http_status": status_code,
+                    "response_text": response_text[:500]  # Limit response text length
+                })
+
+                # Check if it's a 400 error for market closed periods - suppress noise
+                if status_code == 400 and not self.market_is_open():
+                    logger.debug(f"Backfill failed for {epic} (market closed): HTTP {status_code} - {response_text[:200]}")
+                    self.record_failed_gap(gap, 'market_closed')
+                else:
+                    logger.error(f"HTTP error backfilling gap: {error_context}")
+                    self.record_failed_gap(gap, f'http_error_{status_code}')
             else:
-                logger.error(f"Error backfilling gap for {epic}: {e}")
-                self.record_failed_gap(gap, 'api_error')
+                # Non-HTTP errors (timeout, connection, etc.)
+                error_type = type(e).__name__
+                error_context["error_type"] = error_type
+
+                if "400 Bad Request" in str(e) and not self.market_is_open():
+                    logger.debug(f"Backfill failed for {epic} (market closed): {e}")
+                    self.record_failed_gap(gap, 'market_closed')
+                else:
+                    logger.error(f"Error backfilling gap ({error_type}): {error_context} - Exception: {str(e)[:300]}")
+                    self.record_failed_gap(gap, f'error_{error_type.lower()}')
+
             self.backfill_stats["failures"] += 1
             return 'failed'
     
@@ -487,7 +576,8 @@ class AutoBackfillService:
                     logger.debug(f"Skipping known failed gap: {gap['epic']} {gap['timeframe']}m at {gap['gap_start']}")
                     continue
 
-                # Rate limiting
+                # Rate limiting with logging
+                logger.debug(f"Rate limiting: sleeping {BACKFILL_RATE_LIMIT_DELAY}s before processing gap {gap['epic']} {gap['timeframe']}m")
                 await asyncio.sleep(BACKFILL_RATE_LIMIT_DELAY)
 
                 # Attempt backfill with retries (fewer retries for single-candle gaps)
@@ -521,6 +611,19 @@ class AutoBackfillService:
                             await asyncio.sleep(BACKFILL_RATE_LIMIT_DELAY * 2)
                 
                 if not success:
+                    # Enhanced gap processing failure context
+                    failure_context = {
+                        "epic": gap["epic"],
+                        "timeframe": gap["timeframe"],
+                        "gap_start": gap["gap_start"].isoformat(),
+                        "gap_end": gap["gap_end"].isoformat(),
+                        "missing_candles": gap["missing_candles"],
+                        "attempts_made": max_attempts,
+                        "max_attempts": MAX_BACKFILL_ATTEMPTS,
+                        "market_open": self.market_is_open(),
+                        "chunk_info": f"chunk {gap.get('chunk_number', 'N/A')}/{gap.get('total_chunks', 'N/A')}" if "chunk_number" in gap else "single_gap"
+                    }
+
                     # Track failed gap fill
                     track_gap_fill(
                         epic=gap["epic"],
@@ -529,17 +632,24 @@ class AutoBackfillService:
                         candles_filled=0,
                         success=False
                     )
-                    
+
                     # Only log failure as error during market hours
                     if self.market_is_open():
-                        logger.error(f"Failed to backfill gap after {MAX_BACKFILL_ATTEMPTS} attempts")
+                        logger.error(f"Failed to backfill gap after {MAX_BACKFILL_ATTEMPTS} attempts: {failure_context}")
                     else:
-                        logger.debug(f"Failed to backfill gap after {MAX_BACKFILL_ATTEMPTS} attempts (market closed)")
+                        logger.debug(f"Failed to backfill gap after {MAX_BACKFILL_ATTEMPTS} attempts (market closed): {failure_context}")
             
             logger.info(f"Backfill run complete: {successful_fills}/{len(gaps_to_process)} gaps filled")
             
         except Exception as e:
-            logger.error(f"Error in gap processing: {e}")
+            # Enhanced gap processing error logging
+            processing_context = {
+                "epics_count": len(self.epics),
+                "epics": self.epics[:3],  # First 3 epics for context
+                "error_type": type(e).__name__,
+                "backfill_stats": self.backfill_stats
+            }
+            logger.error(f"Error in gap processing ({type(e).__name__}): {processing_context} - Exception: {str(e)[:300]}")
     
     async def run_continuous(self, check_interval_minutes: int = 5):
         """
