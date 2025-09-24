@@ -119,10 +119,10 @@ REQUIRE_VOLUME_CONFIRMATION = False # Disabled in simple mode
 REQUIRE_NEW_CROSSOVER = False  # Disabled in simple mode
 
 # Combined Strategy Settings
-COMBINED_STRATEGY_MODE = 'dynamic'  # Options: 'confirmation', 'consensus', 'hierarchy', 'dynamic'
+COMBINED_STRATEGY_MODE = 'disabled'  # Options: 'confirmation', 'consensus', 'hierarchy', 'dynamic'
 REQUIRE_BOTH_STRATEGIES = False           # Both strategies must agree
 MIN_COMBINED_CONFIDENCE = 0.70          # Higher threshold for combined signals
-USE_ALL_STRATEGIES_DETECTION = True
+USE_ALL_STRATEGIES_DETECTION = False
 #ENABLE_COMBINED_AS_ADDITIONAL_STRATEGY = True
   
 STRATEGY_WEIGHT_KAMA = 0.0             # KAMA strategy weight (if enabled)
