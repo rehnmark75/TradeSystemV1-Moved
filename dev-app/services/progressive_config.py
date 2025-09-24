@@ -43,9 +43,9 @@ BALANCED_PROGRESSIVE_CONFIG = TrailingConfig(
     # Balanced progressive settings - allow trends to develop
     stage1_trigger_points=6,  # Break-even at +6 points (was 2)
     stage1_lock_points=2,     # Better profit guarantee (was 1)
-    stage2_trigger_points=10, # Profit lock at +10 points (was 4)
-    stage2_lock_points=5,     # Better profit guarantee (was 2)
-    stage3_trigger_points=15, # Percentage trailing at +15 points (REDUCED from 18)
+    stage2_trigger_points=16, # Profit lock at +16 points (was 10)
+    stage2_lock_points=10,    # Better profit guarantee (was 5)
+    stage3_trigger_points=17, # Percentage trailing at +17 points (was 15)
     stage3_atr_multiplier=0.7,  # MUCH TIGHTER: 0.7x ATR (was 1.3x)
     stage3_min_distance=2     # Small minimum steps
 )
@@ -60,10 +60,10 @@ CONSERVATIVE_PROGRESSIVE_CONFIG = TrailingConfig(
 
     # Conservative progressive settings - JPY calibrated
     stage1_trigger_points=40,  # Break-even at +40 JPY points (4 real pips)
-    stage1_lock_points=10,     # Lock 10 JPY points (1 real pip)
-    stage2_trigger_points=60,  # Profit lock at +60 JPY points (6 real pips)
-    stage2_lock_points=30,     # Lock 30 JPY points (3 real pips)
-    stage3_trigger_points=100, # Percentage trailing at +100 JPY points (10 real pips)
+    stage1_lock_points=2,      # Lock 2 JPY points (0.2 real pip)
+    stage2_trigger_points=16,  # Profit lock at +16 JPY points (1.6 real pips)
+    stage2_lock_points=10,     # Lock 10 JPY points (1.0 real pip)
+    stage3_trigger_points=17,  # Percentage trailing at +17 JPY points (was 100)
     stage3_atr_multiplier=2.0, # Wider ATR for volatile pairs
     stage3_min_distance=30     # 30 JPY points (3 real pips)
 )
@@ -71,17 +71,17 @@ CONSERVATIVE_PROGRESSIVE_CONFIG = TrailingConfig(
 # JPY-optimized configuration (for reasonable risk levels: 15-20 point stops = ¥1500-2000)
 JPY_OPTIMIZED_CONFIG = TrailingConfig(
     method=TrailingMethod.PROGRESSIVE_3_STAGE,
-    break_even_trigger_points=12,  # JPY: 12 points = ~1.2 real pips
+    break_even_trigger_points=8,  # JPY: 8 points = ~0.8 real pips
     min_trail_distance=8,
     max_trail_distance=200,
     monitor_interval_seconds=30,
 
     # JPY-optimized progressive settings - REDUCED RISK LEVELS
-    stage1_trigger_points=12,  # Break-even at +12 JPY points (1.2 real pips)
-    stage1_lock_points=5,      # Lock 5 JPY points (0.5 real pip)
-    stage2_trigger_points=18,  # Profit lock at +18 JPY points (1.8 real pips)
+    stage1_trigger_points=8,  # Break-even at +8 JPY points (0.8 real pips)
+    stage1_lock_points=2,      # Lock 2 JPY points (0.2 real pip)
+    stage2_trigger_points=16,  # Profit lock at +16 JPY points (1.6 real pips)
     stage2_lock_points=10,     # Lock 10 JPY points (1.0 real pip)
-    stage3_trigger_points=25,  # Percentage trailing at +25 JPY points (2.5 real pips)
+    stage3_trigger_points=17,  # Percentage trailing at +17 JPY points (was 25)
     stage3_atr_multiplier=0.6, # TIGHT: 0.6x ATR for smaller steps
     stage3_min_distance=8      # 8 JPY points (0.8 real pips)
 )

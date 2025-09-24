@@ -101,11 +101,11 @@ STAGE1_TRIGGER_POINTS = 7    # Move to break-even after +7 points profit (was 3)
 STAGE1_LOCK_POINTS = 2       # Fallback: +2 point minimum profit (ENHANCED: uses IG min distance when available)
 
 # Stage 2: Profit Lock-In (OPTIMIZED FOR TREND FOLLOWING)
-STAGE2_TRIGGER_POINTS = 12   # Lock in meaningful profit after +12 points (was 5)
-STAGE2_LOCK_POINTS = 6       # Guarantee +6 points profit (was 3)
+STAGE2_TRIGGER_POINTS = 16   # Lock in meaningful profit after +16 points (was 12)
+STAGE2_LOCK_POINTS = 10      # Guarantee +10 points profit (was 6)
 
-# Stage 3: Dynamic ATR Trailing (OPTIMIZED FOR TIGHTER TRAILING)
-STAGE3_TRIGGER_POINTS = 15   # Start ATR trailing after +15 points (REDUCED from 20)
+# Stage 3: Dynamic Percentage Trailing (STANDARDIZED FOR ALL PAIRS)
+STAGE3_TRIGGER_POINTS = 17   # Start percentage trailing after +17 points (was 15)
 STAGE3_ATR_MULTIPLIER = 0.8  # MUCH TIGHTER: 0.8x ATR (was 1.5x)
 STAGE3_MIN_DISTANCE = 2      # Small minimum trailing distance (was 3)
 
@@ -113,54 +113,54 @@ STAGE3_MIN_DISTANCE = 2      # Small minimum trailing distance (was 3)
 PROGRESSIVE_EPIC_SETTINGS = {
     'CS.D.EURUSD.CEEM.IP': {
         'stage1_trigger': 6,  # Balanced for major pairs (was 2)
-        'stage2_trigger': 10,  # Allow trends to develop (was 4)
-        'stage3_trigger': 18   # ATR trailing for big moves (was 7)
+        'stage2_trigger': 16,  # Allow trends to develop (was 10)
+        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
     },
     'CS.D.GBPUSD.MINI.IP': {
         'stage1_trigger': 6,  # Balanced for major pairs (was 2)
-        'stage2_trigger': 10,  # Allow trends to develop (was 4)
-        'stage3_trigger': 18   # ATR trailing for big moves (was 7)
+        'stage2_trigger': 16,  # Allow trends to develop (was 10)
+        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
     },
     'CS.D.USDJPY.MINI.IP': {
         'stage1_trigger': 6,   # Changed from 40 to 6 for more practical trading
-        'stage2_trigger': 10,  # Changed from 60 to 10 for more practical trading
-        'stage3_trigger': 18   # Changed from 100 to 18 for more practical trading
+        'stage2_trigger': 16,  # Changed from 10 to 16 for standardization
+        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
     },
     'CS.D.EURJPY.MINI.IP': {
         'stage1_trigger': 6,   # Changed from 40 to 6 for more practical trading
-        'stage2_trigger': 10,  # Changed from 60 to 10 for more practical trading
-        'stage3_trigger': 18   # Changed from 100 to 18 for more practical trading
+        'stage2_trigger': 16,  # Changed from 10 to 16 for standardization
+        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
     },
     # Additional major and minor pairs with balanced settings
     'CS.D.USDCHF.MINI.IP': {
         'stage1_trigger': 6,   # Balanced for major pairs
-        'stage2_trigger': 10,  # Allow trends to develop
-        'stage3_trigger': 18   # ATR trailing for big moves
+        'stage2_trigger': 16,  # Allow trends to develop (was 10)
+        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
     },
     'CS.D.AUDUSD.MINI.IP': {
         'stage1_trigger': 6,   # Balanced for major pairs
-        'stage2_trigger': 10,  # Allow trends to develop
-        'stage3_trigger': 18   # ATR trailing for big moves
+        'stage2_trigger': 16,  # Allow trends to develop (was 10)
+        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
     },
     'CS.D.USDCAD.MINI.IP': {
         'stage1_trigger': 6,   # Balanced for major pairs
-        'stage2_trigger': 10,  # Allow trends to develop
-        'stage3_trigger': 18   # ATR trailing for big moves
+        'stage2_trigger': 16,  # Allow trends to develop (was 10)
+        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
     },
     'CS.D.NZDUSD.MINI.IP': {
         'stage1_trigger': 7,   # Slightly more conservative for minor pairs
-        'stage2_trigger': 12,  # Allow trends to develop
-        'stage3_trigger': 20   # ATR trailing for big moves
+        'stage2_trigger': 16,  # Standardized to 16pts (was 12)
+        'stage3_trigger': 17   # Percentage trailing standardized (was 20)
     },
     'CS.D.AUDJPY.MINI.IP': {
         'stage1_trigger': 6,   # Changed from 40 to 6 for more practical trading
-        'stage2_trigger': 10,  # Changed from 60 to 10 for more practical trading
-        'stage3_trigger': 18   # Changed from 100 to 18 for more practical trading
+        'stage2_trigger': 16,  # Standardized to 16pts (was 10)
+        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
     },
     'CS.D.GBPJPY.MINI.IP': {
         'stage1_trigger': 6,   # Changed from 40 to 6 for more practical trading
-        'stage2_trigger': 10,  # Changed from 60 to 10 for more practical trading
-        'stage3_trigger': 18   # Changed from 100 to 18 for more practical trading
+        'stage2_trigger': 16,  # Standardized to 16pts (was 10)
+        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
     }
 }
 
