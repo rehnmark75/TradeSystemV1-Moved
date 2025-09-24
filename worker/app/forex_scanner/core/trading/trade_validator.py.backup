@@ -1685,20 +1685,12 @@ class TradeValidator:
             Tuple of (is_valid, reason)
         """
         try:
-            # NEW: ENTRY POINT LOGGING - Always log when this method is called
+            if not self.market_intelligence_engine:
+                return True, "Market intelligence engine not available - allowing trade"
+
             epic = signal.get('epic', 'Unknown')
             strategy = signal.get('strategy', 'unknown')
             signal_type = signal.get('signal_type', 'unknown')
-
-            self.logger.info(f"🧠🔍 MARKET INTELLIGENCE VALIDATION STARTED for {epic} {signal_type} ({strategy} strategy)")
-            self.logger.info(f"🧠⚙️ Config: min_confidence={self.market_intelligence_min_confidence:.1%}, "
-                          f"block_unsuitable_regimes={self.market_intelligence_block_unsuitable_regimes}, "
-                          f"engine_available={self.market_intelligence_engine is not None}")
-
-            if not self.market_intelligence_engine:
-                reason = "Market intelligence engine not available - allowing trade"
-                self.logger.warning(f"🧠❌ {epic} {signal_type}: {reason}")
-                return True, reason
 
             # Get existing market intelligence from signal if available
             existing_intelligence = signal.get('market_intelligence')
@@ -1706,17 +1698,16 @@ class TradeValidator:
             if existing_intelligence:
                 # Use existing intelligence data
                 intelligence_report = existing_intelligence
-                self.logger.info(f"🧠📊 {epic}: Using existing market intelligence from signal")
+                self.logger.debug(f"🧠 Using existing market intelligence for {epic}")
             else:
                 # Generate fresh intelligence report
-                self.logger.info(f"🧠🔄 {epic}: Generating fresh market intelligence report")
+                self.logger.debug(f"🧠 Generating fresh market intelligence for {epic}")
                 epic_list = [epic]
                 full_report = self.market_intelligence_engine.generate_market_intelligence_report(epic_list)
 
                 if not full_report:
-                    reason = "Market intelligence unavailable - allowing trade"
-                    self.logger.warning(f"🧠⚠️ {epic} {signal_type}: {reason}")
-                    return True, reason
+                    self.logger.warning(f"⚠️ {epic}: Failed to get market intelligence - allowing trade")
+                    return True, "Market intelligence unavailable - allowing trade"
 
                 # Extract relevant sections
                 intelligence_report = {
@@ -1724,26 +1715,19 @@ class TradeValidator:
                     'session_analysis': full_report.get('session_analysis', {}),
                     'strategy_recommendations': full_report.get('strategy_recommendations', {})
                 }
-                self.logger.debug(f"🧠✅ {epic}: Intelligence report generated successfully")
 
             # 1. Check market regime confidence
             market_regime = intelligence_report.get('market_regime', {})
             regime_confidence = market_regime.get('confidence', 0.5)
-            dominant_regime = market_regime.get('dominant_regime', 'unknown')
-
-            self.logger.info(f"🧠🎯 {epic}: Confidence Check - Regime: '{dominant_regime}', "
-                          f"Confidence: {regime_confidence:.1%}, Required: {self.market_intelligence_min_confidence:.1%}")
 
             if regime_confidence < self.market_intelligence_min_confidence:
                 reason = f"Market regime confidence {regime_confidence:.1%} below threshold {self.market_intelligence_min_confidence:.1%}"
-                self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY CONFIDENCE: {reason}")
+                self.logger.info(f"🚫 {epic} {signal_type} BLOCKED: {reason}")
                 return False, reason
-
-            self.logger.info(f"🧠✅ {epic}: Confidence check PASSED ({regime_confidence:.1%} >= {self.market_intelligence_min_confidence:.1%})")
 
             # 2. Check regime suitability for strategy (if enabled)
             if self.market_intelligence_block_unsuitable_regimes:
-                self.logger.info(f"🧠🔍 {epic}: Starting regime-strategy compatibility check")
+                dominant_regime = market_regime.get('dominant_regime', 'unknown')
                 strategy_recommendations = intelligence_report.get('strategy_recommendations', {})
                 recommended_strategy = strategy_recommendations.get('primary_strategy', '').lower()
 
@@ -1763,50 +1747,32 @@ class TradeValidator:
                 current_strategy_lower = strategy.lower()
                 compatible_strategies = regime_strategy_compatibility.get(dominant_regime, [])
 
-                self.logger.info(f"🧠🎭 {epic}: Regime-Strategy Check - Current: '{strategy}', "
-                              f"Regime: '{dominant_regime}', Compatible: {compatible_strategies}")
-                self.logger.info(f"🧠💡 {epic}: AI Recommended Strategy: '{recommended_strategy}'")
-
                 # Check if current strategy is compatible with the regime
                 strategy_compatible = any(comp_strategy in current_strategy_lower for comp_strategy in compatible_strategies)
 
                 if not strategy_compatible and dominant_regime != 'unknown':
                     reason = f"Strategy '{strategy}' unsuitable for {dominant_regime} regime (confidence: {regime_confidence:.1%})"
-                    self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY REGIME INCOMPATIBILITY: {reason}")
-                    self.logger.info(f"🧠💭 {epic}: Compatible strategies for {dominant_regime}: {compatible_strategies}")
+                    self.logger.info(f"🚫 {epic} {signal_type} BLOCKED: {reason}")
                     return False, reason
-
-                self.logger.info(f"🧠✅ {epic}: Regime compatibility check PASSED ('{strategy}' works with '{dominant_regime}')")
-            else:
-                self.logger.info(f"🧠⏭️ {epic}: Regime suitability check DISABLED - skipping")
 
             # 3. Check session analysis (optional additional filtering)
             session_analysis = intelligence_report.get('session_analysis', {})
             session_strength = session_analysis.get('session_strength', 'normal')
-            current_session = session_analysis.get('current_session', 'unknown')
-
-            self.logger.info(f"🧠🕐 {epic}: Session Analysis - Current: '{current_session}', Strength: '{session_strength}'")
 
             if session_strength == 'very_low':
                 reason = f"Very low session strength detected - high risk period"
-                self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY SESSION STRENGTH: {reason}")
+                self.logger.info(f"🚫 {epic} {signal_type} BLOCKED: {reason}")
                 return False, reason
-
-            self.logger.info(f"🧠✅ {epic}: Session strength check PASSED ('{session_strength}' is acceptable)")
 
             # All checks passed
             regime_info = f"{dominant_regime} regime (confidence: {regime_confidence:.1%})"
-            self.logger.info(f"🧠🎉 {epic} {signal_type} FINAL VERDICT: APPROVED by Market Intelligence")
-            self.logger.info(f"🧠📋 {epic}: Summary - Regime: {dominant_regime} ({regime_confidence:.1%}), "
-                          f"Strategy: {strategy}, Session: {current_session} ({session_strength})")
+            self.logger.info(f"✅ {epic} {signal_type} ALLOWED: Market intelligence approved - {regime_info}")
             return True, f"Market intelligence approved: {regime_info}"
 
         except Exception as e:
             # SAFE FALLBACK: Allow trade on intelligence validation errors
-            epic_error = signal.get('epic', 'Unknown')
-            self.logger.error(f"🧠💥 MARKET INTELLIGENCE VALIDATION ERROR for {epic_error} {signal.get('signal_type', 'unknown')}: {e}")
-            self.logger.warning(f"🧠🛡️ {epic_error}: Validation failed - allowing trade as safety measure")
-            self.logger.debug(f"🧠🔍 {epic_error}: Error details - {str(e)}")
+            self.logger.error(f"❌ Market intelligence validation error for {signal.get('epic', 'Unknown')}: {e}")
+            self.logger.warning(f"⚠️ Market intelligence validation failed - allowing trade as safety measure")
             return True, f"Market intelligence validation error (trade allowed): {str(e)}"
 
     def _capture_market_intelligence_context(self, signal: Dict) -> None:

@@ -25,7 +25,7 @@ import os
 import time
 import logging
 from logging.handlers import TimedRotatingFileHandler, RotatingFileHandler
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import pytz
 
@@ -33,10 +33,59 @@ class StockholmFormatter(logging.Formatter):
     def converter(self, timestamp):
         dt = datetime.fromtimestamp(timestamp, tz=pytz.timezone('Europe/Stockholm'))
         return dt.timetuple()
-    
+
     def formatTime(self, record, datefmt=None):
         dt = datetime.fromtimestamp(record.created, tz=pytz.timezone('Europe/Stockholm'))
         return dt.strftime('%Y-%m-%d %H:%M:%S %Z')
+
+
+def cleanup_old_log_files(log_dir: str, log_prefix: str, days_to_keep: int = 7):
+    """
+    Clean up old log files that exceed the retention period.
+
+    Args:
+        log_dir: Directory containing log files
+        log_prefix: Log file prefix to match (e.g., 'forex_scanner')
+        days_to_keep: Number of days to keep (default: 7)
+    """
+    try:
+        import glob
+        from pathlib import Path
+
+        # Calculate cutoff date
+        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+
+        # Find all log files matching the prefix
+        pattern = os.path.join(log_dir, f"{log_prefix}*.log*")
+        log_files = glob.glob(pattern)
+
+        removed_count = 0
+        total_size_removed = 0
+
+        for log_file in log_files:
+            try:
+                # Get file modification time
+                file_path = Path(log_file)
+                file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
+
+                # Remove file if older than cutoff
+                if file_mtime < cutoff_date:
+                    file_size = file_path.stat().st_size
+                    file_path.unlink()
+                    removed_count += 1
+                    total_size_removed += file_size
+                    print(f"🗑️ Removed old log file: {log_file} ({file_size/1024/1024:.1f}MB)")
+
+            except Exception as e:
+                print(f"⚠️ Failed to remove log file {log_file}: {e}")
+
+        if removed_count > 0:
+            print(f"✅ Cleaned up {removed_count} old log files, freed {total_size_removed/1024/1024:.1f}MB")
+        else:
+            print(f"📁 No old log files found (keeping logs newer than {days_to_keep} days)")
+
+    except Exception as e:
+        print(f"❌ Error during log cleanup: {e}")
 
 # Add the project root and forex_scanner to the path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -510,18 +559,29 @@ def main():
     logger = logging.getLogger(__name__)
     os.makedirs("logs", exist_ok=True)
 
-    # Create the handler first
-    file_handler = RotatingFileHandler(
-        f"logs/forex_scanner_{datetime.now().strftime('%Y%m%d')}.log",
-        maxBytes=50*1024*1024, 
-        backupCount=5
+    # NEW: Cleanup old log files before setting up new handler
+    cleanup_old_log_files("logs", "forex_scanner", days_to_keep=7)
+
+    # FIXED: Use TimedRotatingFileHandler with proper cleanup
+    # This will create files like: forex_scanner.log, forex_scanner.log.2025-09-24, etc.
+    file_handler = TimedRotatingFileHandler(
+        "logs/forex_scanner.log",
+        when='midnight',
+        interval=1,
+        backupCount=7,  # Keep 7 days of logs
+        encoding='utf-8'
     )
+
+    # Ensure the handler deletes old files properly
+    file_handler.namer = lambda name: name.replace('.log', '') + '.log'
 
     # MODIFY: Set formatter with Stockholm timezone
     file_handler.setFormatter(StockholmFormatter('%(asctime)s - %(levelname)s - %(message)s'))
 
     # Add the handler
     logging.getLogger().addHandler(file_handler)
+
+    logger.info(f"🗂️ Log rotation configured: keeping {file_handler.backupCount} days of logs")
     
     # Initialize trading system
     try:
