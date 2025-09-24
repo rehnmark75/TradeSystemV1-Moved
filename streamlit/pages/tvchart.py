@@ -453,7 +453,7 @@ with st.expander("📊 Chart Legend", expanded=False):
         **Arrow Colors:**
         - 🟢 Green = Profitable trade
         - 🔴 Red = Loss trade
-        - 🟡 Yellow = Still running
+        - 🔵 Blue = Still running
         - ⚫ Gray = Breakeven
         """)
     with col3:
@@ -666,7 +666,7 @@ for row in trades_df.itertuples():
     # profit_loss > 0: green (profitable)
     # profit_loss < 0: red (loss)
     # profit_loss is None/NaN: yellow (still running)
-    marker_color = "yellow"  # Default for running trades
+    marker_color = "#1f77b4"  # Blue for running trades (more readable than yellow)
     if hasattr(row, 'profit_loss') and row.profit_loss is not None:
         try:
             pnl_value = float(row.profit_loss)
@@ -677,7 +677,7 @@ for row in trades_df.itertuples():
             else:
                 marker_color = "gray"  # Exactly zero (breakeven)
         except (ValueError, TypeError):
-            marker_color = "yellow"  # Can't determine, treat as running
+            marker_color = "#1f77b4"  # Can't determine, treat as running (blue)
 
     # Add P&L to text if available
     text_label = f"{strategy_name}" if strategy_name else ("BUY" if is_bull else "SELL")
