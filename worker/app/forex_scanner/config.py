@@ -398,6 +398,9 @@ ICHIMOKU_CLOUD_STRATEGY = True  # Ichimoku Kinko Hyo strategy
 # Mean Reversion Strategy
 MEAN_REVERSION_STRATEGY = True  # Multi-oscillator mean reversion strategy
 
+# Strategy Configurations - Additional strategies
+RANGING_MARKET_STRATEGY = True  # Multi-oscillator ranging market strategy
+
 # KAMA Strategy Configuration
 KAMA_STRATEGY_CONFIG = {
     'default': {

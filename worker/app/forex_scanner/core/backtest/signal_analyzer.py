@@ -39,7 +39,7 @@ class SignalAnalyzer:
         self.logger.info("=" * 120)
         
         # Header
-        header = f"{'#':<3} {'TIMESTAMP':<20} {'PAIR':<8} {'TYPE':<4} {'STRATEGY':<15} {'PRICE':<8} {'CONF':<6} {'PROFIT':<8} {'LOSS':<8} {'R:R':<6}"
+        header = f"{'#':<3} {'TIMESTAMP (UTC)':<20} {'PAIR':<8} {'TYPE':<4} {'STRATEGY':<15} {'PRICE':<8} {'CONF':<6} {'PROFIT':<8} {'LOSS':<8} {'R:R':<6}"
         self.logger.info(header)
         self.logger.info("-" * 120)
         
@@ -56,11 +56,8 @@ class SignalAnalyzer:
                 timestamp = timestamp.to_pydatetime()
             
             if isinstance(timestamp, datetime):
-                try:
-                    local_time = timezone_manager.utc_to_local(timestamp)
-                    timestamp_str = local_time.strftime('%Y-%m-%d %H:%M')
-                except:
-                    timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M')
+                # Display UTC time instead of local time
+                timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M UTC')
             else:
                 timestamp_str = str(timestamp)[:16]
             

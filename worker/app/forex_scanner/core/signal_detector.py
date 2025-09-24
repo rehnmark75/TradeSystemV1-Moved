@@ -25,6 +25,7 @@ try:
     from .smart_money_integration import add_smart_money_to_signal, add_smart_money_to_signals
     from .strategies.zero_lag_strategy import ZeroLagStrategy
     from .strategies.mean_reversion_strategy import MeanReversionStrategy
+    from .strategies.ranging_market_strategy import RangingMarketStrategy
     from .detection.large_candle_filter import LargeCandleFilter
 except ImportError:
     from forex_scanner.core.database import DatabaseManager
@@ -41,6 +42,7 @@ except ImportError:
     from forex_scanner.core.smart_money_integration import add_smart_money_to_signal, add_smart_money_to_signals
     from forex_scanner.core.strategies.zero_lag_strategy import ZeroLagStrategy
     from forex_scanner.core.strategies.mean_reversion_strategy import MeanReversionStrategy
+    from forex_scanner.core.strategies.ranging_market_strategy import RangingMarketStrategy
     from forex_scanner.core.detection.large_candle_filter import LargeCandleFilter
 
 try:
@@ -185,6 +187,21 @@ class SignalDetector:
         else:
             self.mean_reversion_strategy = None
             self.logger.info("⚪ Mean Reversion strategy disabled")
+
+        # Initialize Ranging Market Strategy if enabled
+        if getattr(config, 'RANGING_MARKET_STRATEGY', False):
+            try:
+                self.ranging_market_strategy = RangingMarketStrategy(data_fetcher=self.data_fetcher)
+                self.logger.info("✅ Ranging Market strategy initialized")
+            except ImportError as e:
+                self.logger.error(f"❌ Failed to import Ranging Market strategy: {e}")
+                self.ranging_market_strategy = None
+            except Exception as e:
+                self.logger.error(f"❌ Failed to initialize Ranging Market strategy: {e}")
+                self.ranging_market_strategy = None
+        else:
+            self.ranging_market_strategy = None
+            self.logger.info("⚪ Ranging Market strategy disabled")
 
         # Initialize analysis components
         self.backtest_engine = BacktestEngine(self.data_fetcher)
@@ -605,6 +622,42 @@ class SignalDetector:
             self.logger.error(f"Error in mean reversion signal detection for {epic}: {e}")
             return None
 
+    def detect_ranging_market_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None
+    ) -> Optional[Dict]:
+        """
+        Detect Ranging Market signals using multi-oscillator confluence approach
+        """
+        if not hasattr(self, 'ranging_market_strategy') or not self.ranging_market_strategy:
+            self.logger.debug("Ranging Market strategy not available")
+            return None
+
+        try:
+            # Get enhanced data
+            df = self.data_fetcher.get_enhanced_data(epic, pair, timeframe=timeframe, ema_strategy=self.ema_strategy)
+
+            if df is None or len(df) < system_config.MIN_BARS_FOR_SIGNAL:
+                self.logger.debug(f"Insufficient data for ranging market analysis: {len(df) if df is not None else 0} bars")
+                return None
+
+            # Use ranging market strategy
+            signal = self.ranging_market_strategy.detect_signal(df, epic, spread_pips, timeframe)
+
+            if signal:
+                # Add enhanced market context
+                signal = self._add_market_context(signal, df)
+                signal = add_smart_money_to_signal(signal, epic, self.data_fetcher, self.db_manager)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"Error in ranging market signal detection for {epic}: {e}")
+            return None
+
     def detect_combined_signals(
         self, 
         epic: str, 
@@ -855,6 +908,26 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [MEAN REVERSION STRATEGY] Error for {epic}: {e}")
                     individual_results['mean_reversion'] = None
+
+            # 11. Ranging Market Strategy (if enabled)
+            if (getattr(config, 'RANGING_MARKET_STRATEGY', False) and
+                hasattr(self, 'ranging_market_strategy') and self.ranging_market_strategy is not None):
+                try:
+                    self.logger.debug(f"🔍 [RANGING MARKET STRATEGY] Starting detection for {epic}")
+                    ranging_market_signal = self.detect_ranging_market_signals(epic, pair, spread_pips, timeframe)
+
+                    # Store result for combined strategy
+                    individual_results['ranging_market'] = ranging_market_signal
+
+                    if ranging_market_signal:
+                        all_signals.append(ranging_market_signal)
+                        self.logger.info(f"✅ [RANGING MARKET STRATEGY] Signal detected for {epic}")
+                    else:
+                        self.logger.debug(f"📊 [RANGING MARKET STRATEGY] No signal for {epic}")
+
+                except Exception as e:
+                    self.logger.error(f"❌ [RANGING MARKET STRATEGY] Error for {epic}: {e}")
+                    individual_results['ranging_market'] = None
 
             # ========== COMBINED STRATEGY WITH PRECOMPUTED RESULTS ==========
             
