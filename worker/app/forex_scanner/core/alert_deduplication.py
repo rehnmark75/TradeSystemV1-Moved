@@ -70,7 +70,10 @@ class AlertDeduplicationManager:
         
         # In-memory caches for performance
         self._recent_signals_cache = {}  # {epic: {signal_type: last_timestamp}}
-        self._signal_hash_cache = set()  # Set of recent signal hashes
+        self._signal_hash_cache = {}  # Dict of {hash: timestamp} for time-aware expiry
+        self._cache_expiry_minutes = getattr(config, 'SIGNAL_HASH_CACHE_EXPIRY_MINUTES', 15)
+        self._max_cache_size = getattr(config, 'MAX_SIGNAL_HASH_CACHE_SIZE', 1000)
+        self._enable_time_hash = getattr(config, 'ENABLE_TIME_BASED_HASH_COMPONENTS', True)
         self._hourly_alert_count = 0
         self._last_count_reset = datetime.now()
     
@@ -118,7 +121,23 @@ class AlertDeduplicationManager:
     def generate_signal_hash(self, signal: Dict) -> str:
         """
         Generate a unique hash for the signal to detect exact duplicates
+        Enhanced with time components to prevent false positives
         """
+        # Get current time and create time bucket (15-minute intervals)
+        current_time = datetime.now()
+        time_bucket = current_time.strftime('%Y-%m-%d-%H') + f":{(current_time.minute // 15) * 15:02d}"
+
+        # Determine market session
+        hour = current_time.hour
+        if 0 <= hour < 8:
+            market_session = 'SYDNEY_TOKYO'
+        elif 8 <= hour < 16:
+            market_session = 'LONDON'
+        elif 16 <= hour < 24:
+            market_session = 'NEW_YORK'
+        else:
+            market_session = 'TRANSITION'
+
         # Create a normalized signal for hashing
         hash_data = {
             'epic': signal.get('epic', ''),
@@ -131,11 +150,16 @@ class AlertDeduplicationManager:
             'ema_short': round(float(signal.get('ema_short', 0)), 5) if signal.get('ema_short') else None,
             'ema_long': round(float(signal.get('ema_long', 0)), 5) if signal.get('ema_long') else None,
             'macd_line': round(float(signal.get('macd_line', 0)), 6) if signal.get('macd_line') else None,
+            # NEW: Add time-based components (configurable)
+            **({
+                'time_bucket': time_bucket,  # 15-minute time window
+                'market_session': market_session,  # Market session context
+            } if self._enable_time_hash else {})
         }
-        
+
         # Convert to deterministic JSON string
         hash_string = json.dumps(hash_data, sort_keys=True, separators=(',', ':'))
-        
+
         # Generate MD5 hash
         return hashlib.md5(hash_string.encode()).hexdigest()
     
@@ -147,6 +171,23 @@ class AlertDeduplicationManager:
         
         return f"{epic}:{signal_type}:{strategy}"
     
+    def _cleanup_expired_cache(self):
+        """Remove expired entries from in-memory hash cache"""
+        now = datetime.now()
+        expiry_threshold = now - timedelta(minutes=self._cache_expiry_minutes)
+
+        # Count expired entries before cleanup
+        expired_count = sum(1 for timestamp in self._signal_hash_cache.values()
+                           if timestamp < expiry_threshold)
+
+        if expired_count > 0:
+            # Remove expired entries
+            self._signal_hash_cache = {
+                hash_key: timestamp for hash_key, timestamp in self._signal_hash_cache.items()
+                if timestamp >= expiry_threshold
+            }
+            self.logger.debug(f"🧹 Cleaned {expired_count} expired cache entries, {len(self._signal_hash_cache)} remain")
+
     def _reset_hourly_counters_if_needed(self):
         """Reset hourly counters if an hour has passed"""
         now = datetime.now()
@@ -194,31 +235,41 @@ class AlertDeduplicationManager:
             return True, ""  # Allow on error to avoid blocking legitimate alerts
     
     def _check_signal_hash_duplicate(self, signal_hash: str) -> Tuple[bool, str]:
-        """Check if this exact signal hash was recently seen"""
+        """Check if this exact signal hash was recently seen (with time-aware cache)"""
+        # First cleanup expired cache entries
+        self._cleanup_expired_cache()
+
+        # Check in-memory cache (now time-aware)
         if signal_hash in self._signal_hash_cache:
+            cache_timestamp = self._signal_hash_cache[signal_hash]
+            time_diff = datetime.now() - cache_timestamp
+            self.logger.debug(f"📅 Hash found in cache from {time_diff.total_seconds():.0f}s ago")
             return False, "Exact duplicate signal detected (hash match)"
-        
+
         # Check database for recent hash matches (last 15 minutes)
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute("""
-                SELECT id FROM alert_history 
-                WHERE signal_hash = %s 
+                SELECT id, alert_timestamp FROM alert_history
+                WHERE signal_hash = %s
                 AND alert_timestamp >= %s
                 LIMIT 1
             """, (signal_hash, datetime.now() - timedelta(minutes=15)))
-            
+
             result = cursor.fetchone()
             cursor.close()
             conn.close()
-            
+
             if result:
+                db_timestamp = result[1]
+                time_diff = datetime.now() - db_timestamp
+                self.logger.debug(f"📊 Hash found in database from {time_diff.total_seconds():.0f}s ago")
                 return False, "Exact duplicate found in recent history"
-            
+
             return True, ""
-            
+
         except Exception as e:
             self.logger.error(f"Error checking signal hash: {e}")
             return True, ""  # Allow on error
@@ -274,11 +325,18 @@ class AlertDeduplicationManager:
         # Generate deduplication keys
         signal_hash = self.generate_signal_hash(signal)
         cooldown_key = self.generate_cooldown_key(signal)
-        
+
+        # Enhanced logging for hash generation
+        self.logger.debug(f"🔍 Dedup check for {epic} {signal_type} ({strategy}):")
+        self.logger.debug(f"   Generated hash: {signal_hash[:8]}...")
+        self.logger.debug(f"   Cooldown key: {cooldown_key}")
+        self.logger.debug(f"   Cache size: {len(self._signal_hash_cache)} entries")
+
         metadata = {
             'signal_hash': signal_hash,
             'cooldown_key': cooldown_key,
-            'check_timestamp': datetime.now().isoformat()
+            'check_timestamp': datetime.now().isoformat(),
+            'cache_size': len(self._signal_hash_cache)
         }
         
         # Run all deduplication checks
@@ -295,6 +353,8 @@ class AlertDeduplicationManager:
         for check_name, (passed, reason) in checks:
             if not passed:
                 self.logger.info(f"🚫 Alert blocked: {check_name} - {reason}")
+                self.logger.debug(f"   Epic: {epic}, Strategy: {strategy}, Signal: {signal_type}")
+                self.logger.debug(f"   Hash: {signal_hash[:12]}..., Cache entries: {len(self._signal_hash_cache)}")
                 metadata['blocked_by'] = check_name
                 metadata['block_reason'] = reason
                 return False, f"{check_name}: {reason}", metadata
@@ -302,19 +362,26 @@ class AlertDeduplicationManager:
                 self.logger.debug(f"✅ {check_name}: Passed")
         
         # All checks passed - update caches
-        self._signal_hash_cache.add(signal_hash)
+        current_time = datetime.now()
+        self._signal_hash_cache[signal_hash] = current_time
         self._hourly_alert_count += 1
-        
+
         # Update in-memory cache
         if epic not in self._recent_signals_cache:
             self._recent_signals_cache[epic] = {}
-        self._recent_signals_cache[epic][signal_type] = datetime.now()
-        
-        # Clean up old cache entries (keep cache size manageable)
-        if len(self._signal_hash_cache) > 1000:
-            # Remove oldest 20% of entries (simplified cleanup)
-            hash_list = list(self._signal_hash_cache)
-            self._signal_hash_cache = set(hash_list[-800:])
+        self._recent_signals_cache[epic][signal_type] = current_time
+
+        # Clean up old cache entries (time-based cleanup)
+        if len(self._signal_hash_cache) > self._max_cache_size:
+            # Force cleanup if cache gets too large
+            self._cleanup_expired_cache()
+            # If still too large after expiry cleanup, remove oldest entries
+            if len(self._signal_hash_cache) > self._max_cache_size:
+                sorted_items = sorted(self._signal_hash_cache.items(), key=lambda x: x[1])
+                # Keep newest 80% of max size
+                keep_size = int(self._max_cache_size * 0.8)
+                self._signal_hash_cache = dict(sorted_items[-keep_size:])
+                self.logger.debug(f"🧹 Performed size-based cache cleanup, kept {keep_size} newest entries")
         
         self.logger.info(f"✅ Alert approved: {epic} {signal_type} ({strategy})")
         metadata['approved'] = True
@@ -366,40 +433,52 @@ class AlertDeduplicationManager:
             return None
     
     def get_deduplication_stats(self) -> Dict:
-        """Get current deduplication statistics"""
+        """Get current deduplication statistics with enhanced cache info"""
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             # Get recent statistics
             cursor.execute("""
-                SELECT 
+                SELECT
                     COUNT(*) as total_alerts_24h,
                     COUNT(DISTINCT epic) as unique_epics_24h,
                     COUNT(DISTINCT signal_hash) as unique_signals_24h,
                     AVG(confidence_score) as avg_confidence_24h
-                FROM alert_history 
+                FROM alert_history
                 WHERE alert_timestamp >= %s
             """, (datetime.now() - timedelta(hours=24),))
-            
+
             stats = cursor.fetchone()
             cursor.close()
             conn.close()
-            
+
+            # Calculate cache age statistics
+            now = datetime.now()
+            cache_ages = [(now - timestamp).total_seconds() for timestamp in self._signal_hash_cache.values()]
+            avg_cache_age = sum(cache_ages) / len(cache_ages) if cache_ages else 0
+            max_cache_age = max(cache_ages) if cache_ages else 0
+
             return {
                 'total_alerts_24h': stats[0] if stats else 0,
-                'unique_epics_24h': stats[1] if stats else 0, 
+                'unique_epics_24h': stats[1] if stats else 0,
                 'unique_signals_24h': stats[2] if stats else 0,
                 'avg_confidence_24h': float(stats[3]) if stats and stats[3] else 0,
                 'cache_size': len(self._signal_hash_cache),
                 'hourly_alert_count': self._hourly_alert_count,
+                'cache_stats': {
+                    'avg_age_seconds': avg_cache_age,
+                    'max_age_seconds': max_cache_age,
+                    'expiry_threshold_seconds': self._cache_expiry_minutes * 60
+                },
                 'config': {
                     'epic_signal_cooldown_minutes': self.config.epic_signal_cooldown_minutes,
+                    'cache_expiry_minutes': self._cache_expiry_minutes,
                     'max_alerts_per_hour': self.config.max_alerts_per_hour,
                     'max_alerts_per_epic_hour': self.config.max_alerts_per_epic_hour
                 }
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error getting deduplication stats: {e}")
             return {}

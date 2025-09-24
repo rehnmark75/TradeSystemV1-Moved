@@ -941,6 +941,9 @@ CONFIDENCE_SIMILARITY_THRESHOLD = 0.05  # 5% confidence similarity threshold
 
 # Cache and performance settings
 SIGNAL_HASH_CACHE_SIZE = 1000           # How many signal hashes to keep in memory
+SIGNAL_HASH_CACHE_EXPIRY_MINUTES = 15   # Minutes before cache entries expire (matches database check)
+MAX_SIGNAL_HASH_CACHE_SIZE = 1000       # Max cache size before forced cleanup
+ENABLE_TIME_BASED_HASH_COMPONENTS = True # Include time buckets in hash generation
 DEDUPLICATION_DEBUG_MODE = False        # Enable verbose deduplication logging
 DEDUPLICATION_CLEANUP_INTERVAL = 100    # Clean cache every N checks
 
