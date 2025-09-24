@@ -142,8 +142,8 @@ class IchimokuStrategy(BaseStrategy):
                     self.logger.warning(f"Could not load optimal parameters for {epic}: {e}, falling back to config")
 
             # FALLBACK: Get Ichimoku configuration from configdata structure
-            ichimoku_configs = getattr(config, 'ICHIMOKU_STRATEGY_CONFIG', {})
-            active_config = getattr(config, 'ACTIVE_ICHIMOKU_CONFIG', 'traditional')
+            ichimoku_configs = getattr(self.config, 'ICHIMOKU_STRATEGY_CONFIG', {})
+            active_config = getattr(self.config, 'ACTIVE_ICHIMOKU_CONFIG', 'traditional')
 
             if active_config in ichimoku_configs:
                 return ichimoku_configs[active_config]
