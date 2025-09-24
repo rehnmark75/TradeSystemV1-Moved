@@ -135,9 +135,9 @@ ENABLE_MARKET_INTELLIGENCE_STORAGE = True  # Store market intelligence for every
 MARKET_INTELLIGENCE_CLEANUP_DAYS = 30      # Auto-cleanup old records after N days
 
 # Market Intelligence Trade Filtering Configuration
-ENABLE_MARKET_INTELLIGENCE_FILTERING = True  # Enable active trade filtering based on market intelligence
+ENABLE_MARKET_INTELLIGENCE_FILTERING = True   # 🔧 RE-ENABLED: Test evening signal filtering with market intelligence
 MARKET_INTELLIGENCE_MIN_CONFIDENCE = 0.55    # Minimum confidence threshold for market regime analysis
-MARKET_INTELLIGENCE_BLOCK_UNSUITABLE_REGIMES = True  # Block trades when strategy unsuitable for current regime
+MARKET_INTELLIGENCE_BLOCK_UNSUITABLE_REGIMES = True   # 🔧 RE-ENABLED: Test regime-strategy compatibility blocking
 
 # =============================================================================
 # INTELLIGENCE ANALYSIS CONFIGURATION

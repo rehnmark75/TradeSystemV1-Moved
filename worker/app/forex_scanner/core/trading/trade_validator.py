@@ -509,8 +509,16 @@ class TradeValidator:
         Returns:
             Tuple of (is_valid, validation_message)
         """
+        # ✅ ENHANCED SIGNAL ENTRY LOGGING
+        epic = signal.get('epic', 'Unknown')
+        strategy = signal.get('strategy', 'Unknown')
+        signal_type = signal.get('signal_type', 'Unknown')
+        confidence = signal.get('confidence_score', 0)
+
+        self.logger.info(f"🎯 STARTING VALIDATION: {epic} {signal_type} ({confidence:.1%}) [{strategy} strategy]")
+
         self.validation_stats['total_validations'] += 1
-        
+
         try:
             # 1. Basic structure validation
             valid, msg = self._validate_signal_structure(signal)
@@ -608,11 +616,18 @@ class TradeValidator:
                         signal['claude_validation_result'] = claude_result
 
             # 11. Market Intelligence validation (if enabled)
+            self.logger.info(f"🧠 {epic}: Market Intelligence filtering enabled: {self.enable_market_intelligence_filtering}")
             if self.enable_market_intelligence_filtering:
+                self.logger.info(f"🧠🎯 {epic}: CALLING MARKET INTELLIGENCE VALIDATION for {strategy} strategy")
                 valid, msg = self._validate_market_intelligence(signal)
                 if not valid:
                     self.validation_stats['failed_other'] += 1
+                    self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY MARKET INTELLIGENCE: {msg}")
                     return False, f"Market Intelligence: {msg}"
+                else:
+                    self.logger.info(f"🧠✅ {epic}: Market Intelligence validation PASSED: {msg}")
+            else:
+                self.logger.info(f"🧠⏭️ {epic}: Market Intelligence filtering DISABLED - skipping regime checks")
 
             # 12. Final trading suitability check
             valid, msg = self.check_trading_suitability(signal)
@@ -1601,15 +1616,29 @@ class TradeValidator:
         invalid_signals = []
         validation_stats = {}
         
-        self.logger.info(f"🔍 Validating {len(signals)} signals for trading...")
-        
+        # ✅ ENHANCED ENTRY LOGGING: Track all incoming signals
+        self.logger.info(f"🔍 TRADE VALIDATOR: Received {len(signals)} signals for trading validation")
+
+        # Log summary of incoming signals
+        if signals:
+            strategy_counts = {}
+            epic_counts = {}
+            for signal in signals:
+                strategy = signal.get('strategy', 'Unknown')
+                epic = signal.get('epic', 'Unknown')
+                strategy_counts[strategy] = strategy_counts.get(strategy, 0) + 1
+                epic_counts[epic] = epic_counts.get(epic, 0) + 1
+
+            self.logger.info(f"📊 SIGNALS BY STRATEGY: {dict(strategy_counts)}")
+            self.logger.info(f"📊 SIGNALS BY EPIC: {dict(epic_counts)}")
+
         for i, signal in enumerate(signals, 1):
             epic = signal.get('epic', 'Unknown')
             signal_type = signal.get('signal_type', 'Unknown')
             confidence = signal.get('confidence_score', 0)
             strategy = signal.get('strategy', 'Unknown')
-            
-            self.logger.debug(f"📊 Validating signal {i}/{len(signals)}: {epic} {signal_type} ({confidence:.1%}) - {strategy}")
+
+            self.logger.info(f"🔍 VALIDATING SIGNAL {i}/{len(signals)}: {epic} {signal_type} ({confidence:.1%}) - {strategy} strategy")
             
             # Get market data for this epic (if available)
             market_data = market_data_dict.get(epic) if market_data_dict else None
@@ -1744,6 +1773,7 @@ class TradeValidator:
             # 2. Check regime suitability for strategy (if enabled)
             if self.market_intelligence_block_unsuitable_regimes:
                 self.logger.info(f"🧠🔍 {epic}: Starting regime-strategy compatibility check")
+                self.logger.info(f"🧠⚙️ {epic}: REGIME BLOCKING IS ENABLED - will check strategy compatibility")
                 strategy_recommendations = intelligence_report.get('strategy_recommendations', {})
                 recommended_strategy = strategy_recommendations.get('primary_strategy', '').lower()
 

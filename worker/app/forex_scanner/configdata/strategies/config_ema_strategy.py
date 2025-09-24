@@ -157,7 +157,7 @@ TWO_POLE_OSCILLATOR_ENABLED = True      # TEMPORARILY DISABLE to test enhanced v
 TWO_POLE_FILTER_LENGTH = 20              # Filter length (default: 20)
 TWO_POLE_SMA_LENGTH = 25                 # SMA length for normalization (default: 25)  
 TWO_POLE_SIGNAL_DELAY = 4                # Signal delay in bars (default: 4)
-TWO_POLE_VALIDATION_ENABLED = True       # Use oscillator for signal validation
+TWO_POLE_VALIDATION_ENABLED = False       # 🔧 TEMPORARILY DISABLED: Use oscillator for signal validation
 TWO_POLE_MIN_STRENGTH = 0.1              # Minimum oscillator strength for signals
 TWO_POLE_ZONE_FILTER_ENABLED = True      # Require proper zone for signals (oversold/overbought)
 
@@ -369,7 +369,7 @@ EMA_ADX_WEAK_TREND_THRESHOLD = 15.0          # ADX value indicating weak trend (
 EMA_ADX_SCALING_FACTOR = 40.0                # ADX scaling factor for confidence calculation
 
 # BALANCED HIGH-QUALITY validation confidence scoring
-EMA_ENHANCED_MIN_CONFIDENCE = 0.72           # BALANCED MODE: High quality with good frequency
+EMA_ENHANCED_MIN_CONFIDENCE = 0.65           # 🔧 TEMPORARILY REDUCED: BALANCED MODE: High quality with good frequency
 EMA_VALIDATION_WEIGHTS = {
     "multi_candle": 0.25,                    # Weight for multi-candle confirmation
     "volume": 0.15,                          # Weight for volume analysis

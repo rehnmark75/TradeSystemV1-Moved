@@ -130,7 +130,7 @@ RVI_MIN_SWING_SIZE = 0.3             # Minimum swing size for valid signals
 
 # Multi-Oscillator Confluence Settings
 OSCILLATOR_CONFLUENCE_ENABLED = True
-OSCILLATOR_MIN_CONFIRMATIONS = 3       # Minimum oscillators agreeing for signal (high quality requirement)
+OSCILLATOR_MIN_CONFIRMATIONS = 2       # Minimum oscillators agreeing for signal (balanced quality)
 OSCILLATOR_WEIGHTS = {                 # Weight for each oscillator in confluence
     'squeeze_momentum': 0.35,          # Primary ranging market engine
     'wave_trend': 0.25,                # Trend/momentum hybrid
@@ -139,8 +139,8 @@ OSCILLATOR_WEIGHTS = {                 # Weight for each oscillator in confluenc
 }
 
 # Confluence Thresholds
-OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.30  # Minimum weighted score for bullish signal (balanced quality)
-OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.30  # Minimum weighted score for bearish signal (balanced quality)
+OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.12  # Minimum weighted score for bullish signal (balanced production)
+OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.12  # Minimum weighted score for bearish signal (balanced production)
 OSCILLATOR_EXTREME_CONFLUENCE_BOOST = 0.15   # Boost for extreme readings
 
 # Signal Quality Requirements
@@ -217,7 +217,7 @@ MTF_ZONE_CONFLUENCE = True             # Require S/R zone confluence
 # =============================================================================
 
 # Signal Quality Requirements
-SIGNAL_QUALITY_MIN_CONFIDENCE = 0.50   # Minimum confidence for signal generation (high quality)
+SIGNAL_QUALITY_MIN_CONFIDENCE = 0.45   # Minimum confidence for signal generation (balanced quality)
 SIGNAL_QUALITY_REQUIRE_VOLUME_CONFIRMATION = False  # Volume confirmation (if available)
 SIGNAL_QUALITY_MIN_RISK_REWARD = 1.8   # Minimum risk-reward ratio (high quality)
 SIGNAL_QUALITY_MAX_SPREAD_IMPACT = 0.3  # Maximum spread impact on signal quality

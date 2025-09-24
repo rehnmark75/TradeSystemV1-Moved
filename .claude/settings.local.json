@@ -70,7 +70,10 @@
       "mcp__serena__write_memory",
       "mcp__serena__list_memories",
       "mcp__serena__read_memory",
-      "mcp__serena__replace_regex"
+      "mcp__serena__replace_regex",
+      "Bash(xargs:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)"
     ],
     "deny": [],
     "ask": []

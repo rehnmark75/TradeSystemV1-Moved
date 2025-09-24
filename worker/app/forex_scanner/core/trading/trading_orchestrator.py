@@ -905,11 +905,24 @@ class TradingOrchestrator:
                 return []
             
             # 3. Apply NEW trade validation (trading-specific rules only, NO duplicate detection)
-            self.logger.info(f"🔍 Validating {len(intelligence_filtered_signals)} signals for trading...")
-            
+            self.logger.info(f"🔍 TRADING ORCHESTRATOR: Sending {len(intelligence_filtered_signals)} signals to TradeValidator")
+
+            # Log signal summary before validation
+            if intelligence_filtered_signals:
+                signal_summary = {}
+                for signal in intelligence_filtered_signals:
+                    strategy = signal.get('strategy', 'Unknown')
+                    epic = signal.get('epic', 'Unknown')
+                    key = f"{epic}-{strategy}"
+                    signal_summary[key] = signal_summary.get(key, 0) + 1
+                self.logger.info(f"📊 ORCHESTRATOR SIGNALS TO VALIDATE: {dict(signal_summary)}")
+
             if self.trade_validator:
                 valid_signals, invalid_signals = self.trade_validator.validate_signals_batch(intelligence_filtered_signals)
-                
+
+                # ✅ ENHANCED VALIDATION RESULTS LOGGING
+                self.logger.info(f"✅ ORCHESTRATOR: TradeValidator returned {len(valid_signals)} valid, {len(invalid_signals)} invalid signals")
+
                 if invalid_signals and len(invalid_signals) > 0:
                     # Create summary of rejected signals with epic names
                     rejected_epics = []
