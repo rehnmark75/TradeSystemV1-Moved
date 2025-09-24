@@ -1733,10 +1733,15 @@ class TradeValidator:
 
                 # Define regime-strategy compatibility
                 regime_strategy_compatibility = {
-                    'trending': ['ichimoku', 'ema', 'macd', 'kama'],
-                    'ranging': ['mean_reversion', 'bollinger', 'stochastic'],
-                    'breakout': ['bollinger', 'kama', 'momentum'],
-                    'consolidation': ['mean_reversion', 'stochastic']
+                    'trending': ['ichimoku', 'ema', 'macd', 'kama', 'smart_money_ema', 'smart_money_macd', 'bb_supertrend'],
+                    'ranging': ['mean_reversion', 'bollinger', 'stochastic', 'ranging_market', 'smc'],
+                    'breakout': ['bollinger', 'kama', 'momentum', 'momentum_bias', 'bb_supertrend'],
+                    'consolidation': ['mean_reversion', 'stochastic', 'ranging_market', 'smc'],
+                    'scalping': ['scalping', 'zero_lag', 'momentum_bias'],
+                    # Add volatility-based regimes
+                    'high_volatility': ['macd', 'zero_lag_squeeze', 'zero_lag', 'momentum', 'kama', 'ema', 'momentum_bias', 'bb_supertrend'],
+                    'low_volatility': ['mean_reversion', 'bollinger', 'stochastic', 'ema', 'ranging_market', 'smc'],
+                    'medium_volatility': ['ichimoku', 'ema', 'macd', 'kama', 'zero_lag_squeeze', 'zero_lag', 'smart_money_ema', 'smart_money_macd']
                 }
 
                 current_strategy_lower = strategy.lower()
