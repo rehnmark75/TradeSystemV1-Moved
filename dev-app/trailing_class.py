@@ -699,12 +699,12 @@ class Progressive3StageTrailing(TrailingStrategy):
         if ig_min_distance:
             lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
 
-                # ✅ VALIDATION: Ensure we're using lock points, not trigger points
-                if lock_points == progressive_config.stage1_trigger_points:
-                    self.logger.warning(f"⚠️ [VALIDATION] Trade {trade.id}: lock_points ({lock_points}) equals trigger_points! This might be incorrect.")
-                    if ig_min_distance and ig_min_distance != progressive_config.stage1_trigger_points:
-                        self.logger.info(f"🔧 [FIX] Trade {trade.id}: Using IG minimum ({ig_min_distance}) instead of trigger value")
-                        lock_points = max(1, round(ig_min_distance))
+            # ✅ VALIDATION: Ensure we're using lock points, not trigger points
+            if lock_points == progressive_config.stage1_trigger_points:
+                self.logger.warning(f"⚠️ [VALIDATION] Trade {trade.id}: lock_points ({lock_points}) equals trigger_points! This might be incorrect.")
+                if ig_min_distance and ig_min_distance != progressive_config.stage1_trigger_points:
+                    self.logger.info(f"🔧 [FIX] Trade {trade.id}: Using IG minimum ({ig_min_distance}) instead of trigger value")
+                    lock_points = max(1, round(ig_min_distance))
 
             self.logger.info(f"🎯 [STAGE 1 IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts")
         else:

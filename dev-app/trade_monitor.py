@@ -18,7 +18,8 @@ from services.db import SessionLocal
 from services.models import TradeLog, IGCandle  # ✅ CORRECT: IGCandle model for ig_candles table
 
 # Import utils functions
-from utils import get_point_value, convert_price_to_points  # ✅ ADDED: Import 
+from utils import get_point_value, convert_price_to_points  # ✅ ADDED: Import
+from database_monitoring_fix import DatabaseMonitoringFix  # ✅ CRITICAL FIX: Enhanced monitoring 
 # services/shared_types.py
 """
 Shared types and configurations to avoid circular imports
@@ -503,7 +504,13 @@ class TradeMonitor:
         print("🔧 Setting up logger...")
         logger_setup = TradeMonitorLogger()
         self.logger = logger_setup.get_logger()
-        
+
+        print("🚨 Initializing CRITICAL monitoring fix...")
+        self.monitoring_fix = DatabaseMonitoringFix(self.logger)
+        self.last_integrity_check = datetime.now()
+        self.integrity_check_interval = timedelta(minutes=5)
+        print("✅ Critical monitoring fix initialized")
+
         print("🔧 Creating order sender...")
         self.order_sender = OrderSender(self.api_config, self.logger)
         
@@ -651,11 +658,10 @@ class TradeMonitor:
             if not self.enhanced_status_manager and ENHANCED_STATUS_MANAGER_AVAILABLE:
                 self.enhanced_status_manager = EnhancedTradeStatusManager(self._trading_headers)
             
-            # Get active trades that need validation
+            # Get active trades that need validation - ENHANCED WITH CRITICAL FIX
             with SessionLocal() as db:
-                active_trades = (db.query(TradeLog)
-                               .filter(TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected"]))
-                               .all())
+                # 🚨 CRITICAL FIX: Use enhanced monitoring to prevent missed trades (like Trade 1161)
+                active_trades = self.monitoring_fix.get_active_trades_enhanced(db)
                 
                 validation_stats["checked"] = len(active_trades)
                 
@@ -910,14 +916,19 @@ class TradeMonitor:
                 }
                 self.logger.debug("🔄 Skipping validation this cycle - focusing on progressive trailing")
             
-            # Get trades to process
+            # Get trades to process - ENHANCED WITH CRITICAL FIX
             with SessionLocal() as db:
-                # ✅ FIX: Add database locking to prevent concurrent access issues
-                active_trades = (db.query(TradeLog)
-                               .filter(TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected"]))
-                               .order_by(TradeLog.id.desc())
-                               .limit(50)  # Process max 50 trades per cycle
-                               .all())
+                # 🚨 CRITICAL FIX: Use enhanced monitoring to prevent missed trades (like Trade 1161)
+                all_active_trades = self.monitoring_fix.get_active_trades_enhanced(db)
+                # Limit to 50 trades per cycle for performance
+                active_trades = all_active_trades[:50]
+
+                # Periodic integrity check to prevent monitoring gaps
+                if datetime.now() - self.last_integrity_check > self.integrity_check_interval:
+                    report = self.monitoring_fix.validate_monitoring_integrity(db)
+                    if report["status"] != "healthy":
+                        self.logger.error(f"🚨 MONITORING INTEGRITY ISSUE: {report}")
+                    self.last_integrity_check = datetime.now()
                 
                 stats["processed"] = len(active_trades)
                 
