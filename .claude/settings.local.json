@@ -62,7 +62,8 @@
       "Bash(pip3 list:*)",
       "Bash(dpkg:*)",
       "mcp__serena__get_current_config",
-      "mcp__serena__activate_project"
+      "mcp__serena__activate_project",
+      "mcp__serena__search_for_pattern"
     ],
     "deny": [],
     "ask": []
