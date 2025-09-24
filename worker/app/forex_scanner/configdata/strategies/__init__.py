@@ -10,6 +10,7 @@ from .config_ema_strategy import *
 from .config_smc_strategy import *
 from .config_ichimoku_strategy import *
 from .config_mean_reversion_strategy import *
+from .config_ranging_market_strategy import *
 
 # Import TradingView integration (optional)
 try:
@@ -439,7 +440,141 @@ __all__ = [
     'MEAN_REVERSION_ENABLE_PERFORMANCE_TRACKING',
     'MEAN_REVERSION_DEBUG_LOGGING',
     'MEAN_REVERSION_LOG_OSCILLATOR_VALUES',
-    'MEAN_REVERSION_LOG_CONFLUENCE_SCORES'
+    'MEAN_REVERSION_LOG_CONFLUENCE_SCORES',
+
+    # Ranging Market Strategy Core Settings
+    'RANGING_MARKET_STRATEGY',
+    'STRATEGY_WEIGHT_RANGING_MARKET',
+    'RANGING_MARKET_STRATEGY_WEIGHT',
+    'RANGING_MARKET_ALLOW_COMBINED',
+    'RANGING_MARKET_PRIORITY_LEVEL',
+
+    # Squeeze Momentum Settings
+    'SQUEEZE_MOMENTUM_ENABLED',
+    'SQUEEZE_BB_LENGTH',
+    'SQUEEZE_BB_MULT',
+    'SQUEEZE_KC_LENGTH',
+    'SQUEEZE_KC_MULT',
+    'SQUEEZE_MOMENTUM_LENGTH',
+    'SQUEEZE_USE_TRUE_RANGE',
+    'SQUEEZE_MIN_BARS_IN_SQUEEZE',
+    'SQUEEZE_MAX_BARS_IN_SQUEEZE',
+    'SQUEEZE_RELEASE_CONFIRMATION_BARS',
+    'SQUEEZE_MOMENTUM_THRESHOLD',
+    'SQUEEZE_REQUIRE_MOMENTUM_ALIGNMENT',
+    'SQUEEZE_MIN_MOMENTUM_CHANGE',
+    'SQUEEZE_FILTER_FALSE_BREAKOUTS',
+
+    # Wave Trend Oscillator Settings
+    'WAVE_TREND_ENABLED',
+    'WTO_CHANNEL_LENGTH',
+    'WTO_AVERAGE_LENGTH',
+    'WTO_SIGNAL_LENGTH',
+    'WTO_OVERBOUGHT_LEVEL',
+    'WTO_OVERSOLD_LEVEL',
+    'WTO_REQUIRE_SIGNAL_CROSSOVER',
+    'WTO_MIN_OSCILLATOR_SEPARATION',
+    'WTO_DIVERGENCE_DETECTION',
+    'WTO_DIVERGENCE_LOOKBACK',
+    'WTO_TREND_THRESHOLD',
+    'WTO_RANGING_ZONE_UPPER',
+    'WTO_RANGING_ZONE_LOWER',
+
+    # Bollinger Bands & Keltner Channel Settings
+    'BOLLINGER_BANDS_ENABLED',
+    'BB_LENGTH',
+    'BB_MULTIPLIER',
+    'BB_USE_CLOSE_PRICE',
+    'BB_PERCENT_B_ENABLED',
+    'KELTNER_CHANNELS_ENABLED',
+    'KC_LENGTH',
+    'KC_MULTIPLIER',
+    'KC_USE_EXPONENTIAL_MA',
+    'BB_KC_SQUEEZE_RATIO_THRESHOLD',
+    'BB_KC_EXPANSION_RATIO_THRESHOLD',
+    'BB_TOUCH_CONFIRMATION_BARS',
+    'BB_REJECTION_CONFIRMATION_BARS',
+
+    # RSI Settings for Ranging Markets
+    'RSI_ENABLED',
+    'RSI_PERIOD',
+    'RSI_OVERBOUGHT',
+    'RSI_OVERSOLD',
+    'RSI_EXTREME_OB',
+    'RSI_EXTREME_OS',
+    'RSI_DIVERGENCE_ENABLED',
+    'RSI_DIVERGENCE_LOOKBACK',
+    'RSI_MIN_DIVERGENCE_BARS',
+    'RSI_DIVERGENCE_STRENGTH_THRESHOLD',
+    'RSI_REQUIRE_DOUBLE_DIVERGENCE',
+    'RSI_MEAN_REVERSION_ENABLED',
+    'RSI_MEAN_LEVEL',
+    'RSI_MEAN_REVERSION_DISTANCE',
+
+    # RVI Settings
+    'RVI_ENABLED',
+    'RVI_PERIOD',
+    'RVI_SIGNAL_PERIOD',
+    'RVI_OVERBOUGHT',
+    'RVI_OVERSOLD',
+    'RVI_REQUIRE_SIGNAL_CROSSOVER',
+    'RVI_MOMENTUM_CONFIRMATION',
+    'RVI_DIVERGENCE_DETECTION',
+    'RVI_MIN_SWING_SIZE',
+
+    # Ranging Market Oscillator Confluence
+    'OSCILLATOR_CONFLUENCE_ENABLED',
+    'OSCILLATOR_MIN_CONFIRMATIONS',
+    'OSCILLATOR_WEIGHTS',
+    'OSCILLATOR_BULL_CONFLUENCE_THRESHOLD',
+    'OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD',
+    'OSCILLATOR_EXTREME_CONFLUENCE_BOOST',
+    'CONFLUENCE_REQUIRE_PRIMARY_AGREEMENT',
+    'CONFLUENCE_ALLOW_MIXED_SIGNALS',
+    'CONFLUENCE_MIN_SIGNAL_STRENGTH',
+
+    # Market Regime Detection
+    'MARKET_REGIME_DETECTION_ENABLED',
+    'REGIME_VOLATILITY_PERIOD',
+    'REGIME_TREND_PERIOD',
+    'REGIME_ADX_THRESHOLD',
+    'RANGING_MARKET_ADX_MAX',
+    'RANGING_MARKET_ATR_STABILITY',
+    'RANGING_MARKET_MIN_DURATION',
+    'RANGING_MARKET_PRICE_OSCILLATION',
+    'REGIME_DISABLE_IN_STRONG_TREND',
+    'REGIME_BOOST_IN_RANGING',
+    'REGIME_TREND_STRENGTH_THRESHOLD',
+    'REGIME_VOLATILITY_FILTER',
+
+    # Ranging Market Risk Management
+    'RANGING_POSITION_SIZE_MULTIPLIER',
+    'RANGING_MAX_DRAWDOWN_THRESHOLD',
+    'RANGING_MAX_DAILY_LOSS',
+    'RANGING_DEFAULT_SL_PIPS',
+    'RANGING_DEFAULT_TP_PIPS',
+    'RANGING_DYNAMIC_SL_TP',
+    'RANGING_TRAIL_STOP_ENABLED',
+    'RANGING_SL_BASED_ON_RANGE',
+    'RANGING_TP_BASED_ON_RANGE',
+    'RANGING_RANGE_SL_MULTIPLIER',
+    'RANGING_RANGE_TP_MULTIPLIER',
+    'RANGING_VOLATILITY_SL_ADJUSTMENT',
+    'RANGING_ATR_SL_MULTIPLIER',
+    'RANGING_ATR_TP_MULTIPLIER',
+    'RANGING_MARKET_SAFETY_PRESETS',
+
+    # Performance and Debug Settings
+    'RANGING_MARKET_ENABLE_BACKTESTING',
+    'RANGING_MARKET_MIN_DATA_PERIODS',
+    'RANGING_MARKET_ENABLE_PERFORMANCE_TRACKING',
+    'RANGING_MARKET_DEBUG_LOGGING',
+    'RANGING_MARKET_LOG_OSCILLATOR_VALUES',
+    'RANGING_MARKET_LOG_CONFLUENCE_SCORES',
+    'RANGING_MARKET_LOG_ZONE_INTERACTIONS',
+
+    # Ranging Market Helper Functions
+    'get_ranging_market_config_summary'
 ]
 
 # Add TradingView integration functions if available
@@ -463,13 +598,14 @@ __description__ = "Strategy-specific configuration modules for ZeroLag, MACD, EM
 def get_strategies_summary() -> dict:
     """Get a summary of all loaded strategy configurations"""
     return {
-        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc', 'ichimoku', 'mean_reversion'],
+        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc', 'ichimoku', 'mean_reversion', 'ranging_market'],
         'zerolag_enabled': globals().get('ZERO_LAG_STRATEGY', False),
         'macd_enabled': globals().get('MACD_EMA_STRATEGY', False),
         'ema_enabled': globals().get('SIMPLE_EMA_STRATEGY', False),
         'smc_enabled': globals().get('SMC_STRATEGY', False),
         'ichimoku_enabled': globals().get('ICHIMOKU_CLOUD_STRATEGY', False),
         'mean_reversion_enabled': globals().get('MEAN_REVERSION_STRATEGY', False),
+        'ranging_market_enabled': globals().get('RANGING_MARKET_STRATEGY', False),
         'total_settings': len(__all__)
     }
 
@@ -481,7 +617,8 @@ def validate_strategy_configs() -> dict:
         'ema': _validate_ema_config(),
         'smc': _validate_smc_config(),
         'ichimoku': _validate_ichimoku_config(),
-        'mean_reversion': _validate_mean_reversion_config()
+        'mean_reversion': _validate_mean_reversion_config(),
+        'ranging_market': _validate_ranging_market_config()
     }
     
     # Add TradingView integration validation if available
@@ -724,6 +861,51 @@ def _validate_mean_reversion_config() -> bool:
         print(f"❌ Mean Reversion config validation failed: {e}")
         return False
 
+def _validate_ranging_market_config() -> bool:
+    """Validate Ranging Market strategy configuration"""
+    try:
+        required_ranging_market_configs = [
+            'RANGING_MARKET_STRATEGY', 'STRATEGY_WEIGHT_RANGING_MARKET',
+            'SQUEEZE_MOMENTUM_ENABLED', 'WAVE_TREND_ENABLED',
+            'OSCILLATOR_CONFLUENCE_ENABLED', 'SIGNAL_QUALITY_MIN_CONFIDENCE'
+        ]
+
+        for config_name in required_ranging_market_configs:
+            if config_name not in globals():
+                print(f"❌ Missing Ranging Market config: {config_name}")
+                return False
+
+        # Validate weight values are reasonable
+        strategy_weight = globals().get('STRATEGY_WEIGHT_RANGING_MARKET', 0)
+        if not (0 <= strategy_weight <= 1):
+            print("❌ STRATEGY_WEIGHT_RANGING_MARKET must be between 0 and 1")
+            return False
+
+        # Validate confidence settings
+        min_confidence = globals().get('SIGNAL_QUALITY_MIN_CONFIDENCE', 0)
+        if not (0 <= min_confidence <= 1):
+            print("❌ SIGNAL_QUALITY_MIN_CONFIDENCE must be between 0 and 1")
+            return False
+
+        # Validate oscillator confluence settings
+        min_confirmations = globals().get('OSCILLATOR_MIN_CONFIRMATIONS', 0)
+        if min_confirmations < 1:
+            print("❌ OSCILLATOR_MIN_CONFIRMATIONS must be >= 1")
+            return False
+
+        bull_threshold = globals().get('OSCILLATOR_BULL_CONFLUENCE_THRESHOLD', 0)
+        bear_threshold = globals().get('OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD', 0)
+        if not (0 <= bull_threshold <= 1) or not (0 <= bear_threshold <= 1):
+            print("❌ Oscillator confluence thresholds must be between 0 and 1")
+            return False
+
+        print("✅ Ranging Market configuration validation passed")
+        return True
+
+    except Exception as e:
+        print(f"❌ Ranging Market config validation failed: {e}")
+        return False
+
 # Validate configurations on import (can be disabled in production)
 try:
     validation_result = validate_strategy_configs()
@@ -734,4 +916,4 @@ try:
 except Exception as e:
     print(f"⚠️ Strategy configuration validation error: {e}")
 
-print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}, Mean Reversion: {globals().get('MEAN_REVERSION_STRATEGY', False)}")
+print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}, Mean Reversion: {globals().get('MEAN_REVERSION_STRATEGY', False)}, Ranging Market: {globals().get('RANGING_MARKET_STRATEGY', False)}")
