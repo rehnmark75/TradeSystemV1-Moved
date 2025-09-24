@@ -14,6 +14,8 @@ from .zero_lag_strategy import ZeroLagStrategy
 from .smc_strategy import SMCStrategy, create_smc_strategy
 from .smc_strategy_fast import SMCStrategyFast, create_smc_strategy_fast
 from .mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
+from .rag_intelligence_strategy import RAGIntelligenceStrategy
+
 __all__ = [
     'BaseStrategy',
     'EMAStrategy',
@@ -28,5 +30,6 @@ __all__ = [
     'SMCStrategyFast',
     'create_smc_strategy_fast',
     'MeanReversionStrategy',
-    'create_mean_reversion_strategy'
+    'create_mean_reversion_strategy',
+    'RAGIntelligenceStrategy'
 ]
