@@ -12,12 +12,14 @@ from .data_fetcher import DataFetcher
 from .scanner import ForexScanner, IntelligentForexScanner
 from .signal_detector import SignalDetector
 
-# Strategy modules - Original strategies
-from .strategies.base_strategy import BaseStrategy
-from .strategies.ema_strategy import EMAStrategy
-from .strategies.macd_strategy import MACDStrategy
-# from .strategies.combined_strategy import CombinedStrategy  # Removed - strategy was disabled and unused
-from .strategies.scalping_strategy import ScalpingStrategy
+# Strategy modules - Import from strategies package (cleaner approach)
+from .strategies import (
+    BaseStrategy,
+    EMAStrategy,
+    MACDStrategy,
+    ScalpingStrategy,
+    # Import other strategies as needed without redundancy
+)
 
 # NEW: Smart Money Strategy modules (Phase 1 & 2)
 def get_smart_money_ema_strategy():
@@ -179,21 +181,25 @@ __all__ = [
 
 # Module-level convenience functions - Enhanced
 def get_available_strategies():
-    """Get list of available trading strategies"""
-    strategies = [
-        'EMAStrategy',
-        'MACDStrategy', 
-        # 'CombinedStrategy',  # Removed - strategy was disabled and unused
-        'ScalpingStrategy'
-    ]
-    
+    """Get list of available trading strategies (dynamically detected)"""
+    strategies = []
+
+    # Dynamically detect available strategies from the strategies module
+    try:
+        from .strategies import __all__ as strategy_exports
+        # Filter to only include classes that end with 'Strategy'
+        strategies = [name for name in strategy_exports if name.endswith('Strategy')]
+    except ImportError:
+        # Fallback to basic list if strategies module can't be imported
+        strategies = ['EMAStrategy', 'MACDStrategy', 'ScalpingStrategy']
+
     # Add smart money strategies if available
     if get_smart_money_ema_strategy():
         strategies.append('SmartMoneyEMAStrategy')
     if get_smart_money_macd_strategy():
         strategies.append('SmartMoneyMACDStrategy')
-    
-    return strategies
+
+    return sorted(strategies)
 
 # NEW: Get smart money strategies
 def get_smart_money_strategies():
@@ -382,27 +388,34 @@ def validate_core_imports():
     except ImportError as e:
         import_status['SignalDetector'] = str(e)
     
-    # Test strategy imports
+    # Test strategy imports (using proper package-based imports)
     try:
-        from .strategies.ema_strategy import EMAStrategy
+        from .strategies import EMAStrategy, MACDStrategy, ScalpingStrategy
         import_status['EMAStrategy'] = True
-    except ImportError as e:
-        import_status['EMAStrategy'] = str(e)
-    
-    try:
-        from .strategies.macd_strategy import MACDStrategy
         import_status['MACDStrategy'] = True
-    except ImportError as e:
-        import_status['MACDStrategy'] = str(e)
-    
-    # Combined strategy validation removed - strategy was disabled and unused
-    import_status['CombinedStrategy'] = 'Removed - strategy was disabled and unused'
-    
-    try:
-        from .strategies.scalping_strategy import ScalpingStrategy
         import_status['ScalpingStrategy'] = True
     except ImportError as e:
-        import_status['ScalpingStrategy'] = str(e)
+        # Test individual imports to identify specific failures
+        try:
+            from .strategies import EMAStrategy
+            import_status['EMAStrategy'] = True
+        except ImportError as e:
+            import_status['EMAStrategy'] = str(e)
+
+        try:
+            from .strategies import MACDStrategy
+            import_status['MACDStrategy'] = True
+        except ImportError as e:
+            import_status['MACDStrategy'] = str(e)
+
+        try:
+            from .strategies import ScalpingStrategy
+            import_status['ScalpingStrategy'] = True
+        except ImportError as e:
+            import_status['ScalpingStrategy'] = str(e)
+
+    # Combined strategy validation removed - strategy was disabled and unused
+    import_status['CombinedStrategy'] = 'Removed - strategy was disabled and unused'
     
     # Test detection utilities
     try:
