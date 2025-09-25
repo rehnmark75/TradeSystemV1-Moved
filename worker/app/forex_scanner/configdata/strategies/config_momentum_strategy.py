@@ -111,10 +111,10 @@ MOMENTUM_ADAPTIVE_SMOOTHING = True
 # Momentum calculation method
 MOMENTUM_CALCULATION_METHOD = 'velocity_weighted'  # Options: 'simple', 'velocity_weighted', 'volume_weighted'
 
-# Threshold settings
-MOMENTUM_SIGNAL_THRESHOLD = 0.0001  # Minimum momentum threshold for signal
-MOMENTUM_DIVERGENCE_THRESHOLD = 0.00005  # Momentum divergence threshold
-MOMENTUM_VELOCITY_THRESHOLD = 0.00002  # Velocity threshold
+# Threshold settings - Optimized for 20-50 signals per week
+MOMENTUM_SIGNAL_THRESHOLD = 0.0003   # Slightly more sensitive for target range
+MOMENTUM_DIVERGENCE_THRESHOLD = 0.00015  # Slightly more sensitive
+MOMENTUM_VELOCITY_THRESHOLD = 0.00008    # Slightly more sensitive
 
 # Volume confirmation settings
 MOMENTUM_VOLUME_MULTIPLIER = 1.2  # Volume must be 1.2x average
@@ -130,8 +130,8 @@ MOMENTUM_STOP_LOSS_METHOD = 'adaptive'  # Options: 'fixed', 'atr', 'adaptive'
 MOMENTUM_TAKE_PROFIT_RATIO = 2.0  # 2:1 reward:risk ratio
 
 # Signal validation
-MOMENTUM_MIN_CONFIDENCE = 0.10  # Further lowered to 10% for testing purposes
-MOMENTUM_SIGNAL_COOLDOWN = 300  # 5 minutes cooldown between signals
+MOMENTUM_MIN_CONFIDENCE = 0.12  # 12% confidence - target 20-50 signals per week
+MOMENTUM_SIGNAL_COOLDOWN = 900   # 15 minutes cooldown between signals
 
 def get_momentum_config_for_epic(epic: str, market_condition: str = 'default') -> dict:
     """Get momentum configuration for specific epic with fallbacks"""

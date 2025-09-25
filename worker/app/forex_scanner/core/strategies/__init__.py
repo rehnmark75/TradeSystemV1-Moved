@@ -11,6 +11,7 @@ from .bb_supertrend_strategy import BollingerSupertrendStrategy
 from .kama_strategy import KAMAStrategy
 from .momentum_bias_strategy import MomentumBiasStrategy
 from .zero_lag_strategy import ZeroLagStrategy
+from .momentum_strategy import MomentumStrategy
 from .smc_strategy import SMCStrategy, create_smc_strategy
 from .smc_strategy_fast import SMCStrategyFast, create_smc_strategy_fast
 from .mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
@@ -23,6 +24,7 @@ __all__ = [
     'KAMAStrategy',
     'MomentumBiasStrategy',
     'ZeroLagStrategy',
+    'MomentumStrategy',
     'SMCStrategy',
     'create_smc_strategy',
     'SMCStrategyFast',

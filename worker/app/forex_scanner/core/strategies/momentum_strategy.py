@@ -556,12 +556,18 @@ class MomentumStrategy(BaseStrategy):
             trigger_reason = 'momentum_crossover_bearish'
             self.logger.debug(f"   🎯 BEAR signal: fast={fast_momentum:.6f} < slow={slow_momentum:.6f}, velocity={velocity_momentum:.6f}")
 
-        # Alternative signal: Strong momentum divergence (inspired by TradingView scripts)
-        elif abs(fast_momentum - slow_momentum) > self.signal_threshold * 2:
-            if fast_momentum > slow_momentum and velocity_confirmation_bull:
+        # Alternative signal: Strong momentum divergence (balanced conditions)
+        elif abs(fast_momentum - slow_momentum) > self.signal_threshold * 4:  # Balanced threshold
+            if (fast_momentum > slow_momentum and
+                velocity_confirmation_bull and
+                volume_confirmation and
+                fast_momentum > self.signal_threshold * 3):  # Balanced strength requirement
                 signal_type = 'BULL'
                 trigger_reason = 'strong_momentum_divergence_bull'
-            elif fast_momentum < slow_momentum and velocity_confirmation_bear:
+            elif (fast_momentum < slow_momentum and
+                  velocity_confirmation_bear and
+                  volume_confirmation and
+                  fast_momentum < -self.signal_threshold * 3):  # Balanced strength requirement
                 signal_type = 'BEAR'
                 trigger_reason = 'strong_momentum_divergence_bear'
 
@@ -811,12 +817,16 @@ class MomentumStrategy(BaseStrategy):
             stop_distance = max(2.0 * spread_adjustment, 1.5 * atr_value)
             target_distance = 2.0 * stop_distance  # 2:1 RR
 
+            # Calculate stop loss and take profit
+            stop_loss_price = current_price - stop_distance if signal_type == 'BULL' else current_price + stop_distance
+            take_profit_price = current_price + target_distance if signal_type == 'BULL' else current_price - target_distance
+
             signal.update({
-                'stop_loss': current_price - stop_distance if signal_type == 'BULL' else current_price + stop_distance,
-                'take_profit': current_price + target_distance if signal_type == 'BULL' else current_price - target_distance,
+                'stop_loss': stop_loss_price,
+                'take_profit': take_profit_price,
                 'risk_reward_ratio': 2.0,
-                'stop_loss_suggestion': signal['stop_loss'],
-                'take_profit_suggestion': signal['take_profit']
+                'stop_loss_suggestion': stop_loss_price,
+                'take_profit_suggestion': take_profit_price
             })
 
             # Market context
