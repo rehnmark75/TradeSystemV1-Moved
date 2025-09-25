@@ -1331,14 +1331,14 @@ COMPRESS_OLD_LOGS = True
 # Smart Money Configuration moved to configdata/strategies/config_smc_strategy.py
 
 ZERO_LAG_STRATEGY = True
-MOMENTUM_BIAS_STRATEGY = False
+# MOMENTUM_BIAS_STRATEGY removed - legacy strategy replaced by MOMENTUM_STRATEGY
 MOMENTUM_STRATEGY = True
 
 ZERO_LAG_STRATEGY_ENABLED = True
-MOMENTUM_BIAS_STRATEGY_ENABLED = False
+# MOMENTUM_BIAS_STRATEGY_ENABLED removed - legacy strategy replaced by MOMENTUM_STRATEGY
 MOMENTUM_STRATEGY_ENABLED = True
 USE_ZERO_LAG_STRATEGY = True
-USE_MOMENTUM_BIAS_STRATEGY = False
+# USE_MOMENTUM_BIAS_STRATEGY removed - legacy strategy replaced by MOMENTUM_STRATEGY
 USE_MOMENTUM_STRATEGY = True
 
 
@@ -1371,14 +1371,14 @@ REQUIRED_INDICATORS_BY_STRATEGY = {
     'ema': ['ema', 'close', 'high', 'low'],
     'macd': ['macd', 'ema', 'close'],
     'kama': ['kama', 'close', 'high', 'low'] if KAMA_STRATEGY else [],
-    'momentum_bias': ['momentum_bias', 'close', 'high', 'low'] if MOMENTUM_BIAS_STRATEGY else [],
+    # 'momentum_bias' removed - legacy strategy replaced by momentum
     'momentum': ['momentum', 'close', 'high', 'low', 'volume'] if MOMENTUM_STRATEGY else [],
     'zero_lag_ema': ['zero_lag', 'close', 'high', 'low'] if ZERO_LAG_STRATEGY else [],
     'bb_supertrend': ['bb_supertrend', 'close', 'high', 'low', 'volume'] if BOLLINGER_SUPERTREND_STRATEGY else [],
     # CRITICAL FIX: Only include enabled strategies in combined
     'combined': (['ema', 'macd'] +
                 (['kama'] if KAMA_STRATEGY else []) +
-                (['momentum_bias'] if MOMENTUM_BIAS_STRATEGY else []) +
+                # momentum_bias removed - legacy strategy replaced by momentum
                 (['momentum'] if MOMENTUM_STRATEGY else []) +
                 (['zero_lag'] if ZERO_LAG_STRATEGY else []) +
                 (['bb_supertrend'] if BOLLINGER_SUPERTREND_STRATEGY else []))

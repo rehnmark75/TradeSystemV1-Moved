@@ -113,21 +113,6 @@ class SignalDetector:
         else:
             self.zero_lag_strategy = None
 
-        # Momentum Bias Strategy - FIXED INITIALIZATION
-        if getattr(config, 'MOMENTUM_BIAS_STRATEGY', False):
-            try:
-                from core.strategies.momentum_bias_strategy import MomentumBiasStrategy
-                self.momentum_bias_strategy = MomentumBiasStrategy()
-                self.logger.info("✅ Momentum Bias strategy initialized")
-            except ImportError as e:
-                self.logger.error(f"❌ Failed to import MomentumBiasStrategy: {e}")
-                self.momentum_bias_strategy = None
-            except Exception as e:
-                self.logger.error(f"❌ Failed to initialize Momentum Bias strategy: {e}")
-                self.momentum_bias_strategy = None
-        else:
-            self.momentum_bias_strategy = None
-            self.logger.info("⚪ Momentum Bias strategy disabled")
 
         # Initialize Advanced Momentum Strategy if enabled
         if getattr(config, 'MOMENTUM_STRATEGY', False):
@@ -497,46 +482,6 @@ class SignalDetector:
             self.logger.error(f"Error detecting Zero-Lag signals for {epic}: {e}")
             return None
 
-    def detect_momentum_bias_signals(
-        self, 
-        epic: str, 
-        pair: str, 
-        spread_pips: float = 1.5,
-        timeframe: str = None
-    ) -> Optional[Dict]:
-        """Detect Momentum Bias signals with proper null checking"""
-        
-        # Check if momentum bias strategy is enabled and available
-        if not getattr(config, 'MOMENTUM_BIAS_STRATEGY', False):
-            return None
-            
-        if not hasattr(self, 'momentum_bias_strategy') or self.momentum_bias_strategy is None:
-            self.logger.debug("Momentum Bias strategy not available or not initialized")
-            return None
-            
-        try:
-            # Get enhanced data
-            df = self.data_fetcher.get_enhanced_data(
-                epic, pair, timeframe=timeframe, 
-                ema_strategy=self.ema_strategy
-            )
-            
-            if df is None or len(df) < system_config.MIN_BARS_FOR_SIGNAL:
-                return None
-            
-            # Use Momentum Bias strategy
-            signal = self.momentum_bias_strategy.detect_signal(df, epic, spread_pips, timeframe)
-            
-            if signal:
-                # Add enhanced market context
-                signal = self._add_market_context(signal, df)
-                signal = add_smart_money_to_signal(signal, epic, self.data_fetcher, self.db_manager)
-            
-            return signal
-            
-        except Exception as e:
-            self.logger.error(f"❌ momentum_bias strategy error: {e}")
-            return None
 
     def detect_momentum_signals(
         self,
@@ -899,25 +844,6 @@ class SignalDetector:
                     self.logger.error(f"❌ [SCALPING] Error for {epic}: {e}")
                     individual_results['scalping'] = None
             
-            # 7. Momentum Bias Strategy (if enabled)
-            if (getattr(config, 'MOMENTUM_BIAS_STRATEGY', False) and
-                hasattr(self, 'momentum_bias_strategy') and self.momentum_bias_strategy is not None):
-                try:
-                    self.logger.debug(f"🔍 [MOMENTUM BIAS] Starting detection for {epic}")
-                    momentum_signal = self.detect_momentum_bias_signals(epic, pair, spread_pips, timeframe)
-                    
-                    # 🔧 NEW: Store result for combined strategy
-                    individual_results['momentum_bias'] = momentum_signal
-                    
-                    if momentum_signal:
-                        all_signals.append(momentum_signal)
-                        self.logger.info(f"✅ [MOMENTUM BIAS] Signal detected for {epic}")
-                    else:
-                        self.logger.debug(f"📊 [MOMENTUM BIAS] No signal for {epic}")
-                        
-                except Exception as e:
-                    self.logger.error(f"❌ [MOMENTUM BIAS] Error for {epic}: {e}")
-                    individual_results['momentum_bias'] = None
 
             # 8. Advanced Momentum Strategy (if enabled)
             if (getattr(config, 'MOMENTUM_STRATEGY', False) and

@@ -9,12 +9,14 @@ from .macd_strategy import MACDStrategy
 from .combined_strategy import CombinedStrategy
 from .bb_supertrend_strategy import BollingerSupertrendStrategy
 from .kama_strategy import KAMAStrategy
-from .momentum_bias_strategy import MomentumBiasStrategy
 from .zero_lag_strategy import ZeroLagStrategy
 from .momentum_strategy import MomentumStrategy
 from .smc_strategy import SMCStrategy, create_smc_strategy
 from .smc_strategy_fast import SMCStrategyFast, create_smc_strategy_fast
 from .mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
+from .ichimoku_strategy import IchimokuStrategy
+from .ranging_market_strategy import RangingMarketStrategy
+from .scalping_strategy import ScalpingStrategy
 __all__ = [
     'BaseStrategy',
     'EMAStrategy',
@@ -22,7 +24,6 @@ __all__ = [
     'CombinedStrategy',
     'BollingerSupertrendStrategy',
     'KAMAStrategy',
-    'MomentumBiasStrategy',
     'ZeroLagStrategy',
     'MomentumStrategy',
     'SMCStrategy',
@@ -30,5 +31,8 @@ __all__ = [
     'SMCStrategyFast',
     'create_smc_strategy_fast',
     'MeanReversionStrategy',
-    'create_mean_reversion_strategy'
+    'create_mean_reversion_strategy',
+    'IchimokuStrategy',
+    'RangingMarketStrategy',
+    'ScalpingStrategy'
 ]
