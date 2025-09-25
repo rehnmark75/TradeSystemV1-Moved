@@ -441,7 +441,7 @@ if ema_config:
 
 # Add legend for trade markers
 with st.expander("📊 Chart Legend", expanded=False):
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.markdown("""
         **Trade Arrows:**
@@ -458,13 +458,23 @@ with st.expander("📊 Chart Legend", expanded=False):
         """)
     with col3:
         st.markdown("""
+        **Market Intelligence:**
+        - 🟢T = Trending regime
+        - 🟡R = Ranging regime
+        - 🟠B = Breakout regime
+        - 🔴V = Reversal regime
+        - 🔴H = High volatility
+        - 🔵L = Low volatility
+        """)
+    with col4:
+        st.markdown("""
         **Risk Management:**
         - 🔴 Circle = Stop Loss Level
         - 🟢 Circle = Take Profit Level
         - 🟡 Circle = Moved to Breakeven
         - 🟣 Circle = Trailing Active
         """)
-    with col4:
+    with col5:
         ema_periods = (ema_config.short_period, ema_config.long_period, ema_config.trend_period) if ema_config else (21, 50, 200)
         legend_text = f"""
         **EMA Indicators:**
@@ -679,8 +689,27 @@ for row in trades_df.itertuples():
         except (ValueError, TypeError):
             marker_color = "#1f77b4"  # Can't determine, treat as running (blue)
 
-    # Add P&L to text if available
+    # Extract market intelligence data if available
+    regime = getattr(row, 'regime', None)
+    regime_confidence = getattr(row, 'regime_confidence', None)
+    session = getattr(row, 'session', None)
+    volatility_level = getattr(row, 'volatility_level', None)
+
+    # Get regime icon/indicator
+    regime_indicators = {
+        'trending': '🟢T',
+        'ranging': '🟡R',
+        'breakout': '🟠B',
+        'reversal': '🔴V',
+        'high_volatility': '🔴H',
+        'low_volatility': '🔵L'
+    }
+    regime_indicator = regime_indicators.get(regime, '') if regime else ''
+
+    # Build enhanced text label with market intelligence
     text_label = f"{strategy_name}" if strategy_name else ("BUY" if is_bull else "SELL")
+
+    # Add P&L to text if available
     if hasattr(row, 'profit_loss') and row.profit_loss is not None:
         try:
             pnl_value = float(row.profit_loss)
@@ -689,13 +718,33 @@ for row in trades_df.itertuples():
         except (ValueError, TypeError):
             pass
 
-    # Main trade marker (arrow) - keep this clean with just strategy and P&L
+    # Add regime indicator to text
+    if regime_indicator:
+        text_label += f" {regime_indicator}"
+
+    # Create enhanced tooltip with market intelligence
+    tooltip_parts = [text_label]
+    if regime and regime_confidence:
+        tooltip_parts.append(f"Regime: {regime.title()} ({regime_confidence:.0%})")
+    if session:
+        tooltip_parts.append(f"Session: {session}")
+    if volatility_level:
+        tooltip_parts.append(f"Vol: {volatility_level.title()}")
+
+    # Join all tooltip parts with line breaks (if supported) or separators
+    enhanced_text = " | ".join(tooltip_parts) if len(tooltip_parts) > 1 else text_label
+
+    # Enhance marker color with regime-based modifications
+    # Keep primary P&L color but add regime-based styling via text indicators
+    final_marker_color = marker_color
+
+    # Main trade marker (arrow) - enhanced with market intelligence
     marker = {
         "time": timestamp,
         "position": "aboveBar" if is_bull else "belowBar",
-        "color": marker_color,
+        "color": final_marker_color,
         "shape": "arrowUp" if is_bull else "arrowDown",
-        "text": text_label
+        "text": enhanced_text
     }
     trade_markers.append(marker)
 
@@ -1564,156 +1613,220 @@ if not trades_df.empty:
 # Display Trade Context Analysis if enabled
 if show_trade_context and not trades_df.empty:
     st.subheader("📊 Trade Context Analysis")
-    st.write("Understanding market conditions when trades occurred")
-    
-    # Get intelligence service
-    try:
-        intelligence_service = get_intelligence_service()
-        
-        if intelligence_service.is_available():
-            # Create tabs for different views
-            tab1, tab2, tab3 = st.tabs(["Individual Trades", "Regime Performance", "Trade Summary"])
-            
-            with tab1:
-                st.write("**Trade-by-Trade Analysis**")
-                
-                trade_contexts = []
-                for idx, trade in trades_df.head(10).iterrows():  # Limit to 10 for performance
-                    try:
-                        trade_data = {
-                            'entry_time': trade['timestamp'],
-                            'direction': trade['direction'], 
-                            'pnl': trade.get('profit_loss', 0),
-                            'strategy': trade.get('strategy', 'Unknown')
-                        }
-                        
-                        context = intelligence_service.analyze_trade_context(trade_data, selected_epic)
-                        trade_contexts.append(context)
-                        
-                        # Display individual trade analysis
-                        success_color = "🟢" if context.get('success', False) else "🔴"
-                        regime = context.get('dominant_regime', 'unknown')
-                        quality_score = context.get('trade_quality_score', 0) * 100
-                        
-                        with st.expander(f"{success_color} {trade_data['strategy']} {trade_data['direction']} - PnL: {trade_data['pnl']:.2f} ({quality_score:.0f}% quality)", expanded=False):
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write("**Market Conditions:**")
-                                st.write(f"• Regime: {regime.title()}")
-                                st.write(f"• Session: {context.get('current_session', 'unknown').title()}")
-                                st.write(f"• Volatility: {context.get('volatility_percentile', 50):.0f}th percentile")
-                                st.write(f"• Volume: {context.get('volume_relative', 1):.1f}x normal")
-                            
-                            with col2:
-                                st.write("**Trade Analysis:**")
-                                regime_align = context.get('regime_alignment', {})
-                                session_align = context.get('session_alignment', {})
-                                st.write(f"• Regime Alignment: {regime_align.get('alignment', 'unknown').title()}")
-                                st.write(f"• Quality Score: {quality_score:.0f}%")
-                                st.write(f"• Entry Price: {context.get('entry_price', 0):.5f}")
-                                st.write(f"• Regime Score: {regime_align.get('score', 0):.1%}")
-                                st.write(f"• Session Score: {session_align.get('score', 0):.1%}")
-                            
-                            # Success factors and improvements
-                            st.write("**Key Insights:**")
-                            for factor in context.get('success_factors', [])[:3]:  # Limit to top 3
-                                st.write(f"✓ {factor}")
-                            
-                            for suggestion in context.get('improvement_suggestions', [])[:2]:  # Limit to top 2
-                                st.write(f"💡 {suggestion}")
-                            
-                    except Exception as e:
-                        st.error(f"Error analyzing trade {idx}: {str(e)[:100]}")
-                        continue
-            
-            with tab2:
-                st.write("**Performance by Market Regime**")
-                
-                if 'trade_contexts' in locals() and trade_contexts:
-                    # Create regime performance summary
-                    regime_performance = {}
-                    
-                    for context in trade_contexts:
-                        regime = context.get('dominant_regime', 'unknown')
-                        success = context.get('success', False)
-                        pnl = context.get('pnl', 0)
-                        
-                        if regime not in regime_performance:
-                            regime_performance[regime] = {
-                                'total_trades': 0,
-                                'winning_trades': 0,
-                                'total_pnl': 0,
-                                'avg_quality': 0
-                            }
-                        
-                        regime_performance[regime]['total_trades'] += 1
-                        if success:
-                            regime_performance[regime]['winning_trades'] += 1
-                        regime_performance[regime]['total_pnl'] += pnl
-                        regime_performance[regime]['avg_quality'] += context.get('trade_quality_score', 0)
-                    
-                    # Display regime performance table
-                    regime_data = []
-                    for regime, stats in regime_performance.items():
-                        win_rate = (stats['winning_trades'] / stats['total_trades']) * 100 if stats['total_trades'] > 0 else 0
-                        avg_quality = (stats['avg_quality'] / stats['total_trades']) * 100 if stats['total_trades'] > 0 else 0
-                        
-                        regime_data.append({
-                            'Regime': regime.title(),
-                            'Total Trades': stats['total_trades'],
-                            'Win Rate': f"{win_rate:.1f}%", 
-                            'Total PnL': f"{stats['total_pnl']:.2f}",
-                            'Avg Quality': f"{avg_quality:.0f}%"
-                        })
-                    
-                    if regime_data:
-                        st.dataframe(regime_data, use_container_width=True)
-                        
-                        # Highlight best and worst performing regimes
-                        if len(regime_performance) > 1:
-                            best_regime = max(regime_performance.items(), key=lambda x: x[1]['total_pnl'])
-                            worst_regime = min(regime_performance.items(), key=lambda x: x[1]['total_pnl'])
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.success(f"🏆 Best: **{best_regime[0].title()}** ({best_regime[1]['total_pnl']:+.2f} PnL)")
-                            with col2:
-                                st.error(f"⚠️ Worst: **{worst_regime[0].title()}** ({worst_regime[1]['total_pnl']:+.2f} PnL)")
-            
-            with tab3:
-                st.write("**Overall Trading Summary**")
-                
-                if 'trade_contexts' in locals() and trade_contexts:
-                    # Overall statistics
-                    total_trades = len(trade_contexts)
-                    successful_trades = sum(1 for ctx in trade_contexts if ctx.get('success', False))
-                    total_pnl = sum(ctx.get('pnl', 0) for ctx in trade_contexts)
-                    avg_quality = sum(ctx.get('trade_quality_score', 0) for ctx in trade_contexts) / total_trades * 100 if total_trades > 0 else 0
-                    
-                    col1, col2, col3, col4 = st.columns(4)
+    st.write("Analyzing market intelligence data captured when trades were generated")
+
+    # Filter trades with intelligence data
+    trades_with_intelligence = trades_df[
+        (trades_df['regime'].notna()) |
+        (trades_df['session'].notna()) |
+        (trades_df['volatility_level'].notna())
+    ].head(10)  # Limit to 10 for performance
+
+    if not trades_with_intelligence.empty:
+        # Create tabs for different views
+        tab1, tab2, tab3 = st.tabs(["Individual Trades", "Regime Performance", "Trade Summary"])
+
+        with tab1:
+            st.write("**Trade-by-Trade Analysis** (Using Historical Market Intelligence)")
+
+            for idx, trade in trades_with_intelligence.iterrows():
+                # Extract stored market intelligence
+                regime = trade.get('regime', 'unknown')
+                regime_confidence = trade.get('regime_confidence', 0)
+                session = trade.get('session', 'unknown')
+                volatility_level = trade.get('volatility_level', 'unknown')
+                intelligence_source = trade.get('intelligence_source', 'unknown')
+
+                pnl = trade.get('profit_loss', 0)
+                success = pnl > 0 if pd.notna(pnl) else False
+
+                # Display individual trade analysis
+                success_color = "🟢" if success else "🔴" if pd.notna(pnl) else "🔵"
+                pnl_display = f"{pnl:.2f}" if pd.notna(pnl) else "Running"
+
+                with st.expander(f"{success_color} {trade.get('strategy', 'Unknown')} {trade.get('direction', 'N/A')} - PnL: {pnl_display}", expanded=False):
+
+                    col1, col2 = st.columns(2)
                     with col1:
-                        st.metric("Analyzed Trades", total_trades)
+                        st.write("**Market Conditions (Historical):**")
+                        st.write(f"• Regime: {regime.title() if regime != 'unknown' else 'Not Available'}")
+                        if regime_confidence > 0:
+                            st.write(f"• Regime Confidence: {regime_confidence:.1%}")
+                        st.write(f"• Session: {session.title() if session != 'unknown' else 'Not Available'}")
+                        st.write(f"• Volatility: {volatility_level.title() if volatility_level != 'unknown' else 'Not Available'}")
+                        if intelligence_source != 'unknown':
+                            st.write(f"• Intelligence Source: {intelligence_source}")
+
                     with col2:
-                        st.metric("Win Rate", f"{(successful_trades/total_trades)*100:.1f}%" if total_trades > 0 else "0%")
-                    with col3:
-                        st.metric("Total PnL", f"{total_pnl:+.2f}")
-                    with col4:
-                        st.metric("Avg Quality Score", f"{avg_quality:.0f}%")
-                    
-                    # Key insights
-                    st.write("**Key Insights:**")
-                    if avg_quality < 60:
-                        st.warning("• Consider waiting for higher quality setups")
-                    if total_pnl < 0:
-                        st.error("• Review losing trades for improvement opportunities")
-                    else:
-                        st.success("• Trading approach is generating positive results")
-        else:
-            st.warning("⚠️ Market Intelligence Engine not available. Trade context analysis requires the intelligence system to be properly configured.")
+                        st.write("**Trade Details:**")
+                        st.write(f"• Strategy: {trade.get('strategy', 'Unknown')}")
+                        st.write(f"• Direction: {trade.get('direction', 'N/A')}")
+                        st.write(f"• Entry Price: {trade.get('entry_price', 0):.5f}")
+                        st.write(f"• Signal Type: {trade.get('signal_type', 'N/A')}")
+                        if pd.notna(trade.get('confidence_score')):
+                            st.write(f"• Signal Confidence: {trade.get('confidence_score'):.1%}")
+                        st.write(f"• Entry Time: {trade.get('timestamp', 'N/A')}")
+
+                    # Market intelligence insights
+                    if regime != 'unknown' or session != 'unknown':
+                        st.write("**Market Intelligence Insights:**")
+                        if regime == 'trending' and success:
+                            st.write("✓ Successfully traded in trending market conditions")
+                        elif regime == 'ranging' and not success:
+                            st.write("⚠️ Trade occurred during ranging market - consider avoiding")
+                        elif regime == 'breakout':
+                            st.write("📈 Trade occurred during breakout conditions")
+                        elif regime == 'reversal':
+                            st.write("🔄 Trade occurred during market reversal")
+
+                        if session in ['London', 'New York'] and volatility_level == 'high':
+                            st.write("✓ High volatility during major session - good trade timing")
+                        elif session == 'Asian' and volatility_level == 'low':
+                            st.write("⚠️ Low volatility Asian session - consider smaller positions")
+    else:
+        st.warning("No trades with market intelligence data found for this timeframe.")
+        st.info("Market intelligence data is only available for recent trades where the intelligence system was active.")
             
-    except Exception as e:
-        st.error(f"Error initializing trade context analysis: {str(e)[:100]}")
+        with tab2:
+            st.write("**Performance by Market Regime** (Using Historical Intelligence)")
+
+            # Create regime performance summary from historical data
+            regime_performance = {}
+
+            for idx, trade in trades_with_intelligence.iterrows():
+                regime = trade.get('regime', 'unknown')
+                if regime == 'unknown':
+                    continue
+
+                pnl = trade.get('profit_loss', 0)
+                success = pnl > 0 if pd.notna(pnl) else False
+
+                if regime not in regime_performance:
+                    regime_performance[regime] = {
+                        'total_trades': 0,
+                        'winning_trades': 0,
+                        'total_pnl': 0,
+                        'avg_confidence': 0,
+                        'confidence_count': 0
+                    }
+
+                regime_performance[regime]['total_trades'] += 1
+                if success:
+                    regime_performance[regime]['winning_trades'] += 1
+                if pd.notna(pnl):
+                    regime_performance[regime]['total_pnl'] += pnl
+
+                # Add regime confidence if available
+                regime_confidence = trade.get('regime_confidence', 0)
+                if regime_confidence > 0:
+                    regime_performance[regime]['avg_confidence'] += regime_confidence
+                    regime_performance[regime]['confidence_count'] += 1
+
+            # Display regime performance table
+            if regime_performance:
+                regime_data = []
+                for regime, stats in regime_performance.items():
+                    win_rate = (stats['winning_trades'] / stats['total_trades']) * 100 if stats['total_trades'] > 0 else 0
+                    avg_confidence = (stats['avg_confidence'] / stats['confidence_count']) * 100 if stats['confidence_count'] > 0 else 0
+
+                    regime_data.append({
+                        'Regime': regime.title(),
+                        'Total Trades': stats['total_trades'],
+                        'Win Rate': f"{win_rate:.1f}%",
+                        'Total PnL': f"{stats['total_pnl']:.2f}",
+                        'Avg Regime Confidence': f"{avg_confidence:.0f}%" if avg_confidence > 0 else "N/A"
+                    })
+
+                st.dataframe(regime_data, use_container_width=True)
+
+                # Highlight best and worst performing regimes
+                if len(regime_performance) > 1:
+                    best_regime = max(regime_performance.items(), key=lambda x: x[1]['total_pnl'])
+                    worst_regime = min(regime_performance.items(), key=lambda x: x[1]['total_pnl'])
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.success(f"🏆 Best: **{best_regime[0].title()}** ({best_regime[1]['total_pnl']:+.2f} PnL)")
+                    with col2:
+                        st.error(f"⚠️ Worst: **{worst_regime[0].title()}** ({worst_regime[1]['total_pnl']:+.2f} PnL)")
+            else:
+                st.info("No regime data available for performance analysis.")
+            
+        with tab3:
+            st.write("**Overall Trading Summary** (Using Historical Intelligence)")
+
+            # Overall statistics from historical data
+            total_trades = len(trades_with_intelligence)
+            completed_trades = trades_with_intelligence[trades_with_intelligence['profit_loss'].notna()]
+
+            if not completed_trades.empty:
+                successful_trades = len(completed_trades[completed_trades['profit_loss'] > 0])
+                total_pnl = completed_trades['profit_loss'].sum()
+
+                # Calculate regime distribution
+                regime_counts = trades_with_intelligence['regime'].value_counts()
+                session_counts = trades_with_intelligence['session'].value_counts()
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Analyzed Trades", total_trades)
+                with col2:
+                    win_rate = (successful_trades / len(completed_trades)) * 100 if len(completed_trades) > 0 else 0
+                    st.metric("Win Rate", f"{win_rate:.1f}%")
+                with col3:
+                    st.metric("Total PnL", f"{total_pnl:+.2f}")
+                with col4:
+                    avg_confidence = trades_with_intelligence[trades_with_intelligence['regime_confidence'].notna()]['regime_confidence'].mean()
+                    if pd.notna(avg_confidence):
+                        st.metric("Avg Regime Confidence", f"{avg_confidence:.1%}")
+                    else:
+                        st.metric("Avg Regime Confidence", "N/A")
+
+                # Market Intelligence Summary
+                st.write("**Market Intelligence Summary:**")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Regime Distribution:**")
+                    for regime, count in regime_counts.head(5).items():
+                        if regime and regime != 'unknown':
+                            st.write(f"• {regime.title()}: {count} trades")
+
+                with col2:
+                    st.write("**Session Distribution:**")
+                    for session, count in session_counts.head(5).items():
+                        if session and session != 'unknown':
+                            st.write(f"• {session.title()}: {count} trades")
+
+                # Key insights based on historical data
+                st.write("**Key Insights from Historical Intelligence:**")
+
+                if total_pnl > 0:
+                    st.success("✓ Overall positive performance with market intelligence")
+                else:
+                    st.warning("⚠️ Review market regime alignment for better results")
+
+                # Regime-specific insights
+                if not regime_counts.empty:
+                    most_common_regime = regime_counts.index[0]
+                    if most_common_regime and most_common_regime != 'unknown':
+                        regime_pnl = completed_trades[completed_trades['regime'] == most_common_regime]['profit_loss'].sum()
+                        if regime_pnl > 0:
+                            st.info(f"✓ Strong performance in {most_common_regime} markets")
+                        else:
+                            st.warning(f"⚠️ Consider adjusting strategy for {most_common_regime} markets")
+
+                # Session-specific insights
+                if not session_counts.empty:
+                    most_active_session = session_counts.index[0]
+                    if most_active_session and most_active_session != 'unknown':
+                        session_pnl = completed_trades[completed_trades['session'] == most_active_session]['profit_loss'].sum()
+                        if session_pnl > 0:
+                            st.info(f"✓ Effective trading during {most_active_session} session")
+                        else:
+                            st.warning(f"⚠️ Review {most_active_session} session strategy")
+            else:
+                st.info("No completed trades with market intelligence available for analysis.")
 
 elif show_trade_context and trades_df.empty:
     st.info("No trades found for context analysis. Generate some trades to see intelligent analysis!")

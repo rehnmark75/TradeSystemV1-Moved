@@ -43,7 +43,13 @@ def get_trade_logs(engine, epic, min_time):
             tl.last_trigger_price,
             ah.strategy,
             ah.signal_type,
-            ah.confidence_score
+            ah.confidence_score,
+            ah.strategy_metadata,
+            (ah.strategy_metadata::json->'market_intelligence'->'regime_analysis'->>'dominant_regime') as regime,
+            (ah.strategy_metadata::json->'market_intelligence'->'regime_analysis'->>'confidence')::float as regime_confidence,
+            (ah.strategy_metadata::json->'market_intelligence'->'session_analysis'->>'current_session') as session,
+            (ah.strategy_metadata::json->'market_intelligence'->>'volatility_level') as volatility_level,
+            (ah.strategy_metadata::json->'market_intelligence'->>'intelligence_source') as intelligence_source
         FROM trade_log tl
         LEFT JOIN alert_history ah ON tl.alert_id = ah.id
         WHERE tl.symbol = :epic AND tl.timestamp >= :min_time
