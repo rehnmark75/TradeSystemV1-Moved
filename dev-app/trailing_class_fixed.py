@@ -690,7 +690,13 @@ class Progressive3StageTrailing(TrailingStrategy):
         return trail_level
 
     def _calculate_stage1_trail(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
-        """Stage 1: Break-even protection - uses IG minimum distance"""
+        """Stage 1: Break-even protection - ONE-TIME move, not continuous trailing"""
+
+        # ✅ CRITICAL FIX: Stage 1 should only move ONCE to break-even, not continuously trail
+        if trade.moved_to_breakeven:
+            self.logger.debug(f"[STAGE 1 SKIP] Trade {trade.id}: Already moved to break-even, no further Stage 1 action needed")
+            return None
+
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
 
@@ -698,15 +704,7 @@ class Progressive3StageTrailing(TrailingStrategy):
         ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
         if ig_min_distance:
             lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
-
-                # ✅ VALIDATION: Ensure we're using lock points, not trigger points
-                if lock_points == progressive_config.stage1_trigger_points:
-                    self.logger.warning(f"⚠️ [VALIDATION] Trade {trade.id}: lock_points ({lock_points}) equals trigger_points! This might be incorrect.")
-                    if ig_min_distance and ig_min_distance != progressive_config.stage1_trigger_points:
-                        self.logger.info(f"🔧 [FIX] Trade {trade.id}: Using IG minimum ({ig_min_distance}) instead of trigger value")
-                        lock_points = max(1, round(ig_min_distance))
-
-            self.logger.info(f"🎯 [STAGE 1 IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts")
+            self.logger.info(f"🎯 [STAGE 1 IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts (from IG: {ig_min_distance})")
         else:
             lock_points = self.config.stage1_lock_points
             self.logger.info(f"⚠️ [STAGE 1 FALLBACK] Trade {trade.id}: No IG minimum distance, using config {lock_points}pts")
@@ -716,18 +714,28 @@ class Progressive3StageTrailing(TrailingStrategy):
         else:  # SELL
             trail_level = trade.entry_price - (lock_points * point_value)
 
+        self.logger.info(f"🛡️ [STAGE 1 BREAK-EVEN] Trade {trade.id}: Moving stop to break-even protection at {trail_level:.5f} ({lock_points}pts from entry)")
         return round(trail_level, 5)
 
     def _calculate_stage2_trail(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
-        """Stage 2: Profit lock-in - entry + 3 points"""
+        """Stage 2: Profit lock-in - ONE-TIME move to lock in 10 points profit when price reaches 16+ points"""
+
+        # ✅ CRITICAL FIX: Stage 2 should only move ONCE to lock in profit, not continuously trail
+        if hasattr(trade, 'status') and trade.status in ['stage2_profit_lock', 'stage3_trailing']:
+            self.logger.debug(f"[STAGE 2 SKIP] Trade {trade.id}: Already in Stage 2/3 ({trade.status}), no further Stage 2 action needed")
+            return None
+
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
-        lock_points = self.config.stage2_lock_points
+
+        # ✅ FIXED: Stage 2 locks in 10 points profit (not config value)
+        # When price reaches 16+ points, move stop to entry + 10 points
+        profit_lock_points = 10
 
         if direction == "BUY":
-            trail_level = trade.entry_price + (lock_points * point_value)
+            trail_level = trade.entry_price + (profit_lock_points * point_value)
         else:  # SELL
-            trail_level = trade.entry_price - (lock_points * point_value)
+            trail_level = trade.entry_price - (profit_lock_points * point_value)
 
         # Ensure we don't move backwards from Stage 1
         if current_stop > 0:
@@ -736,6 +744,7 @@ class Progressive3StageTrailing(TrailingStrategy):
             else:
                 trail_level = min(trail_level, current_stop)
 
+        self.logger.info(f"💰 [STAGE 2 PROFIT LOCK] Trade {trade.id}: Moving stop to profit lock at {trail_level:.5f} (locking in {profit_lock_points}pts profit)")
         return round(trail_level, 5)
 
     def _calculate_stage3_trail(self, trade: TradeLog, current_price: float,
@@ -770,9 +779,18 @@ class Progressive3StageTrailing(TrailingStrategy):
         else:
             retracement_percentage = 0.25  # 25% retracement for smaller profits (18-24 points)
 
-        # Calculate trail distance in points, with minimum protection
+        # Calculate trail distance in points, with IG minimum protection
+        # ✅ CRITICAL FIX: Always respect IG's min_stop_distance_points to avoid rejection
+        ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+        if ig_min_distance:
+            min_distance = max(ig_min_distance, self.config.stage3_min_distance)
+            self.logger.debug(f"[IG MIN CHECK] {trade.symbol}: Using IG min {ig_min_distance}pts vs config {self.config.stage3_min_distance}pts = {min_distance}pts")
+        else:
+            min_distance = self.config.stage3_min_distance
+            self.logger.debug(f"[FALLBACK MIN] {trade.symbol}: No IG minimum, using config {min_distance}pts")
+
         trail_distance_points = max(
-            self.config.stage3_min_distance,  # Minimum trailing distance
+            min_distance,  # IG minimum distance (prevents rejection)
             effective_profit * retracement_percentage  # Percentage-based distance
         )
 
