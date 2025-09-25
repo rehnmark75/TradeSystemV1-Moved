@@ -54,10 +54,12 @@ class ForexFactoryScraper:
             week_offset: Weeks from current week (0=current, 1=next week, -1=last week)
         """
         try:
-            # Calculate date for the week
+            # Calculate date for the week (use Monday as week start)
             today = datetime.now()
             target_date = today + timedelta(weeks=week_offset)
-            date_str = target_date.strftime("%b%%d.%Y").lower()
+            # Get Monday of the target week
+            week_start = target_date - timedelta(days=target_date.weekday())
+            date_str = week_start.strftime("%b%d.%Y").lower()
 
             # Build URL with date parameter
             url = f"{self.calendar_url}?week={date_str}"

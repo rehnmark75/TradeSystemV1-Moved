@@ -16,6 +16,13 @@ from services.smc_structure import (
 )
 from services.market_intelligence_service import get_intelligence_service
 from utils.helpers import synthesize_15m_from_5m
+# Economic Calendar Integration
+from components.economic_calendar_widget import (
+    render_economic_calendar_sidebar,
+    render_upcoming_alerts,
+    generate_chart_markers,
+    render_market_intelligence_enhancement
+)
 
 st.set_page_config(page_title="TradingView Candlestick Viewer", layout="wide")
 LOCAL_TZ = pytz.timezone("UTC")
@@ -363,6 +370,21 @@ with st.sidebar.expander("🧠 Market Intelligence", expanded=market_expanded):
     else:
         intelligence_lookback = 24
 
+# Economic Calendar Section
+st.sidebar.divider()
+economic_events = None
+try:
+    # Show upcoming high-impact alerts first
+    render_upcoming_alerts(selected_epic)
+
+    # Main economic calendar sidebar widget
+    economic_events = render_economic_calendar_sidebar(selected_epic)
+
+except Exception as e:
+    st.sidebar.error(f"Economic Calendar unavailable: {str(e)[:40]}...")
+    import logging
+    logging.getLogger(__name__).error(f"Economic calendar error: {e}")
+
 # Trading Tools
 with st.sidebar.expander("🎯 Trading Tools", expanded=False):
     show_stop_levels = st.checkbox("Show Stop Loss Levels", value=False)
@@ -441,7 +463,7 @@ if ema_config:
 
 # Add legend for trade markers
 with st.expander("📊 Chart Legend", expanded=False):
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         st.markdown("""
         **Trade Arrows:**
@@ -491,6 +513,15 @@ with st.expander("📊 Chart Legend", expanded=False):
         legend_text += "\n        - *Periods adapt per epic*"
 
         st.markdown(legend_text)
+
+    with col6:
+        st.markdown("""
+        **Economic Calendar:**
+        - 🔴 Red Arrow = High Impact Event
+        - 🟡 Yellow Arrow = Medium Impact
+        - 🟢 Green Arrow = Low Impact
+        - *Arrows show event timing*
+        """)
 
 # Fetch candle data based on selected timeframe
 if selected_tf == "5m":
@@ -1186,7 +1217,23 @@ if all_risk_markers and candles:
                     aligned_marker["time"] = candle_time
                     aligned_risk_markers.append(aligned_marker)
 
-visible_markers = visible_swing_markers + aligned_trade_markers + visible_sr_break_markers + aligned_risk_markers + aligned_regime_markers
+# Add economic calendar markers
+economic_markers = []
+if economic_events and candles:
+    try:
+        candle_times_list = [c["time"] for c in candles]
+        economic_markers = generate_chart_markers(
+            economic_events,
+            candle_times_list,
+            timeframe
+        )
+        import logging
+        logging.getLogger(__name__).info(f"Added {len(economic_markers)} economic calendar markers")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to add economic markers: {e}")
+
+visible_markers = visible_swing_markers + aligned_trade_markers + visible_sr_break_markers + aligned_risk_markers + aligned_regime_markers + economic_markers
 
 # Chart info
 if trade_markers:
@@ -1194,7 +1241,12 @@ if trade_markers:
     if show_market_regime and aligned_regime_markers:
         st.sidebar.write(f"🎯 {len(aligned_regime_markers)} regime indicators displayed")
 
-    # Show risk management markers info
+# Show economic calendar markers info
+if economic_markers:
+    st.sidebar.write(f"📅 {len(economic_markers)} economic events on chart")
+
+# Show risk management markers info
+if trade_markers:
     if show_stop_levels or show_tp_levels or show_trailing_info:
         st.sidebar.write("--- Risk Management ---")
         if show_stop_levels:
