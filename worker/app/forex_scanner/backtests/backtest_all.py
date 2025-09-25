@@ -32,12 +32,13 @@ class AllStrategiesBacktest:
         # Available strategy backtests
         self.available_strategies = {
             'ema': 'backtest_ema.py',
-            'macd': 'backtest_macd.py', 
+            'macd': 'backtest_macd.py',
             'kama': 'backtest_kama.py',
             'bb_supertrend': 'backtest_bb_supertrend.py',
             'zero_lag': 'backtest_zero_lag.py',
             'combined': 'backtest_combined.py',
-            'scalping': 'backtest_scalping.py'
+            'scalping': 'backtest_scalping.py',
+            'momentum': 'backtest_momentum.py'
         }
         
         # Strategy enabled status
@@ -48,7 +49,8 @@ class AllStrategiesBacktest:
             'bb_supertrend': getattr(config, 'BOLLINGER_SUPERTREND_STRATEGY', True),
             'zero_lag': getattr(config, 'ZERO_LAG_STRATEGY', False),
             'combined': True,  # Always available
-            'scalping': getattr(config, 'SCALPING_STRATEGY_ENABLED', True)
+            'scalping': getattr(config, 'SCALPING_STRATEGY_ENABLED', True),
+            'momentum': getattr(config, 'MOMENTUM_STRATEGY', True)
         }
     
     def setup_logging(self):

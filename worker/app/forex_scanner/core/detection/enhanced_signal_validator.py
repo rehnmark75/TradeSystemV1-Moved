@@ -47,7 +47,7 @@ class EnhancedSignalValidator:
         
         # ✅ NEW: Hard rejection rules (skip immediately)
         self.hard_rejection_rules = {
-            'min_efficiency_ratio': 0.20,      # Below = instant skip
+            'min_efficiency_ratio': 0.05,      # Lowered from 0.20 to 0.05 (5%) for more realistic signals
             'max_ema_compression': 0.0012,     # EMAs too close = consolidation
             'min_macd_histogram': 0.00005,     # Too weak momentum
             'min_ema_separation': 0.0008       # EMAs must be separated enough
@@ -81,8 +81,9 @@ class EnhancedSignalValidator:
             kama_data = signal_data.get('kama_data', {})
             
             # ✅ STAGE 1: Hard rejection rules (immediate skip)
+            strategy_name = signal_data.get('strategy', '')
             hard_rejection, rejection_reason = self._check_hard_rejection_rules(
-                ema_data, macd_data, kama_data
+                ema_data, macd_data, kama_data, strategy_name
             )
             
             if hard_rejection:
@@ -120,19 +121,23 @@ class EnhancedSignalValidator:
             self.logger.error(f"[VALIDATION ERROR] {e}")
             return False, 0.10, f"Validation error: {str(e)}", {}
     
-    def _check_hard_rejection_rules(self, ema_data: Dict, macd_data: Dict, kama_data: Dict) -> Tuple[bool, str]:
+    def _check_hard_rejection_rules(self, ema_data: Dict, macd_data: Dict, kama_data: Dict, strategy_name: str = None) -> Tuple[bool, str]:
         """
         Check hard rejection rules that immediately disqualify signals
         🔥 FIXED: Now supports dynamic EMA configurations using semantic names
         """
-        
+
         # ✅ RULE 1: Market efficiency too low (choppy market) - WITH CONTEXT
-        efficiency_ratio = kama_data.get('efficiency_ratio', 0)
-        min_required = self.hard_rejection_rules['min_efficiency_ratio']
-        
-        if efficiency_ratio < min_required:
-            self.logger.debug(f"[HARD REJECT] Efficiency check: {efficiency_ratio:.3f} < {min_required:.3f}")
-            return True, f"Market too choppy (efficiency: {efficiency_ratio:.3f} < {min_required:.3f})"
+        # Skip efficiency check for momentum-based strategies as they have their own momentum validation
+        if strategy_name != 'momentum':
+            efficiency_ratio = kama_data.get('efficiency_ratio', 0)
+            min_required = self.hard_rejection_rules['min_efficiency_ratio']
+
+            if efficiency_ratio < min_required:
+                self.logger.debug(f"[HARD REJECT] Efficiency check: {efficiency_ratio:.3f} < {min_required:.3f}")
+                return True, f"Market too choppy (efficiency: {efficiency_ratio:.3f} < {min_required:.3f})"
+        else:
+            self.logger.debug(f"[MOMENTUM STRATEGY] Skipping efficiency check - using momentum-specific validation")
         
         # ✅ RULE 2: EMAs too compressed (consolidation) - DYNAMIC EMA SUPPORT
         # Use semantic names instead of hardcoded periods
