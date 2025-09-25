@@ -459,12 +459,13 @@ with st.expander("📊 Chart Legend", expanded=False):
     with col3:
         st.markdown("""
         **Market Intelligence:**
-        - 🟢T = Trending regime
-        - 🟡R = Ranging regime
-        - 🟠B = Breakout regime
-        - 🔴V = Reversal regime
-        - 🔴H = High volatility
-        - 🔵L = Low volatility
+        - 🟢 = Trending regime
+        - 🟡 = Ranging regime
+        - 🟠 = Breakout regime
+        - 🔴 = Reversal regime
+        - 🔺 = High volatility
+        - 🔵 = Low volatility
+        - *Small circles on candles*
         """)
     with col4:
         st.markdown("""
@@ -605,6 +606,15 @@ trades_df = get_trade_logs(engine, selected_epic, earliest_time)
 # Debug: Show trade data info
 if not trades_df.empty:
     st.sidebar.write(f"Found {len(trades_df)} trades")
+
+    # Show regime data availability if enabled
+    if show_market_regime:
+        regime_count = trades_df['regime'].notna().sum() if 'regime' in trades_df.columns else 0
+        if regime_count > 0:
+            unique_regimes = trades_df['regime'].dropna().unique()
+            st.sidebar.success(f"✅ {regime_count} trades with regime data: {list(unique_regimes)}")
+        else:
+            st.sidebar.info("ℹ️ No regime data available for current trades")
 else:
     st.sidebar.write("No trades found for this symbol")
 
@@ -630,6 +640,7 @@ if candles and selected_epic:
 
 # Prepare trade markers with strategy labels
 trade_markers = []
+regime_markers = []  # Separate markers for regime indicators
 stop_loss_markers = []
 take_profit_markers = []
 trailing_markers = []
@@ -695,58 +706,71 @@ for row in trades_df.itertuples():
     session = getattr(row, 'session', None)
     volatility_level = getattr(row, 'volatility_level', None)
 
-    # Get regime icon/indicator
+
+    # Get regime icon/indicator - more compact format
     regime_indicators = {
-        'trending': '🟢T',
-        'ranging': '🟡R',
-        'breakout': '🟠B',
-        'reversal': '🔴V',
-        'high_volatility': '🔴H',
-        'low_volatility': '🔵L'
+        'trending': '🟢',
+        'ranging': '🟡',
+        'breakout': '🟠',
+        'reversal': '🔴',
+        'high_volatility': '🔺',
+        'low_volatility': '🔵'
     }
     regime_indicator = regime_indicators.get(regime, '') if regime else ''
 
-    # Build enhanced text label with market intelligence
+    # Build clean text label - strategy name only
     text_label = f"{strategy_name}" if strategy_name else ("BUY" if is_bull else "SELL")
 
-    # Add P&L to text if available
+    # Only add P&L for significant amounts to keep it clean
     if hasattr(row, 'profit_loss') and row.profit_loss is not None:
         try:
             pnl_value = float(row.profit_loss)
-            if pnl_value != 0:
-                text_label += f" ({pnl_value:+.2f})"
+            if abs(pnl_value) >= 1.0:  # Only show P&L if >= 1.0 to reduce clutter
+                text_label += f" {pnl_value:+.0f}"  # Even shorter format, no decimals
         except (ValueError, TypeError):
             pass
 
-    # Add regime indicator to text
-    if regime_indicator:
-        text_label += f" {regime_indicator}"
-
-    # Create enhanced tooltip with market intelligence
-    tooltip_parts = [text_label]
-    if regime and regime_confidence:
-        tooltip_parts.append(f"Regime: {regime.title()} ({regime_confidence:.0%})")
-    if session:
-        tooltip_parts.append(f"Session: {session}")
-    if volatility_level:
-        tooltip_parts.append(f"Vol: {volatility_level.title()}")
-
-    # Join all tooltip parts with line breaks (if supported) or separators
-    enhanced_text = " | ".join(tooltip_parts) if len(tooltip_parts) > 1 else text_label
+    # We'll use clean trade markers without regime text clutter
+    # Market intelligence will be shown as separate circle markers
 
     # Enhance marker color with regime-based modifications
     # Keep primary P&L color but add regime-based styling via text indicators
     final_marker_color = marker_color
 
-    # Main trade marker (arrow) - enhanced with market intelligence
+    # Create clean main trade marker (arrow only)
     marker = {
         "time": timestamp,
         "position": "aboveBar" if is_bull else "belowBar",
         "color": final_marker_color,
         "shape": "arrowUp" if is_bull else "arrowDown",
-        "text": enhanced_text
+        "text": text_label  # Clean label without regime clutter
     }
     trade_markers.append(marker)
+
+    # Create separate regime indicator marker if regime data exists
+    # Or create test markers if no regime data is available
+    if regime_indicator:
+        # Map regime to proper colors
+        regime_colors = {
+            '🟢': '#4CAF50',  # Green for trending
+            '🟡': '#FFC107',  # Yellow for ranging
+            '🟠': '#FF9800',  # Orange for breakout
+            '🔴': '#F44336',  # Red for reversal
+            '🔺': '#E91E63',  # Pink for high volatility
+            '🔵': '#2196F3'   # Blue for low volatility
+        }
+
+        regime_color = regime_colors.get(regime_indicator, '#9E9E9E')  # Default grey
+
+        regime_marker = {
+            "time": timestamp,
+            "position": "inBar",  # Always use inBar for regime indicators
+            "color": regime_color,  # Use proper hex color
+            "shape": "circle",  # Small circle shape
+            "text": regime_indicator,  # Show the emoji as text
+            "size": 1  # Small but visible size
+        }
+        regime_markers.append(regime_marker)
 
     # Add separate circle markers for risk management
     # Use small time offsets to avoid exact timestamp conflicts
@@ -1108,6 +1132,31 @@ if trade_markers and candles:
 # Combine all risk management markers for visibility filtering
 all_risk_markers = stop_loss_markers + take_profit_markers + trailing_markers
 
+# Align regime markers to candle times like trade markers
+aligned_regime_markers = []
+if regime_markers and candles:
+    candle_times_list = sorted([c["time"] for c in candles])
+
+    for marker in regime_markers:
+        marker_time = marker["time"]
+
+        # Find the candle that contains this marker time
+        for i, candle_time in enumerate(candle_times_list):
+            if i < len(candle_times_list) - 1:
+                next_candle_time = candle_times_list[i + 1]
+                if candle_time <= marker_time < next_candle_time:
+                    aligned_marker = marker.copy()
+                    aligned_marker["time"] = candle_time
+                    aligned_regime_markers.append(aligned_marker)
+                    break
+            else:
+                # Last candle - check if marker is within timeframe minutes of it
+                time_diff = marker_time - candle_time
+                if 0 <= time_diff < (timeframe * 60):
+                    aligned_marker = marker.copy()
+                    aligned_marker["time"] = candle_time
+                    aligned_regime_markers.append(aligned_marker)
+
 # Filter all markers to visible range
 visible_swing_markers = [m for m in markers if m["time"] in visible_candle_times]
 visible_sr_break_markers = [m for m in sr_break_markers if m["time"] in visible_candle_times]
@@ -1137,14 +1186,13 @@ if all_risk_markers and candles:
                     aligned_marker["time"] = candle_time
                     aligned_risk_markers.append(aligned_marker)
 
-visible_markers = visible_swing_markers + aligned_trade_markers + visible_sr_break_markers + aligned_risk_markers
+visible_markers = visible_swing_markers + aligned_trade_markers + visible_sr_break_markers + aligned_risk_markers + aligned_regime_markers
 
-# Debug info
+# Chart info
 if trade_markers:
-    st.sidebar.write(f"Total trade markers: {len(trade_markers)}")
-    st.sidebar.write(f"Aligned trade markers: {len(aligned_trade_markers)}")
-    if aligned_trade_markers:
-        st.sidebar.write(f"First marker: {aligned_trade_markers[0]['text']}")
+    st.sidebar.write(f"📊 {len(aligned_trade_markers)} trade signals displayed")
+    if show_market_regime and aligned_regime_markers:
+        st.sidebar.write(f"🎯 {len(aligned_regime_markers)} regime indicators displayed")
 
     # Show risk management markers info
     if show_stop_levels or show_tp_levels or show_trailing_info:
