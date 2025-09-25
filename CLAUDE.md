@@ -43,16 +43,36 @@ The TradeSystemV1 documentation has been organized into focused, specialized fil
 ## 🤖 Agent Configuration
 
 **Automatic Agent Usage:**
+
 - **trading-strategy-analyst**: Automatically use this agent for any task involving:
-  - Strategy performance analysis
-  - Backtest result evaluation
-  - Trading strategy optimization
-  - Win rate, profit/loss analysis
-  - Strategy parameter tuning
-  - Market regime performance assessment
-  - Trade outcome analysis
+  - Strategy performance analysis, backtest result evaluation, trading strategy optimization
+  - Win rate, profit/loss analysis, strategy parameter tuning, market regime performance assessment
   - Keywords: strategy, backtest, performance, win rate, profit, loss, optimization, trading, analysis, momentum, RSI, MACD, EMA, SMA, bollinger, stochastic, parameters, signals, entry, exit, stop loss, take profit
   - File patterns: */strategies/*, */backtests/*, *backtest*.py, *strategy*.py, *config_*.py
+
+- **devops-engineer**: Automatically use this agent for any task involving:
+  - Docker orchestration, CI/CD pipelines, infrastructure automation, production deployment
+  - System monitoring, alerting, performance optimization, infrastructure scaling
+  - Keywords: docker, kubernetes, deployment, infrastructure, monitoring, CI/CD, pipeline, container, scaling, production, devops, automation
+  - File patterns: docker-compose*.yml, Dockerfile*, k8s/*, .github/workflows/*, .gitlab-ci.yml
+
+- **quantitative-researcher**: Automatically use this agent for any task involving:
+  - Mathematical modeling, statistical analysis, hypothesis testing, risk modeling
+  - Research methodology, alternative data analysis, factor modeling, portfolio optimization
+  - Keywords: statistical, mathematical, model, research, hypothesis, risk, factor, correlation, regression, optimization, quantitative, econometric, simulation
+  - File patterns: */research/*, */models/*, *analysis*.py, *research*.py, *model*.py
+
+- **real-time-systems-engineer**: Automatically use this agent for any task involving:
+  - Ultra-low latency optimization, high-frequency processing, concurrent programming
+  - Real-time data processing, performance optimization, memory management
+  - Keywords: latency, real-time, concurrent, performance, optimization, threading, memory, high-frequency, microsecond, lock-free
+  - File patterns: */real_time/*, */concurrent/*, */performance/*, *latency*.py, *concurrent*.py
+
+- **financial-data-engineer**: Automatically use this agent for any task involving:
+  - Market data feeds, tick data processing, financial data normalization, order book management
+  - Financial database optimization, time series data, market microstructure
+  - Keywords: market data, tick data, financial, forex, currency, price, quote, trade, order book, time series, OHLCV
+  - File patterns: */market_data/*, */feeds/*, */financial/*, *market*.py, *price*.py, *forex*.py
 
 ## 📈 System Status
 
