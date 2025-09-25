@@ -78,13 +78,13 @@ class SimpleLogParser:
         # Signal detection patterns
         self.signal_patterns = {
             'detected': [
-                r'📊.*CS\.D\.[A-Z]{6}\.MINI\.IP.*(BULL|BEAR)',
+                r'📊.*CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP.*(BULL|BEAR)',
                 r'Scanner detected.*signals',
                 r'signals ready',
                 r'Scan completed.*signals'
             ],
             'rejected': [
-                r'🚫.*REJECTED.*CS\.D\.[A-Z]{6}\.MINI\.IP',
+                r'🚫.*REJECTED.*CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP',
                 r'SELL signal REJECTED|BUY signal REJECTED',
                 r'Filtered out.*invalid signals'
             ]
@@ -93,22 +93,22 @@ class SimpleLogParser:
         # Trade event patterns
         self.trade_patterns = {
             'trade_opened': [
-                r'✅ Trade logged: CS\.D\.[A-Z]{6}\.MINI\.IP.*?(BUY|SELL)',
+                r'✅ Trade logged: CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP.*?(BUY|SELL)',
                 r'Place-Order: Parsed EPIC.*Direction: (BUY|SELL)',
-                r'No open position for CS\.D\.[A-Z]{6}\.MINI\.IP, placing order'
+                r'No open position for CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP, placing order'
             ],
             'trade_closed': [
                 r'Trade.*closed.*profit',
-                r'Position closed.*CS\.D\.[A-Z]{6}\.MINI\.IP',
-                r'Deal closed.*CS\.D\.[A-Z]{6}\.MINI\.IP'
+                r'Position closed.*CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP',
+                r'Deal closed.*CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP'
             ],
             'trade_monitoring': [
                 r'📊 \[PROFIT\] Trade \d+.*(BUY|SELL): entry=.*profit=.*pts',
-                r'🔧 \[COMBINED\] Processing trade \d+ CS\.D\.[A-Z]{6}\.MINI\.IP',
-                r'📊 \[TRAILING CONFIG\] CS\.D\.[A-Z]{6}\.MINI\.IP'
+                r'🔧 \[COMBINED\] Processing trade \d+ CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP',
+                r'📊 \[TRAILING CONFIG\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP'
             ],
             'trade_adjustments': [
-                r'\[ADJUST-STOP\] CS\.D\.[A-Z]{6}\.MINI\.IP',
+                r'\[ADJUST-STOP\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP',
                 r'Stop level.*→ New:',
                 r'Limit level.*→ New:'
             ],
@@ -120,10 +120,10 @@ class SimpleLogParser:
                 r'💎 \[STAGE 2\] Trade \d+:',
                 r'🎯 \[STAGE 3\] Trade \d+:',
                 r'🎯 \[TRAILING SUCCESS\] Trade \d+',
-                r'\[PROGRESSIVE STAGE \d+\] CS\.D\.[A-Z]{6}\.MINI\.IP',
-                r'\[PERCENTAGE TRAIL\] CS\.D\.[A-Z]{6}\.MINI\.IP:',
-                r'\[INTELLIGENT TRAIL\] CS\.D\.[A-Z]{6}\.MINI\.IP',
-                r'📊 \[TRAILING CONFIG\] CS\.D\.[A-Z]{6}\.MINI\.IP',
+                r'\[PROGRESSIVE STAGE \d+\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP',
+                r'\[PERCENTAGE TRAIL\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP:',
+                r'\[INTELLIGENT TRAIL\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP',
+                r'📊 \[TRAILING CONFIG\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP',
                 r'\[SAFE DISTANCE RESULT\] Trade \d+',
                 r'Stage \d+:.*trailing',
                 r'trailingStopDistance',
@@ -216,7 +216,7 @@ class SimpleLogParser:
                                         pass
 
                                 # Extract epic
-                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                                 if epic_match:
                                     epics.add(epic_match.group(1))
                                 break
@@ -227,7 +227,7 @@ class SimpleLogParser:
                                 signals_rejected += 1
 
                                 # Extract epic from rejection
-                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                                 if epic_match:
                                     epics.add(epic_match.group(1))
                                 break
@@ -296,7 +296,7 @@ class SimpleLogParser:
                             if re.search(pattern, line, re.IGNORECASE):
                                 trade_opened += 1
                                 # Extract epic
-                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                                 if epic_match:
                                     active_trades.add(epic_match.group(1))
                                 break
@@ -310,7 +310,7 @@ class SimpleLogParser:
                             if re.search(pattern, line, re.IGNORECASE):
                                 trade_monitoring += 1
                                 # Extract epic and trade ID
-                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                                epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                                 if epic_match:
                                     active_trades.add(epic_match.group(1))
                                 break
@@ -640,8 +640,8 @@ class SimpleLogParser:
                     activity = None
 
                     # Signal detected - look for the signal line with confidence
-                    if re.search(r'📊.*CS\.D\.[A-Z]{6}\.MINI\.IP.*(BULL|BEAR).*\(\d+\.?\d*%\)', line):
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                    if re.search(r'📊.*CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP.*(BULL|BEAR).*\(\d+\.?\d*%\)', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         conf_match = re.search(r'\((\d+\.?\d*)%\)', line)
                         signal_match = re.search(r'(BULL|BEAR)', line)
 
@@ -655,8 +655,8 @@ class SimpleLogParser:
                         }
 
                     # Signal rejected
-                    elif re.search(r'🚫.*REJECTED.*CS\.D\.[A-Z]{6}\.MINI\.IP', line):
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                    elif re.search(r'🚫.*REJECTED.*CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         reason_match = re.search(r'REJECTED.*?:\s*(.+)', line)
 
                         activity = {
@@ -668,8 +668,8 @@ class SimpleLogParser:
                         }
 
                     # Trade opened - enhanced extraction
-                    elif re.search(r'✅ Trade logged: CS\.D\.[A-Z]{6}\.MINI\.IP.*?(BUY|SELL)', line):
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                    elif re.search(r'✅ Trade logged: CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP.*?(BUY|SELL)', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         direction_match = re.search(r'(BUY|SELL)', line)
                         price_match = re.search(r'(\d+\.?\d*)\s+(BUY|SELL)', line)
 
@@ -695,7 +695,7 @@ class SimpleLogParser:
                         current_match = re.search(r'current=([0-9.]+)', line)
                         profit_match = re.search(r'profit=([+-]?\d+)pts', line)
                         trigger_match = re.search(r'trigger=(\d+)pts', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
 
                         # Calculate additional metrics
                         entry_price = float(entry_match.group(1)) if entry_match else None
@@ -727,8 +727,8 @@ class SimpleLogParser:
                         }
 
                     # Trade adjustments - enhanced extraction
-                    elif re.search(r'\[ADJUST-STOP\] CS\.D\.[A-Z]{6}\.MINI\.IP', line):
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                    elif re.search(r'\[ADJUST-STOP\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         direction_match = re.search(r'Direction: (BUY|SELL)', line)
 
                         # Extract stop level changes
@@ -760,7 +760,7 @@ class SimpleLogParser:
                     # Trailing events - break-even triggers
                     elif re.search(r'🎯 \[BREAK-EVEN TRIGGER\] Trade \d+:', line):
                         trade_id_match = re.search(r'Trade (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         profit_match = re.search(r'Profit (\d+)pts', line)
                         trigger_match = re.search(r'trigger (\d+)pts', line)
 
@@ -778,7 +778,7 @@ class SimpleLogParser:
                     # Stage 2 profit lock triggers
                     elif re.search(r'💰 \[STAGE 2 TRIGGER\] Trade \d+:', line):
                         trade_id_match = re.search(r'Trade (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         profit_match = re.search(r'Profit (\d+)pts', line)
                         trigger_match = re.search(r'trigger (\d+)pts', line)
 
@@ -796,7 +796,7 @@ class SimpleLogParser:
                     # Stage 3 percentage trailing triggers
                     elif re.search(r'🚀 \[STAGE 3 TRIGGER\] Trade \d+:', line):
                         trade_id_match = re.search(r'Trade (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         profit_match = re.search(r'Profit (\d+)pts', line)
                         trigger_match = re.search(r'trigger (\d+)pts', line)
 
@@ -814,7 +814,7 @@ class SimpleLogParser:
                     # Break-even execution
                     elif re.search(r'🎉 \[BREAK-EVEN\] Trade \d+', line):
                         trade_id_match = re.search(r'Trade (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         stop_level_match = re.search(r'(\d+\.\d+)', line)
 
                         activity = {
@@ -830,7 +830,7 @@ class SimpleLogParser:
                     # Stage 2 profit lock execution
                     elif re.search(r'💎 \[STAGE 2\] Trade \d+:', line):
                         trade_id_match = re.search(r'Trade (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         stop_level_match = re.search(r'locked at ([0-9.]+)', line)
                         lock_points_match = re.search(r'\+(\d+)pts', line)
 
@@ -848,7 +848,7 @@ class SimpleLogParser:
                     # Stage 3 percentage trailing execution
                     elif re.search(r'🎯 \[STAGE 3\] Trade \d+:', line):
                         trade_id_match = re.search(r'Trade (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         stop_level_match = re.search(r'trailing to ([0-9.]+)', line)
 
                         activity = {
@@ -864,7 +864,7 @@ class SimpleLogParser:
                     # General trailing success events
                     elif re.search(r'🎯 \[TRAILING SUCCESS\] Trade \d+', line):
                         trade_id_match = re.search(r'Trade (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         stop_level_match = re.search(r'Stop moved to ([0-9.]+)', line)
                         adjustment_match = re.search(r'\((\d+) pts\)', line)
 
@@ -880,9 +880,9 @@ class SimpleLogParser:
                         }
 
                     # Progressive stage events
-                    elif re.search(r'\[PROGRESSIVE STAGE \d+\] CS\.D\.[A-Z]{6}\.MINI\.IP', line):
+                    elif re.search(r'\[PROGRESSIVE STAGE \d+\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP', line):
                         stage_match = re.search(r'STAGE (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         trade_id_match = re.search(r'Trade (\d+)', line)
                         profit_match = re.search(r'Profit: (\d+)pts', line)
                         trail_match = re.search(r'Trail: ([0-9.]+)', line)
@@ -900,8 +900,8 @@ class SimpleLogParser:
                         }
 
                     # Percentage trail calculations
-                    elif re.search(r'\[PERCENTAGE TRAIL\] CS\.D\.[A-Z]{6}\.MINI\.IP:', line):
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                    elif re.search(r'\[PERCENTAGE TRAIL\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP:', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         trade_id_match = re.search(r'Trade (\d+)', line)
                         profit_match = re.search(r'Profit ([0-9.]+)pts', line)
                         retracement_match = re.search(r'(\d+)% retracement', line)
@@ -920,8 +920,8 @@ class SimpleLogParser:
                         }
 
                     # Intelligent trail calculations
-                    elif re.search(r'\[INTELLIGENT TRAIL\] CS\.D\.[A-Z]{6}\.MINI\.IP', line):
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                    elif re.search(r'\[INTELLIGENT TRAIL\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         direction_match = re.search(r'(BUY|SELL)', line)
                         current_match = re.search(r'current=([0-9.]+)', line)
                         stop_match = re.search(r'current_stop=([0-9.]+)', line)
@@ -942,8 +942,8 @@ class SimpleLogParser:
                         }
 
                     # Trailing configuration events
-                    elif re.search(r'📊 \[TRAILING CONFIG\] CS\.D\.[A-Z]{6}\.MINI\.IP', line):
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                    elif re.search(r'📊 \[TRAILING CONFIG\] CS\.D\.[A-Z]{6}\.(?:MINI|CEEM)\.IP', line):
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
 
                         activity = {
                             'timestamp': log_time,
@@ -956,7 +956,7 @@ class SimpleLogParser:
                     # Safe distance calculation events
                     elif re.search(r'\[SAFE DISTANCE RESULT\] Trade \d+', line):
                         trade_id_match = re.search(r'Trade (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         distance_match = re.search(r'Returning ([0-9.]+) points', line)
 
                         activity = {
@@ -972,7 +972,7 @@ class SimpleLogParser:
                     # Stage configuration lines (e.g., "Stage 1: Break-even at +6pts")
                     elif re.search(r'Stage \d+:.*trailing|Stage \d+:.*Break-even|Stage \d+:.*Profit lock', line):
                         stage_match = re.search(r'Stage (\d+)', line)
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
 
                         activity = {
                             'timestamp': log_time,
@@ -985,7 +985,7 @@ class SimpleLogParser:
 
                     # Trailing stop details (trailingStopDistance, trailingStep)
                     elif re.search(r'trailingStopDistance|trailingStep', line):
-                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.MINI\.IP', line)
+                        epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
                         trailing_distance_match = re.search(r'trailingStopDistance["\']?\s*:\s*([0-9.]+)', line)
                         trailing_step_match = re.search(r'trailingStep["\']?\s*:\s*([0-9.]+)', line)
 
