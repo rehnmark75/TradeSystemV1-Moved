@@ -57,7 +57,12 @@ class DataFetcher:
         
         # Pre-calculated indicators cache
         self._indicator_cache = {}
-        
+
+        # Backtest mode tracking
+        self.backtest_mode = False
+        self.backtest_start_time = None
+        self.backtest_end_time = None
+
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"🌍 Enhanced data fetcher initialized with timezone: {user_timezone}")
         self.logger.info(f"   Cache enabled: {self.cache_enabled}")
@@ -1587,7 +1592,14 @@ class DataFetcher:
         tf_minutes = timeframe_map.get(timeframe, 5)
         
         # Calculate lookback time in UTC (database time)
-        since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
+        # ENHANCED: Support backtest mode with specific time windows
+        if self.backtest_mode and self.backtest_start_time and self.backtest_end_time:
+            since_utc = self.backtest_start_time
+            until_utc = self.backtest_end_time
+            self.logger.debug(f"🧪 Backtest mode: Using time window {since_utc.strftime('%Y-%m-%d %H:%M')} to {until_utc.strftime('%Y-%m-%d %H:%M')}")
+        else:
+            since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
+            until_utc = None  # Live mode - no end time limit
         
         # FIXED: Handle 15m and 60m data by resampling 5m data if needed
         if timeframe == '15m':
@@ -1635,6 +1647,7 @@ class DataFetcher:
                     WHERE pfp.epic = :epic
                     AND pfp.timeframe = :timeframe
                     AND pfp.start_time >= :since
+                    """ + (" AND pfp.start_time <= :until" if until_utc else "") + """
                     ORDER BY pfp.start_time DESC
                     LIMIT :limit
                 )
@@ -1664,19 +1677,30 @@ class DataFetcher:
                 WHERE pfp.epic = :epic
                 AND pfp.timeframe = :timeframe
                 AND pfp.start_time >= :since
+                """ + (" AND pfp.start_time <= :until" if until_utc else "") + """
                 ORDER BY pfp.start_time ASC
                 LIMIT :limit
             """
         
         try:
-            self.logger.info(f"🔍 Fetching {epic} data since {tz_manager.format_time_for_display(since_utc)}")
-            
-            df = self.db_manager.execute_query(query, {
+            if until_utc:
+                self.logger.info(f"🔍 Fetching {epic} data from {tz_manager.format_time_for_display(since_utc)} to {tz_manager.format_time_for_display(until_utc)} (backtest mode)")
+            else:
+                self.logger.info(f"🔍 Fetching {epic} data since {tz_manager.format_time_for_display(since_utc)}")
+
+            # Build query parameters
+            query_params = {
                 "epic": epic,
                 "timeframe": source_tf,
                 "since": since_utc,
                 "limit": self.batch_size
-            })
+            }
+
+            # Add until parameter for backtest mode
+            if until_utc:
+                query_params["until"] = until_utc
+
+            df = self.db_manager.execute_query(query, query_params)
             
             if df.empty:
                 return None
@@ -1946,6 +1970,157 @@ class DataFetcher:
             
         except Exception as e:
             self.logger.error(f"❌ Error validating EMA calculation for {epic}: {e}")
+
+    # ================================================================
+    # BACKTEST HISTORICAL DATA METHODS
+    # ================================================================
+
+
+    def set_backtest_mode(self, start_time: datetime, end_time: datetime):
+        """
+        Enable backtest mode with specific time window
+
+        Args:
+            start_time: Start of backtest period (UTC)
+            end_time: End of backtest period (UTC)
+        """
+        self.backtest_mode = True
+        self.backtest_start_time = start_time
+        self.backtest_end_time = end_time
+        self.logger.info(f"🧪 Backtest mode enabled")
+        self.logger.info(f"   Period: {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')} UTC")
+
+    def disable_backtest_mode(self):
+        """Disable backtest mode and return to live data mode"""
+        self.backtest_mode = False
+        self.backtest_start_time = None
+        self.backtest_end_time = None
+        self.logger.info("📡 Returned to live data mode")
+
+    def get_historical_window(
+        self,
+        epic: str,
+        pair: str,
+        start_time: datetime,
+        end_time: datetime,
+        timeframe: str = '15m',
+        required_indicators: list = None,
+        ema_strategy = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        Get enhanced data for a specific historical time window from ig_candles
+
+        Args:
+            epic: Epic code
+            pair: Currency pair
+            start_time: Start of window (UTC)
+            end_time: End of window (UTC)
+            timeframe: Timeframe ('5m', '15m', '1h')
+            required_indicators: List of required indicators
+            ema_strategy: EMA strategy instance for configuration
+
+        Returns:
+            Enhanced DataFrame with technical indicators or None
+        """
+        try:
+            # Set temporary backtest mode for this query
+            original_mode = self.backtest_mode
+            original_start = self.backtest_start_time
+            original_end = self.backtest_end_time
+
+            self.set_backtest_mode(start_time, end_time)
+
+            # Get enhanced data using the modified fetch method
+            df = self.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=timeframe,
+                lookback_hours=None,  # Will be calculated from time window
+                required_indicators=required_indicators,
+                ema_strategy=ema_strategy
+            )
+
+            # Restore original mode
+            if original_mode:
+                self.set_backtest_mode(original_start, original_end)
+            else:
+                self.disable_backtest_mode()
+
+            if df is not None and len(df) > 0:
+                self.logger.info(f"📊 Historical window data: {len(df)} bars for {epic} ({start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')})")
+            else:
+                self.logger.warning(f"⚠️ No data found for {epic} in specified window")
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ Error getting historical window for {epic}: {e}")
+            return None
+
+    def get_backtest_data_chronologically(
+        self,
+        epic: str,
+        pair: str,
+        start_time: datetime,
+        end_time: datetime,
+        timeframe: str = '15m',
+        window_hours: int = 24,
+        ema_strategy = None
+    ) -> List[pd.DataFrame]:
+        """
+        Get historical data in chronological windows for backtesting
+
+        This method returns data in time-ordered chunks to simulate real-time processing
+
+        Args:
+            epic: Epic code
+            pair: Currency pair
+            start_time: Start of backtest period (UTC)
+            end_time: End of backtest period (UTC)
+            timeframe: Timeframe ('5m', '15m', '1h')
+            window_hours: Hours per window (default 24 hours)
+            ema_strategy: EMA strategy instance
+
+        Returns:
+            List of DataFrames, each representing a time window
+        """
+        try:
+            windows = []
+            current_start = start_time
+
+            self.logger.info(f"📅 Preparing chronological backtest data for {epic}")
+            self.logger.info(f"   Period: {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')}")
+            self.logger.info(f"   Window size: {window_hours} hours")
+
+            window_count = 0
+            while current_start < end_time:
+                window_end = min(current_start + timedelta(hours=window_hours), end_time)
+
+                # Get data for this window
+                df = self.get_historical_window(
+                    epic=epic,
+                    pair=pair,
+                    start_time=current_start,
+                    end_time=window_end,
+                    timeframe=timeframe,
+                    ema_strategy=ema_strategy
+                )
+
+                if df is not None and len(df) > 0:
+                    windows.append(df)
+                    window_count += 1
+                    self.logger.debug(f"   Window {window_count}: {len(df)} bars ({current_start.strftime('%Y-%m-%d %H:%M')} to {window_end.strftime('%Y-%m-%d %H:%M')})")
+                else:
+                    self.logger.debug(f"   Window {window_count + 1}: No data ({current_start.strftime('%Y-%m-%d %H:%M')} to {window_end.strftime('%Y-%m-%d %H:%M')})")
+
+                current_start = window_end
+
+            self.logger.info(f"✅ Generated {len(windows)} chronological windows for backtesting")
+            return windows
+
+        except Exception as e:
+            self.logger.error(f"❌ Error getting chronological backtest data: {e}")
+            return []
 
 # Maintain backward compatibility
 OptimizedDataFetcher = DataFetcher  # Alias for backward compatibility

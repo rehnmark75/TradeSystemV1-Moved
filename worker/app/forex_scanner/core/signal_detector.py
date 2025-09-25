@@ -761,28 +761,43 @@ class SignalDetector:
             return None
     
     def detect_signals_all_strategies(
-        self, 
-        epic: str, 
-        pair: str, 
+        self,
+        epic: str,
+        pair: str,
         spread_pips: float = 1.5,
-        timeframe: str = None
+        timeframe: str = None,
+        strategy_filter: List[str] = None
     ) -> List[Dict]:
         """
         ✅ OPTIMIZED: Detect signals using ALL enabled strategies individually
         🔧 FIXED: Collects individual results and passes to combined strategy to prevent duplicates
+        🧪 ENHANCED: Support strategy filtering for backtest mode
+
+        Args:
+            strategy_filter: List of strategy names to run. If None, runs all enabled strategies.
+                           Valid values: ['ema', 'macd', 'kama', 'zero_lag', 'bollinger_supertrend', 'combined', 'momentum']
         """
         all_signals = []
         
         try:
-            self.logger.debug(f"🔍 Running ALL individual strategies for {epic}")
-            
+            if strategy_filter:
+                self.logger.debug(f"🧪 Running FILTERED strategies for {epic}: {strategy_filter}")
+            else:
+                self.logger.debug(f"🔍 Running ALL individual strategies for {epic}")
+
             # 🔧 NEW: Collect individual results for combined strategy
             individual_results = {}
+
+            # Strategy filter helper function
+            def should_run_strategy(strategy_name: str) -> bool:
+                if strategy_filter is None:
+                    return True  # Run all strategies if no filter
+                return strategy_name in strategy_filter
             
             # ========== RUN INDIVIDUAL STRATEGIES SEPARATELY ==========
-            
+
             # 1. EMA Strategy
-            if getattr(config, 'SIMPLE_EMA_STRATEGY', True):
+            if getattr(config, 'SIMPLE_EMA_STRATEGY', True) and should_run_strategy('ema'):
                 try:
                     self.logger.debug(f"🔍 [EMA STRATEGY] Starting detection for {epic}")
                     if system_config.USE_BID_ADJUSTMENT:
@@ -804,7 +819,7 @@ class SignalDetector:
                     individual_results['ema'] = None
             
             # 2. MACD Strategy  
-            if getattr(config, 'MACD_EMA_STRATEGY', True):
+            if getattr(config, 'MACD_EMA_STRATEGY', True) and should_run_strategy('macd'):
                 try:
                     self.logger.debug(f"🔍 [MACD STRATEGY] Starting detection for {epic}")
                     macd_signal = self.detect_macd_ema_signals(epic, pair, spread_pips, timeframe)
@@ -823,7 +838,7 @@ class SignalDetector:
                     individual_results['macd'] = None
             
             # 3. KAMA Strategy
-            if getattr(config, 'KAMA_STRATEGY', True) and self.kama_strategy:
+            if getattr(config, 'KAMA_STRATEGY', True) and self.kama_strategy and should_run_strategy('kama'):
                 try:
                     self.logger.debug(f"🔍 [KAMA STRATEGY] Starting detection for {epic}")
                     kama_signal = self.detect_kama_signals(epic, pair, spread_pips, timeframe)
@@ -842,7 +857,7 @@ class SignalDetector:
                     individual_results['kama'] = None
             
             # 4. Zero Lag Strategy
-            if getattr(config, 'ZERO_LAG_STRATEGY', True) and self.zero_lag_strategy:
+            if getattr(config, 'ZERO_LAG_STRATEGY', True) and self.zero_lag_strategy and should_run_strategy('zero_lag'):
                 try:
                     self.logger.debug(f"🔍 [ZERO LAG] Starting detection for {epic}")
                     zero_lag_signal = self.detect_zero_lag_signals(epic, pair, spread_pips, timeframe)
@@ -861,7 +876,7 @@ class SignalDetector:
                     individual_results['zero_lag'] = None
             
             # 5. Bollinger Bands + SuperTrend Strategy
-            if getattr(config, 'BOLLINGER_SUPERTREND_STRATEGY', True) and self.bb_supertrend_strategy:
+            if getattr(config, 'BOLLINGER_SUPERTREND_STRATEGY', True) and self.bb_supertrend_strategy and should_run_strategy('bollinger_supertrend'):
                 try:
                     self.logger.debug(f"🔍 [BB+SUPERTREND] Starting detection for {epic}")
                     bb_signal = self.detect_bb_supertrend_signals(epic, pair, spread_pips, timeframe)
@@ -880,7 +895,7 @@ class SignalDetector:
                     individual_results['bb_supertrend'] = None
             
             # 6. Scalping Strategy (if enabled)
-            if getattr(config, 'SCALPING_STRATEGY_ENABLED', False):
+            if getattr(config, 'SCALPING_STRATEGY_ENABLED', False) and should_run_strategy('scalping'):
                 try:
                     self.logger.debug(f"🔍 [SCALPING] Starting detection for {epic}")
                     scalping_timeframe = '1m' if timeframe in ['1m', '5m'] else timeframe
@@ -901,7 +916,8 @@ class SignalDetector:
             
             # 7. Momentum Bias Strategy (if enabled)
             if (getattr(config, 'MOMENTUM_BIAS_STRATEGY', False) and
-                hasattr(self, 'momentum_bias_strategy') and self.momentum_bias_strategy is not None):
+                hasattr(self, 'momentum_bias_strategy') and self.momentum_bias_strategy is not None and
+                should_run_strategy('momentum')):
                 try:
                     self.logger.debug(f"🔍 [MOMENTUM BIAS] Starting detection for {epic}")
                     momentum_signal = self.detect_momentum_bias_signals(epic, pair, spread_pips, timeframe)
@@ -921,7 +937,8 @@ class SignalDetector:
 
             # 8. Advanced Momentum Strategy (if enabled)
             if (getattr(config, 'MOMENTUM_STRATEGY', False) and
-                hasattr(self, 'momentum_strategy') and self.momentum_strategy is not None):
+                hasattr(self, 'momentum_strategy') and self.momentum_strategy is not None and
+                should_run_strategy('momentum')):
                 try:
                     self.logger.debug(f"🔍 [MOMENTUM STRATEGY] Starting detection for {epic}")
                     momentum_signal = self.detect_momentum_signals(epic, pair, spread_pips, timeframe)
@@ -1022,7 +1039,7 @@ class SignalDetector:
             # ========== COMBINED STRATEGY WITH PRECOMPUTED RESULTS ==========
             
             # 8. Combined Strategy - 🔧 UPDATED: Pass precomputed results to prevent duplicates
-            if getattr(config, 'ENABLE_COMBINED_AS_ADDITIONAL_STRATEGY', False):
+            if getattr(config, 'ENABLE_COMBINED_AS_ADDITIONAL_STRATEGY', False) and should_run_strategy('combined'):
                 try:
                     self.logger.debug(f"🔍 [COMBINED] Starting detection with precomputed results for {epic}")
                     
@@ -1179,7 +1196,7 @@ class SignalDetector:
                     individual_results['ema'] = None
             
             # 2. MACD Strategy  
-            if getattr(config, 'MACD_EMA_STRATEGY', True):
+            if getattr(config, 'MACD_EMA_STRATEGY', True) and should_run_strategy('macd'):
                 try:
                     self.logger.debug(f"🔍 [MACD STRATEGY] Starting detection for {epic}")
                     macd_signal = self.detect_macd_ema_signals(epic, pair, spread_pips, timeframe)
