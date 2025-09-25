@@ -73,7 +73,8 @@
       "mcp__serena__replace_regex",
       "Bash(xargs:*)",
       "Bash(git log:*)",
-      "Bash(git show:*)"
+      "Bash(git show:*)",
+      "Read(//home/hr/**)"
     ],
     "deny": [],
     "ask": []

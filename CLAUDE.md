@@ -40,6 +40,20 @@ The TradeSystemV1 documentation has been organized into focused, specialized fil
 - **Modular Design**: New strategies follow lightweight configuration patterns
 - **Real-time Intelligence**: Market analysis and trade context evaluation available
 
+## 🤖 Agent Configuration
+
+**Automatic Agent Usage:**
+- **trading-strategy-analyst**: Automatically use this agent for any task involving:
+  - Strategy performance analysis
+  - Backtest result evaluation
+  - Trading strategy optimization
+  - Win rate, profit/loss analysis
+  - Strategy parameter tuning
+  - Market regime performance assessment
+  - Trade outcome analysis
+  - Keywords: strategy, backtest, performance, win rate, profit, loss, optimization, trading, analysis, momentum, RSI, MACD, EMA, SMA, bollinger, stochastic, parameters, signals, entry, exit, stop loss, take profit
+  - File patterns: */strategies/*, */backtests/*, *backtest*.py, *strategy*.py, *config_*.py
+
 ## 📈 System Status
 
 **Recent Enhancements:**
