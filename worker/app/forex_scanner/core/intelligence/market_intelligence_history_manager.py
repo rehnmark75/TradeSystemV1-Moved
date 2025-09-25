@@ -247,9 +247,26 @@ class MarketIntelligenceHistoryManager:
                 for epic, analysis in pair_analyses.items():
                     if isinstance(analysis, dict) and 'regime_scores' in analysis:
                         regime_scores = analysis['regime_scores']
-                        # Determine dominant regime for this epic
-                        epic_regime = max(regime_scores, key=regime_scores.get) if regime_scores else 'unknown'
-                        epic_confidence = regime_scores.get(epic_regime, 0.5) if regime_scores else 0.5
+                        # Determine dominant regime for this epic - filter out non-numeric values
+                        if regime_scores:
+                            # Filter out non-numeric values and convert to float
+                            numeric_scores = {}
+                            for regime, score in regime_scores.items():
+                                try:
+                                    numeric_scores[regime] = float(score)
+                                except (ValueError, TypeError):
+                                    # Skip non-numeric scores
+                                    continue
+
+                            if numeric_scores:
+                                epic_regime = max(numeric_scores, key=numeric_scores.get)
+                                epic_confidence = numeric_scores.get(epic_regime, 0.5)
+                            else:
+                                epic_regime = 'unknown'
+                                epic_confidence = 0.5
+                        else:
+                            epic_regime = 'unknown'
+                            epic_confidence = 0.5
 
                         # Extract clean epic name
                         clean_epic = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')

@@ -44,19 +44,22 @@ class DataFetcher:
         self.volume_analyzer = VolumeAnalyzer()
         self.behavior_analyzer = BehaviorAnalyzer()
         self.timezone_manager = TimezoneManager(user_timezone)
-        
+
         # Performance optimizations
         self.cache_enabled = getattr(config, 'ENABLE_DATA_CACHE', True)
         self.reduced_lookback = getattr(config, 'REDUCED_LOOKBACK_HOURS', True)
         self.lazy_indicators = getattr(config, 'LAZY_INDICATOR_LOADING', True)
         self.batch_size = getattr(config, 'DATA_BATCH_SIZE', 2000)
-        
+
         # Cache for recently fetched data
         self._data_cache = {}
         self._cache_timeout = 150  # 5 minutes
-        
+
         # Pre-calculated indicators cache
         self._indicator_cache = {}
+
+        # Historical mode constraint for backtesting
+        self.historical_max_timestamp = None  # NEW: Maximum timestamp for historical data
         
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"🌍 Enhanced data fetcher initialized with timezone: {user_timezone}")
@@ -1587,7 +1590,12 @@ class DataFetcher:
         tf_minutes = timeframe_map.get(timeframe, 5)
         
         # Calculate lookback time in UTC (database time)
-        since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
+        # In historical mode, calculate lookback from our historical constraint timestamp
+        if self.historical_max_timestamp:
+            from datetime import timedelta
+            since_utc = self.historical_max_timestamp - timedelta(hours=lookback_hours)
+        else:
+            since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
         
         # FIXED: Handle 15m and 60m data by resampling 5m data if needed
         if timeframe == '15m':
@@ -1595,13 +1603,21 @@ class DataFetcher:
             # Increase lookback to ensure we have enough 5m data
             # 15m needs 3x more 5m bars, so increase lookback accordingly
             adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
-            since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+            if self.historical_max_timestamp:
+                from datetime import timedelta
+                since_utc = self.historical_max_timestamp - timedelta(hours=adjusted_lookback)
+            else:
+                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
         elif timeframe == '1h':
             source_tf = 5  # Always fetch 5m data for 60m resampling
             # Increase lookback to ensure we have enough 5m data
             # 60m needs 12x more 5m bars, so increase lookback accordingly
             adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
-            since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+            if self.historical_max_timestamp:
+                from datetime import timedelta
+                since_utc = self.historical_max_timestamp - timedelta(hours=adjusted_lookback)
+            else:
+                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
         else:
             source_tf = tf_minutes
         
@@ -1612,13 +1628,17 @@ class DataFetcher:
         
         if use_recent_data_optimization:
             # Backtesting mode: fetch most recent data within lookback period
-            query = """
+            historical_constraint = ""
+            if self.historical_max_timestamp:
+                historical_constraint = "AND pfp.start_time <= :max_timestamp"
+
+            query = f"""
                 WITH recent_data AS (
-                    SELECT 
-                        pfp.start_time, 
-                        ic.open, 
-                        ic.high, 
-                        ic.low, 
+                    SELECT
+                        pfp.start_time,
+                        ic.open,
+                        ic.high,
+                        ic.low,
                         pfp.preferred_price as close,
                         ic.ltv,
                         pfp.preferred_source as data_source,
@@ -1627,14 +1647,15 @@ class DataFetcher:
                         is_price_safe_for_trading(pfp.epic, pfp.timeframe, pfp.start_time, 10.0) as is_safe_for_trading
                     FROM preferred_forex_prices pfp
                     JOIN ig_candles ic ON (
-                        pfp.epic = ic.epic 
-                        AND pfp.timeframe = ic.timeframe 
+                        pfp.epic = ic.epic
+                        AND pfp.timeframe = ic.timeframe
                         AND pfp.start_time = ic.start_time
                         AND pfp.preferred_source = ic.data_source
                     )
                     WHERE pfp.epic = :epic
                     AND pfp.timeframe = :timeframe
                     AND pfp.start_time >= :since
+                    {historical_constraint}
                     ORDER BY pfp.start_time DESC
                     LIMIT :limit
                 )
@@ -1642,12 +1663,16 @@ class DataFetcher:
             """
         else:
             # Live trading mode: simple chronological order (original behavior)
-            query = """
-                SELECT 
-                    pfp.start_time, 
-                    ic.open, 
-                    ic.high, 
-                    ic.low, 
+            historical_constraint = ""
+            if self.historical_max_timestamp:
+                historical_constraint = "AND pfp.start_time <= :max_timestamp"
+
+            query = f"""
+                SELECT
+                    pfp.start_time,
+                    ic.open,
+                    ic.high,
+                    ic.low,
                     pfp.preferred_price as close,
                     ic.ltv,
                     pfp.preferred_source as data_source,
@@ -1656,27 +1681,38 @@ class DataFetcher:
                     is_price_safe_for_trading(pfp.epic, pfp.timeframe, pfp.start_time, 10.0) as is_safe_for_trading
                 FROM preferred_forex_prices pfp
                 JOIN ig_candles ic ON (
-                    pfp.epic = ic.epic 
-                    AND pfp.timeframe = ic.timeframe 
+                    pfp.epic = ic.epic
+                    AND pfp.timeframe = ic.timeframe
                     AND pfp.start_time = ic.start_time
                     AND pfp.preferred_source = ic.data_source
                 )
                 WHERE pfp.epic = :epic
                 AND pfp.timeframe = :timeframe
                 AND pfp.start_time >= :since
+                {historical_constraint}
                 ORDER BY pfp.start_time ASC
                 LIMIT :limit
             """
         
         try:
-            self.logger.info(f"🔍 Fetching {epic} data since {tz_manager.format_time_for_display(since_utc)}")
-            
-            df = self.db_manager.execute_query(query, {
+            if self.historical_max_timestamp:
+                self.logger.info(f"🔍 Fetching {epic} historical data from {tz_manager.format_time_for_display(since_utc)} to {self.historical_max_timestamp}")
+            else:
+                self.logger.info(f"🔍 Fetching {epic} data since {tz_manager.format_time_for_display(since_utc)}")
+
+            # Build query parameters
+            query_params = {
                 "epic": epic,
                 "timeframe": source_tf,
                 "since": since_utc,
                 "limit": self.batch_size
-            })
+            }
+
+            # Add historical constraint parameter if set
+            if self.historical_max_timestamp:
+                query_params["max_timestamp"] = self.historical_max_timestamp
+
+            df = self.db_manager.execute_query(query, query_params)
             
             if df.empty:
                 return None

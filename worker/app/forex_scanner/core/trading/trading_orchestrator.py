@@ -133,6 +133,8 @@ class TradingOrchestrator:
         use_advanced_claude_prompts: bool = None,
         # TRADING CONFIGURATION
         enable_trading: bool = None,
+        # BACKTEST CONFIGURATION
+        disable_alert_history: bool = False,  # Disable database writes during backtesting
         # SCANNER CONFIGURATION (passed to scanner)
         scan_interval: int = None,
         epic_list: List[str] = None,
@@ -187,8 +189,12 @@ class TradingOrchestrator:
         self.db_manager = db_manager
         
         # CRITICAL: Initialize AlertHistoryManager for database operations
+        # BACKTEST MODE: Disable AlertHistoryManager if disable_alert_history is True
         try:
-            if self.db_manager:
+            if disable_alert_history:
+                self.alert_history = None
+                self.logger.info("🚫 AlertHistoryManager DISABLED for backtesting - no database writes")
+            elif self.db_manager:
                 self.alert_history = AlertHistoryManager(self.db_manager)
                 self.logger.info("✅ AlertHistoryManager initialized successfully")
             else:
@@ -1710,6 +1716,155 @@ class TradingOrchestrator:
             'SignalDetector': hasattr(self, 'signal_detector') and self.signal_detector is not None,
         }
         return components
+
+    def process_signal(self, signal: Dict, historical_mode: bool = False) -> Optional[Dict]:
+        """
+        Process a single signal through the complete trading pipeline
+
+        Args:
+            signal: Signal to process
+            historical_mode: If True, log trade decision instead of executing
+
+        Returns:
+            Trade decision dictionary with full context
+        """
+        try:
+            # Apply intelligence filtering
+            intelligence_signals = self._apply_intelligence_filtering([signal])
+            if not intelligence_signals:
+                return {
+                    'action': 'REJECT',
+                    'reason': 'Failed intelligence filtering',
+                    'signal': signal,
+                    'decision_timestamp': datetime.now(),
+                    'intelligence_score': self._calculate_intelligence_score(signal),
+                    'intelligence_threshold': self.intelligence_threshold
+                }
+
+            filtered_signal = intelligence_signals[0]
+
+            # Apply trade validation if available
+            if self.trade_validator:
+                valid_signals, invalid_signals = self.trade_validator.validate_signals_batch([filtered_signal])
+
+                if not valid_signals:
+                    invalid_signal = invalid_signals[0] if invalid_signals else filtered_signal
+                    return {
+                        'action': 'REJECT',
+                        'reason': f"Failed validation: {invalid_signal.get('validation_error', 'Unknown reason')}",
+                        'signal': signal,
+                        'decision_timestamp': datetime.now(),
+                        'validation_result': invalid_signal
+                    }
+
+                validated_signal = valid_signals[0]
+            else:
+                validated_signal = filtered_signal
+
+            # Apply risk management if available
+            if self.risk_manager:
+                risk_approved = self.risk_manager.evaluate_signal_risk(validated_signal)
+                if not risk_approved:
+                    return {
+                        'action': 'REJECT',
+                        'reason': 'Failed risk management evaluation',
+                        'signal': signal,
+                        'decision_timestamp': datetime.now(),
+                        'risk_evaluation': False
+                    }
+
+            # Apply Claude analysis if enabled
+            claude_result = None
+            if self.enable_claude and self.integration_manager:
+                try:
+                    claude_result = self.integration_manager.analyze_signal(validated_signal)
+                    if claude_result and claude_result.get('recommendation') == 'REJECT':
+                        return {
+                            'action': 'REJECT',
+                            'reason': f"Claude recommendation: {claude_result.get('reasoning', 'Signal rejected by AI analysis')}",
+                            'signal': signal,
+                            'decision_timestamp': datetime.now(),
+                            'claude_result': claude_result
+                        }
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Claude analysis failed: {e}")
+
+            # Determine trade action
+            signal_type = validated_signal.get('signal_type', 'UNKNOWN')
+            if signal_type == 'BULL':
+                action = 'BUY'
+            elif signal_type == 'BEAR':
+                action = 'SELL'
+            else:
+                action = 'REJECT'
+
+            # Create comprehensive trade decision
+            trade_decision = {
+                'action': action,
+                'reason': 'Passed all validation steps' if action in ['BUY', 'SELL'] else 'Unknown signal type',
+                'signal': signal,
+                'validated_signal': validated_signal,
+                'decision_timestamp': datetime.now(),
+                'confidence_score': validated_signal.get('confidence_score', 0),
+                'epic': validated_signal.get('epic', 'Unknown'),
+                'strategy': validated_signal.get('strategy', 'Unknown'),
+                'entry_price': validated_signal.get('entry_price') or validated_signal.get('price'),
+                'intelligence_score': self._calculate_intelligence_score(validated_signal),
+                'pipeline_stage': 'COMPLETE'
+            }
+
+            # Add Claude analysis if available
+            if claude_result:
+                trade_decision['claude_result'] = claude_result
+                trade_decision['claude_score'] = claude_result.get('claude_score', 0)
+                trade_decision['claude_reasoning'] = claude_result.get('reasoning', '')
+
+            # In historical mode, we log the decision
+            if historical_mode:
+                self.logger.info(f"📊 HISTORICAL TRADE DECISION: {action} {trade_decision['epic']} "
+                               f"({trade_decision['strategy']}) - Confidence: {trade_decision['confidence_score']:.1%}")
+
+                # Save to database if alert_history is available
+                if self.alert_history:
+                    try:
+                        # Save the original signal with decision context
+                        decision_signal = validated_signal.copy()
+                        decision_signal['historical_trade_decision'] = action
+                        decision_signal['historical_decision_reason'] = trade_decision['reason']
+                        decision_signal['historical_mode'] = True
+
+                        alert_id = self.alert_history.save_alert(
+                            decision_signal,
+                            claude_result or {}
+                        )
+                        trade_decision['alert_id'] = alert_id
+
+                    except Exception as e:
+                        self.logger.error(f"❌ Error saving historical decision to database: {e}")
+
+                return trade_decision
+
+            # In live mode, we would execute the trade here
+            else:
+                # This is where actual trade execution would happen
+                self.logger.info(f"🚀 LIVE TRADE: {action} {trade_decision['epic']} "
+                               f"({trade_decision['strategy']}) - Confidence: {trade_decision['confidence_score']:.1%}")
+
+                # TODO: Integrate with OrderManager for actual trade execution
+                # For now, just log the decision
+                trade_decision['execution_status'] = 'SIMULATED'
+
+                return trade_decision
+
+        except Exception as e:
+            self.logger.error(f"❌ Error processing signal: {e}")
+            return {
+                'action': 'ERROR',
+                'reason': f'Processing error: {str(e)}',
+                'signal': signal,
+                'decision_timestamp': datetime.now(),
+                'error': str(e)
+            }
 
 
 # =================================================================

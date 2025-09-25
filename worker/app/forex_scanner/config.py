@@ -401,6 +401,9 @@ MEAN_REVERSION_STRATEGY = True  # Multi-oscillator mean reversion strategy
 # Strategy Configurations - Additional strategies
 RANGING_MARKET_STRATEGY = True  # Multi-oscillator ranging market strategy
 
+# Enable Combined Strategy
+COMBINED_STRATEGY = False  # Combined strategy ensemble mode (disabled by default)
+
 # KAMA Strategy Configuration
 KAMA_STRATEGY_CONFIG = {
     'default': {
@@ -779,6 +782,12 @@ REJECTION_WICK_THRESHOLD = 0.1  # 50% of candle range
 
 # Import all market intelligence configurations from dedicated config module
 from configdata.market_intelligence_config import *
+
+# Import MACD strategy configuration
+try:
+    from configdata.strategies.config_macd_strategy import MACD_EMA_STRATEGY
+except ImportError:
+    MACD_EMA_STRATEGY = False  # Fallback if not available
 
 # =============================================================================
 # ORDER EXECUTION CONFIGURATION

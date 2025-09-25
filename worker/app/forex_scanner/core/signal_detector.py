@@ -65,11 +65,23 @@ class SignalDetector:
         self.logger = logging.getLogger(__name__)
         
         # Initialize strategies
-        self.ema_strategy = EMAStrategy(data_fetcher=self.data_fetcher)
+        # Initialize EMA strategy if enabled
+        if getattr(config, 'EMA_STRATEGY', False):
+            self.ema_strategy = EMAStrategy(data_fetcher=self.data_fetcher)
+            self.logger.info("🎯 EMA Strategy initialized")
+        else:
+            self.ema_strategy = None
+
         # MACD strategy will be created per-epic with optimized parameters
         self.macd_strategy = None  # Will be created when needed with epic parameter
         self.macd_strategies_cache = {}  # Cache epic-specific strategies
-        self.combined_strategy = CombinedStrategy(data_fetcher=self.data_fetcher)
+
+        # Initialize Combined strategy if enabled
+        if getattr(config, 'COMBINED_STRATEGY', False):
+            self.combined_strategy = CombinedStrategy(data_fetcher=self.data_fetcher)
+            self.logger.info("🎯 Combined Strategy initialized")
+        else:
+            self.combined_strategy = None
         self.scalping_strategy = ScalpingStrategy()
         self.large_candle_filter = LargeCandleFilter()
         self.logger.info("✅ Large candle filter initialized")

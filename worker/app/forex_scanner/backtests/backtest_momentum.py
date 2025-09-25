@@ -921,6 +921,207 @@ class MomentumBacktest:
                 self.logger.info(f"   ⏱️  Avg analysis time: {avg_time:.2f}s")
             self.logger.info("=" * 60)
 
+    def run_historical_scanner_pipeline(self,
+                                       epic: str = None,
+                                       days: int = 7,
+                                       timeframe: str = None,
+                                       min_confidence: float = None,
+                                       strategy_filter: str = None) -> bool:
+        """
+        Run full historical scanner pipeline backtest - most realistic mode
+
+        This uses the complete production scanner pipeline on historical data,
+        stepping through time chronologically and logging trade decisions.
+
+        Args:
+            epic: Epic to test (if None, uses config)
+            days: Days to test
+            timeframe: Timeframe to analyze
+            min_confidence: Minimum confidence threshold
+
+        Returns:
+            Success status
+        """
+        try:
+            self.logger.info("🚀 HISTORICAL SCANNER PIPELINE BACKTEST")
+            self.logger.info("=" * 60)
+            self.logger.info("This mode uses the complete production scanner pipeline")
+            self.logger.info("on historical data for the most realistic backtesting.")
+            self.logger.info("=" * 60)
+
+            # Import HistoricalScannerEngine
+            try:
+                from core.backtest.historical_scanner_engine import HistoricalScannerEngine
+            except ImportError:
+                from forex_scanner.core.backtest.historical_scanner_engine import HistoricalScannerEngine
+
+            # Set up parameters
+            # Fix epic list - only EURUSD changed from MINI to CEEM, others still use MINI
+            if epic:
+                epic_list = [epic]
+            else:
+                # Use corrected epic list with EURUSD as CEEM.IP, others as MINI.IP
+                default_epics = getattr(config, 'EPIC_LIST', [
+                    'CS.D.EURUSD.CEEM.IP',  # Only EURUSD uses CEEM
+                    'CS.D.GBPUSD.MINI.IP',
+                    'CS.D.USDJPY.MINI.IP',
+                    'CS.D.AUDUSD.MINI.IP',
+                    'CS.D.USDCHF.MINI.IP',
+                    'CS.D.USDCAD.MINI.IP',
+                    'CS.D.NZDUSD.MINI.IP',
+                    'CS.D.EURJPY.MINI.IP'
+                ])
+
+                # Fix any EURUSD.MINI.IP in the config list to use CEEM.IP
+                epic_list = []
+                for e in default_epics:
+                    if 'EURUSD.MINI.IP' in e:
+                        epic_list.append(e.replace('EURUSD.MINI.IP', 'EURUSD.CEEM.IP'))
+                    else:
+                        epic_list.append(e)
+            timeframe = timeframe or getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+
+            # Calculate time range - always try to use available data
+            from datetime import datetime, timedelta
+
+            # Check what data is actually available and adjust date range accordingly
+            try:
+                with self.db_manager.get_connection() as conn:
+                    with conn.cursor() as cursor:
+                        # Find the most recent data available for the epic list
+                        cursor.execute("""
+                            SELECT MAX(start_time) as latest_data
+                            FROM ig_candles
+                            WHERE timeframe = 15
+                            AND epic = ANY(%s)
+                        """, [epic_list])
+
+                        result = cursor.fetchone()
+                        if result and result[0]:
+                            latest_available = result[0]
+                            end_date = latest_available
+                            start_date = end_date - timedelta(days=days)
+
+                            self.logger.info(f"📅 Using data range based on available data:")
+                            self.logger.info(f"   Latest available: {latest_available}")
+                            self.logger.info(f"   Backtest range: {start_date} to {end_date}")
+                        else:
+                            # Fallback to current approach if no data found
+                            end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                            start_date = end_date - timedelta(days=days)
+                            self.logger.warning(f"⚠️ No data found, using current date approach")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Error checking available data, using current date approach: {e}")
+                end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                start_date = end_date - timedelta(days=days)
+
+            self.logger.info(f"📊 Configuration:")
+            self.logger.info(f"   Epic(s): {epic_list}")
+            self.logger.info(f"   Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+            self.logger.info(f"   Days: {days}")
+            self.logger.info(f"   Timeframe: {timeframe}")
+            self.logger.info(f"   Min confidence: {min_confidence or 'From config'}")
+
+            # Initialize historical scanner engine
+            scanner_config = {}
+            if min_confidence:
+                scanner_config['min_confidence'] = min_confidence
+            if strategy_filter:
+                scanner_config['strategy_filter'] = strategy_filter
+
+            self.logger.info(f"🎯 Strategy Filter: {strategy_filter or 'all strategies'}")
+
+            historical_engine = HistoricalScannerEngine(
+                db_manager=self.db_manager,
+                epic_list=epic_list,
+                **scanner_config
+            )
+
+            self.logger.info("✅ Historical scanner engine initialized")
+
+            # Run the historical backtest
+            results = historical_engine.run_historical_backtest(
+                start_date=start_date,
+                end_date=end_date,
+                timeframe=timeframe
+            )
+
+            if results.get('success'):
+                # Display comprehensive results
+                stats = results['statistics']
+                self.logger.info("\n" + "=" * 60)
+                self.logger.info("🎉 HISTORICAL PIPELINE BACKTEST RESULTS")
+                self.logger.info("=" * 60)
+
+                self.logger.info(f"📊 Scan Statistics:")
+                self.logger.info(f"   Total scans: {stats['total_scans']}")
+                self.logger.info(f"   Signals detected: {stats['signals_detected']}")
+                self.logger.info(f"   Trade decisions: {stats['trades_approved'] + stats['trades_rejected']}")
+                self.logger.info(f"   Approved trades: {stats['trades_approved']}")
+                self.logger.info(f"   Rejected trades: {stats['trades_rejected']}")
+                self.logger.info(f"   Approval rate: {stats['approval_rate']:.1%}")
+
+                self.logger.info(f"\n⏱️  Performance:")
+                self.logger.info(f"   Total duration: {stats['total_duration_seconds']:.1f}s")
+                self.logger.info(f"   Avg scan time: {stats['avg_scan_time']:.3f}s")
+                self.logger.info(f"   Signals per scan: {stats['signals_per_scan']:.2f}")
+
+                # Trade summary
+                trade_summary = results['trade_summary']
+                self.logger.info(f"\n📈 Trade Summary:")
+                self.logger.info(f"   Total trade decisions: {trade_summary['total_trades']}")
+
+                if trade_summary['by_action']:
+                    self.logger.info(f"   By Action:")
+                    for action, count in trade_summary['by_action'].items():
+                        self.logger.info(f"     {action}: {count}")
+
+                if trade_summary['by_epic']:
+                    self.logger.info(f"   By Epic:")
+                    for epic, actions in trade_summary['by_epic'].items():
+                        total_epic = sum(actions.values())
+                        self.logger.info(f"     {epic}: {total_epic} decisions "
+                                       f"(BUY: {actions.get('BUY', 0)}, SELL: {actions.get('SELL', 0)}, "
+                                       f"REJECT: {actions.get('REJECT', 0)})")
+
+                if trade_summary['by_strategy']:
+                    self.logger.info(f"   By Strategy:")
+                    for strategy, count in trade_summary['by_strategy'].items():
+                        self.logger.info(f"     {strategy}: {count}")
+
+                # Show sample trade decisions
+                trades = results.get('trades', [])
+                if trades:
+                    approved_trades = [t for t in trades if t.get('action') in ['BUY', 'SELL']]
+                    if approved_trades:
+                        self.logger.info(f"\n💰 Sample Approved Trades (showing first 5):")
+                        for i, trade in enumerate(approved_trades[:5], 1):
+                            epic = trade.get('epic', 'Unknown')
+                            action = trade.get('action', 'Unknown')
+                            confidence = trade.get('confidence_score', 0)
+                            strategy = trade.get('strategy', 'Unknown')
+                            timestamp = trade.get('historical_timestamp', 'Unknown')
+
+                            self.logger.info(f"   {i}. {action} {epic} ({strategy}) - "
+                                           f"Confidence: {confidence:.1%} at {timestamp}")
+
+                self.logger.info("=" * 60)
+                self.logger.info("✅ Historical scanner pipeline backtest completed successfully!")
+                self.logger.info("📊 This represents realistic trading decisions using the complete")
+                self.logger.info("   production pipeline on historical data.")
+
+                return True
+            else:
+                error = results.get('error', 'Unknown error')
+                self.logger.error(f"❌ Historical pipeline backtest failed: {error}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"❌ Error running historical scanner pipeline: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return False
+
 
 def main():
     """Main execution with enhanced implementation"""
@@ -930,8 +1131,10 @@ def main():
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument('--simulate-live', action='store_true',
                            help='Simulate live scanner behavior using real signal detector')
+    mode_group.add_argument('--pipeline', action='store_true',
+                           help='Run full scanner pipeline backtest (most realistic)')
     mode_group.add_argument('--backtest', action='store_true', default=True,
-                           help='Run backtest using momentum strategy (default)')
+                           help='Run backtest using momentum strategy only (default)')
 
     # Arguments
     parser.add_argument('--epic', help='Epic to test')
@@ -943,6 +1146,11 @@ def main():
     parser.add_argument('--no-optimal-params', action='store_true', help='Disable database optimization (use static parameters)')
     parser.add_argument('--verbose', action='store_true', help='Verbose logging')
 
+    # Strategy filtering for pipeline mode
+    parser.add_argument('--strategy-filter',
+                       choices=['momentum', 'macd', 'ema', 'zero_lag', 'combined', 'all'],
+                       help='Filter to specific strategy in pipeline mode (default: all strategies)')
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -950,7 +1158,15 @@ def main():
 
     backtest = MomentumBacktest()
 
-    if args.simulate_live:
+    if args.pipeline:
+        success = backtest.run_historical_scanner_pipeline(
+            epic=args.epic,
+            days=args.days,
+            timeframe=args.timeframe,
+            min_confidence=args.min_confidence,
+            strategy_filter=args.strategy_filter
+        )
+    elif args.simulate_live:
         success = backtest.run_live_scanner_simulation(
             epic=args.epic,
             days=args.days,
