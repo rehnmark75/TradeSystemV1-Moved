@@ -187,7 +187,7 @@ Examples:
         parser.add_argument('--disable-order-flow', action='store_true',
                           help='Disable order flow analysis')
         parser.add_argument('--strategies', type=str, nargs='+',
-                          choices=['ema', 'smart_money_ema', 'macd', 'smart_money_macd'],
+                          choices=['ema', 'macd'],
                           help='Specific strategies to compare')
         
         return parser
@@ -1000,107 +1000,7 @@ Examples:
             self.logger.error(f"❌ Smart money backtest failed: {e}")
             return False
     
-    def _test_smart_ema_strategy(self, args) -> bool:
-        """Test Smart Money EMA strategy"""
-        try:
-            from core.strategies.smart_money_ema_strategy import SmartMoneyEMAStrategy
-            from core.database import DatabaseManager
-            from core.data_fetcher import DataFetcher
-            import config
-            
-            self.logger.info(f"🧠 Testing Smart Money EMA Strategy for {args.epic}")
-            
-            # Initialize components
-            db_manager = DatabaseManager(config.DATABASE_URL)
-            data_fetcher = DataFetcher(db_manager)
-            
-            # Create smart money EMA strategy
-            smart_ema = SmartMoneyEMAStrategy(data_fetcher=data_fetcher)
-            
-            # Get data
-            pair_info = config.PAIR_INFO.get(args.epic, {'pair': 'EURUSD'})
-            df = data_fetcher.get_enhanced_data(args.epic, pair_info['pair'], args.timeframe)
-            
-            if df is None or len(df) < 50:
-                self.logger.error("❌ Insufficient data for smart EMA test")
-                return False
-            
-            # Test signal detection
-            signal = smart_ema.detect_signal(df, args.epic, config.SPREAD_PIPS, args.timeframe)
-            
-            if signal:
-                self.logger.info(f"✅ Smart Money EMA Signal Detected!")
-                self.logger.info(f"   Signal Type: {signal.get('signal_type')}")
-                self.logger.info(f"   Original Confidence: {signal.get('original_confidence_score', 'N/A')}")
-                self.logger.info(f"   Enhanced Confidence: {signal.get('enhanced_confidence_score', 'N/A')}")
-                self.logger.info(f"   Smart Money Score: {signal.get('smart_money_score', 'N/A')}")
-                
-                # Show smart money analysis details
-                if 'market_structure_analysis' in signal:
-                    structure = signal['market_structure_analysis']
-                    self.logger.info(f"   Market Structure: {structure.get('current_bias')} "
-                                   f"(score: {structure.get('structure_score', 0):.3f})")
-                
-                if 'order_flow_analysis' in signal:
-                    order_flow = signal['order_flow_analysis']
-                    self.logger.info(f"   Order Flow: {order_flow.get('validation_reason', 'N/A')}")
-            else:
-                self.logger.info("ℹ️ No Smart Money EMA signal detected")
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"❌ Smart Money EMA test failed: {e}")
-            return False
-    
-    def _test_smart_macd_strategy(self, args) -> bool:
-        """Test Smart Money MACD strategy"""
-        try:
-            from core.strategies.smart_money_macd_strategy import SmartMoneyMACDStrategy
-            from core.database import DatabaseManager
-            from core.data_fetcher import DataFetcher
-            import config
-            
-            self.logger.info(f"📈 Testing Smart Money MACD Strategy for {args.epic}")
-            
-            # Initialize components
-            db_manager = DatabaseManager(config.DATABASE_URL)
-            data_fetcher = DataFetcher(db_manager)
-            
-            # Create smart money MACD strategy
-            smart_macd = SmartMoneyMACDStrategy()
-            
-            # Get data
-            pair_info = config.PAIR_INFO.get(args.epic, {'pair': 'EURUSD'})
-            df = data_fetcher.get_enhanced_data(args.epic, pair_info['pair'], args.timeframe)
-            
-            if df is None or len(df) < 50:
-                self.logger.error("❌ Insufficient data for smart MACD test")
-                return False
-            
-            # Test signal detection
-            signal = smart_macd.detect_signal(df, args.epic, config.SPREAD_PIPS, args.timeframe)
-            
-            if signal:
-                self.logger.info(f"✅ Smart Money MACD Signal Detected!")
-                self.logger.info(f"   Signal Type: {signal.get('signal_type')}")
-                self.logger.info(f"   Original Confidence: {signal.get('original_confidence_score', 'N/A')}")
-                self.logger.info(f"   Enhanced Confidence: {signal.get('enhanced_confidence_score', 'N/A')}")
-                self.logger.info(f"   Order Flow Score: {signal.get('order_flow_score', 'N/A')}")
-                
-                # Show order flow confluence details
-                if 'confluence_details' in signal:
-                    self.logger.info("   Order Flow Confluences:")
-                    for factor, details in signal['confluence_details'].items():
-                        self.logger.info(f"     {factor}: {details.get('description', 'N/A')}")
-            else:
-                self.logger.info("ℹ️ No Smart Money MACD signal detected")
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"❌ Smart Money MACD test failed: {e}")
-            return False
+    # Smart Money strategy test methods removed - strategies were experimental and not integrated
     
     def setup_logging(self, verbose: bool = False):
         """Setup logging configuration"""

@@ -13,8 +13,9 @@ try:
     from core.signal_detector import SignalDetector
     from core.intelligence.market_structure_analyzer import MarketStructureAnalyzer
     from core.intelligence.order_flow_analyzer import OrderFlowAnalyzer
-    from core.strategies.smart_money_ema_strategy import SmartMoneyEMAStrategy
-    from core.strategies.smart_money_macd_strategy import SmartMoneyMACDStrategy
+    # Smart Money strategies removed - were experimental and not integrated
+    # from core.strategies.smart_money_ema_strategy import SmartMoneyEMAStrategy
+    # from core.strategies.smart_money_macd_strategy import SmartMoneyMACDStrategy
     import config
 except ImportError:
     try:
@@ -41,8 +42,9 @@ class SmartMoneyCommands:
             try:
                 self.market_structure_analyzer = MarketStructureAnalyzer()
                 self.order_flow_analyzer = OrderFlowAnalyzer()
-                self.smart_ema_strategy = SmartMoneyEMAStrategy()
-                self.smart_macd_strategy = SmartMoneyMACDStrategy()
+                # Smart Money strategies removed - were experimental
+                self.smart_ema_strategy = None
+                self.smart_macd_strategy = None
                 self.logger.info("🧠 Smart Money Commands initialized with full functionality")
             except (NameError, ImportError):
                 # Create mock components if smart money modules are not available

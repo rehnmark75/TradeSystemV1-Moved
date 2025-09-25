@@ -11,7 +11,7 @@ from .bb_supertrend_strategy import BollingerSupertrendStrategy
 from .kama_strategy import KAMAStrategy
 from .zero_lag_strategy import ZeroLagStrategy
 from .momentum_strategy import MomentumStrategy
-from .smc_strategy import SMCStrategy, create_smc_strategy
+# from .smc_strategy import SMCStrategy, create_smc_strategy  # Removed - legacy strategy, SMCStrategyFast is in production
 from .smc_strategy_fast import SMCStrategyFast, create_smc_strategy_fast
 from .mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
 from .ichimoku_strategy import IchimokuStrategy
@@ -26,8 +26,7 @@ __all__ = [
     'KAMAStrategy',
     'ZeroLagStrategy',
     'MomentumStrategy',
-    'SMCStrategy',
-    'create_smc_strategy',
+    # 'SMCStrategy', 'create_smc_strategy',  # Removed - legacy strategy
     'SMCStrategyFast',
     'create_smc_strategy_fast',
     'MeanReversionStrategy',
