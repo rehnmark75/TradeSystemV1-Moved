@@ -247,9 +247,24 @@ class MarketIntelligenceHistoryManager:
                 for epic, analysis in pair_analyses.items():
                     if isinstance(analysis, dict) and 'regime_scores' in analysis:
                         regime_scores = analysis['regime_scores']
-                        # Determine dominant regime for this epic
-                        epic_regime = max(regime_scores, key=regime_scores.get) if regime_scores else 'unknown'
-                        epic_confidence = regime_scores.get(epic_regime, 0.5) if regime_scores else 0.5
+                        # Filter out non-numeric values and ensure we have valid regime scores
+                        if isinstance(regime_scores, dict):
+                            valid_regime_scores = {k: v for k, v in regime_scores.items()
+                                                 if isinstance(v, (int, float)) and isinstance(k, str)}
+
+                            # Debug log invalid entries for troubleshooting
+                            invalid_entries = {k: v for k, v in regime_scores.items()
+                                             if not (isinstance(v, (int, float)) and isinstance(k, str))}
+                            if invalid_entries:
+                                self.logger.debug(f"🔍 Filtered invalid regime_scores entries for {epic}: {invalid_entries}")
+
+                            # Determine dominant regime for this epic
+                            epic_regime = max(valid_regime_scores, key=valid_regime_scores.get) if valid_regime_scores else 'unknown'
+                            epic_confidence = valid_regime_scores.get(epic_regime, 0.5) if valid_regime_scores else 0.5
+                        else:
+                            self.logger.debug(f"🔍 regime_scores is not a dict for {epic}: {type(regime_scores)} - {regime_scores}")
+                            epic_regime = 'unknown'
+                            epic_confidence = 0.5
 
                         # Extract clean epic name
                         clean_epic = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
