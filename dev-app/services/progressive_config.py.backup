@@ -140,19 +140,26 @@ def get_progressive_config_for_epic(epic: str, candles=None, current_price: floa
         base_config = TrailingConfig(**config_dict)
 
     # ✅ ENHANCEMENT: Dynamic break-even calculation using IG minimum distance
-    # ✅ ENHANCEMENT: Dynamic break-even calculation using IG minimum distance
     if trade and hasattr(trade, 'min_stop_distance_points') and trade.min_stop_distance_points is not None:
-        # Calculate dynamic break-even trigger: IG minimum + 4 points buffer (CLEAN FORMULA)
+        # Calculate dynamic break-even trigger: IG minimum + 4 points buffer
         dynamic_trigger = trade.min_stop_distance_points + 4
-        dynamic_trigger = int(round(dynamic_trigger))
+
+        # Apply bounds: minimum 3 points, maximum 15 points
+        bounded_trigger = min(max(dynamic_trigger, 3), 15)
+        bounded_trigger = int(round(bounded_trigger))
 
         # Update base config with dynamic values
         config_dict = base_config.__dict__.copy()
-        config_dict['break_even_trigger_points'] = dynamic_trigger
-        config_dict['stage1_trigger_points'] = dynamic_trigger  # Keep them in sync
+        config_dict['break_even_trigger_points'] = bounded_trigger
+        config_dict['stage1_trigger_points'] = bounded_trigger  # Keep them in sync
 
         # Log the dynamic calculation for transparency
-        print(f"[DYNAMIC STAGE1] {epic}: IG min {trade.min_stop_distance_points:.1f} + 4 = {dynamic_trigger} points (pure formula)")
+        print(f"[DYNAMIC BREAK-EVEN] {epic}: IG min {trade.min_stop_distance_points:.1f} + 4 = {dynamic_trigger:.1f}")
+        if bounded_trigger != dynamic_trigger:
+            print(f"[DYNAMIC BREAK-EVEN] {epic}: Applied bounds {dynamic_trigger:.1f} → {bounded_trigger} points")
+        else:
+            print(f"[DYNAMIC BREAK-EVEN] {epic}: Using calculated {bounded_trigger} points")
+
         # ✅ FIX: Filter out metadata parameters before creating TrailingConfig
         metadata_params = {'_adaptation', '_regime', '_market_context', '_adaptive_skip_reason'}
         filtered_config_dict = {k: v for k, v in config_dict.items() if k not in metadata_params}

@@ -11,6 +11,7 @@ from .config_smc_strategy import *
 from .config_ichimoku_strategy import *
 from .config_mean_reversion_strategy import *
 from .config_ranging_market_strategy import *
+from .config_momentum_strategy import *
 
 # Import TradingView integration (optional)
 try:
@@ -574,7 +575,54 @@ __all__ = [
     'RANGING_MARKET_LOG_ZONE_INTERACTIONS',
 
     # Ranging Market Helper Functions
-    'get_ranging_market_config_summary'
+    'get_ranging_market_config_summary',
+
+    # Momentum Strategy Core Settings
+    'MOMENTUM_STRATEGY',
+    'MOMENTUM_STRATEGY_CONFIG',
+    'ACTIVE_MOMENTUM_CONFIG',
+    'STRATEGY_WEIGHT_MOMENTUM',
+
+    # Momentum Feature Toggles
+    'MOMENTUM_FEATURE_ENABLED',
+    'MOMENTUM_VELOCITY_ENABLED',
+    'MOMENTUM_VOLUME_CONFIRMATION',
+    'MOMENTUM_MTF_VALIDATION',
+    'ENABLE_DYNAMIC_MOMENTUM_CONFIG',
+    'MOMENTUM_ADAPTIVE_SMOOTHING',
+
+    # Momentum Calculation Settings
+    'MOMENTUM_CALCULATION_METHOD',
+    'MOMENTUM_SIGNAL_THRESHOLD',
+    'MOMENTUM_DIVERGENCE_THRESHOLD',
+    'MOMENTUM_VELOCITY_THRESHOLD',
+
+    # Volume Momentum Settings
+    'MOMENTUM_VOLUME_MULTIPLIER',
+    'MOMENTUM_VOLUME_CONFIRMATION_ENABLED',
+
+    # Multi-Timeframe Momentum Settings
+    'MOMENTUM_MTF_TIMEFRAMES',
+    'MOMENTUM_MTF_MIN_AGREEMENT',
+
+    # Momentum Risk Management
+    'MOMENTUM_MAX_RISK_PER_TRADE',
+    'MOMENTUM_STOP_LOSS_METHOD',
+    'MOMENTUM_TAKE_PROFIT_RATIO',
+
+    # Signal Validation
+    'MOMENTUM_MIN_CONFIDENCE',
+    'MOMENTUM_SIGNAL_COOLDOWN',
+
+    # Momentum Helper Functions
+    'get_momentum_config_for_epic',
+    'get_momentum_threshold_for_epic',
+    'get_momentum_velocity_threshold_for_epic',
+    'get_adaptive_smoothing_factor',
+    'validate_momentum_config',
+    'calculate_velocity_momentum',
+    'calculate_volume_weighted_momentum',
+    'calculate_adaptive_momentum'
 ]
 
 # Add TradingView integration functions if available
@@ -598,7 +646,7 @@ __description__ = "Strategy-specific configuration modules for ZeroLag, MACD, EM
 def get_strategies_summary() -> dict:
     """Get a summary of all loaded strategy configurations"""
     return {
-        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc', 'ichimoku', 'mean_reversion', 'ranging_market'],
+        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc', 'ichimoku', 'mean_reversion', 'ranging_market', 'momentum'],
         'zerolag_enabled': globals().get('ZERO_LAG_STRATEGY', False),
         'macd_enabled': globals().get('MACD_EMA_STRATEGY', False),
         'ema_enabled': globals().get('SIMPLE_EMA_STRATEGY', False),
@@ -606,6 +654,7 @@ def get_strategies_summary() -> dict:
         'ichimoku_enabled': globals().get('ICHIMOKU_CLOUD_STRATEGY', False),
         'mean_reversion_enabled': globals().get('MEAN_REVERSION_STRATEGY', False),
         'ranging_market_enabled': globals().get('RANGING_MARKET_STRATEGY', False),
+        'momentum_enabled': globals().get('MOMENTUM_STRATEGY', False),
         'total_settings': len(__all__)
     }
 
@@ -618,7 +667,8 @@ def validate_strategy_configs() -> dict:
         'smc': _validate_smc_config(),
         'ichimoku': _validate_ichimoku_config(),
         'mean_reversion': _validate_mean_reversion_config(),
-        'ranging_market': _validate_ranging_market_config()
+        'ranging_market': _validate_ranging_market_config(),
+        'momentum': validate_momentum_config()
     }
     
     # Add TradingView integration validation if available
@@ -916,4 +966,4 @@ try:
 except Exception as e:
     print(f"⚠️ Strategy configuration validation error: {e}")
 
-print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}, Mean Reversion: {globals().get('MEAN_REVERSION_STRATEGY', False)}, Ranging Market: {globals().get('RANGING_MARKET_STRATEGY', False)}")
+print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}, Mean Reversion: {globals().get('MEAN_REVERSION_STRATEGY', False)}, Ranging Market: {globals().get('RANGING_MARKET_STRATEGY', False)}, Momentum: {globals().get('MOMENTUM_STRATEGY', False)}")

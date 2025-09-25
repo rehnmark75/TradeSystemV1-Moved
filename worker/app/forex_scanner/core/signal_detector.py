@@ -26,6 +26,7 @@ try:
     from .strategies.zero_lag_strategy import ZeroLagStrategy
     from .strategies.mean_reversion_strategy import MeanReversionStrategy
     from .strategies.ranging_market_strategy import RangingMarketStrategy
+    from .strategies.momentum_strategy import MomentumStrategy
     from .detection.large_candle_filter import LargeCandleFilter
 except ImportError:
     from forex_scanner.core.database import DatabaseManager
@@ -43,6 +44,7 @@ except ImportError:
     from forex_scanner.core.strategies.zero_lag_strategy import ZeroLagStrategy
     from forex_scanner.core.strategies.mean_reversion_strategy import MeanReversionStrategy
     from forex_scanner.core.strategies.ranging_market_strategy import RangingMarketStrategy
+    from forex_scanner.core.strategies.momentum_strategy import MomentumStrategy
     from forex_scanner.core.detection.large_candle_filter import LargeCandleFilter
 
 try:
@@ -126,6 +128,29 @@ class SignalDetector:
         else:
             self.momentum_bias_strategy = None
             self.logger.info("⚪ Momentum Bias strategy disabled")
+
+        # Initialize Advanced Momentum Strategy if enabled
+        if getattr(config, 'MOMENTUM_STRATEGY', False):
+            try:
+                # Get the active momentum config name for proper logging
+                try:
+                    from configdata.strategies.config_momentum_strategy import ACTIVE_MOMENTUM_CONFIG
+                    active_momentum_config = ACTIVE_MOMENTUM_CONFIG
+                except ImportError:
+                    active_momentum_config = 'default'
+
+                self.momentum_strategy = MomentumStrategy(data_fetcher=self.data_fetcher)
+                self.logger.info(f"✅ Advanced Momentum strategy initialized with '{active_momentum_config}' configuration")
+                self.logger.info("🚀 Features: minimal lag oscillators, velocity momentum, volume confirmation")
+            except ImportError as e:
+                self.logger.error(f"❌ Failed to import Advanced Momentum strategy: {e}")
+                self.momentum_strategy = None
+            except Exception as e:
+                self.logger.error(f"❌ Failed to initialize Advanced Momentum strategy: {e}")
+                self.momentum_strategy = None
+        else:
+            self.momentum_strategy = None
+            self.logger.info("⚪ Advanced Momentum strategy disabled")
 
         # Initialize SMC Strategy if enabled
         if getattr(config, 'SMC_STRATEGY', False):
@@ -513,6 +538,51 @@ class SignalDetector:
             self.logger.error(f"❌ momentum_bias strategy error: {e}")
             return None
 
+    def detect_momentum_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None
+    ) -> Optional[Dict]:
+        """Detect Advanced Momentum signals with minimal lag indicators"""
+
+        # Check if advanced momentum strategy is enabled and available
+        if not getattr(config, 'MOMENTUM_STRATEGY', False):
+            return None
+
+        if not hasattr(self, 'momentum_strategy') or self.momentum_strategy is None:
+            self.logger.debug("Advanced Momentum strategy not available or not initialized")
+            return None
+
+        try:
+            # Use default timeframe if not specified
+            timeframe = self._get_default_timeframe(timeframe)
+
+            # Get enhanced data with momentum strategy support
+            df = self.data_fetcher.get_enhanced_data(
+                epic, pair, timeframe=timeframe
+            )
+
+            if df is None or len(df) < system_config.MIN_BARS_FOR_SIGNAL:
+                return None
+
+            # Use Advanced Momentum strategy
+            signal = self.momentum_strategy.detect_signal(df, epic, spread_pips, timeframe)
+
+            if signal:
+                # Add enhanced market context
+                signal = self._add_market_context(signal, df)
+                signal = add_smart_money_to_signal(signal, epic, self.data_fetcher, self.db_manager)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Advanced Momentum strategy error for {epic}: {e}")
+            import traceback
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
+
     def detect_smc_signals(
         self, 
         epic: str, 
@@ -849,7 +919,27 @@ class SignalDetector:
                     self.logger.error(f"❌ [MOMENTUM BIAS] Error for {epic}: {e}")
                     individual_results['momentum_bias'] = None
 
-            # 8. SMC Strategy (if enabled)
+            # 8. Advanced Momentum Strategy (if enabled)
+            if (getattr(config, 'MOMENTUM_STRATEGY', False) and
+                hasattr(self, 'momentum_strategy') and self.momentum_strategy is not None):
+                try:
+                    self.logger.debug(f"🔍 [MOMENTUM STRATEGY] Starting detection for {epic}")
+                    momentum_signal = self.detect_momentum_signals(epic, pair, spread_pips, timeframe)
+
+                    # Store result for combined strategy
+                    individual_results['momentum'] = momentum_signal
+
+                    if momentum_signal:
+                        all_signals.append(momentum_signal)
+                        self.logger.info(f"✅ [MOMENTUM STRATEGY] Signal detected for {epic} - {momentum_signal.get('signal_type')} with {momentum_signal.get('confidence_score', 0):.1%} confidence")
+                    else:
+                        self.logger.debug(f"📊 [MOMENTUM STRATEGY] No signal for {epic}")
+
+                except Exception as e:
+                    self.logger.error(f"❌ [MOMENTUM STRATEGY] Error for {epic}: {e}")
+                    individual_results['momentum'] = None
+
+            # 9. SMC Strategy (if enabled)
             if (getattr(config, 'SMC_STRATEGY', False) and
                 hasattr(self, 'smc_strategy') and self.smc_strategy is not None):
                 try:
