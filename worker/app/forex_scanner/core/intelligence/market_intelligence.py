@@ -167,7 +167,8 @@ class MarketIntelligenceEngine:
         return {
             'strategy': 'conservative',
             'ema_config': 'default',
-            'recommendations': ['Use standard strategy parameters']
+            'momentum_enabled': True,  # Enable momentum by default as it's conservative
+            'recommendations': ['Use standard strategy parameters', 'Momentum strategy enabled with conservative settings']
         }
     
     def _analyze_single_pair_regime(self, epic: str, lookback_hours: int) -> Dict:
@@ -639,8 +640,10 @@ class MarketIntelligenceEngine:
                 'trending': {
                     'strategy': 'trend_following',
                     'ema_config': 'aggressive',
+                    'momentum_enabled': True,
                     'recommendations': [
                         'Use trend-following strategies',
+                        'Enable momentum strategy for trend continuation',
                         'Look for pullback entries',
                         'Trail stops aggressively'
                     ]
@@ -648,17 +651,21 @@ class MarketIntelligenceEngine:
                 'ranging': {
                     'strategy': 'mean_reversion',
                     'ema_config': 'conservative',
+                    'momentum_enabled': False,
                     'recommendations': [
                         'Trade range boundaries',
                         'Use oscillator confirmations',
+                        'Disable momentum strategy in ranging markets',
                         'Take profits quickly'
                     ]
                 },
                 'breakout': {
                     'strategy': 'breakout_trading',
                     'ema_config': 'aggressive',
+                    'momentum_enabled': True,
                     'recommendations': [
                         'Prepare for volatility expansion',
+                        'Enable momentum strategy for breakout confirmation',
                         'Use volume confirmation',
                         'Set wider stops'
                     ]
@@ -666,10 +673,23 @@ class MarketIntelligenceEngine:
                 'high_volatility': {
                     'strategy': 'volatility_adaptive',
                     'ema_config': 'conservative',
+                    'momentum_enabled': True,
                     'recommendations': [
+                        'Enable momentum strategy for volatility adaptation',
                         'Reduce position sizes',
                         'Widen stop losses',
                         'Trade less frequently'
+                    ]
+                },
+                'momentum_favorable': {
+                    'strategy': 'momentum_focused',
+                    'ema_config': 'balanced',
+                    'momentum_enabled': True,
+                    'recommendations': [
+                        'Prioritize momentum strategy',
+                        'Look for velocity confirmations',
+                        'Use volume-weighted momentum',
+                        'Trail stops dynamically'
                     ]
                 }
             }
@@ -677,7 +697,8 @@ class MarketIntelligenceEngine:
             return strategy_map.get(regime, {
                 'strategy': 'default',
                 'ema_config': 'default',
-                'recommendations': ['Use standard strategy parameters']
+                'momentum_enabled': True,  # Enable momentum by default
+                'recommendations': ['Use standard strategy parameters', 'Momentum strategy enabled']
             })
             
         except Exception as e:
