@@ -142,8 +142,43 @@ ACTIVE_ZERO_LAG_CONFIG = 'default'
 
 # Individual feature toggles
 ZERO_LAG_SQUEEZE_MOMENTUM_ENABLED = True
-ZERO_LAG_MTF_VALIDATION_ENABLED = False
+ZERO_LAG_MTF_VALIDATION_ENABLED = True
 ZERO_LAG_SMART_MONEY_ENABLED = False
+
+# =============================================================================
+# MULTI-TIMEFRAME VALIDATION SETTINGS
+# =============================================================================
+
+# Enable/disable higher timeframe validation for improved signal quality
+HIGHER_TIMEFRAME_VALIDATION = True                 # Master switch for multi-timeframe validation
+
+# Zero Lag Strategy Multi-Timeframe Settings
+ZERO_LAG_MTF_ENABLED = True                       # Enable MTF validation for Zero Lag strategy
+ZERO_LAG_MTF_REQUIRE_1H = True                   # Require 1H timeframe confirmation
+ZERO_LAG_MTF_REQUIRE_4H = True                   # Require 4H timeframe confirmation
+ZERO_LAG_MTF_STRICT_MODE = True                  # True = both 1H and 4H must pass, False = either one passes
+
+# Multi-timeframe data lookback settings
+MTF_1H_LOOKBACK_HOURS = 200                      # Hours of 1H data to fetch for validation
+MTF_4H_LOOKBACK_HOURS = 800                      # Hours of 4H data to fetch for validation
+
+# Multi-timeframe validation criteria
+# For BULL signals: higher timeframe must have close > EMA200 AND close > ZLEMA AND trend >= 0
+# For BEAR signals: higher timeframe must have close < EMA200 AND close < ZLEMA AND trend <= 0
+
+# MTF confidence adjustments
+ZERO_LAG_MTF_CONFIDENCE_BOOST = 0.15             # Confidence boost when MTF validates signal
+ZERO_LAG_MTF_CONFIDENCE_PENALTY = 0.25           # Confidence penalty when MTF invalidates signal
+
+# MTF timeframe weights for confidence calculation
+ZERO_LAG_MTF_TIMEFRAME_WEIGHTS = {
+    '1h': 0.6,      # 60% weight for 1H timeframe validation
+    '4h': 0.4       # 40% weight for 4H timeframe validation
+}
+
+# MTF validation thresholds
+ZERO_LAG_MTF_TREND_THRESHOLD = 0.0001            # Minimum trend strength for MTF validation
+ZERO_LAG_MTF_EMA200_BUFFER_PIPS = 2              # Buffer around EMA200 for MTF validation
 
 # Backward compatibility with original settings
 ZERO_LAG_LENGTH = ZERO_LAG_STRATEGY_CONFIG['default']['zl_length']

@@ -354,6 +354,53 @@ SMC_SUPPLY_DEMAND_ZONES_ENABLED = True
 SMC_MULTI_TIMEFRAME_ENABLED = True
 SMC_LIQUIDITY_ANALYSIS_ENABLED = True
 
+# =============================================================================
+# SMART MONEY CONCEPTS ANALYSIS SETTINGS
+# =============================================================================
+
+# Smart Money Structure Validation
+SMART_MONEY_STRUCTURE_VALIDATION = True        # Enable market structure validation
+SMART_MONEY_ORDER_FLOW_VALIDATION = True      # Enable order flow validation
+SMART_MONEY_STRUCTURE_WEIGHT = 0.05           # Weight for structure analysis (0-1)
+SMART_MONEY_ORDER_FLOW_WEIGHT = 0.05          # Weight for order flow analysis (0-1)
+SMART_MONEY_MIN_SCORE = 0.05                  # Minimum smart money score to proceed
+
+# Market Structure Configuration
+STRUCTURE_SWING_LOOKBACK = 5                  # Periods to look back for swing point identification
+STRUCTURE_MIN_SWING_STRENGTH = 0.3           # Minimum strength for valid swing points
+STRUCTURE_BOS_CONFIRMATION_PIPS = 5          # Pips needed to confirm break of structure
+STRUCTURE_CHOCH_LOOKBACK = 20                # Periods to analyze for change of character
+
+# Order Flow Configuration
+ORDER_FLOW_MIN_OB_SIZE_PIPS = 8              # Minimum order block size in pips
+ORDER_FLOW_MIN_FVG_SIZE_PIPS = 5             # Minimum fair value gap size in pips
+ORDER_FLOW_OB_LOOKBACK = 50                  # Periods to look back for order blocks
+ORDER_FLOW_FVG_LOOKBACK = 30                 # Periods to look back for FVGs
+ORDER_FLOW_VOLUME_SPIKE = 1.5                # Volume spike threshold for institutional moves
+
+# Smart Money EMA Integration
+USE_SMART_MONEY_EMA = False                  # Use Smart Money concepts with EMA strategy
+
+# Smart Money Read-only Analysis Settings
+SMART_MONEY_READONLY_ENABLED = True          # Enable/disable smart money analysis
+SMART_MONEY_MIN_DATA_POINTS = 100            # Minimum data points required for analysis
+SMART_MONEY_ANALYSIS_TIMEOUT = 5.0           # Analysis timeout in seconds
+SMART_MONEY_STRUCTURE_WEIGHT = 0.4           # Weight for market structure (0-1)
+SMART_MONEY_ORDER_FLOW_WEIGHT = 0.6          # Weight for order flow (0-1)
+
+# Smart Money Strategy Integration Settings
+SMC_STRATEGY_WEIGHT = 0.15                   # Weight in combined strategy mode
+SMC_ALLOW_COMBINED = True                    # Allow in combined strategies
+SMC_PRIORITY_LEVEL = 2                       # Priority level (1=highest, 5=lowest)
+
+# Performance Settings
+SMC_ENABLE_BACKTESTING = True                # Enable strategy in backtests
+SMC_MIN_DATA_PERIODS = 200                   # Minimum data periods required
+SMC_ENABLE_PERFORMANCE_TRACKING = True       # Track strategy performance
+
+# Debug Settings
+SMC_DEBUG_LOGGING = True                     # Enable detailed debug logging
+
 # Helper functions
 def get_smc_config_for_epic(epic: str, market_condition: str = 'default') -> dict:
     """Get SMC configuration for specific epic with fallbacks"""

@@ -401,41 +401,7 @@ MEAN_REVERSION_STRATEGY = True  # Multi-oscillator mean reversion strategy
 # Strategy Configurations - Additional strategies
 RANGING_MARKET_STRATEGY = True  # Multi-oscillator ranging market strategy
 
-# KAMA Strategy Configuration
-KAMA_STRATEGY_CONFIG = {
-    'default': {
-        'period': 10,    # Efficiency Ratio period
-        'fast': 2,       # Fast smoothing constant
-        'slow': 30       # Slow smoothing constant
-    },
-    'conservative': {
-        'period': 14,
-        'fast': 2,
-        'slow': 50
-    },
-    'aggressive': {
-        'period': 6,
-        'fast': 2,
-        'slow': 20
-    }
-}
-
-# Default KAMA configuration to use
-DEFAULT_KAMA_CONFIG = 'default'
-
-# Additional KAMA periods to calculate (optional)
-ADDITIONAL_KAMA_PERIODS = [6, 14]  # Will calculate KAMA_6 and KAMA_14 in addition to default
-
-# KAMA Signal Confidence Thresholds
-KAMA_MIN_EFFICIENCY_RATIO = 0.1     # Minimum ER for signal validity
-KAMA_HIGH_EFFICIENCY_THRESHOLD = 0.6  # High trending market threshold
-KAMA_TREND_CHANGE_WEIGHT = 0.3      # Weight for trend change signals
-KAMA_CROSSOVER_WEIGHT = 0.4         # Weight for price crossover signals
-KAMA_ER_WEIGHT = 0.3               # Weight for efficiency ratio
-
-# Integration with Combined Strategy
-INCLUDE_KAMA_IN_COMBINED = True     # Include KAMA in combined strategy logic
-STRATEGY_WEIGHT_KAMA = 0.2         # Weight for KAMA in combined strategy (adjust other weights accordingly)
+# KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
 
 
 # =============================================================================
@@ -464,124 +430,7 @@ BACKTEST_COMPARE_CONFIGS = True          # Enable configuration comparison in ba
 WEB_INTERFACE_SHOW_DYNAMIC_STATUS = True # Show dynamic config status in web interface
 WEB_INTERFACE_ALLOW_CONFIG_OVERRIDE = True # Allow manual config override in web interface
 
-# =============================================================================
-# SCALPING STRATEGY SETTINGS (Existing)
-# =============================================================================
-
-# Add this to your config.py file
-
-# Scalping Strategy Settings
-SCALPING_STRATEGY_ENABLED = False
-SCALPING_MODE = 'aggressive'  # Options: 'ultra_fast', 'aggressive', 'conservative', 'dual_ma'
-
-# Scalping Strategy Configurations
-SCALPING_STRATEGY_CONFIG = {
-    'ultra_fast': {
-        'fast_ema': 3,      # Ultra-responsive
-        'slow_ema': 8,      # Quick confirmation  
-        'filter_ema': 21,   # Trend filter
-        'timeframes': ['1m'],
-        'target_pips': 3,
-        'stop_loss_pips': 2,
-        'max_spread_pips': 1.5,
-        'description': 'Ultra-fast 1-minute scalping with 3/8 EMA crossover'
-    },
-    'aggressive': {
-        'fast_ema': 5,      # Fast but not too noisy
-        'slow_ema': 13,     # Fibonacci number
-        'filter_ema': 50,   # Medium-term trend filter
-        'timeframes': ['1m', '5m'],
-        'target_pips': 5,
-        'stop_loss_pips': 3,
-        'max_spread_pips': 2.0,
-        'description': 'Aggressive scalping with 5/13 EMA crossover'
-    },
-    'conservative': {
-        'fast_ema': 8,      # More stable
-        'slow_ema': 20,     # Classic combination
-        'filter_ema': 50,   # Trend filter
-        'timeframes': ['5m'],
-        'target_pips': 8,
-        'stop_loss_pips': 5,
-        'max_spread_pips': 2.5,
-        'description': 'Conservative scalping with 8/20 EMA crossover'
-    },
-    'dual_ma': {
-        'fast_ema': 7,      # Research-based optimal
-        'slow_ema': 14,     # Research-based optimal
-        'filter_ema': None, # No filter for simplicity
-        'timeframes': ['1m', '5m'],
-        'target_pips': 5,
-        'stop_loss_pips': 3,
-        'max_spread_pips': 2.0,
-        'description': 'Simple dual MA crossover scalping (7/14)'
-    }
-}
-
-# Active scalping configuration
-ACTIVE_SCALPING_CONFIG = SCALPING_MODE
-SCALPING_TIMEFRAME = '5m'  # Primary scalping timeframe
-
-# Scalping Risk Management
-SCALPING_RISK_MANAGEMENT = {
-    'max_trades_per_hour': 20,      # Prevent overtrading
-    'max_daily_trades': 100,        # Daily limit
-    'max_consecutive_losses': 3,     # Stop after 3 losses
-    'min_profit_ratio': 1.5,        # Minimum 1.5:1 reward:risk
-    'position_size_percent': 0.5,   # Smaller positions for scalping
-    'enable_quick_exit': True,      # Enable rapid exit signals
-    'session_limits': {
-        'london': {'start': 8, 'end': 17, 'max_trades': 40},
-        'new_york': {'start': 13, 'end': 22, 'max_trades': 35},
-        'asian': {'start': 0, 'end': 9, 'max_trades': 25}
-    }
-}
-
-# Scalping Market Conditions
-SCALPING_MARKET_CONDITIONS = {
-    'min_volume_ratio': 1.2,        # Minimum volume vs average
-    'max_volatility_atr': 0.005,    # Maximum ATR (avoid high volatility)
-    'preferred_pairs': [             # Best pairs for scalping
-        'CS.D.EURUSD.CEEM.IP',      # Tight spreads, high liquidity
-        'CS.D.GBPUSD.MINI.IP',      # Good volatility
-        'CS.D.USDJPY.MINI.IP',      # Popular scalping pair
-        'CS.D.AUDUSD.MINI.IP'       # Decent spreads
-    ],
-    'avoid_news_minutes': 30,       # Avoid trading 30min before/after news
-    'preferred_sessions': ['london', 'london_new_york_overlap']
-}
-
-# Helper function to get active scalping config
-def get_scalping_config():
-    """Get the currently active scalping configuration"""
-    return SCALPING_STRATEGY_CONFIG[ACTIVE_SCALPING_CONFIG]
-
-def get_scalping_timeframes():
-    """Get preferred timeframes for active scalping config"""
-    config = get_scalping_config()
-    return config.get('timeframes', ['5m'])
-
-def is_scalping_session():
-    """Check if current time is good for scalping"""
-    from datetime import datetime
-    import pytz
-    
-    now = datetime.now(pytz.timezone(USER_TIMEZONE))
-    hour = now.hour
-    
-    # London session (high liquidity)
-    if 8 <= hour <= 17:
-        return True
-    
-    # London-NY overlap (best for scalping)
-    if 13 <= hour <= 17:
-        return True
-    
-    # Early NY session
-    if 13 <= hour <= 18:
-        return True
-    
-    return False
+# Scalping Strategy Configuration moved to configdata/strategies/config_scalping_strategy.py
 
 # Multi-Timeframe Strategy Mapping
 STRATEGY_TIMEFRAME_MAP = {
@@ -1029,15 +878,7 @@ MIN_CLAUDE_QUALITY_SCORE = 5
 #ENSEMBLE_WEIGHT_KAMA = 0.15
 #ENSEMBLE_WEIGHT_BB_SUPERTREND = 0.15
 
-# ===== KAMA STRATEGY CONFIGURATION =====
-
-KAMA_ER_PERIOD = 14              # Efficiency Ratio calculation period
-KAMA_FAST_SC = 2                 # Fast smoothing constant (for trending markets)
-KAMA_SLOW_SC = 30                # Slow smoothing constant (for ranging markets)
-KAMA_MIN_EFFICIENCY = 0.1        # Minimum efficiency ratio for signals
-KAMA_TREND_THRESHOLD = 0.05      # Minimum trend change (5%) for signals
-KAMA_MIN_BARS = 50               # Minimum bars needed for calculation
-KAMA_BASE_CONFIDENCE = 0.75      # Base confidence level
+# KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
 
 
 
@@ -1049,135 +890,7 @@ KAMA_BASE_CONFIDENCE = 0.75      # Base confidence level
 # ===== BB SUPERTREND STRATEGY CONFIGURATION =====
 BOLLINGER_SUPERTREND_STRATEGY = False
 
-# 🔧 UPDATED: More conservative base settings
-BB_PERIOD = 24                   # Change from 20
-BB_STD_DEV = 2.8                # Change from 2.2  
-SUPERTREND_PERIOD = 16          # Change from 12
-SUPERTREND_MULTIPLIER = 4.0     # Change from 3.2
-BB_SUPERTREND_BASE_CONFIDENCE = 0.65  # Higher base confidence
-BB_SUPERTREND_MAX_CONFIDENCE = 0.85   # Higher max confidence
-DEFAULT_BB_SUPERTREND_CONFIG = 'conservative'  # Switch to balanced default
-
-# 🎯 REDESIGNED: BB SuperTrend Strategy Profiles with MUCH better parameters
-BB_SUPERTREND_CONFIGS = {
-    'conservative': {
-        'bb_period': 24,                 # Longer period for maximum stability
-        'bb_std_dev': 2.8,               # Very wide bands for highest quality signals
-        'supertrend_period': 16,         # Long trend confirmation period
-        'supertrend_multiplier': 4.0,    # High multiplier to eliminate noise
-        'base_confidence': 0.75,         # High confidence threshold
-        'min_bb_width_pct': 0.0018,     # Require significant volatility
-        'max_signals_per_session': 2,   # Very selective signal generation
-        'require_mtf_confluence': True, # Mandatory multi-timeframe confirmation
-        'min_mtf_confluence': 0.65,     # High MTF agreement requirement
-        'enable_signal_filtering': True,
-        'min_bb_position_score': 0.8    # Very strict position requirements
-    },
-    'balanced': {
-        'bb_period': 20,                 # Good balance of stability and responsiveness
-        'bb_std_dev': 2.2,               # Moderately wide bands
-        'supertrend_period': 12,         # Balanced trend detection
-        'supertrend_multiplier': 3.2,    # Good noise filtering
-        'base_confidence': 0.65,         # Solid confidence threshold
-        'min_bb_width_pct': 0.0015,     # Reasonable volatility requirement
-        'max_signals_per_session': 4,   # Moderate signal frequency
-        'require_mtf_confluence': True, # MTF confirmation recommended
-        'min_mtf_confluence': 0.5,      # 50% MTF agreement minimum
-        'enable_signal_filtering': True,
-        'min_bb_position_score': 0.7    # Good position requirements
-    },
-    'default': {
-        'bb_period': 20,                 # CHANGED from 14 - more stable
-        'bb_std_dev': 2.2,               # CHANGED from 1.8 - less noisy
-        'supertrend_period': 10,         # CHANGED from 8 - more stable
-        'supertrend_multiplier': 3.0,    # CHANGED from 2.5 - less noise
-        'base_confidence': 0.6,          # CHANGED from 0.5 - higher quality
-        'min_bb_width_pct': 0.0012,     # NEW: Minimum volatility requirement
-        'max_signals_per_session': 5,   # NEW: Prevent over-trading
-        'require_mtf_confluence': False, # Optional MTF for default
-        'min_mtf_confluence': 0.4,      # 40% MTF requirement
-        'enable_signal_filtering': True,
-        'min_bb_position_score': 0.6    # Moderate position requirements
-    },
-    'aggressive': {
-        'bb_period': 16,                 # CHANGED from 14 - slightly more stable
-        'bb_std_dev': 2.0,               # CHANGED from 1.8 - less tight
-        'supertrend_period': 8,          # Keep responsive
-        'supertrend_multiplier': 2.8,    # CHANGED from 2.5 - less noise
-        'base_confidence': 0.55,         # CHANGED from 0.5 - higher
-        'min_bb_width_pct': 0.001,      # Lower volatility requirement
-        'max_signals_per_session': 7,   # Allow more signals
-        'require_mtf_confluence': False, # No MTF requirement for aggressive
-        'min_mtf_confluence': 0.3,      # Low MTF requirement
-        'enable_signal_filtering': True,
-        'min_bb_position_score': 0.5    # Looser position requirements
-    },
-    'experimental_quality': {
-        'bb_period': 25,                 # Very long for maximum stability
-        'bb_std_dev': 2.5,               # Wide bands for quality
-        'supertrend_period': 18,         # Very long trend confirmation
-        'supertrend_multiplier': 4.5,    # Very strong noise filtering
-        'base_confidence': 0.8,          # Very high confidence
-        'min_bb_width_pct': 0.002,      # High volatility requirement
-        'max_signals_per_session': 1,   # Extremely selective
-        'require_mtf_confluence': True, # Mandatory MTF
-        'min_mtf_confluence': 0.7,      # Very high MTF requirement
-        'enable_signal_filtering': True,
-        'min_bb_position_score': 0.85,  # Very strict position
-        'require_trend_alignment': True, # Additional filter
-        'min_atr_multiple': 1.8         # High volatility filter
-    }
-}
-
-# 🎯 CRITICAL SIGNAL QUALITY IMPROVEMENTS
-BB_SUPERTREND_ENHANCEMENTS = {
-    # Signal Filtering - ENABLED BY DEFAULT
-    'enable_signal_filtering': True,
-    'min_bb_separation_pips': 10,       # Increased minimum BB width
-    'max_signals_per_hour': 1,          # Much more restrictive
-    'max_signals_per_day': 8,           # Daily limit
-    'require_volume_confirmation': False,
-    'min_candle_body_ratio': 0.4,       # Stronger candle requirement
-    
-    # Enhanced Quality Filters
-    'require_bb_extremes': True,        # Price must be near BB extremes
-    'bb_extreme_threshold': 0.8,        # 80% towards BB edge
-    'require_supertrend_flip': True,    # SuperTrend must have flipped recently
-    'max_supertrend_age': 5,            # SuperTrend flip within 5 bars
-    
-    # Market Condition Filters
-    'avoid_low_volatility': True,       # Skip low volatility periods
-    'min_atr_threshold': 0.0008,        # Minimum ATR for signals
-    'avoid_ranging_markets': True,       # Skip sideways markets
-    'trend_strength_threshold': 0.6,    # Minimum trend strength
-    
-    # Risk Management
-    'dynamic_position_sizing': True,
-    'max_risk_per_trade': 0.015,        # 1.5% max risk (reduced)
-    'profit_target_multiplier': 3.0,    # 3x risk for profit (increased)
-    'stop_loss_atr_multiple': 2.0,      # 2x ATR for stop loss
-    
-    # Session and Time Filters
-    'trading_sessions': ['london', 'ny_overlap'],
-    'avoid_news_times': True,
-    'session_volatility_filter': True,  # Only trade in volatile sessions
-    
-    # MTF Enhancement
-    'mtf_timeframes': ['15m', '1h', '4h'], # Multiple timeframe analysis
-    'require_htf_trend_alignment': True,   # Higher timeframe trend alignment
-    'htf_lookback_periods': 50,           # Look back 50 periods on HTF
-}
-
-# 🔍 DEBUGGING AND MONITORING
-BB_SUPERTREND_DEBUG = {
-    'log_signal_details': True,
-    'log_rejection_reasons': True,
-    'track_mtf_performance': True,
-    'enable_cache_monitoring': True,
-    'performance_tracking': True,
-    'log_config_loading': True,         # Log when config is loaded
-    'validate_config_changes': True     # Validate config changes take effect
-}
+# BB SuperTrend Strategy Configuration moved to configdata/strategies/config_bb_supertrend_strategy.py
 
 
 
@@ -1615,32 +1328,7 @@ LOG_TIMEZONE = 'Europe/Stockholm'
 # Enable log file compression for old files (saves disk space)
 COMPRESS_OLD_LOGS = True
 
-SMART_MONEY_STRUCTURE_VALIDATION = True  # Enable market structure validation
-SMART_MONEY_ORDER_FLOW_VALIDATION = True  # Enable order flow validation
-SMART_MONEY_STRUCTURE_WEIGHT = 0.05  # Weight for structure analysis (0-1)
-SMART_MONEY_ORDER_FLOW_WEIGHT = 0.05  # Weight for order flow analysis (0-1)
-SMART_MONEY_MIN_SCORE = 0.05  # Minimum smart money score to proceed
-
-# Market Structure Configuration
-STRUCTURE_SWING_LOOKBACK = 5  # Periods to look back for swing point identification
-STRUCTURE_MIN_SWING_STRENGTH = 0.3  # Minimum strength for valid swing points
-STRUCTURE_BOS_CONFIRMATION_PIPS = 5  # Pips needed to confirm break of structure
-STRUCTURE_CHOCH_LOOKBACK = 20  # Periods to analyze for change of character
-
-# Order Flow Configuration  
-ORDER_FLOW_MIN_OB_SIZE_PIPS = 8  # Minimum order block size in pips
-ORDER_FLOW_MIN_FVG_SIZE_PIPS = 5  # Minimum fair value gap size in pips
-ORDER_FLOW_OB_LOOKBACK = 50  # Periods to look back for order blocks
-ORDER_FLOW_FVG_LOOKBACK = 30  # Periods to look back for FVGs
-ORDER_FLOW_VOLUME_SPIKE = 1.5  # Volume spike threshold for institutional moves
-
-USE_SMART_MONEY_EMA = False
-
-SMART_MONEY_READONLY_ENABLED = True          # Enable/disable smart money analysis
-SMART_MONEY_MIN_DATA_POINTS = 100            # Minimum data points required for analysis
-SMART_MONEY_ANALYSIS_TIMEOUT = 5.0           # Analysis timeout in seconds
-SMART_MONEY_STRUCTURE_WEIGHT = 0.4           # Weight for market structure (0-1)
-SMART_MONEY_ORDER_FLOW_WEIGHT = 0.6          # Weight for order flow (0-1)
+# Smart Money Configuration moved to configdata/strategies/config_smc_strategy.py
 
 ZERO_LAG_STRATEGY = True
 MOMENTUM_BIAS_STRATEGY = False
@@ -1935,24 +1623,5 @@ ORDER_CIRCUIT_BREAKER_RECOVERY = 300.0
 
 import logging
 
-# =============================================================================
-# MULTI-TIMEFRAME VALIDATION SETTINGS
-# =============================================================================
-
-# Enable/disable higher timeframe validation for improved signal quality
-HIGHER_TIMEFRAME_VALIDATION = True                 # Master switch for multi-timeframe validation
-
-# Zero Lag Strategy Multi-Timeframe Settings
-ZERO_LAG_MTF_ENABLED = True                       # Enable MTF validation for Zero Lag strategy
-ZERO_LAG_MTF_REQUIRE_1H = True                   # Require 1H timeframe confirmation
-ZERO_LAG_MTF_REQUIRE_4H = True                   # Require 4H timeframe confirmation
-ZERO_LAG_MTF_STRICT_MODE = True                  # True = both 1H and 4H must pass, False = either one passes
-
-# Multi-timeframe data lookback settings
-MTF_1H_LOOKBACK_HOURS = 200                      # Hours of 1H data to fetch for validation
-MTF_4H_LOOKBACK_HOURS = 800                      # Hours of 4H data to fetch for validation
-
-# Multi-timeframe validation criteria
-# For BULL signals: higher timeframe must have close > EMA200 AND close > ZLEMA AND trend >= 0
-# For BEAR signals: higher timeframe must have close < EMA200 AND close < ZLEMA AND trend <= 0
+# Zero Lag MTF Validation Settings moved to configdata/strategies/config_zerolag_strategy.py
 

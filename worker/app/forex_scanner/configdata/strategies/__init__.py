@@ -12,6 +12,9 @@ from .config_ichimoku_strategy import *
 from .config_mean_reversion_strategy import *
 from .config_ranging_market_strategy import *
 from .config_momentum_strategy import *
+from .config_kama_strategy import *
+from .config_scalping_strategy import *
+from .config_bb_supertrend_strategy import *
 
 # Import TradingView integration (optional)
 try:
@@ -622,7 +625,117 @@ __all__ = [
     'validate_momentum_config',
     'calculate_velocity_momentum',
     'calculate_volume_weighted_momentum',
-    'calculate_adaptive_momentum'
+    'calculate_adaptive_momentum',
+
+    # KAMA Strategy Core Settings
+    'KAMA_STRATEGY',
+    'KAMA_STRATEGY_CONFIG',
+    'ACTIVE_KAMA_CONFIG',
+    'DEFAULT_KAMA_CONFIG',
+    'ENABLE_DYNAMIC_KAMA_CONFIG',
+    'KAMA_ADAPTIVE_SMOOTHING',
+    'ADDITIONAL_KAMA_PERIODS',
+    'KAMA_MIN_EFFICIENCY_RATIO',
+    'KAMA_HIGH_EFFICIENCY_THRESHOLD',
+    'KAMA_TREND_CHANGE_WEIGHT',
+    'KAMA_CROSSOVER_WEIGHT',
+    'KAMA_ER_WEIGHT',
+    'KAMA_MIN_CONFIDENCE',
+    'KAMA_BASE_CONFIDENCE',
+    'KAMA_MAX_CONFIDENCE',
+    'KAMA_ENHANCED_VALIDATION',
+    'KAMA_MIN_BARS',
+    'KAMA_TREND_THRESHOLD',
+    'KAMA_REQUIRE_TREND_CONFIRMATION',
+    'STRATEGY_WEIGHT_KAMA',
+    'INCLUDE_KAMA_IN_COMBINED',
+    'KAMA_ALLOW_COMBINED',
+    'KAMA_PRIORITY_LEVEL',
+    'KAMA_ENABLE_BACKTESTING',
+    'KAMA_MIN_DATA_PERIODS',
+    'KAMA_ENABLE_PERFORMANCE_TRACKING',
+    'KAMA_DEBUG_LOGGING',
+    'KAMA_MTF_ENABLED',
+    'KAMA_MTF_TIMEFRAMES',
+    'KAMA_MTF_MIN_AGREEMENT',
+    'KAMA_ER_THRESHOLDS',
+    'KAMA_PAIR_ADJUSTMENTS',
+    'KAMA_SIGNAL_FREQUENCY_PRESETS',
+
+    # KAMA Helper Functions
+    'get_kama_config_for_epic',
+    'get_kama_threshold_for_epic',
+    'get_kama_confidence_adjustment_for_epic',
+    'calculate_kama_confidence',
+    'get_kama_market_regime',
+    'validate_kama_config',
+    'get_kama_config_summary',
+    'set_kama_frequency_preset',
+
+    # Scalping Strategy Core Settings
+    'SCALPING_STRATEGY_ENABLED',
+    'SCALPING_MODE',
+    'SCALPING_STRATEGY_CONFIG',
+    'ACTIVE_SCALPING_CONFIG',
+    'SCALPING_TIMEFRAME',
+    'ENABLE_DYNAMIC_SCALPING_CONFIG',
+    'SCALPING_ADAPTIVE_SIZING',
+    'SCALPING_RISK_MANAGEMENT',
+    'SCALPING_MARKET_CONDITIONS',
+    'SCALPING_SIGNAL_QUALITY',
+    'STRATEGY_WEIGHT_SCALPING',
+    'SCALPING_ALLOW_COMBINED',
+    'SCALPING_PRIORITY_LEVEL',
+    'SCALPING_ENABLE_BACKTESTING',
+    'SCALPING_MIN_DATA_PERIODS',
+    'SCALPING_ENABLE_PERFORMANCE_TRACKING',
+    'SCALPING_DEBUG_LOGGING',
+    'SCALPING_FREQUENCY_PRESETS',
+
+    # Scalping Helper Functions
+    'get_scalping_config',
+    'get_scalping_timeframes',
+    'is_scalping_session',
+    'get_scalping_position_size',
+    'is_valid_scalping_pair',
+    'get_scalping_risk_limits',
+    'validate_scalping_config',
+    'get_scalping_config_summary',
+    'set_scalping_frequency_preset',
+
+    # BB SuperTrend Strategy Core Settings
+    'BOLLINGER_SUPERTREND_STRATEGY',
+    'BB_PERIOD',
+    'BB_STD_DEV',
+    'SUPERTREND_PERIOD',
+    'SUPERTREND_MULTIPLIER',
+    'BB_SUPERTREND_BASE_CONFIDENCE',
+    'BB_SUPERTREND_MAX_CONFIDENCE',
+    'DEFAULT_BB_SUPERTREND_CONFIG',
+    'BB_SUPERTREND_CONFIGS',
+    'ACTIVE_BB_SUPERTREND_CONFIG',
+    'ENABLE_DYNAMIC_BB_SUPERTREND_CONFIG',
+    'BB_SUPERTREND_ENHANCEMENTS',
+    'BB_SUPERTREND_DEBUG',
+    'STRATEGY_WEIGHT_BB_SUPERTREND',
+    'BB_SUPERTREND_ALLOW_COMBINED',
+    'BB_SUPERTREND_PRIORITY_LEVEL',
+    'BB_SUPERTREND_ENABLE_BACKTESTING',
+    'BB_SUPERTREND_MIN_DATA_PERIODS',
+    'BB_SUPERTREND_ENABLE_PERFORMANCE_TRACKING',
+    'BB_SUPERTREND_MIN_CONFIDENCE',
+    'BB_SUPERTREND_SIGNAL_COOLDOWN',
+    'BB_SUPERTREND_FREQUENCY_PRESETS',
+
+    # BB SuperTrend Helper Functions
+    'get_bb_supertrend_config_for_epic',
+    'get_bb_supertrend_confidence_for_epic',
+    'calculate_bb_position_score',
+    'is_bb_supertrend_signal_valid',
+    'get_bb_supertrend_risk_parameters',
+    'validate_bb_supertrend_config',
+    'get_bb_supertrend_config_summary',
+    'set_bb_supertrend_frequency_preset'
 ]
 
 # Add TradingView integration functions if available
@@ -646,7 +759,7 @@ __description__ = "Strategy-specific configuration modules for ZeroLag, MACD, EM
 def get_strategies_summary() -> dict:
     """Get a summary of all loaded strategy configurations"""
     return {
-        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc', 'ichimoku', 'mean_reversion', 'ranging_market', 'momentum'],
+        'loaded_strategies': ['zerolag', 'macd', 'ema', 'smc', 'ichimoku', 'mean_reversion', 'ranging_market', 'momentum', 'kama', 'scalping', 'bb_supertrend'],
         'zerolag_enabled': globals().get('ZERO_LAG_STRATEGY', False),
         'macd_enabled': globals().get('MACD_EMA_STRATEGY', False),
         'ema_enabled': globals().get('SIMPLE_EMA_STRATEGY', False),
@@ -655,6 +768,9 @@ def get_strategies_summary() -> dict:
         'mean_reversion_enabled': globals().get('MEAN_REVERSION_STRATEGY', False),
         'ranging_market_enabled': globals().get('RANGING_MARKET_STRATEGY', False),
         'momentum_enabled': globals().get('MOMENTUM_STRATEGY', False),
+        'kama_enabled': globals().get('KAMA_STRATEGY', False),
+        'scalping_enabled': globals().get('SCALPING_STRATEGY_ENABLED', False),
+        'bb_supertrend_enabled': globals().get('BOLLINGER_SUPERTREND_STRATEGY', False),
         'total_settings': len(__all__)
     }
 
@@ -668,7 +784,10 @@ def validate_strategy_configs() -> dict:
         'ichimoku': _validate_ichimoku_config(),
         'mean_reversion': _validate_mean_reversion_config(),
         'ranging_market': _validate_ranging_market_config(),
-        'momentum': validate_momentum_config()
+        'momentum': validate_momentum_config(),
+        'kama': validate_kama_config(),
+        'scalping': validate_scalping_config(),
+        'bb_supertrend': validate_bb_supertrend_config()
     }
     
     # Add TradingView integration validation if available
@@ -966,4 +1085,4 @@ try:
 except Exception as e:
     print(f"⚠️ Strategy configuration validation error: {e}")
 
-print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}, Mean Reversion: {globals().get('MEAN_REVERSION_STRATEGY', False)}, Ranging Market: {globals().get('RANGING_MARKET_STRATEGY', False)}, Momentum: {globals().get('MOMENTUM_STRATEGY', False)}")
+print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}, Mean Reversion: {globals().get('MEAN_REVERSION_STRATEGY', False)}, Ranging Market: {globals().get('RANGING_MARKET_STRATEGY', False)}, Momentum: {globals().get('MOMENTUM_STRATEGY', False)}, KAMA: {globals().get('KAMA_STRATEGY', False)}, Scalping: {globals().get('SCALPING_STRATEGY_ENABLED', False)}, BB SuperTrend: {globals().get('BOLLINGER_SUPERTREND_STRATEGY', False)}")
