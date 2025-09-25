@@ -81,7 +81,7 @@ try:
     from core.signal_detector import SignalDetector
     from core.strategies.ema_strategy import EMAStrategy
     from core.strategies.macd_strategy import MACDStrategy
-    from core.strategies.combined_strategy import CombinedStrategy
+    # from core.strategies.combined_strategy import CombinedStrategy  # Removed - strategy was disabled and unused
     import config
 except ImportError:
     try:
@@ -192,7 +192,7 @@ class DebugCommands:
         
         try:
             # Test combined strategy class
-            combined_strategy = CombinedStrategy()
+            # combined_strategy = CombinedStrategy()  # Removed - strategy was disabled and unused
             
             # Check required methods
             required_methods = [

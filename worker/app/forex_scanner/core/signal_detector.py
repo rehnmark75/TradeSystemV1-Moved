@@ -15,7 +15,7 @@ try:
     from .data_fetcher import DataFetcher
     from .strategies.ema_strategy import EMAStrategy
     from .strategies.macd_strategy import MACDStrategy
-    from .strategies.combined_strategy import CombinedStrategy
+    # from .strategies.combined_strategy import CombinedStrategy  # Removed - strategy was disabled
     from .backtest.backtest_engine import BacktestEngine
     from .backtest.performance_analyzer import PerformanceAnalyzer
     from .backtest.signal_analyzer import SignalAnalyzer
@@ -33,7 +33,7 @@ except ImportError:
     from forex_scanner.core.data_fetcher import DataFetcher
     from forex_scanner.core.strategies.ema_strategy import EMAStrategy
     from forex_scanner.core.strategies.macd_strategy import MACDStrategy
-    from forex_scanner.core.strategies.combined_strategy import CombinedStrategy
+    # from forex_scanner.core.strategies.combined_strategy import CombinedStrategy  # Removed - strategy was disabled
     from forex_scanner.core.backtest.backtest_engine import BacktestEngine
     from forex_scanner.core.backtest.performance_analyzer import PerformanceAnalyzer
     from forex_scanner.core.backtest.signal_analyzer import SignalAnalyzer
@@ -69,7 +69,7 @@ class SignalDetector:
         # MACD strategy will be created per-epic with optimized parameters
         self.macd_strategy = None  # Will be created when needed with epic parameter
         self.macd_strategies_cache = {}  # Cache epic-specific strategies
-        self.combined_strategy = CombinedStrategy(data_fetcher=self.data_fetcher)
+        # self.combined_strategy = CombinedStrategy(data_fetcher=self.data_fetcher)  # Removed - strategy was disabled
         self.scalping_strategy = ScalpingStrategy()
         self.large_candle_filter = LargeCandleFilter()
         self.logger.info("✅ Large candle filter initialized")
@@ -673,37 +673,7 @@ class SignalDetector:
             self.logger.error(f"Error in ranging market signal detection for {epic}: {e}")
             return None
 
-    def detect_combined_signals(
-        self, 
-        epic: str, 
-        pair: str, 
-        spread_pips: float = 1.5,
-        timeframe: str = None
-    ) -> Optional[Dict]:
-        """
-        Intelligently combine MACD and EMA strategies
-        """
-        try:
-            # Get enhanced data
-            df = self.data_fetcher.get_enhanced_data(epic, pair, timeframe=timeframe,ema_strategy=self.ema_strategy)
-            
-            if df is None or len(df) < system_config.MIN_BARS_FOR_SIGNAL:
-                return None
-            
-            # Use combined strategy
-            signal = self.combined_strategy.detect_signal(df, epic, spread_pips, timeframe)
-            
-            if signal:
-                # Add enhanced market context
-                signal = self._add_market_context(signal, df)
-
-                signal = add_smart_money_to_signal(signal, epic, self.data_fetcher, self.db_manager)
-            
-            return signal
-                
-        except Exception as e:
-            self.logger.error(f"Error combining signals for {epic}: {e}")
-            return None
+    # detect_combined_signals method removed - combined strategy was disabled and unused
     
     def detect_signals_all_strategies(
         self, 
@@ -945,54 +915,8 @@ class SignalDetector:
                     self.logger.error(f"❌ [RANGING MARKET STRATEGY] Error for {epic}: {e}")
                     individual_results['ranging_market'] = None
 
-            # ========== COMBINED STRATEGY WITH PRECOMPUTED RESULTS ==========
-            
-            # 8. Combined Strategy - 🔧 UPDATED: Pass precomputed results to prevent duplicates
-            if getattr(config, 'ENABLE_COMBINED_AS_ADDITIONAL_STRATEGY', False):
-                try:
-                    self.logger.debug(f"🔍 [COMBINED] Starting detection with precomputed results for {epic}")
-                    
-                    # 🔧 KEY CHANGE: Check if combined strategy supports precomputed results
-                    if hasattr(self, 'combined_strategy') and hasattr(self.combined_strategy, 'detect_signal'):
-                        # Get the method signature to check if it supports precomputed_results parameter
-                        import inspect
-                        sig = inspect.signature(self.combined_strategy.detect_signal)
-                        
-                        if 'precomputed_results' in sig.parameters:
-                            # 🚀 OPTIMIZED: Use precomputed results
-                            self.logger.debug(f"🚀 [COMBINED] Using precomputed results for {epic}")
-                            
-                            # 🔧 FIXED: Use correct method name and parameters
-                            df = self.data_fetcher.get_enhanced_data(
-                                epic=epic,
-                                pair=pair,
-                                timeframe=timeframe,
-                                lookback_hours=72,  # 72 hours ≈ 300 5-minute bars
-                                required_indicators=['ema', 'macd', 'kama', 'bb_supertrend', 'momentum_bias', 'zero_lag']
-                            )
-                            
-                            if df is not None and len(df) >= 50:
-                                combined_signal = self.combined_strategy.detect_signal(
-                                    df, epic, spread_pips, timeframe, precomputed_results=individual_results
-                                )
-                            else:
-                                combined_signal = None
-                        else:
-                            # 🔄 FALLBACK: Use normal combined strategy detection
-                            self.logger.debug(f"🔄 [COMBINED] Using normal detection for {epic}")
-                            combined_signal = self.detect_combined_signals(epic, pair, spread_pips, timeframe)
-                    else:
-                        # 🔄 FALLBACK: Use legacy method
-                        combined_signal = self.detect_combined_signals(epic, pair, spread_pips, timeframe)
-                    
-                    if combined_signal:
-                        all_signals.append(combined_signal)
-                        self.logger.info(f"✅ [COMBINED] Signal detected for {epic}")
-                    else:
-                        self.logger.debug(f"📊 [COMBINED] No signal for {epic}")
-                        
-                except Exception as e:
-                    self.logger.error(f"❌ [COMBINED] Error for {epic}: {e}")
+            # ========== COMBINED STRATEGY REMOVED ==========
+            # Combined strategy was disabled and unused, removed to clean up codebase
             
             # ========== ADD SMART MONEY ANALYSIS TO ALL SIGNALS ==========
             
@@ -1221,33 +1145,7 @@ class SignalDetector:
                     self.logger.error(f"❌ [SMC STRATEGY] Error for {epic}: {e}")
                     individual_results['smc'] = None
             
-            # 6. Combined Strategy (also needs filtering) - Updated to include zero-lag
-            if getattr(config, 'COMBINED_STRATEGY', True) and len(individual_results) > 1:
-                try:
-                    self.logger.debug(f"🔍 [COMBINED STRATEGY] Starting detection for {epic}")
-                    combined_signal = self._detect_combined_strategy_signal(
-                        individual_results, epic, pair, spread_pips, timeframe
-                    )
-                    
-                    if combined_signal:
-                        # 🆕 NEW: Apply large candle filter
-                        should_block, block_reason = self._apply_large_candle_filter(
-                            df, epic, combined_signal, timeframe
-                        )
-                        
-                        if should_block:
-                            self.logger.warning(f"🚫 [COMBINED STRATEGY] Signal blocked for {epic}: {block_reason}")
-                            combined_signal['filter_rejected'] = True
-                            combined_signal['rejection_reason'] = f"Large candle filter: {block_reason}"
-                            combined_signal['status'] = 'REJECTED'
-                        else:
-                            all_signals.append(combined_signal)
-                            self.logger.info(f"✅ [COMBINED STRATEGY] Signal detected for {epic}")
-                    else:
-                        self.logger.debug(f"📊 [COMBINED STRATEGY] No signal for {epic}")
-                        
-                except Exception as e:
-                    self.logger.error(f"❌ [COMBINED STRATEGY] Error for {epic}: {e}")
+            # Combined Strategy removed - was disabled and unused
             
             # Log filter statistics periodically
             if hasattr(self, 'large_candle_filter') and self.large_candle_filter.filter_stats['total_signals_checked'] % 50 == 0:
@@ -1902,9 +1800,7 @@ class SignalDetector:
                 'SIMPLE_EMA_STRATEGY': getattr(config, 'SIMPLE_EMA_STRATEGY', 'NOT_SET'),
                 'MACD_EMA_STRATEGY': getattr(config, 'MACD_EMA_STRATEGY', 'NOT_SET'),
                 'KAMA_STRATEGY': getattr(config, 'KAMA_STRATEGY', 'NOT_SET'),
-                'COMBINED_STRATEGY_MODE': getattr(config, 'COMBINED_STRATEGY_MODE', 'NOT_SET'),
-                'REQUIRE_BOTH_STRATEGIES': getattr(config, 'REQUIRE_BOTH_STRATEGIES', 'NOT_SET'),
-                'MIN_COMBINED_CONFIDENCE': getattr(config, 'MIN_COMBINED_CONFIDENCE', 'NOT_SET'),
+                # Combined strategy config removed - strategy was disabled and unused
                 'STRATEGY_WEIGHT_EMA': getattr(config, 'STRATEGY_WEIGHT_EMA', 'NOT_SET'),
                 'STRATEGY_WEIGHT_MACD': getattr(config, 'STRATEGY_WEIGHT_MACD', 'NOT_SET'),
                 'STRATEGY_WEIGHT_KAMA': getattr(config, 'STRATEGY_WEIGHT_KAMA', 'NOT_SET'),
@@ -1955,15 +1851,10 @@ class SignalDetector:
                 'market_regime': kama_signal.get('market_regime') if kama_signal else None
             }
             
-            # Test combined strategy
-            self.logger.info("Testing combined strategy...")
-            combined_signal = self.detect_combined_signals(epic, pair, system_config.SPREAD_PIPS, '5m')
+            # Combined strategy testing removed - strategy was disabled and unused
             debug_info['combined_signal'] = {
-                'signal_detected': combined_signal is not None,
-                'signal_type': combined_signal.get('signal_type') if combined_signal else None,
-                'confidence': combined_signal.get('confidence_score') if combined_signal else None,
-                'strategy': combined_signal.get('strategy') if combined_signal else None,
-                'combination_mode': combined_signal.get('combination_mode') if combined_signal else None
+                'signal_detected': False,
+                'note': 'Combined strategy removed - was disabled and unused'
             }
             
         except Exception as e:
@@ -2344,15 +2235,7 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.debug(f"BB+Supertrend strategy failed: {e}")
 
-            # Test Combined strategy
-            try:
-                signal = self.combined_strategy.detect_signal(df, pair, spread_pips, timeframe)
-                if signal:
-                    signal['strategy_name'] = 'combined'
-                    all_signals.append(signal)
-                    confluence_result['strategies_tested'].append('combined')
-            except Exception as e:
-                self.logger.debug(f"Combined strategy failed: {e}")
+            # Combined strategy removed - was disabled and unused
             
             confluence_result['strategy_count'] = len(all_signals)
             

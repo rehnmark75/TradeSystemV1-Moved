@@ -6,7 +6,7 @@ Trading Strategies Module
 from .base_strategy import BaseStrategy
 from .ema_strategy import EMAStrategy, create_ema_strategy
 from .macd_strategy import MACDStrategy
-from .combined_strategy import CombinedStrategy
+# from .combined_strategy import CombinedStrategy  # Removed - strategy was disabled and unused
 from .bb_supertrend_strategy import BollingerSupertrendStrategy
 from .kama_strategy import KAMAStrategy
 from .zero_lag_strategy import ZeroLagStrategy
@@ -21,7 +21,7 @@ __all__ = [
     'BaseStrategy',
     'EMAStrategy',
     'MACDStrategy',
-    'CombinedStrategy',
+    # 'CombinedStrategy',  # Removed - strategy was disabled and unused
     'BollingerSupertrendStrategy',
     'KAMAStrategy',
     'ZeroLagStrategy',

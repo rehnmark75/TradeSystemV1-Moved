@@ -16,7 +16,7 @@ from .signal_detector import SignalDetector
 from .strategies.base_strategy import BaseStrategy
 from .strategies.ema_strategy import EMAStrategy
 from .strategies.macd_strategy import MACDStrategy
-from .strategies.combined_strategy import CombinedStrategy
+# from .strategies.combined_strategy import CombinedStrategy  # Removed - strategy was disabled and unused
 from .strategies.scalping_strategy import ScalpingStrategy
 
 # NEW: Smart Money Strategy modules (Phase 1 & 2)
@@ -136,7 +136,7 @@ __all__ = [
     'BaseStrategy',
     'EMAStrategy',
     'MACDStrategy', 
-    'CombinedStrategy',
+    # 'CombinedStrategy',  # Removed - strategy was disabled and unused
     'ScalpingStrategy',
     
     # Detection utilities
@@ -183,7 +183,7 @@ def get_available_strategies():
     strategies = [
         'EMAStrategy',
         'MACDStrategy', 
-        'CombinedStrategy',
+        # 'CombinedStrategy',  # Removed - strategy was disabled and unused
         'ScalpingStrategy'
     ]
     
@@ -395,11 +395,8 @@ def validate_core_imports():
     except ImportError as e:
         import_status['MACDStrategy'] = str(e)
     
-    try:
-        from .strategies.combined_strategy import CombinedStrategy
-        import_status['CombinedStrategy'] = True
-    except ImportError as e:
-        import_status['CombinedStrategy'] = str(e)
+    # Combined strategy validation removed - strategy was disabled and unused
+    import_status['CombinedStrategy'] = 'Removed - strategy was disabled and unused'
     
     try:
         from .strategies.scalping_strategy import ScalpingStrategy

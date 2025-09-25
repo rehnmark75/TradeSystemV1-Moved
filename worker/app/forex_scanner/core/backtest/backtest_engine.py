@@ -13,7 +13,7 @@ import pytz
 
 from ..strategies.ema_strategy import EMAStrategy
 from ..strategies.macd_strategy import MACDStrategy
-from ..strategies.combined_strategy import CombinedStrategy
+# from ..strategies.combined_strategy import CombinedStrategy  # Removed - strategy was disabled and unused
 from ..strategies.bb_supertrend_strategy import BollingerSupertrendStrategy
 from ..data_fetcher import DataFetcher
 try:
@@ -32,7 +32,7 @@ class BacktestEngine:
         # Initialize strategies with BACKTEST MODE
         self.ema_strategy = EMAStrategy(backtest_mode=True)
         self.macd_strategy = MACDStrategy()
-        self.combined_strategy = CombinedStrategy()
+        # self.combined_strategy = CombinedStrategy()  # Removed - strategy was disabled and unused
         
         # Initialize BB+Supertrend strategy if enabled
         if getattr(config, 'BOLLINGER_SUPERTREND_STRATEGY', False):
@@ -328,7 +328,7 @@ class BacktestEngine:
         """Backtest combined strategy on historical data"""
         if not hasattr(self, 'combined_strategy') or self.combined_strategy is None:
             try:
-                self.combined_strategy = CombinedStrategy()
+                # self.combined_strategy = CombinedStrategy()  # Removed - strategy was disabled and unused
                 self.logger.info("✅ Combined strategy initialized for backtest")
             except Exception as e:
                 self.logger.error(f"❌ Failed to initialize combined strategy: {e}")

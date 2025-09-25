@@ -118,22 +118,14 @@ ENABLE_BEHAVIOR_ANALYSIS = False   # Disable if not used
 REQUIRE_VOLUME_CONFIRMATION = False # Disabled in simple mode
 REQUIRE_NEW_CROSSOVER = False  # Disabled in simple mode
 
-# Combined Strategy Settings
-COMBINED_STRATEGY_MODE = 'disabled'  # Options: 'confirmation', 'consensus', 'hierarchy', 'dynamic'
-REQUIRE_BOTH_STRATEGIES = False           # Both strategies must agree
-MIN_COMBINED_CONFIDENCE = 0.70          # Higher threshold for combined signals
-USE_ALL_STRATEGIES_DETECTION = False
-#ENABLE_COMBINED_AS_ADDITIONAL_STRATEGY = True
+# Combined Strategy Settings - REMOVED: Strategy was disabled and unused, cleaned up codebase
   
 STRATEGY_WEIGHT_KAMA = 0.0             # KAMA strategy weight (if enabled)
 #STRATEGY_WEIGHT_BB_SUPERTREND = 0.20    # BB+SuperTrend weight (if enabled)
 #STRATEGY_WEIGHT_MOMENTUM_BIAS = 0.05    # Momentum Bias weight (if enabled)
 STRATEGY_WEIGHT_ZERO_LAG = 0.0         # Zero Lag EMA weight (if enabled)
 
-# Advanced Combination Rules
-#ENABLE_STRATEGY_CONFLICTS = True        # Allow strategy conflict analysis
-#ENABLE_DYNAMIC_WEIGHTING = True         # Adjust weights based on market conditions
-#ENABLE_SIGNAL_SEQUENCING = True         # Consider which signal came first
+# Advanced Combination Rules - REMOVED: Combined strategy removed, these are no longer used
 
 # Strategy Selection for Enhanced Signal Processing Pipeline, name must match strategy name for it to be included in the
 
