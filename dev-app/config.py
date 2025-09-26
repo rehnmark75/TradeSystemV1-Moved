@@ -109,60 +109,7 @@ STAGE3_TRIGGER_POINTS = 17   # Start percentage trailing after +17 points (was 1
 STAGE3_ATR_MULTIPLIER = 0.8  # MUCH TIGHTER: 0.8x ATR (was 1.5x)
 STAGE3_MIN_DISTANCE = 2      # Small minimum trailing distance (was 3)
 
-# Epic-specific progressive settings (for high-performance pairs)
-PROGRESSIVE_EPIC_SETTINGS = {
-    'CS.D.EURUSD.CEEM.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Allow trends to develop (was 10)
-        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
-    },
-    'CS.D.GBPUSD.MINI.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Allow trends to develop (was 10)
-        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
-    },
-    'CS.D.USDJPY.MINI.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Changed from 10 to 16 for standardization
-        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
-    },
-    'CS.D.EURJPY.MINI.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Changed from 10 to 16 for standardization
-        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
-    },
-    # Additional major and minor pairs with balanced settings
-    'CS.D.USDCHF.MINI.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Allow trends to develop (was 10)
-        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
-    },
-    'CS.D.AUDUSD.MINI.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Allow trends to develop (was 10)
-        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
-    },
-    'CS.D.USDCAD.MINI.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Allow trends to develop (was 10)
-        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
-    },
-    'CS.D.NZDUSD.MINI.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Standardized to 16pts (was 12)
-        'stage3_trigger': 17   # Percentage trailing standardized (was 20)
-    },
-    'CS.D.AUDJPY.MINI.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Standardized to 16pts (was 10)
-        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
-    },
-    'CS.D.GBPJPY.MINI.IP': {
-        # 'stage1_trigger': REMOVED - now uses dynamic formula (min_stop_distance + 4)
-        'stage2_trigger': 16,  # Standardized to 16pts (was 10)
-        'stage3_trigger': 17   # Percentage trailing standardized (was 18)
-    }
-}
+# REMOVED: Epic-specific progressive settings - now using standard 3-stage configuration for all pairs
 
 # ================== DEFAULT VALUES ==================
 DEFAULT_TEST_EPIC = "CS.D.USDJPY.MINI.IP"

@@ -51,13 +51,13 @@ class TrailingConfig:
 
     monitor_interval_seconds: int = 60  # ✅ NEW: poll interval between trade checks
 
-    # NEW: Progressive trailing settings
-    stage1_trigger_points: int = 3    # Break-even trigger
-    stage1_lock_points: int = 1       # Minimum profit guarantee
-    stage2_trigger_points: int = 5    # Profit lock trigger
-    stage2_lock_points: int = 3       # Better profit guarantee
-    stage3_trigger_points: int = 8    # Percentage-based trailing trigger
-    stage3_atr_multiplier: float = 1.5 # ATR multiplier for stage 3
+    # Standard 3-stage trailing settings (simplified)
+    stage1_trigger_points: int = 7    # Fallback: Break-even trigger (IG min+4 used when available)
+    stage1_lock_points: int = 2       # Fallback: Minimum profit guarantee (IG min used when available)
+    stage2_trigger_points: int = 16   # Profit lock trigger
+    stage2_lock_points: int = 10      # Profit guarantee
+    stage3_trigger_points: int = 17   # Percentage-based trailing trigger
+    stage3_atr_multiplier: float = 0.8 # ATR multiplier for stage 3 (tighter)
     stage3_min_distance: int = 2      # Minimum distance for stage 3
 
     # EMA Exit compatibility (disabled by default for progressive trailing)
@@ -633,13 +633,18 @@ class Progressive3StageTrailing(TrailingStrategy):
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
 
-        # Get epic-specific settings or use defaults
-        from config import PROGRESSIVE_EPIC_SETTINGS
-        epic_settings = PROGRESSIVE_EPIC_SETTINGS.get(trade.symbol, {})
+        # Use standard 3-stage configuration for all epics
+        from config import STAGE2_TRIGGER_POINTS, STAGE3_TRIGGER_POINTS
 
-        stage1_trigger = epic_settings.get('stage1_trigger', self.config.stage1_trigger_points)
-        stage2_trigger = epic_settings.get('stage2_trigger', self.config.stage2_trigger_points)
-        stage3_trigger = epic_settings.get('stage3_trigger', self.config.stage3_trigger_points)
+        # Stage 1: Dynamic trigger based on IG minimum distance
+        ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+        if ig_min_distance:
+            stage1_trigger = int(ig_min_distance + 4)
+        else:
+            stage1_trigger = self.config.stage1_trigger_points  # Fallback
+
+        stage2_trigger = STAGE2_TRIGGER_POINTS  # 16 points
+        stage3_trigger = STAGE3_TRIGGER_POINTS  # 17 points
 
         # Calculate current profit in points
         if direction == "BUY":
@@ -839,11 +844,12 @@ class Progressive3StageTrailing(TrailingStrategy):
         else:  # SELL
             profit_points = int((trade.entry_price - current_price) / point_value)
 
-        # Get epic-specific settings
-        from config import PROGRESSIVE_EPIC_SETTINGS
-        epic_settings = PROGRESSIVE_EPIC_SETTINGS.get(trade.symbol, {})
-
-        stage1_trigger = epic_settings.get('stage1_trigger', self.config.stage1_trigger_points)
+        # Use standard stage1 trigger (IG minimum distance + 4)
+        ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+        if ig_min_distance:
+            stage1_trigger = int(ig_min_distance + 4)
+        else:
+            stage1_trigger = self.config.stage1_trigger_points  # Fallback
 
         # Always try to trail if we have enough profit for any stage
         return profit_points >= stage1_trigger
@@ -1213,14 +1219,17 @@ class EnhancedTradeProcessor:
         self.logger.info(f"🔧 [ENHANCED] Processing trade {trade.id} {trade.symbol} status={trade.status}")
 
         try:
-            # ✅ FIX: Use progressive configuration instead of static config
-            from services.progressive_config import get_progressive_config_for_epic
+            # Use standard 3-stage configuration (simplified - removed per-epic progressive config)
+            from config import STAGE2_TRIGGER_POINTS, STAGE2_LOCK_POINTS, STAGE3_TRIGGER_POINTS
 
             point_value = get_point_value(trade.symbol)
 
-            # Get dynamic configuration for this epic
-            progressive_config = get_progressive_config_for_epic(trade.symbol, current_price=current_price, trade=trade)
-            break_even_trigger_points = progressive_config.stage1_trigger_points
+            # Stage 1: Use dynamic trigger based on IG minimum distance + 4 points
+            ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+            if ig_min_distance:
+                break_even_trigger_points = int(ig_min_distance + 4)
+            else:
+                break_even_trigger_points = 7  # Fallback from config
             break_even_trigger = break_even_trigger_points * point_value
             
             # Calculate safe trailing distance
@@ -1263,9 +1272,10 @@ class EnhancedTradeProcessor:
                 ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
                 if ig_min_distance:
                     lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
-                    self.logger.info(f"🎯 [USING IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts instead of config {progressive_config.stage1_lock_points}pts")
+                    self.logger.info(f"🎯 [USING IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts")
                 else:
-                    lock_points = progressive_config.stage1_lock_points
+                    from config import STAGE1_LOCK_POINTS
+                    lock_points = STAGE1_LOCK_POINTS
                     self.logger.info(f"⚠️ [FALLBACK CONFIG] Trade {trade.id}: No IG minimum distance, using config {lock_points}pts")
                 if trade.direction.upper() == "BUY":
                     break_even_stop = trade.entry_price + (lock_points * point_value)  # Entry + lock_points
@@ -1273,11 +1283,10 @@ class EnhancedTradeProcessor:
                     break_even_stop = trade.entry_price - (lock_points * point_value)  # Entry - lock_points
 
                 
-                # ✅ ENHANCED LOGGING: Track exact values used
+                # Enhanced logging: Track exact values used
                 self.logger.info(f"💰 [BREAK-EVEN DETAILED] Trade {trade.id}:")
                 self.logger.info(f"   → IG minimum: {ig_min_distance} points")
-                self.logger.info(f"   → Config lock: {progressive_config.stage1_lock_points} points")
-                self.logger.info(f"   → Config trigger: {progressive_config.stage1_trigger_points} points")
+                self.logger.info(f"   → Trigger points: {break_even_trigger_points} points")
                 self.logger.info(f"   → Using lock_points: {lock_points} points")
                 self.logger.info(f"   → Entry: {trade.entry_price:.5f}")
                 self.logger.info(f"   → Break-even stop: {break_even_stop:.5f}")
@@ -1464,12 +1473,12 @@ class EnhancedTradeProcessor:
                     else:
                         self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Break-even level validation failed")
 
-            # --- STEP 1.5: Progressive Stage Check ---
-            # ✅ CRITICAL: Check for Stage 2 and Stage 3 progression after break-even
+            # --- STEP 1.5: Standard Stage Check ---
+            # Check for Stage 2 and Stage 3 progression after break-even
             if getattr(trade, 'moved_to_breakeven', False):
-                # Check if we should progress to Stage 2 (profit lock) or Stage 3 (ATR trailing)
-                stage2_trigger = progressive_config.stage2_trigger_points  # 10 points for AUDJPY
-                stage3_trigger = progressive_config.stage3_trigger_points  # 18 points for AUDJPY
+                # Use standard 3-stage configuration
+                stage2_trigger = STAGE2_TRIGGER_POINTS  # 16 points
+                stage3_trigger = STAGE3_TRIGGER_POINTS  # 17 points
 
                 if profit_points >= stage3_trigger:
                     # Stage 3: Percentage-based trailing
@@ -1516,7 +1525,7 @@ class EnhancedTradeProcessor:
                     self.logger.info(f"💰 [STAGE 2 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 2 trigger {stage2_trigger}pts - Profit lock")
 
                     # Calculate Stage 2 profit lock level (entry + lock points)
-                    lock_points = progressive_config.stage2_lock_points  # 5 points for AUDJPY
+                    lock_points = STAGE2_LOCK_POINTS  # 10 points
                     if trade.direction.upper() == "BUY":
                         stage2_stop = trade.entry_price + (lock_points * point_value)
                     else:
