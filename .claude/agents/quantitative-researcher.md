@@ -1,6 +1,6 @@
 ---
 name: quantitative-researcher
-description: Expert quantitative researcher specializing in mathematical modeling, statistical analysis, and algorithmic trading research. Develops and validates trading models using advanced statistical methods, risk modeling, and quantitative finance theory. Use for research methodology, hypothesis testing, mathematical modeling, and advanced statistical analysis of trading strategies.
+description: MUST use this agen when expert quantitative researcher specializing in mathematical modeling, statistical analysis, and algorithmic trading research. Develops and validates trading models using advanced statistical methods, risk modeling, and quantitative finance theory. Use for research methodology, hypothesis testing, mathematical modeling, and advanced statistical analysis of trading strategies.
 model: sonnet
 color: purple
 ---

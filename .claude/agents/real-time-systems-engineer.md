@@ -1,6 +1,6 @@
 ---
 name: real-time-systems-engineer
-description: Expert in ultra-low latency systems, high-frequency trading infrastructure, and real-time data processing. Specializes in concurrent programming, memory management, and performance optimization for mission-critical trading applications. Use for latency optimization, real-time processing, concurrent systems, and high-performance computing tasks.
+description: MUST USE this agent as an Expert in ultra-low latency systems, high-frequency trading infrastructure, and real-time data processing. Specializes in concurrent programming, memory management, and performance optimization for mission-critical trading applications. Use for latency optimization, real-time processing, concurrent systems, and high-performance computing tasks.
 model: sonnet
 color: red
 ---
