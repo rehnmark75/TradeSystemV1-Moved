@@ -332,6 +332,7 @@ class BacktestScanner(IntelligentForexScanner):
 
             # Check if specific strategy is requested
             strategy_name = self.strategy_name.upper()
+            self.logger.debug(f"🎯 Backtest strategy filter: '{strategy_name}' for {epic}")
 
             # Strategy method mapping
             strategy_methods = {
@@ -344,6 +345,7 @@ class BacktestScanner(IntelligentForexScanner):
                 'BB_SUPERTREND': 'detect_bb_supertrend_signals',
                 'BB': 'detect_bb_supertrend_signals',
                 'ZERO_LAG': 'detect_zero_lag_signals',
+                'ZEROLAG': 'detect_zero_lag_signals',  # Fixed: Accept both forms
                 'ZL': 'detect_zero_lag_signals',
                 'MOMENTUM': 'detect_momentum_signals',
                 'SMC_FAST': 'detect_smc_signals',
@@ -351,6 +353,7 @@ class BacktestScanner(IntelligentForexScanner):
                 'ICHIMOKU': 'detect_ichimoku_signals',
                 'ICHIMOKU_CLOUD': 'detect_ichimoku_signals',
                 'MEAN_REVERSION': 'detect_mean_reversion_signals',
+                'MEANREV': 'detect_mean_reversion_signals',  # Fixed: Accept short form
                 'RANGING_MARKET': 'detect_ranging_market_signals',
                 'RANGING': 'detect_ranging_market_signals'
             }

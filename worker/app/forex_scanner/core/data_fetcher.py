@@ -141,8 +141,8 @@ class DataFetcher:
             
             if config_key not in self._logged_ema_configs:
                 # First time seeing this configuration - log at INFO level
-                self.logger.info(f"🎯 EMA configuration for {epic}:")
-                self.logger.info(f"   Periods: {ema_periods}")
+                self.logger.debug(f"🎯 EMA configuration for {epic}:")
+                self.logger.debug(f"   Periods: {ema_periods}")
                 self.logger.info(f"   Source: {config_source}")
                 
                 # Mark this config as logged
@@ -259,7 +259,7 @@ class DataFetcher:
                 ema_periods = self._get_required_ema_periods(epic_guess, ema_strategy)
             
             # ENHANCED: Log EMA indicator addition with actual periods
-            self.logger.info(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
+            self.logger.debug(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
             
             # Add EMA indicators with the correct periods
             df_enhanced = self.technical_analyzer.add_ema_indicators(df_enhanced, ema_periods)
@@ -283,7 +283,7 @@ class DataFetcher:
                 
                 # CRITICAL FIX: Ensure EMA 200 is always present for MACD strategy
                 if 'ema_200' not in df_enhanced.columns:
-                    self.logger.info(f"🔄 Adding EMA 200 for MACD strategy")
+                    self.logger.debug(f"🔄 Adding EMA 200 for MACD strategy")
                     df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
                 else:
                     self.logger.debug(f"✅ EMA 200 already present for MACD strategy")
@@ -872,7 +872,7 @@ class DataFetcher:
             
             # Apply indicators based on requirements
             if 'ema' in required_indicators:
-                self.logger.info(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
+                self.logger.debug(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
                 df_enhanced = self.technical_analyzer.add_ema_indicators(df_enhanced, ema_periods)
             
             if 'macd' in required_indicators and getattr(config, 'MACD_EMA_STRATEGY', False):
@@ -886,7 +886,7 @@ class DataFetcher:
                 
                 # CRITICAL FIX: Ensure EMA 200 is always present for MACD strategy
                 if 'ema_200' not in df_enhanced.columns:
-                    self.logger.info(f"🔄 Adding EMA 200 for MACD strategy (lazy loading)")
+                    self.logger.debug(f"🔄 Adding EMA 200 for MACD strategy (lazy loading)")
                     df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
             
             # Add KAMA indicators if required
@@ -1013,7 +1013,7 @@ class DataFetcher:
                             optimal_config['long'],
                             optimal_config['trend']
                         ]
-                        self.logger.info(f"🎯 Using OPTIMAL EMA periods for {epic}: {ema_periods} (backtest consistency)")
+                        self.logger.debug(f"🎯 Using OPTIMAL EMA periods for {epic}: {ema_periods} (backtest consistency)")
                         return ema_periods
                 except Exception as e:
                     self.logger.warning(f"⚠️ Optimal EMA config failed for {epic}: {e}, falling back to strategy config")
@@ -1112,7 +1112,7 @@ class DataFetcher:
             
             # ALWAYS ensure EMA 200 exists for trend filtering
             if 'ema_200' not in df_enhanced.columns:
-                self.logger.info("🔄 Adding EMA 200 for trend filtering (always present)")
+                self.logger.debug("🔄 Adding EMA 200 for trend filtering (always present)")
                 df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
             else:
                 self.logger.debug("✅ EMA 200 already present")
@@ -1956,9 +1956,9 @@ class DataFetcher:
             
             # Log validation results
             if not missing_periods and not missing_semantic:
-                self.logger.info(f"✅ EMA validation passed for {epic}")
-                self.logger.info(f"   Configuration: {config_source}")
-                self.logger.info(f"   Periods calculated: {ema_periods}")
+                self.logger.debug(f"✅ EMA validation passed for {epic}")
+                self.logger.debug(f"   Configuration: {config_source}")
+                self.logger.debug(f"   Periods calculated: {ema_periods}")
                 self.logger.info(f"   Semantic mapping: ✅")
                 
                 # Log actual EMA values for verification

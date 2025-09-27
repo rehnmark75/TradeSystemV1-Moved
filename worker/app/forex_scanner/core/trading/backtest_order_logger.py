@@ -111,6 +111,10 @@ class BacktestOrderLogger:
             validation_passed = signal.get('validation_passed', False)
             validation_message = signal.get('validation_message', '')
 
+            # Initialize variables
+            failure_reason = 'Unknown'
+            detailed_reason = 'N/A'
+
             # Track validation failures for summary
             if not validation_passed and validation_message:
                 # Extract the validation step that failed (first part before ':')
@@ -122,8 +126,10 @@ class BacktestOrderLogger:
 
                 # Store detailed rejection reason (full validation message)
                 detailed_reason = validation_message.strip() if validation_message else 'Unknown'
-            else:
-                detailed_reason = 'N/A'
+            elif not validation_passed:
+                # No validation message but failed - use generic reason
+                failure_reason = 'Validation Failed'
+                detailed_reason = 'No specific validation message provided'
 
             signal_record = {
                 'id': self.signals_logged,
