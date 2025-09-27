@@ -90,14 +90,28 @@ class DatabaseManager:
                 if isinstance(query, str):
                     # Convert string to text() object
                     query_obj = text(query)
+                    query_str = query.strip().upper()
                 else:
                     # Already a text() object
                     query_obj = query
-                
+                    query_str = str(query).strip().upper()
+
                 result = conn.execute(query_obj, params or {})
-                df = pd.DataFrame(result.fetchall(), columns=result.keys())
-            return df
-            
+
+                # Check if this is a non-SELECT query that doesn't return rows
+                if ((query_str.startswith('UPDATE') or
+                     query_str.startswith('DELETE') or
+                     (query_str.startswith('INSERT') and 'RETURNING' not in query_str)) and
+                    'VOID' not in query_str):
+                    # For UPDATE/DELETE queries or INSERT without RETURNING, return empty DataFrame
+                    # but commit the transaction
+                    conn.commit()
+                    return pd.DataFrame()
+                else:
+                    # For SELECT queries, INSERT with RETURNING, or function calls, return the data as DataFrame
+                    df = pd.DataFrame(result.fetchall(), columns=result.keys())
+                    return df
+
         except Exception as e:
             self.logger.error(f"❌ Query execution failed: {e}")
             raise

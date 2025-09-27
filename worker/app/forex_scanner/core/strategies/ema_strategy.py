@@ -259,37 +259,79 @@ class EMAStrategy(BaseStrategy):
         try:
             # Validate data requirements
             if not self.indicator_calculator.validate_data_requirements(df, self.min_bars):
+                self.logger.info(f"❌ EMA Strategy: Data validation failed for {epic} - need {self.min_bars} bars, got {len(df)}")
                 return None
-            
-            self.logger.debug(f"Processing {len(df)} bars for {epic}")
-            
+
+            self.logger.info(f"✅ EMA Strategy: Processing {len(df)} bars for {epic}")
+
             # Calculate EMAs if not present
             df_enhanced = self.indicator_calculator.ensure_emas(df.copy(), self.ema_config)
-            
+
             # Apply core detection logic (based on detect_ema_alerts)
             df_with_signals = self.indicator_calculator.detect_ema_alerts(df_enhanced)
-            
-            # Simple immediate signal detection (no confirmation candle logic)
+
+            # BACKTEST MODE: Check all timestamps where alerts occurred
+            if self.backtest_mode:
+                return self._check_backtest_signals(df_with_signals, epic, timeframe, spread_pips)
+
+            # LIVE MODE: Simple immediate signal detection (no confirmation candle logic)
             latest_row = df_with_signals.iloc[-1]
-            
+
+            # DEBUG: Check alert flags
+            bull_alert = latest_row.get('bull_alert', False)
+            bear_alert = latest_row.get('bear_alert', False)
+            self.logger.info(f"🔍 EMA Debug: Bull alert: {bull_alert}, Bear alert: {bear_alert}")
+
             # Debug logging for troubleshooting
             if len(df) < 80:  # Only log for small datasets to avoid spam
                 bull_alert = latest_row.get('bull_alert', False)
                 bear_alert = latest_row.get('bear_alert', False)
                 if bull_alert or bear_alert:
                     self.logger.info(f"🎯 EMA Alert detected! Bull: {bull_alert}, Bear: {bear_alert}")
-            
+
             signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df), df_with_signals)
             if signal:
                 return signal
-            
+
             return None
-            
+
         except Exception as e:
             self.logger.error(f"Signal detection error: {e}")
             return None
-    
-    
+
+    def _check_backtest_signals(self, df_with_signals: pd.DataFrame, epic: str, timeframe: str, spread_pips: float) -> Optional[Dict]:
+        """
+        BACKTEST MODE: Check only the latest row for alerts (same as live mode)
+
+        The backtest scanner will iterate through time periods, so we only need to check
+        the latest row in the provided data, just like the live scanner does.
+        """
+        try:
+            # In backtest mode, we still only check the latest row
+            # The backtest scanner handles the time iteration
+            latest_row = df_with_signals.iloc[-1]
+
+            # Check for alerts at this specific timestamp
+            bull_alert = latest_row.get('bull_alert', False)
+            bear_alert = latest_row.get('bear_alert', False)
+
+            if bull_alert or bear_alert:
+                self.logger.debug(f"🔍 BACKTEST: Alert at {latest_row.get('start_time')} - Bull: {bull_alert}, Bear: {bear_alert}")
+
+                # Use the same signal checking logic as live mode
+                signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df_with_signals), df_with_signals)
+                if signal:
+                    signal['alert_timestamp'] = latest_row.get('start_time')
+                    signal['backtest_detection_mode'] = 'latest_row_only'
+                    return signal
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Error in backtest signal processing: {e}")
+            return None
+
+
     def _get_1h_two_pole_color(self, epic: str, current_time: pd.Timestamp) -> Optional[str]:
         """Get the Two-Pole Oscillator color from 1H timeframe"""
         return self.mtf_analyzer.get_1h_two_pole_color(epic, current_time)

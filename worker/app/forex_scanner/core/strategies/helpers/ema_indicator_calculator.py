@@ -106,7 +106,13 @@ class EMAIndicatorCalculator:
             
             # Bull alert when both cross and condition are true
             df['bull_alert'] = df['bull_cross'] & df['bull_condition']
-            
+
+            # DEBUG: Check for any crossovers or conditions
+            bull_crosses = df['bull_cross'].sum()
+            bull_conditions = df['bull_condition'].sum()
+            bull_alerts = df['bull_alert'].sum()
+            self.logger.info(f"🔍 EMA Detection Debug: Bull crosses: {bull_crosses}, Bull conditions: {bull_conditions}, Bull alerts: {bull_alerts}")
+
             # BEAR DETECTION - CORRECTED ALIGNMENT RULES
             # Bear cross: price was above EMA_short, now below
             df['bear_cross'] = (
@@ -121,9 +127,15 @@ class EMAIndicatorCalculator:
                 (ema_short < ema_trend - self.eps)      # Short EMA below Trend EMA (redundant but explicit)
             )
             
-            # Bear alert when both cross and condition are true  
+            # Bear alert when both cross and condition are true
             df['bear_alert'] = df['bear_cross'] & df['bear_condition']
-            
+
+            # DEBUG: Check for any bear signals too
+            bear_crosses = df['bear_cross'].sum()
+            bear_conditions = df['bear_condition'].sum()
+            bear_alerts = df['bear_alert'].sum()
+            self.logger.info(f"🔍 EMA Detection Debug: Bear crosses: {bear_crosses}, Bear conditions: {bear_conditions}, Bear alerts: {bear_alerts}")
+
             return df
             
         except Exception as e:
