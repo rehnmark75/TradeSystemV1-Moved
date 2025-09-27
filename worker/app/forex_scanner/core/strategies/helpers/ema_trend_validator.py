@@ -201,10 +201,8 @@ class EMATrendValidator:
         if not getattr(config, 'TWO_POLE_OSCILLATOR_ENABLED', False):
             return True
 
-        # BACKTEST MODE: Disable strict Two-Pole validation for historical analysis
-        if backtest_mode:
-            self.logger.debug(f"🔥 BACKTEST MODE: Two-Pole color validation DISABLED for {signal_type} signal")
-            return True
+        # ✅ RE-ENABLED: Two-Pole color validation now works in both live and backtest modes
+        # Removed backtest mode bypass to ensure full validation pipeline integrity
         
         # Get both color indicators
         two_pole_is_green = latest_row.get('two_pole_is_green', False)
