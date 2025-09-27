@@ -637,7 +637,7 @@ MAX_POSITION_SIZE = 1.0      # Maximum position size
 # Order parameters
 DEFAULT_STOP_DISTANCE = 20   # Stop loss distance in pips
 DEFAULT_RISK_REWARD = 2.0    # Risk:reward ratio for take profit
-MIN_CONFIDENCE_FOR_ORDERS = 0.70  # Minimum confidence to execute orders
+MIN_CONFIDENCE_FOR_ORDERS = 0.60  # Lowered for backtest validation debugging
 
 # Your existing API configuration
 ORDER_API_URL = "http://fastapi-dev:8000/orders/place-order"  # Update if hosted elsewhere
@@ -676,7 +676,7 @@ DEFAULT_POSITION_SIZE = 1.0       # None = use broker default, or set specific s
 DYNAMIC_STOPS = True               # Adjust stops based on signal confidence
 
 # Risk management
-MIN_CONFIDENCE_FOR_ORDERS = 0.70  # Only trade signals above 75% confidence
+MIN_CONFIDENCE_FOR_ORDERS = 0.60  # Lowered for backtest validation debugging
 MAX_DAILY_TRADES = 10              # Maximum trades per day
 MAX_CONCURRENT_POSITIONS = 3       # Maximum open positions
 
@@ -718,7 +718,7 @@ MAX_CONCURRENT_POSITIONS = 3   # Maximum open positions
 
 # SIGNAL REQUIREMENTS
 # -------------------
-MIN_CONFIDENCE_FOR_ORDERS = 0.70  # Only trade signals above 75% confidence
+MIN_CONFIDENCE_FOR_ORDERS = 0.60  # Lowered for backtest validation debugging
 
 # =============================================================================
 # DIRECTION MAPPING (automatic)

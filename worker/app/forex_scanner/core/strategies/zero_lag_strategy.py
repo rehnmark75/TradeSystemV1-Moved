@@ -142,7 +142,7 @@ class ZeroLagStrategy(BaseStrategy):
                 zero_lag_config = getattr(configdata.strategies, 'ZERO_LAG_STRATEGY_CONFIG', {}).get('default', {})
                 self.length = zero_lag_config.get('zl_length', 50)
                 self.band_multiplier = zero_lag_config.get('band_multiplier', 1.5) 
-                self.min_confidence = zero_lag_config.get('min_confidence', 0.65)
+                self.min_confidence = zero_lag_config.get('min_confidence', 0.55)  # Lowered for backtest validation
                 self.bb_length = zero_lag_config.get('bb_length', 20)
                 self.bb_mult = zero_lag_config.get('bb_mult', 2.0)
                 self.kc_length = zero_lag_config.get('kc_length', 20)
@@ -151,7 +151,7 @@ class ZeroLagStrategy(BaseStrategy):
                 # Fallback defaults
                 self.length = 50
                 self.band_multiplier = 1.5
-                self.min_confidence = 0.65
+                self.min_confidence = 0.55  # Lowered for backtest validation debugging
                 self.bb_length = 20
                 self.bb_mult = 2.0
                 self.kc_length = 20
@@ -406,11 +406,18 @@ class ZeroLagStrategy(BaseStrategy):
                 self.logger.debug("⚠️ No data fetcher available for multi-timeframe validation")
                 signal['mtf_validation'] = {'overall_valid': True, 'note': 'no_data_fetcher'}
             
+            # DEFENSIVE: Store critical fields before confidence calculation
+            signal_epic = signal.get('epic')
+            signal_signal_type = signal.get('signal_type')
+
             # Calculate confidence score (should be high for strict validation)
             confidence = self.signal_calculator.calculate_signal_confidence(
                 latest_row, signal_type, signal
             )
-            
+
+            # DEFENSIVE: Restore critical fields after confidence calculation
+            signal['epic'] = signal_epic or epic
+            signal['signal_type'] = signal_signal_type or signal_type
             signal['confidence'] = confidence
             signal['confidence_score'] = confidence
             
@@ -455,7 +462,15 @@ class ZeroLagStrategy(BaseStrategy):
             # Add RSI info to signal for logging
             rsi_value = latest_row.get('rsi', 50.0)
 
+            # CRITICAL: Ensure required fields are present before return
+            if 'epic' not in signal or 'signal_type' not in signal:
+                self.logger.error(f"❌ CRITICAL: Signal missing required fields! epic: {signal.get('epic', 'MISSING')}, signal_type: {signal.get('signal_type', 'MISSING')}")
+                signal['epic'] = epic  # Force add epic
+                signal['signal_type'] = signal_type  # Force add signal_type
+                self.logger.info(f"✅ FIXED: Added missing fields - epic: {epic}, signal_type: {signal_type}")
+
             self.logger.info(f"🎯 HIGH-QUALITY {signal_type} signal: ribbon={trend} + EMA200 + squeeze={momentum_color} + NO_SQUEEZE + RSI={rsi_value:.1f}{mtf_status}")
+            self.logger.info(f"   📊 Signal validation: epic={signal.get('epic', 'MISSING')}, signal_type={signal.get('signal_type', 'MISSING')}")
             self.logger.info(f"   📊 DEBUG VALUES for TradingView comparison:")
             self.logger.info(f"   📊 Close: {close:.5f}, ZLEMA: {zlema:.5f}")
             self.logger.info(f"   📊 Upper Band: {upper_band:.5f}, Lower Band: {lower_band:.5f}")

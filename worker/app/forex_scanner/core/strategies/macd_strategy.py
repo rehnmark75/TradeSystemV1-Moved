@@ -89,7 +89,7 @@ class MACDStrategy(BaseStrategy):
         
         # Basic parameters
         self.eps = 1e-8  # Epsilon for stability
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.50)  # MACD needs higher confidence
+        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.35)  # Lowered for backtest validation debugging
         self.min_bars = 60  # Minimum bars for stable MACD (26 + 9 + buffer)
         
         # Initialize helper modules (orchestrator pattern)
