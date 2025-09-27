@@ -875,8 +875,11 @@ class DataFetcher:
                 self.logger.debug(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
                 df_enhanced = self.technical_analyzer.add_ema_indicators(df_enhanced, ema_periods)
             
-            if 'macd' in required_indicators and getattr(config, 'MACD_EMA_STRATEGY', False):
-                self.logger.info(f"🔄 Adding MACD indicators (MACD strategy enabled)")
+            if 'macd' in required_indicators:
+                if getattr(config, 'MACD_EMA_STRATEGY', False):
+                    self.logger.info(f"🔄 Adding MACD indicators (MACD strategy enabled)")
+                else:
+                    self.logger.info(f"🔄 Adding MACD indicators (explicitly requested)")
                 df_enhanced = self.technical_analyzer.add_macd_indicators(
                     df_enhanced,
                     config.MACD_PERIODS['fast_ema'],
@@ -922,7 +925,10 @@ class DataFetcher:
                 df_enhanced = self._add_bb_supertrend_indicators(df_enhanced)
             elif 'bb_supertrend' in required_indicators:
                 self.logger.info(f"⚪ BB+Supertrend indicators NOT added (strategy disabled)")
-            
+
+            # Note: RSI and ADX indicators will be added by the MACD strategy itself
+            # when needed for quality scoring - no need to pre-calculate here
+
             return df_enhanced
             
         except Exception as e:
