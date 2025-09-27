@@ -46,6 +46,9 @@ class BacktestOrderLogger:
         self.bull_signals = 0
         self.bear_signals = 0
 
+        # Validation failure tracking
+        self.validation_failures = {}  # validation_step -> count
+
         # Finalization tracking
         self._finalized = False
 
@@ -105,6 +108,23 @@ class BacktestOrderLogger:
                 signal_type = 'SELL'  # Normalize for display
 
             # Store complete signal data for detailed reporting
+            validation_passed = signal.get('validation_passed', False)
+            validation_message = signal.get('validation_message', '')
+
+            # Track validation failures for summary
+            if not validation_passed and validation_message:
+                # Extract the validation step that failed (first part before ':')
+                failure_reason = validation_message.split(':')[0] if ':' in validation_message else validation_message
+                failure_reason = failure_reason.strip()
+                if failure_reason not in self.validation_failures:
+                    self.validation_failures[failure_reason] = 0
+                self.validation_failures[failure_reason] += 1
+
+                # Store detailed rejection reason (full validation message)
+                detailed_reason = validation_message.strip() if validation_message else 'Unknown'
+            else:
+                detailed_reason = 'N/A'
+
             signal_record = {
                 'id': self.signals_logged,
                 'timestamp': timestamp,
@@ -116,7 +136,9 @@ class BacktestOrderLogger:
                 'profit': signal.get('potential_profit_pips', 0),
                 'loss': signal.get('potential_loss_pips', 0),
                 'risk_reward': signal.get('risk_reward_ratio', 0),
-                'validation_passed': signal.get('validation_passed', False)
+                'validation_passed': validation_passed,
+                'rejection_reason': 'N/A' if validation_passed else (failure_reason or 'Unknown'),
+                'detailed_rejection_reason': detailed_reason
             }
             self.all_signals.append(signal_record)
 
@@ -484,52 +506,9 @@ class BacktestOrderLogger:
 
         self.logger.info("")
         self.logger.info(f"✅ TOTAL {strategy_display} SIGNALS: {self.signals_logged}")
-        self.logger.info("")
-        self.logger.info(f"🎯 INDIVIDUAL {strategy_display} SIGNALS:")
-        self.logger.info("=" * 120)
-        self.logger.info(f"{'#':3} {'TIMESTAMP':19} {'PAIR':12} {'TYPE':4} {'STRATEGY':12} {'PRICE':10} {'CONF':6} {'PROFIT':8} {'LOSS':8} {'R:R':6}")
-        self.logger.info("-" * 120)
 
-        # Show latest signals (up to 20)
-        latest_signals = sorted(self.all_signals, key=lambda x: x['timestamp'], reverse=True)[:20]
-
-        for signal in latest_signals:
-            # Format timestamp
-            if hasattr(signal['timestamp'], 'strftime'):
-                timestamp_str = signal['timestamp'].strftime('%Y-%m-%d %H:%M:%S UTC')
-            else:
-                timestamp_str = str(signal['timestamp'])[:19] + ' UTC'
-
-            # Clean up epic display
-            epic_display = signal['epic'].replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
-            if len(epic_display) > 12:
-                epic_display = epic_display[:12]
-
-            # Format strategy display
-            strategy_display = signal['strategy']
-            if len(strategy_display) > 12:
-                strategy_display = strategy_display[:12]
-
-            # Format values
-            profit = signal.get('profit', 0)
-            loss = signal.get('loss', 0)
-            risk_reward = signal.get('risk_reward', 0)
-
-            # Calculate R:R ratio display
-            if loss > 0:
-                rr_display = f"{profit/loss:.2f}"
-            elif profit > 0:
-                rr_display = "inf"
-            else:
-                rr_display = "0.00"
-
-            self.logger.info(f"{signal['id']:3} {timestamp_str:19} {epic_display:12} {signal['signal_type']:4} "
-                           f"{strategy_display:12} {signal['price']:8.5f}  {signal['confidence']:5.1%} "
-                           f"{profit:6.1f}   {loss:6.1f}   {rr_display:6}")
-
-        self.logger.info("=" * 120)
-        if len(self.all_signals) > 20:
-            self.logger.info(f"📝 Showing latest 20 of {self.signals_logged} total signals (newest first)")
+        # Add filtered signal sections
+        self._display_filtered_signal_sections(strategy_display)
 
         # Performance summary
         self.logger.info("")
@@ -561,6 +540,107 @@ class BacktestOrderLogger:
             self.logger.info(f"   📊 Signal Breakdown:")
             self.logger.info(f"      ✅ Validated: {validated_signals} signals")
             self.logger.info(f"      ❌ Failed Validation: {self.signals_logged - validated_signals} signals")
+
+            # Add detailed validation failure breakdown
+            if self.validation_failures:
+                self.logger.info(f"      🔍 Validation Failure Breakdown:")
+                # Sort by count (descending) for most common failures first
+                sorted_failures = sorted(self.validation_failures.items(), key=lambda x: x[1], reverse=True)
+                for failure_type, count in sorted_failures:
+                    self.logger.info(f"         • {failure_type}: {count} signals")
+            elif self.signals_logged - validated_signals > 0:
+                self.logger.info(f"      🔍 Validation Failure Breakdown: No detailed reasons available")
+
+    def _display_filtered_signal_sections(self, strategy_display: str):
+        """Display separate sections for validated and rejected signals"""
+        # Filter signals by validation status
+        validated_signals = [s for s in self.all_signals if s.get('validation_passed', False)]
+        rejected_signals = [s for s in self.all_signals if not s.get('validation_passed', False)]
+
+        # Sort both by timestamp (newest first) and limit to 15 each
+        validated_signals = sorted(validated_signals, key=lambda x: x['timestamp'], reverse=True)[:15]
+        rejected_signals = sorted(rejected_signals, key=lambda x: x['timestamp'], reverse=True)[:15]
+
+        # Display validated signals section
+        if validated_signals:
+            self.logger.info("")
+            self.logger.info(f"✅ VALIDATED {strategy_display} SIGNALS ({len(validated_signals)} signals):")
+            self.logger.info("=" * 140)
+            self.logger.info(f"{'#':3} {'TIMESTAMP':19} {'PAIR':12} {'TYPE':4} {'STRATEGY':12} {'PRICE':10} {'CONF':6} {'PROFIT':8} {'LOSS':8} {'R:R':6}")
+            self.logger.info("-" * 140)
+
+            for signal in validated_signals:
+                self._format_signal_row(signal, include_rejection=False)
+
+            self.logger.info("=" * 140)
+            self.logger.info(f"📝 {len(validated_signals)} validated signals shown (newest first)")
+
+        # Display rejected signals section
+        if rejected_signals:
+            self.logger.info("")
+            self.logger.info(f"❌ REJECTED {strategy_display} SIGNALS ({len(rejected_signals)} signals):")
+            self.logger.info("=" * 200)
+            self.logger.info(f"{'#':3} {'TIMESTAMP':19} {'PAIR':12} {'TYPE':4} {'STRATEGY':12} {'PRICE':10} {'CONF':6} {'PROFIT':8} {'LOSS':8} {'R:R':6} {'DETAILED REJECTION REASON':65}")
+            self.logger.info("-" * 200)
+
+            for signal in rejected_signals:
+                self._format_signal_row(signal, include_rejection=True, use_detailed=True)
+
+            self.logger.info("=" * 200)
+            self.logger.info(f"📝 {len(rejected_signals)} rejected signals shown (newest first)")
+
+    def _format_signal_row(self, signal: Dict, include_rejection: bool = True, use_detailed: bool = False):
+        """Format a single signal row for display"""
+        # Format timestamp
+        if hasattr(signal['timestamp'], 'strftime'):
+            timestamp_str = signal['timestamp'].strftime('%Y-%m-%d %H:%M:%S UTC')
+        else:
+            timestamp_str = str(signal['timestamp'])[:19] + ' UTC'
+
+        # Clean up epic display
+        epic_display = signal['epic'].replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+        if len(epic_display) > 12:
+            epic_display = epic_display[:12]
+
+        # Format strategy display
+        strategy_display = signal['strategy']
+        if len(strategy_display) > 12:
+            strategy_display = strategy_display[:12]
+
+        # Format values
+        profit = signal.get('profit', 0)
+        loss = signal.get('loss', 0)
+        risk_reward = signal.get('risk_reward', 0)
+
+        # Calculate R:R ratio display
+        if loss > 0:
+            rr_display = f"{profit/loss:.2f}"
+        elif profit > 0:
+            rr_display = "inf"
+        else:
+            rr_display = "0.00"
+
+        # Base signal info
+        base_info = (f"{signal['id']:3} {timestamp_str:19} {epic_display:12} {signal['signal_type']:4} "
+                    f"{strategy_display:12} {signal['price']:8.5f}  {signal['confidence']:5.1%} "
+                    f"{profit:6.1f}   {loss:6.1f}   {rr_display:6}")
+
+        # Add rejection reason if requested
+        if include_rejection:
+            if use_detailed:
+                # Use detailed rejection reason for comprehensive debugging
+                detailed_reason = signal.get('detailed_rejection_reason', 'N/A')
+                if len(detailed_reason) > 65:
+                    detailed_reason = detailed_reason[:62] + '...'
+                self.logger.info(f"{base_info} {detailed_reason:65}")
+            else:
+                # Use basic rejection reason for compact display
+                rejection_reason = signal.get('rejection_reason', 'N/A')
+                if len(rejection_reason) > 25:
+                    rejection_reason = rejection_reason[:22] + '...'
+                self.logger.info(f"{base_info} {rejection_reason:25}")
+        else:
+            self.logger.info(base_info)
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get logger statistics"""
