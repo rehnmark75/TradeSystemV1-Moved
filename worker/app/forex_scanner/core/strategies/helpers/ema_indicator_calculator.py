@@ -136,6 +136,17 @@ class EMAIndicatorCalculator:
             bear_alerts = df['bear_alert'].sum()
             self.logger.info(f"🔍 EMA Detection Debug: Bear crosses: {bear_crosses}, Bear conditions: {bear_conditions}, Bear alerts: {bear_alerts}")
 
+            # CRITICAL DEBUG: Show which specific rows have alerts
+            if bull_alerts > 0:
+                bull_alert_rows = df[df['bull_alert'] == True].index.tolist()
+                bull_timestamps = df[df['bull_alert'] == True]['start_time'].tolist()
+                self.logger.info(f"🎯 BULL ALERTS at rows: {bull_alert_rows}, timestamps: {bull_timestamps}")
+
+            if bear_alerts > 0:
+                bear_alert_rows = df[df['bear_alert'] == True].index.tolist()
+                bear_timestamps = df[df['bear_alert'] == True]['start_time'].tolist()
+                self.logger.info(f"🎯 BEAR ALERTS at rows: {bear_alert_rows}, timestamps: {bear_timestamps}")
+
             return df
             
         except Exception as e:

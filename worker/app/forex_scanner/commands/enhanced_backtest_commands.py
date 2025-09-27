@@ -77,7 +77,11 @@ class EnhancedBacktestCommands:
 
             # Create backtest execution
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=days)
+            # CRITICAL FIX: Start early enough to capture all alerts AND have sufficient indicator data
+            # We need extra days for indicator calculation (e.g., EMA 50 needs 50+ bars)
+            # Add 2 extra days to ensure we have enough historical data before the target period
+            start_date = end_date - timedelta(days=days + 2)
+            start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
             execution_id = self.scanner_factory.create_backtest_execution(
                 strategy_name=strategy,
@@ -189,68 +193,125 @@ class EnhancedBacktestCommands:
         except Exception as e:
             self.logger.error(f"❌ Error displaying results: {e}")
 
+    def _sanitize_unicode(self, text: str) -> str:
+        """Sanitize text to remove problematic Unicode characters"""
+        if not isinstance(text, str):
+            text = str(text)
+
+        try:
+            # Remove or replace problematic Unicode characters
+            # Focus on surrogate pairs and other problematic characters
+            sanitized = text.encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+
+            # Remove surrogate pairs and other problematic characters
+            sanitized = ''.join(char for char in sanitized if ord(char) < 65536 and not (0xD800 <= ord(char) <= 0xDFFF))
+
+            # Replace any remaining control characters with spaces
+            sanitized = ''.join(char if ord(char) >= 32 or char in '\t\n\r' else ' ' for char in sanitized)
+
+            return sanitized
+        except Exception as e:
+            # Fallback to ASCII-only representation
+            self.logger.warning(f"Unicode sanitization failed: {e}")
+            return ''.join(char if ord(char) < 128 else '?' for char in str(text))
+
     def _display_detailed_signals(self, signals: List[Dict], max_display: int, total_signals: int):
         """Display detailed signal breakdown in the requested format"""
+        try:
+            self.logger.info(f"\n🎯 INDIVIDUAL SIGNAL DETAILS:")
+            self.logger.info("=" * 120)
 
-        self.logger.info(f"\n🎯 INDIVIDUAL SIGNAL DETAILS:")
-        self.logger.info("=" * 120)
+            # Header
+            header = f"{'#':<3} {'TIMESTAMP':<20} {'PAIR':<8} {'TYPE':<4} {'STRATEGY':<15} {'PRICE':<8} {'CONF':<6} {'PROFIT':<8} {'LOSS':<8} {'R:R':<8}"
+            self.logger.info(header)
+            self.logger.info("-" * 120)
 
-        # Header
-        header = f"{'#':<3} {'TIMESTAMP':<20} {'PAIR':<8} {'TYPE':<4} {'STRATEGY':<15} {'PRICE':<8} {'CONF':<6} {'PROFIT':<8} {'LOSS':<8} {'R:R':<8}"
-        self.logger.info(header)
-        self.logger.info("-" * 120)
+            # Display signals
+            for i, signal in enumerate(signals, 1):
+                try:
+                    # Format timestamp with error handling
+                    timestamp = signal.get('signal_timestamp', 'N/A')
+                    if isinstance(timestamp, str):
+                        timestamp_str = self._sanitize_unicode(str(timestamp)[:19]) + ' UTC'
+                    else:
+                        try:
+                            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')
+                        except:
+                            timestamp_str = self._sanitize_unicode(str(timestamp)[:19]) + ' UTC'
 
-        # Display signals
-        for i, signal in enumerate(signals, 1):
-            # Format timestamp
-            timestamp = signal['signal_timestamp']
-            if isinstance(timestamp, str):
-                timestamp_str = timestamp[:19] + ' UTC'
-            else:
-                timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')
+                    # Clean up epic name with error handling
+                    epic = self._sanitize_unicode(str(signal.get('epic', 'UNKNOWN')))
+                    pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
 
-            # Clean up epic name
-            pair_name = signal['epic'].replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                    # Signal type with error handling
+                    signal_type = self._sanitize_unicode(str(signal.get('signal_type', 'N/A')))
 
-            # Signal type
-            signal_type = signal['signal_type']
+                    # Strategy name with error handling
+                    strategy_name = self._sanitize_unicode(str(signal.get('strategy_name', 'UNKNOWN')))
+                    strategy = strategy_name[:14]  # Truncate if too long
 
-            # Strategy name
-            strategy = signal['strategy_name'][:14]  # Truncate if too long
+                    # Prices with error handling
+                    entry_price = signal.get('entry_price', 0) or 0
+                    try:
+                        price_str = f"{float(entry_price):.5f}" if entry_price else "N/A"
+                    except:
+                        price_str = "N/A"
 
-            # Prices
-            entry_price = signal['entry_price'] or 0
-            price_str = f"{float(entry_price):.5f}" if entry_price else "N/A"
+                    # Confidence with error handling
+                    confidence = signal.get('confidence_score', 0) or 0
+                    try:
+                        conf_str = f"{float(confidence)*100:.1f}%" if confidence else "N/A"
+                    except:
+                        conf_str = "N/A"
 
-            # Confidence
-            confidence = signal['confidence_score'] or 0
-            conf_str = f"{float(confidence)*100:.1f}%" if confidence else "N/A"
+                    # Calculate profit/loss and R:R ratio with error handling
+                    pips_gained = signal.get('pips_gained', 0) or 0
+                    trade_result = self._sanitize_unicode(str(signal.get('trade_result', '')))
 
-            # Calculate profit/loss and R:R ratio
-            pips_gained = signal.get('pips_gained') or 0
-            trade_result = signal.get('trade_result', '')
+                    try:
+                        if trade_result == 'win':
+                            profit_pips = abs(float(pips_gained)) if pips_gained else 15.0
+                            loss_pips = 0.0
+                            rr_ratio = "inf"
+                        elif trade_result == 'loss':
+                            profit_pips = 0.0
+                            loss_pips = abs(float(pips_gained)) if pips_gained else 10.0
+                            rr_ratio = "0.00"
+                        else:
+                            # Default values for incomplete trades
+                            profit_pips = 15.0 if signal_type == 'BULL' else 15.0
+                            loss_pips = 10.0 if signal_type == 'BULL' else 10.0
+                            rr_ratio = f"{profit_pips/max(loss_pips, 1):.2f}"
+                    except:
+                        profit_pips = 15.0
+                        loss_pips = 10.0
+                        rr_ratio = "1.50"
 
-            if trade_result == 'win':
-                profit_pips = abs(float(pips_gained)) if pips_gained else 15.0
-                loss_pips = 0.0
-                rr_ratio = "inf"
-            elif trade_result == 'loss':
-                profit_pips = 0.0
-                loss_pips = abs(float(pips_gained)) if pips_gained else 10.0
-                rr_ratio = "0.00"
-            else:
-                # Default values for incomplete trades
-                profit_pips = 15.0 if signal_type == 'BULL' else 15.0
-                loss_pips = 10.0 if signal_type == 'BULL' else 10.0
-                rr_ratio = f"{profit_pips/max(loss_pips, 1):.2f}"
+                    # Format row with comprehensive error handling
+                    try:
+                        row = f"{i:<3} {timestamp_str:<20} {pair_name:<8} {signal_type:<4} {strategy:<15} {price_str:<8} {conf_str:<6} {profit_pips:<8.1f} {loss_pips:<8.1f} {rr_ratio:<8}"
+                        # Sanitize the entire row output
+                        sanitized_row = self._sanitize_unicode(row)
+                        self.logger.info(sanitized_row)
+                    except Exception as row_error:
+                        # Fallback to basic info if row formatting fails
+                        fallback_row = f"{i} {pair_name} {signal_type} ERROR: {row_error}"
+                        self.logger.error(self._sanitize_unicode(fallback_row))
 
-            # Format row
-            row = f"{i:<3} {timestamp_str:<20} {pair_name:<8} {signal_type:<4} {strategy:<15} {price_str:<8} {conf_str:<6} {profit_pips:<8.1f} {loss_pips:<8.1f} {rr_ratio:<8}"
-            self.logger.info(row)
+                except Exception as signal_error:
+                    # If processing a single signal fails, log the error and continue
+                    error_msg = f"Error processing signal {i}: {signal_error}"
+                    self.logger.error(self._sanitize_unicode(error_msg))
 
-        self.logger.info("=" * 120)
-        if total_signals > max_display:
-            self.logger.info(f"📝 Showing latest {max_display} of {total_signals} total signals (newest first)")
+            self.logger.info("=" * 120)
+            if total_signals > max_display:
+                self.logger.info(f"📝 Showing latest {max_display} of {total_signals} total signals (newest first)")
+
+        except Exception as e:
+            # If the entire method fails, log error but don't crash
+            error_msg = f"❌ Error displaying detailed signals: {e}"
+            self.logger.error(self._sanitize_unicode(error_msg))
+            self.logger.info("❌ Signal display failed - continuing with summary")
 
     def _display_performance_summary(self, execution_id: int, signals: List[Dict]):
         """Display performance summary statistics"""

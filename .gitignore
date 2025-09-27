@@ -65,3 +65,4 @@ postgresbackup/
 **/*.pfx
 vector-db/vectordb/32cb61c2-d8ab-4295-b0ed-f764a453d8a2/length.bin
 vector-db/vectordb/6fab4550-a78b-46bc-999b-3d013e14ad98/length.bin
+vector-db/vectordb/32cb61c2-d8ab-4295-b0ed-f764a453d8a2/length.bin

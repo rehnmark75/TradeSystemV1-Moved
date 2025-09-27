@@ -109,7 +109,9 @@ class BacktestScanner(IntelligentForexScanner):
             if hasattr(self.signal_detector, 'ema_strategy') and self.signal_detector.ema_strategy:
                 self.signal_detector.ema_strategy.data_fetcher = backtest_data_fetcher
                 self.signal_detector.ema_strategy.backtest_mode = True
-                self.logger.info("✅ EMA strategy configured for backtest mode - will process all alert timestamps")
+                # CRITICAL FIX: Enable optimal parameters for consistent signal detection and validation
+                self.signal_detector.ema_strategy.use_optimal_parameters = True
+                self.logger.info("✅ EMA strategy configured for backtest mode - will use optimal parameters and process all alert timestamps")
 
             self.logger.info("✅ Signal detector updated to use BacktestDataFetcher for historical data")
 
@@ -275,6 +277,10 @@ class BacktestScanner(IntelligentForexScanner):
         try:
             # Set the current backtest time (important for data fetcher)
             self.current_backtest_time = current_time
+
+            # CRITICAL FIX: Sync timestamp with data fetcher for time-aware data filtering
+            if hasattr(self.signal_detector, 'data_fetcher') and hasattr(self.signal_detector.data_fetcher, 'current_backtest_time'):
+                self.signal_detector.data_fetcher.current_backtest_time = current_time
 
             # Override scan_once to use historical data at this timestamp
             signals = self._scan_historical_timepoint(current_time)

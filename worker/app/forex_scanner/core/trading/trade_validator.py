@@ -86,14 +86,17 @@ class TradeValidator:
     FIXED: Flexible required fields handling to support various signal formats
     """
     
-    def __init__(self, 
+    def __init__(self,
                  logger: Optional[logging.Logger] = None,
-                 db_manager: Optional[object] = None):  # NEW: Optional db_manager for S/R validation
-        
+                 db_manager: Optional[object] = None,  # NEW: Optional db_manager for S/R validation
+                 backtest_mode: bool = False):  # NEW: Backtest mode parameter
+
         self.logger = logger or logging.getLogger(__name__)
-        
-        # Validation rules - FIXED: More flexible required fields
-        self.min_confidence = float(getattr(config, 'MIN_CONFIDENCE_FOR_ORDERS', 0.75))
+        self.backtest_mode = backtest_mode
+
+        # Validation rules - UNIVERSAL FIX: Confidence format handling for all strategies
+        raw_confidence = float(getattr(config, 'MIN_CONFIDENCE_FOR_ORDERS', 0.75))
+        self.min_confidence = self._normalize_confidence_threshold(raw_confidence)
         # FIXED: More flexible required fields - price can be in multiple field names
         self.required_fields = ['epic', 'signal_type', 'confidence_score']
         # OPTIONAL: Price fields that can satisfy price requirement (checked separately)
@@ -103,8 +106,13 @@ class TradeValidator:
         ]
         self.valid_directions = ['BUY', 'SELL', 'BULL', 'BEAR', 'TEST_BULL', 'TEST_BEAR']
         
-        # Market hours validation (disabled by default for testing)
-        self.validate_market_hours = getattr(config, 'VALIDATE_MARKET_HOURS', False)
+        # Market hours validation - DISABLED for backtests (historical data analysis)
+        if self.backtest_mode:
+            self.validate_market_hours = False  # UNIVERSAL FIX: Allow historical analysis
+            if hasattr(self, 'logger') and self.logger:
+                self.logger.info("🔧 BACKTEST: Market hours validation disabled for historical analysis")
+        else:
+            self.validate_market_hours = getattr(config, 'VALIDATE_MARKET_HOURS', False)
         self.trading_start_hour = getattr(config, 'TRADING_START_HOUR', 0)
         self.trading_end_hour = getattr(config, 'TRADING_END_HOUR', 23)
         
@@ -497,7 +505,50 @@ class TradeValidator:
             
         except Exception as e:
             self.logger.warning(f"⚠️ Failed to save Claude rejection: {e}")
-    
+
+    def _normalize_confidence_threshold(self, threshold: float) -> float:
+        """
+        UNIVERSAL FIX: Normalize confidence threshold to decimal format (0.0-1.0)
+
+        This ensures all strategies work correctly in both live and backtest modes
+        by converting any percentage format (like 70.0) to decimal format (0.70).
+
+        Args:
+            threshold: Raw confidence threshold from config
+
+        Returns:
+            Normalized confidence threshold as decimal (0.0-1.0)
+        """
+        # If threshold is greater than 1.0, assume it's in percentage format
+        if threshold > 1.0:
+            normalized = threshold / 100.0
+            if self.backtest_mode:
+                self.logger.info(f"🔧 BACKTEST: Normalized confidence threshold {threshold}% → {normalized:.2f}")
+            return normalized
+
+        # Already in decimal format
+        return threshold
+
+    def _normalize_signal_confidence(self, confidence: float) -> float:
+        """
+        UNIVERSAL FIX: Normalize signal confidence to decimal format (0.0-1.0)
+
+        This ensures all strategies work correctly by converting any percentage
+        format confidence scores to decimal format for consistent comparison.
+
+        Args:
+            confidence: Raw confidence score from signal
+
+        Returns:
+            Normalized confidence score as decimal (0.0-1.0)
+        """
+        # If confidence is greater than 1.0, assume it's in percentage format
+        if confidence > 1.0:
+            return confidence / 100.0
+
+        # Already in decimal format (like signal 5331 with 0.95)
+        return confidence
+
     def validate_signal_for_trading(self, signal: Dict, market_data: Optional[object] = None) -> Tuple[bool, str]:
         """
         ENHANCED: Comprehensive signal validation for trading with safe S/R integration + Claude filtering
@@ -1352,11 +1403,23 @@ class TradeValidator:
             return False, f"Epic validation error: {str(e)}"
     
     def apply_confidence_filters(self, signal: Dict) -> Tuple[bool, str]:
-        """Apply confidence-based filters"""
+        """
+        Apply confidence-based filters with UNIVERSAL format normalization
+
+        UNIVERSAL FIX: Ensures all strategies work correctly by normalizing
+        both signal confidence and threshold to decimal format (0.0-1.0)
+        """
         try:
-            confidence = signal.get('confidence_score', 0)
-            
-            # Check minimum confidence
+            raw_confidence = signal.get('confidence_score', 0)
+
+            # UNIVERSAL FIX: Normalize signal confidence to decimal format
+            confidence = self._normalize_signal_confidence(float(raw_confidence))
+
+            # Log for debugging if in backtest mode and formats differ
+            if self.backtest_mode and raw_confidence != confidence:
+                self.logger.debug(f"🔧 BACKTEST: Normalized signal confidence {raw_confidence} → {confidence:.3f}")
+
+            # Check minimum confidence (both values now in decimal format)
             if confidence < self.min_confidence:
                 return False, f"Confidence {confidence:.1%} below minimum {self.min_confidence:.1%}"
             

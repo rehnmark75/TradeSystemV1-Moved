@@ -264,18 +264,30 @@ class EMAStrategy(BaseStrategy):
 
             self.logger.info(f"✅ EMA Strategy: Processing {len(df)} bars for {epic}")
 
+            # CRITICAL FIX: Get epic-specific EMA configuration (including optimal parameters)
+            epic_ema_config = self._get_ema_periods(epic)
+
             # Calculate EMAs if not present
-            df_enhanced = self.indicator_calculator.ensure_emas(df.copy(), self.ema_config)
+            df_enhanced = self.indicator_calculator.ensure_emas(df.copy(), epic_ema_config)
 
             # Apply core detection logic (based on detect_ema_alerts)
             df_with_signals = self.indicator_calculator.detect_ema_alerts(df_enhanced)
 
-            # BACKTEST MODE: Check all timestamps where alerts occurred
-            if self.backtest_mode:
-                return self._check_backtest_signals(df_with_signals, epic, timeframe, spread_pips)
-
-            # LIVE MODE: Simple immediate signal detection (no confirmation candle logic)
+            # UNIFIED MODE: Use same logic for both live and backtest
+            # The backtest scanner will call this method iteratively for each timestamp
             latest_row = df_with_signals.iloc[-1]
+            current_timestamp = latest_row.get('start_time')
+
+            # BACKTEST FIX: Check if any alert occurred at the current timestamp
+            if self.backtest_mode:
+                # In backtest mode, find if there's an alert specifically at the current timestamp
+                alert_at_current_time = df_with_signals[df_with_signals['start_time'] == current_timestamp]
+                if len(alert_at_current_time) > 0:
+                    latest_row = alert_at_current_time.iloc[-1]  # Use the row at current timestamp
+                    self.logger.info(f"🔍 BACKTEST: Checking alerts at timestamp {current_timestamp}")
+                else:
+                    # No data at current timestamp, use latest available
+                    pass
 
             # DEBUG: Check alert flags
             bull_alert = latest_row.get('bull_alert', False)
@@ -301,29 +313,50 @@ class EMAStrategy(BaseStrategy):
 
     def _check_backtest_signals(self, df_with_signals: pd.DataFrame, epic: str, timeframe: str, spread_pips: float) -> Optional[Dict]:
         """
-        BACKTEST MODE: Check only the latest row for alerts (same as live mode)
+        BACKTEST MODE: Find the most recent alert in the dataset and check if it's NEW
 
-        The backtest scanner will iterate through time periods, so we only need to check
-        the latest row in the provided data, just like the live scanner does.
+        The key insight: We need to find the latest alert timestamp in the data and
+        check if it matches the current timestamp we're processing.
         """
         try:
-            # In backtest mode, we still only check the latest row
-            # The backtest scanner handles the time iteration
-            latest_row = df_with_signals.iloc[-1]
+            if len(df_with_signals) == 0:
+                return None
 
-            # Check for alerts at this specific timestamp
-            bull_alert = latest_row.get('bull_alert', False)
-            bear_alert = latest_row.get('bear_alert', False)
+            current_timestamp = df_with_signals.iloc[-1].get('start_time')
 
-            if bull_alert or bear_alert:
-                self.logger.debug(f"🔍 BACKTEST: Alert at {latest_row.get('start_time')} - Bull: {bull_alert}, Bear: {bear_alert}")
+            # Find all rows with alerts in the current dataset
+            alert_rows = df_with_signals[
+                (df_with_signals.get('bull_alert', False) == True) |
+                (df_with_signals.get('bear_alert', False) == True)
+            ].copy()
+
+            if len(alert_rows) == 0:
+                return None
+
+            # Get the most recent alert in the data
+            latest_alert_row = alert_rows.iloc[-1]
+            alert_timestamp = latest_alert_row.get('start_time')
+
+            # Only process the alert if it's at the current timestamp (i.e., it's a NEW alert)
+            if alert_timestamp == current_timestamp:
+                bull_alert = latest_alert_row.get('bull_alert', False)
+                bear_alert = latest_alert_row.get('bear_alert', False)
+
+                self.logger.info(f"🔍 BACKTEST: NEW alert at {current_timestamp} - Bull: {bull_alert}, Bear: {bear_alert}")
 
                 # Use the same signal checking logic as live mode
-                signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df_with_signals), df_with_signals)
+                signal = self._check_immediate_signal(latest_alert_row, epic, timeframe, spread_pips, len(df_with_signals), df_with_signals)
                 if signal:
-                    signal['alert_timestamp'] = latest_row.get('start_time')
-                    signal['backtest_detection_mode'] = 'latest_row_only'
+                    signal['alert_timestamp'] = alert_timestamp
+                    signal['backtest_detection_mode'] = 'new_alert_detection'
+                    self.logger.info(f"✅ BACKTEST: Signal generated at {alert_timestamp}")
                     return signal
+                else:
+                    self.logger.info(f"❌ BACKTEST: Alert at {alert_timestamp} failed validation")
+            else:
+                # This is an old alert, not a new one
+                if len(df_with_signals) % 50 == 0:  # Log occasionally
+                    self.logger.debug(f"🔍 BACKTEST: Latest alert was at {alert_timestamp}, current time: {current_timestamp}")
 
             return None
 
@@ -346,9 +379,10 @@ class EMAStrategy(BaseStrategy):
             # Check for bull alert with Two-Pole Oscillator color validation
             if latest_row.get('bull_alert', False):
                 self.logger.info(f"🎯 EMA BULL alert detected at bar {bar_count}")
-                
+
                 # CRITICAL: Reject BULL signals if Two-Pole Oscillator is PURPLE (wrong color)
-                if not self.trend_validator.validate_two_pole_color(latest_row, 'BULL'):
+                if not self.trend_validator.validate_two_pole_color(latest_row, 'BULL', self.backtest_mode):
+                    self.logger.info(f"❌ EMA BULL signal REJECTED by Two-Pole Oscillator validation")
                     return None
                     
                 # Check 1H Two-Pole color if multi-timeframe validation is enabled
@@ -360,6 +394,7 @@ class EMAStrategy(BaseStrategy):
                 
                 # MACD momentum validation
                 if not self.trend_validator.validate_macd_momentum(df_with_signals, 'BULL'):
+                    self.logger.info(f"❌ EMA BULL signal REJECTED by MACD momentum validation")
                     return None
                 
                 # EMA 200 trend filter check
@@ -399,7 +434,7 @@ class EMAStrategy(BaseStrategy):
                 self.logger.info(f"🎯 EMA BEAR alert detected at bar {bar_count}")
                 
                 # CRITICAL: Reject BEAR signals if Two-Pole Oscillator is GREEN (wrong color)
-                if not self.trend_validator.validate_two_pole_color(latest_row, 'BEAR'):
+                if not self.trend_validator.validate_two_pole_color(latest_row, 'BEAR', self.backtest_mode):
                     return None
                     
                 # Check 1H Two-Pole color if multi-timeframe validation is enabled

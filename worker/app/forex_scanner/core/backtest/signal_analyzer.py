@@ -12,9 +12,23 @@ import logging
 
 class SignalAnalyzer:
     """Analyzes and displays signal data"""
-    
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+
+    def _sanitize_unicode(self, text: str) -> str:
+        """Sanitize text to remove problematic Unicode characters"""
+        if not isinstance(text, str):
+            return str(text)
+
+        # Remove or replace problematic Unicode characters
+        # Focus on surrogate pairs and other problematic characters
+        sanitized = text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+
+        # Replace any remaining problematic characters with safe alternatives
+        sanitized = ''.join(char if ord(char) < 65536 else '?' for char in sanitized)
+
+        return sanitized
     
     def display_signal_list(self, signals: List[Dict], timezone_manager=None, max_signals: int = 50):
         """
@@ -62,12 +76,12 @@ class SignalAnalyzer:
                 timestamp_str = str(timestamp)[:16]
             
             # Extract pair from epic
-            epic = signal.get('epic', 'Unknown')
+            epic = self._sanitize_unicode(str(signal.get('epic', 'Unknown')))
             pair = epic.split('.')[-3] if '.' in epic else epic[:6]
-            
+
             # Signal details
-            signal_type = signal.get('signal_type', 'UNK')
-            strategy = signal.get('strategy', 'unknown')[:13]  # Truncate strategy name
+            signal_type = self._sanitize_unicode(str(signal.get('signal_type', 'UNK')))
+            strategy = self._sanitize_unicode(str(signal.get('strategy', 'unknown')))[:13]  # Truncate strategy name
             confidence = signal.get('confidence_score', 0)
             price = signal.get('price', 0)
             profit_pips = signal.get('max_profit_pips', 0)
@@ -82,7 +96,9 @@ class SignalAnalyzer:
             
             # Format row
             row = f"{i:<3} {timestamp_str:<20} {pair:<8} {signal_type:<4} {strategy:<15} {price:<8.5f} {confidence:<6.1%} {profit_pips:<8.1f} {loss_pips:<8.1f} {rr_str:<6}"
-            self.logger.info(row)
+            # Sanitize the entire row output
+            sanitized_row = self._sanitize_unicode(row)
+            self.logger.info(sanitized_row)
         
         if len(signals) > max_signals:
             self.logger.info(f"... and {len(signals) - max_signals} more signals")
@@ -98,9 +114,9 @@ class SignalAnalyzer:
         pair_stats = {}
         
         for signal in signals:
-            epic = signal.get('epic', 'Unknown')
+            epic = self._sanitize_unicode(str(signal.get('epic', 'Unknown')))
             pair = epic.split('.')[-3] if '.' in epic else epic[:6]
-            
+
             if pair not in pair_stats:
                 pair_stats[pair] = {
                     'total': 0,
@@ -108,17 +124,18 @@ class SignalAnalyzer:
                     'bear': 0,
                     'strategies': {}
                 }
-            
+
             stats = pair_stats[pair]
             stats['total'] += 1
-            
-            if signal.get('signal_type') == 'BULL':
+
+            signal_type = self._sanitize_unicode(str(signal.get('signal_type', '')))
+            if signal_type == 'BULL':
                 stats['bull'] += 1
-            elif signal.get('signal_type') == 'BEAR':
+            elif signal_type == 'BEAR':
                 stats['bear'] += 1
-            
+
             # Track strategies
-            strategy = signal.get('strategy', 'unknown')
+            strategy = self._sanitize_unicode(str(signal.get('strategy', 'unknown')))
             if strategy not in stats['strategies']:
                 stats['strategies'][strategy] = 0
             stats['strategies'][strategy] += 1

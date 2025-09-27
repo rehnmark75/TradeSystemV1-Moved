@@ -83,8 +83,12 @@ class BacktestTradingOrchestrator:
         self.data_fetcher = BacktestDataFetcher(self.db_manager, config.USER_TIMEZONE)
         self.signal_detector = SignalDetector(self.db_manager, config.USER_TIMEZONE)
 
-        # CRITICAL: Use SAME TradeValidator as live trading
-        self.trade_validator = TradeValidator(logger=self.logger, db_manager=self.db_manager)
+        # CRITICAL: Use SAME TradeValidator as live trading with backtest mode enabled
+        self.trade_validator = TradeValidator(
+            logger=self.logger,
+            db_manager=self.db_manager,
+            backtest_mode=True  # UNIVERSAL FIX: Enable confidence format normalization
+        )
 
         # Backtest-specific components
         self.order_logger = BacktestOrderLogger(self.db_manager, execution_id, logger=self.logger)

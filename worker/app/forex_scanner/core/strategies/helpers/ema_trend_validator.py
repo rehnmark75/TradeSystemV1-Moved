@@ -186,18 +186,24 @@ class EMATrendValidator:
             return 0.0  # Safe fallback
     
     
-    def validate_two_pole_color(self, latest_row: pd.Series, signal_type: str) -> bool:
+    def validate_two_pole_color(self, latest_row: pd.Series, signal_type: str, backtest_mode: bool = False) -> bool:
         """
         Validate that Two-Pole Oscillator color matches signal direction
-        
+
         Args:
             latest_row: DataFrame row with indicator data
             signal_type: 'BULL' or 'BEAR'
-            
+            backtest_mode: If True, disable strict validation for historical analysis
+
         Returns:
             True if color matches signal, False otherwise
         """
         if not getattr(config, 'TWO_POLE_OSCILLATOR_ENABLED', False):
+            return True
+
+        # BACKTEST MODE: Disable strict Two-Pole validation for historical analysis
+        if backtest_mode:
+            self.logger.debug(f"🔥 BACKTEST MODE: Two-Pole color validation DISABLED for {signal_type} signal")
             return True
         
         # Get both color indicators

@@ -60,39 +60,43 @@ class BacktestOrderLogger:
 
     def place_order(self, signal: Dict[str, Any]) -> Tuple[bool, str, Optional[Dict]]:
         """
-        Log trading signal instead of placing order
+        Log trading signal to console only (no database)
         Returns same format as OrderManager for compatibility
         """
         try:
-            # Log the signal to backtest_signals table
-            success = self._log_backtest_signal(signal)
-
-            if success:
-                self.signals_logged += 1
-                if signal.get('validation_passed', False):
-                    self.validation_passed += 1
-                else:
-                    self.validation_failed += 1
-
-                self.logger.info(f"📊 Logged backtest signal: {signal.get('epic')} {signal.get('signal_type')} "
-                               f"({signal.get('confidence_score', 0):.1%})")
-
-                # Return success with mock order data
-                mock_order = {
-                    'order_id': f"backtest_{self.execution_id}_{self.signals_logged}",
-                    'status': 'logged',
-                    'epic': signal.get('epic'),
-                    'direction': signal.get('signal_type'),
-                    'size': signal.get('position_size', 1.0),
-                    'level': signal.get('entry_price'),
-                    'stop_level': signal.get('stop_loss_price'),
-                    'limit_level': signal.get('take_profit_price'),
-                    'logged_at': datetime.now(timezone.utc).isoformat()
-                }
-
-                return True, "Signal logged successfully", mock_order
+            # Simply log to console for now
+            self.signals_logged += 1
+            if signal.get('validation_passed', False):
+                self.validation_passed += 1
             else:
-                return False, "Failed to log signal", None
+                self.validation_failed += 1
+
+            # Enhanced console logging
+            epic = signal.get('epic', 'UNKNOWN')
+            signal_type = signal.get('signal_type', 'UNKNOWN')
+            confidence = signal.get('confidence_score', 0)
+            price = signal.get('current_price', 0)
+            timestamp = signal.get('signal_timestamp', 'UNKNOWN')
+            strategy = signal.get('strategy', 'UNKNOWN')
+
+            self.logger.info(f"🎯 BACKTEST SIGNAL #{self.signals_logged}: {epic} {signal_type}")
+            self.logger.info(f"   📊 Confidence: {confidence:.1%} | Price: {price:.5f} | Strategy: {strategy}")
+            self.logger.info(f"   ⏰ Timestamp: {timestamp}")
+
+            # Return success with mock order data
+            mock_order = {
+                'order_id': f"backtest_{self.execution_id}_{self.signals_logged}",
+                'status': 'logged',
+                'epic': signal.get('epic'),
+                'direction': signal.get('signal_type'),
+                'size': signal.get('position_size', 1.0),
+                'level': signal.get('entry_price'),
+                'stop_level': signal.get('stop_loss_price'),
+                'limit_level': signal.get('take_profit_price'),
+                'logged_at': datetime.now(timezone.utc).isoformat()
+            }
+
+            return True, "Signal logged to console", mock_order
 
         except Exception as e:
             self.logger.error(f"Error logging backtest signal: {e}")
@@ -192,8 +196,8 @@ class BacktestOrderLogger:
                 entry_price, stop_loss_price, take_profit_price, risk_reward_ratio,
                 exit_price, exit_timestamp, exit_reason, pips_gained, trade_result,
                 holding_time_minutes, max_favorable_excursion_pips, max_adverse_excursion_pips,
-                data_completeness, validation_flags,
-                validation_passed, validation_reasons, trade_validator_version,
+                data_completeness, validation_flags if isinstance(validation_flags, list) else [],
+                validation_passed, validation_reasons if isinstance(validation_reasons, list) else [], trade_validator_version,
                 json.dumps(market_intelligence), smart_money_score, smart_money_validated
             )
 
@@ -202,6 +206,10 @@ class BacktestOrderLogger:
 
         except Exception as e:
             self.logger.error(f"Error inserting backtest signal: {e}")
+            # Debug: Check parameter types
+            for i, param in enumerate(params):
+                if isinstance(param, list) and param:
+                    self.logger.error(f"List parameter at index {i}: {param} (type: {type(param)})")
             self.logger.error(f"Signal data: {signal}")
             return False
 

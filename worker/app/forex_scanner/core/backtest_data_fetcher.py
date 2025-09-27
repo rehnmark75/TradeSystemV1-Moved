@@ -454,6 +454,61 @@ class BacktestDataFetcher(DataFetcher):
             # Return empty DataFrames for all epics
             return {epic: pd.DataFrame() for epic in epics}
 
+    def get_enhanced_data(self, epic: str, pair: str, timeframe: str = '5m', **kwargs) -> pd.DataFrame:
+        """
+        Override parent method to provide time-aware data for backtesting
+
+        In backtest mode, this method respects the current_backtest_time to provide
+        only data up to the current simulation timestamp, ensuring realistic backtesting.
+        """
+        try:
+            # If we're in backtest mode and have a current timestamp, filter data accordingly
+            if hasattr(self, 'current_backtest_time') and self.current_backtest_time:
+                # Call parent method to get the full dataset
+                full_df = super().get_enhanced_data(epic, pair, timeframe, **kwargs)
+
+                if full_df is None or len(full_df) == 0:
+                    return full_df
+
+                # Filter data up to current backtest time
+                # Ensure timestamp column exists and is properly formatted
+                if 'start_time' in full_df.columns:
+                    # Convert current_backtest_time to timestamp with proper timezone handling
+                    cutoff_time = pd.Timestamp(self.current_backtest_time)
+
+                    # Handle timezone mismatch: ensure both timestamps are comparable
+                    start_time_col = full_df['start_time']
+                    if hasattr(start_time_col.dtype, 'tz') and start_time_col.dtype.tz is not None:
+                        # DataFrame has timezone-aware timestamps, make cutoff_time timezone-aware
+                        if cutoff_time.tz is None:
+                            # Assume cutoff_time is in UTC if no timezone specified
+                            cutoff_time = cutoff_time.tz_localize('UTC')
+                        else:
+                            # Convert to same timezone as DataFrame
+                            cutoff_time = cutoff_time.tz_convert(start_time_col.dtype.tz)
+                    else:
+                        # DataFrame has timezone-naive timestamps, make cutoff_time timezone-naive
+                        if cutoff_time.tz is not None:
+                            cutoff_time = cutoff_time.tz_localize(None)
+
+                    filtered_df = full_df[full_df['start_time'] <= cutoff_time].copy()
+
+                    if len(filtered_df) < len(full_df):
+                        self.logger.debug(f"🕒 BACKTEST: Filtered {epic} data from {len(full_df)} to {len(filtered_df)} rows (cutoff: {cutoff_time})")
+
+                    return filtered_df
+                else:
+                    self.logger.warning(f"⚠️ No 'start_time' column found in {epic} data, returning unfiltered data")
+                    return full_df
+            else:
+                # No current timestamp set, return full data (fallback behavior)
+                return super().get_enhanced_data(epic, pair, timeframe, **kwargs)
+
+        except Exception as e:
+            self.logger.error(f"Error in backtest get_enhanced_data for {epic}: {e}")
+            # Fallback to parent method
+            return super().get_enhanced_data(epic, pair, timeframe, **kwargs)
+
     def get_enhanced_data_for_backtest(
         self,
         epic: str,

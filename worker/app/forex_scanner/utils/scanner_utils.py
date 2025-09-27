@@ -808,7 +808,7 @@ def save_signal_with_logging(alert_history, signal: Dict, logger) -> Optional[in
         problematic_fields = []
         for k, v in signal.items():
             try:
-                json.dumps(make_json_serializable(v))
+                json.dumps(make_json_serializable(v), ensure_ascii=False)
             except (TypeError, ValueError):
                 problematic_fields.append((k, type(v).__name__))
         if problematic_fields:
