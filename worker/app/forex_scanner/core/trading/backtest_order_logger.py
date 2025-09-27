@@ -39,6 +39,13 @@ class BacktestOrderLogger:
         self.validation_passed = 0
         self.validation_failed = 0
 
+        # Signal tracking for comprehensive reporting
+        self.signals_by_epic = {}  # epic -> signal count
+        self.signals_by_strategy = {}  # strategy -> signal count
+        self.all_signals = []  # Store all signals for detailed reporting
+        self.bull_signals = 0
+        self.bear_signals = 0
+
         # Finalization tracking
         self._finalized = False
 
@@ -64,21 +71,56 @@ class BacktestOrderLogger:
         Returns same format as OrderManager for compatibility
         """
         try:
-            # Simply log to console for now
+            # Extract signal data
+            epic = signal.get('epic', 'UNKNOWN')
+            signal_type = signal.get('signal_type', 'UNKNOWN').upper()
+            confidence = signal.get('confidence_score', 0)
+            price = signal.get('current_price', 0)
+            timestamp = signal.get('signal_timestamp', 'UNKNOWN')
+            strategy = signal.get('strategy', 'UNKNOWN')
+
+            # Update statistics
             self.signals_logged += 1
             if signal.get('validation_passed', False):
                 self.validation_passed += 1
             else:
                 self.validation_failed += 1
 
-            # Enhanced console logging
-            epic = signal.get('epic', 'UNKNOWN')
-            signal_type = signal.get('signal_type', 'UNKNOWN')
-            confidence = signal.get('confidence_score', 0)
-            price = signal.get('current_price', 0)
-            timestamp = signal.get('signal_timestamp', 'UNKNOWN')
-            strategy = signal.get('strategy', 'UNKNOWN')
+            # Track by epic
+            if epic not in self.signals_by_epic:
+                self.signals_by_epic[epic] = 0
+            self.signals_by_epic[epic] += 1
 
+            # Track by strategy
+            if strategy not in self.signals_by_strategy:
+                self.signals_by_strategy[strategy] = 0
+            self.signals_by_strategy[strategy] += 1
+
+            # Track signal types
+            if signal_type in ['BULL', 'BUY', 'LONG']:
+                self.bull_signals += 1
+                signal_type = 'BUY'  # Normalize for display
+            elif signal_type in ['BEAR', 'SELL', 'SHORT']:
+                self.bear_signals += 1
+                signal_type = 'SELL'  # Normalize for display
+
+            # Store complete signal data for detailed reporting
+            signal_record = {
+                'id': self.signals_logged,
+                'timestamp': timestamp,
+                'epic': epic,
+                'signal_type': signal_type,
+                'strategy': strategy,
+                'price': price,
+                'confidence': confidence,
+                'profit': signal.get('potential_profit_pips', 0),
+                'loss': signal.get('potential_loss_pips', 0),
+                'risk_reward': signal.get('risk_reward_ratio', 0),
+                'validation_passed': signal.get('validation_passed', False)
+            }
+            self.all_signals.append(signal_record)
+
+            # Enhanced console logging
             self.logger.info(f"🎯 BACKTEST SIGNAL #{self.signals_logged}: {epic} {signal_type}")
             self.logger.info(f"   📊 Confidence: {confidence:.1%} | Price: {price:.5f} | Strategy: {strategy}")
             self.logger.info(f"   ⏰ Timestamp: {timestamp}")
@@ -410,11 +452,115 @@ class BacktestOrderLogger:
                            f"Validated: {self.validation_passed}, "
                            f"Failed validation: {self.validation_failed}")
 
+            # Generate comprehensive summary report
+            self._generate_comprehensive_summary()
+
             return True
 
         except Exception as e:
             self.logger.error(f"Error finalizing execution: {e}")
             return False
+
+    def _generate_comprehensive_summary(self):
+        """Generate comprehensive backtest summary in the old system format"""
+        if self.signals_logged == 0:
+            self.logger.info("📊 No signals generated during backtest")
+            return
+
+        # Get primary strategy name (most common)
+        primary_strategy = max(self.signals_by_strategy.items(), key=lambda x: x[1])[0] if self.signals_by_strategy else 'unknown'
+        strategy_display = primary_strategy.upper()
+
+        self.logger.info("")
+        self.logger.info("📊 RESULTS BY EPIC:")
+        self.logger.info("------------------------------")
+
+        # Sort epics by signal count (descending)
+        sorted_epics = sorted(self.signals_by_epic.items(), key=lambda x: x[1], reverse=True)
+        for epic, count in sorted_epics:
+            # Clean up epic display name
+            epic_display = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            self.logger.info(f"   {epic_display}: {count} signals")
+
+        self.logger.info("")
+        self.logger.info(f"✅ TOTAL {strategy_display} SIGNALS: {self.signals_logged}")
+        self.logger.info("")
+        self.logger.info(f"🎯 INDIVIDUAL {strategy_display} SIGNALS:")
+        self.logger.info("=" * 120)
+        self.logger.info(f"{'#':3} {'TIMESTAMP':19} {'PAIR':12} {'TYPE':4} {'STRATEGY':12} {'PRICE':10} {'CONF':6} {'PROFIT':8} {'LOSS':8} {'R:R':6}")
+        self.logger.info("-" * 120)
+
+        # Show latest signals (up to 20)
+        latest_signals = sorted(self.all_signals, key=lambda x: x['timestamp'], reverse=True)[:20]
+
+        for signal in latest_signals:
+            # Format timestamp
+            if hasattr(signal['timestamp'], 'strftime'):
+                timestamp_str = signal['timestamp'].strftime('%Y-%m-%d %H:%M:%S UTC')
+            else:
+                timestamp_str = str(signal['timestamp'])[:19] + ' UTC'
+
+            # Clean up epic display
+            epic_display = signal['epic'].replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            if len(epic_display) > 12:
+                epic_display = epic_display[:12]
+
+            # Format strategy display
+            strategy_display = signal['strategy']
+            if len(strategy_display) > 12:
+                strategy_display = strategy_display[:12]
+
+            # Format values
+            profit = signal.get('profit', 0)
+            loss = signal.get('loss', 0)
+            risk_reward = signal.get('risk_reward', 0)
+
+            # Calculate R:R ratio display
+            if loss > 0:
+                rr_display = f"{profit/loss:.2f}"
+            elif profit > 0:
+                rr_display = "inf"
+            else:
+                rr_display = "0.00"
+
+            self.logger.info(f"{signal['id']:3} {timestamp_str:19} {epic_display:12} {signal['signal_type']:4} "
+                           f"{strategy_display:12} {signal['price']:8.5f}  {signal['confidence']:5.1%} "
+                           f"{profit:6.1f}   {loss:6.1f}   {rr_display:6}")
+
+        self.logger.info("=" * 120)
+        if len(self.all_signals) > 20:
+            self.logger.info(f"📝 Showing latest 20 of {self.signals_logged} total signals (newest first)")
+
+        # Performance summary
+        self.logger.info("")
+        self.logger.info(f"📈 {strategy_display} STRATEGY PERFORMANCE:")
+        self.logger.info("=" * 50)
+        self.logger.info(f"   📊 Total Signals: {self.signals_logged}")
+
+        # Calculate average confidence
+        if self.all_signals:
+            avg_confidence = sum(s['confidence'] for s in self.all_signals) / len(self.all_signals)
+            self.logger.info(f"   🎯 Average Confidence: {avg_confidence:.1%}")
+
+        self.logger.info(f"   📈 Bull Signals: {self.bull_signals}")
+        self.logger.info(f"   📉 Bear Signals: {self.bear_signals}")
+
+        # Calculate basic performance metrics
+        total_profit = sum(s.get('profit', 0) for s in self.all_signals)
+        total_loss = sum(s.get('loss', 0) for s in self.all_signals)
+        validated_signals = sum(1 for s in self.all_signals if s.get('validation_passed', False))
+
+        if self.all_signals:
+            avg_profit = total_profit / len(self.all_signals)
+            avg_loss = total_loss / len(self.all_signals)
+            validation_rate = validated_signals / len(self.all_signals)
+
+            self.logger.info(f"   💰 Average Profit: {avg_profit:.1f} pips")
+            self.logger.info(f"   📉 Average Loss: {avg_loss:.1f} pips")
+            self.logger.info(f"   🏆 Validation Rate: {validation_rate:.1%}")
+            self.logger.info(f"   📊 Signal Breakdown:")
+            self.logger.info(f"      ✅ Validated: {validated_signals} signals")
+            self.logger.info(f"      ❌ Failed Validation: {self.signals_logged - validated_signals} signals")
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get logger statistics"""
@@ -423,7 +569,11 @@ class BacktestOrderLogger:
             'signals_logged': self.signals_logged,
             'validation_passed': self.validation_passed,
             'validation_failed': self.validation_failed,
-            'validation_rate': self.validation_passed / max(1, self.signals_logged)
+            'validation_rate': self.validation_passed / max(1, self.signals_logged),
+            'signals_by_epic': self.signals_by_epic,
+            'signals_by_strategy': self.signals_by_strategy,
+            'bull_signals': self.bull_signals,
+            'bear_signals': self.bear_signals
         }
 
     def __enter__(self):

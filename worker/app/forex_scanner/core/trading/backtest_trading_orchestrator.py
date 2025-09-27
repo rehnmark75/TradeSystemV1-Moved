@@ -125,8 +125,16 @@ class BacktestTradingOrchestrator:
             # Initialize backtest execution
             self._initialize_backtest_execution()
 
-            # Run the backtest scanner (which processes signals through time)
-            backtest_results = self.scanner.run_historical_backtest()
+            # Run scanner with proper context management to get raw results
+            with self.scanner.order_logger:
+                self.scanner._initialize_backtest_execution()
+                raw_backtest_results = self.scanner._execute_backtest_loop()
+
+            # CRITICAL FIX: Process all signals through orchestrator validation pipeline
+            self._process_scanner_signals(raw_backtest_results)
+
+            # Generate final report from raw results
+            backtest_results = self.scanner._generate_backtest_report(raw_backtest_results)
 
             # Process any additional signal validation if needed
             enhanced_results = self._enhance_backtest_results(backtest_results)
@@ -161,6 +169,10 @@ class BacktestTradingOrchestrator:
             if validation_passed:
                 self.orchestrator_stats['signals_validated'] += 1
 
+                # Mark signal as validated for tracking
+                signal['validation_passed'] = True
+                signal['validation_message'] = validation_message
+
                 # Step 2: Log validated signal (instead of executing order)
                 success, message, order_data = self.order_logger.place_order(signal)
 
@@ -179,6 +191,14 @@ class BacktestTradingOrchestrator:
                     return False, f"Logging failed: {message}", {}
             else:
                 self.orchestrator_stats['signals_rejected'] += 1
+
+                # Mark signal as failed validation for tracking
+                signal['validation_passed'] = False
+                signal['validation_message'] = validation_message
+
+                # Still log failed signals for comprehensive reporting
+                self.order_logger.place_order(signal)
+
                 self.logger.info(f"❌ Signal rejected by validation: {validation_message}")
                 return False, f"Validation failed: {validation_message}", {}
 
@@ -186,6 +206,44 @@ class BacktestTradingOrchestrator:
             self.orchestrator_stats['validation_errors'] += 1
             self.logger.error(f"Error in validation pipeline: {e}")
             return False, f"Pipeline error: {str(e)}", {}
+
+    def _process_scanner_signals(self, backtest_results: Dict):
+        """
+        CRITICAL FIX: Process signals from scanner through orchestrator validation pipeline
+
+        This ensures signals go through the same validation as live trading
+        """
+        try:
+            signals_processed = 0
+
+            self.logger.info(f"🔍 DEBUG: Backtest results keys: {list(backtest_results.keys())}")
+
+            # Extract signals from backtest results structure: results['signals_by_epic'][epic]
+            signals_by_epic = backtest_results.get('signals_by_epic', {})
+
+            self.logger.info(f"🔍 DEBUG: Found {len(signals_by_epic)} epics with signals")
+
+            for epic, signals in signals_by_epic.items():
+                self.logger.info(f"🔍 DEBUG: Epic {epic} has {len(signals) if isinstance(signals, list) else 'non-list'} signals")
+
+                if isinstance(signals, list):
+                    for signal in signals:
+                        if isinstance(signal, dict):
+                            signals_processed += 1
+
+                            # Process each signal through the validation pipeline
+                            success, message, order_data = self.process_signal_through_validation_pipeline(signal)
+
+                            if success:
+                                self.logger.debug(f"✅ Signal {signals_processed} ({epic}) validated and logged")
+                            else:
+                                self.logger.debug(f"❌ Signal {signals_processed} ({epic}) failed validation: {message}")
+
+            self.logger.info(f"🔄 Processed {signals_processed} signals through orchestrator validation pipeline")
+
+        except Exception as e:
+            self.logger.error(f"Error processing scanner signals through validation: {e}")
+            raise
 
     def _initialize_backtest_execution(self):
         """Initialize backtest execution record"""

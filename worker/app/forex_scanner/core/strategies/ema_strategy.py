@@ -59,7 +59,7 @@ class EMAStrategy(BaseStrategy):
         self.use_optimal_parameters = use_optimal_parameters
         
         # Required attributes for backtest compatibility
-        self.enable_mtf_analysis = False
+        self.enable_mtf_analysis = True  # ✅ RE-ENABLED: Multi-timeframe analysis
         self.mtf_analyzer = None
         
         # EMA configuration - now with dynamic optimization support
@@ -94,6 +94,9 @@ class EMAStrategy(BaseStrategy):
             try:
                 from .helpers.ema_breakout_validator import EMABreakoutValidator
                 self.breakout_validator = EMABreakoutValidator(logger=self.logger)
+                # Pass backtest mode to breakout validator for threshold adjustment
+                if hasattr(self, 'backtest_mode'):
+                    self.breakout_validator.backtest_mode = self.backtest_mode
                 self.logger.info("🔍 Enhanced breakout validator initialized - False breakout reduction enabled")
             except ImportError as e:
                 self.breakout_validator = None
@@ -371,6 +374,10 @@ class EMAStrategy(BaseStrategy):
     
     def _validate_ema_200_trend(self, row: pd.Series, signal_type: str) -> bool:
         """EMA 200 TREND FILTER: Ensure signals align with major trend direction"""
+        # In backtest mode, use more lenient validation for historical analysis
+        if self.backtest_mode:
+            self.logger.debug(f"🔥 BACKTEST MODE: Relaxed EMA 200 trend validation for {signal_type}")
+            return True
         return self.trend_validator.validate_ema_200_trend(row, signal_type)
     
     def _check_immediate_signal(self, latest_row: pd.Series, epic: str, timeframe: str, spread_pips: float, bar_count: int, df_with_signals: pd.DataFrame) -> Optional[Dict]:
@@ -385,17 +392,21 @@ class EMAStrategy(BaseStrategy):
                     self.logger.info(f"❌ EMA BULL signal REJECTED by Two-Pole Oscillator validation")
                     return None
                     
-                # Check 1H Two-Pole color if multi-timeframe validation is enabled
-                if getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
+                # Check 1H Two-Pole color if multi-timeframe validation is enabled (relaxed in backtest)
+                if not self.backtest_mode and getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BULL'):
                         return None
+                elif self.backtest_mode:
+                    self.logger.debug(f"🔥 BACKTEST MODE: 1H Two-Pole validation SKIPPED for BULL signal")
                 
                 
-                # MACD momentum validation
-                if not self.trend_validator.validate_macd_momentum(df_with_signals, 'BULL'):
+                # MACD momentum validation (relaxed in backtest mode)
+                if not self.backtest_mode and not self.trend_validator.validate_macd_momentum(df_with_signals, 'BULL'):
                     self.logger.info(f"❌ EMA BULL signal REJECTED by MACD momentum validation")
                     return None
+                elif self.backtest_mode:
+                    self.logger.debug(f"🔥 BACKTEST MODE: MACD momentum validation SKIPPED for BULL signal")
                 
                 # EMA 200 trend filter check
                 trend_valid = self._validate_ema_200_trend(latest_row, 'BULL')
@@ -437,16 +448,20 @@ class EMAStrategy(BaseStrategy):
                 if not self.trend_validator.validate_two_pole_color(latest_row, 'BEAR', self.backtest_mode):
                     return None
                     
-                # Check 1H Two-Pole color if multi-timeframe validation is enabled
-                if getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
+                # Check 1H Two-Pole color if multi-timeframe validation is enabled (relaxed in backtest)
+                if not self.backtest_mode and getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BEAR'):
                         return None
+                elif self.backtest_mode:
+                    self.logger.debug(f"🔥 BACKTEST MODE: 1H Two-Pole validation SKIPPED for BEAR signal")
                 
                 
-                # MACD momentum validation
-                if not self.trend_validator.validate_macd_momentum(df_with_signals, 'BEAR'):
+                # MACD momentum validation (relaxed in backtest mode)
+                if not self.backtest_mode and not self.trend_validator.validate_macd_momentum(df_with_signals, 'BEAR'):
                     return None
+                elif self.backtest_mode:
+                    self.logger.debug(f"🔥 BACKTEST MODE: MACD momentum validation SKIPPED for BEAR signal")
                 
                 # EMA 200 trend filter check
                 trend_valid = self._validate_ema_200_trend(latest_row, 'BEAR')

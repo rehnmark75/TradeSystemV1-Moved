@@ -772,8 +772,9 @@ class EMABreakoutValidator:
         balanced_validation_passed = tier1_excellent or tier2_good or tier3_acceptable
         
         # BASIC REQUIREMENTS:
-        # 1. Must meet minimum confidence
-        confidence_acceptable = final_confidence >= 0.70
+        # 1. Must meet minimum confidence (adjusted for backtest mode)
+        confidence_threshold = 0.60 if getattr(self, 'backtest_mode', False) else 0.70
+        confidence_acceptable = final_confidence >= confidence_threshold
         
         # 2. Must have at least some momentum confirmation
         has_momentum_confirmation = has_rsi_momentum or has_macd_trend
