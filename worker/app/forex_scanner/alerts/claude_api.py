@@ -13,6 +13,7 @@ import pandas as pd
 import os
 import time
 import random
+import re
 from datetime import datetime
 from typing import Dict, Optional, List
 try:
@@ -51,7 +52,29 @@ class ClaudeAnalyzer:
         # Create save directory if auto_save is enabled
         if self.auto_save:
             self._ensure_save_directory()
-    
+
+    def _clean_unicode_for_api(self, data):
+        """
+        Clean Unicode issues for API requests to prevent surrogate pair errors
+        Fixes the 'no low surrogate in string' error at character position 53414
+        """
+        if isinstance(data, str):
+            # Remove or replace problematic Unicode characters
+            # Fix surrogate pairs and control characters
+            cleaned = data.encode('utf-8', errors='ignore').decode('utf-8')
+            # Remove control characters except newlines and tabs
+            cleaned = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', cleaned)
+            # Fix high surrogates without low surrogates
+            cleaned = re.sub(r'[\uD800-\uDBFF](?![\uDC00-\uDFFF])', '', cleaned)
+            # Fix low surrogates without high surrogates
+            cleaned = re.sub(r'(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]', '', cleaned)
+            return cleaned
+        elif isinstance(data, dict):
+            return {k: self._clean_unicode_for_api(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self._clean_unicode_for_api(item) for item in data]
+        return data
+
     def _ensure_save_directory(self):
         """Ensure the claude_analysis directory exists"""
         try:
@@ -1914,11 +1937,23 @@ Respond with ONLY the three lines above, nothing else.
             "anthropic-version": "2023-06-01"
         }
         
+        # ✅ FIXED: Clean Unicode issues in prompt before sending to API
+        cleaned_prompt = self._clean_unicode_for_api(prompt)
+
+        # Log if cleaning was necessary
+        if cleaned_prompt != prompt:
+            original_len = len(prompt)
+            cleaned_len = len(cleaned_prompt)
+            self.logger.debug(f"🧹 Unicode cleaning applied: {original_len} → {cleaned_len} chars")
+
         data = {
             "model": self.model,
             "max_tokens": max_tokens or self.max_tokens,
-            "messages": [{"role": "user", "content": prompt}]
+            "messages": [{"role": "user", "content": cleaned_prompt}]
         }
+
+        # ✅ FIXED: Additional safety - clean entire data structure
+        data = self._clean_unicode_for_api(data)
         
         last_exception = None
         

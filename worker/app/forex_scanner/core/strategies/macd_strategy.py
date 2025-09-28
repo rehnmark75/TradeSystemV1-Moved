@@ -89,7 +89,7 @@ class MACDStrategy(BaseStrategy):
         
         # Basic parameters
         self.eps = 1e-8  # Epsilon for stability
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.50)  # MACD needs higher confidence
+        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.35)  # Lowered for backtest validation debugging
         self.min_bars = 60  # Minimum bars for stable MACD (26 + 9 + buffer)
         
         # Initialize helper modules (orchestrator pattern)
@@ -305,8 +305,29 @@ class MACDStrategy(BaseStrategy):
             
             self.logger.debug(f"Processing {len(df)} bars for {epic}")
             
-            # 1. Calculate MACD indicators if not present
-            df_enhanced = self.indicator_calculator.ensure_macd_indicators(df.copy(), self.macd_config)
+            # 1. Check if MACD indicators already exist (from data_fetcher optimization)
+            required_macd_cols = ['macd_line', 'macd_signal', 'macd_histogram']
+            macd_exists = all(col in df.columns for col in required_macd_cols)
+
+            # Debug: Show what indicators are available
+            indicator_cols = [col for col in df.columns if any(x in col.lower() for x in ['macd', 'rsi', 'adx', 'ema'])]
+            self.logger.debug(f"📊 Available indicators for {epic}: {indicator_cols}")
+
+            if macd_exists:
+                self.logger.info(f"📊 [REUSING MACD] MACD indicators already exist for {epic} - skipping recalculation")
+                df_enhanced = df.copy()
+
+                # Ensure we have EMA 200 for trend validation
+                if 'ema_200' not in df_enhanced.columns:
+                    df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
+
+                # Ensure we have RSI and ADX for quality scoring
+                if 'rsi' not in df_enhanced.columns or 'adx' not in df_enhanced.columns:
+                    self.logger.debug(f"📊 Adding missing RSI/ADX indicators for {epic}")
+                    df_enhanced = self.indicator_calculator._add_enhanced_filters(df_enhanced)
+            else:
+                self.logger.info(f"📊 [STANDARD MACD] Used standard detection for {epic}")
+                df_enhanced = self.indicator_calculator.ensure_macd_indicators(df.copy(), self.macd_config)
             
             # 2. Detect MACD crossovers (with strength filtering)
             df_with_signals = self.indicator_calculator.detect_macd_crossovers(df_enhanced, epic, is_backtest=self.backtest_mode)

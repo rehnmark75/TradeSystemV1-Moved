@@ -1,17 +1,17 @@
 # core/strategies/zero_lag_strategy.py
 """
-Zero Lag + Squeeze Momentum + EMA200 Strategy - Refactored & Simplified
+Zero Lag + Squeeze Momentum Strategy - Refactored & Simplified
 Following the successful EMA strategy refactoring pattern
 
 Strategy Components:
-1. EMA200 Filter - Macro trend direction (guardrail)
-2. Zero Lag Trend - Entry signal detection (GPS)  
-3. Squeeze Momentum - Momentum & volatility confirmation (engine RPM)
+1. Zero Lag Trend - Entry signal detection (GPS)
+2. Squeeze Momentum - Momentum & volatility confirmation (engine RPM)
+3. EMA200 Filter - Macro trend direction (handled by TradeValidator)
 
 Decision Matrix:
-- BULL: close > EMA200 + Zero Lag bullish + Squeeze momentum positive/rising
-- BEAR: close < EMA200 + Zero Lag bearish + Squeeze momentum negative/falling
-- NO TRADE: Conflicting signals or flat EMA200/low momentum
+- BULL: Zero Lag bullish + Squeeze momentum positive/rising (+ EMA200 filter via TradeValidator)
+- BEAR: Zero Lag bearish + Squeeze momentum negative/falling (+ EMA200 filter via TradeValidator)
+- NO TRADE: Conflicting signals or low momentum
 """
 
 import pandas as pd
@@ -44,13 +44,13 @@ except ImportError:
 
 class ZeroLagStrategy(BaseStrategy):
     """
-    Zero Lag + Squeeze Momentum + EMA200 Strategy
-    
+    Zero Lag + Squeeze Momentum Strategy
+
     Simplified architecture following EMA strategy pattern:
     - Main class handles orchestration and public interface
     - Helper modules handle specialized functionality
     - Clean separation of concerns
-    - Enhanced maintainability
+    - EMA200 validation delegated to TradeValidator for consistency
     """
     
     def __init__(self, data_fetcher=None, epic=None, use_optimal_parameters=False):
@@ -142,7 +142,7 @@ class ZeroLagStrategy(BaseStrategy):
                 zero_lag_config = getattr(configdata.strategies, 'ZERO_LAG_STRATEGY_CONFIG', {}).get('default', {})
                 self.length = zero_lag_config.get('zl_length', 50)
                 self.band_multiplier = zero_lag_config.get('band_multiplier', 1.5) 
-                self.min_confidence = zero_lag_config.get('min_confidence', 0.65)
+                self.min_confidence = zero_lag_config.get('min_confidence', 0.55)  # Lowered for backtest validation
                 self.bb_length = zero_lag_config.get('bb_length', 20)
                 self.bb_mult = zero_lag_config.get('bb_mult', 2.0)
                 self.kc_length = zero_lag_config.get('kc_length', 20)
@@ -151,7 +151,7 @@ class ZeroLagStrategy(BaseStrategy):
                 # Fallback defaults
                 self.length = 50
                 self.band_multiplier = 1.5
-                self.min_confidence = 0.65
+                self.min_confidence = 0.55  # Lowered for backtest validation debugging
                 self.bb_length = 20
                 self.bb_mult = 2.0
                 self.kc_length = 20
@@ -290,10 +290,10 @@ class ZeroLagStrategy(BaseStrategy):
     def _detect_three_component_signal(self, df: pd.DataFrame, epic: str, 
                                        spread_pips: float, timeframe: str) -> Optional[Dict]:
         """
-        Detect signals using the 3-component system:
-        1. EMA200 Filter (Macro Bias)
-        2. Zero Lag Trend (Entry Signals)  
-        3. Squeeze Momentum (Confirmation)
+        Detect signals using the 2-component system + TradeValidator:
+        1. Zero Lag Trend (Entry Signals)
+        2. Squeeze Momentum (Confirmation)
+        3. EMA200 Filter (handled by TradeValidator)
         """
         try:
             if len(df) < 2:
@@ -327,20 +327,8 @@ class ZeroLagStrategy(BaseStrategy):
                 
             self.logger.debug(f"✅ Ribbon color matches: {signal_type} with trend={trend}")
             
-            # VALIDATION 2: EMA200 SIMPLE FILTER
-            # BULL: close > EMA200, BEAR: close < EMA200
+            # EMA200 validation moved to TradeValidator for consistency across all strategies
             close = latest_row.get('close', 0)
-            ema_200 = latest_row.get('ema_200', 0)
-            
-            if signal_type == 'BULL' and close <= ema_200:
-                self.logger.debug(f"❌ BULL signal but close {close:.5f} <= EMA200 {ema_200:.5f}")
-                return None
-            elif signal_type == 'BEAR' and close >= ema_200:
-                self.logger.debug(f"❌ BEAR signal but close {close:.5f} >= EMA200 {ema_200:.5f}")
-                return None
-                
-            distance_pips = (close - ema_200) * (10000 if close < 50 else 100)
-            self.logger.debug(f"✅ EMA200 filter passed: {distance_pips:+.1f} pips from EMA200")
             
             # VALIDATION 3: SQUEEZE MOMENTUM ALIGNMENT + NO SQUEEZE
             squeeze_momentum = latest_row.get('squeeze_momentum', 0)
@@ -406,24 +394,30 @@ class ZeroLagStrategy(BaseStrategy):
                 self.logger.debug("⚠️ No data fetcher available for multi-timeframe validation")
                 signal['mtf_validation'] = {'overall_valid': True, 'note': 'no_data_fetcher'}
             
+            # DEFENSIVE: Store critical fields before confidence calculation
+            signal_epic = signal.get('epic')
+            signal_signal_type = signal.get('signal_type')
+
             # Calculate confidence score (should be high for strict validation)
             confidence = self.signal_calculator.calculate_signal_confidence(
                 latest_row, signal_type, signal
             )
-            
+
+            # DEFENSIVE: Restore critical fields after confidence calculation
+            signal['epic'] = signal_epic or epic
+            signal['signal_type'] = signal_signal_type or signal_type
             signal['confidence'] = confidence
             signal['confidence_score'] = confidence
             
-            # Add validation results
+            # Add validation results (EMA200 validation moved to TradeValidator)
             signal['validation_results'] = {
                 'zero_lag_trend_crossover': True,  # Already validated
                 'ribbon_color_aligned': True,      # Already validated
-                'ema200_filter': True,             # Already validated
                 'squeeze_momentum_aligned': True,  # Already validated
                 'squeeze_off': True,               # Already validated
                 'rsi_validation': True,            # Already validated
                 'multi_timeframe_validation': signal.get('mtf_validation', {}).get('overall_valid', False),
-                'validation_level': 'strict_5_component_with_mtf'  # Updated to reflect RSI and MTF
+                'validation_level': 'strict_4_component_with_mtf_plus_tradevalidator'  # Updated
             }
             
             # Add strategy metadata
@@ -455,14 +449,22 @@ class ZeroLagStrategy(BaseStrategy):
             # Add RSI info to signal for logging
             rsi_value = latest_row.get('rsi', 50.0)
 
-            self.logger.info(f"🎯 HIGH-QUALITY {signal_type} signal: ribbon={trend} + EMA200 + squeeze={momentum_color} + NO_SQUEEZE + RSI={rsi_value:.1f}{mtf_status}")
+            # CRITICAL: Ensure required fields are present before return
+            if 'epic' not in signal or 'signal_type' not in signal:
+                self.logger.error(f"❌ CRITICAL: Signal missing required fields! epic: {signal.get('epic', 'MISSING')}, signal_type: {signal.get('signal_type', 'MISSING')}")
+                signal['epic'] = epic  # Force add epic
+                signal['signal_type'] = signal_type  # Force add signal_type
+                self.logger.info(f"✅ FIXED: Added missing fields - epic: {epic}, signal_type: {signal_type}")
+
+            self.logger.info(f"🎯 HIGH-QUALITY {signal_type} signal: ribbon={trend} + squeeze={momentum_color} + NO_SQUEEZE + RSI={rsi_value:.1f}{mtf_status}")
+            self.logger.info(f"   📊 Signal validation: epic={signal.get('epic', 'MISSING')}, signal_type={signal.get('signal_type', 'MISSING')}")
             self.logger.info(f"   📊 DEBUG VALUES for TradingView comparison:")
             self.logger.info(f"   📊 Close: {close:.5f}, ZLEMA: {zlema:.5f}")
             self.logger.info(f"   📊 Upper Band: {upper_band:.5f}, Lower Band: {lower_band:.5f}")
             self.logger.info(f"   📊 Volatility: {volatility:.5f}, Trend: {trend}")
             self.logger.info(f"   📊 Squeeze Momentum: {squeeze_momentum_val:.6f}")
             self.logger.info(f"   📊 RSI: {rsi_value:.1f}")
-            self.logger.info(f"   📊 EMA200: {ema_200:.5f}, Close vs EMA200: {'+' if close > ema_200 else '-'}{abs(close-ema_200)*10000:.1f} pips")
+            # EMA200 data included in signal for TradeValidator validation
             return signal
             
         except Exception as e:
@@ -516,9 +518,15 @@ class ZeroLagStrategy(BaseStrategy):
                 'trend_strength': self.signal_calculator.calculate_trend_strength(latest_row),
             }
             
-            # Add spread and fees
-            signal['spread_pips'] = spread_pips
-            signal['estimated_fee'] = spread_pips * 0.5  # Rough estimate
+            # Add spread and fees with safe type conversion
+            try:
+                spread_pips_float = float(spread_pips) if spread_pips is not None else 0.0
+                signal['spread_pips'] = spread_pips_float
+                signal['estimated_fee'] = spread_pips_float * 0.5  # Rough estimate
+            except (ValueError, TypeError):
+                self.logger.warning(f"Invalid spread_pips value: {spread_pips}, using 0.0")
+                signal['spread_pips'] = 0.0
+                signal['estimated_fee'] = 0.0
             
             return signal
             

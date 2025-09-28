@@ -74,7 +74,8 @@
       "Bash(xargs:*)",
       "Bash(git log:*)",
       "Bash(git show:*)",
-      "Read(//home/hr/**)"
+      "Read(//home/hr/**)",
+      "Read(//home/**)"
     ],
     "deny": [],
     "ask": []

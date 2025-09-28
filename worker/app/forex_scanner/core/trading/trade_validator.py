@@ -86,14 +86,17 @@ class TradeValidator:
     FIXED: Flexible required fields handling to support various signal formats
     """
     
-    def __init__(self, 
+    def __init__(self,
                  logger: Optional[logging.Logger] = None,
-                 db_manager: Optional[object] = None):  # NEW: Optional db_manager for S/R validation
-        
+                 db_manager: Optional[object] = None,  # NEW: Optional db_manager for S/R validation
+                 backtest_mode: bool = False):  # NEW: Backtest mode parameter
+
         self.logger = logger or logging.getLogger(__name__)
-        
-        # Validation rules - FIXED: More flexible required fields
-        self.min_confidence = float(getattr(config, 'MIN_CONFIDENCE_FOR_ORDERS', 0.75))
+        self.backtest_mode = backtest_mode
+
+        # Validation rules - UNIVERSAL FIX: Confidence format handling for all strategies
+        raw_confidence = float(getattr(config, 'MIN_CONFIDENCE_FOR_ORDERS', 0.75))
+        self.min_confidence = self._normalize_confidence_threshold(raw_confidence)
         # FIXED: More flexible required fields - price can be in multiple field names
         self.required_fields = ['epic', 'signal_type', 'confidence_score']
         # OPTIONAL: Price fields that can satisfy price requirement (checked separately)
@@ -103,8 +106,13 @@ class TradeValidator:
         ]
         self.valid_directions = ['BUY', 'SELL', 'BULL', 'BEAR', 'TEST_BULL', 'TEST_BEAR']
         
-        # Market hours validation (disabled by default for testing)
-        self.validate_market_hours = getattr(config, 'VALIDATE_MARKET_HOURS', False)
+        # Market hours validation - DISABLED for backtests (historical data analysis)
+        if self.backtest_mode:
+            self.validate_market_hours = False  # UNIVERSAL FIX: Allow historical analysis
+            if hasattr(self, 'logger') and self.logger:
+                self.logger.info("🔧 BACKTEST: Market hours validation disabled for historical analysis")
+        else:
+            self.validate_market_hours = getattr(config, 'VALIDATE_MARKET_HOURS', False)
         self.trading_start_hour = getattr(config, 'TRADING_START_HOUR', 0)
         self.trading_end_hour = getattr(config, 'TRADING_END_HOUR', 23)
         
@@ -497,7 +505,50 @@ class TradeValidator:
             
         except Exception as e:
             self.logger.warning(f"⚠️ Failed to save Claude rejection: {e}")
-    
+
+    def _normalize_confidence_threshold(self, threshold: float) -> float:
+        """
+        UNIVERSAL FIX: Normalize confidence threshold to decimal format (0.0-1.0)
+
+        This ensures all strategies work correctly in both live and backtest modes
+        by converting any percentage format (like 70.0) to decimal format (0.70).
+
+        Args:
+            threshold: Raw confidence threshold from config
+
+        Returns:
+            Normalized confidence threshold as decimal (0.0-1.0)
+        """
+        # If threshold is greater than 1.0, assume it's in percentage format
+        if threshold > 1.0:
+            normalized = threshold / 100.0
+            if self.backtest_mode:
+                self.logger.info(f"🔧 BACKTEST: Normalized confidence threshold {threshold}% → {normalized:.2f}")
+            return normalized
+
+        # Already in decimal format
+        return threshold
+
+    def _normalize_signal_confidence(self, confidence: float) -> float:
+        """
+        UNIVERSAL FIX: Normalize signal confidence to decimal format (0.0-1.0)
+
+        This ensures all strategies work correctly by converting any percentage
+        format confidence scores to decimal format for consistent comparison.
+
+        Args:
+            confidence: Raw confidence score from signal
+
+        Returns:
+            Normalized confidence score as decimal (0.0-1.0)
+        """
+        # If confidence is greater than 1.0, assume it's in percentage format
+        if confidence > 1.0:
+            return confidence / 100.0
+
+        # Already in decimal format (like signal 5331 with 0.95)
+        return confidence
+
     def validate_signal_for_trading(self, signal: Dict, market_data: Optional[object] = None) -> Tuple[bool, str]:
         """
         ENHANCED: Comprehensive signal validation for trading with safe S/R integration + Claude filtering
@@ -524,26 +575,42 @@ class TradeValidator:
             valid, msg = self._validate_signal_structure(signal)
             if not valid:
                 self.validation_stats['failed_format'] += 1
+                if self.backtest_mode:
+                    self.logger.warning(f"🚫 BACKTEST STEP 1 FAILED - Structure: {msg}")
                 return False, f"Structure: {msg}"
-            
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 1 PASSED - Structure validation")
+
             # 2. Market hours validation (only if enabled)
             if self.validate_market_hours:
                 valid, msg = self.check_trading_hours()
                 if not valid:
                     self.validation_stats['failed_market_hours'] += 1
+                    if self.backtest_mode:
+                        self.logger.warning(f"🚫 BACKTEST STEP 2 FAILED - Market hours: {msg}")
                     return False, f"Market hours: {msg}"
-            
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 2 PASSED - Market hours validation")
+
             # 3. Epic validation
             valid, msg = self.validate_epic_tradability(signal.get('epic'))
             if not valid:
                 self.validation_stats['failed_epic_blocked'] += 1
+                if self.backtest_mode:
+                    self.logger.warning(f"🚫 BACKTEST STEP 3 FAILED - Epic: {msg}")
                 return False, f"Epic: {msg}"
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 3 PASSED - Epic validation")
             
             # 4. Confidence validation
             valid, msg = self.apply_confidence_filters(signal)
             if not valid:
                 self.validation_stats['failed_confidence'] += 1
+                if self.backtest_mode:
+                    self.logger.warning(f"🚫 BACKTEST STEP 4 FAILED - Confidence: {msg}")
                 return False, f"Confidence: {msg}"
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 4 PASSED - Confidence validation")
             
             # 5. Signal freshness check (warning only, don't reject) - FIXED: timezone-aware
             if self.enable_freshness_check:
@@ -559,7 +626,11 @@ class TradeValidator:
 
             if not valid:
                 self.validation_stats['failed_risk_management'] += 1
+                if self.backtest_mode:
+                    self.logger.warning(f"🚫 BACKTEST STEP 6 FAILED - Risk: {msg}")
                 return False, f"Risk: {msg}"
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 6 PASSED - Risk validation")
 
             
             # 7. NEW: EMA 200 trend filter validation
@@ -567,14 +638,22 @@ class TradeValidator:
                 valid, msg = self.validate_ema200_trend_filter(signal)
                 if not valid:
                     self.validation_stats['failed_ema200_filter'] += 1
+                    if self.backtest_mode:
+                        self.logger.warning(f"🚫 BACKTEST STEP 7 FAILED - EMA200 filter: {msg}")
                     return False, f"EMA200 Trend: {msg}"
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 7 PASSED - EMA200 filter validation")
             
             # 8. ENHANCED: Support/Resistance validation with safe market data handling
             if self.enable_sr_validation:
                 valid, msg = self._safe_validate_support_resistance(signal, market_data)
                 if not valid:
                     self.validation_stats['failed_sr_validation'] += 1
+                    if self.backtest_mode:
+                        self.logger.warning(f"🚫 BACKTEST STEP 8 FAILED - S/R Level: {msg}")
                     return False, f"S/R Level: {msg}"
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 8 PASSED - S/R validation (disabled)")
             
             # 9. ⭐ NEW: Economic News filtering (if enabled) ⭐
             if self.enable_news_filtering:
@@ -583,12 +662,18 @@ class TradeValidator:
                     self.validation_stats['failed_news_filtering'] += 1
                     epic = signal.get('epic', 'Unknown')
                     signal_type = signal.get('signal_type', 'Unknown')
+                    if self.backtest_mode:
+                        self.logger.warning(f"🚫 BACKTEST STEP 9 FAILED - News filtering: {msg}")
                     self.logger.info(f"📰 NEWS BLOCKED: {epic} {signal_type} - {msg}")
                     return False, f"News filtering: {msg}"
                 else:
+                    if self.backtest_mode:
+                        self.logger.info(f"✅ BACKTEST STEP 9 PASSED - News filtering")
                     # Add news context to signal for later use
                     if news_context:
                         signal['news_validation_context'] = news_context
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 9 PASSED - News filtering (disabled)")
 
             # 10. ⭐ NEW: Claude filtering (if enabled) ⭐
             if self.enable_claude_filtering:
@@ -597,6 +682,8 @@ class TradeValidator:
                     # Log the Claude rejection for analysis
                     epic = signal.get('epic', 'Unknown')
                     signal_type = signal.get('signal_type', 'Unknown')
+                    if self.backtest_mode:
+                        self.logger.warning(f"🚫 BACKTEST STEP 10 FAILED - Claude filtering: {msg}")
                     self.logger.info(f"🚫 Claude REJECTED: {epic} {signal_type} - {msg}")
 
                     # OPTIONAL: Save rejected signals for analysis
@@ -609,11 +696,15 @@ class TradeValidator:
                     epic = signal.get('epic', 'Unknown')
                     signal_type = signal.get('signal_type', 'Unknown')
                     score = claude_result.get('score', 'N/A') if claude_result else 'N/A'
+                    if self.backtest_mode:
+                        self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Claude filtering approved")
                     self.logger.info(f"✅ Claude APPROVED: {epic} {signal_type} - Score: {score}/10")
 
                     # Add Claude result to signal for later use
                     if claude_result:
                         signal['claude_validation_result'] = claude_result
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Claude filtering (disabled)")
 
             # 11. Market Intelligence validation (if enabled)
             self.logger.info(f"🧠 {epic}: Market Intelligence filtering enabled: {self.enable_market_intelligence_filtering}")
@@ -622,26 +713,42 @@ class TradeValidator:
                 valid, msg = self._validate_market_intelligence(signal)
                 if not valid:
                     self.validation_stats['failed_other'] += 1
+                    if self.backtest_mode:
+                        self.logger.warning(f"🚫 BACKTEST STEP 11 FAILED - Market Intelligence: {msg}")
                     self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY MARKET INTELLIGENCE: {msg}")
                     return False, f"Market Intelligence: {msg}"
                 else:
+                    if self.backtest_mode:
+                        self.logger.info(f"✅ BACKTEST STEP 11 PASSED - Market Intelligence")
                     self.logger.info(f"🧠✅ {epic}: Market Intelligence validation PASSED: {msg}")
             else:
+                if self.backtest_mode:
+                    self.logger.info(f"✅ BACKTEST STEP 11 PASSED - Market Intelligence (disabled)")
                 self.logger.info(f"🧠⏭️ {epic}: Market Intelligence filtering DISABLED - skipping regime checks")
 
             # 12. Final trading suitability check
             valid, msg = self.check_trading_suitability(signal)
             if not valid:
                 self.validation_stats['failed_other'] += 1
+                if self.backtest_mode:
+                    self.logger.warning(f"🚫 BACKTEST STEP 12 FAILED - Trading suitability: {msg}")
                 return False, f"Trading: {msg}"
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 12 PASSED - Trading suitability")
 
             # 13. ⭐ NEW: Universal Market Intelligence Capture ⭐
             # Capture market intelligence for ALL validated signals, regardless of strategy
             if self.enable_market_intelligence_capture:
                 self._capture_market_intelligence_context(signal)
+                if self.backtest_mode:
+                    self.logger.info(f"✅ BACKTEST STEP 13 COMPLETED - Market Intelligence capture")
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 13 SKIPPED - Market Intelligence capture (disabled)")
 
             # All validations passed
             self.validation_stats['passed_validations'] += 1
+            if self.backtest_mode:
+                self.logger.info(f"🎉 BACKTEST VALIDATION COMPLETE - All steps passed for {epic} {signal_type}!")
             return True, "Signal valid for trading"
             
         except Exception as e:
@@ -1352,11 +1459,23 @@ class TradeValidator:
             return False, f"Epic validation error: {str(e)}"
     
     def apply_confidence_filters(self, signal: Dict) -> Tuple[bool, str]:
-        """Apply confidence-based filters"""
+        """
+        Apply confidence-based filters with UNIVERSAL format normalization
+
+        UNIVERSAL FIX: Ensures all strategies work correctly by normalizing
+        both signal confidence and threshold to decimal format (0.0-1.0)
+        """
         try:
-            confidence = signal.get('confidence_score', 0)
-            
-            # Check minimum confidence
+            raw_confidence = signal.get('confidence_score', 0)
+
+            # UNIVERSAL FIX: Normalize signal confidence to decimal format
+            confidence = self._normalize_signal_confidence(float(raw_confidence))
+
+            # Log for debugging if in backtest mode and formats differ
+            if self.backtest_mode and raw_confidence != confidence:
+                self.logger.debug(f"🔧 BACKTEST: Normalized signal confidence {raw_confidence} → {confidence:.3f}")
+
+            # Check minimum confidence (both values now in decimal format)
             if confidence < self.min_confidence:
                 return False, f"Confidence {confidence:.1%} below minimum {self.min_confidence:.1%}"
             

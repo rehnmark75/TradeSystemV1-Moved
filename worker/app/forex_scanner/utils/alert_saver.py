@@ -67,7 +67,7 @@ def save_signal_to_database_direct(signal: Dict, message: str = "Signal detected
             if value is None:
                 return None
             if isinstance(value, dict):
-                return json.dumps(value)
+                return json.dumps(value, ensure_ascii=False)
             return str(value)
         
         strategy_config = safe_json(signal.get('strategy_config'))

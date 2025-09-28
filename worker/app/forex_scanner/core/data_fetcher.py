@@ -141,8 +141,8 @@ class DataFetcher:
             
             if config_key not in self._logged_ema_configs:
                 # First time seeing this configuration - log at INFO level
-                self.logger.info(f"🎯 EMA configuration for {epic}:")
-                self.logger.info(f"   Periods: {ema_periods}")
+                self.logger.debug(f"🎯 EMA configuration for {epic}:")
+                self.logger.debug(f"   Periods: {ema_periods}")
                 self.logger.info(f"   Source: {config_source}")
                 
                 # Mark this config as logged
@@ -259,7 +259,7 @@ class DataFetcher:
                 ema_periods = self._get_required_ema_periods(epic_guess, ema_strategy)
             
             # ENHANCED: Log EMA indicator addition with actual periods
-            self.logger.info(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
+            self.logger.debug(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
             
             # Add EMA indicators with the correct periods
             df_enhanced = self.technical_analyzer.add_ema_indicators(df_enhanced, ema_periods)
@@ -283,7 +283,7 @@ class DataFetcher:
                 
                 # CRITICAL FIX: Ensure EMA 200 is always present for MACD strategy
                 if 'ema_200' not in df_enhanced.columns:
-                    self.logger.info(f"🔄 Adding EMA 200 for MACD strategy")
+                    self.logger.debug(f"🔄 Adding EMA 200 for MACD strategy")
                     df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
                 else:
                     self.logger.debug(f"✅ EMA 200 already present for MACD strategy")
@@ -872,11 +872,14 @@ class DataFetcher:
             
             # Apply indicators based on requirements
             if 'ema' in required_indicators:
-                self.logger.info(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
+                self.logger.debug(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
                 df_enhanced = self.technical_analyzer.add_ema_indicators(df_enhanced, ema_periods)
             
-            if 'macd' in required_indicators and getattr(config, 'MACD_EMA_STRATEGY', False):
-                self.logger.info(f"🔄 Adding MACD indicators (MACD strategy enabled)")
+            if 'macd' in required_indicators:
+                if getattr(config, 'MACD_EMA_STRATEGY', False):
+                    self.logger.info(f"🔄 Adding MACD indicators (MACD strategy enabled)")
+                else:
+                    self.logger.info(f"🔄 Adding MACD indicators (explicitly requested)")
                 df_enhanced = self.technical_analyzer.add_macd_indicators(
                     df_enhanced,
                     config.MACD_PERIODS['fast_ema'],
@@ -886,7 +889,7 @@ class DataFetcher:
                 
                 # CRITICAL FIX: Ensure EMA 200 is always present for MACD strategy
                 if 'ema_200' not in df_enhanced.columns:
-                    self.logger.info(f"🔄 Adding EMA 200 for MACD strategy (lazy loading)")
+                    self.logger.debug(f"🔄 Adding EMA 200 for MACD strategy (lazy loading)")
                     df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
             
             # Add KAMA indicators if required
@@ -922,7 +925,10 @@ class DataFetcher:
                 df_enhanced = self._add_bb_supertrend_indicators(df_enhanced)
             elif 'bb_supertrend' in required_indicators:
                 self.logger.info(f"⚪ BB+Supertrend indicators NOT added (strategy disabled)")
-            
+
+            # Note: RSI and ADX indicators will be added by the MACD strategy itself
+            # when needed for quality scoring - no need to pre-calculate here
+
             return df_enhanced
             
         except Exception as e:
@@ -996,38 +1002,69 @@ class DataFetcher:
     
     def _get_required_ema_periods(self, epic: str, ema_strategy=None) -> List[int]:
         """
-        FIXED: Get required EMA periods from the EMA strategy
-        
-        This method now properly uses the EMA strategy's configuration
-        methods instead of trying to access non-existent dynamic managers.
+        CRITICAL FIX: Get required EMA periods from the EMA strategy with optimal parameter support
+
+        This method now properly detects and uses optimal parameters to ensure
+        BacktestDataFetcher and EMA strategy use the same EMA configuration.
         """
         try:
-            # FIXED: Use EMA strategy's own configuration method
-            if ema_strategy and hasattr(ema_strategy, 'get_ema_config_for_epic'):
+            # PRIORITY 1: Check for optimal parameters first (backtest consistency)
+            if epic and ema_strategy and getattr(ema_strategy, 'use_optimal_parameters', False):
+                try:
+                    from optimization.optimal_parameter_service import get_epic_ema_config
+                    optimal_config = get_epic_ema_config(epic)
+                    if optimal_config:
+                        ema_periods = [
+                            optimal_config['short'],
+                            optimal_config['long'],
+                            optimal_config['trend']
+                        ]
+                        self.logger.debug(f"🎯 Using OPTIMAL EMA periods for {epic}: {ema_periods} (backtest consistency)")
+                        return ema_periods
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Optimal EMA config failed for {epic}: {e}, falling back to strategy config")
+
+            # PRIORITY 2: Use EMA strategy's own _get_ema_periods method
+            if ema_strategy and hasattr(ema_strategy, '_get_ema_periods'):
                 try:
                     # Get configuration from the strategy itself
-                    ema_config = ema_strategy.get_ema_config_for_epic(epic)
-                    
+                    ema_config = ema_strategy._get_ema_periods(epic)
+
                     if ema_config:
                         ema_periods = [
-                            ema_config['short'],
-                            ema_config['long'],
-                            ema_config['trend']
+                            ema_config.get('short', 21),
+                            ema_config.get('long', 50),
+                            ema_config.get('trend', 200)
                         ]
-                        
-                        # Determine if this is dynamic or static
-                        config_mode = 'dynamic' if getattr(ema_strategy, 'enable_dynamic_config', False) else 'static'
+
+                        # Determine if this is optimal or static
+                        config_mode = 'optimal' if getattr(ema_strategy, 'use_optimal_parameters', False) else 'static'
                         self.logger.debug(f"📊 Using {config_mode} EMA config from strategy for {epic}: {ema_periods}")
                         return ema_periods
-                        
+
                 except Exception as e:
-                    self.logger.warning(f"⚠️ Strategy EMA config failed for {epic}: {e}")
-                    # Fall through to config.py
-            
-            # Try configdata EMA_STRATEGY_CONFIG (moved from config.py)
+                    self.logger.warning(f"⚠️ Strategy _get_ema_periods failed for {epic}: {e}")
+                    # Fall through to configdata
+
+            # PRIORITY 3: Use strategy's ema_config attribute if available
+            if ema_strategy and hasattr(ema_strategy, 'ema_config'):
+                try:
+                    ema_config = ema_strategy.ema_config
+                    if ema_config and isinstance(ema_config, dict):
+                        ema_periods = [
+                            ema_config.get('short', 21),
+                            ema_config.get('long', 50),
+                            ema_config.get('trend', 200)
+                        ]
+                        self.logger.debug(f"📊 Using strategy ema_config attribute for {epic}: {ema_periods}")
+                        return ema_periods
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Strategy ema_config attribute failed: {e}")
+
+            # PRIORITY 4: Try configdata EMA_STRATEGY_CONFIG (moved from config.py)
             ema_configs = getattr(config, 'EMA_STRATEGY_CONFIG', {})
             active_config_name = getattr(config, 'ACTIVE_EMA_CONFIG', 'default')
-            
+
             if active_config_name in ema_configs:
                 config_data = ema_configs[active_config_name]
                 ema_periods = [
@@ -1037,31 +1074,31 @@ class DataFetcher:
                 ]
                 self.logger.debug(f"📋 Using configdata EMA config '{active_config_name}' for {epic}: {ema_periods}")
                 return ema_periods
-            
-            # Alternative: Use configdata convenience method
+
+            # PRIORITY 5: Alternative configdata convenience method
             if hasattr(config, 'get_ema_config_for_epic'):
                 try:
                     ema_config = config.get_ema_config_for_epic(epic, 'default')
                     if ema_config:
                         ema_periods = [
                             ema_config['short'],
-                            ema_config['long'], 
+                            ema_config['long'],
                             ema_config['trend']
                         ]
                         self.logger.debug(f"📊 Using configdata convenience method for {epic}: {ema_periods}")
                         return ema_periods
                 except Exception as e:
                     self.logger.warning(f"⚠️ Configdata convenience method failed: {e}")
-            
+
             # FINAL: Ultimate fallback to match configdata default
-            default_periods = [21, 50, 200]  # Changed from [9, 21, 200] to match configdata default
-            self.logger.debug(f"🔧 Using hardcoded default EMA config for {epic}: {default_periods}")
+            default_periods = [21, 50, 200]  # Match configdata default
+            self.logger.warning(f"🔧 Using hardcoded default EMA config for {epic}: {default_periods}")
             return default_periods
-            
+
         except Exception as e:
             self.logger.error(f"❌ Error getting EMA periods for {epic}: {e}")
             # Ultimate fallback
-            return [9, 21, 200]
+            return [21, 50, 200]
 
     def _ensure_ema200_always_present(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -1081,7 +1118,7 @@ class DataFetcher:
             
             # ALWAYS ensure EMA 200 exists for trend filtering
             if 'ema_200' not in df_enhanced.columns:
-                self.logger.info("🔄 Adding EMA 200 for trend filtering (always present)")
+                self.logger.debug("🔄 Adding EMA 200 for trend filtering (always present)")
                 df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
             else:
                 self.logger.debug("✅ EMA 200 already present")
@@ -1925,9 +1962,9 @@ class DataFetcher:
             
             # Log validation results
             if not missing_periods and not missing_semantic:
-                self.logger.info(f"✅ EMA validation passed for {epic}")
-                self.logger.info(f"   Configuration: {config_source}")
-                self.logger.info(f"   Periods calculated: {ema_periods}")
+                self.logger.debug(f"✅ EMA validation passed for {epic}")
+                self.logger.debug(f"   Configuration: {config_source}")
+                self.logger.debug(f"   Periods calculated: {ema_periods}")
                 self.logger.info(f"   Semantic mapping: ✅")
                 
                 # Log actual EMA values for verification

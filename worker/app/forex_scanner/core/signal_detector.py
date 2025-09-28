@@ -323,12 +323,16 @@ class SignalDetector:
         timeframe = self._get_default_timeframe(timeframe)
         
         try:
-            # Get enhanced data
-            df = self.data_fetcher.get_enhanced_data(epic, pair, timeframe=timeframe, ema_strategy=self.ema_strategy)
-            
+            # Get enhanced data with MACD indicators pre-calculated
+            df = self.data_fetcher.get_enhanced_data(
+                epic, pair, timeframe=timeframe,
+                ema_strategy=self.ema_strategy,
+                required_indicators=['macd']  # Pre-calculate MACD indicators
+            )
+
             if df is None or len(df) < config.MIN_BARS_FOR_MACD:
                 return None
-            
+
             # 📊 NEW: Use MTF-enhanced detection if available
             # Get epic-specific MACD strategy with optimized parameters
             macd_strategy = self._get_macd_strategy_for_epic(epic)
@@ -337,9 +341,8 @@ class SignalDetector:
                 signal = macd_strategy.detect_signal_with_mtf(df, epic, spread_pips, timeframe)
                 self.logger.info(f"🔄 [MTF MACD] Used MTF-enhanced detection for {epic}")
             else:
-                # Fallback to standard detection
+                # Fallback to standard detection (strategy will log its own optimization status)
                 signal = macd_strategy.detect_signal(df, epic, spread_pips, timeframe)
-                self.logger.info(f"📊 [STANDARD MACD] Used standard detection for {epic}")
             
             if signal:
                 # Add enhanced market context
