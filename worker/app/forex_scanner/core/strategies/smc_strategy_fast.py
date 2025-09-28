@@ -35,7 +35,7 @@ class SMCStrategyFast(BaseStrategy):
     - Confluence-based signals
     """
     
-    def __init__(self, smc_config_name: str = None, data_fetcher=None, backtest_mode: bool = False):
+    def __init__(self, smc_config_name: str = None, data_fetcher=None, backtest_mode: bool = False, pipeline_mode: bool = True):
         # Initialize parent
         super().__init__('smc_fast')
         
@@ -56,11 +56,24 @@ class SMCStrategyFast(BaseStrategy):
         self.confluence_required = self.smc_config.get('confluence_required', 2)
         self.min_risk_reward = self.smc_config.get('min_risk_reward', 1.5)
         self.fvg_min_size = self.smc_config.get('fvg_min_size', 3) / 10000  # Convert to price
+
+        # Enable/disable expensive features based on pipeline mode
+        self.enhanced_validation = pipeline_mode and getattr(config, 'SMC_ENHANCED_VALIDATION', True)
+        if not self.enhanced_validation:
+            # In basic mode, reduce analysis complexity
+            self.confluence_required = max(1, self.confluence_required - 1)  # Lower confluence requirement
+            self.swing_length = max(3, self.swing_length - 1)  # Shorter swing detection
         
         self.logger.info(f"🧠 Fast SMC Strategy initialized")
         self.logger.info(f"🔧 Config: {smc_config_name or 'default'}")
         self.logger.info(f"🎯 Confluence required: {self.confluence_required}")
         self.logger.info(f"📊 Min R:R ratio: {self.min_risk_reward}")
+
+        if self.enhanced_validation:
+            self.logger.info(f"🔍 Enhanced validation ENABLED - Full SMC analysis")
+        else:
+            self.logger.info(f"🔧 Enhanced validation DISABLED - Fast SMC testing mode")
+
         if backtest_mode:
             self.logger.info("🔥 BACKTEST MODE: Time restrictions disabled")
     
@@ -116,15 +129,15 @@ class SMCStrategyFast(BaseStrategy):
             
             # Fast SMC analysis
             df_smc = self._fast_smc_analysis(df.copy())
-            
+
             # Check latest row for signals
             latest_row = df_smc.iloc[-1]
-            
+
             # Look for structure break signals
             if not latest_row.get('structure_break', False):
                 return None
-            
-            # Fast confluence calculation
+
+            # Fast confluence calculation (skip expensive analysis in basic mode)
             confluence_score = self._fast_confluence_calculation(df_smc, len(df_smc) - 1)
             
             if confluence_score < self.confluence_required:
@@ -166,16 +179,23 @@ class SMCStrategyFast(BaseStrategy):
         try:
             # 1. Fast swing point detection using rolling windows
             df = self._detect_swing_points_fast(df)
-            
+
             # 2. Fast structure break detection
             df = self._detect_structure_breaks_fast(df)
-            
-            # 3. Fast fair value gap detection
-            df = self._detect_fvgs_fast(df)
-            
-            # 4. Fast order block approximation
-            df = self._detect_order_blocks_fast(df)
-            
+
+            if self.enhanced_validation:
+                # 3. Enhanced analysis: Fair value gaps (expensive in basic mode)
+                df = self._detect_fvgs_fast(df)
+
+                # 4. Enhanced analysis: Order block approximation (expensive in basic mode)
+                df = self._detect_order_blocks_fast(df)
+            else:
+                # Basic mode: Skip expensive FVG and order block analysis
+                df['fvg_bullish'] = False
+                df['fvg_bearish'] = False
+                df['order_block_bullish'] = False
+                df['order_block_bearish'] = False
+
             return df
             
         except Exception as e:
@@ -309,14 +329,15 @@ class SMCStrategyFast(BaseStrategy):
             if current_row.get('structure_break', False):
                 confluence_score += 1.0
             
-            # 2. FVG confluence
-            if current_row.get('fvg_bullish', False) or current_row.get('fvg_bearish', False):
+            # 2. FVG confluence (only in enhanced mode)
+            if self.enhanced_validation and (current_row.get('fvg_bullish', False) or current_row.get('fvg_bearish', False)):
                 confluence_score += 0.6
-            
-            # 3. Order block confluence (check recent 5 bars)
-            recent_obs = df.iloc[max(0, current_index-5):current_index+1]
-            if recent_obs['order_block_bullish'].any() or recent_obs['order_block_bearish'].any():
-                confluence_score += 0.8
+
+            # 3. Order block confluence (only in enhanced mode)
+            if self.enhanced_validation:
+                recent_obs = df.iloc[max(0, current_index-5):current_index+1]
+                if recent_obs['order_block_bullish'].any() or recent_obs['order_block_bearish'].any():
+                    confluence_score += 0.8
             
             # 4. Volume confluence
             volume_col = 'volume' if 'volume' in df.columns else 'ltv'
@@ -326,12 +347,12 @@ class SMCStrategyFast(BaseStrategy):
                 if current_volume > (avg_volume * 1.5):
                     confluence_score += 0.4
             
-            # 5. Multiple timeframe proxy (use EMA alignment if available)
-            if all(col in df.columns for col in ['ema_21', 'ema_50', 'ema_200']):
+            # 5. Multiple timeframe proxy (only in enhanced mode, use EMA alignment if available)
+            if self.enhanced_validation and all(col in df.columns for col in ['ema_21', 'ema_50', 'ema_200']):
                 ema_21 = current_row.get('ema_21', 0)
-                ema_50 = current_row.get('ema_50', 0) 
+                ema_50 = current_row.get('ema_50', 0)
                 ema_200 = current_row.get('ema_200', 0)
-                
+
                 # Check EMA alignment
                 if (ema_21 > ema_50 > ema_200) or (ema_21 < ema_50 < ema_200):
                     confluence_score += 0.5

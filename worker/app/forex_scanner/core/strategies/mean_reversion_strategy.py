@@ -69,7 +69,7 @@ class MeanReversionStrategy(BaseStrategy):
     """
 
     def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None,
-                 timeframe: str = '15m', use_optimized_parameters: bool = True):
+                 timeframe: str = '15m', use_optimized_parameters: bool = True, pipeline_mode: bool = True):
         # Initialize parent
         self.name = 'mean_reversion'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
@@ -91,20 +91,37 @@ class MeanReversionStrategy(BaseStrategy):
         self.min_confidence = self.mr_config.get('min_confidence', mr_config.SIGNAL_QUALITY_MIN_CONFIDENCE)
         self.min_bars = self.mr_config.get('min_data_periods', mr_config.MEAN_REVERSION_MIN_DATA_PERIODS)
 
+        # Enable/disable expensive features based on pipeline mode
+        self.enhanced_validation = pipeline_mode and getattr(config, 'MEAN_REVERSION_ENHANCED_VALIDATION', True)
+
         # Initialize helper modules (orchestrator pattern)
         self.indicator_calculator = MeanReversionIndicatorCalculator(logger=self.logger)
         self.signal_detector = MeanReversionSignalDetector(
             logger=self.logger,
-            indicator_calculator=self.indicator_calculator
+            indicator_calculator=self.indicator_calculator,
+            enhanced_validation=self.enhanced_validation
         )
-        self.trend_validator = MeanReversionTrendValidator(logger=self.logger)
+        self.trend_validator = MeanReversionTrendValidator(logger=self.logger, enhanced_validation=self.enhanced_validation)
 
         self.logger.info(f"🎯 Mean Reversion Strategy initialized for {epic or 'default'} ({timeframe})")
         self.logger.info(f"🔧 Using multi-oscillator confluence approach with 3 specialized helpers")
         self.logger.info(f"📊 Config: Min confidence {self.min_confidence:.1%}, Min bars {self.min_bars}")
+        self.logger.info(f"🧠 Smart Money: Disabled (traditional technical analysis strategy)")
+
+        if self.enhanced_validation:
+            self.logger.info(f"🔍 Enhanced validation ENABLED - Full mean reversion analysis")
+        else:
+            self.logger.info(f"🔧 Enhanced validation DISABLED - Basic mean reversion testing mode")
 
         if backtest_mode:
             self.logger.info("🔥 BACKTEST MODE: Enhanced signal validation enabled")
+
+    def should_enable_smart_money(self) -> bool:
+        """
+        Mean Reversion strategy does NOT use smart money concepts.
+        It relies on traditional technical analysis (oscillators, RSI, divergences).
+        """
+        return False
 
     def _get_mean_reversion_parameters(self) -> Dict:
         """Get mean reversion parameters from optimization database or config fallback"""
@@ -376,6 +393,14 @@ class MeanReversionStrategy(BaseStrategy):
     ) -> Optional[Dict]:
         """Create a mean reversion signal dictionary with all required fields"""
         try:
+            # CRITICAL FIX: Ensure spread_pips is numeric for price calculations
+            if isinstance(spread_pips, str):
+                try:
+                    spread_pips = float(spread_pips)
+                except (ValueError, TypeError):
+                    self.logger.warning(f"Invalid spread_pips value '{spread_pips}', using default 1.5")
+                    spread_pips = 1.5
+
             # Create base signal using parent method
             signal = self.create_base_signal(signal_type, epic, timeframe, latest_row)
 

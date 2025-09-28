@@ -38,8 +38,11 @@ except ImportError:
 
 try:
     from configdata import config
+    # Import Ichimoku-specific config to override defaults
+    from configdata.strategies import config_ichimoku_strategy as ichimoku_config
 except ImportError:
     from forex_scanner.configdata import config
+    from forex_scanner.configdata.strategies import config_ichimoku_strategy as ichimoku_config
 
 
 class IchimokuStrategy(BaseStrategy):
@@ -58,7 +61,8 @@ class IchimokuStrategy(BaseStrategy):
                  backtest_mode: bool = False,
                  epic: str = None,
                  timeframe: str = '15m',
-                 use_optimized_parameters: bool = True):
+                 use_optimized_parameters: bool = True,
+                 pipeline_mode: bool = True):
         # Initialize parent
         self.name = 'ichimoku'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
@@ -85,8 +89,8 @@ class IchimokuStrategy(BaseStrategy):
 
         # Basic parameters
         self.eps = 1e-8  # Epsilon for stability
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.55)  # Ichimoku needs higher confidence
-        self.min_bars = 80  # Minimum bars for stable Ichimoku (52 + 26 + buffer)
+        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.45)  # Use global default (was too high at 0.55)
+        self.min_bars = 60  # Reduced from 80 to 60 bars (52 + buffer) for better signal frequency
 
         # Strategy-specific thresholds
         self.cloud_thickness_threshold = self.ichimoku_config.get('cloud_thickness_threshold', 0.0001)
@@ -99,13 +103,16 @@ class IchimokuStrategy(BaseStrategy):
         self.signal_calculator = None
         self.mtf_analyzer = None
 
-        # RAG Enhancement modules
+        # Enable/disable expensive features based on pipeline mode
+        self.enhanced_validation = pipeline_mode and getattr(config, 'ICHIMOKU_ENHANCED_VALIDATION', True)
+
+        # RAG Enhancement modules (only in pipeline mode)
         self.rag_enhancer = None
         self.tradingview_parser = None
         self.market_intelligence_adapter = None
         self.confluence_scorer = None
         self.mtf_rag_validator = None
-        self.rag_enabled = getattr(config, 'ENABLE_RAG_ENHANCEMENT', True)
+        self.rag_enabled = self.enhanced_validation and getattr(config, 'ENABLE_RAG_ENHANCEMENT', True)
 
         # Initialize helper modules (orchestrator pattern)
         self._initialize_helpers()
@@ -117,6 +124,14 @@ class IchimokuStrategy(BaseStrategy):
 
         # Log initialization
         self._log_initialization()
+
+        # Log threshold improvements and filter status
+        self.logger.info(f"📊 Ichimoku Configuration:")
+        self.logger.info(f"   Min Confidence: {self.min_confidence:.1%} (reduced from 55% for better signal frequency)")
+        self.logger.info(f"   Min Bars: {self.min_bars} (reduced from 80 for faster detection)")
+        self.logger.info(f"   Periods: T={self.tenkan_period}, K={self.kijun_period}, S={self.senkou_b_period}")
+        self.logger.info(f"   Chikou Filter: {'Enabled' if getattr(ichimoku_config, 'ICHIMOKU_CHIKOU_FILTER_ENABLED', True) else 'Disabled'}")
+        self.logger.info(f"   Cloud Filter: {'Enabled' if getattr(ichimoku_config, 'ICHIMOKU_CLOUD_FILTER_ENABLED', True) else 'Disabled'}")
 
     def _get_ichimoku_periods(self, epic: str = None) -> Dict:
         """Get Ichimoku periods - with database optimization support"""
@@ -318,6 +333,11 @@ class IchimokuStrategy(BaseStrategy):
         self.logger.info(f"   Cloud thickness threshold: {self.cloud_thickness_threshold:.6f}")
         self.logger.info(f"   TK cross strength: {self.tk_cross_strength_threshold:.1f}")
 
+        if self.enhanced_validation:
+            self.logger.info(f"🔍 Enhanced validation ENABLED - Full Ichimoku analysis with RAG")
+        else:
+            self.logger.info(f"🔧 Enhanced validation DISABLED - Basic Ichimoku testing mode")
+
         if self.backtest_mode:
             self.logger.info("🔥 BACKTEST MODE: Time restrictions and MTF disabled")
         elif self.enable_mtf_analysis:
@@ -398,9 +418,12 @@ class IchimokuStrategy(BaseStrategy):
             # Check for immediate signals
             signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df), df_with_signals)
             if signal:
-                # Apply RAG enhancement if available
-                enhanced_signal = self._apply_rag_enhancement(signal, df_with_signals, epic, timeframe)
-                return enhanced_signal
+                # Apply RAG enhancement if available (only in pipeline mode)
+                if self.enhanced_validation and self.rag_enabled:
+                    enhanced_signal = self._apply_rag_enhancement(signal, df_with_signals, epic, timeframe)
+                    return enhanced_signal
+                else:
+                    return signal
             else:
                 self.logger.info(f"🌥️ Ichimoku {epic}: Signal validation failed or no valid signals")
 
@@ -431,8 +454,8 @@ class IchimokuStrategy(BaseStrategy):
                     self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal failed Chikou span validation")
                     return None
 
-                # Multi-timeframe validation if enabled
-                if self.enable_mtf_analysis and self.mtf_analyzer:
+                # Multi-timeframe validation if enabled (only in pipeline mode)
+                if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer:
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_mtf_ichimoku(epic, current_time, 'BULL'):
                         self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal failed MTF validation")
@@ -469,8 +492,8 @@ class IchimokuStrategy(BaseStrategy):
                     self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal failed Chikou span validation")
                     return None
 
-                # Multi-timeframe validation if enabled
-                if self.enable_mtf_analysis and self.mtf_analyzer:
+                # Multi-timeframe validation if enabled (only in pipeline mode)
+                if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer:
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_mtf_ichimoku(epic, current_time, 'BEAR'):
                         self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal failed MTF validation")
@@ -506,6 +529,14 @@ class IchimokuStrategy(BaseStrategy):
     ) -> Dict:
         """Create a signal dictionary with all required fields"""
         try:
+            # CRITICAL FIX: Ensure spread_pips is numeric for price calculations
+            if isinstance(spread_pips, str):
+                try:
+                    spread_pips = float(spread_pips)
+                except (ValueError, TypeError):
+                    self.logger.warning(f"Invalid spread_pips value '{spread_pips}', using default 1.5")
+                    spread_pips = 1.5
+
             # Create base signal using parent method
             signal = self.create_base_signal(signal_type, epic, timeframe, latest_row)
 
@@ -537,10 +568,11 @@ class IchimokuStrategy(BaseStrategy):
 
             # Validate confidence threshold
             if not self.signal_calculator.validate_confidence_threshold(confidence, self.min_confidence):
+                self.logger.info(f"🌥️ Ichimoku {epic}: Signal rejected - confidence {confidence:.1%} < threshold {self.min_confidence:.1%}")
                 return None
 
-            # Add market intelligence data if available
-            if self.market_intelligence_adapter:
+            # Add market intelligence data if available (only in pipeline mode)
+            if self.enhanced_validation and self.market_intelligence_adapter:
                 try:
                     # Get market conditions analysis
                     market_conditions = self.market_intelligence_adapter.analyze_market_conditions(epic, timeframe)

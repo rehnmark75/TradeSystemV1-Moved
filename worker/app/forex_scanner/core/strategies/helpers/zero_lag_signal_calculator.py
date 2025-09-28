@@ -16,10 +16,11 @@ except ImportError:
 class ZeroLagSignalCalculator:
     """Calculates confidence scores and signal strength for Zero Lag signals"""
     
-    def __init__(self, logger: logging.Logger = None, trend_validator=None, squeeze_analyzer=None):
+    def __init__(self, logger: logging.Logger = None, trend_validator=None, squeeze_analyzer=None, enhanced_validation: bool = True):
         self.logger = logger or logging.getLogger(__name__)
         self.trend_validator = trend_validator
         self.squeeze_analyzer = squeeze_analyzer
+        self.enhanced_validation = enhanced_validation
         self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.45)
     
     def calculate_signal_confidence(self, latest_row: pd.Series, signal_type: str, 

@@ -40,12 +40,13 @@ class EMAStrategy(BaseStrategy):
     Based on the core logic from detect_ema_alerts function.
     """
     
-    def __init__(self, 
-                 ema_config_name: str = None, 
-                 data_fetcher=None, 
+    def __init__(self,
+                 ema_config_name: str = None,
+                 data_fetcher=None,
                  backtest_mode: bool = False,
                  epic: str = None,
-                 use_optimal_parameters: bool = True):
+                 use_optimal_parameters: bool = True,
+                 pipeline_mode: bool = True):
         # Initialize parent but skip the enhanced validator setup
         self.name = 'ema'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
@@ -88,8 +89,8 @@ class EMAStrategy(BaseStrategy):
         self.mtf_analyzer = EMAMultiTimeframeAnalyzer(logger=self.logger, data_fetcher=data_fetcher)
         self.indicator_calculator = EMAIndicatorCalculator(logger=self.logger, eps=self.eps)
         
-        # Initialize enhanced breakout validator to reduce false signals
-        self.enhanced_validation = getattr(config, 'EMA_ENHANCED_VALIDATION', True)
+        # Initialize enhanced breakout validator only in pipeline mode
+        self.enhanced_validation = pipeline_mode and getattr(config, 'EMA_ENHANCED_VALIDATION', True)
         if self.enhanced_validation:
             try:
                 from .helpers.ema_breakout_validator import EMABreakoutValidator

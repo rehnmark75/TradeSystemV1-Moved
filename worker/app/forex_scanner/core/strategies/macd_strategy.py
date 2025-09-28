@@ -64,10 +64,21 @@ class MACDStrategy(BaseStrategy):
     Coordinates focused helper modules to keep main class lightweight and maintainable.
     """
     
-    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None, timeframe: str = '15m', use_optimized_parameters: bool = True):  # Enable optimization by default
-        # Initialize parent  
+    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic: str = None, timeframe: str = '15m', use_optimized_parameters: bool = True, pipeline_mode: bool = True):  # Enable optimization by default
+        # Initialize parent
         self.name = 'macd'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
+
+        # EMERGENCY: Force INFO level logging for debugging
+        self.logger.setLevel(logging.INFO)
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+
+        self.logger.info(f"🚨 EMERGENCY: MACD Strategy INITIALIZING for epic={epic}, timeframe={timeframe}")
         self._validator = None  # Skip enhanced validator for simplicity
         self.epic = epic
         self.timeframe = timeframe
@@ -96,16 +107,35 @@ class MACDStrategy(BaseStrategy):
         self.indicator_calculator = MACDIndicatorCalculator(logger=self.logger, eps=self.eps)
         self.trend_validator = MACDTrendValidator(logger=self.logger)
         self.signal_calculator = MACDSignalCalculator(logger=self.logger, trend_validator=self.trend_validator)
-        self.mtf_analyzer = MACDMultiTimeframeAnalyzer(logger=self.logger, data_fetcher=data_fetcher)
+
+        # Enable/disable expensive features based on pipeline mode
+        self.enhanced_validation = pipeline_mode and getattr(config, 'MACD_ENHANCED_VALIDATION', True)
+        if self.enhanced_validation:
+            self.mtf_analyzer = MACDMultiTimeframeAnalyzer(logger=self.logger, data_fetcher=data_fetcher)
+            self.logger.info("🔍 Enhanced MTF analyzer initialized - Multi-timeframe validation enabled")
+        else:
+            self.mtf_analyzer = None
+            self.logger.info("🔧 Enhanced validation DISABLED - Using basic MACD signal detection")
         
         # Set MTF analyzer for backtest compatibility
-        if self.enable_mtf_analysis and self.mtf_analyzer.is_mtf_enabled():
+        if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer and self.mtf_analyzer.is_mtf_enabled():
             self.mtf_analyzer_instance = self.mtf_analyzer  # For compatibility
         else:
             self.mtf_analyzer_instance = None
         
+        # Add simple caching for performance optimization
+        self._enhanced_df_cache = {}  # {epic: {'df': DataFrame, 'timestamp': timestamp}}
+        self._cache_ttl_seconds = 300  # 5 minutes cache TTL
+
         self.logger.info(f"🎯 MACD Strategy initialized - Periods: {self.fast_ema}/{self.slow_ema}/{self.signal_ema} ({timeframe})")
-        self.logger.info(f"🔧 Using lightweight orchestrator pattern with 4 focused helpers")
+        self.logger.info(f"🔧 Using lightweight orchestrator pattern with focused helpers")
+        self.logger.info(f"⚡ Enhanced with DataFrame caching (TTL: {self._cache_ttl_seconds}s)")
+
+        if self.enhanced_validation:
+            self.logger.info(f"🔍 Enhanced validation ENABLED - Multi-timeframe analysis enabled")
+        else:
+            self.logger.info(f"🔧 Enhanced validation DISABLED - Basic mode for fast testing")
+
         if backtest_mode:
             self.logger.info("🔥 BACKTEST MODE: Time restrictions disabled")
     
@@ -299,38 +329,56 @@ class MACDStrategy(BaseStrategy):
         """
         
         try:
+            self.logger.info(f"🚨 EMERGENCY: MACD detect_signal CALLED for {epic} with {len(df)} bars (timeframe: {timeframe})")
+
             # Validate data requirements
             if not self.indicator_calculator.validate_data_requirements(df, self.min_bars):
+                self.logger.info(f"🚨 EMERGENCY: Data validation FAILED for {epic} - need {self.min_bars} bars, have {len(df)}")
                 return None
             
             self.logger.debug(f"Processing {len(df)} bars for {epic}")
-            
-            # 1. Check if MACD indicators already exist (from data_fetcher optimization)
-            required_macd_cols = ['macd_line', 'macd_signal', 'macd_histogram']
-            macd_exists = all(col in df.columns for col in required_macd_cols)
 
-            # Debug: Show what indicators are available
-            indicator_cols = [col for col in df.columns if any(x in col.lower() for x in ['macd', 'rsi', 'adx', 'ema'])]
-            self.logger.debug(f"📊 Available indicators for {epic}: {indicator_cols}")
-
-            if macd_exists:
-                self.logger.info(f"📊 [REUSING MACD] MACD indicators already exist for {epic} - skipping recalculation")
-                df_enhanced = df.copy()
-
-                # Ensure we have EMA 200 for trend validation
-                if 'ema_200' not in df_enhanced.columns:
-                    df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
-
-                # Ensure we have RSI and ADX for quality scoring
-                if 'rsi' not in df_enhanced.columns or 'adx' not in df_enhanced.columns:
-                    self.logger.debug(f"📊 Adding missing RSI/ADX indicators for {epic}")
-                    df_enhanced = self.indicator_calculator._add_enhanced_filters(df_enhanced)
+            # 0. Check cache first for performance optimization
+            cached_df = self._get_cached_enhanced_df(epic, df)
+            if cached_df is not None:
+                self.logger.debug(f"⚡ [CACHE] Using cached enhanced DataFrame for {epic}")
+                df_enhanced = cached_df
             else:
-                self.logger.info(f"📊 [STANDARD MACD] Used standard detection for {epic}")
-                df_enhanced = self.indicator_calculator.ensure_macd_indicators(df.copy(), self.macd_config)
-            
+                # 1. Check if MACD indicators already exist (from data_fetcher optimization)
+                required_macd_cols = ['macd_line', 'macd_signal', 'macd_histogram']
+                macd_exists = all(col in df.columns for col in required_macd_cols)
+
+                # Debug: Show what indicators are available
+                indicator_cols = [col for col in df.columns if any(x in col.lower() for x in ['macd', 'rsi', 'adx', 'ema'])]
+                self.logger.debug(f"📊 Available indicators for {epic}: {indicator_cols}")
+
+                if macd_exists:
+                    self.logger.info(f"📊 [REUSING MACD] MACD indicators already exist for {epic} - skipping recalculation")
+                    df_enhanced = df.copy()
+
+                    # Ensure we have EMA 200 for trend validation
+                    if 'ema_200' not in df_enhanced.columns:
+                        df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
+
+                    # Ensure we have RSI and ADX for quality scoring
+                    if 'rsi' not in df_enhanced.columns or 'adx' not in df_enhanced.columns:
+                        self.logger.debug(f"📊 Adding missing RSI/ADX indicators for {epic}")
+                        df_enhanced = self.indicator_calculator._add_enhanced_filters(df_enhanced)
+                else:
+                    self.logger.info(f"📊 [STANDARD MACD] Used standard detection for {epic}")
+                    df_enhanced = self.indicator_calculator.ensure_macd_indicators(df.copy(), self.macd_config)
+
+                # Cache the enhanced DataFrame for future use
+                self._cache_enhanced_df(epic, df_enhanced)
+
             # 2. Detect MACD crossovers (with strength filtering)
+            self.logger.info(f"🚨 EMERGENCY: About to detect crossovers for {epic} with {len(df_enhanced)} bars")
             df_with_signals = self.indicator_calculator.detect_macd_crossovers(df_enhanced, epic, is_backtest=self.backtest_mode)
+
+            # EMERGENCY: Check what signals were detected
+            bull_signals = df_with_signals.get('bull_alert', pd.Series(False, index=df_with_signals.index)).sum()
+            bear_signals = df_with_signals.get('bear_alert', pd.Series(False, index=df_with_signals.index)).sum()
+            self.logger.info(f"🚨 CROSSOVER DETECTION RESULT for {epic}: {bull_signals} bull alerts, {bear_signals} bear alerts")
             
             # 3. Check for signals - scan all bars with crossovers (for backtest compatibility)
             if self.backtest_mode:
@@ -343,14 +391,20 @@ class MACDStrategy(BaseStrategy):
                     bear_alert = row.get('bear_alert', False)
 
                     if bull_alert or bear_alert:
+                        signal_type = 'BULL' if bull_alert else 'BEAR'
+                        self.logger.info(f"🚨 EMERGENCY: Found {signal_type} alert at index {idx} - validating...")
+
                         signal = self._check_immediate_signal(row, epic, timeframe, spread_pips, len(df))
                         if signal:
+                            self.logger.info(f"✅ Signal VALIDATED: {signal_type} at {idx} with confidence {signal.get('confidence', 'unknown')}")
                             # Add timing info to signal for backtest
                             if hasattr(row, 'name'):
                                 signal['signal_time'] = row.name
                             elif 'start_time' in row:
                                 signal['signal_time'] = row['start_time']
                             all_signals.append((idx, signal))
+                        else:
+                            self.logger.info(f"❌ Signal REJECTED: {signal_type} at {idx} failed validation")
 
                 # Return the LATEST signal only (respects the filtering that was already applied)
                 if all_signals:
@@ -377,17 +431,56 @@ class MACDStrategy(BaseStrategy):
                     return signal
                 
                 return None
-            
+
         except Exception as e:
             self.logger.error(f"Signal detection error: {e}")
             return None
-    
+
+    def _get_cached_enhanced_df(self, epic: str, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """Get cached enhanced DataFrame if available and fresh"""
+        try:
+            if epic not in self._enhanced_df_cache:
+                return None
+
+            cache_entry = self._enhanced_df_cache[epic]
+            current_time = pd.Timestamp.now()
+
+            # Check if cache is still fresh (TTL not expired)
+            if (current_time - cache_entry['timestamp']).seconds > self._cache_ttl_seconds:
+                del self._enhanced_df_cache[epic]  # Cleanup expired cache
+                return None
+
+            # Check if DataFrame structure matches (basic validation)
+            cached_df = cache_entry['df']
+            if len(cached_df) >= len(df) and all(col in cached_df.columns for col in df.columns):
+                self.logger.debug(f"⚡ [CACHE HIT] Using cached enhanced DataFrame for {epic}")
+                # Return latest subset to match input DataFrame length
+                return cached_df.tail(len(df)).copy()
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Cache retrieval error: {e}")
+            return None
+
+    def _cache_enhanced_df(self, epic: str, df_enhanced: pd.DataFrame):
+        """Cache enhanced DataFrame for future use"""
+        try:
+            self._enhanced_df_cache[epic] = {
+                'df': df_enhanced.copy(),
+                'timestamp': pd.Timestamp.now()
+            }
+            self.logger.debug(f"⚡ [CACHE STORE] Cached enhanced DataFrame for {epic}")
+
+        except Exception as e:
+            self.logger.error(f"Cache storage error: {e}")
+
     def _check_immediate_signal(self, latest_row: pd.Series, epic: str, timeframe: str, spread_pips: float, bar_count: int) -> Optional[Dict]:
         """Check for immediate MACD crossover signals with all validations"""
         try:
             # Check for bull crossover
             if latest_row.get('bull_alert', False):
-                self.logger.debug(f"🎯 MACD BULL crossover detected at bar {bar_count}")
+                self.logger.info(f"🚨 EMERGENCY: Validating BULL crossover for {epic} at bar {bar_count}")
                 
                 # EMA 200 trend filter disabled to allow more signals
                 # if not self.trend_validator.validate_ema_200_trend(latest_row, 'BULL'):
@@ -399,9 +492,9 @@ class MACDStrategy(BaseStrategy):
                     self.logger.warning("❌ MACD BULL signal REJECTED: Negative histogram")
                     return None
                 
-                # Optional: Multi-timeframe validation
+                # Optional: Multi-timeframe validation (only in pipeline mode)
                 mtf_passed = True
-                if self.enable_mtf_analysis and self.mtf_analyzer.is_mtf_enabled():
+                if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer and self.mtf_analyzer.is_mtf_enabled():
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     mtf_result = self.mtf_analyzer.validate_higher_timeframe_macd(epic, current_time, 'BULL')
                     mtf_passed = mtf_result.get('validation_passed', True)
@@ -436,9 +529,9 @@ class MACDStrategy(BaseStrategy):
                     self.logger.warning("❌ MACD BEAR signal REJECTED: Positive histogram")
                     return None
                 
-                # Optional: Multi-timeframe validation
+                # Optional: Multi-timeframe validation (only in pipeline mode)
                 mtf_passed = True
-                if self.enable_mtf_analysis and self.mtf_analyzer.is_mtf_enabled():
+                if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer and self.mtf_analyzer.is_mtf_enabled():
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     mtf_result = self.mtf_analyzer.validate_higher_timeframe_macd(epic, current_time, 'BEAR')
                     mtf_passed = mtf_result.get('validation_passed', True)
@@ -491,13 +584,13 @@ class MACDStrategy(BaseStrategy):
             # Calculate confidence using signal calculator
             confidence = self.signal_calculator.calculate_simple_confidence(latest_row, signal_type)
             
-            # Add MTF boost if enabled and available
-            if self.enable_mtf_analysis and self.mtf_analyzer.is_mtf_enabled():
+            # Add MTF boost if enabled and available (only in pipeline mode)
+            if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer and self.mtf_analyzer.is_mtf_enabled():
                 current_time = latest_row.get('start_time', pd.Timestamp.now())
                 mtf_result = self.mtf_analyzer.validate_higher_timeframe_macd(epic, current_time, signal_type)
                 confidence_boost = mtf_result.get('confidence_boost', 0.0)
                 confidence = min(0.95, confidence + confidence_boost)
-                
+
                 signal['mtf_analysis'] = {
                     'validation_passed': mtf_result.get('validation_passed', False),
                     'confidence_boost': confidence_boost,
@@ -508,8 +601,12 @@ class MACDStrategy(BaseStrategy):
             signal['confidence'] = confidence
             signal['confidence_score'] = confidence  # For compatibility
             
-            # Add execution prices  
-            signal = self.add_execution_prices(signal, spread_pips)
+            # Add execution prices (ensure spread_pips is numeric)
+            try:
+                spread_pips_numeric = float(spread_pips) if isinstance(spread_pips, (str, int)) else spread_pips
+            except (ValueError, TypeError):
+                spread_pips_numeric = 1.5  # Default spread for major pairs
+            signal = self.add_execution_prices(signal, spread_pips_numeric)
             
             # Validate confidence threshold
             if not self.signal_calculator.validate_confidence_threshold(confidence):

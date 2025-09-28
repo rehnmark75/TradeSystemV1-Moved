@@ -16,8 +16,9 @@ except ImportError:
 class ZeroLagTrendValidator:
     """Handles all trend validation and multi-timeframe analysis for Zero Lag signals"""
     
-    def __init__(self, logger: logging.Logger = None):
+    def __init__(self, logger: logging.Logger = None, enhanced_validation: bool = True):
         self.logger = logger or logging.getLogger(__name__)
+        self.enhanced_validation = enhanced_validation
         self.eps = 1e-8  # Epsilon for stability
     
     def validate_ema200_macro_trend(self, row: pd.Series, signal_type: str) -> bool:

@@ -72,7 +72,7 @@ class SignalValidator:
             self.logger.warning("EMAStrategy not available")
             
         try:
-            self.macd_strategy = MACDStrategy()
+            self.macd_strategy = MACDStrategy(backtest_mode=True)
         except (ImportError, TypeError):
             self.macd_strategy = None
             self.logger.warning("MACDStrategy not available")

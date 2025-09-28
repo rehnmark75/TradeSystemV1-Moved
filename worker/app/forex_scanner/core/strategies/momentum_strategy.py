@@ -81,7 +81,7 @@ class MomentumStrategy(BaseStrategy):
     - Multi-timeframe confirmation
     """
 
-    def __init__(self, data_fetcher=None, backtest_mode: bool = False, use_optimal_parameters: bool = False):
+    def __init__(self, data_fetcher=None, backtest_mode: bool = False, use_optimal_parameters: bool = False, pipeline_mode: bool = True):
         """Initialize momentum strategy with advanced features"""
         super().__init__('momentum')
         self.price_adjuster = PriceAdjuster()
@@ -99,11 +99,14 @@ class MomentumStrategy(BaseStrategy):
         self.velocity_period = self.momentum_config.get('velocity_period', 7)
         self.volume_period = self.momentum_config.get('volume_period', 14)
 
-        # Feature toggles
-        self.velocity_enabled = config_momentum_strategy.MOMENTUM_VELOCITY_ENABLED
-        self.volume_confirmation = config_momentum_strategy.MOMENTUM_VOLUME_CONFIRMATION
-        self.mtf_validation = config_momentum_strategy.MOMENTUM_MTF_VALIDATION
-        self.adaptive_smoothing = config_momentum_strategy.MOMENTUM_ADAPTIVE_SMOOTHING
+        # Enable/disable expensive features based on pipeline mode
+        self.enhanced_validation = pipeline_mode and getattr(config_momentum_strategy, 'MOMENTUM_ENHANCED_VALIDATION', True)
+
+        # Feature toggles (expensive features only in pipeline mode)
+        self.velocity_enabled = self.enhanced_validation and config_momentum_strategy.MOMENTUM_VELOCITY_ENABLED
+        self.volume_confirmation = self.enhanced_validation and config_momentum_strategy.MOMENTUM_VOLUME_CONFIRMATION
+        self.mtf_validation = self.enhanced_validation and config_momentum_strategy.MOMENTUM_MTF_VALIDATION
+        self.adaptive_smoothing = self.enhanced_validation and config_momentum_strategy.MOMENTUM_ADAPTIVE_SMOOTHING
 
         # Thresholds
         self.signal_threshold = config_momentum_strategy.MOMENTUM_SIGNAL_THRESHOLD
@@ -112,6 +115,11 @@ class MomentumStrategy(BaseStrategy):
 
         # Calculation method
         self.calculation_method = config_momentum_strategy.MOMENTUM_CALCULATION_METHOD
+
+        if self.enhanced_validation:
+            self.logger.info(f"🔍 Enhanced validation ENABLED - Full momentum analysis")
+        else:
+            self.logger.info(f"🔧 Enhanced validation DISABLED - Basic momentum testing mode")
 
         self.logger.info("🚀 Advanced Momentum Strategy initialized")
         self.logger.info(f"   Parameters: fast={self.fast_period}, slow={self.slow_period}, signal={self.signal_period}")

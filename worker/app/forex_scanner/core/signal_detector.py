@@ -261,21 +261,26 @@ class SignalDetector:
     def _get_macd_strategy_for_epic(self, epic: str) -> 'MACDStrategy':
         """Get or create epic-specific MACD strategy with optimized parameters"""
         if epic not in self.macd_strategies_cache:
+            # Detect if we're in backtest mode by checking data_fetcher type
+            is_backtest = 'Backtest' in str(type(self.data_fetcher).__name__)
+
             try:
                 # Create MACD strategy with epic-specific optimized parameters
                 self.macd_strategies_cache[epic] = MACDStrategy(
-                    data_fetcher=self.data_fetcher, 
-                    epic=epic, 
-                    use_optimized_parameters=True
+                    data_fetcher=self.data_fetcher,
+                    epic=epic,
+                    use_optimized_parameters=True,
+                    backtest_mode=is_backtest
                 )
-                self.logger.debug(f"✅ Created optimized MACD strategy for {epic}")
+                self.logger.debug(f"✅ Created optimized MACD strategy for {epic} (backtest_mode={is_backtest})")
             except Exception as e:
                 self.logger.warning(f"Failed to create optimized MACD strategy for {epic}: {e}")
                 # Fallback to basic MACD strategy
                 self.macd_strategies_cache[epic] = MACDStrategy(
-                    data_fetcher=self.data_fetcher, 
-                    epic=epic, 
-                    use_optimized_parameters=False
+                    data_fetcher=self.data_fetcher,
+                    epic=epic,
+                    use_optimized_parameters=False,
+                    backtest_mode=is_backtest
                 )
         
         return self.macd_strategies_cache[epic]

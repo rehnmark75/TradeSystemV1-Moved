@@ -18,8 +18,19 @@ from typing import Optional, Dict, Tuple
 
 try:
     from configdata import config
+    # Import Ichimoku-specific config for strategy settings
+    from configdata.strategies import config_ichimoku_strategy as ichimoku_config
+    # Apply strategy-specific overrides to general config
+    for attr in dir(ichimoku_config):
+        if attr.startswith('ICHIMOKU_') and not attr.startswith('_'):
+            setattr(config, attr, getattr(ichimoku_config, attr))
 except ImportError:
     from forex_scanner.configdata import config
+    from forex_scanner.configdata.strategies import config_ichimoku_strategy as ichimoku_config
+    # Apply strategy-specific overrides to general config
+    for attr in dir(ichimoku_config):
+        if attr.startswith('ICHIMOKU_') and not attr.startswith('_'):
+            setattr(config, attr, getattr(ichimoku_config, attr))
 
 
 class IchimokuTrendValidator:

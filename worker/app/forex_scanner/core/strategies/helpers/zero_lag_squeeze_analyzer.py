@@ -17,8 +17,9 @@ except ImportError:
 class ZeroLagSqueezeAnalyzer:
     """Handles Squeeze Momentum calculations and validation for Zero Lag strategy"""
     
-    def __init__(self, logger: logging.Logger = None):
+    def __init__(self, logger: logging.Logger = None, enhanced_validation: bool = True):
         self.logger = logger or logging.getLogger(__name__)
+        self.enhanced_validation = enhanced_validation
         self.eps = 1e-8  # Epsilon for stability
     
     def calculate_squeeze_momentum(self, df: pd.DataFrame, 

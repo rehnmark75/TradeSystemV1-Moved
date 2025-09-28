@@ -19,7 +19,7 @@ class MACDSignalCalculator:
     def __init__(self, logger: logging.Logger = None, trend_validator=None):
         self.logger = logger or logging.getLogger(__name__)
         self.trend_validator = trend_validator
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.30)  # TEMP: Lower for debugging
+        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.25)  # BALANCED: Reasonable quality threshold
     
     def calculate_simple_confidence(self, latest_row: pd.Series, signal_type: str) -> float:
         """
@@ -40,7 +40,7 @@ class MACDSignalCalculator:
             Confidence score between 0.0 and 0.95 (higher threshold required)
         """
         try:
-            base_confidence = 0.55  # Start with 55% (balanced quality vs quantity)
+            base_confidence = 0.30  # BALANCED: Reasonable starting confidence for quality signals
             
             # Get enhanced indicator values
             macd_histogram = latest_row.get('macd_histogram', 0)
@@ -59,14 +59,14 @@ class MACDSignalCalculator:
             if macd_histogram == 0:
                 return 0.3  # Low confidence if MACD missing
             
-            # 1. ADX TREND STRENGTH ANALYSIS (30% weight) - NEW PRIMARY FACTOR
+            # 1. ADX TREND STRENGTH ANALYSIS (10% weight) - Reduced from 30% for more signals
             adx_boost = 0.0
             if adx >= 40:
-                adx_boost = 0.30  # Very strong trend
+                adx_boost = 0.10  # Very strong trend (reduced from 30%)
             elif adx >= 30:
-                adx_boost = 0.20  # Strong trend
+                adx_boost = 0.07  # Strong trend (reduced from 20%)
             elif adx >= 25:
-                adx_boost = 0.10  # Moderate trend
+                adx_boost = 0.03  # Moderate trend (reduced from 10%)
             else:
                 # Weak trend - reduce confidence but still allow signals
                 adx_boost = 0.05  # Small boost instead of rejection
@@ -174,13 +174,21 @@ class MACDSignalCalculator:
             # Ensure we have a high-quality signal (65%+ minimum after all boosts)
             final_confidence = max(0.20, min(0.95, base_confidence))
             
-            # Quality gate - temporarily lowered for testing  
-            if final_confidence < 0.30:
-                self.logger.debug(f"Signal rejected: confidence {final_confidence:.3f} below 30% threshold")
-                return 0.30  # Below trading threshold
-            
-            self.logger.debug(f"Enhanced MACD confidence: {final_confidence:.3f} for {signal_type} "
-                            f"(ADX: {adx:.1f}, RSI: {rsi:.1f}, Histogram: {macd_histogram:.6f})")
+            # EMERGENCY: Log detailed confidence breakdown for debugging
+            self.logger.info(f"🚨 CONFIDENCE BREAKDOWN for {signal_type}:")
+            self.logger.info(f"   📊 Base: {base_confidence:.3f}, ADX boost: {adx_boost:.3f}")
+            self.logger.info(f"   📊 Histogram boost: {histogram_boost:.3f}, RSI boost: {rsi_boost:.3f}")
+            self.logger.info(f"   📊 EMA boost: {ema_boost:.3f}, Alignment boost: {alignment_boost:.3f}")
+            self.logger.info(f"   📊 Divergence boost: {divergence_boost:.3f}")
+            self.logger.info(f"   📊 FINAL: {final_confidence:.3f}")
+            self.logger.info(f"   📊 Raw values - ADX: {adx:.1f}, RSI: {rsi:.1f}, Histogram: {macd_histogram:.8f}")
+
+            # EMERGENCY: Very low quality gate to catch any signal
+            if final_confidence < 0.10:
+                self.logger.info(f"🚨 Signal rejected: confidence {final_confidence:.3f} below EMERGENCY 10% threshold")
+                return 0.10  # Extremely low threshold
+
+            self.logger.info(f"✅ Enhanced MACD confidence PASSED: {final_confidence:.3f} for {signal_type}")
             return final_confidence
             
         except Exception as e:
@@ -190,16 +198,17 @@ class MACDSignalCalculator:
     def validate_confidence_threshold(self, confidence: float) -> bool:
         """
         Validate that confidence meets minimum threshold
-        
+
         Args:
             confidence: Calculated confidence score
-            
+
         Returns:
             True if confidence meets threshold
         """
+        # BALANCED MODE: Normal confidence validation
         passes = confidence >= self.min_confidence
         if not passes:
-            self.logger.debug(f"Signal rejected: confidence {confidence:.3f} < threshold {self.min_confidence}")
+            self.logger.debug(f"Signal rejected: confidence {confidence:.3f} < threshold {self.min_confidence:.3f}")
         return passes
     
     def calculate_macd_strength_factor(self, latest_row: pd.Series, signal_type: str) -> float:

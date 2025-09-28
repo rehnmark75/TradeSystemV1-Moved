@@ -126,6 +126,112 @@ class BacktestScanner(IntelligentForexScanner):
                 self.signal_detector.ema_strategy.use_optimal_parameters = True
                 self.logger.info("✅ EMA strategy configured for backtest mode - will use optimal parameters and process all alert timestamps")
 
+            # CRITICAL FIX: Also configure MACD strategy for backtest mode
+            if hasattr(self.signal_detector, 'macd_strategy') and self.signal_detector.macd_strategy:
+                self.signal_detector.macd_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.macd_strategy.backtest_mode = True
+                self.signal_detector.macd_strategy.use_optimized_parameters = True
+                self.logger.info("✅ MACD strategy configured for backtest mode - will use optimal parameters and backtest filtering")
+
+            # CRITICAL FIX: Configure EMA strategy for pipeline mode
+            if hasattr(self.signal_detector, 'ema_strategy') and self.signal_detector.ema_strategy:
+                self.signal_detector.ema_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.ema_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.ema_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'EMA_ENHANCED_VALIDATION', True)
+                # Disable breakout validator in basic mode for performance
+                if not self.pipeline_mode:
+                    self.signal_detector.ema_strategy.breakout_validator = None
+                if self.signal_detector.ema_strategy.enhanced_validation:
+                    self.logger.info("✅ EMA strategy configured for PIPELINE mode - enhanced validation enabled")
+                else:
+                    self.logger.info("✅ EMA strategy configured for BASIC mode - enhanced validation disabled for fast testing")
+
+            # CRITICAL FIX: Configure SMC strategy for pipeline mode
+            if hasattr(self.signal_detector, 'smc_strategy') and self.signal_detector.smc_strategy:
+                self.signal_detector.smc_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.smc_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.smc_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'SMC_ENHANCED_VALIDATION', True)
+                if self.signal_detector.smc_strategy.enhanced_validation:
+                    self.logger.info("✅ SMC strategy configured for PIPELINE mode - enhanced validation enabled")
+                else:
+                    self.logger.info("✅ SMC strategy configured for BASIC mode - enhanced validation disabled for fast testing")
+
+            # CRITICAL FIX: Configure Ichimoku strategy for pipeline mode
+            if hasattr(self.signal_detector, 'ichimoku_strategy') and self.signal_detector.ichimoku_strategy:
+                self.signal_detector.ichimoku_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.ichimoku_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.ichimoku_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'ICHIMOKU_ENHANCED_VALIDATION', True)
+                # Disable expensive RAG features in basic mode
+                if not self.pipeline_mode:
+                    self.signal_detector.ichimoku_strategy.rag_enabled = False
+                    self.signal_detector.ichimoku_strategy.market_intelligence_adapter = None
+                if self.signal_detector.ichimoku_strategy.enhanced_validation:
+                    self.logger.info("✅ Ichimoku strategy configured for PIPELINE mode - enhanced validation and RAG enabled")
+                else:
+                    self.logger.info("✅ Ichimoku strategy configured for BASIC mode - enhanced validation and RAG disabled for fast testing")
+
+            # CRITICAL FIX: Configure Mean Reversion strategy for pipeline mode
+            if hasattr(self.signal_detector, 'mean_reversion_strategy') and self.signal_detector.mean_reversion_strategy:
+                self.signal_detector.mean_reversion_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.mean_reversion_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.mean_reversion_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'MEAN_REVERSION_ENHANCED_VALIDATION', True)
+                if self.signal_detector.mean_reversion_strategy.enhanced_validation:
+                    self.logger.info("✅ Mean Reversion strategy configured for PIPELINE mode - enhanced validation enabled")
+                else:
+                    self.logger.info("✅ Mean Reversion strategy configured for BASIC mode - enhanced validation disabled for fast testing")
+
+            # CRITICAL FIX: Configure Ranging Market strategy for pipeline mode
+            if hasattr(self.signal_detector, 'ranging_market_strategy') and self.signal_detector.ranging_market_strategy:
+                self.signal_detector.ranging_market_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.ranging_market_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.ranging_market_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'RANGING_MARKET_ENHANCED_VALIDATION', True)
+                if self.signal_detector.ranging_market_strategy.enhanced_validation:
+                    self.logger.info("✅ Ranging Market strategy configured for PIPELINE mode - enhanced validation enabled")
+                else:
+                    self.logger.info("✅ Ranging Market strategy configured for BASIC mode - enhanced validation disabled for fast testing")
+
+            # CRITICAL FIX: Configure Zero Lag strategy for pipeline mode
+            if hasattr(self.signal_detector, 'zero_lag_strategy') and self.signal_detector.zero_lag_strategy:
+                self.signal_detector.zero_lag_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.zero_lag_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.zero_lag_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'ZERO_LAG_ENHANCED_VALIDATION', True)
+                if self.signal_detector.zero_lag_strategy.enhanced_validation:
+                    self.logger.info("✅ Zero Lag strategy configured for PIPELINE mode - enhanced validation enabled")
+                else:
+                    self.logger.info("✅ Zero Lag strategy configured for BASIC mode - enhanced validation disabled for fast testing")
+
+            # CRITICAL FIX: Configure Momentum strategy for pipeline mode
+            if hasattr(self.signal_detector, 'momentum_strategy') and self.signal_detector.momentum_strategy:
+                self.signal_detector.momentum_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.momentum_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.momentum_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'MOMENTUM_ENHANCED_VALIDATION', True)
+                # Disable expensive features in basic mode
+                if not self.pipeline_mode:
+                    self.signal_detector.momentum_strategy.velocity_enabled = False
+                    self.signal_detector.momentum_strategy.volume_confirmation = False
+                    self.signal_detector.momentum_strategy.mtf_validation = False
+                    self.signal_detector.momentum_strategy.adaptive_smoothing = False
+                if self.signal_detector.momentum_strategy.enhanced_validation:
+                    self.logger.info("✅ Momentum strategy configured for PIPELINE mode - enhanced validation enabled")
+                else:
+                    self.logger.info("✅ Momentum strategy configured for BASIC mode - enhanced validation disabled for fast testing")
+
+            # CRITICAL FIX: Also configure any existing MACD strategies in cache for backtest mode
+            if hasattr(self.signal_detector, 'macd_strategies_cache') and self.signal_detector.macd_strategies_cache:
+                for epic, strategy in self.signal_detector.macd_strategies_cache.items():
+                    if strategy:
+                        strategy.data_fetcher = backtest_data_fetcher
+                        strategy.backtest_mode = True
+                        strategy.use_optimized_parameters = True
+                self.logger.info(f"✅ {len(self.signal_detector.macd_strategies_cache)} cached MACD strategies configured for backtest mode")
+
             self.logger.info("✅ Signal detector updated to use BacktestDataFetcher for historical data")
 
         except Exception as e:
@@ -387,8 +493,10 @@ class BacktestScanner(IntelligentForexScanner):
 
                     # Pipeline mode: Run through full validation and processing
                     if signal and self.pipeline_mode:
-                        self.logger.debug(f"🔄 Pipeline mode: Processing {strategy_name} signal for {epic}")
+                        self.logger.info(f"🔄 PIPELINE MODE ACTIVE: Processing {strategy_name} signal for {epic} through full validation pipeline")
                         signal = self._apply_full_pipeline(signal, epic, timestamp)
+                    elif signal:
+                        self.logger.info(f"🚀 BASIC MODE: Skipping trade validator and market intelligence for {strategy_name} signal on {epic}")
 
                     return signal
                 else:
@@ -408,13 +516,15 @@ class BacktestScanner(IntelligentForexScanner):
 
             # Pipeline mode: Run through full validation and processing for fallback signals
             if signals and self.pipeline_mode:
-                self.logger.debug(f"🔄 Pipeline mode: Processing fallback signals for {epic}")
+                self.logger.info(f"🔄 PIPELINE MODE ACTIVE: Processing fallback signals for {epic} through full validation pipeline")
                 # For multiple signals, process each one
                 if isinstance(signals, list):
                     signals = [self._apply_full_pipeline(signal, epic, timestamp) for signal in signals if signal]
                     signals = [s for s in signals if s]  # Remove None results
                 else:
                     signals = self._apply_full_pipeline(signals, epic, timestamp)
+            elif signals:
+                self.logger.info(f"🚀 BASIC MODE: Skipping trade validator and market intelligence for fallback signals on {epic}")
 
             return signals
 
@@ -460,7 +570,7 @@ class BacktestScanner(IntelligentForexScanner):
 
             # Apply trade validation (same logic as live trading)
             self.logger.debug(f"🔍 Pipeline: Validating signal for {epic}")
-            is_valid, validation_message = self._trade_validator.validate_signal(signal)
+            is_valid, validation_message = self._trade_validator.validate_signal_for_trading(signal)
 
             if not is_valid:
                 self.logger.debug(f"❌ Pipeline: Signal rejected - {validation_message}")

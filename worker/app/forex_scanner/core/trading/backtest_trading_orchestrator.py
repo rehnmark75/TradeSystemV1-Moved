@@ -72,10 +72,12 @@ class BacktestTradingOrchestrator:
                  execution_id: int,
                  backtest_config: Dict,
                  db_manager: DatabaseManager = None,
-                 logger: Optional[logging.Logger] = None):
+                 logger: Optional[logging.Logger] = None,
+                 pipeline_mode: bool = False):
 
         self.execution_id = execution_id
         self.backtest_config = backtest_config
+        self.pipeline_mode = pipeline_mode
         self.db_manager = db_manager or DatabaseManager(config.DATABASE_URL)
         self.logger = logger or logging.getLogger(__name__)
 
@@ -83,12 +85,23 @@ class BacktestTradingOrchestrator:
         self.data_fetcher = BacktestDataFetcher(self.db_manager, config.USER_TIMEZONE)
         self.signal_detector = SignalDetector(self.db_manager, config.USER_TIMEZONE)
 
-        # CRITICAL: Use SAME TradeValidator as live trading with backtest mode enabled
-        self.trade_validator = TradeValidator(
-            logger=self.logger,
-            db_manager=self.db_manager,
-            backtest_mode=True  # UNIVERSAL FIX: Enable confidence format normalization
-        )
+        # Pipeline mode: Use SAME TradeValidator as live trading with backtest mode enabled
+        # Basic mode: Skip TradeValidator to improve performance for parameter optimization
+        if self.pipeline_mode:
+            self.trade_validator = TradeValidator(
+                logger=self.logger,
+                db_manager=self.db_manager,
+                backtest_mode=True  # UNIVERSAL FIX: Enable confidence format normalization
+            )
+            self.logger.info("🔄 PIPELINE MODE: TradeValidator enabled for full validation")
+        else:
+            self.trade_validator = None
+            self.logger.info("🚀 BASIC MODE: TradeValidator disabled for fast parameter optimization")
+
+        # DEBUG: Log pipeline mode status
+        self.logger.info(f"🔧 BacktestTradingOrchestrator initialized with pipeline_mode={pipeline_mode}")
+        self.logger.info(f"🔧 backtest_config contains pipeline_mode: {backtest_config.get('pipeline_mode', 'NOT_SET')}")
+        self.logger.info(f"🔧 trade_validator created: {self.trade_validator is not None}")
 
         # Backtest-specific components
         self.order_logger = BacktestOrderLogger(self.db_manager, execution_id, logger=self.logger)
@@ -163,8 +176,15 @@ class BacktestTradingOrchestrator:
         self.orchestrator_stats['signals_processed'] += 1
 
         try:
-            # Step 1: Signal validation (SAME as live trading)
-            validation_passed, validation_message = self.trade_validator.validate_signal_for_trading(signal)
+            # Step 1: Signal validation (PIPELINE MODE ONLY)
+            if self.pipeline_mode and self.trade_validator:
+                self.logger.info(f"🔄 PIPELINE MODE: Validating signal through TradeValidator for {signal.get('epic', 'unknown')}")
+                validation_passed, validation_message = self.trade_validator.validate_signal_for_trading(signal)
+                self.logger.info(f"🔄 PIPELINE MODE: Validation result: {validation_passed}, message: {validation_message}")
+            else:
+                # Basic mode: Skip validation for fast parameter optimization
+                self.logger.info(f"🚀 BASIC MODE: Skipping TradeValidator validation for {signal.get('epic', 'unknown')} (pipeline_mode={self.pipeline_mode}, trade_validator={self.trade_validator is not None})")
+                validation_passed, validation_message = True, "Basic mode - validation skipped"
 
             if validation_passed:
                 self.orchestrator_stats['signals_validated'] += 1
@@ -292,7 +312,7 @@ class BacktestTradingOrchestrator:
         # Add orchestration statistics
         enhanced_results['orchestration_stats'] = self.orchestrator_stats.copy()
         enhanced_results['validation_summary'] = self._get_validation_summary()
-        enhanced_results['trade_validator_stats'] = self.trade_validator.get_validation_statistics()
+        enhanced_results['trade_validator_stats'] = self.trade_validator.get_validation_statistics() if self.trade_validator else {'status': 'disabled_basic_mode'}
 
         return enhanced_results
 
@@ -353,9 +373,9 @@ class BacktestTradingOrchestrator:
                 'orchestration_version': 'backtest_v1.0'
             },
             'validation_pipeline': {
-                'trade_validator_used': True,
-                'same_as_live_trading': True,
-                'validation_statistics': self.trade_validator.get_validation_statistics(),
+                'trade_validator_used': self.trade_validator is not None,
+                'same_as_live_trading': self.trade_validator is not None,
+                'validation_statistics': self.trade_validator.get_validation_statistics() if self.trade_validator else {'status': 'disabled_basic_mode'},
                 'validation_summary': self._get_validation_summary()
             },
             'signal_processing': {
@@ -419,8 +439,8 @@ class BacktestTradingOrchestrator:
     def _verify_pipeline_integrity(self) -> bool:
         """Verify that validation pipeline is working correctly"""
         try:
-            # Check that TradeValidator is functioning
-            validator_stats = self.trade_validator.get_validation_statistics()
+            # Check that TradeValidator is functioning (if enabled)
+            validator_stats = self.trade_validator.get_validation_statistics() if self.trade_validator else {'status': 'disabled_basic_mode'}
 
             # Verify order logger is functioning
             logger_stats = self.order_logger.get_statistics()
@@ -464,7 +484,7 @@ class BacktestTradingOrchestrator:
         """Get current orchestrator statistics"""
         return {
             'orchestrator_stats': self.orchestrator_stats.copy(),
-            'trade_validator_stats': self.trade_validator.get_validation_statistics(),
+            'trade_validator_stats': self.trade_validator.get_validation_statistics() if self.trade_validator else {'status': 'disabled_basic_mode'},
             'order_logger_stats': self.order_logger.get_statistics(),
             'execution_id': self.execution_id
         }
@@ -506,6 +526,10 @@ def create_backtest_trading_orchestrator(execution_id: int,
                                        db_manager: DatabaseManager = None,
                                        **kwargs) -> BacktestTradingOrchestrator:
     """Create BacktestTradingOrchestrator instance"""
+    # Extract pipeline_mode from backtest_config if not provided in kwargs
+    if 'pipeline_mode' not in kwargs:
+        kwargs['pipeline_mode'] = backtest_config.get('pipeline_mode', False)
+
     return BacktestTradingOrchestrator(
         execution_id, backtest_config, db_manager, **kwargs
     )

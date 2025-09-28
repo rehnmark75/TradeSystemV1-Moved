@@ -112,7 +112,8 @@ class EnhancedBacktestCommands:
                 execution_id,
                 backtest_config,
                 self.db_manager,
-                logger=self.logger
+                logger=self.logger,
+                pipeline_mode=pipeline  # Pass pipeline mode to control validation
             ) as orchestrator:
 
                 # Run the complete orchestration

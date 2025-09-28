@@ -53,7 +53,7 @@ class ZeroLagStrategy(BaseStrategy):
     - EMA200 validation delegated to TradeValidator for consistency
     """
     
-    def __init__(self, data_fetcher=None, epic=None, use_optimal_parameters=False):
+    def __init__(self, data_fetcher=None, epic=None, use_optimal_parameters=False, pipeline_mode=True):
         super().__init__('zero_lag_squeeze')
         
         # Initialize core components
@@ -62,14 +62,18 @@ class ZeroLagStrategy(BaseStrategy):
         self.epic = epic
         self.use_optimal_parameters = use_optimal_parameters
         
+        # Enable/disable expensive features based on pipeline mode
+        self.enhanced_validation = pipeline_mode and getattr(configdata, 'ZERO_LAG_ENHANCED_VALIDATION', True) if configdata else pipeline_mode
+
         # Initialize simplified helper modules
         self.indicator_calculator = ZeroLagIndicatorCalculator(logger=self.logger)
-        self.trend_validator = ZeroLagTrendValidator(logger=self.logger)
-        self.squeeze_analyzer = ZeroLagSqueezeAnalyzer(logger=self.logger)
+        self.trend_validator = ZeroLagTrendValidator(logger=self.logger, enhanced_validation=self.enhanced_validation)
+        self.squeeze_analyzer = ZeroLagSqueezeAnalyzer(logger=self.logger, enhanced_validation=self.enhanced_validation)
         self.signal_calculator = ZeroLagSignalCalculator(
             logger=self.logger,
             trend_validator=self.trend_validator,
-            squeeze_analyzer=self.squeeze_analyzer
+            squeeze_analyzer=self.squeeze_analyzer,
+            enhanced_validation=self.enhanced_validation
         )
         
         # Strategy configuration - Dynamic or Static
@@ -117,6 +121,11 @@ class ZeroLagStrategy(BaseStrategy):
             self.net_pips = optimal_config.net_pips
             self.last_optimized = optimal_config.last_updated
             
+            if self.enhanced_validation:
+                self.logger.info(f"🔍 Enhanced validation ENABLED - Full Zero Lag analysis")
+            else:
+                self.logger.info(f"🔧 Enhanced validation DISABLED - Basic Zero Lag testing mode")
+
             self.logger.info("✅ Zero Lag + Squeeze Momentum Strategy initialized with OPTIMAL PARAMETERS")
             self.logger.info(f"   📊 Epic: {epic}")
             self.logger.info(f"   ⚡ ZL Length: {self.length} (optimized)")

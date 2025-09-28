@@ -19,9 +19,10 @@ except ImportError:
 class MeanReversionSignalDetector:
     """Detects mean reversion signals using multi-oscillator confluence approach"""
 
-    def __init__(self, logger: logging.Logger = None, indicator_calculator=None):
+    def __init__(self, logger: logging.Logger = None, indicator_calculator=None, enhanced_validation: bool = True):
         self.logger = logger or logging.getLogger(__name__)
         self.indicator_calculator = indicator_calculator
+        self.enhanced_validation = enhanced_validation
 
         # Load configuration
         self.config = self._load_configuration()

@@ -94,11 +94,21 @@ class MACDIndicatorCalculator:
             if 'ema_200' not in df_copy.columns:
                 df_copy['ema_200'] = df_copy['close'].ewm(span=200).mean()
             
-            # Add enhanced filters: ADX, ATR, and RSI
-            df_copy = self._add_enhanced_filters(df_copy)
-            
-            # Add MACD divergence detection for high-quality signals
-            df_copy = self.detect_macd_divergence(df_copy)
+            # Add enhanced filters: ADX, ATR, and RSI (only if missing)
+            if not all(col in df_copy.columns for col in ['adx', 'atr', 'rsi']):
+                self.logger.debug("Adding missing enhanced filters (ADX, ATR, RSI)")
+                df_copy = self._add_enhanced_filters(df_copy)
+            else:
+                self.logger.debug("Enhanced filters already present - skipping calculation")
+
+            # Add MACD divergence detection for high-quality signals (only if missing and enabled)
+            # OPTIMIZATION: Divergence detection is expensive and disabled for performance
+            divergence_enabled = False  # Disabled for optimization - can be re-enabled in config
+            if divergence_enabled and not any(col in df_copy.columns for col in ['bullish_divergence', 'bearish_divergence']):
+                self.logger.debug("Adding MACD divergence detection")
+                df_copy = self.detect_macd_divergence(df_copy)
+            else:
+                self.logger.debug("Divergence detection DISABLED for performance optimization")
             
             self.logger.debug("MACD indicators, enhanced filters, and divergence detection completed successfully")
             return df_copy
@@ -121,12 +131,20 @@ class MACDIndicatorCalculator:
         df_copy = df.copy()
         
         try:
+            # Check if crossover signals already exist (performance optimization)
+            crossover_cols = ['bull_crossover', 'bear_crossover', 'bull_alert', 'bear_alert']
+            if all(col in df_copy.columns for col in crossover_cols):
+                signal_count = df_copy[['bull_alert', 'bear_alert']].any(axis=1).sum()
+                if signal_count > 0:
+                    self.logger.debug(f"📊 [REUSING CROSSOVERS] Found {signal_count} existing crossover signals for {epic}")
+                    return df_copy
+
             # Ensure we have MACD data
             required_cols = ['macd_line', 'macd_signal', 'macd_histogram']
             if not all(col in df_copy.columns for col in required_cols):
                 self.logger.error("Missing MACD indicators for crossover detection")
                 return df_copy
-            
+
             # Initialize signal columns
             df_copy['bull_crossover'] = False
             df_copy['bear_crossover'] = False
@@ -160,24 +178,73 @@ class MACDIndicatorCalculator:
             
             self.logger.debug(f"🔍 RAW MACD crossovers for {epic}: {raw_bull_cross.sum()} bull, {raw_bear_cross.sum()} bear (threshold: {base_threshold:.6f})")
 
-            # Debug histogram values for diagnostic
+            # EMERGENCY DEBUGGING: Comprehensive histogram analysis
             if len(df_copy) > 0:
                 histogram_values = df_copy['macd_histogram'].dropna()
                 if len(histogram_values) > 0:
                     hist_max = histogram_values.max()
                     hist_min = histogram_values.min()
                     hist_mean = histogram_values.mean()
-                    self.logger.debug(f"🔍 HISTOGRAM RANGE for {epic}: min={hist_min:.6f}, max={hist_max:.6f}, mean={hist_mean:.6f}")
+                    hist_std = histogram_values.std()
+                    hist_abs_max = histogram_values.abs().max()
+
+                    self.logger.info(f"🚨 EMERGENCY HISTOGRAM ANALYSIS for {epic}:")
+                    self.logger.info(f"   📊 Range: min={hist_min:.8f}, max={hist_max:.8f}, mean={hist_mean:.8f}")
+                    self.logger.info(f"   📊 Std: {hist_std:.8f}, Abs Max: {hist_abs_max:.8f}")
+                    self.logger.info(f"   📊 Threshold: {base_threshold:.8f}")
 
                     # Check how many values exceed thresholds
                     above_threshold = (histogram_values >= base_threshold).sum()
                     below_neg_threshold = (histogram_values <= -base_threshold).sum()
-                    self.logger.debug(f"🔍 THRESHOLD ANALYSIS for {epic}: {above_threshold} above +{base_threshold:.6f}, {below_neg_threshold} below -{base_threshold:.6f}")
+                    above_zero = (histogram_values > 0).sum()
+                    below_zero = (histogram_values < 0).sum()
+
+                    self.logger.info(f"   🔍 Threshold Analysis: {above_threshold} above +{base_threshold:.8f}, {below_neg_threshold} below -{base_threshold:.8f}")
+                    self.logger.info(f"   🔍 Zero Line Analysis: {above_zero} above zero, {below_zero} below zero")
+
+                    # Log recent histogram values for detailed analysis
+                    recent_hist = histogram_values.tail(20)
+                    self.logger.info(f"   📈 Recent 20 histogram values: {recent_hist.tolist()}")
+
+                    # Check for any crossovers at all (ignoring thresholds)
+                    histogram_prev = df_copy['macd_histogram'].shift(1).dropna()
+                    if len(histogram_prev) > 0:
+                        raw_bull_crosses = ((df_copy['macd_histogram'] > 0) & (histogram_prev <= 0)).sum()
+                        raw_bear_crosses = ((df_copy['macd_histogram'] < 0) & (histogram_prev >= 0)).sum()
+                        self.logger.info(f"   ⚡ RAW crossovers (no threshold): {raw_bull_crosses} bull, {raw_bear_crosses} bear")
             
-            # EMERGENCY: Skip multi-candle confirmation - use raw crossovers
-            bull_cross = raw_bull_cross
-            bear_cross = raw_bear_cross
-            self.logger.debug(f"🚨 EMERGENCY: Using RAW crossovers for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
+            # BALANCED: Use normal threshold-based detection with optimized thresholds
+            emergency_bypass = False  # BALANCED MODE: Use optimized thresholds
+            if emergency_bypass:
+                # Detect ANY histogram crossover regardless of strength
+                emergency_bull_cross = (
+                    (df_copy['macd_histogram'] > 0) &
+                    (df_copy['histogram_prev'] <= 0)
+                    # NO THRESHOLD CHECK
+                )
+                emergency_bear_cross = (
+                    (df_copy['macd_histogram'] < 0) &
+                    (df_copy['histogram_prev'] >= 0)
+                    # NO THRESHOLD CHECK
+                )
+
+                self.logger.info(f"🚨 EMERGENCY BYPASS MODE for {epic}: {emergency_bull_cross.sum()} bull crossovers, {emergency_bear_cross.sum()} bear crossovers (NO THRESHOLDS)")
+
+                # Use emergency crossovers if we find any
+                if emergency_bull_cross.sum() > 0 or emergency_bear_cross.sum() > 0:
+                    bull_cross = emergency_bull_cross
+                    bear_cross = emergency_bear_cross
+                    self.logger.info(f"🚨 USING EMERGENCY CROSSOVERS: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
+                else:
+                    # Fallback to threshold-based if no emergency crossovers found
+                    bull_cross = raw_bull_cross
+                    bear_cross = raw_bear_cross
+                    self.logger.info(f"🚨 NO EMERGENCY CROSSOVERS - Using threshold-based: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
+            else:
+                # EMERGENCY: Skip multi-candle confirmation - use raw crossovers
+                bull_cross = raw_bull_cross
+                bear_cross = raw_bear_cross
+                self.logger.debug(f"🚨 EMERGENCY: Using RAW crossovers for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
             
             # Debug RSI and ADX data availability first
             if 'rsi' in df_copy.columns and 'adx' in df_copy.columns:
@@ -191,15 +258,15 @@ class MACDIndicatorCalculator:
             else:
                 self.logger.error(f"❌ MISSING INDICATORS for {epic}: RSI={'rsi' in df_copy.columns}, ADX={'adx' in df_copy.columns}")
 
-            # 🎯 ADAPTIVE SIGNAL SCORING - Only take highest confidence signals
-            bull_cross, bear_cross = self._apply_adaptive_signal_scoring(
-                df_copy, bull_cross, bear_cross, epic, base_threshold
-            )
+            # 🎯 ADAPTIVE SIGNAL SCORING - DISABLED for more signals (optimization)
+            # bull_cross, bear_cross = self._apply_adaptive_signal_scoring(
+            #     df_copy, bull_cross, bear_cross, epic, base_threshold
+            # )
             
-            # 🌊 VOLATILITY FILTER - Avoid choppy/ranging markets
-            volatility_filter_applied = self._apply_volatility_filter(df_copy, bull_cross, bear_cross, epic)
-            if volatility_filter_applied is not None:
-                bull_cross, bear_cross = volatility_filter_applied
+            # 🌊 VOLATILITY FILTER - DISABLED for more signals (optimization)
+            # volatility_filter_applied = self._apply_volatility_filter(df_copy, bull_cross, bear_cross, epic)
+            # if volatility_filter_applied is not None:
+            #     bull_cross, bear_cross = volatility_filter_applied
 
             # Log basic info for debugging
             bull_count = bull_cross.sum()
@@ -268,12 +335,12 @@ class MACDIndicatorCalculator:
 
             # FINAL PRODUCTION THRESHOLDS - Tuned to prevent signal floods
             if 'JPY' in epic.upper():
-                # JPY pairs: Moderate threshold
-                threshold = 0.00008  # Reduced from 0.0002 to allow some signals
+                # JPY pairs: Balanced threshold for reasonable signal generation
+                threshold = 0.000005  # Balanced: Low enough for signals, high enough for quality
                 pair_type = 'JPY'
             else:
-                # Major pairs: Moderate threshold
-                threshold = 0.00003  # Reduced from 0.00005 to allow some signals
+                # Major pairs: Balanced threshold for reasonable signal generation
+                threshold = 0.000002  # Balanced: Low enough for signals, high enough for quality
                 pair_type = 'Major'
 
             self.logger.info(f"📊 DYNAMIC threshold for {epic} ({pair_type}): {threshold:.6f}")
@@ -422,9 +489,9 @@ class MACDIndicatorCalculator:
             if 'rsi' not in df_enhanced.columns:
                 df_enhanced = self._calculate_rsi(df_enhanced)
 
-            # 4. ADD VWAP (Volume Weighted Average Price) for institutional sentiment
-            if 'vwap' not in df_enhanced.columns:
-                df_enhanced = self._calculate_vwap(df_enhanced)
+            # 4. ADD VWAP (Volume Weighted Average Price) - DISABLED for performance optimization
+            # if 'vwap' not in df_enhanced.columns:
+            #     df_enhanced = self._calculate_vwap(df_enhanced)
 
             return df_enhanced
             
@@ -803,9 +870,9 @@ class MACDIndicatorCalculator:
             if signals.sum() == 0:
                 return signals
             
-            # Calculate spacing requirements (15m timeframe) - VERY AGGRESSIVE
-            min_spacing_bars = 32  # 8 hours minimum spacing (was 6 hours)
-            max_daily_signals = 2  # Target maximum per day (was 4)
+            # Calculate spacing requirements (15m timeframe) - BALANCED for quality signals
+            min_spacing_bars = 4  # 1 hour minimum spacing (balanced approach)
+            max_daily_signals = 6  # Reasonable daily limit for quality
             
             # Create filtered signal series
             spaced_signals = pd.Series(False, index=signals.index)
@@ -1010,7 +1077,7 @@ class MACDIndicatorCalculator:
             self.logger.error(f"Error applying quality score filter: {e}")
             return signals
     
-    def _apply_final_signal_reduction(self, df: pd.DataFrame, signals: pd.Series, signal_type: str, base_threshold: float, epic: str, max_signals_per_day: int = 2) -> pd.Series:
+    def _apply_final_signal_reduction(self, df: pd.DataFrame, signals: pd.Series, signal_type: str, base_threshold: float, epic: str, max_signals_per_day: int = 8) -> pd.Series:
         """
         Final brute-force signal reduction to achieve exact target (2-4 signals per day)
         
@@ -1242,8 +1309,8 @@ class MACDIndicatorCalculator:
             if signals.sum() == 0:
                 return signals
 
-            # PRODUCTION: Reasonable spacing - 1 hour minimum
-            min_spacing_bars = 4  # 1 hour = 4 * 15min bars
+            # OPTIMIZED: Reduced spacing for more signals
+            min_spacing_bars = 1  # 15 minutes minimum spacing (reduced from 1 hour)
 
             filtered_signals = pd.Series(False, index=signals.index)
             last_signal_idx = None
@@ -1291,8 +1358,8 @@ class MACDIndicatorCalculator:
             if total_before == 0:
                 return bull_signals, bear_signals
 
-            # PRODUCTION: Strict but reasonable spacing - 2 hours minimum between ANY signals
-            min_spacing_bars = 8  # 2 hours = 8 * 15min bars
+            # OPTIMIZED: Reduced global spacing for more signals
+            min_spacing_bars = 2  # 30 minutes minimum between ANY signals (reduced from 2 hours)
 
             # Get all signal indices sorted by time
             signal_indices = [(idx, 'BULL' if bull_signals.loc[idx] else 'BEAR')
@@ -1390,30 +1457,35 @@ class MACDIndicatorCalculator:
                 tracker['signal_count_today'] = 0
                 tracker['last_signal_date'] = current_date
 
-            # Check daily limit FIRST (most restrictive)
-            MAX_SIGNALS_PER_DAY = 3  # Slightly less restrictive for backtest
+            # Check daily limit FIRST (balanced for quality signals)
+            MAX_SIGNALS_PER_DAY = 15  # Increased for backtesting - allows more signal detection
             if tracker['signal_count_today'] >= MAX_SIGNALS_PER_DAY:
                 self.logger.info(f"🚨 BACKTEST DAILY LIMIT for {epic}: {tracker['signal_count_today']}/{MAX_SIGNALS_PER_DAY} - BLOCKING all signals")
                 return pd.Series(False, index=bull_signals.index), pd.Series(False, index=bear_signals.index)
 
-            # Check time spacing from last signal
+            # Check time spacing from last signal - use data timestamps, not wall clock
             if tracker['last_signal_time'] is not None:
                 try:
-                    # Calculate time difference
+                    # For backtests, check if this is the same timestamp (same bar) - if so, allow only one signal per bar
+                    if latest_signal_time == tracker['last_signal_time']:
+                        self.logger.info(f"🚨 BACKTEST SAME BAR for {epic}: Signal on same timestamp - BLOCKING duplicate")
+                        return pd.Series(False, index=bull_signals.index), pd.Series(False, index=bear_signals.index)
+
+                    # Calculate time difference for minimum spacing
                     if hasattr(latest_signal_time, 'to_pydatetime') and hasattr(tracker['last_signal_time'], 'to_pydatetime'):
                         time_diff = latest_signal_time.to_pydatetime() - tracker['last_signal_time'].to_pydatetime()
                         hours_since_last = time_diff.total_seconds() / 3600
                     else:
-                        # Fallback: assume signals are too close
-                        hours_since_last = 0
+                        # Fallback: allow if we can't calculate
+                        hours_since_last = 1.0  # Assume enough time has passed
 
-                    MIN_HOURS_BETWEEN_SIGNALS = 3  # 3 hours minimum (slightly less restrictive)
+                    MIN_HOURS_BETWEEN_SIGNALS = 0.25  # 15 minutes for backtesting
                     if hours_since_last < MIN_HOURS_BETWEEN_SIGNALS:
-                        self.logger.info(f"🚨 BACKTEST TIME SPACING for {epic}: {hours_since_last:.1f}h < {MIN_HOURS_BETWEEN_SIGNALS}h - BLOCKING")
+                        self.logger.info(f"🚨 BACKTEST TIME SPACING for {epic}: {hours_since_last:.2f}h < {MIN_HOURS_BETWEEN_SIGNALS}h - BLOCKING")
                         return pd.Series(False, index=bull_signals.index), pd.Series(False, index=bear_signals.index)
 
                 except Exception as spacing_error:
-                    self.logger.warning(f"Time spacing calculation error: {spacing_error}")
+                    self.logger.warning(f"Time spacing calculation error: {spacing_error}, allowing signal")
 
             # Signal passes all global checks - allow ONE signal and update tracker
             # Take only the latest signal to be extra conservative

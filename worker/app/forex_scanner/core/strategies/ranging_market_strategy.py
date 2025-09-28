@@ -66,7 +66,7 @@ class RangingMarketStrategy(BaseStrategy):
     - Relative Vigor Index (momentum confirmation)
     """
 
-    def __init__(self, data_fetcher=None, backtest_mode=False, epic=None, timeframe='15m', use_optimized_parameters=True):
+    def __init__(self, data_fetcher=None, backtest_mode=False, epic=None, timeframe='15m', use_optimized_parameters=True, pipeline_mode=True):
         # Initialize parent properties manually (following mean_reversion_strategy pattern)
         self.name = 'ranging_market'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
@@ -77,6 +77,9 @@ class RangingMarketStrategy(BaseStrategy):
         self.timeframe = timeframe
         self.use_optimized_parameters = use_optimized_parameters
         self.data_fetcher = data_fetcher
+
+        # Enable/disable expensive features based on pipeline mode
+        self.enhanced_validation = pipeline_mode and getattr(config, 'RANGING_MARKET_ENHANCED_VALIDATION', True)
 
         # Strategy configuration
         self.config = self._load_configuration()
@@ -96,6 +99,11 @@ class RangingMarketStrategy(BaseStrategy):
             'zone_validation_passes': 0,
             'regime_filter_passes': 0
         }
+
+        if self.enhanced_validation:
+            self.logger.info(f"🔍 Enhanced validation ENABLED - Full ranging market analysis")
+        else:
+            self.logger.info(f"🔧 Enhanced validation DISABLED - Basic ranging market testing mode")
 
         self.logger.info(f"✅ Ranging Market Strategy initialized for {epic} on {timeframe}")
 

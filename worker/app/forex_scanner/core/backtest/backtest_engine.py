@@ -31,7 +31,7 @@ class BacktestEngine:
         
         # Initialize strategies with BACKTEST MODE
         self.ema_strategy = EMAStrategy(backtest_mode=True)
-        self.macd_strategy = MACDStrategy()
+        self.macd_strategy = MACDStrategy(backtest_mode=True)
         # self.combined_strategy = CombinedStrategy()  # Removed - strategy was disabled and unused
         
         # Initialize BB+Supertrend strategy if enabled
@@ -314,7 +314,7 @@ class BacktestEngine:
         """Backtest MACD strategy on historical data"""
         if not hasattr(self, 'macd_strategy') or self.macd_strategy is None:
             try:
-                self.macd_strategy = MACDStrategy()
+                self.macd_strategy = MACDStrategy(backtest_mode=True)
                 self.logger.info("✅ MACD strategy initialized for backtest")
             except Exception as e:
                 self.logger.error(f"❌ Failed to initialize MACD strategy: {e}")

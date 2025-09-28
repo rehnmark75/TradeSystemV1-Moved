@@ -75,7 +75,8 @@
       "Bash(git log:*)",
       "Bash(git show:*)",
       "Read(//home/hr/**)",
-      "Read(//home/**)"
+      "Read(//home/**)",
+      "Bash(docker-compose exec:*)"
     ],
     "deny": [],
     "ask": []

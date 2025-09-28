@@ -19,8 +19,9 @@ except ImportError:
 class MeanReversionTrendValidator:
     """Handles trend analysis and mean reversion zone validation for mean reversion signals"""
 
-    def __init__(self, logger: logging.Logger = None):
+    def __init__(self, logger: logging.Logger = None, enhanced_validation: bool = True):
         self.logger = logger or logging.getLogger(__name__)
+        self.enhanced_validation = enhanced_validation
         self.eps = 1e-8  # Epsilon for stability
 
         # Load configuration

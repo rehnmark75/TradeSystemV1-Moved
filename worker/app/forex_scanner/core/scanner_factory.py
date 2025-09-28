@@ -202,11 +202,14 @@ class ScannerFactory:
         """Create backtest trading orchestrator"""
 
         try:
+            # Extract pipeline_mode from backtest_config to ensure it's passed
+            pipeline_mode = backtest_config.get('pipeline_mode', False)
             orchestrator = BacktestTradingOrchestrator(
                 execution_id=execution_id,
                 backtest_config=backtest_config,
                 db_manager=self.db_manager,
                 logger=self.logger,
+                pipeline_mode=pipeline_mode,
                 **config_params
             )
 

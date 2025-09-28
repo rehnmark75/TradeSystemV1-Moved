@@ -108,7 +108,70 @@ MACD_ZERO_LINE_BULL_BELOW_ZERO = True               # Bull signals: crossover be
 MACD_ZERO_LINE_BEAR_ABOVE_ZERO = True               # Bear signals: crossover above zero line
 MACD_ZERO_LINE_STRICT_MODE = True                  # False = allow if either line meets criteria, True = require both
 
-# Safety Preset Configurations
+# OPTIMIZED FILTER PRESETS - Post-optimization balanced configurations
+MACD_FILTER_PRESETS = {
+    'conservative': {
+        'name': 'Conservative - High Quality',
+        'description': 'Higher quality signals, fewer in quantity',
+        'histogram_threshold_jpy': 0.00005,  # Higher thresholds
+        'histogram_threshold_major': 0.000025,
+        'min_confidence': 0.50,  # Higher confidence requirement
+        'max_daily_signals': 4,
+        'min_spacing_minutes': 60,  # 1 hour spacing
+        'adx_weight': 0.15,  # Higher ADX influence
+        'enable_adaptive_scoring': True,
+        'enable_volatility_filter': True,
+        'enable_divergence_detection': True,
+        'enable_vwap': True
+    },
+    'balanced': {
+        'name': 'Balanced - Medium Quality & Quantity',
+        'description': 'Balanced between signal quality and quantity (CURRENT OPTIMIZED)',
+        'histogram_threshold_jpy': 0.00003,  # Current optimized values
+        'histogram_threshold_major': 0.00001,
+        'min_confidence': 0.35,  # Current optimized confidence
+        'max_daily_signals': 8,
+        'min_spacing_minutes': 30,  # 30 minute spacing
+        'adx_weight': 0.10,  # Current optimized ADX weight
+        'enable_adaptive_scoring': False,  # Currently disabled
+        'enable_volatility_filter': False,  # Currently disabled
+        'enable_divergence_detection': False,  # Currently disabled
+        'enable_vwap': False  # Currently disabled
+    },
+    'aggressive': {
+        'name': 'Aggressive - Maximum Signals',
+        'description': 'Maximum signal generation, lower quality thresholds',
+        'histogram_threshold_jpy': 0.00001,  # Very low thresholds
+        'histogram_threshold_major': 0.000005,
+        'min_confidence': 0.25,  # Lower confidence requirement
+        'max_daily_signals': 15,
+        'min_spacing_minutes': 15,  # 15 minute spacing
+        'adx_weight': 0.05,  # Minimal ADX influence
+        'enable_adaptive_scoring': False,
+        'enable_volatility_filter': False,
+        'enable_divergence_detection': False,
+        'enable_vwap': False
+    },
+    'maximum': {
+        'name': 'Maximum - All Signals',
+        'description': 'Catch every possible signal, minimal filtering',
+        'histogram_threshold_jpy': 0.000005,  # Extremely low thresholds
+        'histogram_threshold_major': 0.000001,
+        'min_confidence': 0.20,  # Very low confidence requirement
+        'max_daily_signals': 50,  # No practical limit
+        'min_spacing_minutes': 0,  # No spacing requirement
+        'adx_weight': 0.02,  # Minimal ADX influence
+        'enable_adaptive_scoring': False,
+        'enable_volatility_filter': False,
+        'enable_divergence_detection': False,
+        'enable_vwap': False
+    }
+}
+
+# Current active preset (can be changed by user)
+ACTIVE_MACD_PRESET = 'balanced'  # Default to optimized balanced preset
+
+# Legacy Safety Preset Configurations (kept for compatibility)
 MACD_SAFETY_PRESETS = {
     'conservative': {
         'ENABLE_MACD_CONTRADICTION_FILTER': True,
@@ -155,10 +218,39 @@ def get_macd_threshold_for_epic(epic: str) -> float:
         return 0.00003  # Non-JPY pairs - calibrated from actual market data
 
 # Configuration summary function
+def get_active_macd_preset() -> dict:
+    """Get the currently active MACD preset configuration"""
+    try:
+        return MACD_FILTER_PRESETS.get(ACTIVE_MACD_PRESET, MACD_FILTER_PRESETS['balanced'])
+    except Exception:
+        return MACD_FILTER_PRESETS['balanced']  # Fallback to balanced
+
+def set_macd_preset(preset_name: str) -> bool:
+    """Set the active MACD preset"""
+    global ACTIVE_MACD_PRESET
+    if preset_name in MACD_FILTER_PRESETS:
+        ACTIVE_MACD_PRESET = preset_name
+        return True
+    return False
+
+def get_available_macd_presets() -> dict:
+    """Get all available MACD presets with descriptions"""
+    return {
+        name: {
+            'name': config['name'],
+            'description': config['description']
+        }
+        for name, config in MACD_FILTER_PRESETS.items()
+    }
+
 def get_macd_config_summary() -> dict:
     """Get a summary of MACD configuration settings"""
+    preset = get_active_macd_preset()
     return {
         'strategy_enabled': MACD_EMA_STRATEGY,
+        'active_preset': ACTIVE_MACD_PRESET,
+        'preset_name': preset.get('name', 'Unknown'),
+        'preset_description': preset.get('description', 'No description'),
         'mtf_enabled': MACD_MTF_ENABLED,
         'smart_money_enabled': USE_SMART_MONEY_MACD,
         'rsi_filter_enabled': MACD_RSI_FILTER_ENABLED,
@@ -167,5 +259,12 @@ def get_macd_config_summary() -> dict:
         'contradiction_filter_enabled': ENABLE_MACD_CONTRADICTION_FILTER,
         'macd_periods': MACD_PERIODS,
         'min_data_periods': MACD_MIN_DATA_PERIODS,
-        'debug_logging': MACD_DEBUG_LOGGING
+        'debug_logging': MACD_DEBUG_LOGGING,
+        'optimization_settings': {
+            'histogram_threshold_jpy': preset.get('histogram_threshold_jpy'),
+            'histogram_threshold_major': preset.get('histogram_threshold_major'),
+            'min_confidence': preset.get('min_confidence'),
+            'max_daily_signals': preset.get('max_daily_signals'),
+            'adx_weight': preset.get('adx_weight')
+        }
     }
