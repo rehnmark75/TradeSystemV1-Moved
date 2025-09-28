@@ -83,3 +83,4 @@ The TradeSystemV1 documentation has been organized into focused, specialized fil
 - ✅ Comprehensive documentation split
 
 For detailed setup and usage instructions, start with the [Overview & Navigation](claude-overview.md).
+- Add information about the new backtest system to memory
