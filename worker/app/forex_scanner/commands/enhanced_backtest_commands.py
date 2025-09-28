@@ -42,7 +42,8 @@ class EnhancedBacktestCommands:
         show_signals: bool = False,
         timeframe: str = '15m',
         strategy: str = 'EMA_CROSSOVER',
-        max_signals_display: int = 20
+        max_signals_display: int = 20,
+        pipeline: bool = False
     ) -> bool:
         """
         Run enhanced backtest using the new integrated pipeline
@@ -74,6 +75,7 @@ class EnhancedBacktestCommands:
             self.logger.info(f"   Days: {days}")
             self.logger.info(f"   Strategy: {strategy}")
             self.logger.info(f"   Show signals: {'Yes' if show_signals else 'No'}")
+            self.logger.info(f"   Mode: {'Full Pipeline' if pipeline else 'Basic Strategy Testing'}")
 
             # Create backtest execution
             end_date = datetime.now()
@@ -101,7 +103,8 @@ class EnhancedBacktestCommands:
                 'start_date': start_date,
                 'end_date': end_date,
                 'epics': epic_list,
-                'timeframe': timeframe
+                'timeframe': timeframe,
+                'pipeline_mode': pipeline
             }
 
             # Run backtest orchestration
@@ -379,7 +382,7 @@ class EnhancedBacktestCommands:
         except Exception as e:
             self.logger.error(f"❌ Error calculating performance summary: {e}")
 
-    def quick_enhanced_backtest(self, epic: str, hours: int = 24, show_signals: bool = True) -> bool:
+    def quick_enhanced_backtest(self, epic: str, hours: int = 24, show_signals: bool = True, pipeline: bool = False) -> bool:
         """Quick enhanced backtest for recent signals"""
 
         days = max(1, hours // 24)
@@ -391,7 +394,8 @@ class EnhancedBacktestCommands:
             show_signals=show_signals,
             timeframe='5m',
             strategy='QUICK_TEST',
-            max_signals_display=10
+            max_signals_display=10,
+            pipeline=pipeline
         )
 
     def cleanup_test_executions(self, keep_recent: int = 5) -> bool:

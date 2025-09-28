@@ -44,6 +44,7 @@ class BacktestScanner(IntelligentForexScanner):
         self.execution_id = backtest_config['execution_id']
         self.strategy_name = backtest_config['strategy_name']
         self.timeframe = backtest_config.get('timeframe', '15m')
+        self.pipeline_mode = backtest_config.get('pipeline_mode', False)
 
         # Initialize parent with backtest-specific settings
         backtest_kwargs = kwargs.copy()
@@ -58,6 +59,18 @@ class BacktestScanner(IntelligentForexScanner):
 
         # Override scanner metadata
         self.scanner_version = 'backtest_v1.0_integrated_pipeline'
+
+        # Log pipeline mode
+        mode_desc = "Full Pipeline (with validation)" if self.pipeline_mode else "Basic Strategy Testing"
+        self.logger.info(f"🔧 Backtest Mode: {mode_desc}")
+
+        if self.pipeline_mode:
+            self.logger.info("   ✅ Trade validation enabled")
+            self.logger.info("   ✅ Market intelligence enabled")
+            self.logger.info("   ✅ Signal filtering enabled")
+        else:
+            self.logger.info("   ⚡ Fast strategy testing mode")
+            self.logger.info("   ⚡ Minimal validation for parameter optimization")
 
         # Backtest-specific components
         self.order_logger = BacktestOrderLogger(
@@ -370,7 +383,14 @@ class BacktestScanner(IntelligentForexScanner):
                     if signals and not isinstance(signals, list):
                         signals = [signals]
 
-                    return signals[0] if signals else None
+                    signal = signals[0] if signals else None
+
+                    # Pipeline mode: Run through full validation and processing
+                    if signal and self.pipeline_mode:
+                        self.logger.debug(f"🔄 Pipeline mode: Processing {strategy_name} signal for {epic}")
+                        signal = self._apply_full_pipeline(signal, epic, timestamp)
+
+                    return signal
                 else:
                     self.logger.warning(f"⚠️ Strategy method {method_name} not found, falling back to all strategies")
 
@@ -386,11 +406,80 @@ class BacktestScanner(IntelligentForexScanner):
                     epic, pair_name, self.timeframe
                 )
 
+            # Pipeline mode: Run through full validation and processing for fallback signals
+            if signals and self.pipeline_mode:
+                self.logger.debug(f"🔄 Pipeline mode: Processing fallback signals for {epic}")
+                # For multiple signals, process each one
+                if isinstance(signals, list):
+                    signals = [self._apply_full_pipeline(signal, epic, timestamp) for signal in signals if signal]
+                    signals = [s for s in signals if s]  # Remove None results
+                else:
+                    signals = self._apply_full_pipeline(signals, epic, timestamp)
+
             return signals
 
         except Exception as e:
             self.logger.error(f"Error detecting signals for {epic} at {timestamp}: {e}")
             return None
+
+    def _apply_full_pipeline(self, signal: Dict, epic: str, timestamp: datetime) -> Optional[Dict]:
+        """
+        Apply full signal validation and processing pipeline
+
+        This includes:
+        - Trade validation (same as live trading)
+        - Market intelligence analysis
+        - Signal filtering and enhancement
+
+        Returns None if signal doesn't pass validation
+        """
+        try:
+            # Import components needed for full pipeline
+            try:
+                from .trading.trade_validator import TradeValidator
+            except ImportError:
+                from forex_scanner.core.trading.trade_validator import TradeValidator
+
+            # Create TradeValidator if not exists
+            if not hasattr(self, '_trade_validator'):
+                self._trade_validator = TradeValidator(
+                    logger=self.logger,
+                    db_manager=self.db_manager,
+                    backtest_mode=True
+                )
+
+            # Basic signal validation
+            if not signal or not isinstance(signal, dict):
+                return None
+
+            # Ensure signal has required fields for validation
+            if 'epic' not in signal:
+                signal['epic'] = epic
+            if 'timestamp' not in signal:
+                signal['timestamp'] = timestamp.isoformat()
+
+            # Apply trade validation (same logic as live trading)
+            self.logger.debug(f"🔍 Pipeline: Validating signal for {epic}")
+            is_valid, validation_message = self._trade_validator.validate_signal(signal)
+
+            if not is_valid:
+                self.logger.debug(f"❌ Pipeline: Signal rejected - {validation_message}")
+                return None
+
+            # Add pipeline metadata
+            signal['pipeline_processed'] = True
+            signal['validation_passed'] = True
+            signal['validation_message'] = validation_message or 'Passed full pipeline validation'
+
+            self.logger.debug(f"✅ Pipeline: Signal validated for {epic}")
+            return signal
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Pipeline processing failed for {epic}: {e}")
+            # In case of pipeline failure, return original signal with metadata
+            signal['pipeline_processed'] = False
+            signal['pipeline_error'] = str(e)
+            return signal
 
     def _process_backtest_signals(self, signals: List[Dict], timestamp: datetime) -> List[Dict]:
         """

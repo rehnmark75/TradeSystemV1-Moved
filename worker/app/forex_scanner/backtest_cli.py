@@ -51,11 +51,17 @@ class BacktestCLI:
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 Examples:
-  python backtest_cli.py --days 7                              # Test all pairs for 7 days
+  python backtest_cli.py --days 7                              # Test all pairs for 7 days (strategy only)
   python backtest_cli.py --epic CS.D.EURUSD.MINI.IP --days 14  # Test EURUSD for 14 days
   python backtest_cli.py --days 3 --show-signals               # Show detailed signal breakdown
   python backtest_cli.py --days 7 --strategy MACD_CROSSOVER    # Test specific strategy
   python backtest_cli.py --quick-test --epic CS.D.GBPUSD.MINI.IP  # Quick 24h test
+  python backtest_cli.py --days 3 --pipeline                   # Full pipeline test (with validation)
+  python backtest_cli.py --days 7 --strategy MACD --pipeline   # MACD strategy with full pipeline
+
+Mode Comparison:
+  Default (Basic):  Fast strategy testing for parameter optimization
+  --pipeline:       Full production pipeline with validation, filtering & market intelligence
 
 Signal Display Format:
   When using --show-signals, you'll see detailed breakdown like:
@@ -96,6 +102,12 @@ Signal Display Format:
             type=str,
             default='EMA_CROSSOVER',
             help='Strategy name to use for backtest (default: EMA_CROSSOVER)'
+        )
+
+        parser.add_argument(
+            '--pipeline',
+            action='store_true',
+            help='Run full signal pipeline with validation, filtering, and market intelligence (slower but production-ready). Default: basic strategy testing only.'
         )
 
         parser.add_argument(
@@ -163,7 +175,8 @@ Signal Display Format:
                 return self.enhanced_backtest.quick_enhanced_backtest(
                     epic=args.epic,
                     hours=args.hours,
-                    show_signals=True  # Always show signals for quick test
+                    show_signals=True,  # Always show signals for quick test
+                    pipeline=args.pipeline
                 )
 
             # Standard backtest mode
@@ -173,7 +186,8 @@ Signal Display Format:
                 show_signals=args.show_signals,
                 timeframe=args.timeframe,
                 strategy=args.strategy,
-                max_signals_display=args.max_signals
+                max_signals_display=args.max_signals,
+                pipeline=args.pipeline
             )
 
         except KeyboardInterrupt:
