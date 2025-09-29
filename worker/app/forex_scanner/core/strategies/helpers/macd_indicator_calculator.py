@@ -241,10 +241,10 @@ class MACDIndicatorCalculator:
                     bear_cross = raw_bear_cross
                     self.logger.info(f"🚨 NO EMERGENCY CROSSOVERS - Using threshold-based: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
             else:
-                # EMERGENCY: Skip multi-candle confirmation - use raw crossovers
-                bull_cross = raw_bull_cross
-                bear_cross = raw_bear_cross
-                self.logger.debug(f"🚨 EMERGENCY: Using RAW crossovers for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
+                # QUALITY: Apply multi-candle confirmation for high-quality signals
+                bull_cross = self._apply_multi_candle_confirmation(df_copy, raw_bull_cross, 'BULL', epic)
+                bear_cross = self._apply_multi_candle_confirmation(df_copy, raw_bear_cross, 'BEAR', epic)
+                self.logger.info(f"🎯 QUALITY: Multi-candle confirmed signals for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
             
             # Debug RSI and ADX data availability first
             if 'rsi' in df_copy.columns and 'adx' in df_copy.columns:
@@ -333,14 +333,14 @@ class MACDIndicatorCalculator:
             # Different pairs have vastly different MACD histogram scales
             # Must adapt thresholds to each pair's characteristics
 
-            # FINAL PRODUCTION THRESHOLDS - Tuned to prevent signal floods
+            # QUALITY THRESHOLDS - Increased 20x for signal quality improvement
             if 'JPY' in epic.upper():
-                # JPY pairs: Balanced threshold for reasonable signal generation
-                threshold = 0.000005  # Balanced: Low enough for signals, high enough for quality
+                # JPY pairs: Proper threshold for high-quality signal detection
+                threshold = 0.00005  # QUALITY: 20x increase from over-optimized values
                 pair_type = 'JPY'
             else:
-                # Major pairs: Balanced threshold for reasonable signal generation
-                threshold = 0.000002  # Balanced: Low enough for signals, high enough for quality
+                # Major pairs: Proper threshold for high-quality signal detection
+                threshold = 0.00002  # QUALITY: 20x increase from over-optimized values
                 pair_type = 'Major'
 
             self.logger.info(f"📊 DYNAMIC threshold for {epic} ({pair_type}): {threshold:.6f}")
@@ -872,7 +872,7 @@ class MACDIndicatorCalculator:
             
             # Calculate spacing requirements (15m timeframe) - BALANCED for quality signals
             min_spacing_bars = 4  # 1 hour minimum spacing (balanced approach)
-            max_daily_signals = 6  # Reasonable daily limit for quality
+            max_daily_signals = 8  # QUALITY: Consistent 8 signals per day limit
             
             # Create filtered signal series
             spaced_signals = pd.Series(False, index=signals.index)
@@ -1309,8 +1309,8 @@ class MACDIndicatorCalculator:
             if signals.sum() == 0:
                 return signals
 
-            # OPTIMIZED: Reduced spacing for more signals
-            min_spacing_bars = 1  # 15 minutes minimum spacing (reduced from 1 hour)
+            # QUALITY: Increased spacing for better signal quality
+            min_spacing_bars = 4  # 1 hour minimum spacing (4 x 15min bars) for quality
 
             filtered_signals = pd.Series(False, index=signals.index)
             last_signal_idx = None
@@ -1335,7 +1335,7 @@ class MACDIndicatorCalculator:
             final_count = filtered_signals.sum()
 
             if original_count != final_count:
-                self.logger.info(f"⏰ Circuit breaker for {epic} {signal_type}: {original_count} -> {final_count} (min 2hr spacing)")
+                self.logger.info(f"⏰ Circuit breaker for {epic} {signal_type}: {original_count} -> {final_count} (min 1hr spacing)")
 
             return filtered_signals
 
@@ -1358,8 +1358,8 @@ class MACDIndicatorCalculator:
             if total_before == 0:
                 return bull_signals, bear_signals
 
-            # OPTIMIZED: Reduced global spacing for more signals
-            min_spacing_bars = 2  # 30 minutes minimum between ANY signals (reduced from 2 hours)
+            # QUALITY: Increased global spacing for better signal quality
+            min_spacing_bars = 4  # 1 hour minimum between ANY signals (4 x 15min bars)
 
             # Get all signal indices sorted by time
             signal_indices = [(idx, 'BULL' if bull_signals.loc[idx] else 'BEAR')
@@ -1457,8 +1457,8 @@ class MACDIndicatorCalculator:
                 tracker['signal_count_today'] = 0
                 tracker['last_signal_date'] = current_date
 
-            # Check daily limit FIRST (balanced for quality signals)
-            MAX_SIGNALS_PER_DAY = 15  # Increased for backtesting - allows more signal detection
+            # Check daily limit FIRST (conservative for quality signals)
+            MAX_SIGNALS_PER_DAY = 8  # QUALITY: Reduced to 8 signals per day for quality over quantity
             if tracker['signal_count_today'] >= MAX_SIGNALS_PER_DAY:
                 self.logger.info(f"🚨 BACKTEST DAILY LIMIT for {epic}: {tracker['signal_count_today']}/{MAX_SIGNALS_PER_DAY} - BLOCKING all signals")
                 return pd.Series(False, index=bull_signals.index), pd.Series(False, index=bear_signals.index)
@@ -1479,7 +1479,7 @@ class MACDIndicatorCalculator:
                         # Fallback: allow if we can't calculate
                         hours_since_last = 1.0  # Assume enough time has passed
 
-                    MIN_HOURS_BETWEEN_SIGNALS = 0.25  # 15 minutes for backtesting
+                    MIN_HOURS_BETWEEN_SIGNALS = 1.0  # 1 hour minimum spacing for quality
                     if hours_since_last < MIN_HOURS_BETWEEN_SIGNALS:
                         self.logger.info(f"🚨 BACKTEST TIME SPACING for {epic}: {hours_since_last:.2f}h < {MIN_HOURS_BETWEEN_SIGNALS}h - BLOCKING")
                         return pd.Series(False, index=bull_signals.index), pd.Series(False, index=bear_signals.index)

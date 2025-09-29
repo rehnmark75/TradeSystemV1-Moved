@@ -9,8 +9,13 @@ import logging
 from typing import Optional, Dict
 try:
     from configdata import config
+    from configdata.strategies.config_macd_strategy import MACD_DISABLE_EMA200_FILTER
 except ImportError:
     from forex_scanner.configdata import config
+    try:
+        from forex_scanner.configdata.strategies.config_macd_strategy import MACD_DISABLE_EMA200_FILTER
+    except ImportError:
+        MACD_DISABLE_EMA200_FILTER = False  # Fallback
 
 
 class MACDTrendValidator:
@@ -36,6 +41,11 @@ class MACDTrendValidator:
             True if trend is correct, False if against major trend
         """
         try:
+            # Check MACD-specific EMA200 filter setting first
+            if MACD_DISABLE_EMA200_FILTER:
+                return True
+
+            # Fallback to global setting if MACD-specific setting not available
             if not getattr(config, 'EMA_200_TREND_FILTER_ENABLED', True):
                 return True
             
@@ -156,6 +166,42 @@ class MACDTrendValidator:
             self.logger.error(f"Error validating MACD line-signal alignment: {e}")
             return True
     
+    def validate_rsi_confluence(self, row: pd.Series, signal_type: str) -> bool:
+        """
+        RSI CONFLUENCE VALIDATION: Ensure RSI supports signal direction
+
+        Args:
+            row: DataFrame row with RSI data
+            signal_type: 'BULL' or 'BEAR'
+
+        Returns:
+            True if RSI supports signal direction
+        """
+        try:
+            rsi = row.get('rsi', 50)
+
+            if signal_type == 'BULL':
+                # Bull signals prefer RSI not overbought (< 75)
+                # Ideal range is 30-70, acceptable up to 75
+                valid = rsi < 75
+                if not valid:
+                    self.logger.debug(f"BULL signal rejected: RSI overbought at {rsi:.1f}")
+                return valid
+
+            elif signal_type == 'BEAR':
+                # Bear signals prefer RSI not oversold (> 25)
+                # Ideal range is 30-70, acceptable down to 25
+                valid = rsi > 25
+                if not valid:
+                    self.logger.debug(f"BEAR signal rejected: RSI oversold at {rsi:.1f}")
+                return valid
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Error validating RSI confluence: {e}")
+            return True  # Allow on error to avoid blocking signals
+
     def validate_macd_momentum(self, row: pd.Series, signal_type: str) -> bool:
         """
         MACD MOMENTUM VALIDATION: Check if MACD is gaining momentum in signal direction
@@ -216,7 +262,8 @@ class MACDTrendValidator:
                 'ema_200_trend': self.validate_ema_200_trend(row, signal_type),
                 'histogram_direction': self.validate_macd_histogram_direction(row, signal_type),
                 'line_signal_alignment': self.validate_macd_line_signal_alignment(row, signal_type),
-                'momentum_check': self.validate_macd_momentum(row, signal_type)
+                'momentum_check': self.validate_macd_momentum(row, signal_type),
+                'rsi_confluence': self.validate_rsi_confluence(row, signal_type)
             }
             
             # Calculate overall pass rate

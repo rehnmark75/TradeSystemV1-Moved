@@ -100,7 +100,7 @@ class MACDStrategy(BaseStrategy):
         
         # Basic parameters
         self.eps = 1e-8  # Epsilon for stability
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.35)  # Lowered for backtest validation debugging
+        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.65)  # QUALITY: Raised to 65% for high-quality signals only
         self.min_bars = 60  # Minimum bars for stable MACD (26 + 9 + buffer)
         
         # Initialize helper modules (orchestrator pattern)
@@ -225,7 +225,7 @@ class MACDStrategy(BaseStrategy):
                     return {
                         'fast_ema': 8, 'slow_ema': 17, 'signal_ema': 9,
                         'confidence_threshold': 0.6, 'histogram_threshold': 0.00005,
-                        'rsi_filter_enabled': False, 'momentum_confirmation': False,
+                        'rsi_filter_enabled': True, 'momentum_confirmation': True,
                         'zero_line_filter': False, 'mtf_enabled': False,
                         'stop_loss_pips': 10.0, 'take_profit_pips': 20.0
                     }
@@ -256,7 +256,7 @@ class MACDStrategy(BaseStrategy):
                 return {
                     'fast_ema': 8, 'slow_ema': 17, 'signal_ema': 9,
                     'confidence_threshold': 0.6, 'histogram_threshold': 0.00005,
-                    'rsi_filter_enabled': False, 'momentum_confirmation': False,
+                    'rsi_filter_enabled': True, 'momentum_confirmation': True,
                     'zero_line_filter': False, 'mtf_enabled': False,
                     'stop_loss_pips': 10.0, 'take_profit_pips': 20.0
                 }
@@ -353,12 +353,25 @@ class MACDStrategy(BaseStrategy):
                 self.logger.debug(f"📊 Available indicators for {epic}: {indicator_cols}")
 
                 if macd_exists:
-                    self.logger.info(f"📊 [REUSING MACD] MACD indicators already exist for {epic} - skipping recalculation")
-                    df_enhanced = df.copy()
+                    # PHASE 2 FIX: Check if existing MACD was calculated with current parameters
+                    current_params = f"{self.fast_ema}-{self.slow_ema}-{self.signal_ema}"
 
-                    # Ensure we have EMA 200 for trend validation
-                    if 'ema_200' not in df_enhanced.columns:
-                        df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
+                    # If we're using optimized parameters, force recalculation
+                    if ((self.fast_ema == 5 and self.slow_ema == 13 and self.signal_ema == 3) or
+                        (self.fast_ema == 8 and self.slow_ema == 34 and self.signal_ema == 13) or
+                        (self.fast_ema == 21 and self.slow_ema == 55 and self.signal_ema == 9)):
+                        self.logger.info(f"🔄 [FORCE RECALC] Using optimized {self.fast_ema}-{self.slow_ema}-{self.signal_ema} parameters - forcing MACD recalculation for {epic}")
+                        macd_exists = False  # Force recalculation
+                        df_enhanced = df.copy()  # Initialize df_enhanced for recalculation
+                    else:
+                        self.logger.info(f"📊 [REUSING MACD] MACD indicators already exist for {epic} - skipping recalculation")
+                        df_enhanced = df.copy()
+
+                        # Ensure we have EMA 200 for trend validation
+                        if 'ema_200' not in df_enhanced.columns:
+                            df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
+
+                if not macd_exists:
 
                     # Ensure we have RSI and ADX for quality scoring
                     if 'rsi' not in df_enhanced.columns or 'adx' not in df_enhanced.columns:
@@ -482,15 +495,21 @@ class MACDStrategy(BaseStrategy):
             if latest_row.get('bull_alert', False):
                 self.logger.info(f"🚨 EMERGENCY: Validating BULL crossover for {epic} at bar {bar_count}")
                 
-                # EMA 200 trend filter disabled to allow more signals
-                # if not self.trend_validator.validate_ema_200_trend(latest_row, 'BULL'):
-                #     self.logger.warning("❌ MACD BULL signal REJECTED: Price below EMA 200 (against major trend)")
-                #     return None
+                # EMA 200 trend filter - CRITICAL SAFETY FILTER RESTORED
+                if not self.trend_validator.validate_ema_200_trend(latest_row, 'BULL'):
+                    self.logger.warning("❌ MACD BULL signal REJECTED: Price below EMA 200 (against major trend)")
+                    return None
                 
                 # Validate MACD histogram direction
                 if not self.trend_validator.validate_macd_histogram_direction(latest_row, 'BULL'):
                     self.logger.warning("❌ MACD BULL signal REJECTED: Negative histogram")
                     return None
+
+                # RSI confluence validation (if enabled)
+                if self.macd_config.get('rsi_filter_enabled', False):
+                    if not self.trend_validator.validate_rsi_confluence(latest_row, 'BULL'):
+                        self.logger.warning("❌ MACD BULL signal REJECTED: RSI confluence failed")
+                        return None
                 
                 # Optional: Multi-timeframe validation (only in pipeline mode)
                 mtf_passed = True
@@ -519,15 +538,21 @@ class MACDStrategy(BaseStrategy):
             if latest_row.get('bear_alert', False):
                 self.logger.debug(f"🎯 MACD BEAR crossover detected at bar {bar_count}")
                 
-                # EMA 200 trend filter disabled to allow more signals
-                # if not self.trend_validator.validate_ema_200_trend(latest_row, 'BEAR'):
-                #     self.logger.warning("❌ MACD BEAR signal REJECTED: Price above EMA 200 (against major trend)")
-                #     return None
+                # EMA 200 trend filter - CRITICAL SAFETY FILTER RESTORED
+                if not self.trend_validator.validate_ema_200_trend(latest_row, 'BEAR'):
+                    self.logger.warning("❌ MACD BEAR signal REJECTED: Price above EMA 200 (against major trend)")
+                    return None
                 
                 # Validate MACD histogram direction
                 if not self.trend_validator.validate_macd_histogram_direction(latest_row, 'BEAR'):
                     self.logger.warning("❌ MACD BEAR signal REJECTED: Positive histogram")
                     return None
+
+                # RSI confluence validation (if enabled)
+                if self.macd_config.get('rsi_filter_enabled', False):
+                    if not self.trend_validator.validate_rsi_confluence(latest_row, 'BEAR'):
+                        self.logger.warning("❌ MACD BEAR signal REJECTED: RSI confluence failed")
+                        return None
                 
                 # Optional: Multi-timeframe validation (only in pipeline mode)
                 mtf_passed = True

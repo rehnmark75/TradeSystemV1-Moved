@@ -881,39 +881,114 @@ class OptimalParameterService:
             self.logger.error(f"❌ Failed to get MACD parameters for {epic} ({timeframe}): {e}")
             return self._get_macd_fallback_parameters(epic, timeframe, market_conditions)
     
+    def _get_session_adjustments(self, market_conditions: Optional[MarketConditions] = None) -> Dict[str, float]:
+        """Get session-based trading adjustments for MACD parameters"""
+
+        # Default adjustments (neutral)
+        adjustments = {
+            'confidence_multiplier': 1.0,
+            'sensitivity_multiplier': 1.0,
+            'volatility_multiplier': 1.0
+        }
+
+        if not market_conditions or not market_conditions.session:
+            return adjustments
+
+        # PHASE 2 ENHANCEMENT: Session-based parameter optimization
+        # Based on TradingView community research and trading session analysis
+        session = market_conditions.session.lower()
+
+        if session == 'asian':
+            # Asian session: Lower volatility, ranging markets
+            adjustments.update({
+                'confidence_multiplier': 1.1,   # Higher confidence needed (less volatile)
+                'sensitivity_multiplier': 0.8,  # Less sensitive (lower threshold)
+                'volatility_multiplier': 0.8    # Tighter stops (lower volatility)
+            })
+        elif session == 'london':
+            # London session: High volatility, strong trends
+            adjustments.update({
+                'confidence_multiplier': 0.9,   # Lower confidence acceptable (more opportunities)
+                'sensitivity_multiplier': 1.2,  # More sensitive (higher threshold)
+                'volatility_multiplier': 1.3    # Wider stops (higher volatility)
+            })
+        elif session == 'new_york':
+            # New York session: High volatility, continuation patterns
+            adjustments.update({
+                'confidence_multiplier': 0.95,  # Slightly lower confidence
+                'sensitivity_multiplier': 1.1,  # Moderately sensitive
+                'volatility_multiplier': 1.2    # Moderately wider stops
+            })
+        elif session in ['overlap', 'london_new_york']:
+            # Overlap sessions: Highest volatility and opportunity
+            adjustments.update({
+                'confidence_multiplier': 0.85,  # Lower confidence (more aggressive)
+                'sensitivity_multiplier': 1.3,  # Most sensitive
+                'volatility_multiplier': 1.4    # Widest stops (highest volatility)
+            })
+
+        return adjustments
+
     def _get_macd_fallback_parameters(self, epic: str, timeframe: str = '15m', market_conditions: Optional[MarketConditions] = None) -> MACDOptimalParameters:
-        """Get fallback MACD parameters when optimization data is not available"""
-        
+        """Get fallback MACD parameters with ENHANCED TradingView-derived adaptive selection"""
+
         # Import MACD config for fallback values
         from configdata.strategies.config_macd_strategy import MACD_PERIODS
-        
-        # Timeframe-specific MACD parameters (optimized for different timeframes)
+
+        # PHASE 2 ENHANCEMENT: TradingView Community-Validated Parameter Sets
+        # Research-based novel parameter combinations for different market conditions
+        novel_parameters = {
+            'scalping': (5, 13, 3),      # Ultra-fast for scalping (TradingView community favorite)
+            'trend_following': (8, 34, 13),  # Enhanced trend detection (Zeiierman-inspired)
+            'swing_trading': (21, 55, 9),    # Longer-term swings (ChartPrime methodology)
+            'standard': (12, 26, 9),         # Classic Appel parameters
+            'fast_response': (8, 17, 9),     # Faster response (proven 8-17-9 from database)
+            'smooth_trend': (19, 39, 9)      # Smoother for trending markets
+        }
+
+        # ADAPTIVE PARAMETER SELECTION based on timeframe and market conditions
         if timeframe == '5m':
-            fast_ema, slow_ema, signal_ema = 8, 17, 5  # Faster for 5m
+            # Use scalping parameters for very fast timeframe
+            fast_ema, slow_ema, signal_ema = novel_parameters['scalping']
             confidence_threshold = 0.60  # Higher confidence for noisy timeframe
         elif timeframe == '15m':
-            fast_ema, slow_ema, signal_ema = 9, 19, 6  # Optimized for 15m
-            confidence_threshold = 0.55  # Standard confidence
+            # Market regime adaptive selection for 15m
+            if market_conditions and market_conditions.market_regime == 'trending':
+                fast_ema, slow_ema, signal_ema = novel_parameters['trend_following']
+                confidence_threshold = 0.50  # Lower for trending markets
+            elif market_conditions and market_conditions.market_regime == 'ranging':
+                fast_ema, slow_ema, signal_ema = novel_parameters['scalping']  # Faster for ranging
+                confidence_threshold = 0.60  # Higher for ranging markets
+            else:
+                fast_ema, slow_ema, signal_ema = novel_parameters['fast_response']  # Proven 8-17-9
+                confidence_threshold = 0.55  # Standard confidence
         elif timeframe == '1h':
-            fast_ema, slow_ema, signal_ema = 12, 26, 9  # Classic parameters for 1h
+            # Use swing parameters for hourly timeframe
+            fast_ema, slow_ema, signal_ema = novel_parameters['swing_trading']
             confidence_threshold = 0.50  # Lower confidence for stable timeframe
         elif timeframe in ['4h', '1d']:
-            fast_ema, slow_ema, signal_ema = 12, 26, 9  # Classic for higher timeframes
+            # Smooth trend parameters for higher timeframes
+            fast_ema, slow_ema, signal_ema = novel_parameters['smooth_trend']
             confidence_threshold = 0.45  # Even lower for very stable timeframes
         else:
-            # Default fallback to config
-            fast_ema = MACD_PERIODS.get('fast_ema', 12)
-            slow_ema = MACD_PERIODS.get('slow_ema', 26)
-            signal_ema = MACD_PERIODS.get('signal_ema', 9)
+            # Default fallback to proven fast response
+            fast_ema, slow_ema, signal_ema = novel_parameters['fast_response']
             confidence_threshold = 0.55
         
+        # PHASE 2 ENHANCEMENT: Session-based parameter adaptation
+        session_adjustments = self._get_session_adjustments(market_conditions)
+        confidence_threshold *= session_adjustments['confidence_multiplier']
+
+        # Apply session-based histogram threshold adjustments
+        histogram_threshold = 0.00003 * session_adjustments['sensitivity_multiplier']
+
         # JPY pairs typically need different pip values
         if 'JPY' in epic.upper():
-            fallback_sl = 15.0
-            fallback_tp = 30.0
+            fallback_sl = 15.0 * session_adjustments['volatility_multiplier']
+            fallback_tp = 30.0 * session_adjustments['volatility_multiplier']
         else:
-            fallback_sl = 10.0
-            fallback_tp = 20.0
+            fallback_sl = 10.0 * session_adjustments['volatility_multiplier']
+            fallback_tp = 20.0 * session_adjustments['volatility_multiplier']
         
         return MACDOptimalParameters(
             epic=epic,
@@ -922,7 +997,7 @@ class OptimalParameterService:
             signal_ema=signal_ema,
             confidence_threshold=confidence_threshold,
             timeframe=timeframe,
-            histogram_threshold=0.00003,  # Standard threshold
+            histogram_threshold=histogram_threshold,  # Session-adjusted threshold
             zero_line_filter=False,
             rsi_filter_enabled=True,  # Enable RSI filter by default
             momentum_confirmation=True,  # Enable momentum confirmation

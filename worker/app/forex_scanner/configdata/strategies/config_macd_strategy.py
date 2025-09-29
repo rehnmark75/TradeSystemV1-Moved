@@ -45,8 +45,8 @@ MACD_STRONG_THRESHOLD = 0.0001  # Threshold for "strong" MACD momentum
 # MACD Enhanced Filter Configuration
 MACD_ENHANCED_FILTERS_ENABLED = True       # Required for MTF
 MACD_DETECTION_MODE = 'permissive'         # Start permissive
-MACD_REQUIRE_EMA200_ALIGNMENT = True
-MACD_DISABLE_EMA200_FILTER = False
+MACD_REQUIRE_EMA200_ALIGNMENT = False
+MACD_DISABLE_EMA200_FILTER = True
 MACD_EMA200_FILTER_MODE = 'permissive' 
 MIN_BARS_FOR_MACD = 50
 

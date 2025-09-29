@@ -19,7 +19,7 @@ class MACDSignalCalculator:
     def __init__(self, logger: logging.Logger = None, trend_validator=None):
         self.logger = logger or logging.getLogger(__name__)
         self.trend_validator = trend_validator
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.25)  # BALANCED: Reasonable quality threshold
+        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.65)  # QUALITY: Raised to 65% for high-quality signals only
     
     def calculate_simple_confidence(self, latest_row: pd.Series, signal_type: str) -> float:
         """
@@ -40,7 +40,7 @@ class MACDSignalCalculator:
             Confidence score between 0.0 and 0.95 (higher threshold required)
         """
         try:
-            base_confidence = 0.30  # BALANCED: Reasonable starting confidence for quality signals
+            base_confidence = 0.45  # OPTIMIZED: Higher starting confidence for better validation rate
             
             # Get enhanced indicator values
             macd_histogram = latest_row.get('macd_histogram', 0)
@@ -59,17 +59,17 @@ class MACDSignalCalculator:
             if macd_histogram == 0:
                 return 0.3  # Low confidence if MACD missing
             
-            # 1. ADX TREND STRENGTH ANALYSIS (10% weight) - Reduced from 30% for more signals
+            # 1. ADX TREND STRENGTH ANALYSIS (10% weight) - OPTIMIZED: No penalties for weak trends
             adx_boost = 0.0
             if adx >= 40:
-                adx_boost = 0.10  # Very strong trend (reduced from 30%)
+                adx_boost = 0.10  # Very strong trend
             elif adx >= 30:
-                adx_boost = 0.07  # Strong trend (reduced from 20%)
+                adx_boost = 0.07  # Strong trend
             elif adx >= 25:
-                adx_boost = 0.03  # Moderate trend (reduced from 10%)
+                adx_boost = 0.05  # Moderate trend
             else:
-                # Weak trend - reduce confidence but still allow signals
-                adx_boost = 0.05  # Small boost instead of rejection
+                # Weak trend or ranging market - neutral (no penalty)
+                adx_boost = 0.05  # Consistent small boost for all market conditions
             
             base_confidence += adx_boost
             
@@ -101,7 +101,7 @@ class MACDSignalCalculator:
             
             base_confidence += histogram_boost
             
-            # 3. RSI CONFLUENCE ANALYSIS (20% weight) - OVERBOUGHT/OVERSOLD ALIGNMENT
+            # 3. RSI CONFLUENCE ANALYSIS (20% weight) - OPTIMIZED: Reduced penalties by 50%
             rsi_boost = 0.0
             if signal_type == 'BULL':
                 if rsi < 30:
@@ -111,9 +111,9 @@ class MACDSignalCalculator:
                 elif rsi < 60:
                     rsi_boost = 0.10  # Neutral zone
                 elif rsi < 70:
-                    rsi_boost = 0.05  # Getting overbought
+                    rsi_boost = 0.07  # Getting overbought - mild penalty
                 else:
-                    rsi_boost = -0.10  # Overbought - penalty
+                    rsi_boost = -0.05  # Overbought - reduced penalty (was -0.10)
             else:  # BEAR
                 if rsi > 70:
                     rsi_boost = 0.20  # Overbought - excellent for bear signals
@@ -122,13 +122,13 @@ class MACDSignalCalculator:
                 elif rsi > 40:
                     rsi_boost = 0.10  # Neutral zone
                 elif rsi > 30:
-                    rsi_boost = 0.05  # Getting oversold
+                    rsi_boost = 0.07  # Getting oversold - mild penalty
                 else:
-                    rsi_boost = -0.10  # Oversold - penalty
+                    rsi_boost = -0.05  # Oversold - reduced penalty (was -0.10)
             
             base_confidence += rsi_boost
             
-            # 4. EMA 200 TREND ALIGNMENT (15% weight) - MAJOR TREND DIRECTION
+            # 4. EMA 200 TREND ALIGNMENT (15% weight) - OPTIMIZED: Reduced penalty since filter disabled
             ema_boost = 0.0
             if ema_200 > 0 and close > 0:
                 if signal_type == 'BULL' and close > ema_200:
@@ -144,7 +144,7 @@ class MACDSignalCalculator:
                     else:
                         ema_boost = 0.10  # Basic downtrend confirmation
                 else:
-                    ema_boost = -0.10  # Against major trend - significant penalty
+                    ema_boost = 0.02  # Minimal penalty since EMA200 filter disabled at strategy level
             
             base_confidence += ema_boost
             
