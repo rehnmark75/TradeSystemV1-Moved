@@ -84,3 +84,4 @@ The TradeSystemV1 documentation has been organized into focused, specialized fil
 
 For detailed setup and usage instructions, start with the [Overview & Navigation](claude-overview.md).
 - Add information about the new backtest system to memory
+- memorize the new backtest system including the --pipeline switch and how the result is summarized when a backtest completes
