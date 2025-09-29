@@ -1848,31 +1848,79 @@ class TradeValidator:
                 self.logger.warning(f"🧠❌ {epic} {signal_type}: {reason}")
                 return True, reason
 
-            # Get existing market intelligence from signal if available
-            existing_intelligence = signal.get('market_intelligence')
+            # Try to use enhanced cached intelligence engine with fallback system
+            use_enhanced_system = True
 
-            if existing_intelligence:
-                # Use existing intelligence data
-                intelligence_report = existing_intelligence
-                self.logger.info(f"🧠📊 {epic}: Using existing market intelligence from signal")
-            else:
-                # Generate fresh intelligence report
-                self.logger.info(f"🧠🔄 {epic}: Generating fresh market intelligence report")
-                epic_list = [epic]
-                full_report = self.market_intelligence_engine.generate_market_intelligence_report(epic_list)
+            try:
+                # Initialize cached engine and fallback manager if not already done
+                if not hasattr(self, '_cached_intelligence_engine'):
+                    from core.intelligence.cached_market_intelligence import CachedMarketIntelligenceEngine
+                    from core.intelligence.intelligence_fallback_manager import IntelligenceFallbackManager
 
-                if not full_report:
-                    reason = "Market intelligence unavailable - allowing trade"
-                    self.logger.warning(f"🧠⚠️ {epic} {signal_type}: {reason}")
-                    return True, reason
+                    self._cached_intelligence_engine = CachedMarketIntelligenceEngine(
+                        data_fetcher=getattr(self.market_intelligence_engine, 'data_fetcher', None),
+                        cache_ttl_seconds=30
+                    )
+                    self._fallback_manager = IntelligenceFallbackManager(
+                        cached_engine=self._cached_intelligence_engine,
+                        timeout_ms=50
+                    )
 
-                # Extract relevant sections
-                intelligence_report = {
-                    'market_regime': full_report.get('market_regime', {}),
-                    'session_analysis': full_report.get('session_analysis', {}),
-                    'strategy_recommendations': full_report.get('strategy_recommendations', {})
-                }
-                self.logger.debug(f"🧠✅ {epic}: Intelligence report generated successfully")
+                    # Start background worker for common epics
+                    common_epics = ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.CEEM.IP', 'CS.D.USDJPY.CEEM.IP']
+                    self._cached_intelligence_engine.start_background_worker(common_epics, 30)
+
+                    self.logger.info(f"🚀 {epic}: Initialized enhanced intelligence system with 5-level fallback")
+
+                # Use fallback system for ultra-fast, reliable processing
+                fallback_result = self._fallback_manager.process_signal_with_fallback(signal, [epic])
+
+                if fallback_result.success:
+                    intelligence_report = {
+                        'market_regime': fallback_result.intelligence_data,
+                        'processing_level': fallback_result.level_used.value,
+                        'processing_time_ms': fallback_result.processing_time_ms
+                    }
+                    self.logger.info(f"🚀 {epic}: Enhanced system SUCCESS - Level: {fallback_result.level_used.value}, Time: {fallback_result.processing_time_ms:.1f}ms")
+                else:
+                    # Should never happen with 5-level fallback, but handle just in case
+                    use_enhanced_system = False
+                    self.logger.warning(f"🚨 {epic}: Enhanced system failed unexpectedly - using legacy")
+
+            except ImportError:
+                use_enhanced_system = False
+                self.logger.debug(f"🔄 {epic}: Enhanced intelligence not available, using legacy system")
+            except Exception as e:
+                use_enhanced_system = False
+                self.logger.warning(f"⚠️ {epic}: Enhanced system error: {e}, using legacy")
+
+            # Legacy system fallback (if enhanced system unavailable)
+            if not use_enhanced_system:
+                # Get existing market intelligence from signal if available
+                existing_intelligence = signal.get('market_intelligence')
+
+                if existing_intelligence:
+                    # Use existing intelligence data
+                    intelligence_report = existing_intelligence
+                    self.logger.info(f"🧠📊 {epic}: Using existing market intelligence from signal")
+                else:
+                    # Generate fresh intelligence report
+                    self.logger.info(f"🧠🔄 {epic}: Generating fresh market intelligence report")
+                    epic_list = [epic]
+                    full_report = self.market_intelligence_engine.generate_market_intelligence_report(epic_list)
+
+                    if not full_report:
+                        reason = "Market intelligence unavailable - allowing trade"
+                        self.logger.warning(f"🧠⚠️ {epic} {signal_type}: {reason}")
+                        return True, reason
+
+                    # Extract relevant sections
+                    intelligence_report = {
+                        'market_regime': full_report.get('market_regime', {}),
+                        'session_analysis': full_report.get('session_analysis', {}),
+                        'strategy_recommendations': full_report.get('strategy_recommendations', {})
+                    }
+                    self.logger.debug(f"🧠✅ {epic}: Intelligence report generated successfully")
 
             # 1. Check market regime confidence
             market_regime = intelligence_report.get('market_regime', {})
@@ -1889,45 +1937,85 @@ class TradeValidator:
 
             self.logger.info(f"🧠✅ {epic}: Confidence check PASSED ({regime_confidence:.1%} >= {self.market_intelligence_min_confidence:.1%})")
 
-            # 2. Check regime suitability for strategy (if enabled)
+            # 2. Check regime-strategy compatibility with PROBABILISTIC CONFIDENCE SCORING
             if self.market_intelligence_block_unsuitable_regimes:
-                self.logger.info(f"🧠🔍 {epic}: Starting regime-strategy compatibility check")
-                self.logger.info(f"🧠⚙️ {epic}: REGIME BLOCKING IS ENABLED - will check strategy compatibility")
-                strategy_recommendations = intelligence_report.get('strategy_recommendations', {})
-                recommended_strategy = strategy_recommendations.get('primary_strategy', '').lower()
+                self.logger.info(f"🧠🔍 {epic}: Starting PROBABILISTIC regime-strategy compatibility scoring")
 
-                # Define regime-strategy compatibility
-                regime_strategy_compatibility = {
-                    'trending': ['ichimoku', 'ema', 'macd', 'kama', 'smart_money_ema', 'smart_money_macd', 'bb_supertrend'],
-                    'ranging': ['mean_reversion', 'bollinger', 'stochastic', 'ranging_market', 'smc'],
-                    'breakout': ['bollinger', 'kama', 'momentum', 'momentum_bias', 'bb_supertrend'],
-                    'consolidation': ['mean_reversion', 'stochastic', 'ranging_market', 'smc'],
-                    'scalping': ['scalping', 'zero_lag', 'momentum_bias'],
-                    # Add volatility-based regimes
-                    'high_volatility': ['macd', 'zero_lag_squeeze', 'zero_lag', 'momentum', 'kama', 'ema', 'momentum_bias', 'bb_supertrend'],
-                    'low_volatility': ['mean_reversion', 'bollinger', 'stochastic', 'ema', 'ranging_market', 'smc'],
-                    'medium_volatility': ['ichimoku', 'ema', 'macd', 'kama', 'zero_lag_squeeze', 'zero_lag', 'smart_money_ema', 'smart_money_macd']
-                }
+                # Import the new confidence modifier system
+                try:
+                    from configdata.market_intelligence_config import (
+                        REGIME_STRATEGY_CONFIDENCE_MODIFIERS,
+                        ENABLE_PROBABILISTIC_CONFIDENCE_MODIFIERS,
+                        MIN_CONFIDENCE_MODIFIER
+                    )
 
-                current_strategy_lower = strategy.lower()
-                compatible_strategies = regime_strategy_compatibility.get(dominant_regime, [])
+                    if ENABLE_PROBABILISTIC_CONFIDENCE_MODIFIERS:
+                        self.logger.info(f"🧠⚙️ {epic}: PROBABILISTIC SCORING ENABLED - calculating confidence modifier")
 
-                self.logger.info(f"🧠🎭 {epic}: Regime-Strategy Check - Current: '{strategy}', "
-                              f"Regime: '{dominant_regime}', Compatible: {compatible_strategies}")
-                self.logger.info(f"🧠💡 {epic}: AI Recommended Strategy: '{recommended_strategy}'")
+                        current_strategy_lower = strategy.lower()
+                        regime_modifiers = REGIME_STRATEGY_CONFIDENCE_MODIFIERS.get(dominant_regime, {})
 
-                # Check if current strategy is compatible with the regime
-                strategy_compatible = any(comp_strategy in current_strategy_lower for comp_strategy in compatible_strategies)
+                        # Find the best matching confidence modifier for this strategy
+                        confidence_modifier = None
+                        for strategy_key, modifier in regime_modifiers.items():
+                            if strategy_key in current_strategy_lower or current_strategy_lower in strategy_key:
+                                confidence_modifier = modifier
+                                break
 
-                if not strategy_compatible and dominant_regime != 'unknown':
-                    reason = f"Strategy '{strategy}' unsuitable for {dominant_regime} regime (confidence: {regime_confidence:.1%})"
-                    self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY REGIME INCOMPATIBILITY: {reason}")
-                    self.logger.info(f"🧠💭 {epic}: Compatible strategies for {dominant_regime}: {compatible_strategies}")
-                    return False, reason
+                        # If no specific modifier found, use a conservative default
+                        if confidence_modifier is None:
+                            confidence_modifier = 0.7  # Conservative default for unknown strategy-regime combinations
+                            self.logger.info(f"🧠🔍 {epic}: No specific modifier found for '{strategy}' in '{dominant_regime}', using default: {confidence_modifier:.1%}")
+                        else:
+                            self.logger.info(f"🧠🎯 {epic}: Found confidence modifier for '{strategy}' in '{dominant_regime}': {confidence_modifier:.1%}")
 
-                self.logger.info(f"🧠✅ {epic}: Regime compatibility check PASSED ('{strategy}' works with '{dominant_regime}')")
+                        # Check if modifier is above minimum threshold
+                        if confidence_modifier < MIN_CONFIDENCE_MODIFIER:
+                            reason = f"Strategy '{strategy}' confidence modifier {confidence_modifier:.1%} below minimum {MIN_CONFIDENCE_MODIFIER:.1%} for {dominant_regime} regime"
+                            self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY LOW CONFIDENCE MODIFIER: {reason}")
+                            return False, reason
+
+                        # Store the confidence modifier for potential use in signal scoring
+                        # This could be used later to adjust the final signal confidence
+                        signal['market_intelligence_confidence_modifier'] = confidence_modifier
+
+                        self.logger.info(f"🧠✅ {epic}: Probabilistic compatibility PASSED - Strategy '{strategy}' in '{dominant_regime}' regime")
+                        self.logger.info(f"🧠📊 {epic}: Confidence modifier applied: {confidence_modifier:.1%} (Original regime confidence: {regime_confidence:.1%})")
+
+                    else:
+                        # Fall back to binary compatibility check if probabilistic scoring is disabled
+                        self.logger.info(f"🧠⚙️ {epic}: Probabilistic scoring DISABLED - using legacy binary compatibility")
+
+                        # Legacy binary compatibility matrix (kept as fallback)
+                        regime_strategy_compatibility = {
+                            'trending': ['ichimoku', 'ema', 'macd', 'kama', 'smart_money_ema', 'smart_money_macd', 'bb_supertrend'],
+                            'ranging': ['mean_reversion', 'bollinger', 'stochastic', 'ranging_market', 'smc', 'macd'],
+                            'breakout': ['bollinger', 'kama', 'momentum', 'momentum_bias', 'bb_supertrend', 'macd'],
+                            'consolidation': ['mean_reversion', 'stochastic', 'ranging_market', 'smc', 'macd'],
+                            'scalping': ['scalping', 'zero_lag', 'momentum_bias'],
+                            'high_volatility': ['macd', 'zero_lag_squeeze', 'zero_lag', 'momentum', 'kama', 'ema', 'momentum_bias', 'bb_supertrend'],
+                            'low_volatility': ['mean_reversion', 'bollinger', 'stochastic', 'ema', 'ranging_market', 'smc', 'macd'],
+                            'medium_volatility': ['ichimoku', 'ema', 'macd', 'kama', 'zero_lag_squeeze', 'zero_lag', 'smart_money_ema', 'smart_money_macd']
+                        }
+
+                        current_strategy_lower = strategy.lower()
+                        compatible_strategies = regime_strategy_compatibility.get(dominant_regime, [])
+                        strategy_compatible = any(comp_strategy in current_strategy_lower for comp_strategy in compatible_strategies)
+
+                        if not strategy_compatible and dominant_regime != 'unknown':
+                            reason = f"Strategy '{strategy}' unsuitable for {dominant_regime} regime (confidence: {regime_confidence:.1%})"
+                            self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY REGIME INCOMPATIBILITY: {reason}")
+                            return False, reason
+
+                        self.logger.info(f"🧠✅ {epic}: Legacy compatibility check PASSED")
+
+                except ImportError as e:
+                    self.logger.warning(f"🧠⚠️ {epic}: Could not import probabilistic scoring system: {e}")
+                    self.logger.info(f"🧠🔄 {epic}: Falling back to legacy binary compatibility check")
+                    # Continue with legacy system...
+
             else:
-                self.logger.info(f"🧠⏭️ {epic}: Regime suitability check DISABLED - skipping")
+                self.logger.info(f"🧠⏭️ {epic}: Regime compatibility check DISABLED - skipping")
 
             # 3. Check session analysis (optional additional filtering)
             session_analysis = intelligence_report.get('session_analysis', {})

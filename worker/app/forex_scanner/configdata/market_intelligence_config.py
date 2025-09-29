@@ -94,6 +94,118 @@ INTELLIGENCE_PRESETS = {
 }
 
 # =============================================================================
+# PROBABILISTIC CONFIDENCE MODIFIER SYSTEM
+# =============================================================================
+
+# NEW: Regime-Strategy Confidence Modifiers (replaces binary blocking)
+# Values between 0.2-1.0 where:
+# 1.0 = Perfect compatibility (no adjustment)
+# 0.8-0.9 = Good compatibility (slight reduction)
+# 0.6-0.7 = Moderate compatibility (medium reduction)
+# 0.4-0.5 = Poor compatibility (significant reduction)
+# 0.2-0.3 = Very poor compatibility (heavy reduction but not blocked)
+
+REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
+    'trending': {
+        'macd': 1.0,           # Perfect regime for MACD
+        'ema': 1.0,
+        'ichimoku': 1.0,
+        'kama': 1.0,
+        'momentum': 0.9,
+        'zero_lag': 0.9,
+        'mean_reversion': 0.4,  # Poor fit for trending
+        'bollinger': 0.6,
+        'ranging_market': 0.3
+    },
+    'ranging': {
+        'macd': 0.8,           # GOOD - especially with divergence analysis
+        'mean_reversion': 1.0,  # Perfect for ranging
+        'bollinger': 1.0,
+        'stochastic': 1.0,
+        'ranging_market': 1.0,
+        'smc': 1.0,
+        'ema': 0.6,            # Moderate - can work in ranges
+        'ichimoku': 0.5,       # Poor fit for ranging
+        'momentum': 0.4
+    },
+    'breakout': {
+        'macd': 0.9,           # EXCELLENT - confirms momentum expansion
+        'bollinger': 1.0,      # Perfect for breakouts
+        'kama': 1.0,
+        'momentum': 1.0,
+        'momentum_bias': 1.0,
+        'bb_supertrend': 1.0,
+        'zero_lag': 0.9,
+        'ema': 0.8,
+        'mean_reversion': 0.3,  # Very poor for breakouts
+        'ranging_market': 0.2
+    },
+    'consolidation': {
+        'macd': 0.75,          # MODERATE - can detect subtle momentum shifts
+        'mean_reversion': 1.0,  # Perfect for consolidation
+        'stochastic': 1.0,
+        'ranging_market': 1.0,
+        'smc': 1.0,
+        'bollinger': 0.8,
+        'ema': 0.6,
+        'momentum': 0.4,
+        'zero_lag': 0.5
+    },
+    'high_volatility': {
+        'macd': 1.0,           # Perfect - thrives in volatile conditions
+        'zero_lag_squeeze': 1.0,
+        'zero_lag': 1.0,
+        'momentum': 1.0,
+        'kama': 1.0,
+        'ema': 1.0,
+        'momentum_bias': 1.0,
+        'bb_supertrend': 1.0,
+        'ichimoku': 0.8,
+        'mean_reversion': 0.4,  # Poor in high volatility
+        'ranging_market': 0.3
+    },
+    'low_volatility': {
+        'macd': 0.85,          # GOOD - works with tighter thresholds
+        'mean_reversion': 1.0,  # Perfect for low vol
+        'bollinger': 1.0,
+        'stochastic': 1.0,
+        'ema': 1.0,
+        'ranging_market': 1.0,
+        'smc': 1.0,
+        'ichimoku': 0.8,
+        'momentum': 0.5,        # Poor in low volatility
+        'zero_lag': 0.6
+    },
+    'medium_volatility': {
+        'macd': 1.0,           # Perfect - ideal conditions for MACD
+        'ichimoku': 1.0,
+        'ema': 1.0,
+        'kama': 1.0,
+        'zero_lag_squeeze': 1.0,
+        'zero_lag': 1.0,
+        'smart_money_ema': 1.0,
+        'smart_money_macd': 1.0,
+        'momentum': 0.9,
+        'bollinger': 0.8
+    },
+    'scalping': {
+        'macd': 0.6,           # Moderate - can work with very tight parameters
+        'scalping': 1.0,        # Perfect for scalping strategies
+        'zero_lag': 1.0,
+        'momentum_bias': 1.0,
+        'ema': 0.8,
+        'mean_reversion': 0.4,
+        'ichimoku': 0.3
+    }
+}
+
+# Enable/disable the probabilistic confidence modifier system
+ENABLE_PROBABILISTIC_CONFIDENCE_MODIFIERS = True
+
+# Minimum confidence modifier threshold (signals below this are still blocked)
+MIN_CONFIDENCE_MODIFIER = 0.2
+
+# =============================================================================
 # INTELLIGENCE THRESHOLDS AND WEIGHTS
 # =============================================================================
 
