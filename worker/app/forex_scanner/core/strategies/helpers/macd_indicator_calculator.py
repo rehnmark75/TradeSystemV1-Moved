@@ -154,29 +154,35 @@ class MACDIndicatorCalculator:
             # Detect histogram crossovers (zero line crosses)
             df_copy['histogram_prev'] = df_copy['macd_histogram'].shift(1)
             
-            # Determine base strength threshold and apply volatility adjustment
+            # PHASE 2: Get base threshold and apply dynamic volatility scaling
             base_threshold = self.get_histogram_strength_threshold(epic)
-            
-            # Apply volatility-adjusted thresholds (2-3x higher for restrictive filtering)
+
+            # Apply volatility regime-aware threshold scaling
             strength_threshold = self.get_enhanced_threshold(df_copy, epic, base_threshold)
+
+            # Get volatility regime info for logging
+            volatility_info = self.get_volatility_regime(df_copy)
+            self.logger.info(f"🎯 PHASE 2 Dynamic thresholds for {epic}: base={base_threshold:.6f}, "
+                           f"enhanced={strength_threshold:.6f}, regime={volatility_info['regime']}")
             
             # SIMPLIFIED TRADITIONAL MACD: Basic crossovers with light filtering
             
             # MULTI-CANDLE CONFIRMATION MACD for high-quality signals only
             
-            # First check basic crossovers WITH STRENGTH THRESHOLDS
+            # PHASE 2: Apply dynamic thresholds based on volatility regime
             raw_bull_cross = (
                 (df_copy['macd_histogram'] > 0) &
                 (df_copy['histogram_prev'] <= 0) &
-                (df_copy['macd_histogram'] >= base_threshold)  # Must exceed minimum strength
+                (df_copy['macd_histogram'] >= strength_threshold)  # Dynamic volatility-adjusted threshold
             )
             raw_bear_cross = (
                 (df_copy['macd_histogram'] < 0) &
                 (df_copy['histogram_prev'] >= 0) &
-                (df_copy['macd_histogram'] <= -base_threshold)  # Must exceed minimum strength (negative)
+                (df_copy['macd_histogram'] <= -strength_threshold)  # Dynamic volatility-adjusted threshold
             )
             
-            self.logger.debug(f"🔍 RAW MACD crossovers for {epic}: {raw_bull_cross.sum()} bull, {raw_bear_cross.sum()} bear (threshold: {base_threshold:.6f})")
+            self.logger.info(f"🔍 PHASE 2 MACD crossovers for {epic}: {raw_bull_cross.sum()} bull, {raw_bear_cross.sum()} bear "
+                           f"(threshold: {strength_threshold:.6f}, regime: {volatility_info['regime']})")
 
             # EMERGENCY DEBUGGING: Comprehensive histogram analysis
             if len(df_copy) > 0:
@@ -350,55 +356,97 @@ class MACDIndicatorCalculator:
             self.logger.error(f"Error determining histogram threshold for {epic}: {e}")
             return 0.00010  # Default to non-JPY threshold
     
+    def get_volatility_regime(self, df: pd.DataFrame) -> Dict:
+        """
+        PHASE 2: Detect volatility regime for adaptive threshold scaling
+
+        Uses ATR to classify market volatility and recommend threshold adjustments:
+        - Low volatility: Slightly lower thresholds (more signals)
+        - Normal volatility: Standard thresholds
+        - High volatility: Higher thresholds (fewer, higher quality signals)
+
+        Args:
+            df: DataFrame with ATR data
+
+        Returns:
+            Dictionary with volatility classification and multiplier
+        """
+        try:
+            if 'atr' not in df.columns or len(df) < 20:
+                return {'regime': 'normal', 'multiplier': 1.0, 'atr': 0}
+
+            # Get recent ATR values for regime detection
+            recent_atr = df['atr'].tail(20).dropna()
+            if len(recent_atr) < 10:
+                return {'regime': 'normal', 'multiplier': 1.0, 'atr': 0}
+
+            current_atr = recent_atr.iloc[-1]
+            atr_mean = recent_atr.mean()
+            atr_std = recent_atr.std()
+
+            # Calculate ATR percentiles for regime classification
+            atr_20th = recent_atr.quantile(0.20)
+            atr_80th = recent_atr.quantile(0.80)
+
+            # Classify volatility regime
+            if current_atr <= atr_20th:
+                regime = 'low'
+                multiplier = 0.8  # 20% lower thresholds for low volatility
+            elif current_atr >= atr_80th:
+                regime = 'high'
+                multiplier = 1.5  # 50% higher thresholds for high volatility
+            else:
+                regime = 'normal'
+                multiplier = 1.0  # Standard thresholds
+
+            self.logger.debug(f"📊 Volatility regime: {regime} (ATR: {current_atr:.6f}, multiplier: {multiplier:.1f}x)")
+
+            return {
+                'regime': regime,
+                'multiplier': multiplier,
+                'atr': current_atr,
+                'atr_mean': atr_mean,
+                'atr_percentile': (current_atr - atr_20th) / (atr_80th - atr_20th) if atr_80th > atr_20th else 0.5
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error detecting volatility regime: {e}")
+            return {'regime': 'normal', 'multiplier': 1.0, 'atr': 0}
+
     def get_enhanced_threshold(self, df: pd.DataFrame, epic: str, base_threshold: float) -> float:
         """
-        Calculate volatility-adjusted threshold for restrictive signal filtering
-        
-        Uses ATR to dynamically adjust thresholds based on market volatility:
-        - High volatility = Higher thresholds (more restrictive)
-        - Low volatility = Slightly lower thresholds
-        - Always applies 2-3x multiplier for restrictive filtering
-        
+        PHASE 2: Calculate volatility-aware adaptive threshold for market regime detection
+
+        Uses volatility regime detection to dynamically adjust thresholds:
+        - Low volatility: 0.8x threshold (capture subtle moves)
+        - Normal volatility: 1.0x threshold (standard detection)
+        - High volatility: 1.5x threshold (filter noise)
+
         Args:
             df: DataFrame with ATR data
             epic: Trading pair epic
             base_threshold: Base histogram strength threshold
-            
+
         Returns:
-            Enhanced threshold adjusted for volatility and restrictiveness
+            Volatility-adjusted threshold for current market regime
         """
         try:
-            # Get recent ATR for volatility measurement
-            if 'atr' in df.columns and len(df) > 0:
-                recent_atr = df['atr'].tail(20).mean()  # 20-period average ATR
-                
-                # Normalize ATR (typical forex ATR ranges 0.0001-0.01)
-                if 'JPY' in epic.upper():
-                    # JPY pairs have higher ATR values - more lenient
-                    atr_multiplier = min(2.0, max(1.0, recent_atr / 0.008))
-                else:
-                    # Major pairs ATR normalization - more lenient
-                    atr_multiplier = min(2.0, max(1.0, recent_atr / 0.002))
-                
-                self.logger.debug(f"ATR volatility multiplier for {epic}: {atr_multiplier:.2f}")
-            else:
-                atr_multiplier = 1.5  # Lower default multiplier if ATR unavailable
-            
-            # Apply balanced multiplier (tuned for quality scoring system)
-            restrictive_multiplier = 1.0  # Neutral for scoring-based selection
-            
-            # Combine volatility and restrictive adjustments
-            enhanced_threshold = base_threshold * restrictive_multiplier * atr_multiplier
-            
-            self.logger.debug(f"Enhanced threshold for {epic}: {enhanced_threshold:.6f} "
-                            f"(base: {base_threshold:.6f}, restrictive: {restrictive_multiplier}x, "
-                            f"volatility: {atr_multiplier:.2f}x)")
-            
+            # Get volatility regime for adaptive scaling
+            volatility_info = self.get_volatility_regime(df)
+            volatility_multiplier = volatility_info['multiplier']
+            regime = volatility_info['regime']
+
+            # Apply regime-based threshold adjustment
+            enhanced_threshold = base_threshold * volatility_multiplier
+
+            self.logger.info(f"📊 PHASE 2 threshold for {epic}: {enhanced_threshold:.6f} "
+                           f"(base: {base_threshold:.6f}, regime: {regime}, multiplier: {volatility_multiplier:.1f}x)")
+
             return enhanced_threshold
-            
+
         except Exception as e:
             self.logger.error(f"Error calculating enhanced threshold for {epic}: {e}")
-            return base_threshold * 2.5  # Fallback to 2.5x base threshold
+            return base_threshold  # Fallback to base threshold
     
     def validate_macd_strength(self, row: pd.Series, signal_type: str, threshold: float = 0.0001) -> bool:
         """
@@ -872,7 +920,7 @@ class MACDIndicatorCalculator:
             
             # Calculate spacing requirements (15m timeframe) - BALANCED for quality signals
             min_spacing_bars = 4  # 1 hour minimum spacing (balanced approach)
-            max_daily_signals = 8  # QUALITY: Consistent 8 signals per day limit
+            max_daily_signals = 6  # PHASE 2: Ultra-conservative 6 signals per day limit
             
             # Create filtered signal series
             spaced_signals = pd.Series(False, index=signals.index)
@@ -1457,8 +1505,8 @@ class MACDIndicatorCalculator:
                 tracker['signal_count_today'] = 0
                 tracker['last_signal_date'] = current_date
 
-            # Check daily limit FIRST (conservative for quality signals)
-            MAX_SIGNALS_PER_DAY = 8  # QUALITY: Reduced to 8 signals per day for quality over quantity
+            # Check daily limit FIRST (ultra-conservative for premium quality signals)
+            MAX_SIGNALS_PER_DAY = 6  # PHASE 2: Ultra-conservative 6 signals per day for maximum quality
             if tracker['signal_count_today'] >= MAX_SIGNALS_PER_DAY:
                 self.logger.info(f"🚨 BACKTEST DAILY LIMIT for {epic}: {tracker['signal_count_today']}/{MAX_SIGNALS_PER_DAY} - BLOCKING all signals")
                 return pd.Series(False, index=bull_signals.index), pd.Series(False, index=bear_signals.index)

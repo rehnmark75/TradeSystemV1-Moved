@@ -166,6 +166,39 @@ class MACDTrendValidator:
             self.logger.error(f"Error validating MACD line-signal alignment: {e}")
             return True
     
+    def validate_adx_trend_strength(self, row: pd.Series, signal_type: str, min_adx: float = 25.0) -> bool:
+        """
+        ADX TREND STRENGTH VALIDATION: Ensure market is trending (not ranging)
+
+        ADX measures trend strength regardless of direction:
+        - ADX > 25: Strong trend (good for MACD signals)
+        - ADX < 25: Weak trend/ranging (avoid MACD signals)
+
+        Args:
+            row: DataFrame row with ADX data
+            signal_type: 'BULL' or 'BEAR'
+            min_adx: Minimum ADX value required (default: 25)
+
+        Returns:
+            True if market has sufficient trend strength
+        """
+        try:
+            adx = row.get('adx', 0)
+
+            # Both bull and bear signals need trending markets
+            trend_strength_ok = adx >= min_adx
+
+            if not trend_strength_ok:
+                self.logger.debug(f"{signal_type} signal rejected: ADX {adx:.1f} < {min_adx:.1f} (ranging market)")
+                return False
+
+            self.logger.debug(f"{signal_type} signal: ADX {adx:.1f} confirms trending market")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error validating ADX trend strength: {e}")
+            return True  # Allow on error to avoid blocking signals
+
     def validate_rsi_confluence(self, row: pd.Series, signal_type: str) -> bool:
         """
         RSI CONFLUENCE VALIDATION: Ensure RSI supports signal direction
@@ -263,7 +296,8 @@ class MACDTrendValidator:
                 'histogram_direction': self.validate_macd_histogram_direction(row, signal_type),
                 'line_signal_alignment': self.validate_macd_line_signal_alignment(row, signal_type),
                 'momentum_check': self.validate_macd_momentum(row, signal_type),
-                'rsi_confluence': self.validate_rsi_confluence(row, signal_type)
+                'rsi_confluence': self.validate_rsi_confluence(row, signal_type),
+                'adx_trend_strength': self.validate_adx_trend_strength(row, signal_type)
             }
             
             # Calculate overall pass rate
@@ -284,6 +318,95 @@ class MACDTrendValidator:
             self.logger.error(f"Error running trend validation: {e}")
             return {'error': str(e), 'all_passed': False}
     
+    def classify_market_regime(self, row: pd.Series) -> Dict:
+        """
+        PHASE 2: Classify market regime using ADX and ATR analysis
+
+        Combines trend strength (ADX) and volatility (ATR) to determine optimal trading conditions:
+        - Strong Trending + Normal Vol: Ideal for MACD signals
+        - Weak Trending + High Vol: Avoid (choppy/news-driven)
+        - Strong Trending + Low Vol: Reduce thresholds slightly
+        - Ranging markets: Avoid or use different strategy
+
+        Args:
+            row: DataFrame row with ADX and ATR data
+
+        Returns:
+            Dictionary with market classification and recommendations
+        """
+        try:
+            adx = row.get('adx', 0)
+            atr = row.get('atr', 0)
+
+            # Classify trend strength using ADX
+            if adx >= 40:
+                trend_strength = 'strong'
+            elif adx >= 25:
+                trend_strength = 'moderate'
+            else:
+                trend_strength = 'weak'
+
+            # Classify volatility using ATR (simplified - could use percentiles)
+            epic = row.get('epic', '')
+            if 'JPY' in epic.upper():
+                # JPY pairs have different volatility ranges
+                if atr >= 0.008:
+                    volatility = 'high'
+                elif atr >= 0.004:
+                    volatility = 'normal'
+                else:
+                    volatility = 'low'
+            else:
+                # Major pairs
+                if atr >= 0.002:
+                    volatility = 'high'
+                elif atr >= 0.001:
+                    volatility = 'normal'
+                else:
+                    volatility = 'low'
+
+            # Determine market regime and trading recommendation
+            if trend_strength == 'strong' and volatility in ['normal', 'low']:
+                regime = 'ideal_trending'
+                recommendation = 'trade_normally'
+                threshold_adjustment = 1.0
+            elif trend_strength == 'moderate' and volatility == 'normal':
+                regime = 'good_trending'
+                recommendation = 'trade_conservatively'
+                threshold_adjustment = 1.2
+            elif trend_strength == 'weak':
+                regime = 'ranging_choppy'
+                recommendation = 'avoid_trading'
+                threshold_adjustment = 2.0  # Much higher thresholds
+            elif volatility == 'high':
+                regime = 'high_volatility'
+                recommendation = 'trade_conservatively'
+                threshold_adjustment = 1.5
+            else:
+                regime = 'normal'
+                recommendation = 'trade_normally'
+                threshold_adjustment = 1.0
+
+            return {
+                'regime': regime,
+                'trend_strength': trend_strength,
+                'volatility': volatility,
+                'recommendation': recommendation,
+                'threshold_adjustment': threshold_adjustment,
+                'adx': adx,
+                'atr': atr,
+                'trading_favorable': recommendation in ['trade_normally', 'trade_conservatively']
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error classifying market regime: {e}")
+            return {
+                'regime': 'unknown',
+                'recommendation': 'trade_normally',
+                'threshold_adjustment': 1.0,
+                'trading_favorable': True
+            }
+
     def apply_lenient_validation(self, validation_results: Dict, min_pass_rate: float = 0.75) -> bool:
         """
         Apply lenient validation - allow signals if most filters pass

@@ -225,7 +225,7 @@ class MACDStrategy(BaseStrategy):
                     return {
                         'fast_ema': 8, 'slow_ema': 17, 'signal_ema': 9,
                         'confidence_threshold': 0.6, 'histogram_threshold': 0.00005,
-                        'rsi_filter_enabled': True, 'momentum_confirmation': True,
+                        'rsi_filter_enabled': True, 'momentum_confirmation': True, 'divergence_detection': True, 'divergence_detection': True,
                         'zero_line_filter': False, 'mtf_enabled': False,
                         'stop_loss_pips': 10.0, 'take_profit_pips': 20.0
                     }
@@ -256,7 +256,7 @@ class MACDStrategy(BaseStrategy):
                 return {
                     'fast_ema': 8, 'slow_ema': 17, 'signal_ema': 9,
                     'confidence_threshold': 0.6, 'histogram_threshold': 0.00005,
-                    'rsi_filter_enabled': True, 'momentum_confirmation': True,
+                    'rsi_filter_enabled': True, 'momentum_confirmation': True, 'divergence_detection': True,
                     'zero_line_filter': False, 'mtf_enabled': False,
                     'stop_loss_pips': 10.0, 'take_profit_pips': 20.0
                 }
@@ -510,6 +510,19 @@ class MACDStrategy(BaseStrategy):
                     if not self.trend_validator.validate_rsi_confluence(latest_row, 'BULL'):
                         self.logger.warning("❌ MACD BULL signal REJECTED: RSI confluence failed")
                         return None
+
+                # ADX trend strength validation (Phase 2: Market regime awareness)
+                if not self.trend_validator.validate_adx_trend_strength(latest_row, 'BULL'):
+                    self.logger.warning("❌ MACD BULL signal REJECTED: ADX trend strength insufficient (ranging market)")
+                    return None
+
+                # PHASE 2: Market regime classification and adaptive validation
+                market_regime = self.trend_validator.classify_market_regime(latest_row)
+                if market_regime['recommendation'] == 'avoid_trading':
+                    self.logger.warning(f"❌ MACD BULL signal REJECTED: Unfavorable market regime ({market_regime['regime']})")
+                    return None
+                elif market_regime['recommendation'] == 'trade_conservatively':
+                    self.logger.info(f"⚠️ MACD BULL signal: Conservative regime ({market_regime['regime']}) - higher quality required")
                 
                 # Optional: Multi-timeframe validation (only in pipeline mode)
                 mtf_passed = True
@@ -553,6 +566,19 @@ class MACDStrategy(BaseStrategy):
                     if not self.trend_validator.validate_rsi_confluence(latest_row, 'BEAR'):
                         self.logger.warning("❌ MACD BEAR signal REJECTED: RSI confluence failed")
                         return None
+
+                # ADX trend strength validation (Phase 2: Market regime awareness)
+                if not self.trend_validator.validate_adx_trend_strength(latest_row, 'BEAR'):
+                    self.logger.warning("❌ MACD BEAR signal REJECTED: ADX trend strength insufficient (ranging market)")
+                    return None
+
+                # PHASE 2: Market regime classification and adaptive validation
+                market_regime = self.trend_validator.classify_market_regime(latest_row)
+                if market_regime['recommendation'] == 'avoid_trading':
+                    self.logger.warning(f"❌ MACD BEAR signal REJECTED: Unfavorable market regime ({market_regime['regime']})")
+                    return None
+                elif market_regime['recommendation'] == 'trade_conservatively':
+                    self.logger.info(f"⚠️ MACD BEAR signal: Conservative regime ({market_regime['regime']}) - higher quality required")
                 
                 # Optional: Multi-timeframe validation (only in pipeline mode)
                 mtf_passed = True
