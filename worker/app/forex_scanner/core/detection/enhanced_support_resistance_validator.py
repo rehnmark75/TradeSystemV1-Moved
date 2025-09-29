@@ -48,6 +48,13 @@ class LevelType(Enum):
     SWING_LOW = "swing_low"
 
 
+class LevelClusterType(Enum):
+    """Types of level clusters"""
+    RESISTANCE_CLUSTER = "resistance_cluster"
+    SUPPORT_CLUSTER = "support_cluster"
+    MIXED_CLUSTER = "mixed_cluster"
+
+
 @dataclass
 class EnhancedLevel:
     """Enhanced level representation with flip detection and strength analysis"""
@@ -64,6 +71,38 @@ class EnhancedLevel:
     significance: float = 0.0
     is_recent_flip: bool = False  # Flipped within recent bars
     original_type: Optional[LevelType] = None  # Original role before flip
+
+
+@dataclass
+class LevelCluster:
+    """Level cluster representation for density analysis"""
+    cluster_id: str
+    center_price: float
+    cluster_type: LevelClusterType
+    levels: List[EnhancedLevel]
+    density_score: float  # Levels per pip
+    cluster_radius_pips: float
+    strength_weighted_center: float
+    total_strength: float  # Sum of all level strengths in cluster
+    timeframe_distribution: Dict[str, int]  # Level count per timeframe
+    creation_timestamp: datetime
+    age_bars: int = 0
+    risk_multiplier: float = 1.0  # Risk impact factor
+
+
+@dataclass
+class ClusterRiskAssessment:
+    """Risk assessment for trades near level clusters"""
+    signal_type: str
+    current_price: float
+    nearest_cluster: Optional[LevelCluster]
+    cluster_distance_pips: float
+    cluster_impact_score: float  # 0.0 to 1.0
+    risk_multiplier: float
+    recommended_position_size_adjustment: float
+    cluster_density_warning: bool
+    expected_risk_reward: float
+    intervening_levels_count: int
 
 
 class EnhancedSupportResistanceValidator(SupportResistanceValidator):
@@ -86,13 +125,26 @@ class EnhancedSupportResistanceValidator(SupportResistanceValidator):
                  min_level_distance_pips: float = 10.0,
                  recent_flip_bars: int = 50,  # Consider flips within last 50 bars as "recent"
                  min_flip_strength: float = 0.6,  # Minimum strength to consider a level flip
+                 # Cluster detection parameters
+                 enable_cluster_detection: bool = True,
+                 cluster_radius_pips: float = 15.0,
+                 min_levels_per_cluster: int = 3,
+                 cluster_strength_threshold: float = 0.5,
+                 max_cluster_density: int = 5,  # Max levels per 50 pips
+                 min_risk_reward_with_clusters: float = 1.8,
                  logger: Optional[logging.Logger] = None):
         """
-        Initialize Enhanced Support/Resistance Validator
+        Initialize Enhanced Support/Resistance Validator with Cluster Detection
 
         Args:
             recent_flip_bars: Number of bars to consider for "recent" flips
             min_flip_strength: Minimum strength required for level flip validation
+            enable_cluster_detection: Enable level cluster detection and validation
+            cluster_radius_pips: Radius in pips for cluster detection
+            min_levels_per_cluster: Minimum levels required to form a cluster
+            cluster_strength_threshold: Minimum strength for cluster levels
+            max_cluster_density: Maximum allowed levels per 50 pips
+            min_risk_reward_with_clusters: Minimum R/R when clusters present
             Other args: Same as base SupportResistanceValidator
         """
         super().__init__(left_bars, right_bars, volume_threshold, level_tolerance_pips,
@@ -100,6 +152,14 @@ class EnhancedSupportResistanceValidator(SupportResistanceValidator):
 
         self.recent_flip_bars = recent_flip_bars
         self.min_flip_strength = min_flip_strength
+
+        # Cluster detection parameters
+        self.enable_cluster_detection = enable_cluster_detection
+        self.cluster_radius_pips = cluster_radius_pips
+        self.min_levels_per_cluster = min_levels_per_cluster
+        self.cluster_strength_threshold = cluster_strength_threshold
+        self.max_cluster_density = max_cluster_density
+        self.min_risk_reward_with_clusters = min_risk_reward_with_clusters
 
         # Initialize SMC components if available
         if SMC_AVAILABLE:
@@ -116,6 +176,10 @@ class EnhancedSupportResistanceValidator(SupportResistanceValidator):
         # Enhanced caching for level flip detection
         self.enhanced_level_cache = {}
         self.level_flip_cache = {}
+
+        # Cluster detection caching
+        self.cluster_cache = {}
+        self.cluster_risk_cache = {}
 
     def validate_trade_direction(self,
                                 signal: Dict,
@@ -148,6 +212,31 @@ class EnhancedSupportResistanceValidator(SupportResistanceValidator):
             if not enhanced_levels:
                 return True, "No significant levels found - trade allowed", {}
 
+            # NEW: Cluster detection and risk assessment
+            clusters = self._detect_level_clusters(enhanced_levels, epic)
+            cluster_risk = self._assess_cluster_risk(current_price, signal_type, clusters, epic)
+
+            # Check if cluster risk is too high
+            if self.enable_cluster_detection and cluster_risk.cluster_density_warning:
+                cluster_type = cluster_risk.nearest_cluster.cluster_type.value if cluster_risk.nearest_cluster else "unknown"
+                return False, (f"Trade rejected due to {cluster_type} cluster risk - "
+                             f"{cluster_risk.intervening_levels_count} levels within "
+                             f"{cluster_risk.cluster_distance_pips:.1f} pips, "
+                             f"expected R/R: {cluster_risk.expected_risk_reward:.1f}"), {
+                    'cluster_risk_assessment': cluster_risk,
+                    'clusters_detected': len(clusters)
+                }
+
+            # Reject trades with poor risk/reward due to clusters
+            if (self.enable_cluster_detection and
+                cluster_risk.expected_risk_reward < self.min_risk_reward_with_clusters):
+                return False, (f"Trade rejected due to poor risk/reward from cluster interference - "
+                             f"Expected R/R: {cluster_risk.expected_risk_reward:.1f}, "
+                             f"Required: {self.min_risk_reward_with_clusters:.1f}"), {
+                    'cluster_risk_assessment': cluster_risk,
+                    'poor_risk_reward': True
+                }
+
             # Perform enhanced proximity check with level flip awareness
             validation_result = self._check_enhanced_level_proximity(
                 current_price=current_price,
@@ -166,7 +255,14 @@ class EnhancedSupportResistanceValidator(SupportResistanceValidator):
                 'level_tolerance_pips': self.level_tolerance_pips,
                 'validation_timestamp': datetime.now().isoformat(),
                 'enhanced_mode': self.enhanced_mode,
-                'smc_analysis_available': SMC_AVAILABLE
+                'smc_analysis_available': SMC_AVAILABLE,
+                # NEW: Cluster detection information
+                'cluster_detection_enabled': self.enable_cluster_detection,
+                'clusters_detected': len(clusters),
+                'cluster_risk_assessment': cluster_risk,
+                'nearest_cluster_distance_pips': cluster_risk.cluster_distance_pips,
+                'cluster_density_warning': cluster_risk.cluster_density_warning,
+                'expected_risk_reward': cluster_risk.expected_risk_reward
             }
 
             # Add specific flip detection results
@@ -690,6 +786,241 @@ class EnhancedSupportResistanceValidator(SupportResistanceValidator):
             'volume_confirmation': level.volume_confirmation,
             'significance': level.significance
         }
+
+    def _detect_level_clusters(self, levels: List[EnhancedLevel], epic: str) -> List[LevelCluster]:
+        """
+        Detect level clusters using density-based algorithm
+
+        Args:
+            levels: List of enhanced levels to analyze
+            epic: Trading instrument identifier
+
+        Returns:
+            List of detected level clusters
+        """
+        if not self.enable_cluster_detection or len(levels) < self.min_levels_per_cluster:
+            return []
+
+        # Cache key for cluster detection
+        cache_key = f"{epic}_{len(levels)}_clusters"
+        if (cache_key in self.cluster_cache and
+            cache_key in self._cache_expiry and
+            datetime.now() < self._cache_expiry[cache_key]):
+            return self.cluster_cache[cache_key]
+
+        clusters = []
+        pip_size = self._get_pip_size(epic)
+
+        # Separate support and resistance levels
+        support_levels = [l for l in levels if 'support' in l.level_type.value.lower()]
+        resistance_levels = [l for l in levels if 'resistance' in l.level_type.value.lower()]
+
+        # Detect resistance clusters (important for preventing buy signals below them)
+        if resistance_levels:
+            resistance_clusters = self._create_clusters_by_proximity(
+                resistance_levels, pip_size, LevelClusterType.RESISTANCE_CLUSTER, epic
+            )
+            clusters.extend(resistance_clusters)
+
+        # Detect support clusters (important for preventing sell signals above them)
+        if support_levels:
+            support_clusters = self._create_clusters_by_proximity(
+                support_levels, pip_size, LevelClusterType.SUPPORT_CLUSTER, epic
+            )
+            clusters.extend(support_clusters)
+
+        # Sort clusters by strength (strongest first)
+        clusters.sort(key=lambda c: c.total_strength, reverse=True)
+
+        # Cache results
+        self.cluster_cache[cache_key] = clusters
+        self._cache_expiry[cache_key] = datetime.now() + timedelta(minutes=self.cache_duration_minutes)
+
+        self.logger.debug(f"🔍 Detected {len(clusters)} level clusters for {epic}")
+        return clusters
+
+    def _create_clusters_by_proximity(self, levels: List[EnhancedLevel], pip_size: float,
+                                     cluster_type: LevelClusterType, epic: str) -> List[LevelCluster]:
+        """
+        Create clusters by grouping levels within proximity threshold
+
+        Args:
+            levels: Levels to cluster
+            pip_size: Pip size for the instrument
+            cluster_type: Type of cluster to create
+            epic: Trading instrument identifier
+
+        Returns:
+            List of clusters created from the levels
+        """
+        if not levels:
+            return []
+
+        # Sort levels by price
+        sorted_levels = sorted(levels, key=lambda l: l.price)
+        clusters = []
+        cluster_id_counter = 0
+
+        i = 0
+        while i < len(sorted_levels):
+            # Start a new cluster with the current level
+            cluster_levels = [sorted_levels[i]]
+            cluster_center = sorted_levels[i].price
+
+            # Find all levels within cluster radius
+            j = i + 1
+            while j < len(sorted_levels):
+                distance_pips = abs(sorted_levels[j].price - cluster_center) / pip_size
+
+                if distance_pips <= self.cluster_radius_pips:
+                    cluster_levels.append(sorted_levels[j])
+                    # Update cluster center to weighted average
+                    total_strength = sum(l.strength for l in cluster_levels)
+                    cluster_center = sum(l.price * l.strength for l in cluster_levels) / total_strength
+                    j += 1
+                else:
+                    break
+
+            # Create cluster if it meets minimum size requirement
+            if len(cluster_levels) >= self.min_levels_per_cluster:
+                cluster = self._create_level_cluster(cluster_levels, cluster_type, epic, cluster_id_counter)
+                if cluster.density_score >= self.cluster_strength_threshold:
+                    clusters.append(cluster)
+                    cluster_id_counter += 1
+
+            # Move to next unclustered level
+            i = j if j > i + 1 else i + 1
+
+        return clusters
+
+    def _create_level_cluster(self, levels: List[EnhancedLevel], cluster_type: LevelClusterType,
+                             epic: str, cluster_id: int) -> LevelCluster:
+        """
+        Create a LevelCluster object from a group of levels
+
+        Args:
+            levels: Levels to include in the cluster
+            cluster_type: Type of cluster
+            epic: Trading instrument identifier
+            cluster_id: Unique identifier for the cluster
+
+        Returns:
+            LevelCluster object
+        """
+        pip_size = self._get_pip_size(epic)
+
+        # Calculate cluster metrics
+        total_strength = sum(l.strength for l in levels)
+        center_price = sum(l.price for l in levels) / len(levels)
+        strength_weighted_center = sum(l.price * l.strength for l in levels) / total_strength
+
+        # Calculate cluster radius
+        max_distance = max(abs(l.price - center_price) for l in levels)
+        cluster_radius_pips = max_distance / pip_size
+
+        # Calculate density score (levels per pip)
+        density_score = len(levels) / max(cluster_radius_pips, 1.0)
+
+        # Calculate risk multiplier based on density
+        risk_multiplier = 1.0 + (density_score * 0.2)  # Increase risk by 20% per level density
+
+        # Timeframe distribution (if available)
+        timeframe_distribution = {'unknown': len(levels)}  # Simplified for now
+
+        return LevelCluster(
+            cluster_id=f"{epic}_cluster_{cluster_id}_{cluster_type.value}",
+            center_price=center_price,
+            cluster_type=cluster_type,
+            levels=levels,
+            density_score=density_score,
+            cluster_radius_pips=cluster_radius_pips,
+            strength_weighted_center=strength_weighted_center,
+            total_strength=total_strength,
+            timeframe_distribution=timeframe_distribution,
+            creation_timestamp=datetime.now(),
+            age_bars=0,
+            risk_multiplier=risk_multiplier
+        )
+
+    def _assess_cluster_risk(self, current_price: float, signal_type: str,
+                            clusters: List[LevelCluster], epic: str) -> ClusterRiskAssessment:
+        """
+        Assess risk impact of nearby clusters on the proposed trade
+
+        Args:
+            current_price: Current market price
+            signal_type: 'BUY' or 'SELL'
+            clusters: List of detected clusters
+            epic: Trading instrument identifier
+
+        Returns:
+            ClusterRiskAssessment object
+        """
+        pip_size = self._get_pip_size(epic)
+
+        # Find the most relevant cluster for this signal type
+        relevant_clusters = []
+
+        if signal_type.upper() in ['BUY', 'BULL']:
+            # For buy signals, we care about resistance clusters above
+            relevant_clusters = [c for c in clusters
+                               if c.cluster_type == LevelClusterType.RESISTANCE_CLUSTER
+                               and c.center_price > current_price]
+        elif signal_type.upper() in ['SELL', 'BEAR']:
+            # For sell signals, we care about support clusters below
+            relevant_clusters = [c for c in clusters
+                               if c.cluster_type == LevelClusterType.SUPPORT_CLUSTER
+                               and c.center_price < current_price]
+
+        if not relevant_clusters:
+            return ClusterRiskAssessment(
+                signal_type=signal_type,
+                current_price=current_price,
+                nearest_cluster=None,
+                cluster_distance_pips=float('inf'),
+                cluster_impact_score=0.0,
+                risk_multiplier=1.0,
+                recommended_position_size_adjustment=1.0,
+                cluster_density_warning=False,
+                expected_risk_reward=3.0,  # Default R/R
+                intervening_levels_count=0
+            )
+
+        # Find nearest relevant cluster
+        nearest_cluster = min(relevant_clusters,
+                             key=lambda c: abs(c.center_price - current_price))
+
+        distance_pips = abs(nearest_cluster.center_price - current_price) / pip_size
+
+        # Calculate cluster impact score (higher = more problematic)
+        impact_score = min(1.0, nearest_cluster.density_score / 10.0)  # Scale density to 0-1
+        impact_score *= max(0.1, 1.0 - (distance_pips / 100.0))  # Reduce impact with distance
+
+        # Calculate risk multiplier
+        risk_multiplier = 1.0 + (impact_score * nearest_cluster.risk_multiplier)
+
+        # Calculate expected R/R (pessimistic due to cluster)
+        expected_rr = 3.0 / risk_multiplier  # Default 3:1 R/R reduced by risk
+
+        # Position size adjustment recommendation
+        pos_size_adj = max(0.25, 1.0 - (impact_score * 0.5))  # Reduce position by up to 50%
+
+        # Density warning if too many levels in small space
+        density_warning = (nearest_cluster.density_score > self.max_cluster_density or
+                          distance_pips < 25.0)  # Too close to cluster
+
+        return ClusterRiskAssessment(
+            signal_type=signal_type,
+            current_price=current_price,
+            nearest_cluster=nearest_cluster,
+            cluster_distance_pips=distance_pips,
+            cluster_impact_score=impact_score,
+            risk_multiplier=risk_multiplier,
+            recommended_position_size_adjustment=pos_size_adj,
+            cluster_density_warning=density_warning,
+            expected_risk_reward=expected_rr,
+            intervening_levels_count=len(nearest_cluster.levels)
+        )
 
     def get_validation_summary(self) -> str:
         """Enhanced validation summary"""
