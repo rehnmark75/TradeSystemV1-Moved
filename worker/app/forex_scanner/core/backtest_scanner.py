@@ -162,6 +162,8 @@ class BacktestScanner(IntelligentForexScanner):
             if hasattr(self.signal_detector, 'ichimoku_strategy') and self.signal_detector.ichimoku_strategy:
                 self.signal_detector.ichimoku_strategy.data_fetcher = backtest_data_fetcher
                 self.signal_detector.ichimoku_strategy.backtest_mode = True
+                # CRITICAL: Disable MTF analysis in backtest mode for performance and reliability
+                self.signal_detector.ichimoku_strategy.enable_mtf_analysis = False
                 # Set enhanced validation based on pipeline mode
                 self.signal_detector.ichimoku_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'ICHIMOKU_ENHANCED_VALIDATION', True)
                 # Disable expensive RAG features in basic mode
@@ -169,9 +171,9 @@ class BacktestScanner(IntelligentForexScanner):
                     self.signal_detector.ichimoku_strategy.rag_enabled = False
                     self.signal_detector.ichimoku_strategy.market_intelligence_adapter = None
                 if self.signal_detector.ichimoku_strategy.enhanced_validation:
-                    self.logger.info("✅ Ichimoku strategy configured for PIPELINE mode - enhanced validation and RAG enabled")
+                    self.logger.info("✅ Ichimoku strategy configured for PIPELINE mode - enhanced validation and RAG enabled, MTF disabled")
                 else:
-                    self.logger.info("✅ Ichimoku strategy configured for BASIC mode - enhanced validation and RAG disabled for fast testing")
+                    self.logger.info("✅ Ichimoku strategy configured for BASIC mode - enhanced validation, RAG, and MTF disabled for fast testing")
 
             # CRITICAL FIX: Configure Mean Reversion strategy for pipeline mode
             if hasattr(self.signal_detector, 'mean_reversion_strategy') and self.signal_detector.mean_reversion_strategy:
@@ -572,14 +574,17 @@ class BacktestScanner(IntelligentForexScanner):
             self.logger.debug(f"🔍 Pipeline: Validating signal for {epic}")
             is_valid, validation_message = self._trade_validator.validate_signal_for_trading(signal)
 
+            # Add pipeline metadata for both accepted and rejected signals
+            signal['pipeline_processed'] = True
+            signal['validation_passed'] = is_valid
+            signal['validation_message'] = validation_message or ('Passed full pipeline validation' if is_valid else 'Unknown rejection reason')
+
             if not is_valid:
                 self.logger.debug(f"❌ Pipeline: Signal rejected - {validation_message}")
-                return None
-
-            # Add pipeline metadata
-            signal['pipeline_processed'] = True
-            signal['validation_passed'] = True
-            signal['validation_message'] = validation_message or 'Passed full pipeline validation'
+                # Return rejected signal with metadata for collection instead of None
+                signal['rejected'] = True
+                signal['rejection_reason'] = validation_message
+                return signal
 
             self.logger.debug(f"✅ Pipeline: Signal validated for {epic}")
             return signal

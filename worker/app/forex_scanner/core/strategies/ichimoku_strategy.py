@@ -87,10 +87,10 @@ class IchimokuStrategy(BaseStrategy):
         self.chikou_shift = self.ichimoku_config.get('chikou_shift', 26)     # Lagging span displacement
         self.cloud_shift = self.ichimoku_config.get('cloud_shift', 26)       # Cloud forward displacement
 
-        # Basic parameters
+        # Basic parameters - Optimized for balanced signal frequency
         self.eps = 1e-8  # Epsilon for stability
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.45)  # Use global default (was too high at 0.55)
-        self.min_bars = 60  # Reduced from 80 to 60 bars (52 + buffer) for better signal frequency
+        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.50)  # Balanced 50% confidence
+        self.min_bars = 70  # Balanced bars requirement for stability and responsiveness
 
         # Strategy-specific thresholds
         self.cloud_thickness_threshold = self.ichimoku_config.get('cloud_thickness_threshold', 0.0001)
@@ -127,11 +127,23 @@ class IchimokuStrategy(BaseStrategy):
 
         # Log threshold improvements and filter status
         self.logger.info(f"📊 Ichimoku Configuration:")
-        self.logger.info(f"   Min Confidence: {self.min_confidence:.1%} (reduced from 55% for better signal frequency)")
-        self.logger.info(f"   Min Bars: {self.min_bars} (reduced from 80 for faster detection)")
+        self.logger.info(f"   Min Confidence: {self.min_confidence:.1%} (optimized for quality vs quantity balance)")
+        self.logger.info(f"   Min Bars: {self.min_bars} (balanced for reliability and responsiveness)")
         self.logger.info(f"   Periods: T={self.tenkan_period}, K={self.kijun_period}, S={self.senkou_b_period}")
         self.logger.info(f"   Chikou Filter: {'Enabled' if getattr(ichimoku_config, 'ICHIMOKU_CHIKOU_FILTER_ENABLED', True) else 'Disabled'}")
         self.logger.info(f"   Cloud Filter: {'Enabled' if getattr(ichimoku_config, 'ICHIMOKU_CLOUD_FILTER_ENABLED', True) else 'Disabled'}")
+
+    @staticmethod
+    def is_epic_excluded(epic: str) -> bool:
+        """Check if an epic is excluded from Ichimoku scanning"""
+        excluded_epics = getattr(ichimoku_config, 'ICHIMOKU_EXCLUDED_EPICS', [])
+        return epic in excluded_epics
+
+    @staticmethod
+    def get_exclusion_reason(epic: str) -> str:
+        """Get the reason why an epic is excluded"""
+        exclusion_reasons = getattr(ichimoku_config, 'ICHIMOKU_EPIC_EXCLUSION_REASON', {})
+        return exclusion_reasons.get(epic, "Epic excluded from Ichimoku scanning")
 
     def _get_ichimoku_periods(self, epic: str = None) -> Dict:
         """Get Ichimoku periods - with database optimization support"""
@@ -379,14 +391,22 @@ class IchimokuStrategy(BaseStrategy):
         🌥️ CORE SIGNAL DETECTION: Ichimoku Cloud analysis
 
         Ichimoku signal logic:
-        1. Calculate Ichimoku components if not present
-        2. Detect TK line crossovers (Tenkan vs Kijun)
-        3. Validate cloud breakouts (price vs Kumo)
-        4. Confirm with Chikou span momentum
-        5. Generate bull/bear signals with confidence
+        1. Check if epic is excluded from Ichimoku scanning (strategy-specific)
+        2. Calculate Ichimoku components if not present
+        3. Detect TK line crossovers (Tenkan vs Kijun)
+        4. Validate cloud breakouts (price vs Kumo)
+        5. Confirm with Chikou span momentum
+        6. Generate bull/bear signals with confidence
         """
 
         try:
+            # ICHIMOKU-SPECIFIC EPIC EXCLUSION CHECK
+            # This only affects Ichimoku strategy - other strategies can still trade these epics
+            if self.is_epic_excluded(epic):
+                reason = self.get_exclusion_reason(epic)
+                self.logger.info(f"🚫 Ichimoku strategy skipping {epic}: {reason}")
+                self.logger.info("💡 Note: Other strategies can still trade this epic")
+                return None
             # Validate data requirements
             if not self.indicator_calculator.validate_data_requirements(df, self.min_bars):
                 self.logger.info(f"🌥️ Ichimoku {epic}: Insufficient data ({len(df)} bars, need {self.min_bars})")

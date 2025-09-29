@@ -12,6 +12,17 @@ Configuration module for Ichimoku Kinko Hyo (One Glance Equilibrium Chart) strat
 ICHIMOKU_CLOUD_STRATEGY = True          # True = enable Ichimoku Cloud strategy
 STRATEGY_WEIGHT_ICHIMOKU = 0.6          # Ichimoku strategy weight (slightly higher due to comprehensive nature)
 
+# Epic Filtering Configuration - ICHIMOKU STRATEGY ONLY
+# These exclusions ONLY apply to the Ichimoku strategy
+# Other strategies (EMA, MACD, SMC, etc.) can still trade these epics
+ICHIMOKU_EXCLUDED_EPICS = [
+    'CS.D.GBPUSD.MINI.IP'    # Exclude GBPUSD due to extreme volatility causing excessive signals
+]
+
+ICHIMOKU_EPIC_EXCLUSION_REASON = {
+    'CS.D.GBPUSD.MINI.IP': 'Extreme volatility generates excessive signals (200+ per 14 days) even with 75% confidence threshold'
+}
+
 # =============================================================================
 # ICHIMOKU PERIODS CONFIGURATION (Traditional: 9-26-52-26)
 # =============================================================================
@@ -91,10 +102,10 @@ ACTIVE_ICHIMOKU_CONFIG = 'traditional'
 # ICHIMOKU VALIDATION FILTERS
 # =============================================================================
 
-# Cloud Filter Settings (Made very permissive)
-ICHIMOKU_CLOUD_FILTER_ENABLED = False                # Disable strict cloud position validation
-ICHIMOKU_CLOUD_BUFFER_PIPS = 20.0                    # Very large buffer for cloud position validation
-ICHIMOKU_CLOUD_THICKNESS_FILTER_ENABLED = False      # Disable cloud thickness filtering
+# Cloud Filter Settings (DISABLED - Empirically determined optimal setting)
+ICHIMOKU_CLOUD_FILTER_ENABLED = False                # DISABLED - Any buffer completely blocks TK signals
+ICHIMOKU_CLOUD_BUFFER_PIPS = 30.0                    # Not used when disabled
+ICHIMOKU_CLOUD_THICKNESS_FILTER_ENABLED = False      # Keep disabled for signal generation
 ICHIMOKU_MIN_CLOUD_THICKNESS_RATIO = 0.00001         # Very low minimum cloud thickness requirement
 
 # TK Line Filter Settings
@@ -111,10 +122,10 @@ ICHIMOKU_CHIKOU_PERIODS = 26                         # Chikou lookback period
 # ICHIMOKU SIGNAL VALIDATION THRESHOLDS
 # =============================================================================
 
-# Signal Strength Thresholds (Made more permissive)
-ICHIMOKU_CLOUD_THICKNESS_THRESHOLD = 0.00001         # Lower minimum cloud thickness
-ICHIMOKU_TK_CROSS_STRENGTH_THRESHOLD = 0.1           # Lower minimum TK cross strength
-ICHIMOKU_CHIKOU_CLEAR_THRESHOLD = 0.00001            # Lower minimum Chikou clearance
+# Signal Strength Thresholds (Balanced for reasonable signal frequency)
+ICHIMOKU_CLOUD_THICKNESS_THRESHOLD = 0.0001          # Lower minimum cloud thickness for more signals
+ICHIMOKU_TK_CROSS_STRENGTH_THRESHOLD = 0.2           # Lower minimum TK cross strength for more signals
+ICHIMOKU_CHIKOU_CLEAR_THRESHOLD = 0.0002             # Lower minimum Chikou clearance
 
 # =============================================================================
 # MULTI-TIMEFRAME (MTF) SETTINGS
@@ -173,12 +184,12 @@ USE_SMART_MONEY_ICHIMOKU = False                     # Enable smart money integr
 ENABLE_ICHIMOKU_CONTRADICTION_FILTER = True         # Prevent contradictory signals
 ICHIMOKU_SIGNAL_SPACING_MINUTES = 60                # Minimum time between signals (minutes)
 
-# Signal Quality Thresholds (Made more permissive)
-ICHIMOKU_MIN_SIGNAL_CONFIDENCE = 0.35               # Lower minimum confidence for signal generation
+# Signal Quality Thresholds (BALANCED for optimal signal quality/quantity)
+ICHIMOKU_MIN_SIGNAL_CONFIDENCE = 0.45               # Balanced minimum confidence for quality
 ICHIMOKU_PERFECT_ALIGNMENT_BONUS = 0.1              # Bonus for perfect Ichimoku alignment
 
 # Detection Mode
-ICHIMOKU_DETECTION_MODE = 'aggressive'               # More permissive signal detection
+ICHIMOKU_DETECTION_MODE = 'balanced'                 # Balanced signal detection mode
 ICHIMOKU_REQUIRE_PERFECT_ALIGNMENT = False           # Don't require all components aligned
 
 # Minimum bars for stable Ichimoku calculation
