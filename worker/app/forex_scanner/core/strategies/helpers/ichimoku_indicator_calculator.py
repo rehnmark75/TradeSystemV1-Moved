@@ -243,8 +243,11 @@ class IchimokuIndicatorCalculator:
             return df
 
     def _detect_tk_crossovers(self, df: pd.DataFrame, config: Dict) -> pd.DataFrame:
-        """Detect Tenkan-Kijun line crossovers"""
+        """Detect Tenkan-Kijun line crossovers with harmonic mean validation"""
         try:
+            # Enhanced TK Cross Detection with Harmonic Mean Analysis
+            df = self._calculate_harmonic_mean_analysis(df)
+
             # TK Bull Cross: Tenkan crosses above Kijun
             df['tk_bull_cross'] = (
                 (df['prev_tenkan'] <= df['prev_kijun'] + self.eps) &  # Was below/equal
@@ -260,10 +263,181 @@ class IchimokuIndicatorCalculator:
             # TK Cross strength (distance between lines)
             df['tk_cross_strength'] = abs(df['tenkan_sen'] - df['kijun_sen']) / (df['close'] + self.eps)
 
+            # Enhanced TK crosses with harmonic mean validation
+            df['tk_bull_cross_enhanced'] = (
+                df['tk_bull_cross'] &
+                df.get('harmonic_divergence_valid', True) &
+                df.get('genuine_trend_change', True)
+            )
+
+            df['tk_bear_cross_enhanced'] = (
+                df['tk_bear_cross'] &
+                df.get('harmonic_divergence_valid', True) &
+                df.get('genuine_trend_change', True)
+            )
+
             return df
 
         except Exception as e:
             self.logger.error(f"Error detecting TK crossovers: {e}")
+            return df
+
+    def _calculate_harmonic_mean_analysis(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate harmonic mean analysis for genuine TK cross validation
+
+        This method uses harmonic vs arithmetic mean divergence to detect
+        genuine trend changes vs noise-based crossovers.
+        """
+        try:
+            # Parameters for harmonic analysis
+            harmonic_window = 10  # Window for harmonic/arithmetic mean comparison
+            divergence_threshold = 0.02  # Minimum divergence for validation
+            trend_change_threshold = 0.015  # Threshold for genuine trend change
+
+            # Calculate harmonic and arithmetic means for Tenkan and Kijun
+            df = self._calculate_harmonic_and_arithmetic_means(df, harmonic_window)
+
+            # Calculate divergence between harmonic and arithmetic means
+            df = self._calculate_harmonic_divergence(df, divergence_threshold)
+
+            # Detect genuine trend changes using harmonic analysis
+            df = self._detect_genuine_trend_changes(df, trend_change_threshold)
+
+            self.logger.debug("Harmonic mean analysis completed")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error in harmonic mean analysis: {e}")
+            return df
+
+    def _calculate_harmonic_and_arithmetic_means(self, df: pd.DataFrame, window: int) -> pd.DataFrame:
+        """Calculate rolling harmonic and arithmetic means for TK lines"""
+        try:
+            # Harmonic mean calculation (safe for positive values)
+            def safe_harmonic_mean(values):
+                """Calculate harmonic mean safely, handling zeros and negatives"""
+                positive_values = values[values > 1e-10]  # Filter out zeros/negatives
+                if len(positive_values) < len(values) * 0.5:  # Too many zeros/negatives
+                    return np.nan
+                if len(positive_values) == 0:
+                    return np.nan
+                return len(positive_values) / np.sum(1.0 / positive_values)
+
+            # Tenkan harmonic and arithmetic means
+            df['tenkan_harmonic_mean'] = df['tenkan_sen'].rolling(window=window).apply(
+                safe_harmonic_mean, raw=True
+            )
+            df['tenkan_arithmetic_mean'] = df['tenkan_sen'].rolling(window=window).mean()
+
+            # Kijun harmonic and arithmetic means
+            df['kijun_harmonic_mean'] = df['kijun_sen'].rolling(window=window).apply(
+                safe_harmonic_mean, raw=True
+            )
+            df['kijun_arithmetic_mean'] = df['kijun_sen'].rolling(window=window).mean()
+
+            # TK spread harmonic and arithmetic means
+            df['tk_spread'] = abs(df['tenkan_sen'] - df['kijun_sen'])
+            df['tk_spread_harmonic_mean'] = df['tk_spread'].rolling(window=window).apply(
+                safe_harmonic_mean, raw=True
+            )
+            df['tk_spread_arithmetic_mean'] = df['tk_spread'].rolling(window=window).mean()
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error calculating harmonic/arithmetic means: {e}")
+            return df
+
+    def _calculate_harmonic_divergence(self, df: pd.DataFrame, threshold: float) -> pd.DataFrame:
+        """Calculate divergence between harmonic and arithmetic means"""
+        try:
+            # Tenkan divergence
+            df['tenkan_harmonic_divergence'] = abs(
+                (df['tenkan_harmonic_mean'] - df['tenkan_arithmetic_mean']) /
+                (df['tenkan_arithmetic_mean'] + self.eps)
+            )
+
+            # Kijun divergence
+            df['kijun_harmonic_divergence'] = abs(
+                (df['kijun_harmonic_mean'] - df['kijun_arithmetic_mean']) /
+                (df['kijun_arithmetic_mean'] + self.eps)
+            )
+
+            # TK spread divergence
+            df['tk_spread_harmonic_divergence'] = abs(
+                (df['tk_spread_harmonic_mean'] - df['tk_spread_arithmetic_mean']) /
+                (df['tk_spread_arithmetic_mean'] + self.eps)
+            )
+
+            # Composite divergence score
+            df['composite_harmonic_divergence'] = (
+                df['tenkan_harmonic_divergence'] +
+                df['kijun_harmonic_divergence'] +
+                df['tk_spread_harmonic_divergence']
+            ) / 3
+
+            # Divergence validation
+            df['harmonic_divergence_valid'] = (
+                df['composite_harmonic_divergence'] >= threshold
+            )
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error calculating harmonic divergence: {e}")
+            return df
+
+    def _detect_genuine_trend_changes(self, df: pd.DataFrame, threshold: float) -> pd.DataFrame:
+        """Detect genuine trend changes using harmonic mean analysis"""
+        try:
+            # Calculate trend change momentum using harmonic means
+            df['tenkan_harmonic_momentum'] = df['tenkan_harmonic_mean'].pct_change()
+            df['kijun_harmonic_momentum'] = df['kijun_harmonic_mean'].pct_change()
+
+            # Trend alignment using harmonic means
+            df['harmonic_trend_alignment'] = np.where(
+                (df['tenkan_harmonic_momentum'] > 0) & (df['kijun_harmonic_momentum'] > 0),
+                'bullish',
+                np.where(
+                    (df['tenkan_harmonic_momentum'] < 0) & (df['kijun_harmonic_momentum'] < 0),
+                    'bearish',
+                    'neutral'
+                )
+            )
+
+            # Genuine trend change detection
+            df['harmonic_momentum_strength'] = abs(
+                df['tenkan_harmonic_momentum'] + df['kijun_harmonic_momentum']
+            )
+
+            df['genuine_trend_change'] = (
+                df['harmonic_momentum_strength'] >= threshold
+            )
+
+            # Enhanced trend change validation with directional confirmation
+            df['prev_harmonic_trend'] = df['harmonic_trend_alignment'].shift(1)
+            df['trend_change_confirmed'] = (
+                (df['harmonic_trend_alignment'] != df['prev_harmonic_trend']) &
+                (df['harmonic_trend_alignment'] != 'neutral') &
+                df['genuine_trend_change']
+            )
+
+            # Harmonic strength ratio (harmonic vs arithmetic)
+            df['tenkan_harmonic_ratio'] = df['tenkan_harmonic_mean'] / (df['tenkan_arithmetic_mean'] + self.eps)
+            df['kijun_harmonic_ratio'] = df['kijun_harmonic_mean'] / (df['kijun_arithmetic_mean'] + self.eps)
+
+            # Quality score for harmonic analysis
+            df['harmonic_quality_score'] = (
+                df['composite_harmonic_divergence'] *
+                df['harmonic_momentum_strength'] *
+                np.where(df['trend_change_confirmed'], 1.2, 1.0)  # Bonus for confirmed changes
+            )
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error detecting genuine trend changes: {e}")
             return df
 
     def _detect_cloud_breakouts(self, df: pd.DataFrame, config: Dict) -> pd.DataFrame:

@@ -102,9 +102,9 @@ ACTIVE_ICHIMOKU_CONFIG = 'traditional'
 # ICHIMOKU VALIDATION FILTERS
 # =============================================================================
 
-# Cloud Filter Settings (DISABLED - Empirically determined optimal setting)
-ICHIMOKU_CLOUD_FILTER_ENABLED = False                # DISABLED - Any buffer completely blocks TK signals
-ICHIMOKU_CLOUD_BUFFER_PIPS = 30.0                    # Not used when disabled
+# Cloud Filter Settings (TEMPORARILY DISABLED for testing)
+ICHIMOKU_CLOUD_FILTER_ENABLED = False                # DISABLED - For signal generation testing
+ICHIMOKU_CLOUD_BUFFER_PIPS = 8.0                     # Not used when disabled
 ICHIMOKU_CLOUD_THICKNESS_FILTER_ENABLED = False      # Keep disabled for signal generation
 ICHIMOKU_MIN_CLOUD_THICKNESS_RATIO = 0.00001         # Very low minimum cloud thickness requirement
 
@@ -114,7 +114,7 @@ ICHIMOKU_MIN_TK_SEPARATION = 0.0005                  # Minimum TK separation for
 ICHIMOKU_TK_CROSS_CONFIRMATION_BARS = 1              # Bars to confirm TK crossover
 
 # Chikou Span Filter Settings
-ICHIMOKU_CHIKOU_FILTER_ENABLED = False               # Disable overly strict Chikou validation
+ICHIMOKU_CHIKOU_FILTER_ENABLED = False               # Disable for now - too restrictive initially
 ICHIMOKU_CHIKOU_BUFFER_PIPS = 5.0                    # Larger buffer for Chikou validation
 ICHIMOKU_CHIKOU_PERIODS = 26                         # Chikou lookback period
 
@@ -122,7 +122,7 @@ ICHIMOKU_CHIKOU_PERIODS = 26                         # Chikou lookback period
 # ICHIMOKU SIGNAL VALIDATION THRESHOLDS
 # =============================================================================
 
-# Signal Strength Thresholds (Balanced for reasonable signal frequency)
+# Signal Strength Thresholds (More permissive for signal generation)
 ICHIMOKU_CLOUD_THICKNESS_THRESHOLD = 0.0001          # Lower minimum cloud thickness for more signals
 ICHIMOKU_TK_CROSS_STRENGTH_THRESHOLD = 0.2           # Lower minimum TK cross strength for more signals
 ICHIMOKU_CHIKOU_CLEAR_THRESHOLD = 0.0002             # Lower minimum Chikou clearance
@@ -160,7 +160,7 @@ ICHIMOKU_MOMENTUM_CONFLUENCE_ENABLED = False         # Enable additional momentu
 ICHIMOKU_MIN_CONFLUENCE_RATIO = 0.5                  # Minimum confluence for signal validation
 
 # Enhanced validation with other indicators
-ICHIMOKU_EMA_200_TREND_FILTER = False                # Use EMA 200 as additional trend filter
+ICHIMOKU_EMA_200_TREND_FILTER = True                 # Use EMA 200 as additional trend filter
 ICHIMOKU_RSI_CONFLUENCE_ENABLED = False              # Use RSI for confluence
 ICHIMOKU_MACD_CONFLUENCE_ENABLED = False             # Use MACD for confluence
 
@@ -184,8 +184,8 @@ USE_SMART_MONEY_ICHIMOKU = False                     # Enable smart money integr
 ENABLE_ICHIMOKU_CONTRADICTION_FILTER = True         # Prevent contradictory signals
 ICHIMOKU_SIGNAL_SPACING_MINUTES = 60                # Minimum time between signals (minutes)
 
-# Signal Quality Thresholds (BALANCED for optimal signal quality/quantity)
-ICHIMOKU_MIN_SIGNAL_CONFIDENCE = 0.45               # Balanced minimum confidence for quality
+# Signal Quality Thresholds (MORE PERMISSIVE for signal generation)
+ICHIMOKU_MIN_SIGNAL_CONFIDENCE = 0.40               # More permissive confidence for signal generation
 ICHIMOKU_PERFECT_ALIGNMENT_BONUS = 0.1              # Bonus for perfect Ichimoku alignment
 
 # Detection Mode

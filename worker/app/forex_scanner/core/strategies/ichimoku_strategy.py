@@ -89,13 +89,18 @@ class IchimokuStrategy(BaseStrategy):
 
         # Basic parameters - Optimized for balanced signal frequency
         self.eps = 1e-8  # Epsilon for stability
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.50)  # Balanced 50% confidence
+        self.min_confidence = getattr(ichimoku_config, 'ICHIMOKU_MIN_SIGNAL_CONFIDENCE', 0.50)  # Use Ichimoku-specific confidence
         self.min_bars = 70  # Balanced bars requirement for stability and responsiveness
 
-        # Strategy-specific thresholds
-        self.cloud_thickness_threshold = self.ichimoku_config.get('cloud_thickness_threshold', 0.0001)
-        self.tk_cross_strength_threshold = self.ichimoku_config.get('tk_cross_strength_threshold', 0.5)
-        self.chikou_clear_threshold = self.ichimoku_config.get('chikou_clear_threshold', 0.0002)
+        # Strategy-specific thresholds - updated with config values
+        self.cloud_thickness_threshold = getattr(ichimoku_config, 'ICHIMOKU_CLOUD_THICKNESS_THRESHOLD', 0.0002)
+        self.tk_cross_strength_threshold = getattr(ichimoku_config, 'ICHIMOKU_TK_CROSS_STRENGTH_THRESHOLD', 0.3)
+        self.chikou_clear_threshold = getattr(ichimoku_config, 'ICHIMOKU_CHIKOU_CLEAR_THRESHOLD', 0.0002)
+
+        # Cloud and Chikou filter settings
+        self.cloud_filter_enabled = getattr(ichimoku_config, 'ICHIMOKU_CLOUD_FILTER_ENABLED', True)
+        self.cloud_buffer_pips = getattr(ichimoku_config, 'ICHIMOKU_CLOUD_BUFFER_PIPS', 8.0)
+        self.chikou_filter_enabled = getattr(ichimoku_config, 'ICHIMOKU_CHIKOU_FILTER_ENABLED', False)
 
         # Will be initialized after helpers are available
         self.indicator_calculator = None
@@ -474,6 +479,22 @@ class IchimokuStrategy(BaseStrategy):
                     self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal failed Chikou span validation")
                     return None
 
+                # EMA200 trend filter validation (if enabled)
+                if getattr(ichimoku_config, 'ICHIMOKU_EMA_200_TREND_FILTER', False):
+                    price = latest_row.get('close', latest_row.get('price', 0))
+                    ema200 = latest_row.get('ema_200')
+
+                    if ema200 is None:
+                        # Calculate EMA200 if not present
+                        df_with_signals['ema_200'] = df_with_signals['close'].ewm(span=200, adjust=False).mean()
+                        ema200 = df_with_signals['ema_200'].iloc[-1]
+
+                    if price < ema200:
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal rejected - price {price:.5f} below EMA200 {ema200:.5f}")
+                        return None
+                    else:
+                        self.logger.info(f"✅ Ichimoku {epic}: BULL signal aligned with EMA200 trend - price {price:.5f} above EMA200 {ema200:.5f}")
+
                 # Multi-timeframe validation if enabled (only in pipeline mode)
                 if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer:
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
@@ -511,6 +532,22 @@ class IchimokuStrategy(BaseStrategy):
                 if not self.trend_validator.validate_chikou_span(df_with_signals, 'BEAR'):
                     self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal failed Chikou span validation")
                     return None
+
+                # EMA200 trend filter validation (if enabled)
+                if getattr(ichimoku_config, 'ICHIMOKU_EMA_200_TREND_FILTER', False):
+                    price = latest_row.get('close', latest_row.get('price', 0))
+                    ema200 = latest_row.get('ema_200')
+
+                    if ema200 is None:
+                        # Calculate EMA200 if not present
+                        df_with_signals['ema_200'] = df_with_signals['close'].ewm(span=200, adjust=False).mean()
+                        ema200 = df_with_signals['ema_200'].iloc[-1]
+
+                    if price > ema200:
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal rejected - price {price:.5f} above EMA200 {ema200:.5f}")
+                        return None
+                    else:
+                        self.logger.info(f"✅ Ichimoku {epic}: BEAR signal aligned with EMA200 trend - price {price:.5f} below EMA200 {ema200:.5f}")
 
                 # Multi-timeframe validation if enabled (only in pipeline mode)
                 if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer:
