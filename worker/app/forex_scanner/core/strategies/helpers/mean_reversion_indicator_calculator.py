@@ -136,8 +136,14 @@ class MeanReversionIndicatorCalculator:
             # 2. Calculate Multi-timeframe RSI
             df_copy = self._calculate_mtf_rsi(df_copy)
 
-            # 3. Calculate RSI-EMA Divergence
-            df_copy = self._calculate_rsi_ema_divergence(df_copy)
+            # 3. Calculate RSI-EMA Divergence (FAST MODE: Skip if enabled)
+            if not (hasattr(mr_config, 'BACKTEST_FAST_MODE') and mr_config.BACKTEST_FAST_MODE and mr_config.FAST_MODE_DISABLE_DIVERGENCE):
+                df_copy = self._calculate_rsi_ema_divergence(df_copy)
+            else:
+                # Fast mode: Add dummy columns to prevent errors
+                df_copy['rsi_ema_divergence_bull'] = False
+                df_copy['rsi_ema_divergence_bear'] = False
+                df_copy['divergence_strength'] = 0.0
 
             # 4. Calculate Squeeze Momentum Indicator
             df_copy = self._calculate_squeeze_momentum(df_copy)

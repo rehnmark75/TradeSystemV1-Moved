@@ -162,7 +162,9 @@ ICHIMOKU_MIN_CONFLUENCE_RATIO = 0.5                  # Minimum confluence for si
 # Enhanced validation with other indicators
 ICHIMOKU_EMA_200_TREND_FILTER = True                 # Use EMA 200 as additional trend filter
 ICHIMOKU_RSI_CONFLUENCE_ENABLED = False              # Use RSI for confluence
-ICHIMOKU_MACD_CONFLUENCE_ENABLED = False             # Use MACD for confluence
+ICHIMOKU_MACD_CONFLUENCE_ENABLED = True              # Use MACD histogram filter
+ICHIMOKU_MACD_HISTOGRAM_FILTER = True                # Require MACD histogram alignment
+ICHIMOKU_MACD_HISTOGRAM_MIN_VALUE = 0.0001           # Minimum histogram value for signal validation
 
 # =============================================================================
 # SMART MONEY INTEGRATION SETTINGS

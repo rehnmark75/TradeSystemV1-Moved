@@ -77,13 +77,14 @@ class MeanReversionBacktest(BacktestBase):
     def initialize_strategy(self, epic: str = None) -> MeanReversionStrategy:
         """Initialize the mean reversion strategy with optimal parameters"""
         try:
-            # Create strategy with optimal parameters
+            # Create strategy with optimal parameters and enhanced validation
             strategy = create_mean_reversion_strategy(
                 data_fetcher=self.data_fetcher,
                 backtest_mode=True,
                 epic=epic,
                 timeframe='15m',
-                use_optimized_parameters=self.use_optimal_parameters
+                use_optimized_parameters=self.use_optimal_parameters,
+                pipeline_mode=True  # Enable our enhanced validation logic
             )
 
             if self.use_optimal_parameters:

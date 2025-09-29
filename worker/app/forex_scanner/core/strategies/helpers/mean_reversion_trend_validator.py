@@ -552,3 +552,264 @@ class MeanReversionTrendValidator:
         except Exception as e:
             self.logger.error(f"Error getting trend analysis summary: {e}")
             return {'error': str(e)}
+
+    def validate_with_regime_dependent_thresholds(self, df: pd.DataFrame, signal_idx: int, signal_type: str, epic: str) -> Dict:
+        """
+        NEW: Enhanced validation with regime-dependent thresholds
+
+        Uses different validation criteria based on current market regime.
+        More strict validation in trending markets, more permissive in ranging markets.
+
+        Args:
+            df: DataFrame with indicator data
+            signal_idx: Index of the signal bar
+            signal_type: 'BULL' or 'BEAR'
+            epic: Trading pair epic
+
+        Returns:
+            Dictionary with validation results and regime-adjusted scores
+        """
+        try:
+            row = df.iloc[signal_idx]
+
+            # Determine market regime
+            regime_analysis = self._analyze_market_regime(df, signal_idx)
+            regime_type = regime_analysis['regime_type']
+            regime_strength = regime_analysis['strength_score']
+
+            # Get regime-dependent thresholds
+            thresholds = self._get_regime_dependent_thresholds(regime_type, epic)
+
+            validation_results = {
+                'regime_type': regime_type,
+                'regime_strength': regime_strength,
+                'thresholds_used': thresholds,
+                'validation_details': {}
+            }
+
+            # 1. Confidence Threshold (varies by regime)
+            confidence = row.get('mr_confidence', 0)
+            min_confidence = thresholds['min_confidence']
+            confidence_valid = confidence >= min_confidence
+            validation_results['validation_details']['confidence'] = {
+                'passed': confidence_valid,
+                'value': confidence,
+                'threshold': min_confidence,
+                'regime_adjusted': regime_type != 'ranging'
+            }
+
+            # 2. Confluence Threshold (stricter in trends)
+            confluence_score = row.get(f'oscillator_{signal_type.lower()}_score', 0)
+            min_confluence = thresholds['min_confluence']
+            confluence_valid = confluence_score >= min_confluence
+            validation_results['validation_details']['confluence'] = {
+                'passed': confluence_valid,
+                'value': confluence_score,
+                'threshold': min_confluence,
+                'regime_adjusted': regime_type != 'ranging'
+            }
+
+            # 3. ADX Regime Filter (regime-specific)
+            adx = row.get('adx', 25)
+            max_adx = thresholds['max_adx']
+            adx_valid = adx <= max_adx if max_adx > 0 else True
+            validation_results['validation_details']['adx_regime'] = {
+                'passed': adx_valid,
+                'value': adx,
+                'threshold': max_adx,
+                'regime_type': regime_type
+            }
+
+            # 4. Volatility Requirements (regime-dependent)
+            atr = row.get('atr', 0)
+            min_atr_multiplier = thresholds['min_atr_multiplier']
+
+            if len(df) >= 20 and atr > 0:
+                recent_atr_avg = df['atr'].iloc[signal_idx-19:signal_idx].mean()
+                atr_ratio = atr / recent_atr_avg if recent_atr_avg > 0 else 1.0
+                volatility_valid = atr_ratio >= min_atr_multiplier
+            else:
+                volatility_valid = True  # Skip if insufficient data
+                atr_ratio = 1.0
+
+            validation_results['validation_details']['volatility'] = {
+                'passed': volatility_valid,
+                'atr_ratio': atr_ratio,
+                'threshold': min_atr_multiplier,
+                'regime_adjusted': True
+            }
+
+            # 5. Price Efficiency Filter (prevents trading in strong trends)
+            efficiency_score = self._calculate_price_efficiency(df, signal_idx)
+            max_efficiency = thresholds['max_price_efficiency']
+            efficiency_valid = efficiency_score <= max_efficiency
+            validation_results['validation_details']['price_efficiency'] = {
+                'passed': efficiency_valid,
+                'value': efficiency_score,
+                'threshold': max_efficiency,
+                'regime_type': regime_type
+            }
+
+            # Calculate overall validation score
+            validations = [
+                validation_results['validation_details']['confidence']['passed'],
+                validation_results['validation_details']['confluence']['passed'],
+                validation_results['validation_details']['adx_regime']['passed'],
+                validation_results['validation_details']['volatility']['passed'],
+                validation_results['validation_details']['price_efficiency']['passed']
+            ]
+
+            pass_count = sum(validations)
+            total_checks = len(validations)
+            pass_rate = pass_count / total_checks
+
+            # Regime-dependent pass rate requirements
+            required_pass_rate = thresholds['min_pass_rate']
+            overall_valid = pass_rate >= required_pass_rate
+
+            validation_results.update({
+                'pass_rate': pass_rate,
+                'required_pass_rate': required_pass_rate,
+                'overall_valid': overall_valid,
+                'failed_validations': [k for k, v in validation_results['validation_details'].items() if not v['passed']]
+            })
+
+            # Log regime-dependent validation results
+            if not overall_valid:
+                self.logger.debug(f"{signal_type} signal REJECTED by regime validation ({regime_type}): "
+                                f"{pass_rate:.1%} pass rate < {required_pass_rate:.1%} required, "
+                                f"failed: {validation_results['failed_validations']}")
+            elif regime_type != 'ranging':
+                self.logger.debug(f"{signal_type} signal PASSED regime validation ({regime_type}): "
+                                f"{pass_rate:.1%} pass rate with adjusted thresholds")
+
+            return validation_results
+
+        except Exception as e:
+            self.logger.error(f"Error in regime-dependent validation: {e}")
+            return {'overall_valid': False, 'error': str(e)}
+
+    def _analyze_market_regime(self, df: pd.DataFrame, signal_idx: int) -> Dict:
+        """Analyze current market regime with strength scoring"""
+        try:
+            row = df.iloc[signal_idx]
+            adx = row.get('adx', 25)
+
+            # Determine regime type
+            if adx < 20:
+                regime_type = 'strong_ranging'
+                strength_score = (20 - adx) / 20  # Higher score = stronger ranging
+            elif adx < 30:
+                regime_type = 'ranging'
+                strength_score = (30 - adx) / 10
+            elif adx < 45:
+                regime_type = 'weak_trend'
+                strength_score = (adx - 30) / 15
+            elif adx < 60:
+                regime_type = 'trend'
+                strength_score = (adx - 45) / 15
+            else:
+                regime_type = 'strong_trend'
+                strength_score = min(1.0, (adx - 60) / 20)
+
+            # Additional regime context
+            atr = row.get('atr', 0)
+            if len(df) >= 20 and atr > 0:
+                recent_atr_avg = df['atr'].iloc[signal_idx-19:signal_idx].mean()
+                volatility_multiplier = atr / recent_atr_avg if recent_atr_avg > 0 else 1.0
+            else:
+                volatility_multiplier = 1.0
+
+            return {
+                'regime_type': regime_type,
+                'adx': adx,
+                'strength_score': strength_score,
+                'volatility_multiplier': volatility_multiplier,
+                'suitable_for_mean_reversion': regime_type in ['strong_ranging', 'ranging', 'weak_trend']
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error analyzing market regime: {e}")
+            return {
+                'regime_type': 'unknown',
+                'strength_score': 0.5,
+                'suitable_for_mean_reversion': True
+            }
+
+    def _get_regime_dependent_thresholds(self, regime_type: str, epic: str) -> Dict:
+        """Get validation thresholds based on market regime"""
+
+        # Base thresholds for different regimes
+        regime_thresholds = {
+            'strong_ranging': {  # Best conditions for mean reversion
+                'min_confidence': 0.65,
+                'min_confluence': 0.70,
+                'max_adx': 100,  # No ADX limit
+                'min_atr_multiplier': 1.1,
+                'max_price_efficiency': 0.8,
+                'min_pass_rate': 0.60
+            },
+            'ranging': {  # Good conditions
+                'min_confidence': 0.70,
+                'min_confluence': 0.72,
+                'max_adx': 35,
+                'min_atr_multiplier': 1.15,
+                'max_price_efficiency': 0.7,
+                'min_pass_rate': 0.70
+            },
+            'weak_trend': {  # Acceptable conditions with stricter requirements
+                'min_confidence': 0.75,
+                'min_confluence': 0.75,
+                'max_adx': 45,
+                'min_atr_multiplier': 1.2,
+                'max_price_efficiency': 0.6,
+                'min_pass_rate': 0.80
+            },
+            'trend': {  # Poor conditions - very strict
+                'min_confidence': 0.80,
+                'min_confluence': 0.80,
+                'max_adx': 55,
+                'min_atr_multiplier': 1.3,
+                'max_price_efficiency': 0.5,
+                'min_pass_rate': 0.90
+            },
+            'strong_trend': {  # Avoid mean reversion in strong trends
+                'min_confidence': 0.85,
+                'min_confluence': 0.85,
+                'max_adx': 0,  # Effectively disabled
+                'min_atr_multiplier': 1.5,
+                'max_price_efficiency': 0.3,
+                'min_pass_rate': 1.0  # Require perfect validation
+            }
+        }
+
+        return regime_thresholds.get(regime_type, regime_thresholds['ranging'])
+
+    def _calculate_price_efficiency(self, df: pd.DataFrame, signal_idx: int) -> float:
+        """Calculate price movement efficiency (trending vs ranging)"""
+        try:
+            if signal_idx < 20:
+                return 0.5  # Neutral if insufficient data
+
+            # Calculate price movement efficiency over last 20 bars
+            start_idx = signal_idx - 19
+            end_idx = signal_idx
+
+            start_price = df.iloc[start_idx]['close']
+            end_price = df.iloc[end_idx]['close']
+            price_change = abs(end_price - start_price)
+
+            # Calculate total range
+            high_range = df['high'].iloc[start_idx:end_idx + 1].max()
+            low_range = df['low'].iloc[start_idx:end_idx + 1].min()
+            total_range = high_range - low_range
+
+            if total_range == 0:
+                return 0.0  # No movement
+
+            efficiency = price_change / total_range
+            return min(1.0, efficiency)
+
+        except Exception as e:
+            self.logger.error(f"Error calculating price efficiency: {e}")
+            return 0.5

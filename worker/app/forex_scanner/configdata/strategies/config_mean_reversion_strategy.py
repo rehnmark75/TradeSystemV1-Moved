@@ -10,41 +10,41 @@ Based on RAG analysis findings: LuxAlgo Premium Oscillator, ChrisMoody RSI, Dive
 # =============================================================================
 
 # Core Strategy Settings
-MEAN_REVERSION_STRATEGY = True     # True = enable mean reversion strategy
+MEAN_REVERSION_STRATEGY = False    # DISABLED - strategy not working properly
 STRATEGY_WEIGHT_MEAN_REVERSION = 0.4   # Mean reversion strategy weight
 
 # =============================================================================
 # LUXALGO PREMIUM OSCILLATOR CONFIGURATION
 # =============================================================================
 
-# LuxAlgo Oscillator Core Settings (Primary Mean Reversion Engine)
+# LuxAlgo Oscillator Core Settings (Strict Quality Engine)
 LUXALGO_OSCILLATOR_ENABLED = True
 LUXALGO_LENGTH = 14                    # Oscillator calculation period
 LUXALGO_SOURCE = 'close'               # Price source for calculations
 LUXALGO_SMOOTHING = 3                  # Smoothing factor for oscillator
-LUXALGO_OVERBOUGHT_THRESHOLD = 80      # Overbought level for mean reversion
-LUXALGO_OVERSOLD_THRESHOLD = 20        # Oversold level for mean reversion
-LUXALGO_EXTREME_OB_THRESHOLD = 90      # Extreme overbought (high probability reversal)
-LUXALGO_EXTREME_OS_THRESHOLD = 10      # Extreme oversold (high probability reversal)
+LUXALGO_OVERBOUGHT_THRESHOLD = 82      # Stricter overbought threshold
+LUXALGO_OVERSOLD_THRESHOLD = 18        # Stricter oversold threshold
+LUXALGO_EXTREME_OB_THRESHOLD = 90      # Stricter extreme levels
+LUXALGO_EXTREME_OS_THRESHOLD = 10      # Stricter extreme levels
 
-# LuxAlgo Signal Generation
-LUXALGO_REQUIRE_DIVERGENCE = True      # Require price/oscillator divergence
-LUXALGO_MIN_DIVERGENCE_BARS = 3        # Minimum bars for divergence pattern
-LUXALGO_DIVERGENCE_LOOKBACK = 20       # Lookback period for divergence detection
+# LuxAlgo Signal Generation (Premium Quality)
+LUXALGO_REQUIRE_DIVERGENCE = True      # Require price/oscillator divergence for quality
+LUXALGO_MIN_DIVERGENCE_BARS = 5        # Stricter divergence pattern (was 3)
+LUXALGO_DIVERGENCE_LOOKBACK = 25       # Extended lookback for better patterns (was 20)
 
 # =============================================================================
 # MULTI-TIMEFRAME RSI CONFIGURATION (ChrisMoody Style)
 # =============================================================================
 
-# Multi-Timeframe RSI Settings
+# Multi-Timeframe RSI Settings (Relaxed for signal generation)
 MTF_RSI_ENABLED = True
 MTF_RSI_PERIOD = 14                    # RSI calculation period
 MTF_RSI_TIMEFRAMES = ['15m', '1h', '4h']  # Timeframes for confluence
-MTF_RSI_MIN_ALIGNMENT = 0.6            # Minimum alignment score for signal
+MTF_RSI_MIN_ALIGNMENT = 0.55           # Relaxed alignment
 MTF_RSI_OVERBOUGHT = 70                # RSI overbought threshold
 MTF_RSI_OVERSOLD = 30                  # RSI oversold threshold
-MTF_RSI_EXTREME_OB = 80                # Extreme overbought threshold
-MTF_RSI_EXTREME_OS = 20                # Extreme oversold threshold
+MTF_RSI_EXTREME_OB = 78                # Moderately selective extreme levels
+MTF_RSI_EXTREME_OS = 22                # Moderately selective extreme levels
 
 # RSI Confluence Requirements
 MTF_RSI_REQUIRE_HIGHER_TF_CONFIRMATION = True  # Require higher timeframe confirmation
@@ -101,9 +101,9 @@ OSCILLATOR_WEIGHTS = {                 # Weight for each oscillator in confluenc
     'squeeze': 0.1                     # Volatility/momentum timing
 }
 
-# Confluence Thresholds
-OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.65  # Minimum weighted score for bullish signal
-OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.65  # Minimum weighted score for bearish signal
+# Confluence Thresholds (Moderate for reasonable signals)
+OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.20  # Moderate threshold
+OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.20  # Moderate threshold
 OSCILLATOR_EXTREME_CONFLUENCE_BOOST = 0.15   # Boost for extreme readings
 
 # =============================================================================
@@ -125,16 +125,16 @@ MEAN_REVERSION_ZONE_CONFIDENCE_BOOST = 0.1  # Confidence boost for zone signals
 # MARKET REGIME DETECTION
 # =============================================================================
 
-# Market Regime Settings
-MARKET_REGIME_DETECTION_ENABLED = True
+# Market Regime Settings (Strategy-Level Filtering)
+MARKET_REGIME_DETECTION_ENABLED = True  # Re-enable for signal quality control
 MARKET_REGIME_VOLATILITY_PERIOD = 20   # Period for volatility calculation
 MARKET_REGIME_TREND_PERIOD = 50        # Period for trend strength calculation
 MARKET_REGIME_RANGING_THRESHOLD = 0.3  # Threshold for ranging market detection
 
-# Regime-Based Signal Filtering
-MARKET_REGIME_DISABLE_IN_STRONG_TREND = True  # Disable mean reversion in strong trends
+# Regime-Based Signal Filtering (Allow more signals)
+MARKET_REGIME_DISABLE_IN_STRONG_TREND = False # Allow signals in all conditions for now
 MARKET_REGIME_BOOST_IN_RANGING = True         # Boost confidence in ranging markets
-MARKET_REGIME_TREND_STRENGTH_THRESHOLD = 0.7  # Threshold for strong trend detection
+MARKET_REGIME_TREND_STRENGTH_THRESHOLD = 0.90 # High threshold
 
 # =============================================================================
 # MULTI-TIMEFRAME ANALYSIS
@@ -155,15 +155,31 @@ MTF_CONFIDENCE_BOOST_FULL_ALIGNMENT = 0.2  # Boost for full MTF alignment
 # SIGNAL QUALITY AND FILTERING
 # =============================================================================
 
-# Signal Quality Requirements
-SIGNAL_QUALITY_MIN_CONFIDENCE = 0.6    # Minimum confidence for signal generation
+# MODERATE QUALITY SIGNAL REQUIREMENTS (Sweet Spot Target)
+SIGNAL_QUALITY_MIN_CONFIDENCE = 0.80   # Higher confidence to reduce signal count
 SIGNAL_QUALITY_REQUIRE_VOLUME_CONFIRMATION = False  # Volume confirmation (if available)
-SIGNAL_QUALITY_MIN_RISK_REWARD = 1.5   # Minimum risk-reward ratio
+SIGNAL_QUALITY_MIN_RISK_REWARD = 2.2   # Moderate risk-reward requirement
 
-# Signal Filtering
-SIGNAL_FILTER_MAX_SIGNALS_PER_DAY = 5   # Maximum signals per epic per day
-SIGNAL_FILTER_MIN_SIGNAL_SPACING = 4    # Minimum hours between signals
+# EXTREME SIGNAL FILTERING (Drastically reduce from 926)
+SIGNAL_FILTER_MAX_SIGNALS_PER_DAY = 0.5 # Only 1 signal per epic per 2 days
+SIGNAL_FILTER_MIN_SIGNAL_SPACING = 48   # 48 hours between signals (extreme)
 SIGNAL_FILTER_AVOID_NEWS_EVENTS = True  # Avoid signals during major news
+
+# MODERATE VOLATILITY FILTERING (Balanced Target)
+VOLATILITY_FILTER_ENABLED = True        # Enable volatility-based signal filtering
+VOLATILITY_MIN_ATR_MULTIPLIER = 1.4     # Moderately strict volatility requirement
+VOLATILITY_ATR_LOOKBACK_PERIODS = 20    # Periods for ATR average calculation
+
+# =============================================================================
+# PERFORMANCE OPTIMIZATION SETTINGS
+# =============================================================================
+
+# Maximum Speed Mode (Fix 299s performance)
+BACKTEST_FAST_MODE = True                # Enable for faster backtesting
+FAST_MODE_DISABLE_DIVERGENCE = True      # Disable expensive divergence for speed
+FAST_MODE_SINGLE_TIMEFRAME = True        # Use primary timeframe only for speed
+FAST_MODE_SIMPLIFIED_VALIDATION = True   # Use simplified validation for speed
+FAST_MODE_REDUCED_LOOKBACKS = True       # Reduce lookback periods for speed
 
 # =============================================================================
 # RISK MANAGEMENT SETTINGS

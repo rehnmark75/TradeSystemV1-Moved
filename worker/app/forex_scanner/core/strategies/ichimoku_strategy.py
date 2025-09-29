@@ -495,6 +495,21 @@ class IchimokuStrategy(BaseStrategy):
                     else:
                         self.logger.info(f"✅ Ichimoku {epic}: BULL signal aligned with EMA200 trend - price {price:.5f} above EMA200 {ema200:.5f}")
 
+                # MACD histogram filter validation (if enabled)
+                if getattr(ichimoku_config, 'ICHIMOKU_MACD_HISTOGRAM_FILTER', False):
+                    macd_histogram = latest_row.get('macd_histogram')
+                    min_histogram_value = getattr(ichimoku_config, 'ICHIMOKU_MACD_HISTOGRAM_MIN_VALUE', 0.0001)
+
+                    if macd_histogram is None:
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal rejected - MACD histogram not available")
+                        return None
+
+                    if macd_histogram <= min_histogram_value:
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal rejected - MACD histogram {macd_histogram:.6f} not positive (min: {min_histogram_value:.6f})")
+                        return None
+                    else:
+                        self.logger.info(f"✅ Ichimoku {epic}: BULL signal aligned with MACD histogram - value {macd_histogram:.6f} > {min_histogram_value:.6f}")
+
                 # Multi-timeframe validation if enabled (only in pipeline mode)
                 if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer:
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
@@ -548,6 +563,21 @@ class IchimokuStrategy(BaseStrategy):
                         return None
                     else:
                         self.logger.info(f"✅ Ichimoku {epic}: BEAR signal aligned with EMA200 trend - price {price:.5f} below EMA200 {ema200:.5f}")
+
+                # MACD histogram filter validation (if enabled)
+                if getattr(ichimoku_config, 'ICHIMOKU_MACD_HISTOGRAM_FILTER', False):
+                    macd_histogram = latest_row.get('macd_histogram')
+                    min_histogram_value = getattr(ichimoku_config, 'ICHIMOKU_MACD_HISTOGRAM_MIN_VALUE', 0.0001)
+
+                    if macd_histogram is None:
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal rejected - MACD histogram not available")
+                        return None
+
+                    if macd_histogram >= -min_histogram_value:
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal rejected - MACD histogram {macd_histogram:.6f} not negative (min: -{min_histogram_value:.6f})")
+                        return None
+                    else:
+                        self.logger.info(f"✅ Ichimoku {epic}: BEAR signal aligned with MACD histogram - value {macd_histogram:.6f} < -{min_histogram_value:.6f}")
 
                 # Multi-timeframe validation if enabled (only in pipeline mode)
                 if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer:
