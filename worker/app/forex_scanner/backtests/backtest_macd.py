@@ -691,7 +691,7 @@ class EnhancedMACDBacktest:
             enable_smart_money: bool = False
         ) -> bool:
             """
-            Simulate the exact live scanner behavior using the REAL signal detection path
+            Run full signal pipeline simulation using the REAL signal detection path with trade validator
             """
 
             timeframe = timeframe or getattr(config, 'DEFAULT_TIMEFRAME', '15m')
@@ -2621,10 +2621,10 @@ def main():
 
     # Mode selection
     mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument('--simulate-live', action='store_true',
-                           help='Simulate live scanner behavior using real signal detector')
+    mode_group.add_argument('--pipeline', action='store_true',
+                           help='Use full signal pipeline with trade validator (realistic live simulation)')
     mode_group.add_argument('--backtest', action='store_true', default=True,
-                           help='Run backtest using modular strategy (default)')
+                           help='Run backtest using raw strategy signals (default)')
 
     # Required arguments
     parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.MINI.IP)')
@@ -2741,10 +2741,10 @@ def main():
         }
         print("🔧 Applied JPY-specific optimizations")
     
-    # Run enhanced backtest or live scanner simulation with Smart Money
+    # Run enhanced backtest or full pipeline simulation with Smart Money
     backtest = EnhancedMACDBacktest()
 
-    if args.simulate_live:
+    if args.pipeline:
         success = backtest.run_live_scanner_simulation(
             epic=args.epic,
             days=args.days,

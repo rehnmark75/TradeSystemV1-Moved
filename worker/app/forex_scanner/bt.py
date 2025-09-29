@@ -125,10 +125,15 @@ Usage:
   python bt.py [PAIR] [DAYS] [OPTIONS]
 
 Basic Usage:
-  python bt.py                           # 7 days, all pairs, EMA strategy
-  python bt.py EURUSD                   # 7 days, EUR/USD only, EMA strategy
-  python bt.py EURUSD 14                # 14 days, EUR/USD, EMA strategy
-  python bt.py EURUSD 7 --show-signals  # With detailed signals
+  python bt.py                           # 7 days, all pairs, EMA strategy (raw signals)
+  python bt.py EURUSD                   # 7 days, EUR/USD only, EMA strategy (raw signals)
+  python bt.py EURUSD 14                # 14 days, EUR/USD, EMA strategy (raw signals)
+  python bt.py EURUSD 7 --show-signals  # With detailed signals (raw signals)
+  python bt.py EURUSD 7 --pipeline      # Full pipeline with trade validator (realistic)
+
+Signal Modes:
+  Default (raw): Tests strategy signal generation without filters
+  --pipeline:    Tests full signal pipeline with trade validator (matches live trading)
 
 Strategy Shortcuts:
   python bt.py EURUSD 7 EMA --show-signals         # EMA Strategy
@@ -145,17 +150,19 @@ Supported Strategies:
 
 Additional Options:
   --show-signals     Show detailed signal breakdown
+  --pipeline         Use full signal pipeline with trade validator (realistic live simulation)
   --all             Test all pairs (default if no pair specified)
   --strategy NAME   Use specific strategy (full name)
   --timeframe 5m    Use different timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d)
   --verbose         Verbose output
 
 Examples:
-  python bt.py GBPUSD 14 EMA --show-signals       # GBP/USD, 14 days, EMA strategy with signals
-  python bt.py --all 7 MACD --show-signals        # All pairs, 7 days, MACD strategy with signals
+  python bt.py GBPUSD 14 EMA --show-signals       # GBP/USD, 14 days, EMA strategy with signals (raw)
+  python bt.py EURUSD 7 MACD --pipeline           # EUR/USD, 7 days, MACD with full pipeline
+  python bt.py --all 7 MACD --show-signals        # All pairs, 7 days, MACD strategy with signals (raw)
   python bt.py EURUSD 3 SMC --timeframe 5m        # EUR/USD, 3 days, Smart Money on 5m timeframe
-  python bt.py AUDUSD 7 MOMENTUM --show-signals   # AUD/USD, 7 days, Momentum strategy
-  python bt.py USDJPY 14 ZEROLAG                   # USD/JPY, 14 days, Zero Lag strategy
+  python bt.py AUDUSD 7 MOMENTUM --pipeline        # AUD/USD, 7 days, Momentum with pipeline validation
+  python bt.py USDJPY 14 ZEROLAG --show-signals   # USD/JPY, 14 days, Zero Lag strategy
 """
     print(help_text)
 

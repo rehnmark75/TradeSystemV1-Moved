@@ -230,7 +230,7 @@ class EMABacktest:
             enable_smart_money: bool = False
         ) -> bool:
             """
-            Simulate the exact live scanner behavior using the REAL signal detection path
+            Run full signal pipeline simulation using the REAL signal detection path with trade validator
             """
             
             timeframe = timeframe or getattr(config, 'DEFAULT_TIMEFRAME', '15m')
@@ -1577,10 +1577,10 @@ def main():
     
     # Mode selection
     mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument('--simulate-live', action='store_true',
-                           help='Simulate live scanner behavior using real signal detector')
+    mode_group.add_argument('--pipeline', action='store_true',
+                           help='Use full signal pipeline with trade validator (realistic live simulation)')
     mode_group.add_argument('--backtest', action='store_true', default=True,
-                           help='Run backtest using modular strategy (default)')
+                           help='Run backtest using raw strategy signals (default)')
     
     # Arguments
     parser.add_argument('--epic', help='Epic to test')
@@ -1641,7 +1641,7 @@ def main():
     
     backtest = EMABacktest()
     
-    if args.simulate_live:
+    if args.pipeline:
         success = backtest.run_live_scanner_simulation(
             epic=args.epic,
             days=args.days,
