@@ -107,95 +107,176 @@ INTELLIGENCE_PRESETS = {
 
 REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
     'trending': {
-        'macd': 1.0,           # Perfect regime for MACD
-        'ema': 1.0,
-        'ichimoku': 1.0,
-        'kama': 1.0,
-        'momentum': 0.9,
-        'zero_lag': 0.9,
-        'mean_reversion': 0.4,  # Poor fit for trending
-        'bollinger': 0.6,
-        'ranging_market': 0.3
+        # PRIORITY: EMA - foundational trend strategy
+        'ema': 1.0,             # PERFECT - EMA is THE trend indicator
+        'smart_money_ema': 1.0, # PERFECT - EMA with smart money
+
+        # Trend-following strategies (excellent in trending markets)
+        'macd': 1.0,            # Perfect - MACD follows trends excellently
+        'ichimoku': 1.0,        # Perfect - cloud trend analysis
+        'kama': 1.0,            # Perfect - adaptive moving average
+        'momentum': 0.95,       # Excellent - momentum follows trends
+        'zero_lag': 0.95,       # Excellent - fast trend response
+        'bb_supertrend': 0.9,   # Very good - combines trend + volatility
+        'smart_money_macd': 0.95, # Excellent - MACD with smart money
+
+        # Mean-reverting strategies (poor in trending markets)
+        'mean_reversion': 0.3,  # Poor - fights the trend
+        'ranging_market': 0.25, # Very poor - designed for ranges
+        'bollinger': 0.5,       # Moderate - can work with trend breakouts
+        'smc': 0.7,             # Good - smart money can detect trends
+        'scalping': 0.4         # Poor - trends too strong for scalping
     },
     'ranging': {
-        'macd': 0.8,           # GOOD - especially with divergence analysis
-        'mean_reversion': 1.0,  # Perfect for ranging
-        'bollinger': 1.0,
-        'stochastic': 1.0,
-        'ranging_market': 1.0,
-        'smc': 1.0,
-        'ema': 0.6,            # Moderate - can work in ranges
-        'ichimoku': 0.5,       # Poor fit for ranging
-        'momentum': 0.4
+        # PRIORITY: EMA - still important for range boundaries
+        'ema': 0.8,             # GOOD - defines range boundaries effectively
+        'smart_money_ema': 0.85, # Good - EMA with smart money context
+
+        # Range-specific strategies (excellent in ranging markets)
+        'mean_reversion': 1.0,  # PERFECT - designed for ranges
+        'ranging_market': 1.0,  # PERFECT - specifically for ranges
+        'bollinger': 1.0,       # PERFECT - mean reversion in bands
+        'smc': 1.0,             # PERFECT - smart money excels in ranges
+        'scalping': 0.9,        # Excellent - ranges perfect for scalping
+
+        # Trend-following in ranges (moderate to poor)
+        'macd': 0.8,            # GOOD - divergence analysis in ranges
+        'smart_money_macd': 0.8, # Good - MACD with smart money
+        'ichimoku': 0.6,        # Moderate - cloud can define ranges
+        'kama': 0.7,            # Good - adapts to ranging conditions
+        'momentum': 0.5,        # Poor - little momentum in ranges
+        'zero_lag': 0.6,        # Moderate - can catch range breaks
+        'bb_supertrend': 0.7    # Good - trend component helps
     },
     'breakout': {
-        'macd': 0.9,           # EXCELLENT - confirms momentum expansion
-        'bollinger': 1.0,      # Perfect for breakouts
-        'kama': 1.0,
-        'momentum': 1.0,
-        'momentum_bias': 1.0,
-        'bb_supertrend': 1.0,
-        'zero_lag': 0.9,
-        'ema': 0.8,
-        'mean_reversion': 0.3,  # Very poor for breakouts
-        'ranging_market': 0.2
+        # PRIORITY: EMA - excellent for confirming breakouts
+        'ema': 0.95,            # EXCELLENT - EMA crossovers confirm breakouts
+        'smart_money_ema': 0.95, # Excellent - EMA with smart money confirmation
+
+        # Breakout-specific strategies (excellent)
+        'bb_supertrend': 1.0,   # PERFECT - designed for breakouts
+        'momentum': 1.0,        # PERFECT - momentum drives breakouts
+        'zero_lag': 0.95,       # Excellent - fast breakout detection
+        'kama': 0.9,            # Excellent - adapts to breakout volatility
+        'bollinger': 0.9,       # Excellent - band breakouts
+
+        # Moderate performers in breakouts
+        'macd': 0.9,            # Very good - momentum confirmation
+        'smart_money_macd': 0.9, # Very good - MACD with smart money
+        'ichimoku': 0.8,        # Good - cloud breakouts
+        'smc': 0.85,            # Very good - smart money breakout detection
+        'scalping': 0.6,        # Moderate - volatility can help
+
+        # Poor performers in breakouts
+        'mean_reversion': 0.2,  # Very poor - fights breakout momentum
+        'ranging_market': 0.15  # Very poor - opposite of breakouts
     },
     'consolidation': {
-        'macd': 0.75,          # MODERATE - can detect subtle momentum shifts
-        'mean_reversion': 1.0,  # Perfect for consolidation
-        'stochastic': 1.0,
-        'ranging_market': 1.0,
-        'smc': 1.0,
-        'bollinger': 0.8,
-        'ema': 0.6,
-        'momentum': 0.4,
-        'zero_lag': 0.5
+        # PRIORITY: EMA - moderate performance in consolidation
+        'ema': 0.7,             # GOOD - can define consolidation boundaries
+        'smart_money_ema': 0.75, # Good - EMA with smart money insight
+
+        # Consolidation specialists (excellent)
+        'mean_reversion': 1.0,  # PERFECT - consolidation = mean reversion
+        'ranging_market': 1.0,  # PERFECT - similar to ranging
+        'smc': 1.0,             # PERFECT - smart money excels here
+        'scalping': 0.85,       # Very good - tight ranges for scalping
+        'bollinger': 0.8,       # Good - mean reversion in consolidation
+
+        # Moderate performers
+        'macd': 0.75,           # Good - can detect subtle momentum shifts
+        'smart_money_macd': 0.75, # Good - MACD with smart money
+        'ichimoku': 0.7,        # Good - cloud consolidation patterns
+        'kama': 0.7,            # Good - adapts to low volatility
+
+        # Poor performers
+        'momentum': 0.4,        # Poor - little momentum in consolidation
+        'zero_lag': 0.5,        # Poor - needs more movement
+        'bb_supertrend': 0.6    # Moderate - trend component struggles
     },
     'high_volatility': {
-        'macd': 1.0,           # Perfect - thrives in volatile conditions
-        'zero_lag_squeeze': 1.0,
-        'zero_lag': 1.0,
-        'momentum': 1.0,
-        'kama': 1.0,
-        'ema': 1.0,
-        'momentum_bias': 1.0,
-        'bb_supertrend': 1.0,
-        'ichimoku': 0.8,
-        'mean_reversion': 0.4,  # Poor in high volatility
-        'ranging_market': 0.3
+        # PRIORITY: EMA - excellent in high volatility
+        'ema': 1.0,             # PERFECT - EMA handles volatility well
+        'smart_money_ema': 1.0, # PERFECT - EMA with smart money
+
+        # High volatility specialists (excellent)
+        'zero_lag': 1.0,        # PERFECT - designed for fast markets
+        'momentum': 1.0,        # PERFECT - volatility creates momentum
+        'macd': 1.0,            # PERFECT - thrives in volatile conditions
+        'smart_money_macd': 1.0, # PERFECT - MACD with smart money
+        'kama': 1.0,            # PERFECT - adapts to high volatility
+        'bb_supertrend': 1.0,   # PERFECT - volatility breakouts
+        'scalping': 0.9,        # Excellent - volatility creates opportunities
+
+        # Moderate performers
+        'ichimoku': 0.8,        # Good - cloud analysis works
+        'smc': 0.85,            # Very good - smart money in volatility
+        'bollinger': 0.8,       # Good - bands expand with volatility
+
+        # Poor performers
+        'mean_reversion': 0.3,  # Poor - volatility fights mean reversion
+        'ranging_market': 0.2   # Very poor - opposite of ranging
     },
     'low_volatility': {
-        'macd': 0.85,          # GOOD - works with tighter thresholds
-        'mean_reversion': 1.0,  # Perfect for low vol
-        'bollinger': 1.0,
-        'stochastic': 1.0,
-        'ema': 1.0,
-        'ranging_market': 1.0,
-        'smc': 1.0,
-        'ichimoku': 0.8,
-        'momentum': 0.5,        # Poor in low volatility
-        'zero_lag': 0.6
+        # PRIORITY: EMA - excellent in low volatility
+        'ema': 1.0,             # PERFECT - smooth trends in low vol
+        'smart_money_ema': 1.0, # PERFECT - EMA with smart money
+
+        # Low volatility specialists (excellent)
+        'mean_reversion': 1.0,  # PERFECT - low vol enables mean reversion
+        'ranging_market': 1.0,  # PERFECT - low vol creates ranges
+        'bollinger': 1.0,       # PERFECT - tight bands in low vol
+        'smc': 1.0,             # PERFECT - smart money in quiet markets
+        'scalping': 0.8,        # Good - tight spreads in low vol
+
+        # Moderate performers
+        'macd': 0.85,           # Good - works with tighter thresholds
+        'smart_money_macd': 0.85, # Good - MACD with smart money
+        'ichimoku': 0.8,        # Good - cloud analysis still works
+        'kama': 0.8,            # Good - adapts to low volatility
+
+        # Poor performers
+        'momentum': 0.4,        # Poor - little momentum in low vol
+        'zero_lag': 0.5,        # Poor - needs more movement
+        'bb_supertrend': 0.6    # Moderate - trend component struggles
     },
     'medium_volatility': {
-        'macd': 1.0,           # Perfect - ideal conditions for MACD
-        'ichimoku': 1.0,
-        'ema': 1.0,
-        'kama': 1.0,
-        'zero_lag_squeeze': 1.0,
-        'zero_lag': 1.0,
-        'smart_money_ema': 1.0,
-        'smart_money_macd': 1.0,
-        'momentum': 0.9,
-        'bollinger': 0.8
+        # PRIORITY: EMA - perfect in medium volatility
+        'ema': 1.0,             # PERFECT - ideal conditions for EMA
+        'smart_money_ema': 1.0, # PERFECT - EMA with smart money
+
+        # All strategies perform well in medium volatility (Goldilocks zone)
+        'macd': 1.0,            # PERFECT - ideal MACD conditions
+        'smart_money_macd': 1.0, # PERFECT - MACD with smart money
+        'ichimoku': 1.0,        # PERFECT - ideal cloud conditions
+        'kama': 1.0,            # PERFECT - balanced adaptive conditions
+        'zero_lag': 0.95,       # Excellent - good response time
+        'bb_supertrend': 0.9,   # Excellent - balanced trend/volatility
+        'momentum': 0.9,        # Excellent - sufficient momentum
+        'smc': 0.9,             # Excellent - smart money analysis
+        'bollinger': 0.85,      # Very good - moderate band expansion
+        'mean_reversion': 0.8,  # Good - still some mean reversion
+        'ranging_market': 0.7,  # Good - some ranging behavior
+        'scalping': 0.75        # Good - balanced conditions
     },
-    'scalping': {
-        'macd': 0.6,           # Moderate - can work with very tight parameters
-        'scalping': 1.0,        # Perfect for scalping strategies
-        'zero_lag': 1.0,
-        'momentum_bias': 1.0,
-        'ema': 0.8,
-        'mean_reversion': 0.4,
-        'ichimoku': 0.3
+    'unknown': {
+        # PRIORITY: EMA - conservative defaults when regime unclear
+        'ema': 0.8,             # GOOD - safe default for foundational strategy
+        'smart_money_ema': 0.8, # Good - EMA with smart money
+
+        # Conservative defaults for all strategies when regime is uncertain
+        'macd': 0.7,            # Good - proven versatile strategy
+        'smart_money_macd': 0.7, # Good - MACD with smart money
+        'ichimoku': 0.7,        # Good - comprehensive analysis
+        'momentum': 0.6,        # Moderate - momentum can be risky
+        'kama': 0.7,            # Good - adaptive nature helps
+        'zero_lag': 0.6,        # Moderate - fast response can be risky
+        'mean_reversion': 0.6,  # Moderate - safer in uncertainty
+        'bollinger': 0.6,       # Moderate - bands provide guidance
+        'smc': 0.7,             # Good - smart money provides insight
+        'ranging_market': 0.5,  # Moderate - specific strategy
+        'bb_supertrend': 0.6,   # Moderate - trend component helps
+        'scalping': 0.4         # Poor - uncertainty bad for scalping
     }
 }
 
