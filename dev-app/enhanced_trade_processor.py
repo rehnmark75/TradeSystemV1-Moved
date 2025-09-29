@@ -36,7 +36,7 @@ except ImportError as e:
 class CombinedTrailingConfig(TrailingConfig):
     """Extended config with EMA exit and limit trailing settings + PROFIT PROTECTION RULE"""
     # EMA Exit Settings
-    enable_ema_exit: bool = True
+    enable_ema_exit: bool = False
     ema_period: int = 21
     ema_confirmation_candles: int = 2
     ema_timeframe: int = 60
@@ -702,7 +702,7 @@ SCALPING_CONFIG_WITH_EMA = CombinedTrailingConfig(
     max_trail_distance=20,
     monitor_interval_seconds=60,
     # EMA Exit Settings for Scalping
-    enable_ema_exit=True,
+    enable_ema_exit=False,
     ema_confirmation_candles=2,
     ema_timeframe=60,
     # Limit trailing settings
@@ -724,7 +724,7 @@ SCALPING_CONFIG_WITH_PROTECTION = CombinedTrailingConfig(
     max_trail_distance=20,
     monitor_interval_seconds=60,
     # EMA Exit Settings
-    enable_ema_exit=True,
+    enable_ema_exit=False,
     ema_confirmation_candles=2,
     ema_timeframe=60,
     # Limit trailing settings
@@ -746,7 +746,7 @@ SWING_CONFIG_WITH_EMA = CombinedTrailingConfig(
     max_trail_distance=100,
     monitor_interval_seconds=60,
     # EMA Exit Settings for Swing Trading
-    enable_ema_exit=True,
+    enable_ema_exit=False,
     ema_confirmation_candles=3,
     ema_timeframe=240,
     # ✅ NEW: Profit Protection Rule
@@ -778,7 +778,7 @@ CONSERVATIVE_CONFIG_WITH_PROTECTION = CombinedTrailingConfig(
     min_trail_distance=5,
     max_trail_distance=40,
     monitor_interval_seconds=90,
-    enable_ema_exit=True,
+    enable_ema_exit=False,
     ema_confirmation_candles=4,
     ema_timeframe=240,
     enable_limit_trailing=True,

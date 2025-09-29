@@ -809,7 +809,7 @@ def get_monitor_status_endpoint():
                     "method": "combined_trailing_with_ema",
                     "break_even_trigger": "dynamic",
                     "min_trail_distance": "pair_specific",
-                    "ema_exit_enabled": True,
+                    "ema_exit_enabled": False,
                     "database_lock_removed": True  # 🆕 NEW
                 }
             }
