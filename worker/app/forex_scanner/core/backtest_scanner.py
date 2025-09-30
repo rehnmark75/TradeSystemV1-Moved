@@ -212,18 +212,8 @@ class BacktestScanner(IntelligentForexScanner):
             if hasattr(self.signal_detector, 'momentum_strategy') and self.signal_detector.momentum_strategy:
                 self.signal_detector.momentum_strategy.data_fetcher = backtest_data_fetcher
                 self.signal_detector.momentum_strategy.backtest_mode = True
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.momentum_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'MOMENTUM_ENHANCED_VALIDATION', True)
-                # Disable expensive features in basic mode
-                if not self.pipeline_mode:
-                    self.signal_detector.momentum_strategy.velocity_enabled = False
-                    self.signal_detector.momentum_strategy.volume_confirmation = False
-                    self.signal_detector.momentum_strategy.mtf_validation = False
-                    self.signal_detector.momentum_strategy.adaptive_smoothing = False
-                if self.signal_detector.momentum_strategy.enhanced_validation:
-                    self.logger.info("✅ Momentum strategy configured for PIPELINE mode - enhanced validation enabled")
-                else:
-                    self.logger.info("✅ Momentum strategy configured for BASIC mode - enhanced validation disabled for fast testing")
+                # NOTE: pipeline_mode only controls TradeValidator, not strategy behavior
+                self.logger.info("✅ Momentum strategy configured for backtest mode")
 
             # CRITICAL FIX: Also configure any existing MACD strategies in cache for backtest mode
             if hasattr(self.signal_detector, 'macd_strategies_cache') and self.signal_detector.macd_strategies_cache:
@@ -485,7 +475,7 @@ class BacktestScanner(IntelligentForexScanner):
                 if hasattr(self.signal_detector, method_name):
                     self.logger.debug(f"🎯 Running {strategy_name} strategy only for {epic}")
                     method = getattr(self.signal_detector, method_name)
-                    signals = method(epic, pair_name, self.timeframe)
+                    signals = method(epic, pair_name, self.spread_pips, self.timeframe)
 
                     # Some methods return a single signal dict, others return lists
                     if signals and not isinstance(signals, list):
@@ -495,10 +485,13 @@ class BacktestScanner(IntelligentForexScanner):
 
                     # Pipeline mode: Run through full validation and processing
                     if signal and self.pipeline_mode:
-                        self.logger.info(f"🔄 PIPELINE MODE ACTIVE: Processing {strategy_name} signal for {epic} through full validation pipeline")
+                        self.logger.debug(f"🔄 PIPELINE MODE ACTIVE: Processing {strategy_name} signal for {epic} through full validation pipeline")
                         signal = self._apply_full_pipeline(signal, epic, timestamp)
                     elif signal:
-                        self.logger.info(f"🚀 BASIC MODE: Skipping trade validator and market intelligence for {strategy_name} signal on {epic}")
+                        # Basic mode: Mark as validated by default (no validator used)
+                        signal['validation_passed'] = True
+                        signal['validation_message'] = 'Basic mode - no validation applied'
+                        self.logger.debug(f"🚀 BASIC MODE: Skipping trade validator for {strategy_name} signal on {epic}")
 
                     return signal
                 else:

@@ -99,16 +99,17 @@ class MomentumStrategy(BaseStrategy):
         self.velocity_period = self.momentum_config.get('velocity_period', 7)
         self.volume_period = self.momentum_config.get('volume_period', 14)
 
-        # Enable/disable expensive features based on pipeline mode
-        self.enhanced_validation = pipeline_mode and getattr(config_momentum_strategy, 'MOMENTUM_ENHANCED_VALIDATION', True)
+        # NOTE: pipeline_mode parameter is ignored for strategy calculations
+        # It only controls whether TradeValidator is used in the backtest pipeline
+        # The strategy itself should calculate signals the same way in both modes
 
-        # Feature toggles (expensive features only in pipeline mode)
-        self.velocity_enabled = self.enhanced_validation and config_momentum_strategy.MOMENTUM_VELOCITY_ENABLED
-        self.volume_confirmation = self.enhanced_validation and config_momentum_strategy.MOMENTUM_VOLUME_CONFIRMATION
-        self.mtf_validation = self.enhanced_validation and config_momentum_strategy.MOMENTUM_MTF_VALIDATION
-        self.adaptive_smoothing = self.enhanced_validation and config_momentum_strategy.MOMENTUM_ADAPTIVE_SMOOTHING
+        # Feature toggles - always enabled (strategy behavior is consistent)
+        self.velocity_enabled = config_momentum_strategy.MOMENTUM_VELOCITY_ENABLED
+        self.volume_confirmation = config_momentum_strategy.MOMENTUM_VOLUME_CONFIRMATION
+        self.mtf_validation = config_momentum_strategy.MOMENTUM_MTF_VALIDATION
+        self.adaptive_smoothing = config_momentum_strategy.MOMENTUM_ADAPTIVE_SMOOTHING
 
-        # Thresholds
+        # Thresholds - same for all modes
         self.signal_threshold = config_momentum_strategy.MOMENTUM_SIGNAL_THRESHOLD
         self.velocity_threshold = config_momentum_strategy.MOMENTUM_VELOCITY_THRESHOLD
         self.min_confidence = config_momentum_strategy.MOMENTUM_MIN_CONFIDENCE
@@ -116,15 +117,15 @@ class MomentumStrategy(BaseStrategy):
         # Calculation method
         self.calculation_method = config_momentum_strategy.MOMENTUM_CALCULATION_METHOD
 
-        if self.enhanced_validation:
-            self.logger.info(f"🔍 Enhanced validation ENABLED - Full momentum analysis")
-        else:
-            self.logger.info(f"🔧 Enhanced validation DISABLED - Basic momentum testing mode")
-
         self.logger.info("🚀 Advanced Momentum Strategy initialized")
         self.logger.info(f"   Parameters: fast={self.fast_period}, slow={self.slow_period}, signal={self.signal_period}")
         self.logger.info(f"   Features: velocity={self.velocity_enabled}, volume={self.volume_confirmation}, mtf={self.mtf_validation}")
         self.logger.info(f"   Method: {self.calculation_method}, adaptive_smoothing={self.adaptive_smoothing}")
+
+    def _initialize_validator(self):
+        """Override base class validator initialization - use momentum-specific confidence calculation"""
+        self._validator = None
+        self.logger.info(f"[{self.name}] Using momentum-specific confidence calculation (validator disabled)")
 
     def get_required_indicators(self) -> List[str]:
         """Return list of required technical indicators"""
@@ -161,7 +162,7 @@ class MomentumStrategy(BaseStrategy):
                 return None
 
             # Apply BID price adjustment for accurate signals
-            df_adjusted = self.price_adjuster.adjust_bid_to_mid_prices(df, spread_pips)
+            df_adjusted = self.price_adjuster.adjust_bid_to_mid_prices(df, spread_pips, epic)
 
             # Calculate momentum indicators
             df_enhanced = self._calculate_momentum_indicators(df_adjusted)
@@ -190,10 +191,10 @@ class MomentumStrategy(BaseStrategy):
             slow_momentum_prev = previous['momentum_slow']
 
             self.logger.debug(f"   Current Price: {current_price:.5f}")
-            self.logger.debug(f"   Fast Momentum: {fast_momentum:.6f} (prev: {fast_momentum_prev:.6f})")
+            self.logger.debug(f"   Fast Momentum: {fast_momentum:.6f} (prev: {fast_momentum_prev:.6f}) [threshold: {self.signal_threshold:.6f}]")
             self.logger.debug(f"   Slow Momentum: {slow_momentum:.6f} (prev: {slow_momentum_prev:.6f})")
             self.logger.debug(f"   Signal Line: {momentum_signal:.6f}")
-            self.logger.debug(f"   Velocity: {velocity_momentum:.6f}")
+            self.logger.debug(f"   Velocity: {velocity_momentum:.6f} [threshold: {self.velocity_threshold:.6f}]")
 
             # Determine signal type using multiple methods
             signal_type, trigger_reason = self._determine_signal_type(
@@ -217,6 +218,7 @@ class MomentumStrategy(BaseStrategy):
             confidence = self.calculate_confidence(enhanced_signal_data)
 
             # Apply minimum confidence threshold
+            self.logger.debug(f"   📊 Signal confidence: {confidence:.1%} (min required: {self.min_confidence:.1%})")
             if confidence < self.min_confidence:
                 self.logger.warning(f"[MOMENTUM REJECTED] {epic} - Low confidence: {confidence:.1%} < {self.min_confidence:.1%}")
                 return None
@@ -515,12 +517,13 @@ class MomentumStrategy(BaseStrategy):
         previous_price: float
     ) -> Tuple[Optional[str], str]:
         """
-        Determine signal type using multiple momentum methods
+        Determine signal type using 2-of-4 confirmation system
+        Improved: Requires momentum crossover + 2 secondary confirmations (not all 4)
         """
         signal_type = None
         trigger_reason = None
 
-        # Primary condition: Fast momentum crosses above slow momentum
+        # Primary condition: Fast momentum crosses above/below slow momentum (MANDATORY)
         momentum_crossover_bull = (
             fast_momentum > slow_momentum and
             fast_momentum_prev <= slow_momentum_prev and
@@ -533,51 +536,59 @@ class MomentumStrategy(BaseStrategy):
             fast_momentum < -self.signal_threshold
         )
 
-        # Secondary condition: Velocity confirmation
-        velocity_confirmation_bull = not self.velocity_enabled or velocity_momentum > self.velocity_threshold
-        velocity_confirmation_bear = not self.velocity_enabled or velocity_momentum < -self.velocity_threshold
+        # If no crossover, no signal possible
+        if not (momentum_crossover_bull or momentum_crossover_bear):
+            return None, None
 
-        # Volume confirmation
-        volume_confirmation = not self.volume_confirmation or abs(volume_momentum) > 0.00001
+        # Determine direction
+        is_bullish = momentum_crossover_bull
 
-        # Price momentum confirmation
-        price_momentum_bull = current_price > previous_price
-        price_momentum_bear = current_price < previous_price
+        # Secondary confirmations (need 2 of 4 for signal)
+        confirmations = []
 
-        # BULL signal conditions
-        if (momentum_crossover_bull and
-            velocity_confirmation_bull and
-            volume_confirmation and
-            price_momentum_bull):
+        # 1. Velocity confirmation
+        if self.velocity_enabled:
+            velocity_confirmed = (
+                (velocity_momentum > self.velocity_threshold) if is_bullish
+                else (velocity_momentum < -self.velocity_threshold)
+            )
+            if velocity_confirmed:
+                confirmations.append('velocity')
 
-            signal_type = 'BULL'
-            trigger_reason = 'momentum_crossover_bullish'
-            self.logger.debug(f"   🎯 BULL signal: fast={fast_momentum:.6f} > slow={slow_momentum:.6f}, velocity={velocity_momentum:.6f}")
+        # 2. Volume confirmation
+        if self.volume_confirmation and abs(volume_momentum) > 0.00005:  # Updated threshold
+            confirmations.append('volume')
 
-        # BEAR signal conditions
-        elif (momentum_crossover_bear and
-              velocity_confirmation_bear and
-              volume_confirmation and
-              price_momentum_bear):
+        # 3. Price direction confirmation
+        price_confirmed = (
+            (current_price > previous_price) if is_bullish
+            else (current_price < previous_price)
+        )
+        if price_confirmed:
+            confirmations.append('price_direction')
 
-            signal_type = 'BEAR'
-            trigger_reason = 'momentum_crossover_bearish'
-            self.logger.debug(f"   🎯 BEAR signal: fast={fast_momentum:.6f} < slow={slow_momentum:.6f}, velocity={velocity_momentum:.6f}")
+        # 4. Strong divergence confirmation
+        divergence = abs(fast_momentum - slow_momentum)
+        if divergence > self.signal_threshold * 2:  # Significant divergence
+            confirmations.append('strong_divergence')
 
-        # Alternative signal: Strong momentum divergence (balanced conditions)
-        elif abs(fast_momentum - slow_momentum) > self.signal_threshold * 4:  # Balanced threshold
-            if (fast_momentum > slow_momentum and
-                velocity_confirmation_bull and
-                volume_confirmation and
-                fast_momentum > self.signal_threshold * 3):  # Balanced strength requirement
-                signal_type = 'BULL'
-                trigger_reason = 'strong_momentum_divergence_bull'
-            elif (fast_momentum < slow_momentum and
-                  velocity_confirmation_bear and
-                  volume_confirmation and
-                  fast_momentum < -self.signal_threshold * 3):  # Balanced strength requirement
-                signal_type = 'BEAR'
-                trigger_reason = 'strong_momentum_divergence_bear'
+        # Require at least 2 confirmations
+        confirmation_count = len(confirmations)
+
+        if confirmation_count >= 2:
+            signal_type = 'BULL' if is_bullish else 'BEAR'
+            trigger_reason = f"momentum_crossover_with_{confirmation_count}_confirmations"
+
+            confirmations_str = ', '.join(confirmations)
+            self.logger.debug(
+                f"   🎯 {signal_type} signal: fast={fast_momentum:.6f} vs slow={slow_momentum:.6f}, "
+                f"velocity={velocity_momentum:.6f}, confirmations={confirmation_count}/4 ({confirmations_str})"
+            )
+        else:
+            # Crossover detected but insufficient confirmations
+            self.logger.debug(
+                f"   ⚠️ Momentum crossover detected but only {confirmation_count}/2 confirmations - signal rejected"
+            )
 
         return signal_type, trigger_reason
 

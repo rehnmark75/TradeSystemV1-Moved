@@ -33,7 +33,9 @@ class PriceAdjuster:
         """
         # Get pip size for this pair
         pip_size = self.get_pip_size(epic) if epic else 0.0001
-        spread = spread_pips * pip_size  # Convert pips to price
+        # Ensure spread_pips is float (handle string inputs)
+        spread_pips_float = float(spread_pips) if isinstance(spread_pips, (str, int)) else spread_pips
+        spread = spread_pips_float * pip_size  # Convert pips to price
         
         df_adjusted = df.copy()
         df_adjusted['open'] = df['open'] + spread/2
