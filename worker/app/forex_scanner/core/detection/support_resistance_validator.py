@@ -298,77 +298,124 @@ class SupportResistanceValidator:
         return filtered_levels
     
     def _find_nearest_support(self, support_levels: List[float], current_price: float) -> Optional[float]:
-        """Find nearest support level below current price"""
-        supports_below = [level for level in support_levels if level < current_price]
+        """
+        Find nearest support level below current price
+        ENHANCED: Also considers levels AT current price (within small tolerance)
+        """
+        pip_tolerance = 0.0001 * 2  # 2 pips tolerance for "AT" level detection
+        supports_below = [level for level in support_levels if level <= current_price + pip_tolerance]
         return max(supports_below) if supports_below else None
-    
+
     def _find_nearest_resistance(self, resistance_levels: List[float], current_price: float) -> Optional[float]:
-        """Find nearest resistance level above current price"""
-        resistances_above = [level for level in resistance_levels if level > current_price]
+        """
+        Find nearest resistance level above current price
+        ENHANCED: Also considers levels AT current price (within small tolerance)
+        """
+        pip_tolerance = 0.0001 * 2  # 2 pips tolerance for "AT" level detection
+        resistances_above = [level for level in resistance_levels if level >= current_price - pip_tolerance]
         return min(resistances_above) if resistances_above else None
     
-    def _check_level_proximity(self, 
-                              current_price: float, 
-                              signal_type: str, 
+    def _check_level_proximity(self,
+                              current_price: float,
+                              signal_type: str,
                               levels: Dict,
                               df: pd.DataFrame) -> Dict:
         """
         Check if trade direction conflicts with nearby major levels
-        
-        Key Logic:
-        - For BUY signals: Check if we're too close to resistance
-        - For SELL signals: Check if we're too close to support
+
+        ENHANCED Key Logic:
+        - For BUY signals: Check ALL support levels if we're AT one (within tolerance)
+        - For SELL signals: Check ALL resistance levels if we're AT one (within tolerance)
+        - Also check nearest resistance (BUY) or support (SELL) in the trade direction
         - Consider volume confirmation for recent level breaks
         """
         pip_size = 0.0001  # Default for most pairs (except JPY)
-        
+
+        all_support_levels = levels.get('support_levels', [])
+        all_resistance_levels = levels.get('resistance_levels', [])
         nearest_support = levels.get('nearest_support')
         nearest_resistance = levels.get('nearest_resistance')
-        
+
         # BUY/BULL signal validation
         if signal_type in ['BUY', 'BULL']:
-            if nearest_resistance:
+            # FIRST: Check if we're AT any resistance level (price sitting on resistance)
+            for resistance in all_resistance_levels:
+                distance_to_resistance = abs(resistance - current_price) / pip_size
+
+                # If we're AT or very close to a resistance level
+                if distance_to_resistance <= self.level_tolerance_pips:
+                    # Check if resistance was recently broken with volume
+                    volume_break = self._check_volume_break(df, resistance, 'resistance')
+
+                    if not volume_break:
+                        return {
+                            'is_valid': False,
+                            'reason': f"BUY signal rejected - price AT resistance level {resistance:.5f} "
+                                    f"({distance_to_resistance:.1f} pips away, minimum: {self.level_tolerance_pips})"
+                        }
+                    else:
+                        # Volume break confirmed, allow trade
+                        return {
+                            'is_valid': True,
+                            'reason': f"BUY signal allowed - resistance at {resistance:.5f} "
+                                    f"recently broken with volume confirmation"
+                        }
+
+            # SECOND: Check nearest resistance above (if price is below resistance)
+            if nearest_resistance and nearest_resistance > current_price:
                 distance_to_resistance = (nearest_resistance - current_price) / pip_size
-                
+
                 if distance_to_resistance <= self.level_tolerance_pips:
                     # Check if resistance was recently broken with volume
                     volume_break = self._check_volume_break(df, nearest_resistance, 'resistance')
-                    
+
                     if not volume_break:
                         return {
                             'is_valid': False,
                             'reason': f"BUY signal too close to resistance at {nearest_resistance:.5f} "
                                     f"({distance_to_resistance:.1f} pips away, minimum: {self.level_tolerance_pips})"
                         }
+
+        # SELL/BEAR signal validation
+        elif signal_type in ['SELL', 'BEAR']:
+            # FIRST: Check if we're AT any support level (price sitting on support)
+            for support in all_support_levels:
+                distance_to_support = abs(support - current_price) / pip_size
+
+                # If we're AT or very close to a support level
+                if distance_to_support <= self.level_tolerance_pips:
+                    # Check if support was recently broken with volume
+                    volume_break = self._check_volume_break(df, support, 'support')
+
+                    if not volume_break:
+                        return {
+                            'is_valid': False,
+                            'reason': f"SELL signal rejected - price AT support level {support:.5f} "
+                                    f"({distance_to_support:.1f} pips away, minimum: {self.level_tolerance_pips})"
+                        }
                     else:
+                        # Volume break confirmed, allow trade
                         return {
                             'is_valid': True,
-                            'reason': f"BUY signal allowed - resistance at {nearest_resistance:.5f} "
+                            'reason': f"SELL signal allowed - support at {support:.5f} "
                                     f"recently broken with volume confirmation"
                         }
-        
-        # SELL/BEAR signal validation  
-        elif signal_type in ['SELL', 'BEAR']:
-            if nearest_support:
+
+            # SECOND: Check nearest support below (if price is above support)
+            if nearest_support and nearest_support < current_price:
                 distance_to_support = (current_price - nearest_support) / pip_size
-                
+
                 if distance_to_support <= self.level_tolerance_pips:
                     # Check if support was recently broken with volume
                     volume_break = self._check_volume_break(df, nearest_support, 'support')
-                    
+
                     if not volume_break:
                         return {
                             'is_valid': False,
                             'reason': f"SELL signal too close to support at {nearest_support:.5f} "
                                     f"({distance_to_support:.1f} pips away, minimum: {self.level_tolerance_pips})"
                         }
-                    else:
-                        return {
-                            'is_valid': True,
-                            'reason': f"SELL signal allowed - support at {nearest_support:.5f} "
-                                    f"recently broken with volume confirmation"
-                        }
-        
+
         # If we get here, trade is allowed
         return {
             'is_valid': True,
