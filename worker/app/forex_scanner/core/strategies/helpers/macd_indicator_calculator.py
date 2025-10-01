@@ -210,7 +210,7 @@ class MACDIndicatorCalculator:
 
                     # Log recent histogram values for detailed analysis
                     recent_hist = histogram_values.tail(20)
-                    self.logger.info(f"   📈 Recent 20 histogram values: {recent_hist.tolist()}")
+                    self.logger.debug(f"Recent 20 histogram values: {recent_hist.tolist()}")
 
                     # Check for any crossovers at all (ignoring thresholds)
                     histogram_prev = df_copy['macd_histogram'].shift(1).dropna()
