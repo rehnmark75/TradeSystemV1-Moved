@@ -364,7 +364,7 @@ class MACDStrategy(BaseStrategy):
                         macd_exists = False  # Force recalculation
                         df_enhanced = df.copy()  # Initialize df_enhanced for recalculation
                     else:
-                        self.logger.info(f"📊 [REUSING MACD] MACD indicators already exist for {epic} - skipping recalculation")
+                        self.logger.debug(f"MACD indicators already exist for {epic} - reusing cached values")
                         df_enhanced = df.copy()
 
                         # Ensure we have EMA 200 for trend validation
