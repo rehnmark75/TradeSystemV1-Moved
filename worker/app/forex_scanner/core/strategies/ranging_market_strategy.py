@@ -867,12 +867,16 @@ class RangingMarketStrategy(BaseStrategy):
                 'oscillator_signals': oscillator_signals,
                 'zone_validation': zone_validation,
 
-                # Risk management
+                # Risk management (legacy pips fields)
                 'sl_pips': sl_pips,
                 'tp_pips': tp_pips,
                 'max_profit_pips': tp_pips,  # Required by SignalAnalyzer
                 'max_loss_pips': sl_pips,    # Required by SignalAnalyzer
                 'risk_reward_ratio': tp_pips / sl_pips if sl_pips > 0 else 0,
+
+                # ✅ NEW: Add distance fields for order API (pips = points for standard pairs)
+                'stop_distance': int(sl_pips),   # For order API
+                'limit_distance': int(tp_pips),  # For order API
 
                 # Timing information
                 'signal_time': latest_row.get('start_time', datetime.now()),

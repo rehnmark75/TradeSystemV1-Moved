@@ -946,13 +946,23 @@ class MomentumStrategy(BaseStrategy):
             stop_distance = max(2.0 * spread_adjustment, 1.5 * atr_value)
             target_distance = 2.0 * stop_distance  # 2:1 RR
 
-            # Calculate stop loss and take profit
+            # Calculate stop loss and take profit prices
             stop_loss_price = current_price - stop_distance if signal_type == 'BULL' else current_price + stop_distance
             take_profit_price = current_price + target_distance if signal_type == 'BULL' else current_price - target_distance
+
+            # ✅ NEW: Convert price distances to points/pips for order API
+            if 'JPY' in epic:
+                stop_distance_points = int(stop_distance * 100)  # JPY: 0.01 = 1 pip
+                limit_distance_points = int(target_distance * 100)
+            else:
+                stop_distance_points = int(stop_distance * 10000)  # Standard: 0.0001 = 1 pip
+                limit_distance_points = int(target_distance * 10000)
 
             signal.update({
                 'stop_loss': stop_loss_price,
                 'take_profit': take_profit_price,
+                'stop_distance': stop_distance_points,  # NEW: For order API
+                'limit_distance': limit_distance_points,  # NEW: For order API
                 'risk_reward_ratio': 2.0,
                 'stop_loss_suggestion': stop_loss_price,
                 'take_profit_suggestion': take_profit_price

@@ -637,9 +637,12 @@ class Progressive3StageTrailing(TrailingStrategy):
         from config import STAGE2_TRIGGER_POINTS, STAGE3_TRIGGER_POINTS
 
         # Stage 1: Dynamic trigger based on IG minimum distance
+        # JPY pairs use +8 offset (higher volatility), others use +4
         ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
         if ig_min_distance:
-            stage1_trigger = int(ig_min_distance + 4)
+            from utils import is_jpy_pair
+            stage1_offset = 8 if is_jpy_pair(trade.symbol) else 4
+            stage1_trigger = int(ig_min_distance + stage1_offset)
         else:
             stage1_trigger = self.config.stage1_trigger_points  # Fallback
 
@@ -844,10 +847,13 @@ class Progressive3StageTrailing(TrailingStrategy):
         else:  # SELL
             profit_points = int((trade.entry_price - current_price) / point_value)
 
-        # Use standard stage1 trigger (IG minimum distance + 4)
+        # Use standard stage1 trigger (IG minimum distance + offset)
+        # JPY pairs use +8 offset (higher volatility), others use +4
         ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
         if ig_min_distance:
-            stage1_trigger = int(ig_min_distance + 4)
+            from utils import is_jpy_pair
+            stage1_offset = 8 if is_jpy_pair(trade.symbol) else 4
+            stage1_trigger = int(ig_min_distance + stage1_offset)
         else:
             stage1_trigger = self.config.stage1_trigger_points  # Fallback
 
@@ -1224,10 +1230,13 @@ class EnhancedTradeProcessor:
 
             point_value = get_point_value(trade.symbol)
 
-            # Stage 1: Use dynamic trigger based on IG minimum distance + 4 points
+            # Stage 1: Use dynamic trigger based on IG minimum distance + offset
+            # JPY pairs use +8 offset (higher volatility), others use +4
             ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
             if ig_min_distance:
-                break_even_trigger_points = int(ig_min_distance + 4)
+                from utils import is_jpy_pair
+                stage1_offset = 8 if is_jpy_pair(trade.symbol) else 4
+                break_even_trigger_points = int(ig_min_distance + stage1_offset)
             else:
                 break_even_trigger_points = 7  # Fallback from config
             break_even_trigger = break_even_trigger_points * point_value

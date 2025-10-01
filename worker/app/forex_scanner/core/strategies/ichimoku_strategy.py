@@ -653,6 +653,11 @@ class IchimokuStrategy(BaseStrategy):
             # Add execution prices
             signal = self.add_execution_prices(signal, spread_pips)
 
+            # ✅ NEW: Calculate optimized SL/TP
+            sl_tp = self.calculate_optimal_sl_tp(signal, epic, latest_row, spread_pips)
+            signal['stop_distance'] = sl_tp['stop_distance']
+            signal['limit_distance'] = sl_tp['limit_distance']
+
             # Validate confidence threshold
             if not self.signal_calculator.validate_confidence_threshold(confidence, self.min_confidence):
                 self.logger.info(f"🌥️ Ichimoku {epic}: Signal rejected - confidence {confidence:.1%} < threshold {self.min_confidence:.1%}")
@@ -714,7 +719,7 @@ class IchimokuStrategy(BaseStrategy):
                     self.logger.warning(f"⚠️ Failed to add market intelligence to signal: {e}")
                     # Continue without market intelligence if it fails
 
-            self.logger.info(f"🌥️ Ichimoku {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}")
+            self.logger.info(f"🌥️ Ichimoku {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}, SL/TP={sl_tp['stop_distance']}/{sl_tp['limit_distance']}")
             return signal
 
         except Exception as e:

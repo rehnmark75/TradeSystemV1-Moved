@@ -97,7 +97,11 @@ ATR_STOP_MULTIPLIER = 1.5  # ATR multiplier for stop loss distance
 # 3-Stage Progressive Trailing System (based on trade data analysis)
 
 # Stage 1: Balanced Break-Even Protection (OPTIMIZED FOR PROFIT CAPTURE)
-STAGE1_TRIGGER_POINTS = 7    # Move to break-even after +7 points profit (was 3)
+# NOTE: Dynamic trigger uses IG minimum distance + offset:
+#       - JPY pairs: IG min + 8 points (e.g., 2 + 8 = 10 points for USDJPY)
+#       - Other pairs: IG min + 4 points (e.g., 2 + 4 = 6 points for EURUSD)
+#       This accommodates higher volatility in JPY pairs (0.01 point value vs 0.0001)
+STAGE1_TRIGGER_POINTS = 7    # Fallback when IG minimum not available
 STAGE1_LOCK_POINTS = 2       # Fallback: +2 point minimum profit (ENHANCED: uses IG min distance when available)
 
 # Stage 2: Profit Lock-In (OPTIMIZED FOR TREND FOLLOWING)

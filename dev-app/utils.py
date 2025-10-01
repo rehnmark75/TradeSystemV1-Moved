@@ -98,6 +98,27 @@ def convert_limit_distance_to_price(entry_price: float, limit_distance_points: i
     return round(limit_price, 5)  # Round to 5 decimal places for forex
 
 
+def is_jpy_pair(epic: str) -> bool:
+    """
+    Check if the trading pair involves JPY currency.
+
+    Args:
+        epic (str): The trading instrument epic (e.g., "USDJPY", "CS.D.USDJPY.MINI.IP")
+
+    Returns:
+        bool: True if JPY pair, False otherwise
+
+    Examples:
+        >>> is_jpy_pair("USDJPY")
+        True
+        >>> is_jpy_pair("CS.D.USDJPY.MINI.IP")
+        True
+        >>> is_jpy_pair("EURUSD")
+        False
+    """
+    return "JPY" in epic.upper()
+
+
 def convert_price_to_points(price_distance: float, epic: str) -> int:
     """
     Convert price distance to points.

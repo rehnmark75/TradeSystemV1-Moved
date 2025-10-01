@@ -300,9 +300,96 @@ class BaseStrategy(ABC):
             'execution_price': execution_price,
             'spread_pips': spread_pips
         })
-        
+
         return signal
-    
+
+    def calculate_optimal_sl_tp(
+        self,
+        signal: Dict,
+        epic: str,
+        latest_row: pd.Series,
+        spread_pips: float
+    ) -> Dict[str, int]:
+        """
+        Calculate optimized SL/TP in POINTS (not price levels) for order API.
+
+        Uses optimal parameters from database if available, otherwise calculates
+        based on ATR with conservative multipliers.
+
+        Args:
+            signal: The trading signal dictionary
+            epic: Trading pair epic code
+            latest_row: Latest candle data with indicators
+            spread_pips: Current spread in pips
+
+        Returns:
+            {
+                'stop_distance': int,  # Stop loss distance in points
+                'limit_distance': int  # Take profit distance in points
+            }
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Get ATR for the pair
+        atr = latest_row.get('atr', 0)
+        if not atr or atr <= 0:
+            # Fallback: estimate from current volatility (high-low range)
+            atr = abs(latest_row.get('high', 0) - latest_row.get('low', 0))
+            logger.warning(f"No ATR indicator, using high-low range: {atr}")
+
+        # Convert ATR to pips/points
+        if 'JPY' in epic:
+            atr_pips = atr * 100  # JPY pairs: 0.01 = 1 pip
+        else:
+            atr_pips = atr * 10000  # Standard pairs: 0.0001 = 1 pip
+
+        # Check for optimal parameters from database
+        if self.optimal_params:
+            stop_distance = int(self.optimal_params.stop_loss_pips)
+            limit_distance = int(self.optimal_params.take_profit_pips)
+            logger.info(f"{self.name}: Using optimal params from DB - SL={stop_distance}, TP={limit_distance}")
+        else:
+            # Calculate based on ATR with 2.0x multiplier (more conservative than dev-app's 1.5x)
+            raw_stop = atr_pips * 2.0
+
+            # Apply minimum safe distances
+            if 'JPY' in epic:
+                min_sl = 20  # Minimum 20 pips for JPY
+            else:
+                min_sl = 15  # Minimum 15 pips for others
+
+            stop_distance = max(int(raw_stop), min_sl)
+
+            # Take profit: 2.0-2.5× risk/reward based on pair volatility
+            # Major pairs get higher RR targets
+            if epic in ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP']:
+                risk_reward = 2.5
+            else:
+                risk_reward = 2.0
+
+            limit_distance = int(stop_distance * risk_reward)
+
+            logger.info(f"{self.name}: Calculated ATR-based SL/TP - ATR={atr_pips:.1f}, SL={stop_distance}, TP={limit_distance}, RR={risk_reward}")
+
+        # Apply reasonable maximums to prevent excessive risk
+        if 'JPY' in epic:
+            max_sl = 55
+        elif 'GBP' in epic:
+            max_sl = 60  # GBP pairs are more volatile
+        else:
+            max_sl = 45
+
+        if stop_distance > max_sl:
+            logger.warning(f"Stop distance {stop_distance} exceeds max {max_sl}, capping to maximum")
+            stop_distance = max_sl
+            limit_distance = int(stop_distance * 2.0)  # Maintain reasonable RR
+
+        return {
+            'stop_distance': stop_distance,
+            'limit_distance': limit_distance
+        }
+
     # ✅ NEW: Validation helper methods
     def get_validation_status(self) -> Dict:
         """Get status of the enhanced validator"""

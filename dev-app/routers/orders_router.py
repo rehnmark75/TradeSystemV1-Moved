@@ -46,6 +46,7 @@ class TradeRequest(BaseModel):
     size: Optional[float] = None
     stop_distance: Optional[int] = None
     limit_distance: Optional[int] = None
+    use_provided_sl_tp: Optional[bool] = False  # NEW: Use scanner-provided SL/TP values
     custom_label: Optional[str] = None
     risk_reward: Optional[float] = 2.0  # Default RR
     alert_id: Optional[int] = None  # NEW: Include alert_id in request body
@@ -360,12 +361,13 @@ async def ig_place_order(
         currency_code = price_info["currency_code"]
         min_distance = price_info["min_distance"]
         logger.info(f"this is min_distance for epic {epic}: {min_distance}")
-        
-        # Calculate ATR-based stop loss and take profit levels
-        try:
-            trade_levels = await calculate_trade_levels(symbol, trading_headers, rr)
-            sl_limit = trade_levels["stopDistance"]
-            limit_distance = trade_levels["limitDistance"]
+
+        # Determine SL/TP source: strategy-provided or ATR-calculated
+        if body.use_provided_sl_tp and body.stop_distance and body.limit_distance:
+            # Use strategy-calculated values
+            sl_limit = body.stop_distance
+            limit_distance = body.limit_distance
+            logger.info(f"✅ Using strategy-provided SL/TP: {sl_limit}/{limit_distance} for {symbol}")
 
             # Validate and adjust levels based on broker requirements
             validated_levels = validate_sl_tp_levels(sl_limit, limit_distance, min_distance)
@@ -376,15 +378,31 @@ async def ig_place_order(
             if validated_levels["adjustments"]:
                 for adjustment in validated_levels["adjustments"]:
                     logger.info(f"⚙️ {adjustment}")
+        else:
+            # Calculate ATR-based stop loss and take profit levels (fallback)
+            try:
+                trade_levels = await calculate_trade_levels(symbol, trading_headers, rr)
+                sl_limit = trade_levels["stopDistance"]
+                limit_distance = trade_levels["limitDistance"]
 
-            logger.info(f"📊 {symbol} ATR-based levels: SL={sl_limit}, TP={limit_distance}, RR={rr:.1f} ({trade_levels['calculationMethod']})")
+                # Validate and adjust levels based on broker requirements
+                validated_levels = validate_sl_tp_levels(sl_limit, limit_distance, min_distance)
+                sl_limit = validated_levels["stopDistance"]
+                limit_distance = validated_levels["limitDistance"]
 
-        except Exception as e:
-            logger.error(f"❌ Failed to calculate ATR-based levels for {symbol}: {e}")
-            # Emergency fallback to conservative levels
-            sl_limit = max(25, min_distance + 10) if min_distance else 25
-            limit_distance = int(sl_limit * rr)
-            logger.info(f"🆘 Using emergency fallback: SL={sl_limit}, TP={limit_distance}")
+                # Log any adjustments made
+                if validated_levels["adjustments"]:
+                    for adjustment in validated_levels["adjustments"]:
+                        logger.info(f"⚙️ {adjustment}")
+
+                logger.info(f"📊 {symbol} ATR-based levels: SL={sl_limit}, TP={limit_distance}, RR={rr:.1f} ({trade_levels['calculationMethod']})")
+
+            except Exception as e:
+                logger.error(f"❌ Failed to calculate ATR-based levels for {symbol}: {e}")
+                # Emergency fallback to conservative levels
+                sl_limit = max(25, min_distance + 10) if min_distance else 25
+                limit_distance = int(sl_limit * rr)
+                logger.info(f"🆘 Using emergency fallback: SL={sl_limit}, TP={limit_distance}")
         
         # Place the market order with calculated SL and TP
         logger.info(f"📤 Placing market order: {symbol} {direction} with SL: {sl_limit}, TP: {limit_distance}")

@@ -658,12 +658,17 @@ class MACDStrategy(BaseStrategy):
             except (ValueError, TypeError):
                 spread_pips_numeric = 1.5  # Default spread for major pairs
             signal = self.add_execution_prices(signal, spread_pips_numeric)
-            
+
+            # ✅ NEW: Calculate optimized SL/TP
+            sl_tp = self.calculate_optimal_sl_tp(signal, epic, latest_row, spread_pips_numeric)
+            signal['stop_distance'] = sl_tp['stop_distance']
+            signal['limit_distance'] = sl_tp['limit_distance']
+
             # Validate confidence threshold
             if not self.signal_calculator.validate_confidence_threshold(confidence):
                 return None
-            
-            self.logger.debug(f"🎯 MACD {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}")
+
+            self.logger.debug(f"🎯 MACD {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}, SL/TP={sl_tp['stop_distance']}/{sl_tp['limit_distance']}")
             return signal
             
         except Exception as e:

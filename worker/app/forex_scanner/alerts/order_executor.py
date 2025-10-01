@@ -422,14 +422,18 @@ class OrderExecutor:
             "size": size or self.position_size or 1.0,
             "stop_distance": stop_distance or self.default_stop_distance,
             "limit_distance": limit_distance,
+            "use_provided_sl_tp": True,  # ✅ NEW: Tell dev-app to use strategy-calculated values
             "custom_label": custom_label or f"forex_scanner_{int(datetime.now().timestamp())}",
             "risk_reward": risk_reward or self.default_risk_reward
         }
-        
+
         # Include alert_id in the request if provided
         if alert_id is not None:
             order_data["alert_id"] = alert_id  # Add to request body
             self.logger.info(f"📊 Sending order with alert_id: {alert_id}")
+
+        # Log SL/TP being sent
+        self.logger.info(f"📤 Sending order with strategy SL/TP: {stop_distance}/{limit_distance} for {external_epic}")
         
         # FIXED: Use the correct headers format that works in dev-app
         headers = {

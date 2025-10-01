@@ -639,15 +639,20 @@ class EMAStrategy(BaseStrategy):
             # Add confidence and execution prices
             signal['confidence'] = confidence
             signal['confidence_score'] = confidence  # For compatibility
-            
-            # Add execution prices  
+
+            # Add execution prices
             signal = self.add_execution_prices(signal, spread_pips)
-            
+
+            # ✅ NEW: Calculate optimized SL/TP
+            sl_tp = self.calculate_optimal_sl_tp(signal, epic, latest_row, spread_pips)
+            signal['stop_distance'] = sl_tp['stop_distance']
+            signal['limit_distance'] = sl_tp['limit_distance']
+
             # Validate confidence threshold
             if not self.signal_calculator.validate_confidence_threshold(confidence):
                 return None
-            
-            self.logger.info(f"🎯 EMA {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}")
+
+            self.logger.info(f"🎯 EMA {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}, SL/TP={sl_tp['stop_distance']}/{sl_tp['limit_distance']}")
             return signal
             
         except Exception as e:

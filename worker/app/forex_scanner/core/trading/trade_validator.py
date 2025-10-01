@@ -1885,7 +1885,7 @@ class TradeValidator:
                     )
 
                     # Start background worker for common epics
-                    common_epics = ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.CEEM.IP', 'CS.D.USDJPY.CEEM.IP']
+                    common_epics = ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP']
                     self._cached_intelligence_engine.start_background_worker(common_epics, 30)
 
                     self.logger.info(f"🚀 {epic}: Initialized enhanced intelligence system with 5-level fallback")

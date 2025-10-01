@@ -218,8 +218,8 @@ MOMENTUM_PAIR_SPECIFIC_PARAMS = {
 # Phase 2: Structure-Based Stop Placement
 MOMENTUM_USE_STRUCTURE_STOPS = True       # Place stops beyond recent swing points
 MOMENTUM_STRUCTURE_LOOKBACK_BARS = 20     # Look back 20 bars for swing highs/lows
-MOMENTUM_MIN_STOP_DISTANCE_PIPS = 8.0     # Minimum stop distance
-MOMENTUM_MAX_STOP_DISTANCE_PIPS = 25.0    # Maximum stop distance (cap)
+MOMENTUM_MIN_STOP_DISTANCE_PIPS = 12.0    # Minimum stop distance (increased from 8.0)
+MOMENTUM_MAX_STOP_DISTANCE_PIPS = 40.0    # Maximum stop distance (increased from 25.0)
 MOMENTUM_STRUCTURE_BUFFER_PIPS = 2.0      # Buffer beyond swing point
 
 def get_momentum_config_for_epic(epic: str, market_condition: str = 'default') -> dict:

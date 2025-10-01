@@ -869,8 +869,8 @@ EMA_PAIR_SPECIFIC_PARAMS = {
 # Structure-Based Stop Placement
 EMA_USE_STRUCTURE_STOPS = True           # Place stops beyond recent swing points
 EMA_STRUCTURE_LOOKBACK_BARS = 30         # Longer lookback for trend-following
-EMA_MIN_STOP_DISTANCE_PIPS = 10.0        # Minimum stop distance
-EMA_MAX_STOP_DISTANCE_PIPS = 25.0        # Maximum stop distance (tighter than momentum)
+EMA_MIN_STOP_DISTANCE_PIPS = 12.0        # Minimum stop distance (increased from 10.0)
+EMA_MAX_STOP_DISTANCE_PIPS = 45.0        # Maximum stop distance (increased from 25.0 to allow ATR-based calculation)
 EMA_STRUCTURE_BUFFER_PIPS = 2.0          # Buffer beyond swing point
 
 # Enhanced Confidence Calculation Factors

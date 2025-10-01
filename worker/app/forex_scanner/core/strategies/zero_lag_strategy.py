@@ -465,7 +465,12 @@ class ZeroLagStrategy(BaseStrategy):
                 signal['signal_type'] = signal_type  # Force add signal_type
                 self.logger.info(f"✅ FIXED: Added missing fields - epic: {epic}, signal_type: {signal_type}")
 
-            self.logger.info(f"🎯 HIGH-QUALITY {signal_type} signal: ribbon={trend} + squeeze={momentum_color} + NO_SQUEEZE + RSI={rsi_value:.1f}{mtf_status}")
+            # ✅ NEW: Calculate optimized SL/TP
+            sl_tp = self.calculate_optimal_sl_tp(signal, epic, latest_row, spread_pips)
+            signal['stop_distance'] = sl_tp['stop_distance']
+            signal['limit_distance'] = sl_tp['limit_distance']
+
+            self.logger.info(f"🎯 HIGH-QUALITY {signal_type} signal: ribbon={trend} + squeeze={momentum_color} + NO_SQUEEZE + RSI={rsi_value:.1f}{mtf_status}, SL/TP={sl_tp['stop_distance']}/{sl_tp['limit_distance']}")
             self.logger.info(f"   📊 Signal validation: epic={signal.get('epic', 'MISSING')}, signal_type={signal.get('signal_type', 'MISSING')}")
             self.logger.info(f"   📊 DEBUG VALUES for TradingView comparison:")
             self.logger.info(f"   📊 Close: {close:.5f}, ZLEMA: {zlema:.5f}")

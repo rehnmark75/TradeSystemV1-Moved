@@ -154,8 +154,8 @@ MACD_PAIR_SPECIFIC_PARAMS = {
 # Structure-Based Stop Placement
 MACD_USE_STRUCTURE_STOPS = True          # Place stops beyond recent swing points
 MACD_STRUCTURE_LOOKBACK_BARS = 20        # Look back 20 bars for swing highs/lows
-MACD_MIN_STOP_DISTANCE_PIPS = 8.0        # Minimum stop distance
-MACD_MAX_STOP_DISTANCE_PIPS = 30.0       # Maximum stop distance (wider for momentum)
+MACD_MIN_STOP_DISTANCE_PIPS = 15.0       # Minimum stop distance (increased from 8.0 - was dangerously tight)
+MACD_MAX_STOP_DISTANCE_PIPS = 45.0       # Maximum stop distance (increased from 30.0 for wider range)
 MACD_STRUCTURE_BUFFER_PIPS = 2.0         # Buffer beyond swing point
 
 # Enhanced Confidence Calculation Factors
