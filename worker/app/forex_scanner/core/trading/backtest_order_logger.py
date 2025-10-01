@@ -131,6 +131,10 @@ class BacktestOrderLogger:
                 failure_reason = 'Validation Failed'
                 detailed_reason = 'No specific validation message provided'
 
+            # Prefer trailing stop simulation results over potential pips
+            profit_pips = signal.get('max_profit_pips') or signal.get('potential_profit_pips', 0)
+            loss_pips = signal.get('max_loss_pips') or signal.get('potential_loss_pips', 0)
+
             signal_record = {
                 'id': self.signals_logged,
                 'timestamp': timestamp,
@@ -139,12 +143,17 @@ class BacktestOrderLogger:
                 'strategy': strategy,
                 'price': price,
                 'confidence': confidence,
-                'profit': signal.get('potential_profit_pips', 0),
-                'loss': signal.get('potential_loss_pips', 0),
-                'risk_reward': signal.get('risk_reward_ratio', 0),
+                'profit': profit_pips,
+                'loss': loss_pips,
+                'risk_reward': signal.get('profit_loss_ratio') or signal.get('risk_reward_ratio', 0),
                 'validation_passed': validation_passed,
                 'rejection_reason': 'N/A' if validation_passed else (failure_reason or 'Unknown'),
-                'detailed_rejection_reason': detailed_reason
+                'detailed_rejection_reason': detailed_reason,
+                # Add simulation metadata if available
+                'exit_reason': signal.get('exit_reason'),
+                'trade_result': signal.get('trade_result'),
+                'trailing_stop_used': signal.get('trailing_stop_used', False),
+                'best_profit_achieved': signal.get('best_profit_achieved', 0)
             }
             self.all_signals.append(signal_record)
 

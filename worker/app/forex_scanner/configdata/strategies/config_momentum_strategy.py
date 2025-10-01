@@ -17,12 +17,12 @@ MOMENTUM_STRATEGY = True
 # Main configuration dictionary with multiple presets optimized for different market conditions
 MOMENTUM_STRATEGY_CONFIG = {
     'default': {
-        'fast_period': 5,           # Fast momentum period (minimal lag)
-        'slow_period': 10,          # Slow momentum period
-        'signal_period': 3,         # Signal line smoothing
-        'velocity_period': 7,       # Price velocity calculation
-        'volume_period': 14,        # Volume momentum period
-        'description': 'Balanced momentum configuration with minimal lag',
+        'fast_period': 5,           # Keep original - Phase 2 testing showed 10 was too slow
+        'slow_period': 10,          # Keep original - Phase 2 testing showed 24 was too slow
+        'signal_period': 3,         # Keep original - faster response needed
+        'velocity_period': 7,       # Keep original - 12 was too slow
+        'volume_period': 14,        # Keep original - adequate baseline
+        'description': 'Phase 1+2 hybrid - original periods with enhanced filters and pair-specific params',
         'best_for': ['trending', 'medium_volatility', 'breakouts'],
         'best_volatility_regime': 'medium',
         'best_trend_strength': 'medium_to_strong',
@@ -111,14 +111,14 @@ MOMENTUM_ADAPTIVE_SMOOTHING = True
 # Momentum calculation method
 MOMENTUM_CALCULATION_METHOD = 'velocity_weighted'  # Options: 'simple', 'velocity_weighted', 'volume_weighted'
 
-# Threshold settings - Optimized for 20-50 signals per week
-# Final calibration: 0.0002 captures typical momentum while maintaining quality
-MOMENTUM_SIGNAL_THRESHOLD = 0.0002   # 2 basis points - balanced threshold
-MOMENTUM_DIVERGENCE_THRESHOLD = 0.0001  # 1 basis point divergence
-MOMENTUM_VELOCITY_THRESHOLD = 0.020    # ATR-normalized velocity threshold
+# Threshold settings - Phase 1 Optimization
+# Increased from 0.0002 to reduce false signals and improve quality
+MOMENTUM_SIGNAL_THRESHOLD = 0.0003   # 3 basis points - higher quality threshold
+MOMENTUM_DIVERGENCE_THRESHOLD = 0.0002  # 2 basis points - minimum momentum strength
+MOMENTUM_VELOCITY_THRESHOLD = 0.008    # Reduced from 0.020 - was too restrictive
 
 # Volume confirmation settings
-MOMENTUM_VOLUME_MULTIPLIER = 1.2  # Volume must be 1.2x average
+MOMENTUM_VOLUME_MULTIPLIER = 1.5  # Increased from 1.2 for stronger confirmation
 MOMENTUM_VOLUME_CONFIRMATION_ENABLED = True
 
 # Multi-timeframe settings
@@ -131,10 +131,94 @@ MOMENTUM_STOP_LOSS_METHOD = 'adaptive'  # Options: 'fixed', 'atr', 'adaptive'
 MOMENTUM_TAKE_PROFIT_RATIO = 2.0  # 2:1 reward:risk ratio
 
 # Signal validation
-# Using momentum-specific confidence calculation (validator disabled)
-# Raised to 93% to reduce signal frequency (especially for trending pairs like USDCAD)
-MOMENTUM_MIN_CONFIDENCE = 0.93  # 93% confidence - very high quality signals only
+# Phase 1 Optimization: Reduced from 93% to allow more statistically valid signals
+# 75% provides optimal balance between quality and quantity
+MOMENTUM_MIN_CONFIDENCE = 0.75  # 75% confidence - statistically validated threshold
 MOMENTUM_SIGNAL_COOLDOWN = 900   # 15 minutes cooldown between signals (TODO: implement)
+
+# Confirmation requirements - Phase 1: Strengthened from 2-of-4 to 3-of-4
+MOMENTUM_MIN_CONFIRMATIONS = 3  # Require 3 out of 4 confirmations for higher quality
+
+# Risk Management - Phase 1: ATR-based stop loss and profit targets
+MOMENTUM_STOP_LOSS_ATR_MULTIPLIER = 2.5   # Wider stops to avoid premature stop-outs
+MOMENTUM_TAKE_PROFIT_ATR_MULTIPLIER = 2.0  # More realistic targets (conservative approach)
+# Alternative aggressive setting: MOMENTUM_TAKE_PROFIT_ATR_MULTIPLIER = 6.0
+
+# TESTING: Static stop loss override (set to 40 pips for testing)
+MOMENTUM_USE_STATIC_STOPS = True          # Override ATR-based stops
+MOMENTUM_STATIC_STOP_PIPS = 40.0          # Fixed 40 pip stop loss
+MOMENTUM_STATIC_TARGET_PIPS = 80.0        # Fixed 80 pip target (2:1 R:R)
+
+# Trend Alignment - Phase 1: NEW
+MOMENTUM_REQUIRE_TREND_ALIGNMENT = True   # Only trade in direction of trend
+MOMENTUM_TREND_EMA_PERIOD = 50            # EMA period for trend determination
+MOMENTUM_ALLOW_COUNTER_TREND = False      # Disable counter-trend trades
+
+# Market Regime Filter - Phase 1: NEW
+MOMENTUM_ENABLE_REGIME_FILTER = True      # Filter out unfavorable market conditions
+MOMENTUM_MIN_ADX = 22                     # Minimum trend strength (ADX)
+MOMENTUM_MIN_ATR_RATIO = 0.8              # Current ATR must be > 0.8x 20-bar average
+MOMENTUM_MIN_EMA_SEPARATION = 0.3         # Price distance from EMA (in ATR units)
+
+# Phase 2: Pair-Specific Parameters
+MOMENTUM_PAIR_SPECIFIC_PARAMS = {
+    'EURUSD': {
+        'signal_threshold': 0.0003,
+        'velocity_threshold': 0.008,
+        'stop_atr_multiplier': 2.5,
+        'target_atr_multiplier': 2.0,
+        'description': 'EUR/USD optimized - most liquid pair'
+    },
+    'GBPUSD': {
+        'signal_threshold': 0.0003,
+        'velocity_threshold': 0.010,  # Higher volatility
+        'stop_atr_multiplier': 2.8,   # Wider stops for GBP volatility
+        'target_atr_multiplier': 2.2,
+        'description': 'GBP/USD optimized - high volatility pair'
+    },
+    'USDJPY': {
+        'signal_threshold': 0.0015,   # Different scale (100+ vs 1.1)
+        'velocity_threshold': 0.040,  # Adjusted for JPY scale
+        'stop_atr_multiplier': 2.5,
+        'target_atr_multiplier': 2.0,
+        'description': 'USD/JPY optimized - different price scale'
+    },
+    'AUDUSD': {
+        'signal_threshold': 0.0003,
+        'velocity_threshold': 0.008,
+        'stop_atr_multiplier': 2.6,
+        'target_atr_multiplier': 2.0,
+        'description': 'AUD/USD optimized'
+    },
+    'NZDUSD': {
+        'signal_threshold': 0.0003,
+        'velocity_threshold': 0.008,
+        'stop_atr_multiplier': 2.6,
+        'target_atr_multiplier': 2.0,
+        'description': 'NZD/USD optimized'
+    },
+    'EURJPY': {
+        'signal_threshold': 0.0015,   # JPY scale adjustment
+        'velocity_threshold': 0.040,
+        'stop_atr_multiplier': 2.7,
+        'target_atr_multiplier': 2.1,
+        'description': 'EUR/JPY optimized - cross pair'
+    },
+    'AUDJPY': {
+        'signal_threshold': 0.0015,   # JPY scale adjustment
+        'velocity_threshold': 0.040,
+        'stop_atr_multiplier': 2.7,
+        'target_atr_multiplier': 2.1,
+        'description': 'AUD/JPY optimized - cross pair'
+    }
+}
+
+# Phase 2: Structure-Based Stop Placement
+MOMENTUM_USE_STRUCTURE_STOPS = True       # Place stops beyond recent swing points
+MOMENTUM_STRUCTURE_LOOKBACK_BARS = 20     # Look back 20 bars for swing highs/lows
+MOMENTUM_MIN_STOP_DISTANCE_PIPS = 8.0     # Minimum stop distance
+MOMENTUM_MAX_STOP_DISTANCE_PIPS = 25.0    # Maximum stop distance (cap)
+MOMENTUM_STRUCTURE_BUFFER_PIPS = 2.0      # Buffer beyond swing point
 
 def get_momentum_config_for_epic(epic: str, market_condition: str = 'default') -> dict:
     """Get momentum configuration for specific epic with fallbacks"""
@@ -145,33 +229,40 @@ def get_momentum_config_for_epic(epic: str, market_condition: str = 'default') -
 
     return MOMENTUM_STRATEGY_CONFIG.get(config_name, MOMENTUM_STRATEGY_CONFIG['default'])
 
-def get_momentum_threshold_for_epic(epic: str) -> float:
-    """Get momentum-specific thresholds based on currency pair"""
-    try:
-        if 'CS.D.' in epic and '.MINI.IP' in epic:
-            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '')
-        else:
-            pair = epic
+def get_pair_name_from_epic(epic: str) -> str:
+    """Extract clean pair name from epic"""
+    if 'CS.D.' in epic:
+        pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+    else:
+        pair = epic
+    return pair
 
-        # JPY pairs typically require different thresholds due to different decimal places
-        if 'JPY' in pair:
-            return 0.001  # Higher threshold for JPY pairs (different scale)
-        elif any(minor in pair for minor in ['EUR', 'GBP', 'AUD', 'NZD', 'CAD']):
-            return MOMENTUM_SIGNAL_THRESHOLD  # Standard threshold for majors
-        else:
-            return MOMENTUM_SIGNAL_THRESHOLD * 1.5  # Higher threshold for exotics
-    except Exception:
-        return MOMENTUM_SIGNAL_THRESHOLD  # Default fallback
+def get_momentum_pair_config(epic: str) -> dict:
+    """Phase 2: Get pair-specific configuration parameters"""
+    pair = get_pair_name_from_epic(epic)
+
+    # Return pair-specific config if available
+    if pair in MOMENTUM_PAIR_SPECIFIC_PARAMS:
+        return MOMENTUM_PAIR_SPECIFIC_PARAMS[pair]
+
+    # Fallback to defaults
+    return {
+        'signal_threshold': MOMENTUM_SIGNAL_THRESHOLD,
+        'velocity_threshold': MOMENTUM_VELOCITY_THRESHOLD,
+        'stop_atr_multiplier': MOMENTUM_STOP_LOSS_ATR_MULTIPLIER,
+        'target_atr_multiplier': MOMENTUM_TAKE_PROFIT_ATR_MULTIPLIER,
+        'description': 'Default parameters'
+    }
+
+def get_momentum_threshold_for_epic(epic: str) -> float:
+    """Get momentum-specific thresholds based on currency pair (Phase 2: uses pair config)"""
+    pair_config = get_momentum_pair_config(epic)
+    return pair_config.get('signal_threshold', MOMENTUM_SIGNAL_THRESHOLD)
 
 def get_momentum_velocity_threshold_for_epic(epic: str) -> float:
-    """Get velocity threshold based on pair characteristics"""
-    try:
-        if 'JPY' in epic:
-            return MOMENTUM_VELOCITY_THRESHOLD * 50  # Adjust for JPY scale
-        else:
-            return MOMENTUM_VELOCITY_THRESHOLD
-    except Exception:
-        return MOMENTUM_VELOCITY_THRESHOLD
+    """Get velocity threshold based on pair characteristics (Phase 2: uses pair config)"""
+    pair_config = get_momentum_pair_config(epic)
+    return pair_config.get('velocity_threshold', MOMENTUM_VELOCITY_THRESHOLD)
 
 def get_adaptive_smoothing_factor(volatility: float) -> float:
     """Calculate adaptive smoothing factor based on market volatility"""

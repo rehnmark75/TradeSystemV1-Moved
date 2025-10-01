@@ -16,11 +16,18 @@ try:
     from core.scanner import IntelligentForexScanner
     from core.database import DatabaseManager
     from core.trading.backtest_order_logger import BacktestOrderLogger
+    from core.trading.trailing_stop_simulator import TrailingStopSimulator
+    from configdata.strategies import config_momentum_strategy
 except ImportError:
     from forex_scanner import config
     from forex_scanner.core.scanner import IntelligentForexScanner
     from forex_scanner.core.database import DatabaseManager
     from forex_scanner.core.trading.backtest_order_logger import BacktestOrderLogger
+    from forex_scanner.core.trading.trailing_stop_simulator import TrailingStopSimulator
+    try:
+        from forex_scanner.configdata.strategies import config_momentum_strategy
+    except ImportError:
+        config_momentum_strategy = None
 
 
 class BacktestScanner(IntelligentForexScanner):
@@ -76,6 +83,33 @@ class BacktestScanner(IntelligentForexScanner):
         self.order_logger = BacktestOrderLogger(
             self.db_manager,
             self.execution_id,
+            logger=self.logger
+        )
+
+        # Initialize trailing stop simulator with ATR-based dynamic stops
+        # Can be configured per-strategy in the future
+        trailing_stop_config = backtest_config.get('trailing_stop_config', {})
+
+        # Check if momentum strategy is using static stops (testing mode)
+        use_static_stops = getattr(config_momentum_strategy, 'MOMENTUM_USE_STATIC_STOPS', False) if config_momentum_strategy and self.strategy_name == 'MOMENTUM' else False
+        static_stop_pips = getattr(config_momentum_strategy, 'MOMENTUM_STATIC_STOP_PIPS', 40.0) if use_static_stops else 10.0
+        static_target_pips = getattr(config_momentum_strategy, 'MOMENTUM_STATIC_TARGET_PIPS', 80.0) if use_static_stops else 15.0
+
+        self.trailing_stop_simulator = TrailingStopSimulator(
+            target_pips=trailing_stop_config.get('target_pips', static_target_pips),
+            initial_stop_pips=trailing_stop_config.get('initial_stop_pips', static_stop_pips),
+            breakeven_trigger=trailing_stop_config.get('breakeven_trigger', static_stop_pips * 0.8),
+            stop_to_profit_trigger=trailing_stop_config.get('stop_to_profit_trigger', static_target_pips),
+            stop_to_profit_level=trailing_stop_config.get('stop_to_profit_level', static_stop_pips),
+            trailing_start=trailing_stop_config.get('trailing_start', static_target_pips),
+            trailing_ratio=trailing_stop_config.get('trailing_ratio', 0.5),
+            max_bars=trailing_stop_config.get('max_bars', 96),
+            use_atr=trailing_stop_config.get('use_atr', not use_static_stops),  # Disable ATR if using static stops
+            # Phase 1: Use momentum strategy config ATR multipliers (2.5x stop, 2.0x target)
+            atr_multiplier=trailing_stop_config.get('atr_multiplier',
+                getattr(config_momentum_strategy, 'MOMENTUM_STOP_LOSS_ATR_MULTIPLIER', 2.5) if config_momentum_strategy and self.strategy_name == 'MOMENTUM' else 2.0),
+            target_atr_multiplier=trailing_stop_config.get('target_atr_multiplier',
+                getattr(config_momentum_strategy, 'MOMENTUM_TAKE_PROFIT_ATR_MULTIPLIER', 2.0) if config_momentum_strategy and self.strategy_name == 'MOMENTUM' else 3.0),
             logger=self.logger
         )
 
@@ -475,7 +509,13 @@ class BacktestScanner(IntelligentForexScanner):
                 if hasattr(self.signal_detector, method_name):
                     self.logger.debug(f"🎯 Running {strategy_name} strategy only for {epic}")
                     method = getattr(self.signal_detector, method_name)
-                    signals = method(epic, pair_name, self.spread_pips, self.timeframe)
+
+                    # Different strategies have different signatures
+                    # EMA strategies don't take spread_pips, others do
+                    if method_name in ['detect_signals_mid_prices']:
+                        signals = method(epic, pair_name, self.timeframe)
+                    else:
+                        signals = method(epic, pair_name, self.spread_pips, self.timeframe)
 
                     # Some methods return a single signal dict, others return lists
                     if signals and not isinstance(signals, list):
@@ -592,7 +632,7 @@ class BacktestScanner(IntelligentForexScanner):
     def _process_backtest_signals(self, signals: List[Dict], timestamp: datetime) -> List[Dict]:
         """
         Process signals through the same pipeline as live scanner
-        But add backtest-specific metadata
+        But add backtest-specific metadata and simulate trade outcomes
         """
         processed_signals = []
 
@@ -608,13 +648,165 @@ class BacktestScanner(IntelligentForexScanner):
                 processed_signal = self._prepare_signal(signal)
                 processed_signal['scanner_version'] = self.scanner_version
 
-                processed_signals.append(processed_signal)
+                # Add trailing stop simulation for realistic trade outcomes
+                enhanced_signal = self._add_trade_simulation(processed_signal, timestamp)
+
+                processed_signals.append(enhanced_signal)
 
             except Exception as e:
                 self.logger.error(f"Error processing backtest signal: {e}")
                 continue
 
         return processed_signals
+
+    def _add_trade_simulation(self, signal: Dict, signal_timestamp: datetime) -> Dict:
+        """
+        Add trade simulation with trailing stop logic
+        Fetches future price data and simulates trade execution
+        """
+        try:
+            epic = signal.get('epic')
+            if not epic:
+                self.logger.warning("Signal missing epic, skipping trade simulation")
+                return signal
+
+            # Fetch future price data for simulation (up to 96 bars = 24 hours on 15m)
+            future_df = self._fetch_future_price_data(epic, signal_timestamp, max_bars=96)
+
+            if future_df is None or len(future_df) == 0:
+                self.logger.debug(f"No future data available for {epic} at {signal_timestamp}, skipping simulation")
+                signal['trade_result'] = 'NO_FUTURE_DATA'
+                signal['is_winner'] = False
+                signal['is_loser'] = False
+                signal['max_profit_pips'] = 0
+                signal['max_loss_pips'] = 0
+                return signal
+
+            # Simulate trade with trailing stop
+            self.logger.debug(f"Simulating trade for {epic} with {len(future_df)} future bars")
+            enhanced_signal = self.trailing_stop_simulator.simulate_trade(
+                signal=signal,
+                df=future_df,
+                signal_idx=0  # Signal is at the start of the future data
+            )
+
+            self.logger.debug(f"Simulation complete: profit={enhanced_signal.get('max_profit_pips', 0):.1f}, "
+                            f"loss={enhanced_signal.get('max_loss_pips', 0):.1f}, "
+                            f"result={enhanced_signal.get('trade_result', 'UNKNOWN')}")
+
+            return enhanced_signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error adding trade simulation: {e}", exc_info=True)
+            # Return original signal without simulation data
+            return signal
+
+    def _fetch_future_price_data(self, epic: str, signal_timestamp: datetime, max_bars: int = 96) -> Optional[pd.DataFrame]:
+        """
+        Fetch future price data for trade simulation using BacktestDataFetcher (in-memory cache)
+
+        Args:
+            epic: Epic code
+            signal_timestamp: Signal timestamp (start of future data)
+            max_bars: Maximum number of bars to fetch
+
+        Returns:
+            DataFrame with OHLC price data or None if no data available
+        """
+        try:
+            # Use BacktestDataFetcher to get data from in-memory cache (same source as signal detection)
+            data_fetcher = self.signal_detector.data_fetcher
+
+            # Extract pair from epic
+            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+
+            # Calculate how much data we need (from NOW back to signal time, plus future bars)
+            time_increment = self._parse_timeframe_to_timedelta(self.timeframe)
+            end_timestamp = signal_timestamp + (time_increment * max_bars)
+            if end_timestamp > self.end_date:
+                end_timestamp = self.end_date
+
+            # Calculate lookback from NOW (not from signal time!) to ensure we get enough data
+            now = datetime.now(timezone.utc)
+
+            # Ensure signal_timestamp is timezone-aware for math operations
+            signal_ts_aware = signal_timestamp
+            if isinstance(signal_timestamp, datetime) and signal_timestamp.tzinfo is None:
+                signal_ts_aware = signal_timestamp.replace(tzinfo=timezone.utc)
+
+            time_from_now_to_signal = now - signal_ts_aware
+            time_from_signal_to_end = end_timestamp - signal_timestamp
+
+            # We need data from (now - time_from_now_to_signal - time_from_signal_to_end)
+            total_lookback = time_from_now_to_signal + time_from_signal_to_end + timedelta(hours=1)  # Add buffer
+            lookback_hours = int(total_lookback.total_seconds() / 3600)
+
+            # CRITICAL: Temporarily clear current_backtest_time to get unfiltered data
+            # The BacktestDataFetcher filters data to current_backtest_time for realistic signals,
+            # but for trailing stop simulation we need access to future bars
+            original_backtest_time = getattr(data_fetcher, 'current_backtest_time', None)
+
+            try:
+                # Clear the time filter to get full historical data including "future" bars
+                data_fetcher.current_backtest_time = None
+
+                # Get full data range that includes our signal time AND future bars
+                full_df = data_fetcher.get_enhanced_data(
+                    epic=epic,
+                    pair=pair,
+                    timeframe=self.timeframe,
+                    lookback_hours=lookback_hours,
+                    ema_strategy=None  # Don't need strategy enhancements for simulation
+                )
+            finally:
+                # Restore original backtest time
+                if original_backtest_time is not None:
+                    data_fetcher.current_backtest_time = original_backtest_time
+
+            if full_df is None or full_df.empty:
+                return None
+
+            # Find the timestamp column
+            timestamp_col = None
+            for col in ['start_time', 'datetime_utc', 'timestamp', 'datetime']:
+                if col in full_df.columns:
+                    timestamp_col = col
+                    break
+
+            if timestamp_col is None:
+                return None
+
+            # Ensure timestamp column is datetime type
+            full_df[timestamp_col] = pd.to_datetime(full_df[timestamp_col])
+
+            # Ensure signal_timestamp is timezone-aware (match the DataFrame)
+            if isinstance(signal_timestamp, datetime):
+                if signal_timestamp.tzinfo is None and full_df[timestamp_col].dt.tz is not None:
+                    # Make signal_timestamp timezone-aware (UTC)
+                    signal_timestamp = signal_timestamp.replace(tzinfo=timezone.utc)
+                elif signal_timestamp.tzinfo is not None and full_df[timestamp_col].dt.tz is None:
+                    # Make DataFrame timezone-aware
+                    full_df[timestamp_col] = full_df[timestamp_col].dt.tz_localize('UTC')
+
+            # Filter for future data only (after signal timestamp)
+            future_df = full_df[full_df[timestamp_col] > signal_timestamp].copy()
+
+            # Limit to max_bars
+            if len(future_df) > max_bars:
+                future_df = future_df.head(max_bars)
+
+            if len(future_df) == 0:
+                return None
+
+            # Rename timestamp column to 'timestamp' for consistency
+            if timestamp_col != 'timestamp':
+                future_df = future_df.rename(columns={timestamp_col: 'timestamp'})
+
+            return future_df
+
+        except Exception as e:
+            self.logger.error(f"Error fetching future price data for {epic}: {e}")
+            return None
 
     def _update_execution_progress(self, results: Dict):
         """Update backtest execution progress in database"""
@@ -732,6 +924,18 @@ class BacktestScanner(IntelligentForexScanner):
         else:
             # Default to 15 minutes
             return timedelta(minutes=15)
+
+    def _timeframe_to_minutes(self, timeframe: str) -> int:
+        """Convert timeframe string to minutes (integer) for database queries"""
+        if timeframe.endswith('m'):
+            return int(timeframe[:-1])
+        elif timeframe.endswith('h'):
+            return int(timeframe[:-1]) * 60
+        elif timeframe.endswith('d'):
+            return int(timeframe[:-1]) * 1440
+        else:
+            # Default to 15 minutes
+            return 15
 
     def get_backtest_statistics(self) -> Dict:
         """Get current backtest statistics"""

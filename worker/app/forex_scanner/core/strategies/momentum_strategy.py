@@ -196,6 +196,12 @@ class MomentumStrategy(BaseStrategy):
             self.logger.debug(f"   Signal Line: {momentum_signal:.6f}")
             self.logger.debug(f"   Velocity: {velocity_momentum:.6f} [threshold: {self.velocity_threshold:.6f}]")
 
+            # Phase 1: Check market regime favorability BEFORE signal determination
+            regime_favorable, regime_reason = self._check_regime_favorability(df_enhanced)
+            if not regime_favorable:
+                self.logger.debug(f"[MOMENTUM REJECTED] {epic} - Unfavorable market regime: {regime_reason}")
+                return None
+
             # Determine signal type using multiple methods
             signal_type, trigger_reason = self._determine_signal_type(
                 fast_momentum, slow_momentum, momentum_signal,
@@ -206,6 +212,12 @@ class MomentumStrategy(BaseStrategy):
 
             if not signal_type:
                 self.logger.debug(f"[MOMENTUM] No signal: conditions not met for {epic}")
+                return None
+
+            # Phase 1: Check trend alignment AFTER signal type determined
+            trend_aligned, trend_reason = self._check_trend_alignment(df_enhanced, signal_type)
+            if not trend_aligned:
+                self.logger.debug(f"[MOMENTUM REJECTED] {epic} - Trend misalignment: {trend_reason}")
                 return None
 
             # Create enhanced signal data for confidence calculation
@@ -504,6 +516,102 @@ class MomentumStrategy(BaseStrategy):
             self.logger.debug(f"Volume momentum calculation failed: {e}")
             return pd.Series(0.0, index=df.index)
 
+    def _check_trend_alignment(self, df: pd.DataFrame, signal_type: str) -> Tuple[bool, str]:
+        """
+        Check if signal aligns with longer-term trend (Phase 1: EMA 50 filter)
+
+        Returns:
+            (is_aligned, reason)
+        """
+        if not config_momentum_strategy.MOMENTUM_REQUIRE_TREND_ALIGNMENT:
+            return True, "trend_filter_disabled"
+
+        try:
+            ema_period = config_momentum_strategy.MOMENTUM_TREND_EMA_PERIOD
+
+            # Calculate EMA if not present
+            if f'ema_{ema_period}' not in df.columns:
+                df[f'ema_{ema_period}'] = ta.ema(df['close'], length=ema_period)
+
+            current_price = df['close'].iloc[-1]
+            ema_value = df[f'ema_{ema_period}'].iloc[-1]
+
+            if pd.isna(ema_value):
+                self.logger.warning("EMA value is NaN, skipping trend filter")
+                return True, "ema_unavailable"
+
+            # Check alignment
+            if signal_type == 'BULL':
+                is_aligned = current_price > ema_value
+                reason = "price_above_ema" if is_aligned else "price_below_ema_rejected"
+            else:  # BEAR
+                is_aligned = current_price < ema_value
+                reason = "price_below_ema" if is_aligned else "price_above_ema_rejected"
+
+            if not is_aligned:
+                self.logger.debug(f"   ❌ Trend filter: {signal_type} rejected - {reason}")
+            else:
+                self.logger.debug(f"   ✅ Trend filter: {signal_type} aligned with EMA{ema_period} trend")
+
+            return is_aligned, reason
+
+        except Exception as e:
+            self.logger.warning(f"Trend alignment check failed: {e}, allowing signal")
+            return True, "trend_check_error"
+
+    def _check_regime_favorability(self, df: pd.DataFrame) -> Tuple[bool, str]:
+        """
+        Check if market regime favors momentum strategies (Phase 1: ADX + ATR filter)
+
+        Returns:
+            (is_favorable, reason)
+        """
+        if not config_momentum_strategy.MOMENTUM_ENABLE_REGIME_FILTER:
+            return True, "regime_filter_disabled"
+
+        try:
+            # Calculate ADX for trend strength
+            adx_data = ta.adx(df['high'], df['low'], df['close'], length=14)
+            if adx_data is None or 'ADX_14' not in adx_data.columns:
+                self.logger.warning("ADX calculation failed, skipping regime filter")
+                return True, "adx_unavailable"
+
+            current_adx = adx_data['ADX_14'].iloc[-1]
+
+            if pd.isna(current_adx):
+                return True, "adx_unavailable"
+
+            # Check minimum trend strength
+            min_adx = config_momentum_strategy.MOMENTUM_MIN_ADX
+            if current_adx < min_adx:
+                self.logger.debug(f"   ❌ Regime filter: ADX {current_adx:.1f} < {min_adx} (ranging market)")
+                return False, f"low_adx_{current_adx:.1f}"
+
+            # Calculate relative ATR for volatility regime
+            if 'atr' not in df.columns:
+                atr = ta.atr(df['high'], df['low'], df['close'], length=14)
+                df['atr'] = atr
+
+            current_atr = df['atr'].iloc[-1]
+            atr_20_avg = df['atr'].tail(20).mean()
+
+            if pd.isna(current_atr) or pd.isna(atr_20_avg) or atr_20_avg == 0:
+                return True, "atr_unavailable"
+
+            atr_ratio = current_atr / atr_20_avg
+            min_atr_ratio = config_momentum_strategy.MOMENTUM_MIN_ATR_RATIO
+
+            if atr_ratio < min_atr_ratio:
+                self.logger.debug(f"   ❌ Regime filter: ATR ratio {atr_ratio:.2f} < {min_atr_ratio} (low volatility)")
+                return False, f"low_volatility_atr_{atr_ratio:.2f}"
+
+            self.logger.debug(f"   ✅ Regime filter: ADX={current_adx:.1f}, ATR ratio={atr_ratio:.2f} (favorable)")
+            return True, f"favorable_adx_{current_adx:.1f}_atr_{atr_ratio:.2f}"
+
+        except Exception as e:
+            self.logger.warning(f"Regime favorability check failed: {e}, allowing signal")
+            return True, "regime_check_error"
+
     def _determine_signal_type(
         self,
         fast_momentum: float,
@@ -517,8 +625,8 @@ class MomentumStrategy(BaseStrategy):
         previous_price: float
     ) -> Tuple[Optional[str], str]:
         """
-        Determine signal type using 2-of-4 confirmation system
-        Improved: Requires momentum crossover + 2 secondary confirmations (not all 4)
+        Determine signal type using 3-of-4 confirmation system (Phase 1: strengthened from 2-of-4)
+        Improved: Requires momentum crossover + 3 secondary confirmations
         """
         signal_type = None
         trigger_reason = None
@@ -569,13 +677,15 @@ class MomentumStrategy(BaseStrategy):
 
         # 4. Strong divergence confirmation
         divergence = abs(fast_momentum - slow_momentum)
-        if divergence > self.signal_threshold * 2:  # Significant divergence
+        # Phase 1: Increased threshold for stronger divergence requirement
+        if divergence > config_momentum_strategy.MOMENTUM_DIVERGENCE_THRESHOLD:
             confirmations.append('strong_divergence')
 
-        # Require at least 2 confirmations
+        # Phase 1: Require at least 3 confirmations (strengthened from 2)
         confirmation_count = len(confirmations)
+        min_confirmations = getattr(config_momentum_strategy, 'MOMENTUM_MIN_CONFIRMATIONS', 3)
 
-        if confirmation_count >= 2:
+        if confirmation_count >= min_confirmations:
             signal_type = 'BULL' if is_bullish else 'BEAR'
             trigger_reason = f"momentum_crossover_with_{confirmation_count}_confirmations"
 
@@ -587,7 +697,7 @@ class MomentumStrategy(BaseStrategy):
         else:
             # Crossover detected but insufficient confirmations
             self.logger.debug(
-                f"   ⚠️ Momentum crossover detected but only {confirmation_count}/2 confirmations - signal rejected"
+                f"   ⚠️ Momentum crossover detected but only {confirmation_count}/{min_confirmations} confirmations - signal rejected"
             )
 
         return signal_type, trigger_reason
@@ -911,46 +1021,57 @@ class MomentumStrategy(BaseStrategy):
                 should_trade, confidence, reason, analysis = self._validator.validate_signal_enhanced(signal_data)
                 return confidence
 
-            # Fallback momentum-specific confidence calculation
-            base_confidence = 0.65
+            # Phase 2: Improved momentum-specific confidence calculation
+            base_confidence = 0.50  # Lowered from 0.65 to start more conservative
 
-            # Factor 1: Momentum strength (how strong is the momentum divergence)
+            # Factor 1: Momentum strength (better scaling)
             momentum_strength = signal_data.get('momentum_strength', 0.0)
-            strength_factor = min(0.2, momentum_strength * 1000)  # Scale appropriately
+            strength_factor = min(0.25, momentum_strength * 2000)  # Increased scaling
 
-            # Factor 2: Velocity confirmation
+            # Factor 2: Trend alignment (NEW in Phase 1)
+            # Check if signal includes trend alignment info
+            trend_aligned = signal_data.get('trend_aligned', True)  # Assume true if not provided
+            trend_factor = 0.15 if trend_aligned else -0.10  # Reward alignment, penalize misalignment
+
+            # Factor 3: Market regime (NEW in Phase 1)
+            regime_favorable = signal_data.get('regime_favorable', True)
+            regime_factor = 0.10 if regime_favorable else -0.10
+
+            # Factor 4: Velocity confirmation (strengthened)
             velocity_strength = signal_data.get('velocity_strength', 0.0)
-            velocity_factor = min(0.15, velocity_strength * 100) if self.velocity_enabled else 0.1
+            velocity_factor = min(0.15, velocity_strength * 150) if self.velocity_enabled else 0.0
 
-            # Factor 3: Volume confirmation
-            volume_confirmation = signal_data.get('volume_confirmation', False)
-            volume_factor = 0.1 if volume_confirmation else 0.0
+            # Factor 5: Volume confirmation (strengthened requirement)
+            volume_ratio = signal_data.get('volume_ratio', 1.0)
+            volume_factor = 0.10 if volume_ratio > 1.5 else (0.05 if volume_ratio > 1.2 else 0.0)
 
-            # Factor 4: RSI confluence (avoid extreme levels)
+            # Factor 6: Number of confirmations (NEW)
+            confirmation_count = signal_data.get('confirmation_count', 0)
+            confirmation_factor = confirmation_count * 0.05  # 0.05 per confirmation
+
+            # Factor 7: RSI confluence (improved logic)
             rsi = signal_data.get('rsi', 50.0)
-            if 30 <= rsi <= 70:  # Good RSI levels
+            if 30 <= rsi <= 70:  # Optimal RSI levels
                 rsi_factor = 0.05
-            elif 20 <= rsi <= 80:  # Acceptable levels
+            elif 20 <= rsi <= 80:  # Acceptable
                 rsi_factor = 0.0
-            else:  # Extreme levels (penalty)
+            else:  # Extreme (overbought/oversold)
                 rsi_factor = -0.05
-
-            # Factor 5: Efficiency ratio
-            efficiency_ratio = signal_data.get('efficiency_ratio', 0.6)
-            efficiency_factor = (efficiency_ratio - 0.5) * 0.2
 
             # Calculate total confidence
             total_confidence = (
                 base_confidence +
                 strength_factor +
+                trend_factor +
+                regime_factor +
                 velocity_factor +
                 volume_factor +
-                rsi_factor +
-                efficiency_factor
+                confirmation_factor +
+                rsi_factor
             )
 
             # Ensure confidence is within valid range
-            final_confidence = max(0.1, min(0.95, total_confidence))
+            final_confidence = max(0.1, min(0.98, total_confidence))
 
             return final_confidence
 
