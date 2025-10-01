@@ -77,7 +77,10 @@
       "Read(//home/hr/**)",
       "Read(//home/**)",
       "Bash(docker-compose exec:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(for:*)",
+      "Bash(do echo \"=== $file ===\")",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []

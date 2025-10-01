@@ -55,12 +55,13 @@ class ZeroLagStrategy(BaseStrategy):
     
     def __init__(self, data_fetcher=None, epic=None, use_optimal_parameters=False, pipeline_mode=True):
         super().__init__('zero_lag_squeeze')
-        
+
         # Initialize core components
         self.price_adjuster = PriceAdjuster()
         self.data_fetcher = data_fetcher
         self.epic = epic
         self.use_optimal_parameters = use_optimal_parameters
+        self.optimal_params = None  # Initialize to prevent AttributeError in base_strategy
         
         # Enable/disable expensive features based on pipeline mode
         self.enhanced_validation = pipeline_mode and getattr(configdata, 'ZERO_LAG_ENHANCED_VALIDATION', True) if configdata else pipeline_mode
