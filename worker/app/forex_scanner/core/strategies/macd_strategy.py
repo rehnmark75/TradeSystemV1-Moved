@@ -27,6 +27,7 @@ from .helpers.macd_indicator_calculator import MACDIndicatorCalculator
 from .helpers.macd_signal_calculator import MACDSignalCalculator
 from .helpers.macd_trend_validator import MACDTrendValidator
 from .helpers.macd_mtf_analyzer import MACDMultiTimeframeAnalyzer
+from .helpers.adaptive_volatility_calculator import AdaptiveVolatilityCalculator
 
 # Import optimization functions
 try:
@@ -132,25 +133,34 @@ class MACDStrategy(BaseStrategy):
         self._enhanced_df_cache = {}  # {epic: {'df': DataFrame, 'timestamp': timestamp}}
         self._cache_ttl_seconds = 300  # 5 minutes cache TTL
 
-        # PHASE 1+2: Use ATR-based dynamic stops instead of database values
-        # Set optimal_params to None to force ATR calculation in calculate_optimal_sl_tp()
+        # PHASE 1+2+3: Adaptive volatility-based SL/TP calculation
+        # Set optimal_params to None to force dynamic calculation in calculate_optimal_sl_tp()
         self.optimal_params = None
 
-        # Get ATR multipliers from config for dynamic SL/TP calculation
-        self.stop_atr_multiplier = getattr(config_macd_strategy, 'MACD_STOP_LOSS_ATR_MULTIPLIER', 2.5) if config_macd_strategy else 2.5
-        self.target_atr_multiplier = getattr(config_macd_strategy, 'MACD_TAKE_PROFIT_ATR_MULTIPLIER', 3.0) if config_macd_strategy else 3.0
+        # Feature flag for adaptive volatility calculator (default: False for gradual rollout)
+        self.use_adaptive_sl_tp = getattr(config_macd_strategy, 'USE_ADAPTIVE_SL_TP', False) if config_macd_strategy else False
 
-        # Get pair-specific parameters if available
-        if config_macd_strategy and hasattr(config_macd_strategy, 'MACD_PAIR_SPECIFIC_PARAMS') and self.epic:
-            # Extract clean pair name (EURUSD, GBPUSD, etc.)
-            clean_pair = self.epic.replace('CS.D.', '').replace('.CEEM.IP', '').replace('.MINI.IP', '')
-            pair_params = config_macd_strategy.MACD_PAIR_SPECIFIC_PARAMS.get(clean_pair, {})
-            if pair_params:
-                self.stop_atr_multiplier = pair_params.get('stop_atr_multiplier', self.stop_atr_multiplier)
-                self.target_atr_multiplier = pair_params.get('target_atr_multiplier', self.target_atr_multiplier)
-                self.logger.info(f"✅ Using pair-specific ATR multipliers for {clean_pair}: SL={self.stop_atr_multiplier}x, TP={self.target_atr_multiplier}x")
+        if self.use_adaptive_sl_tp:
+            # Initialize adaptive volatility calculator (singleton)
+            self.adaptive_calculator = AdaptiveVolatilityCalculator(logger=self.logger)
+            self.logger.info("🧠 Adaptive volatility calculator enabled - Runtime regime-aware SL/TP")
+        else:
+            # Fallback: Use ATR multipliers from config for dynamic SL/TP calculation
+            self.adaptive_calculator = None
+            self.stop_atr_multiplier = getattr(config_macd_strategy, 'MACD_STOP_LOSS_ATR_MULTIPLIER', 2.5) if config_macd_strategy else 2.5
+            self.target_atr_multiplier = getattr(config_macd_strategy, 'MACD_TAKE_PROFIT_ATR_MULTIPLIER', 3.0) if config_macd_strategy else 3.0
 
-        self.logger.info(f"🎯 ATR-based dynamic stops enabled: SL={self.stop_atr_multiplier}x ATR, TP={self.target_atr_multiplier}x ATR")
+            # Get pair-specific parameters if available
+            if config_macd_strategy and hasattr(config_macd_strategy, 'MACD_PAIR_SPECIFIC_PARAMS') and self.epic:
+                # Extract clean pair name (EURUSD, GBPUSD, etc.)
+                clean_pair = self.epic.replace('CS.D.', '').replace('.CEEM.IP', '').replace('.MINI.IP', '')
+                pair_params = config_macd_strategy.MACD_PAIR_SPECIFIC_PARAMS.get(clean_pair, {})
+                if pair_params:
+                    self.stop_atr_multiplier = pair_params.get('stop_atr_multiplier', self.stop_atr_multiplier)
+                    self.target_atr_multiplier = pair_params.get('target_atr_multiplier', self.target_atr_multiplier)
+                    self.logger.info(f"✅ Using pair-specific ATR multipliers for {clean_pair}: SL={self.stop_atr_multiplier}x, TP={self.target_atr_multiplier}x")
+
+            self.logger.info(f"🎯 ATR-based dynamic stops enabled: SL={self.stop_atr_multiplier}x ATR, TP={self.target_atr_multiplier}x ATR")
 
         self.logger.info(f"🎯 MACD Strategy initialized - Periods: {self.fast_ema}/{self.slow_ema}/{self.signal_ema} ({timeframe})")
         self.logger.info(f"🔧 Using lightweight orchestrator pattern with focused helpers")
@@ -721,10 +731,43 @@ class MACDStrategy(BaseStrategy):
         spread_pips: float
     ) -> Dict[str, int]:
         """
-        PHASE 1+2: Calculate ATR-based dynamic SL/TP using config multipliers
+        PHASE 1+2+3: Calculate SL/TP using adaptive volatility calculator OR ATR multipliers
 
-        Overrides base class to use MACD-specific ATR multipliers from config.
+        Priority:
+        1. Adaptive volatility calculator (if enabled via USE_ADAPTIVE_SL_TP)
+        2. Fallback to ATR-based with config multipliers
+
+        Overrides base class to use MACD-specific calculation logic.
         """
+        signal_type = signal.get('signal_type', 'BULL')
+
+        # PHASE 3: Use adaptive volatility calculator if enabled
+        if self.use_adaptive_sl_tp and self.adaptive_calculator:
+            try:
+                result = self.adaptive_calculator.calculate_sl_tp(
+                    epic=epic,
+                    data=latest_row,
+                    signal_type=signal_type
+                )
+
+                self.logger.info(
+                    f"🧠 Adaptive SL/TP [{result.regime.value}] {result.method_used}: "
+                    f"SL={result.stop_distance}p TP={result.limit_distance}p "
+                    f"(R:R={result.limit_distance/result.stop_distance:.2f}, "
+                    f"conf={result.confidence:.1%}, fallback_lvl={result.fallback_level}, "
+                    f"{result.calculation_time_ms:.1f}ms)"
+                )
+
+                return {
+                    'stop_distance': result.stop_distance,
+                    'limit_distance': result.limit_distance
+                }
+
+            except Exception as e:
+                self.logger.error(f"❌ Adaptive calculator failed: {e}, falling back to ATR method")
+                # Fall through to ATR fallback below
+
+        # PHASE 1+2 FALLBACK: ATR-based with config multipliers
         # Get ATR for the pair
         atr = latest_row.get('atr', 0)
         if not atr or atr <= 0:
@@ -765,7 +808,7 @@ class MACDStrategy(BaseStrategy):
             limit_distance = int(stop_distance * (self.target_atr_multiplier / self.stop_atr_multiplier))
 
         self.logger.info(
-            f"MACD ATR-based SL/TP: ATR={atr_pips:.1f} pips, "
+            f"🎯 MACD ATR-based SL/TP: ATR={atr_pips:.1f} pips, "
             f"SL={stop_distance} ({self.stop_atr_multiplier}x), "
             f"TP={limit_distance} ({self.target_atr_multiplier}x), "
             f"R:R={limit_distance/stop_distance:.2f}"

@@ -100,9 +100,15 @@ MACD_RSI_REQUIRE_RISING = True                    # Require RSI rising for long,
 MACD_RSI_REQUIRE_QUALITY_THRESHOLDS = False      # Enable optional quality thresholds (55/45)
 
 # =============================================================================
-# PHASE 1+2 ENHANCEMENTS (Ported from Momentum Strategy)
+# PHASE 1+2+3 ENHANCEMENTS (Ported from Momentum Strategy + Adaptive Volatility)
 # MACD = MOMENTUM-FOCUSED STRATEGY
 # =============================================================================
+
+# PHASE 3: Adaptive Volatility-Based SL/TP (NEW)
+# Runtime regime-aware calculation - No hardcoded values!
+USE_ADAPTIVE_SL_TP = False               # 🧠 Enable adaptive volatility calculator (default: False for gradual rollout)
+                                         # When True: Uses runtime regime detection (trending, ranging, breakout, high volatility)
+                                         # When False: Falls back to ATR multipliers below
 
 # Trend Alignment Filter - MACD as momentum strategy can work counter-trend with confirmation
 MACD_REQUIRE_TREND_ALIGNMENT = False      # MACD can trade counter-trend (momentum reversals)

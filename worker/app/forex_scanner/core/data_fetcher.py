@@ -605,14 +605,30 @@ class DataFetcher:
                 df['bb_upper'] = rolling_mean + (rolling_std * bb_std_dev)
                 df['bb_lower'] = rolling_mean - (rolling_std * bb_std_dev)
             
-            # Calculate ATR for Supertrend
+            # Calculate ATR for Supertrend and adaptive volatility
             if 'atr' not in df.columns:
                 high_low = df['high'] - df['low']
                 high_close = np.abs(df['high'] - df['close'].shift())
                 low_close = np.abs(df['low'] - df['close'].shift())
-                
+
                 true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+
+                # Standard ATR (14-period, used by supertrend_period which is typically 14)
                 df['atr'] = true_range.rolling(window=supertrend_period).mean()
+
+                # 20-period ATR for percentile calculation (adaptive volatility)
+                df['atr_20'] = true_range.rolling(window=20).mean()
+
+                # ATR percentile: current ATR vs 20-period baseline
+                # Used for regime detection (high volatility, breakout conditions)
+                df['atr_percentile'] = (df['atr'] / df['atr_20'] * 100).fillna(50.0)
+
+            # Calculate Bollinger Band width percentile for ranging market detection
+            if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
+                bb_width = df['bb_upper'] - df['bb_lower']
+                # Percentile rank over 50-period window
+                df['bb_width_percentile'] = bb_width.rolling(window=50).rank(pct=True) * 100
+                df['bb_width_percentile'] = df['bb_width_percentile'].fillna(50.0)
             
             if 'ltv' in df.columns and 'volume' not in df.columns:
                 df['volume'] = df['ltv']
@@ -712,19 +728,27 @@ class DataFetcher:
             # Calculate EMA on the adjusted input
             df['zlema'] = zlema_input.ewm(span=length).mean()
             
-            # Calculate ATR for volatility bands
-            high_low = df['high'] - df['low']
-            high_close = np.abs(df['high'] - df['close'].shift())
-            low_close = np.abs(df['low'] - df['close'].shift())
-            
-            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-            atr = true_range.rolling(window=length).mean()
-            
+            # Calculate ATR for volatility bands (if not already calculated)
+            if 'atr' not in df.columns:
+                high_low = df['high'] - df['low']
+                high_close = np.abs(df['high'] - df['close'].shift())
+                low_close = np.abs(df['low'] - df['close'].shift())
+
+                true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                atr = true_range.rolling(window=length).mean()
+
+                df['atr'] = atr
+
+                # Add 20-period ATR and percentile for adaptive volatility
+                df['atr_20'] = true_range.rolling(window=20).mean()
+                df['atr_percentile'] = (df['atr'] / df['atr_20'] * 100).fillna(50.0)
+            else:
+                atr = df['atr']
+
             # Calculate volatility using highest ATR over 3x length period
             volatility_period = min(length * 3, len(df))
             volatility = atr.rolling(window=volatility_period).max() * band_multiplier
-            
-            df['atr'] = atr
+
             df['volatility'] = volatility
             df['upper_band'] = df['zlema'] + volatility
             df['lower_band'] = df['zlema'] - volatility

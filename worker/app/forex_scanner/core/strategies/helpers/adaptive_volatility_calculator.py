@@ -542,8 +542,8 @@ class AdaptiveVolatilityCalculator:
     _instance = None
     _initialized = False
 
-    def __new__(cls):
-        """Singleton pattern"""
+    def __new__(cls, *args, **kwargs):
+        """Singleton pattern - accepts and ignores arguments"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -551,6 +551,9 @@ class AdaptiveVolatilityCalculator:
     def __init__(self, logger: Optional[logging.Logger] = None):
         """Initialize calculators and caches (only once)"""
         if self._initialized:
+            # Update logger if provided on subsequent calls
+            if logger:
+                self.logger = logger
             return
 
         self.logger = logger or logging.getLogger(__name__)
