@@ -149,6 +149,9 @@ class BacktestOrderLogger:
                 'validation_passed': validation_passed,
                 'rejection_reason': 'N/A' if validation_passed else (failure_reason or 'Unknown'),
                 'detailed_rejection_reason': detailed_reason,
+                # Add configured SL/TP from strategy
+                'stop_distance': signal.get('stop_distance', 0),
+                'limit_distance': signal.get('limit_distance', 0),
                 # Add simulation metadata if available
                 'exit_reason': signal.get('exit_reason'),
                 'trade_result': signal.get('trade_result'),
@@ -161,6 +164,12 @@ class BacktestOrderLogger:
             self.logger.info(f"🎯 BACKTEST SIGNAL #{self.signals_logged}: {epic} {signal_type}")
             self.logger.info(f"   📊 Confidence: {confidence:.1%} | Price: {price:.5f} | Strategy: {strategy}")
             self.logger.info(f"   ⏰ Timestamp: {timestamp}")
+
+            # Show configured SL/TP if available
+            stop_distance = signal.get('stop_distance', 0)
+            limit_distance = signal.get('limit_distance', 0)
+            if stop_distance > 0 or limit_distance > 0:
+                self.logger.info(f"   🎯 Configured SL/TP: {stop_distance:.0f} / {limit_distance:.0f} pips")
 
             # Return success with mock order data
             mock_order = {
@@ -580,29 +589,31 @@ class BacktestOrderLogger:
         if validated_signals:
             self.logger.info("")
             self.logger.info(f"✅ VALIDATED {strategy_display} SIGNALS ({len(validated_signals)} signals):")
-            self.logger.info("=" * 140)
-            self.logger.info(f"{'#':3} {'TIMESTAMP':19} {'PAIR':12} {'TYPE':4} {'STRATEGY':12} {'PRICE':10} {'CONF':6} {'PROFIT':8} {'LOSS':8} {'R:R':6}")
-            self.logger.info("-" * 140)
+            self.logger.info("=" * 170)
+            self.logger.info(f"{'#':3} {'TIMESTAMP':19} {'PAIR':12} {'TYPE':4} {'STRATEGY':12} {'PRICE':10} {'CONF':6} {'SL':5} {'TP':5} {'ACT_P':7} {'ACT_L':7} {'R:R':6}")
+            self.logger.info("-" * 170)
 
             for signal in validated_signals:
                 self._format_signal_row(signal, include_rejection=False)
 
-            self.logger.info("=" * 140)
+            self.logger.info("=" * 170)
             self.logger.info(f"📝 {len(validated_signals)} validated signals shown (newest first)")
+            self.logger.info(f"    SL/TP = Configured Stop Loss/Take Profit | ACT_P/ACT_L = Actual Profit/Loss from simulation")
 
         # Display rejected signals section
         if rejected_signals:
             self.logger.info("")
             self.logger.info(f"❌ REJECTED {strategy_display} SIGNALS ({len(rejected_signals)} signals):")
-            self.logger.info("=" * 200)
-            self.logger.info(f"{'#':3} {'TIMESTAMP':19} {'PAIR':12} {'TYPE':4} {'STRATEGY':12} {'PRICE':10} {'CONF':6} {'PROFIT':8} {'LOSS':8} {'R:R':6} {'DETAILED REJECTION REASON':65}")
-            self.logger.info("-" * 200)
+            self.logger.info("=" * 230)
+            self.logger.info(f"{'#':3} {'TIMESTAMP':19} {'PAIR':12} {'TYPE':4} {'STRATEGY':12} {'PRICE':10} {'CONF':6} {'SL':5} {'TP':5} {'ACT_P':7} {'ACT_L':7} {'R:R':6} {'DETAILED REJECTION REASON':65}")
+            self.logger.info("-" * 230)
 
             for signal in rejected_signals:
                 self._format_signal_row(signal, include_rejection=True, use_detailed=True)
 
-            self.logger.info("=" * 200)
+            self.logger.info("=" * 230)
             self.logger.info(f"📝 {len(rejected_signals)} rejected signals shown (newest first)")
+            self.logger.info(f"    SL/TP = Configured Stop Loss/Take Profit | ACT_P/ACT_L = Actual Profit/Loss from simulation")
 
     def _format_signal_row(self, signal: Dict, include_rejection: bool = True, use_detailed: bool = False):
         """Format a single signal row for display"""
@@ -622,23 +633,28 @@ class BacktestOrderLogger:
         if len(strategy_display) > 12:
             strategy_display = strategy_display[:12]
 
-        # Format values
-        profit = signal.get('profit', 0)
-        loss = signal.get('loss', 0)
+        # Get configured SL/TP (from signal creation)
+        configured_sl = signal.get('stop_distance', 0)  # In pips
+        configured_tp = signal.get('limit_distance', 0)  # In pips
+
+        # Get actual simulation results
+        actual_profit = signal.get('profit', 0)
+        actual_loss = signal.get('loss', 0)
         risk_reward = signal.get('risk_reward', 0)
 
-        # Calculate R:R ratio display
-        if loss > 0:
-            rr_display = f"{profit/loss:.2f}"
-        elif profit > 0:
+        # Calculate R:R ratio display (based on actual results)
+        if actual_loss > 0:
+            rr_display = f"{actual_profit/actual_loss:.2f}"
+        elif actual_profit > 0:
             rr_display = "inf"
         else:
             rr_display = "0.00"
 
-        # Base signal info
+        # Base signal info with both configured and actual values
         base_info = (f"{signal['id']:3} {timestamp_str:19} {epic_display:12} {signal['signal_type']:4} "
                     f"{strategy_display:12} {signal['price']:8.5f}  {signal['confidence']:5.1%} "
-                    f"{profit:6.1f}   {loss:6.1f}   {rr_display:6}")
+                    f"{configured_sl:4.0f}  {configured_tp:4.0f}  "
+                    f"{actual_profit:6.1f}  {actual_loss:6.1f}  {rr_display:6}")
 
         # Add rejection reason if requested
         if include_rejection:

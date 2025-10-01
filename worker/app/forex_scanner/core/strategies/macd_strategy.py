@@ -41,8 +41,13 @@ except ImportError:
 
 try:
     from configdata import config
+    from configdata.strategies import config_macd_strategy
 except ImportError:
     from forex_scanner.configdata import config
+    try:
+        from forex_scanner.configdata.strategies import config_macd_strategy
+    except ImportError:
+        config_macd_strategy = None
 
 # Import optimization parameter service
 try:
@@ -126,6 +131,26 @@ class MACDStrategy(BaseStrategy):
         # Add simple caching for performance optimization
         self._enhanced_df_cache = {}  # {epic: {'df': DataFrame, 'timestamp': timestamp}}
         self._cache_ttl_seconds = 300  # 5 minutes cache TTL
+
+        # PHASE 1+2: Use ATR-based dynamic stops instead of database values
+        # Set optimal_params to None to force ATR calculation in calculate_optimal_sl_tp()
+        self.optimal_params = None
+
+        # Get ATR multipliers from config for dynamic SL/TP calculation
+        self.stop_atr_multiplier = getattr(config_macd_strategy, 'MACD_STOP_LOSS_ATR_MULTIPLIER', 2.5) if config_macd_strategy else 2.5
+        self.target_atr_multiplier = getattr(config_macd_strategy, 'MACD_TAKE_PROFIT_ATR_MULTIPLIER', 3.0) if config_macd_strategy else 3.0
+
+        # Get pair-specific parameters if available
+        if config_macd_strategy and hasattr(config_macd_strategy, 'MACD_PAIR_SPECIFIC_PARAMS') and self.epic:
+            # Extract clean pair name (EURUSD, GBPUSD, etc.)
+            clean_pair = self.epic.replace('CS.D.', '').replace('.CEEM.IP', '').replace('.MINI.IP', '')
+            pair_params = config_macd_strategy.MACD_PAIR_SPECIFIC_PARAMS.get(clean_pair, {})
+            if pair_params:
+                self.stop_atr_multiplier = pair_params.get('stop_atr_multiplier', self.stop_atr_multiplier)
+                self.target_atr_multiplier = pair_params.get('target_atr_multiplier', self.target_atr_multiplier)
+                self.logger.info(f"✅ Using pair-specific ATR multipliers for {clean_pair}: SL={self.stop_atr_multiplier}x, TP={self.target_atr_multiplier}x")
+
+        self.logger.info(f"🎯 ATR-based dynamic stops enabled: SL={self.stop_atr_multiplier}x ATR, TP={self.target_atr_multiplier}x ATR")
 
         self.logger.info(f"🎯 MACD Strategy initialized - Periods: {self.fast_ema}/{self.slow_ema}/{self.signal_ema} ({timeframe})")
         self.logger.info(f"🔧 Using lightweight orchestrator pattern with focused helpers")
@@ -512,8 +537,9 @@ class MACDStrategy(BaseStrategy):
                         return None
 
                 # ADX trend strength validation (Phase 2: Market regime awareness)
-                if not self.trend_validator.validate_adx_trend_strength(latest_row, 'BULL'):
-                    self.logger.warning("❌ MACD BULL signal REJECTED: ADX trend strength insufficient (ranging market)")
+                min_adx = getattr(config_macd_strategy, 'MACD_MIN_ADX', 20) if config_macd_strategy else 20
+                if not self.trend_validator.validate_adx_trend_strength(latest_row, 'BULL', min_adx=min_adx):
+                    self.logger.warning(f"❌ MACD BULL signal REJECTED: ADX trend strength insufficient (ADX < {min_adx}, ranging market)")
                     return None
 
                 # PHASE 2: Market regime classification and adaptive validation
@@ -568,8 +594,9 @@ class MACDStrategy(BaseStrategy):
                         return None
 
                 # ADX trend strength validation (Phase 2: Market regime awareness)
-                if not self.trend_validator.validate_adx_trend_strength(latest_row, 'BEAR'):
-                    self.logger.warning("❌ MACD BEAR signal REJECTED: ADX trend strength insufficient (ranging market)")
+                min_adx = getattr(config_macd_strategy, 'MACD_MIN_ADX', 20) if config_macd_strategy else 20
+                if not self.trend_validator.validate_adx_trend_strength(latest_row, 'BEAR', min_adx=min_adx):
+                    self.logger.warning(f"❌ MACD BEAR signal REJECTED: ADX trend strength insufficient (ADX < {min_adx}, ranging market)")
                     return None
 
                 # PHASE 2: Market regime classification and adaptive validation
@@ -664,6 +691,17 @@ class MACDStrategy(BaseStrategy):
             signal['stop_distance'] = sl_tp['stop_distance']
             signal['limit_distance'] = sl_tp['limit_distance']
 
+            # Convert pip distances to price levels for database storage
+            pip_value = 0.01 if 'JPY' in epic else 0.0001
+            execution_price = signal.get('execution_price', signal['price'])
+
+            if signal_type == 'BULL':
+                signal['stop_loss_price'] = execution_price - (sl_tp['stop_distance'] * pip_value)
+                signal['take_profit_price'] = execution_price + (sl_tp['limit_distance'] * pip_value)
+            else:  # BEAR
+                signal['stop_loss_price'] = execution_price + (sl_tp['stop_distance'] * pip_value)
+                signal['take_profit_price'] = execution_price - (sl_tp['limit_distance'] * pip_value)
+
             # Validate confidence threshold
             if not self.signal_calculator.validate_confidence_threshold(confidence):
                 return None
@@ -675,6 +713,69 @@ class MACDStrategy(BaseStrategy):
             self.logger.error(f"Error creating signal: {e}")
             return None
     
+    def calculate_optimal_sl_tp(
+        self,
+        signal: Dict,
+        epic: str,
+        latest_row: pd.Series,
+        spread_pips: float
+    ) -> Dict[str, int]:
+        """
+        PHASE 1+2: Calculate ATR-based dynamic SL/TP using config multipliers
+
+        Overrides base class to use MACD-specific ATR multipliers from config.
+        """
+        # Get ATR for the pair
+        atr = latest_row.get('atr', 0)
+        if not atr or atr <= 0:
+            # Fallback: estimate from current volatility (high-low range)
+            atr = abs(latest_row.get('high', 0) - latest_row.get('low', 0))
+            self.logger.warning(f"No ATR indicator, using high-low range: {atr}")
+
+        # Convert ATR to pips/points
+        if 'JPY' in epic:
+            atr_pips = atr * 100  # JPY pairs: 0.01 = 1 pip
+        else:
+            atr_pips = atr * 10000  # Standard pairs: 0.0001 = 1 pip
+
+        # Calculate using MACD-specific ATR multipliers
+        raw_stop = atr_pips * self.stop_atr_multiplier
+        raw_target = atr_pips * self.target_atr_multiplier
+
+        # Apply minimum safe distances
+        if 'JPY' in epic:
+            min_sl = 20  # Minimum 20 pips for JPY
+        else:
+            min_sl = 15  # Minimum 15 pips for others
+
+        stop_distance = max(int(raw_stop), min_sl)
+        limit_distance = int(raw_target)
+
+        # Apply reasonable maximums to prevent excessive risk
+        if 'JPY' in epic:
+            max_sl = 55
+        elif 'GBP' in epic:
+            max_sl = 60  # GBP pairs are more volatile
+        else:
+            max_sl = 45
+
+        if stop_distance > max_sl:
+            self.logger.warning(f"Stop distance {stop_distance} exceeds max {max_sl}, capping to maximum")
+            stop_distance = max_sl
+            limit_distance = int(stop_distance * (self.target_atr_multiplier / self.stop_atr_multiplier))
+
+        self.logger.info(
+            f"MACD ATR-based SL/TP: ATR={atr_pips:.1f} pips, "
+            f"SL={stop_distance} ({self.stop_atr_multiplier}x), "
+            f"TP={limit_distance} ({self.target_atr_multiplier}x), "
+            f"R:R={limit_distance/stop_distance:.2f}"
+        )
+
+        return {
+            'stop_distance': stop_distance,
+            'limit_distance': limit_distance
+        }
+
     def create_enhanced_signal_data(self, latest_row: pd.Series, signal_type: str) -> Dict:
         """Create signal data for confidence calculation - matches BaseStrategy expected format"""
         try:
