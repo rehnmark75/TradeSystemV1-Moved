@@ -417,7 +417,7 @@ class IchimokuStrategy(BaseStrategy):
                 self.logger.info(f"🌥️ Ichimoku {epic}: Insufficient data ({len(df)} bars, need {self.min_bars})")
                 return None
 
-            self.logger.info(f"🌥️ Ichimoku {epic}: Processing {len(df)} bars for signal detection")
+            self.logger.debug(f"Ichimoku {epic}: Processing {len(df)} bars for signal detection")
 
             # Calculate Ichimoku indicators if not present
             df_enhanced = self.indicator_calculator.ensure_ichimoku_indicators(df.copy(), self.ichimoku_config)
@@ -438,7 +438,7 @@ class IchimokuStrategy(BaseStrategy):
             if any([tk_bull, tk_bear, cloud_bull, cloud_bear]):
                 self.logger.info(f"🌥️ Ichimoku {epic}: Potential signals - TK: Bull={tk_bull}/Bear={tk_bear}, Cloud: Bull={cloud_bull}/Bear={cloud_bear}")
             else:
-                self.logger.info(f"🌥️ Ichimoku {epic}: No TK crosses or cloud breakouts detected")
+                self.logger.debug(f"Ichimoku {epic}: No TK crosses or cloud breakouts detected")
 
             # Check for immediate signals
             signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df), df_with_signals)
@@ -450,7 +450,7 @@ class IchimokuStrategy(BaseStrategy):
                 else:
                     return signal
             else:
-                self.logger.info(f"🌥️ Ichimoku {epic}: Signal validation failed or no valid signals")
+                self.logger.debug(f"Ichimoku {epic}: Signal validation failed or no valid signals")
 
             return None
 
