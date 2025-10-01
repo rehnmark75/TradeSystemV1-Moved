@@ -5,6 +5,7 @@ Works reliably in containerized environments without external dependencies
 
 import os
 import re
+import glob
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
@@ -23,58 +24,124 @@ class SimpleLogParser:
             else:
                 self.base_log_dir = "/home/hr/Projects/TradeSystemV1"  # Host path
 
-        # Generate today's and yesterday's log file names dynamically
-        today = datetime.now().strftime("%Y%m%d")
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        # Initialize log files with discovery
+        self.log_files = self._discover_log_files()
 
-        # Log file paths (absolute paths for container compatibility)
+        # Initialize signal and trade patterns
+        self._init_patterns()
+
+    def _discover_log_files(self) -> Dict[str, List[str]]:
+        """Dynamically discover log files using glob patterns"""
+        log_files = {
+            'forex_scanner': [],
+            'stream_service': [],
+            'trade_monitor': [],
+            'fastapi_dev': [],
+            'dev_trade': [],
+            'trade_sync': []
+        }
+
         if self.base_log_dir == "":  # Container
-            self.log_files = {
-                'forex_scanner': [
-                    f'/logs/worker/forex_scanner_{today}.log',  # Today's file
-                    f'/logs/worker/forex_scanner_{yesterday}.log',  # Yesterday
-                    '/logs/worker/trading-signals.log'
-                ],
-                'stream_service': [
-                    '/logs/stream/fastapi-stream.log'
-                ],
-                'trade_monitor': [
-                    '/logs/dev/trade_monitor.log'
-                ],
-                'fastapi_dev': [
-                    '/logs/dev/fastapi-dev.log'
-                ],
-                'dev_trade': [
-                    '/logs/dev/dev-trade.log'
-                ],
-                'trade_sync': [
-                    '/logs/dev/trade_sync.log'
-                ]
+            base_paths = {
+                'forex_scanner': '/logs/worker',
+                'stream_service': '/logs/stream',
+                'trade_monitor': '/logs/dev',
+                'fastapi_dev': '/logs/dev',
+                'dev_trade': '/logs/dev',
+                'trade_sync': '/logs/dev'
+            }
+            patterns = {
+                'forex_scanner': ['forex_scanner.log', 'forex_scanner.*.log', 'trading-signals.log'],
+                'stream_service': ['fastapi-stream.log', 'fastapi-stream.*.log'],
+                'trade_monitor': ['trade_monitor.log', 'trade_monitor.*.log'],
+                'fastapi_dev': ['fastapi-dev.log', 'fastapi-dev.*.log'],
+                'dev_trade': ['dev-trade.log', 'dev-trade.*.log'],
+                'trade_sync': ['trade_sync.log', 'trade_sync.*.log']
             }
         else:  # Host
-            self.log_files = {
-                'forex_scanner': [
-                    f'logs/worker/forex_scanner_{today}.log',  # Today's file
-                    f'logs/worker/forex_scanner_{yesterday}.log',  # Yesterday
-                    'logs/worker/trading-signals.log'
-                ],
-                'stream_service': [
-                    'logs/stream/fastapi-stream.log'
-                ],
-                'trade_monitor': [
-                    'logs/dev/trade_monitor.log'
-                ],
-                'fastapi_dev': [
-                    'logs/dev/fastapi-dev.log'
-                ],
-                'dev_trade': [
-                    'logs/dev/dev-trade.log'
-                ],
-                'trade_sync': [
-                    'logs/dev/trade_sync.log'
-                ]
+            base_paths = {
+                'forex_scanner': 'logs/worker',
+                'stream_service': 'logs/stream',
+                'trade_monitor': 'logs/dev',
+                'fastapi_dev': 'logs/dev',
+                'dev_trade': 'logs/dev',
+                'trade_sync': 'logs/dev'
+            }
+            patterns = {
+                'forex_scanner': ['forex_scanner.log', 'forex_scanner.*.log', 'trading-signals.log'],
+                'stream_service': ['fastapi-stream.log', 'fastapi-stream.*.log'],
+                'trade_monitor': ['trade_monitor.log', 'trade_monitor.*.log'],
+                'fastapi_dev': ['fastapi-dev.log', 'fastapi-dev.*.log'],
+                'dev_trade': ['dev-trade.log', 'dev-trade.*.log'],
+                'trade_sync': ['trade_sync.log', 'trade_sync.*.log']
             }
 
+        # Discover files for each log type
+        for log_type, base_path in base_paths.items():
+            if self.base_log_dir == "":
+                search_base = base_path
+            else:
+                search_base = os.path.join(self.base_log_dir, base_path)
+
+            # Check if directory exists
+            if not os.path.exists(search_base):
+                continue
+
+            # Search for all matching patterns
+            discovered_files = []
+            for pattern in patterns[log_type]:
+                pattern_path = os.path.join(search_base, pattern)
+                matches = glob.glob(pattern_path)
+                discovered_files.extend(matches)
+
+            # Sort files by modification time (newest first) and deduplicate
+            discovered_files = list(set(discovered_files))
+            discovered_files.sort(key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0, reverse=True)
+
+            # For container, use absolute paths; for host, use relative paths
+            if self.base_log_dir == "":
+                log_files[log_type] = discovered_files
+            else:
+                # Convert to relative paths from base_log_dir
+                log_files[log_type] = [os.path.relpath(f, self.base_log_dir) for f in discovered_files]
+
+        return log_files
+
+    def get_log_file_info(self) -> Dict[str, Any]:
+        """Get diagnostic information about discovered log files"""
+        info = {}
+        for log_type, files in self.log_files.items():
+            file_info = []
+            for file_path in files:
+                if self.base_log_dir == "":
+                    full_path = file_path
+                else:
+                    full_path = os.path.join(self.base_log_dir, file_path)
+
+                if os.path.exists(full_path):
+                    stat = os.stat(full_path)
+                    file_info.append({
+                        'path': file_path,
+                        'size': stat.st_size,
+                        'modified': datetime.fromtimestamp(stat.st_mtime),
+                        'exists': True
+                    })
+                else:
+                    file_info.append({
+                        'path': file_path,
+                        'exists': False
+                    })
+
+            info[log_type] = {
+                'count': len(files),
+                'files': file_info,
+                'total_size': sum(f['size'] for f in file_info if f['exists'])
+            }
+
+        return info
+
+    def _init_patterns(self):
+        """Initialize signal and health patterns"""
         # Signal detection patterns
         self.signal_patterns = {
             'detected': [

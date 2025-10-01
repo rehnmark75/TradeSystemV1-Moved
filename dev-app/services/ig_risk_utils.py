@@ -119,7 +119,9 @@ async def calculate_dynamic_sl_tp(epic: str, trading_headers: dict, atr: float, 
         # Fallback to reasonable defaults based on epic type
         # (using same sane minimums as main logic above)
         if "JPY" in epic:
-            base_stop = max(30, int(atr * 1000) if atr else 30)  # Convert ATR to JPY points
+            # FIXED: For JPY pairs, 1 point = 100 JPY, so ATR of 0.30 (30 pips) = 30 points
+            # Previously was multiplying by 1000, resulting in 300 points = 30,000 JPY!
+            base_stop = max(30, int(atr * 100) if atr else 30)  # Convert ATR to JPY points
         else:
             base_stop = max(25, int(atr * 10000) if atr else 25)  # Convert ATR to standard points
 

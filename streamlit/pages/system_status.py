@@ -1116,6 +1116,13 @@ def render_health_details():
 def search_logs(parser, search_term, log_types, start_date, end_date, regex_mode=False, case_sensitive=False, max_results=500):
     """Search through log files with advanced filtering"""
     results = []
+    search_stats = {
+        'files_searched': 0,
+        'files_found': 0,
+        'files_missing': 0,
+        'lines_scanned': 0,
+        'matches_found': 0
+    }
 
     # Prepare search pattern
     if regex_mode:
@@ -1124,7 +1131,7 @@ def search_logs(parser, search_term, log_types, start_date, end_date, regex_mode
             pattern = re.compile(search_term, flags)
         except re.error as e:
             st.error(f"Invalid regex pattern: {e}")
-            return []
+            return [], search_stats
     else:
         if case_sensitive:
             search_func = lambda text: search_term in text
@@ -1134,30 +1141,41 @@ def search_logs(parser, search_term, log_types, start_date, end_date, regex_mode
     # Define log file mappings
     log_files_to_search = []
     if 'forex_scanner' in log_types:
-        log_files_to_search.extend(parser.log_files['forex_scanner'])
+        log_files_to_search.extend(parser.log_files.get('forex_scanner', []))
     if 'stream_service' in log_types:
-        log_files_to_search.extend(parser.log_files['stream_service'])
+        log_files_to_search.extend(parser.log_files.get('stream_service', []))
     if 'trade_monitor' in log_types:
-        log_files_to_search.extend(parser.log_files['trade_monitor'])
+        log_files_to_search.extend(parser.log_files.get('trade_monitor', []))
     if 'fastapi_dev' in log_types:
         log_files_to_search.extend(parser.log_files.get('fastapi_dev', []))
     if 'dev_trade' in log_types:
         log_files_to_search.extend(parser.log_files.get('dev_trade', []))
 
+    # Check if we have files to search
+    if not log_files_to_search:
+        st.warning(f"⚠️ No log files found for selected sources: {', '.join(log_types)}")
+        return [], search_stats
+
     for log_file in log_files_to_search:
+        search_stats['files_searched'] += 1
+
         if parser.base_log_dir == "":
             file_path = log_file
         else:
             file_path = os.path.join(parser.base_log_dir, log_file)
 
         if not os.path.exists(file_path):
+            search_stats['files_missing'] += 1
             continue
+
+        search_stats['files_found'] += 1
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 line_number = 0
                 for line in f:
                     line_number += 1
+                    search_stats['lines_scanned'] += 1
 
                     # Parse timestamp for filtering
                     timestamp_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
@@ -1184,6 +1202,8 @@ def search_logs(parser, search_term, log_types, start_date, end_date, regex_mode
                             match_found = True
 
                     if match_found:
+                        search_stats['matches_found'] += 1
+
                         # Determine log type with more granularity
                         log_type = 'info'
                         if ' - ERROR - ' in line:
@@ -1213,7 +1233,7 @@ def search_logs(parser, search_term, log_types, start_date, end_date, regex_mode
                             break
 
         except Exception as e:
-            st.warning(f"Error reading {file_path}: {e}")
+            st.warning(f"⚠️ Error reading {os.path.basename(file_path)}: {e}")
             continue
 
         if len(results) >= max_results:
@@ -1222,7 +1242,7 @@ def search_logs(parser, search_term, log_types, start_date, end_date, regex_mode
     # Sort results by timestamp in descending order (newest first)
     results.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min, reverse=True)
 
-    return results
+    return results, search_stats
 
 def highlight_search_term(text, search_term, regex_mode=False, case_sensitive=False):
     """Highlight search term in text"""
@@ -1258,7 +1278,7 @@ def render_search_interface():
     # Search Controls
     st.subheader("🎯 Search Configuration")
 
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([3, 1, 1])
 
     with col1:
         search_term = st.text_input(
@@ -1269,6 +1289,12 @@ def render_search_interface():
 
     with col2:
         search_button = st.button("🔍 Search", type="primary", use_container_width=True)
+
+    with col3:
+        if st.button("🔄 Refresh Files", use_container_width=True):
+            st.cache_resource.clear()
+            st.success("Log file cache cleared!")
+            st.rerun()
 
     # Advanced Filters
     st.markdown("**🔧 Advanced Filters**")
@@ -1330,12 +1356,32 @@ def render_search_interface():
         search_term = st.session_state.search_term
         regex_mode = st.session_state.get('regex_mode', False)
 
+    # Show log file diagnostics
+    with st.expander("📁 Log File Diagnostics", expanded=False):
+        try:
+            log_info = parser.get_log_file_info()
+
+            for log_type in log_types:
+                if log_type in log_info:
+                    info = log_info[log_type]
+                    st.write(f"**{log_type.replace('_', ' ').title()}**: {info['count']} file(s), {info['total_size'] / 1024 / 1024:.2f} MB")
+
+                    if info['files']:
+                        for file in info['files'][:5]:  # Show first 5 files
+                            if file['exists']:
+                                st.caption(f"✅ {file['path']} - {file['size'] / 1024:.1f} KB (modified: {file['modified'].strftime('%Y-%m-%d %H:%M')})")
+                            else:
+                                st.caption(f"❌ {file['path']} - Not found")
+        except Exception as e:
+            st.error(f"Error getting log file info: {e}")
+
     # Perform search
     results = []
+    search_stats = {}
     # Search when button is clicked OR when there's a search term (from quick search or session state)
     if (search_button and search_term) or (search_term and 'search_term' in st.session_state):
         with st.spinner("🔍 Searching logs..."):
-            results = search_logs(
+            results, search_stats = search_logs(
                 parser, search_term, log_types, start_date, end_date,
                 regex_mode, case_sensitive, max_results
             )
@@ -1347,6 +1393,19 @@ def render_search_interface():
             del st.session_state.regex_mode
 
         # Display search statistics
+        if search_stats:
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1:
+                st.metric("Files Searched", search_stats.get('files_searched', 0))
+            with col2:
+                st.metric("Files Found", search_stats.get('files_found', 0))
+            with col3:
+                st.metric("Files Missing", search_stats.get('files_missing', 0))
+            with col4:
+                st.metric("Lines Scanned", f"{search_stats.get('lines_scanned', 0):,}")
+            with col5:
+                st.metric("Matches Found", search_stats.get('matches_found', 0))
+
         if results:
             st.success(f"📊 Found {len(results)} matches for '{search_term}'")
 
