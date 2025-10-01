@@ -78,7 +78,7 @@ class MACDStrategy(BaseStrategy):
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
-        self.logger.info(f"🚨 EMERGENCY: MACD Strategy INITIALIZING for epic={epic}, timeframe={timeframe}")
+        self.logger.debug(f"MACD Strategy initializing for epic={epic}, timeframe={timeframe}")
         self._validator = None  # Skip enhanced validator for simplicity
         self.epic = epic
         self.timeframe = timeframe
@@ -329,11 +329,11 @@ class MACDStrategy(BaseStrategy):
         """
         
         try:
-            self.logger.info(f"🚨 EMERGENCY: MACD detect_signal CALLED for {epic} with {len(df)} bars (timeframe: {timeframe})")
+            self.logger.debug(f"MACD detect_signal called for {epic} with {len(df)} bars (timeframe: {timeframe})")
 
             # Validate data requirements
             if not self.indicator_calculator.validate_data_requirements(df, self.min_bars):
-                self.logger.info(f"🚨 EMERGENCY: Data validation FAILED for {epic} - need {self.min_bars} bars, have {len(df)}")
+                self.logger.warning(f"Data validation failed for {epic} - need {self.min_bars} bars, have {len(df)}")
                 return None
             
             self.logger.debug(f"Processing {len(df)} bars for {epic}")
@@ -385,7 +385,7 @@ class MACDStrategy(BaseStrategy):
                 self._cache_enhanced_df(epic, df_enhanced)
 
             # 2. Detect MACD crossovers (with strength filtering)
-            self.logger.info(f"🚨 EMERGENCY: About to detect crossovers for {epic} with {len(df_enhanced)} bars")
+            self.logger.debug(f"Detecting crossovers for {epic} with {len(df_enhanced)} bars")
             df_with_signals = self.indicator_calculator.detect_macd_crossovers(df_enhanced, epic, is_backtest=self.backtest_mode)
 
             # EMERGENCY: Check what signals were detected
@@ -405,7 +405,7 @@ class MACDStrategy(BaseStrategy):
 
                     if bull_alert or bear_alert:
                         signal_type = 'BULL' if bull_alert else 'BEAR'
-                        self.logger.info(f"🚨 EMERGENCY: Found {signal_type} alert at index {idx} - validating...")
+                        self.logger.debug(f"Found {signal_type} alert at index {idx} - validating...")
 
                         signal = self._check_immediate_signal(row, epic, timeframe, spread_pips, len(df))
                         if signal:
@@ -493,7 +493,7 @@ class MACDStrategy(BaseStrategy):
         try:
             # Check for bull crossover
             if latest_row.get('bull_alert', False):
-                self.logger.info(f"🚨 EMERGENCY: Validating BULL crossover for {epic} at bar {bar_count}")
+                self.logger.debug(f"Validating BULL crossover for {epic} at bar {bar_count}")
                 
                 # EMA 200 trend filter - CRITICAL SAFETY FILTER RESTORED
                 if not self.trend_validator.validate_ema_200_trend(latest_row, 'BULL'):

@@ -194,10 +194,10 @@ class MACDIndicatorCalculator:
                     hist_std = histogram_values.std()
                     hist_abs_max = histogram_values.abs().max()
 
-                    self.logger.info(f"🚨 EMERGENCY HISTOGRAM ANALYSIS for {epic}:")
-                    self.logger.info(f"   📊 Range: min={hist_min:.8f}, max={hist_max:.8f}, mean={hist_mean:.8f}")
-                    self.logger.info(f"   📊 Std: {hist_std:.8f}, Abs Max: {hist_abs_max:.8f}")
-                    self.logger.info(f"   📊 Threshold: {base_threshold:.8f}")
+                    self.logger.debug(f"Histogram analysis for {epic}:")
+                    self.logger.debug(f"   📊 Range: min={hist_min:.8f}, max={hist_max:.8f}, mean={hist_mean:.8f}")
+                    self.logger.debug(f"   📊 Std: {hist_std:.8f}, Abs Max: {hist_abs_max:.8f}")
+                    self.logger.debug(f"   📊 Threshold: {base_threshold:.8f}")
 
                     # Check how many values exceed thresholds
                     above_threshold = (histogram_values >= base_threshold).sum()
@@ -234,7 +234,7 @@ class MACDIndicatorCalculator:
                     # NO THRESHOLD CHECK
                 )
 
-                self.logger.info(f"🚨 EMERGENCY BYPASS MODE for {epic}: {emergency_bull_cross.sum()} bull crossovers, {emergency_bear_cross.sum()} bear crossovers (NO THRESHOLDS)")
+                self.logger.debug(f"Bypass mode for {epic}: {emergency_bull_cross.sum()} bull crossovers, {emergency_bear_cross.sum()} bear crossovers (no thresholds)")
 
                 # Use emergency crossovers if we find any
                 if emergency_bull_cross.sum() > 0 or emergency_bear_cross.sum() > 0:
