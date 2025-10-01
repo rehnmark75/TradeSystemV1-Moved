@@ -12,7 +12,9 @@ Designed for minimal lag with fast momentum detection and adaptive smoothing.
 """
 
 # Strategy enable/disable
-MOMENTUM_STRATEGY = True
+# DISABLED: Redundant with MACD (momentum) and EMA (trend-following)
+# Key enhancements ported to MACD and EMA strategies instead
+MOMENTUM_STRATEGY = False  # Was True - disabled as redundant
 
 # Main configuration dictionary with multiple presets optimized for different market conditions
 MOMENTUM_STRATEGY_CONFIG = {

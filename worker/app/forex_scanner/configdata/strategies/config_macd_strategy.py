@@ -98,6 +98,73 @@ MACD_RSI_OVERBOUGHT_THRESHOLD = 70                # Skip long signals if RSI > 7
 MACD_RSI_OVERSOLD_THRESHOLD = 30                  # Skip short signals if RSI < 30 (oversold)
 MACD_RSI_REQUIRE_RISING = True                    # Require RSI rising for long, falling for short
 MACD_RSI_REQUIRE_QUALITY_THRESHOLDS = False      # Enable optional quality thresholds (55/45)
+
+# =============================================================================
+# PHASE 1+2 ENHANCEMENTS (Ported from Momentum Strategy)
+# MACD = MOMENTUM-FOCUSED STRATEGY
+# =============================================================================
+
+# Trend Alignment Filter - MACD as momentum strategy can work counter-trend with confirmation
+MACD_REQUIRE_TREND_ALIGNMENT = False      # MACD can trade counter-trend (momentum reversals)
+MACD_TREND_EMA_PERIOD = 50               # EMA period for trend context (not mandatory)
+MACD_TREND_ALIGNMENT_BOOST = 0.10        # Confidence boost if aligned with trend
+
+# Market Regime Filter - Critical for momentum strategies
+MACD_ENABLE_REGIME_FILTER = True         # Filter out unfavorable market conditions
+MACD_MIN_ADX = 20                        # Minimum trend strength (lower than trend-following)
+MACD_MIN_ATR_RATIO = 0.7                 # Current ATR > 0.7x baseline (momentum needs volatility)
+MACD_MIN_EMA_SEPARATION = 0.2            # Price distance from EMA (in ATR units)
+
+# Confirmation Requirements - Strengthen signal quality
+MACD_MIN_CONFIRMATIONS = 2               # Require 2 confirmations (MACD + RSI minimum)
+MACD_CONFIRMATION_TYPES = ['macd_histogram', 'rsi_momentum', 'volume', 'price_action']
+
+# Risk Management - ATR-based stops for momentum
+MACD_STOP_LOSS_ATR_MULTIPLIER = 2.5      # Wider stops for momentum trades
+MACD_TAKE_PROFIT_ATR_MULTIPLIER = 3.0    # Larger targets for momentum (2.5:3.0 = 1:1.2 R:R)
+
+# Pair-Specific Parameters
+MACD_PAIR_SPECIFIC_PARAMS = {
+    'EURUSD': {
+        'histogram_threshold': 0.0001,
+        'stop_atr_multiplier': 2.5,
+        'target_atr_multiplier': 3.0,
+        'min_adx': 20
+    },
+    'GBPUSD': {
+        'histogram_threshold': 0.00012,  # Higher volatility
+        'stop_atr_multiplier': 2.8,
+        'target_atr_multiplier': 3.2,
+        'min_adx': 22
+    },
+    'USDJPY': {
+        'histogram_threshold': 0.01,     # Different scale
+        'stop_atr_multiplier': 2.5,
+        'target_atr_multiplier': 3.0,
+        'min_adx': 20
+    },
+    'AUDUSD': {
+        'histogram_threshold': 0.0001,
+        'stop_atr_multiplier': 2.6,
+        'target_atr_multiplier': 3.0,
+        'min_adx': 20
+    }
+}
+
+# Structure-Based Stop Placement
+MACD_USE_STRUCTURE_STOPS = True          # Place stops beyond recent swing points
+MACD_STRUCTURE_LOOKBACK_BARS = 20        # Look back 20 bars for swing highs/lows
+MACD_MIN_STOP_DISTANCE_PIPS = 8.0        # Minimum stop distance
+MACD_MAX_STOP_DISTANCE_PIPS = 30.0       # Maximum stop distance (wider for momentum)
+MACD_STRUCTURE_BUFFER_PIPS = 2.0         # Buffer beyond swing point
+
+# Enhanced Confidence Calculation Factors
+MACD_CONFIDENCE_BASE = 0.50              # Start conservative
+MACD_CONFIDENCE_MACD_STRENGTH = 0.25     # Factor for MACD histogram strength
+MACD_CONFIDENCE_TREND_ALIGNMENT = 0.10   # Bonus if trend-aligned (optional)
+MACD_CONFIDENCE_REGIME_FAVORABLE = 0.10  # Bonus for favorable regime
+MACD_CONFIDENCE_RSI_MOMENTUM = 0.15      # Factor for RSI momentum
+MACD_CONFIDENCE_VOLUME = 0.10            # Factor for volume confirmation
 MACD_RSI_SKIP_EXTREME_ZONES = True               # Skip signals in overbought/oversold zones
 
 # MACD Zero Line Filter (Mean-Reversion Focus)

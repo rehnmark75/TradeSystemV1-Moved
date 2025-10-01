@@ -941,13 +941,18 @@ class TradeValidator:
     
     def validate_ema200_trend_filter(self, signal: Dict) -> Tuple[bool, str]:
         """
-        EMA 200 trend filter - ALL strategies must respect major trend direction
+        EMA 200 trend filter - Strategy-aware validation
 
-        FIXED: Removed mean reversion bypass for consistent risk management
+        EMA Strategy: STRICT trend alignment required (must trade with EMA 200)
+        MACD Strategy: OPTIONAL trend alignment (can trade counter-trend momentum reversals)
+        Other Strategies: STRICT trend alignment by default
+
+        UPDATED: Strategy-aware filtering to support momentum reversals (MACD)
         """
         try:
             signal_type = signal.get('signal_type', '').upper()
             epic = signal.get('epic', 'Unknown')
+            strategy = signal.get('strategy', '').upper()
             
             # GET CURRENT PRICE - flexible approach
             current_price = None
@@ -1026,25 +1031,38 @@ class TradeValidator:
             if current_price <= 0 or ema_200 <= 0:
                 self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: Invalid price values - price: {current_price}, ema200: {ema_200}")
                 return False, "EMA200 filter: Invalid price values - REJECTED"
-            
+
+            # STRATEGY-AWARE FILTERING: MACD can trade counter-trend (momentum reversals)
+            is_macd_strategy = 'MACD' in strategy
+
             # Apply trend filter logic with comprehensive logging
-            self.logger.info(f"📊 EMA200 validation for {epic} {signal_type}: price={current_price:.5f}, ema200={ema_200:.5f}")
+            self.logger.info(f"📊 EMA200 validation for {epic} {signal_type} ({strategy}): price={current_price:.5f}, ema200={ema_200:.5f}")
 
             if signal_type in ['BUY', 'BULL']:
                 if current_price > ema_200:
                     self.logger.info(f"✅ BUY signal APPROVED {epic}: {current_price:.5f} > {ema_200:.5f} (price above EMA200)")
                     return True, f"BUY valid: price {current_price:.5f} above EMA200 {ema_200:.5f}"
                 else:
-                    self.logger.warning(f"🚫 BUY signal REJECTED {epic}: {current_price:.5f} <= {ema_200:.5f} (price at/below EMA200)")
-                    return False, f"BUY rejected: price {current_price:.5f} at/below EMA200 {ema_200:.5f}"
+                    # MACD strategy can trade counter-trend (momentum reversals)
+                    if is_macd_strategy:
+                        self.logger.info(f"✅ MACD BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (counter-trend momentum reversal allowed)")
+                        return True, f"MACD BUY valid: counter-trend reversal (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
+                    else:
+                        self.logger.warning(f"🚫 BUY signal REJECTED {epic}: {current_price:.5f} <= {ema_200:.5f} (price at/below EMA200)")
+                        return False, f"BUY rejected: price {current_price:.5f} at/below EMA200 {ema_200:.5f}"
 
             elif signal_type in ['SELL', 'BEAR']:
                 if current_price < ema_200:
                     self.logger.info(f"✅ SELL signal APPROVED {epic}: {current_price:.5f} < {ema_200:.5f} (price below EMA200)")
                     return True, f"SELL valid: price {current_price:.5f} below EMA200 {ema_200:.5f}"
                 else:
-                    self.logger.warning(f"🚫 SELL signal REJECTED {epic}: {current_price:.5f} >= {ema_200:.5f} (price at/above EMA200)")
-                    return False, f"SELL rejected: price {current_price:.5f} at/above EMA200 {ema_200:.5f}"
+                    # MACD strategy can trade counter-trend (momentum reversals)
+                    if is_macd_strategy:
+                        self.logger.info(f"✅ MACD SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (counter-trend momentum reversal allowed)")
+                        return True, f"MACD SELL valid: counter-trend reversal (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
+                    else:
+                        self.logger.warning(f"🚫 SELL signal REJECTED {epic}: {current_price:.5f} >= {ema_200:.5f} (price at/above EMA200)")
+                        return False, f"SELL rejected: price {current_price:.5f} at/above EMA200 {ema_200:.5f}"
             
             else:
                 return True, f"Unknown signal type {signal_type} (allowing)"

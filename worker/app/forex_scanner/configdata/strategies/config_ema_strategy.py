@@ -805,3 +805,83 @@ def set_overextension_filter_preset(preset: str = 'conservative'):
     }
 
     return presets.get(preset, presets['conservative'])
+
+# =============================================================================
+# PHASE 1+2 ENHANCEMENTS (Ported from Momentum Strategy)
+# EMA = TREND-FOLLOWING STRATEGY
+# =============================================================================
+
+# Trend Alignment Filter - MANDATORY for trend-following
+EMA_REQUIRE_TREND_ALIGNMENT = True       # EMA MUST trade with trend (core principle)
+EMA_TREND_EMA_PERIOD = 200               # Use EMA 200 as primary trend filter
+EMA_ALLOW_COUNTER_TREND = False          # Never trade counter-trend
+
+# Market Regime Filter - Critical for trend-following strategies
+EMA_ENABLE_REGIME_FILTER = True          # Filter out unfavorable market conditions
+EMA_MIN_ADX = 25                         # Minimum trend strength (higher than momentum)
+EMA_MIN_ATR_RATIO = 0.8                  # Current ATR > 0.8x baseline
+EMA_MIN_EMA_SEPARATION = 0.3             # Price distance from EMA (in ATR units)
+
+# Confirmation Requirements - EMA crossover + supporting indicators
+EMA_MIN_CONFIRMATIONS = 2                # Require 2 confirmations (EMA + momentum/volume)
+EMA_CONFIRMATION_TYPES = ['ema_crossover', 'macd_alignment', 'volume', 'price_momentum']
+
+# Risk Management - ATR-based stops for trend-following
+EMA_STOP_LOSS_ATR_MULTIPLIER = 2.0       # Tighter stops for trend-following
+EMA_TAKE_PROFIT_ATR_MULTIPLIER = 4.0     # Larger targets (ride trends) (2.0:4.0 = 1:2 R:R)
+
+# Pair-Specific Parameters
+EMA_PAIR_SPECIFIC_PARAMS = {
+    'EURUSD': {
+        'short_ema': 21,
+        'long_ema': 50,
+        'trend_ema': 200,
+        'stop_atr_multiplier': 2.0,
+        'target_atr_multiplier': 4.0,
+        'min_adx': 25
+    },
+    'GBPUSD': {
+        'short_ema': 21,
+        'long_ema': 50,
+        'trend_ema': 200,
+        'stop_atr_multiplier': 2.2,      # Wider for GBP volatility
+        'target_atr_multiplier': 4.5,
+        'min_adx': 27
+    },
+    'USDJPY': {
+        'short_ema': 21,
+        'long_ema': 50,
+        'trend_ema': 200,
+        'stop_atr_multiplier': 2.0,
+        'target_atr_multiplier': 4.0,
+        'min_adx': 25
+    },
+    'AUDUSD': {
+        'short_ema': 21,
+        'long_ema': 50,
+        'trend_ema': 200,
+        'stop_atr_multiplier': 2.1,
+        'target_atr_multiplier': 4.0,
+        'min_adx': 25
+    }
+}
+
+# Structure-Based Stop Placement
+EMA_USE_STRUCTURE_STOPS = True           # Place stops beyond recent swing points
+EMA_STRUCTURE_LOOKBACK_BARS = 30         # Longer lookback for trend-following
+EMA_MIN_STOP_DISTANCE_PIPS = 10.0        # Minimum stop distance
+EMA_MAX_STOP_DISTANCE_PIPS = 25.0        # Maximum stop distance (tighter than momentum)
+EMA_STRUCTURE_BUFFER_PIPS = 2.0          # Buffer beyond swing point
+
+# Enhanced Confidence Calculation Factors
+EMA_CONFIDENCE_BASE = 0.55               # Start slightly higher for trend clarity
+EMA_CONFIDENCE_EMA_SEPARATION = 0.20     # Factor for EMA separation (trend strength)
+EMA_CONFIDENCE_TREND_ALIGNMENT = 0.15    # MANDATORY alignment bonus
+EMA_CONFIDENCE_REGIME_FAVORABLE = 0.10   # Bonus for favorable regime
+EMA_CONFIDENCE_MACD_ALIGNMENT = 0.10     # Factor for MACD momentum alignment
+EMA_CONFIDENCE_VOLUME = 0.05             # Factor for volume confirmation
+
+# Trend Strength Requirements
+EMA_MIN_EMA_SLOPE = 0.00005              # Minimum slope for trend validity
+EMA_REQUIRE_ALIGNED_EMAS = True          # EMAs must be in proper order (9<21<200 for uptrend)
+EMA_MAX_EMA_COMPRESSION = 0.002          # Max compression between EMAs (avoid ranging)
