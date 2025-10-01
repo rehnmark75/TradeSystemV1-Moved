@@ -682,14 +682,14 @@ class IntelligentForexScanner:
                     session_analysis = intelligence_report.get('session_analysis', {})
                     current_session = session_analysis.get('current_session', 'unknown')
 
-                    self.logger.info(f"🧠 Market Intelligence stored: {dominant_regime} regime ({confidence:.1%}) "
-                                   f"during {current_session} session - Record #{record_id}")
+                    self.logger.debug(f"Market Intelligence stored: {dominant_regime} regime ({confidence:.1%}) "
+                                    f"during {current_session} session - Record #{record_id}")
 
                     # Log additional insights if confidence is high
                     if confidence > 0.8:
                         market_strength = market_regime.get('market_strength', {})
                         market_bias = market_strength.get('market_bias', 'neutral')
-                        self.logger.info(f"   🎯 High confidence analysis: Market bias = {market_bias}")
+                        self.logger.debug(f"High confidence analysis: Market bias = {market_bias}")
 
                 else:
                     self.stats['market_intelligence_errors'] += 1

@@ -270,13 +270,13 @@ class MarketIntelligenceHistoryManager:
                         clean_epic = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
                         epic_breakdown.append(f"{clean_epic}({epic_regime[:4]},{epic_confidence:.1%})")
 
-                self.logger.info(f"✅ Saved market intelligence #{record_id}: {regime} regime ({confidence:.1%}) "
-                               f"during {session} session - {epic_count} epics analyzed")
+                self.logger.debug(f"Saved market intelligence #{record_id}: {regime} regime ({confidence:.1%}) "
+                                f"during {session} session - {epic_count} epics analyzed")
 
                 # Log individual epic breakdown if available
                 if epic_breakdown:
                     breakdown_str = ", ".join(epic_breakdown)
-                    self.logger.info(f"📊 Epic breakdown: {breakdown_str}")
+                    self.logger.debug(f"Epic breakdown: {breakdown_str}")
 
                 return record_id
 
