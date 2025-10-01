@@ -254,10 +254,22 @@ RANGING_TP_BASED_ON_RANGE = True        # Base TP on range size
 RANGING_RANGE_SL_MULTIPLIER = 0.4       # SL as % of range size
 RANGING_RANGE_TP_MULTIPLIER = 0.8       # TP as % of range size
 
-# Volatility-Based Adjustments
+# =============================================================================
+# PHASE 3: Adaptive Volatility-Based SL/TP (NEW)
+# =============================================================================
+
+# Runtime regime-aware calculation - No hardcoded values!
+USE_ADAPTIVE_SL_TP = False               # 🧠 Enable adaptive volatility calculator (default: False for gradual rollout)
+                                         # When True: Uses runtime regime detection (trending, ranging, breakout, high volatility)
+                                         # When False: Falls back to ATR multipliers below
+
+# Volatility-Based Adjustments (FALLBACK when adaptive disabled)
 RANGING_VOLATILITY_SL_ADJUSTMENT = True  # Adjust SL based on volatility
-RANGING_ATR_SL_MULTIPLIER = 1.8         # ATR multiplier for SL
-RANGING_ATR_TP_MULTIPLIER = 2.8         # ATR multiplier for TP
+RANGING_STOP_LOSS_ATR_MULTIPLIER = 1.5   # Tighter stops for ranging/mean reversion
+RANGING_TAKE_PROFIT_ATR_MULTIPLIER = 2.5 # Moderate targets for ranging markets
+# Legacy aliases for compatibility
+RANGING_ATR_SL_MULTIPLIER = 1.5          # ATR multiplier for SL (legacy)
+RANGING_ATR_TP_MULTIPLIER = 2.5          # ATR multiplier for TP (legacy)
 
 # =============================================================================
 # SAFETY PRESET CONFIGURATIONS

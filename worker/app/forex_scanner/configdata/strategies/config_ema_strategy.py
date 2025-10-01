@@ -826,7 +826,16 @@ EMA_MIN_EMA_SEPARATION = 0.3             # Price distance from EMA (in ATR units
 EMA_MIN_CONFIRMATIONS = 2                # Require 2 confirmations (EMA + momentum/volume)
 EMA_CONFIRMATION_TYPES = ['ema_crossover', 'macd_alignment', 'volume', 'price_momentum']
 
-# Risk Management - ATR-based stops for trend-following
+# =============================================================================
+# PHASE 3: Adaptive Volatility-Based SL/TP (NEW)
+# =============================================================================
+
+# Runtime regime-aware calculation - No hardcoded values!
+USE_ADAPTIVE_SL_TP = False               # 🧠 Enable adaptive volatility calculator (default: False for gradual rollout)
+                                         # When True: Uses runtime regime detection (trending, ranging, breakout, high volatility)
+                                         # When False: Falls back to ATR multipliers below
+
+# Risk Management - ATR-based stops for trend-following (FALLBACK when adaptive disabled)
 EMA_STOP_LOSS_ATR_MULTIPLIER = 2.0       # Tighter stops for trend-following
 EMA_TAKE_PROFIT_ATR_MULTIPLIER = 4.0     # Larger targets (ride trends) (2.0:4.0 = 1:2 R:R)
 

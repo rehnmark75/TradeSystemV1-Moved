@@ -25,11 +25,17 @@ from .helpers.ema_trend_validator import EMATrendValidator
 from .helpers.ema_signal_calculator import EMASignalCalculator
 from .helpers.ema_mtf_analyzer import EMAMultiTimeframeAnalyzer
 from .helpers.ema_indicator_calculator import EMAIndicatorCalculator
+from .helpers.adaptive_volatility_calculator import AdaptiveVolatilityCalculator
 
 try:
     from configdata import config
+    from configdata.strategies import config_ema_strategy
 except ImportError:
     from forex_scanner.configdata import config
+    try:
+        from forex_scanner.configdata.strategies import config_ema_strategy
+    except ImportError:
+        config_ema_strategy = None
 
 
 class EMAStrategy(BaseStrategy):
@@ -76,9 +82,23 @@ class EMAStrategy(BaseStrategy):
         self.optimal_params = None
         if epic and use_optimal_parameters:
             self._load_optimal_parameters(epic)
-        
+
         # Set confidence threshold (optimal if available, otherwise config default)
         self.min_confidence = self._get_optimal_confidence() or getattr(config, 'MIN_CONFIDENCE', 0.45)
+
+        # PHASE 3: Adaptive volatility-based SL/TP calculation
+        self.use_adaptive_sl_tp = getattr(config_ema_strategy, 'USE_ADAPTIVE_SL_TP', False) if config_ema_strategy else False
+
+        if self.use_adaptive_sl_tp:
+            # Initialize adaptive volatility calculator (singleton)
+            self.adaptive_calculator = AdaptiveVolatilityCalculator(logger=self.logger)
+            self.logger.info("🧠 Adaptive volatility calculator enabled - Runtime regime-aware SL/TP")
+        else:
+            # Fallback: Use ATR multipliers from config
+            self.adaptive_calculator = None
+            self.stop_atr_multiplier = getattr(config_ema_strategy, 'EMA_STOP_LOSS_ATR_MULTIPLIER', 2.0) if config_ema_strategy else 2.0
+            self.target_atr_multiplier = getattr(config_ema_strategy, 'EMA_TAKE_PROFIT_ATR_MULTIPLIER', 4.0) if config_ema_strategy else 4.0
+            self.logger.info(f"🎯 ATR-based dynamic stops: SL={self.stop_atr_multiplier}x ATR, TP={self.target_atr_multiplier}x ATR")
         
         # Use reasonable minimum bars for EMA strategy
         self.min_bars = 50  # 50 bars minimum for EMA 50 to be stable
@@ -728,6 +748,102 @@ class EMAStrategy(BaseStrategy):
                 'signal_type': signal_type,
                 'price': latest_row.get('close', 0)
             }
+
+    def calculate_optimal_sl_tp(
+        self,
+        signal: Dict,
+        epic: str,
+        latest_row: pd.Series,
+        spread_pips: float
+    ) -> Dict[str, int]:
+        """
+        PHASE 3: Calculate SL/TP using adaptive volatility calculator OR ATR multipliers
+
+        Priority:
+        1. Adaptive volatility calculator (if enabled via USE_ADAPTIVE_SL_TP)
+        2. Fallback to ATR-based with config multipliers
+
+        Overrides base class to use EMA-specific calculation logic.
+        """
+        signal_type = signal.get('signal_type', 'BULL')
+
+        # PHASE 3: Use adaptive volatility calculator if enabled
+        if self.use_adaptive_sl_tp and self.adaptive_calculator:
+            try:
+                result = self.adaptive_calculator.calculate_sl_tp(
+                    epic=epic,
+                    data=latest_row,
+                    signal_type=signal_type
+                )
+
+                self.logger.info(
+                    f"🧠 Adaptive SL/TP [{result.regime.value}] {result.method_used}: "
+                    f"SL={result.stop_distance}p TP={result.limit_distance}p "
+                    f"(R:R={result.limit_distance/result.stop_distance:.2f}, "
+                    f"conf={result.confidence:.1%}, fallback_lvl={result.fallback_level}, "
+                    f"{result.calculation_time_ms:.1f}ms)"
+                )
+
+                return {
+                    'stop_distance': result.stop_distance,
+                    'limit_distance': result.limit_distance
+                }
+
+            except Exception as e:
+                self.logger.error(f"❌ Adaptive calculator failed: {e}, falling back to ATR method")
+                # Fall through to ATR fallback below
+
+        # FALLBACK: ATR-based with config multipliers
+        # Get ATR for the pair
+        atr = latest_row.get('atr', 0)
+        if not atr or atr <= 0:
+            # Fallback: estimate from current volatility (high-low range)
+            atr = abs(latest_row.get('high', 0) - latest_row.get('low', 0))
+            self.logger.warning(f"No ATR indicator, using high-low range: {atr}")
+
+        # Convert ATR to pips/points
+        if 'JPY' in epic:
+            atr_pips = atr * 100  # JPY pairs: 0.01 = 1 pip
+        else:
+            atr_pips = atr * 10000  # Standard pairs: 0.0001 = 1 pip
+
+        # Calculate using EMA-specific ATR multipliers (trend-following: wider targets)
+        raw_stop = atr_pips * self.stop_atr_multiplier
+        raw_target = atr_pips * self.target_atr_multiplier
+
+        # Apply minimum safe distances
+        if 'JPY' in epic:
+            min_sl = 20  # Minimum 20 pips for JPY
+        else:
+            min_sl = 15  # Minimum 15 pips for others
+
+        stop_distance = max(int(raw_stop), min_sl)
+        limit_distance = int(raw_target)
+
+        # Apply reasonable maximums to prevent excessive risk
+        if 'JPY' in epic:
+            max_sl = 55
+        elif 'GBP' in epic:
+            max_sl = 60  # GBP pairs are more volatile
+        else:
+            max_sl = 45
+
+        if stop_distance > max_sl:
+            self.logger.warning(f"Stop distance {stop_distance} exceeds max {max_sl}, capping to maximum")
+            stop_distance = max_sl
+            limit_distance = int(stop_distance * (self.target_atr_multiplier / self.stop_atr_multiplier))
+
+        self.logger.info(
+            f"🎯 EMA ATR-based SL/TP: ATR={atr_pips:.1f} pips, "
+            f"SL={stop_distance} ({self.stop_atr_multiplier}x), "
+            f"TP={limit_distance} ({self.target_atr_multiplier}x), "
+            f"R:R={limit_distance/stop_distance:.2f}"
+        )
+
+        return {
+            'stop_distance': stop_distance,
+            'limit_distance': limit_distance
+        }
 
 
 class LegacyEMAStrategy(EMAStrategy):
