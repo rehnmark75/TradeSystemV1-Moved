@@ -345,11 +345,21 @@ class BaseStrategy(ABC):
             atr_pips = atr * 10000  # Standard pairs: 0.0001 = 1 pip
 
         # Check for optimal parameters from database
-        if self.optimal_params:
-            stop_distance = int(self.optimal_params.stop_loss_pips)
-            limit_distance = int(self.optimal_params.take_profit_pips)
-            logger.info(f"{self.name}: Using optimal params from DB - SL={stop_distance}, TP={limit_distance}")
-        else:
+        # IMPROVED: Only use DB params if they're based on recent optimization (not static defaults)
+        use_db_params = False
+        if self.optimal_params and hasattr(self.optimal_params, 'last_optimized'):
+            # Only use if optimized in last 30 days (otherwise use dynamic ATR)
+            from datetime import datetime, timedelta
+            if self.optimal_params.last_optimized and \
+               (datetime.utcnow() - self.optimal_params.last_optimized) < timedelta(days=30):
+                stop_distance = int(self.optimal_params.stop_loss_pips)
+                limit_distance = int(self.optimal_params.take_profit_pips)
+                use_db_params = True
+                logger.info(f"{self.name}: Using recent optimal params from DB - SL={stop_distance}, TP={limit_distance}")
+            else:
+                logger.info(f"{self.name}: DB params outdated, using dynamic ATR calculation")
+
+        if not use_db_params:
             # Calculate based on ATR with 2.0x multiplier (more conservative than dev-app's 1.5x)
             raw_stop = atr_pips * 2.0
 
@@ -370,11 +380,17 @@ class BaseStrategy(ABC):
 
             limit_distance = int(stop_distance * risk_reward)
 
-            logger.info(f"{self.name}: Calculated ATR-based SL/TP - ATR={atr_pips:.1f}, SL={stop_distance}, TP={limit_distance}, RR={risk_reward}")
+            logger.info(f"{self.name}: Calculated ATR-based SL/TP - ATR={atr_pips:.1f}, SL={stop_distance} points, TP={limit_distance} points, RR={risk_reward}")
 
-        # Apply reasonable maximums to prevent excessive risk
+        # NOTE: Values are already in IG API POINTS (not pips despite variable name!)
+        # The ATR calculation above converts to points:
+        # - JPY: atr_pips = atr * 100 (e.g., 0.20 JPY → 20 points, which is 0.2 pips)
+        # - USD: atr_pips = atr * 10000 (e.g., 0.0020 → 20 points, which is 20 pips)
+        # So stop_distance is already in points, ready for IG API!
+
+        # Apply reasonable maximums to prevent excessive risk (all in points)
         if 'JPY' in epic:
-            max_sl = 55
+            max_sl = 5500  # ~55 pips (5500 points = 55 JPY)
         elif 'GBP' in epic:
             max_sl = 60  # GBP pairs are more volatile
         else:

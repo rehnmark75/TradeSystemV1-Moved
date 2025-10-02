@@ -64,23 +64,22 @@ class EconomicCalendarScheduler:
             logger.info("Scheduler stopped")
 
     def add_weekly_scrape_job(self):
-        """Add weekly scraping job (Sundays at 23:00 UTC)"""
+        """Add daily scraping job (every day at 01:00 UTC) - renamed from weekly but kept for compatibility"""
         trigger = CronTrigger(
-            day_of_week=config.WEEKLY_SCRAPE_DAY,  # Sunday
-            hour=config.WEEKLY_SCRAPE_HOUR,       # 23:00
-            minute=config.WEEKLY_SCRAPE_MINUTE,   # 0
+            hour=1,        # Run at 01:00 UTC daily
+            minute=0,
             timezone=config.SCHEDULER_TIMEZONE
         )
 
         self.scheduler.add_job(
             func=self.weekly_scrape_task,
             trigger=trigger,
-            id='weekly_scrape',
-            name='Weekly Economic Calendar Scrape',
+            id='weekly_scrape',  # Keep ID for compatibility
+            name='Daily Economic Calendar Scrape',
             replace_existing=True
         )
 
-        logger.info("Weekly scrape job scheduled for Sundays at 23:00 UTC")
+        logger.info("Daily scrape job scheduled for 01:00 UTC every day")
 
     def add_daily_cleanup_job(self):
         """Add daily cleanup job (every day at 02:00 UTC)"""

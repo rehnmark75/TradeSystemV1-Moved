@@ -727,7 +727,7 @@ class SignalDetector:
                     individual_results['ema'] = None
             
             # 2. MACD Strategy  
-            if getattr(config, 'MACD_EMA_STRATEGY', True):
+            if getattr(config, 'MACD_STRATEGY', True):
                 try:
                     self.logger.debug(f"🔍 [MACD STRATEGY] Starting detection for {epic}")
                     macd_signal = self.detect_macd_ema_signals(epic, pair, spread_pips, timeframe)
@@ -1037,7 +1037,7 @@ class SignalDetector:
                     individual_results['ema'] = None
             
             # 2. MACD Strategy  
-            if getattr(config, 'MACD_EMA_STRATEGY', True):
+            if getattr(config, 'MACD_STRATEGY', True):
                 try:
                     self.logger.debug(f"🔍 [MACD STRATEGY] Starting detection for {epic}")
                     macd_signal = self.detect_macd_ema_signals(epic, pair, spread_pips, timeframe)
@@ -1806,7 +1806,7 @@ class SignalDetector:
             # Check config settings including KAMA
             debug_info['config_check'] = {
                 'SIMPLE_EMA_STRATEGY': getattr(config, 'SIMPLE_EMA_STRATEGY', 'NOT_SET'),
-                'MACD_EMA_STRATEGY': getattr(config, 'MACD_EMA_STRATEGY', 'NOT_SET'),
+                'MACD_STRATEGY': getattr(config, 'MACD_STRATEGY', 'NOT_SET'),
                 'KAMA_STRATEGY': getattr(config, 'KAMA_STRATEGY', 'NOT_SET'),
                 # Combined strategy config removed - strategy was disabled and unused
                 'STRATEGY_WEIGHT_EMA': getattr(config, 'STRATEGY_WEIGHT_EMA', 'NOT_SET'),
@@ -1834,7 +1834,7 @@ class SignalDetector:
             
             self.logger.info("Testing MACD strategy...")
             macd_signal = None
-            if getattr(config, 'MACD_EMA_STRATEGY', False):
+            if getattr(config, 'MACD_STRATEGY', False):
                 macd_signal = self.detect_macd_ema_signals(epic, pair, system_config.SPREAD_PIPS, '5m')
             
             debug_info['individual_signals']['macd'] = {
@@ -2141,7 +2141,7 @@ class SignalDetector:
         
         if getattr(config, 'SIMPLE_EMA_STRATEGY', True):
             strategies_to_try.append('ema')
-        if getattr(config, 'MACD_EMA_STRATEGY', True):
+        if getattr(config, 'MACD_STRATEGY', True):
             strategies_to_try.append('macd')
         if getattr(config, 'KAMA_STRATEGY', False) and self.kama_strategy:
             strategies_to_try.append('kama')
@@ -2210,7 +2210,7 @@ class SignalDetector:
                     self.logger.debug(f"EMA strategy failed: {e}")
             
             # Test MACD strategy
-            if getattr(config, 'MACD_EMA_STRATEGY', False):
+            if getattr(config, 'MACD_STRATEGY', False):
                 try:
                     macd_strategy = self._get_macd_strategy_for_epic(epic)
                     signal = macd_strategy.detect_signal(df, pair, spread_pips, timeframe)
