@@ -258,20 +258,29 @@ class OrderExecutor:
             stop_distance = signal.get('stop_distance', self.default_stop_distance)
             limit_distance = signal.get('limit_distance', int(stop_distance * self.default_risk_reward))
 
-            # ✅ DEFENSIVE FIX: Validate JPY pair stop/limit distances
-            # For JPY pairs, pips = points (no conversion needed), values should be 20-60 range
-            # If values are suspiciously large (>100), they've been incorrectly multiplied by 100
-            if 'JPY' in internal_epic:
-                if stop_distance > 100:
-                    # Incorrectly scaled - divide by 100 to get back to pips/points
-                    original_stop = stop_distance
-                    original_limit = limit_distance
-                    stop_distance = int(stop_distance / 100)
-                    limit_distance = int(limit_distance / 100)
-                    self.logger.warning(
-                        f"⚠️ JPY PAIR FIX {internal_epic}: SL/TP incorrectly scaled, "
-                        f"corrected {original_stop}/{original_limit} → {stop_distance}/{limit_distance} points"
-                    )
+            # ✅ SAFETY VALIDATION: Ensure reasonable SL/TP values
+            # For all pairs, stop_distance and limit_distance should be in reasonable pip/point range
+            max_reasonable_sl = 100  # Maximum reasonable stop loss in pips/points
+            max_reasonable_tp = 200  # Maximum reasonable take profit in pips/points
+
+            if stop_distance > max_reasonable_sl:
+                self.logger.error(
+                    f"🚨 INVALID SL DETECTED for {internal_epic}: {stop_distance} pips exceeds max {max_reasonable_sl} pips. "
+                    f"This likely indicates a calculation bug. Rejecting order."
+                )
+                return {
+                    "status": "error",
+                    "message": f"Invalid stop distance {stop_distance} pips (max: {max_reasonable_sl} pips)",
+                    "epic": internal_epic,
+                    "alert_id": alert_id
+                }
+
+            if limit_distance > max_reasonable_tp:
+                self.logger.warning(
+                    f"⚠️ LARGE TP DETECTED for {internal_epic}: {limit_distance} pips exceeds max {max_reasonable_tp} pips. "
+                    f"Capping to {max_reasonable_tp} pips for safety."
+                )
+                limit_distance = max_reasonable_tp
 
             # Create custom label with alert_id reference if available
             if alert_id:

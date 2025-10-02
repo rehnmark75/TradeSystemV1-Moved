@@ -139,8 +139,8 @@ OSCILLATOR_WEIGHTS = {                 # Weight for each oscillator in confluenc
 }
 
 # Confluence Thresholds
-OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.12  # Minimum weighted score for bullish signal (balanced production)
-OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.12  # Minimum weighted score for bearish signal (balanced production)
+OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.40  # Minimum weighted score for bullish signal (quality over quantity)
+OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.40  # Minimum weighted score for bearish signal (quality over quantity)
 OSCILLATOR_EXTREME_CONFLUENCE_BOOST = 0.15   # Boost for extreme readings
 
 # Signal Quality Requirements
@@ -153,7 +153,7 @@ CONFLUENCE_MIN_SIGNAL_STRENGTH = 0.6          # Minimum individual signal streng
 # =============================================================================
 
 # Support/Resistance Zone Settings
-DYNAMIC_ZONES_ENABLED = False          # Disabled for production - relying on oscillator confluence only
+DYNAMIC_ZONES_ENABLED = True           # Enable zone validation for better entry quality
 ZONE_CALCULATION_PERIOD = 30          # Period for zone calculations (shorter for more frequent updates)
 ZONE_STRENGTH_THRESHOLD = 1           # Minimum touches for strong zone (more lenient)
 ZONE_PROXIMITY_PIPS = 35              # Pip proximity for zone interaction (extremely generous for production)
@@ -181,7 +181,7 @@ REGIME_TREND_PERIOD = 50              # Period for trend strength calculation
 REGIME_ADX_THRESHOLD = 25             # ADX threshold for trending vs ranging
 
 # Ranging Market Detection
-RANGING_MARKET_ADX_MAX = 75           # Maximum ADX for ranging market (very permissive)
+RANGING_MARKET_ADX_MAX = 20           # Maximum ADX for ranging market (strict - only true ranging conditions)
 RANGING_MARKET_ATR_STABILITY = 0.8    # ATR stability coefficient
 RANGING_MARKET_MIN_DURATION = 10      # Minimum bars for ranging regime
 RANGING_MARKET_PRICE_OSCILLATION = 0.75  # Price oscillation within range coefficient
@@ -217,7 +217,7 @@ MTF_ZONE_CONFLUENCE = True             # Require S/R zone confluence
 # =============================================================================
 
 # Signal Quality Requirements
-SIGNAL_QUALITY_MIN_CONFIDENCE = 0.45   # Minimum confidence for signal generation (balanced quality)
+SIGNAL_QUALITY_MIN_CONFIDENCE = 0.50   # Minimum confidence for signal generation (aligned with confluence)
 SIGNAL_QUALITY_REQUIRE_VOLUME_CONFIRMATION = False  # Volume confirmation (if available)
 SIGNAL_QUALITY_MIN_RISK_REWARD = 1.8   # Minimum risk-reward ratio (high quality)
 SIGNAL_QUALITY_MAX_SPREAD_IMPACT = 0.3  # Maximum spread impact on signal quality
@@ -238,13 +238,13 @@ SIGNAL_MAX_ENTRY_DELAY_BARS = 5        # Maximum bars to wait for entry
 # =============================================================================
 
 # Position Sizing
-RANGING_POSITION_SIZE_MULTIPLIER = 0.9  # Slightly larger position for ranging
+RANGING_POSITION_SIZE_MULTIPLIER = 0.5  # Reduced position size for ranging (conservative risk management)
 RANGING_MAX_DRAWDOWN_THRESHOLD = 0.04   # Stop strategy at 4% drawdown
 RANGING_MAX_DAILY_LOSS = 0.02           # Maximum daily loss threshold
 
 # Stop Loss and Take Profit
-RANGING_DEFAULT_SL_PIPS = 22            # Default stop loss in pips
-RANGING_DEFAULT_TP_PIPS = 38            # Default take profit in pips
+RANGING_DEFAULT_SL_PIPS = 35            # Default stop loss in pips (widened to reduce premature stops)
+RANGING_DEFAULT_TP_PIPS = 52            # Default take profit in pips (maintains ~1.5:1 R:R)
 RANGING_DYNAMIC_SL_TP = True            # Use dynamic SL/TP based on range size
 RANGING_TRAIL_STOP_ENABLED = True       # Enable trailing stop
 
@@ -259,7 +259,7 @@ RANGING_RANGE_TP_MULTIPLIER = 0.8       # TP as % of range size
 # =============================================================================
 
 # Runtime regime-aware calculation - No hardcoded values!
-USE_ADAPTIVE_SL_TP = False               # 🧠 Enable adaptive volatility calculator (default: False for gradual rollout)
+USE_ADAPTIVE_SL_TP = True                # 🧠 Enable adaptive volatility calculator for regime-aware SL/TP
                                          # When True: Uses runtime regime detection (trending, ranging, breakout, high volatility)
                                          # When False: Falls back to ATR multipliers below
 

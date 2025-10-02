@@ -676,9 +676,9 @@ class RangingMarketStrategy(BaseStrategy):
                 rsi_oversold = self.config.get('rsi_oversold', 30)
                 rsi_overbought = self.config.get('rsi_overbought', 70)
 
-                # More flexible RSI signal generation - production settings
-                rsi_bullish_signal = rsi < rsi_oversold or rsi_bullish_div or (rsi < 48)
-                rsi_bearish_signal = rsi > rsi_overbought or rsi_bearish_div or (rsi > 52)
+                # Symmetric RSI signal generation - balanced for ranging markets
+                rsi_bullish_signal = rsi < rsi_oversold or rsi_bullish_div or (rsi < 45)
+                rsi_bearish_signal = rsi > rsi_overbought or rsi_bearish_div or (rsi > 55)
 
                 oscillator_signals['rsi'] = {
                     'bullish': rsi_bullish_signal,
@@ -924,8 +924,8 @@ class RangingMarketStrategy(BaseStrategy):
         try:
             if not self.config.get('ranging_dynamic_sl_tp', True):
                 # Use default values
-                sl_pips = self.config.get('ranging_default_sl_pips', 22)
-                tp_pips = self.config.get('ranging_default_tp_pips', 38)
+                sl_pips = self.config.get('ranging_default_sl_pips', 35)
+                tp_pips = self.config.get('ranging_default_tp_pips', 52)
                 return sl_pips, tp_pips
 
             # Calculate range-based SL/TP
@@ -934,12 +934,28 @@ class RangingMarketStrategy(BaseStrategy):
 
             range_size = recent_data['high'].max() - recent_data['low'].min()
 
-            # Convert to pips
+            # Convert to pips (IG points: 1 point = 0.0001 for standard, 0.01 for JPY)
             pip_value = 0.0001
             if 'JPY' in str(self.epic).upper():
                 pip_value = 0.01
 
             range_pips = range_size / pip_value
+
+            # ✅ CRITICAL VALIDATION: Reject extreme ranges (suggests trending/volatile market, not ranging)
+            # For ranging markets, we expect controlled ranges:
+            # - JPY pairs: typically 20-150 pips range over 20 bars
+            # - Standard pairs: typically 15-100 pips range over 20 bars
+            max_reasonable_range = 200 if 'JPY' in str(self.epic).upper() else 150
+
+            if range_pips > max_reasonable_range:
+                self.logger.warning(
+                    f"⚠️ Extreme range detected for {self.epic}: {range_pips:.1f} pips over {calculation_period} bars. "
+                    f"This suggests trending/volatile market, not ranging. Using conservative defaults."
+                )
+                # Fall back to conservative defaults (not range-based)
+                sl_pips = self.config.get('ranging_default_sl_pips', 35)
+                tp_pips = self.config.get('ranging_default_tp_pips', 52)
+                return sl_pips, tp_pips
 
             # Use percentage of range for SL/TP
             sl_multiplier = self.config.get('ranging_range_sl_multiplier', 0.4)
@@ -947,6 +963,18 @@ class RangingMarketStrategy(BaseStrategy):
 
             sl_pips = max(range_pips * sl_multiplier, 15)  # Minimum 15 pips
             tp_pips = max(range_pips * tp_multiplier, 25)  # Minimum 25 pips
+
+            # ✅ SAFETY CAP: Prevent excessive SL/TP even with valid ranges
+            max_sl = 80 if 'JPY' in str(self.epic).upper() else 60
+            max_tp = 150 if 'JPY' in str(self.epic).upper() else 120
+
+            if sl_pips > max_sl:
+                self.logger.warning(f"⚠️ Capping SL from {sl_pips:.1f} to {max_sl} pips for {self.epic}")
+                sl_pips = max_sl
+
+            if tp_pips > max_tp:
+                self.logger.warning(f"⚠️ Capping TP from {tp_pips:.1f} to {max_tp} pips for {self.epic}")
+                tp_pips = max_tp
 
             # Ensure minimum risk/reward ratio
             min_rr = self.config.get('signal_quality_min_risk_reward', 1.8)
