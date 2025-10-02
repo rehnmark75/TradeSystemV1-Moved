@@ -729,12 +729,29 @@ class Progressive3StageTrailing(TrailingStrategy):
         """Stage 2: Profit lock-in - ONE-TIME move to lock in 10 points profit when price reaches 16+ points"""
 
         # ✅ CRITICAL FIX: Stage 2 should only move ONCE to lock in profit, not continuously trail
+        # Check both status AND the moved_to_stage2 flag
+        if getattr(trade, 'moved_to_stage2', False):
+            self.logger.debug(f"[STAGE 2 SKIP] Trade {trade.id}: Stage 2 already executed (moved_to_stage2=True)")
+            return None
+
         if hasattr(trade, 'status') and trade.status in ['stage2_profit_lock', 'stage3_trailing']:
             self.logger.debug(f"[STAGE 2 SKIP] Trade {trade.id}: Already in Stage 2/3 ({trade.status}), no further Stage 2 action needed")
             return None
 
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
+
+        # ✅ NEW: DEFENSIVE CHECK - Ensure profit actually >= 16 points before Stage 2
+        # This protects against Stage 2 being called incorrectly or for legacy trades
+        from config import STAGE2_TRIGGER_POINTS
+        if direction == "BUY":
+            current_profit_points = int((current_price - trade.entry_price) / point_value)
+        else:  # SELL
+            current_profit_points = int((trade.entry_price - current_price) / point_value)
+
+        if current_profit_points < STAGE2_TRIGGER_POINTS:
+            self.logger.warning(f"⚠️ [STAGE 2 GUARD] Trade {trade.id}: Profit {current_profit_points}pts < Stage 2 trigger {STAGE2_TRIGGER_POINTS}pts - REJECTING Stage 2")
+            return None
 
         # ✅ FIXED: Stage 2 locks in 10 points profit (not config value)
         # When price reaches 16+ points, move stop to entry + 10 points
@@ -1270,6 +1287,8 @@ class EnhancedTradeProcessor:
                 self.logger.info(f"🛡️ [PROFIT PROTECTED] Trade {trade.id}: Skipping break-even check, already protected at +10pts")
                 # Set moved_to_breakeven to True to allow trailing
                 trade.moved_to_breakeven = True
+                # ✅ NEW: Also set moved_to_stage2 since profit_protected implies Stage 2 completed
+                trade.moved_to_stage2 = True
                 db.commit()
                 # Don't change status if already profit_protected
             elif not getattr(trade, 'moved_to_breakeven', False) and is_profitable_for_breakeven:
@@ -1516,7 +1535,12 @@ class EnhancedTradeProcessor:
                                 else:
                                     adjustment_points = 0  # Don't move backwards
 
-                            if adjustment_points > 0:
+                            # ✅ NEW: Enforce minimum movement for Stage 3 trailing
+                            # This prevents tiny incremental movements that are too tight
+                            from config import STAGE3_MIN_ADJUSTMENT
+                            min_adjustment = STAGE3_MIN_ADJUSTMENT  # Default 5 points per trail movement
+
+                            if adjustment_points >= min_adjustment:
                                 success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
                                 if success:
                                     trade.sl_price = new_trail_level
@@ -1524,45 +1548,57 @@ class EnhancedTradeProcessor:
                                     trade.last_trigger_price = current_price
                                     trade.trigger_time = datetime.utcnow()
                                     db.commit()
-                                    self.logger.info(f"🎯 [STAGE 3] Trade {trade.id}: Percentage trailing to {new_trail_level:.5f}")
+                                    self.logger.info(f"🎯 [STAGE 3] Trade {trade.id}: Percentage trailing to {new_trail_level:.5f} ({adjustment_points}pts)")
                                     return True
+                            else:
+                                self.logger.debug(f"📊 [STAGE 3 SKIP] Trade {trade.id}: Adjustment {adjustment_points}pts < minimum {min_adjustment}pts")
                     except Exception as e:
                         self.logger.error(f"❌ [STAGE 3 ERROR] Trade {trade.id}: {e}")
 
                 elif profit_points >= stage2_trigger:
                     # Stage 2: Profit lock
-                    self.logger.info(f"💰 [STAGE 2 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 2 trigger {stage2_trigger}pts - Profit lock")
-
-                    # Calculate Stage 2 profit lock level (entry + lock points)
-                    lock_points = STAGE2_LOCK_POINTS  # 10 points
-                    if trade.direction.upper() == "BUY":
-                        stage2_stop = trade.entry_price + (lock_points * point_value)
+                    # ✅ CRITICAL FIX: Check if Stage 2 already executed
+                    if getattr(trade, 'moved_to_stage2', False):
+                        self.logger.debug(f"📊 [STAGE 2 SKIP] Trade {trade.id}: Stage 2 already executed, waiting for Stage 3")
                     else:
-                        stage2_stop = trade.entry_price - (lock_points * point_value)
+                        self.logger.info(f"💰 [STAGE 2 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 2 trigger {stage2_trigger}pts - Profit lock")
 
-                    # Check if this improves current stop
-                    current_stop = trade.sl_price or 0.0
-                    should_update = False
-                    if trade.direction.upper() == "BUY":
-                        should_update = stage2_stop > current_stop
-                    else:
-                        should_update = stage2_stop < current_stop
+                        # Calculate Stage 2 profit lock level (entry + lock points)
+                        lock_points = STAGE2_LOCK_POINTS  # 10 points
+                        if trade.direction.upper() == "BUY":
+                            stage2_stop = trade.entry_price + (lock_points * point_value)
+                        else:
+                            stage2_stop = trade.entry_price - (lock_points * point_value)
 
-                    if should_update:
-                        adjustment_distance = abs(stage2_stop - current_stop)
-                        adjustment_points = int(adjustment_distance / point_value)
-                        if adjustment_points > 0:
-                            direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
-                            self.logger.info(f"📤 [STAGE 2 SEND] Trade {trade.id}: Moving to profit lock (+{lock_points}pts), adjustment={adjustment_points}pts")
-                            success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
-                            if success:
-                                trade.sl_price = stage2_stop
-                                trade.status = "stage2_profit_lock"
-                                trade.last_trigger_price = current_price
-                                trade.trigger_time = datetime.utcnow()
-                                db.commit()
-                                self.logger.info(f"💎 [STAGE 2] Trade {trade.id}: Profit locked at {stage2_stop:.5f} (+{lock_points}pts)")
-                                return True
+                        # Check if this improves current stop
+                        current_stop = trade.sl_price or 0.0
+                        should_update = False
+                        if trade.direction.upper() == "BUY":
+                            should_update = stage2_stop > current_stop
+                        else:
+                            should_update = stage2_stop < current_stop
+
+                        if should_update:
+                            adjustment_distance = abs(stage2_stop - current_stop)
+                            adjustment_points = int(adjustment_distance / point_value)
+                            if adjustment_points > 0:
+                                direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
+                                self.logger.info(f"📤 [STAGE 2 SEND] Trade {trade.id}: Moving to profit lock (+{lock_points}pts), adjustment={adjustment_points}pts")
+                                success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                                if success:
+                                    trade.sl_price = stage2_stop
+                                    trade.status = "stage2_profit_lock"
+                                    trade.moved_to_stage2 = True  # ✅ NEW: Set flag to prevent re-execution
+                                    trade.last_trigger_price = current_price
+                                    trade.trigger_time = datetime.utcnow()
+                                    db.commit()
+                                    self.logger.info(f"💎 [STAGE 2] Trade {trade.id}: Profit locked at {stage2_stop:.5f} (+{lock_points}pts)")
+                                    return True
+                        else:
+                            # Stage 2 stop not better than current - mark as executed anyway
+                            self.logger.info(f"📊 [STAGE 2 SKIP] Trade {trade.id}: Stage 2 stop {stage2_stop:.5f} not better than current {current_stop:.5f}")
+                            trade.moved_to_stage2 = True
+                            db.commit()
                 else:
                     # Still in Stage 1, continue normal processing
                     self.logger.debug(f"📊 [STAGE 1] Trade {trade.id}: Profit {profit_points}pts < Stage 2 trigger {stage2_trigger}pts")

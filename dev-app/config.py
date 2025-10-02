@@ -111,7 +111,8 @@ STAGE2_LOCK_POINTS = 10      # Guarantee +10 points profit (was 6)
 # Stage 3: Dynamic Percentage Trailing (STANDARDIZED FOR ALL PAIRS)
 STAGE3_TRIGGER_POINTS = 17   # Start percentage trailing after +17 points (was 15)
 STAGE3_ATR_MULTIPLIER = 0.8  # MUCH TIGHTER: 0.8x ATR (was 1.5x)
-STAGE3_MIN_DISTANCE = 2      # Small minimum trailing distance (was 3)
+STAGE3_MIN_DISTANCE = 2      # Small minimum trailing distance from current price (was 3)
+STAGE3_MIN_ADJUSTMENT = 5    # Minimum points to move stop (prevents too-frequent tiny adjustments)
 
 # REMOVED: Epic-specific progressive settings - now using standard 3-stage configuration for all pairs
 
