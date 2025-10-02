@@ -88,21 +88,31 @@ def save_signal_to_database_direct(signal: Dict, message: str = "Signal detected
             except:
                 market_timestamp = None
         
-        # Insert with minimal required fields
+        # Extract SL/TP values from signal
+        stop_distance = signal.get('stop_distance')
+        limit_distance = signal.get('limit_distance')
+        entry_price = signal.get('entry_price') or signal.get('execution_price')
+        stop_loss = signal.get('stop_loss')
+        take_profit = signal.get('take_profit')
+
+        # Insert with minimal required fields + SL/TP
         cursor.execute("""
             INSERT INTO alert_history (
                 epic, pair, signal_type, strategy, confidence_score, price, timeframe,
                 strategy_config, strategy_indicators, strategy_metadata, signal_conditions,
                 signal_hash, data_source, cooldown_key, market_timestamp,
-                alert_message, alert_level, status, alert_timestamp
+                alert_message, alert_level, status, alert_timestamp,
+                stop_distance, limit_distance, entry_price, stop_loss, take_profit
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s
             ) RETURNING id
         """, (
             epic, pair, signal_type, strategy, confidence_score, price, timeframe,
             strategy_config, strategy_indicators, strategy_metadata, signal_conditions,
             signal_hash, data_source, cooldown_key, market_timestamp,
-            message, 'INFO', 'NEW', datetime.now()
+            message, 'INFO', 'NEW', datetime.now(),
+            stop_distance, limit_distance, entry_price, stop_loss, take_profit
         ))
         
         alert_id = cursor.fetchone()[0]

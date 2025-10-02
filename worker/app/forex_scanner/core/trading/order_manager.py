@@ -498,18 +498,27 @@ class OrderManager:
         """
         ADDED: Convert signal format for OrderExecutor compatibility
         OrderExecutor expects BUY/SELL signal types, but strategies generate BULL/BEAR
-        
+
         Args:
             signal: Original signal with BULL/BEAR signal_type
-            
+
         Returns:
             Converted signal with BUY/SELL signal_type
         """
         converted_signal = signal.copy()
-        
+
+        # DEBUG: Log signal keys before conversion
+        has_stop = 'stop_distance' in signal
+        has_limit = 'limit_distance' in signal
+        if has_stop and has_limit:
+            self.logger.debug(f"✅ Signal has SL/TP: stop_distance={signal['stop_distance']}, limit_distance={signal['limit_distance']}")
+        else:
+            self.logger.warning(f"⚠️ Signal missing SL/TP keys: has_stop={has_stop}, has_limit={has_limit}")
+            self.logger.warning(f"   Signal keys: {list(signal.keys())[:15]}")  # Show first 15 keys
+
         # Convert signal_type to format expected by OrderExecutor
         signal_type = signal.get('signal_type', '').upper()
-        
+
         if signal_type in ['BULL', 'LONG']:
             converted_signal['signal_type'] = 'BUY'
         elif signal_type in ['BEAR', 'SHORT']:
@@ -521,7 +530,7 @@ class OrderManager:
             # Unknown signal type, default to original
             self.logger.warning(f"⚠️ Unknown signal type for conversion: {signal_type}")
             converted_signal['signal_type'] = signal_type
-        
+
         self.logger.debug(f"🔄 Signal type converted: {signal_type} → {converted_signal['signal_type']}")
         return converted_signal
     

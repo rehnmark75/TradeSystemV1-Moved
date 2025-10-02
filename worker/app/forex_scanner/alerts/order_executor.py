@@ -52,10 +52,11 @@ class RetryConfig:
     
     def __post_init__(self):
         if self.retry_on_status_codes is None:
-            # Only retry transient errors (removed 500 - handle intelligently instead)
+            # Retry transient errors
             # 429 = Rate limit (retry with backoff)
+            # 500 = Internal server error (could be transient)
             # 502/503/504 = Gateway/Service unavailable (transient)
-            self.retry_on_status_codes = [429, 502, 503, 504]
+            self.retry_on_status_codes = [429, 500, 502, 503, 504]
 
 
 class CircuitBreaker:
@@ -257,6 +258,13 @@ class OrderExecutor:
             # Calculate order parameters
             stop_distance = signal.get('stop_distance', self.default_stop_distance)
             limit_distance = signal.get('limit_distance', int(stop_distance * self.default_risk_reward))
+
+            # Debug: Log if using defaults vs strategy values
+            if 'stop_distance' not in signal:
+                self.logger.warning(f"⚠️ Signal missing 'stop_distance', using default: {stop_distance} pips")
+                self.logger.debug(f"   Signal keys: {list(signal.keys())}")
+            if 'limit_distance' not in signal:
+                self.logger.warning(f"⚠️ Signal missing 'limit_distance', using default: {limit_distance} pips")
 
             # ✅ SAFETY VALIDATION: Ensure reasonable SL/TP values
             # For all pairs, stop_distance and limit_distance should be in reasonable pip/point range
@@ -565,16 +573,22 @@ class OrderExecutor:
                 return result
 
             else:
-                # Other errors - log appropriately
-                error_msg = f"Order failed: HTTP {response.status_code} - {response.text[:200]}"
+                # Other errors - log appropriately with full details
+                try:
+                    error_detail = response.json()
+                    error_msg = f"Order failed: HTTP {response.status_code} - {error_detail}"
+                except:
+                    error_msg = f"Order failed: HTTP {response.status_code} - {response.text[:500]}"
 
-                # Check if this status code should trigger retry (502, 503, 504)
+                # Check if this status code should trigger retry (500, 502, 503, 504)
                 if response.status_code in self.retry_config.retry_on_status_codes:
-                    self.logger.warning(f"⚠️ Transient error, will retry: {error_msg}")
+                    self.logger.warning(f"⚠️ Transient error (will retry): {error_msg}")
+                    self.logger.debug(f"   Order data sent: {order_data}")
                     raise requests.exceptions.RequestException(error_msg)
                 else:
-                    # Real error - log as ERROR
+                    # Real error - log as ERROR with full details
                     self.logger.error(f"❌ {error_msg}")
+                    self.logger.error(f"   Order data sent: {order_data}")
 
                 result = {
                     "status": "error",

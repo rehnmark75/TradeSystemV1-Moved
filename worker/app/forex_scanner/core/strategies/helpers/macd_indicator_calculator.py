@@ -175,8 +175,8 @@ class MACDIndicatorCalculator:
 
             # Get volatility regime info for logging
             volatility_info = self.get_volatility_regime(df_copy)
-            self.logger.info(f"🎯 PHASE 2 Dynamic thresholds for {epic}: base={base_threshold:.6f}, "
-                           f"enhanced={strength_threshold:.6f}, regime={volatility_info['regime']}")
+            self.logger.debug(f"🎯 PHASE 2 Dynamic thresholds for {epic}: base={base_threshold:.6f}, "
+                            f"enhanced={strength_threshold:.6f}, regime={volatility_info['regime']}")
             
             # SIMPLIFIED TRADITIONAL MACD: Basic crossovers with light filtering
             
@@ -194,8 +194,8 @@ class MACDIndicatorCalculator:
                 (df_copy['macd_histogram'] <= -strength_threshold)  # Dynamic volatility-adjusted threshold
             )
             
-            self.logger.info(f"🔍 PHASE 2 MACD crossovers for {epic}: {raw_bull_cross.sum()} bull, {raw_bear_cross.sum()} bear "
-                           f"(threshold: {strength_threshold:.6f}, regime: {volatility_info['regime']})")
+            self.logger.debug(f"🔍 PHASE 2 MACD crossovers for {epic}: {raw_bull_cross.sum()} bull, {raw_bear_cross.sum()} bear "
+                            f"(threshold: {strength_threshold:.6f}, regime: {volatility_info['regime']})")
 
             # EMERGENCY DEBUGGING: Comprehensive histogram analysis
             if len(df_copy) > 0:
@@ -218,8 +218,8 @@ class MACDIndicatorCalculator:
                     above_zero = (histogram_values > 0).sum()
                     below_zero = (histogram_values < 0).sum()
 
-                    self.logger.info(f"   🔍 Threshold Analysis: {above_threshold} above +{base_threshold:.8f}, {below_neg_threshold} below -{base_threshold:.8f}")
-                    self.logger.info(f"   🔍 Zero Line Analysis: {above_zero} above zero, {below_zero} below zero")
+                    self.logger.debug(f"   🔍 Threshold Analysis: {above_threshold} above +{base_threshold:.8f}, {below_neg_threshold} below -{base_threshold:.8f}")
+                    self.logger.debug(f"   🔍 Zero Line Analysis: {above_zero} above zero, {below_zero} below zero")
 
                     # Log recent histogram values for detailed analysis
                     recent_hist = histogram_values.tail(20)
@@ -230,7 +230,7 @@ class MACDIndicatorCalculator:
                     if len(histogram_prev) > 0:
                         raw_bull_crosses = ((df_copy['macd_histogram'] > 0) & (histogram_prev <= 0)).sum()
                         raw_bear_crosses = ((df_copy['macd_histogram'] < 0) & (histogram_prev >= 0)).sum()
-                        self.logger.info(f"   ⚡ RAW crossovers (no threshold): {raw_bull_crosses} bull, {raw_bear_crosses} bear")
+                        self.logger.debug(f"   ⚡ RAW crossovers (no threshold): {raw_bull_crosses} bull, {raw_bear_crosses} bear")
             
             # BALANCED: Use normal threshold-based detection with optimized thresholds
             emergency_bypass = False  # BALANCED MODE: Use optimized thresholds
@@ -263,7 +263,7 @@ class MACDIndicatorCalculator:
                 # QUALITY: Apply multi-candle confirmation for high-quality signals
                 bull_cross = self._apply_multi_candle_confirmation(df_copy, raw_bull_cross, 'BULL', epic)
                 bear_cross = self._apply_multi_candle_confirmation(df_copy, raw_bear_cross, 'BEAR', epic)
-                self.logger.info(f"🎯 QUALITY: Multi-candle confirmed signals for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
+                self.logger.debug(f"🎯 QUALITY: Multi-candle confirmed signals for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
             
             # Debug RSI and ADX data availability first
             if 'rsi' in df_copy.columns and 'adx' in df_copy.columns:
@@ -309,7 +309,7 @@ class MACDIndicatorCalculator:
                 final_bull_count = bull_cross.sum()
                 final_bear_count = bear_cross.sum()
                 if bull_count + bear_count != final_bull_count + final_bear_count:
-                    self.logger.info(f"🎯 LIVE SIGNAL LIMITER for {epic}: Bull {bull_count} -> {final_bull_count}, Bear {bear_count} -> {final_bear_count}")
+                    self.logger.debug(f"🎯 LIVE SIGNAL LIMITER for {epic}: Bull {bull_count} -> {final_bull_count}, Bear {bear_count} -> {final_bear_count}")
             
             df_copy['bull_crossover'] = bull_cross
             df_copy['bear_crossover'] = bear_cross
@@ -392,7 +392,7 @@ class MACDIndicatorCalculator:
 
                 final_threshold = base_threshold * multiplier
 
-                self.logger.info(
+                self.logger.debug(
                     f"🌊 Volatility-adaptive threshold for {epic} ({pair_type}): "
                     f"{final_threshold:.6f} (base={base_threshold:.6f}, mult={multiplier:.1f}x, "
                     f"regime={regime_name}, ATR%={atr_pct:.3f}%, percentile={volatility_metrics.atr_percentile:.0f}, "
@@ -547,8 +547,8 @@ class MACDIndicatorCalculator:
             # Apply regime-based threshold adjustment
             enhanced_threshold = base_threshold * volatility_multiplier
 
-            self.logger.info(f"📊 PHASE 2 threshold for {epic}: {enhanced_threshold:.6f} "
-                           f"(base: {base_threshold:.6f}, regime: {regime}, multiplier: {volatility_multiplier:.1f}x)")
+            self.logger.debug(f"📊 PHASE 2 threshold for {epic}: {enhanced_threshold:.6f} "
+                            f"(base: {base_threshold:.6f}, regime: {regime}, multiplier: {volatility_multiplier:.1f}x)")
 
             return enhanced_threshold
 
@@ -1544,7 +1544,7 @@ class MACDIndicatorCalculator:
                     max_signals = 5
                     regime = "normal"
 
-                self.logger.info(
+                self.logger.debug(
                     f"🎛️ Signal limiter for {epic}: regime={regime}, "
                     f"spacing={min_spacing_bars}bars ({min_spacing_bars*15}min), max={max_signals} "
                     f"(ATR%ile={volatility_metrics.atr_percentile:.0f}, ADX={volatility_metrics.adx:.1f}, "
@@ -1598,7 +1598,7 @@ class MACDIndicatorCalculator:
             total_after = bull_after + bear_after
 
             if total_before != total_after:
-                self.logger.info(
+                self.logger.debug(
                     f"🚨 Signal limiter for {epic}: {total_before} -> {total_after} signals "
                     f"({min_spacing_bars*15}min spacing, max {max_signals}, regime={regime})"
                 )
