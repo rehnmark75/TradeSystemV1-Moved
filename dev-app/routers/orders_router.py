@@ -349,9 +349,18 @@ async def ig_place_order(
         # Check for existing position
         if await has_open_position(symbol, trading_headers):
             msg = f"Position already open for {symbol}, skipping order."
-            logger.info(f"Position already open for {symbol}")
-            logger.info(json.dumps(msg))
-            return {"status": "skipped", "message": msg, "alert_id": alert_id}
+            logger.info(f"ℹ️ Position already open for {symbol}")
+            # Return HTTP 409 (Conflict) - semantically correct for duplicate position
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "skipped",
+                    "message": msg,
+                    "epic": symbol,
+                    "alert_id": alert_id,
+                    "reason": "duplicate_position"
+                }
+            )
 
         logger.info(json.dumps(f"No open position for {symbol}, placing order."))
 

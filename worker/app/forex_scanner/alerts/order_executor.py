@@ -52,7 +52,10 @@ class RetryConfig:
     
     def __post_init__(self):
         if self.retry_on_status_codes is None:
-            self.retry_on_status_codes = [429, 500, 502, 503, 504, 529]
+            # Only retry transient errors (removed 500 - handle intelligently instead)
+            # 429 = Rate limit (retry with backoff)
+            # 502/503/504 = Gateway/Service unavailable (transient)
+            self.retry_on_status_codes = [429, 502, 503, 504]
 
 
 class CircuitBreaker:
@@ -481,23 +484,77 @@ class OrderExecutor:
                 result = response.json()
                 result["alert_id"] = alert_id
                 result["response_time"] = response_time
-                
+
                 self.logger.info(f"✅ Order sent successfully: {external_epic} (took {response_time:.2f}s)")
                 if alert_id:
                     self.logger.info(f"✅ Order linked to alert_id: {alert_id}")
-                
+
                 return result
-            else:
-                error_msg = f"Order failed: HTTP {response.status_code} - {response.text[:200]}"
-                self.logger.error(f"❌ {error_msg}")
-                
-                # Check if this status code should trigger retry
-                if response.status_code in self.retry_config.retry_on_status_codes:
-                    raise requests.exceptions.RequestException(error_msg)
-                
+
+            elif response.status_code == 409:
+                # Position already open - not an error, just skip
+                try:
+                    detail = response.json().get("detail", {})
+                    msg = detail.get("message", "Position already open")
+                except:
+                    msg = "Position already open"
+
+                self.logger.info(f"ℹ️ {external_epic}: {msg}")
                 result = {
-                    "status": "error", 
-                    "message": error_msg, 
+                    "status": "skipped",
+                    "message": msg,
+                    "alert_id": alert_id,
+                    "status_code": 409,
+                    "response_time": response_time,
+                    "reason": "duplicate_position"
+                }
+                return result
+
+            elif response.status_code == 429:
+                # Rate limit / cooldown - log as info, allow retry
+                try:
+                    detail = response.json().get("detail", {})
+                    msg = detail.get("message", "Rate limit or cooldown active")
+                except:
+                    msg = "Rate limit or cooldown active"
+
+                self.logger.info(f"⏳ {external_epic}: {msg}")
+                raise requests.exceptions.RequestException(f"Rate limit: {msg}")
+
+            elif response.status_code == 403:
+                # Forbidden (blacklisted) - log as warning, don't retry
+                try:
+                    detail = response.json().get("detail", {})
+                    msg = detail.get("message", "Trading blocked")
+                except:
+                    msg = "Trading blocked for this epic"
+
+                self.logger.warning(f"⚠️ {external_epic}: {msg}")
+                result = {
+                    "status": "blocked",
+                    "message": msg,
+                    "alert_id": alert_id,
+                    "status_code": 403,
+                    "response_time": response_time,
+                    "reason": "blacklisted"
+                }
+                return result
+
+            else:
+                # Other errors - log appropriately
+                error_msg = f"Order failed: HTTP {response.status_code} - {response.text[:200]}"
+
+                # Check if this status code should trigger retry (502, 503, 504)
+                if response.status_code in self.retry_config.retry_on_status_codes:
+                    self.logger.warning(f"⚠️ Transient error, will retry: {error_msg}")
+                    raise requests.exceptions.RequestException(error_msg)
+                else:
+                    # Real error - log as ERROR
+                    self.logger.error(f"❌ {error_msg}")
+
+                result = {
+                    "status": "error",
+                    "message": error_msg,
                     "alert_id": alert_id,
                     "status_code": response.status_code,
                     "response_time": response_time
