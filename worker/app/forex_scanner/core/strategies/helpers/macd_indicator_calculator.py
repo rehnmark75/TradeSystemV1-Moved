@@ -8,6 +8,15 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import Dict, List, Optional
+from datetime import datetime
+
+# Import volatility metrics for regime-adaptive parameters
+try:
+    from .adaptive_volatility_calculator import VolatilityMetrics
+    VOLATILITY_METRICS_AVAILABLE = True
+except ImportError:
+    VOLATILITY_METRICS_AVAILABLE = False
+    VolatilityMetrics = None
 
 
 class MACDIndicatorCalculator:
@@ -153,11 +162,15 @@ class MACDIndicatorCalculator:
             
             # Detect histogram crossovers (zero line crosses)
             df_copy['histogram_prev'] = df_copy['macd_histogram'].shift(1)
-            
-            # PHASE 2: Get base threshold and apply dynamic volatility scaling
-            base_threshold = self.get_histogram_strength_threshold(epic)
 
-            # Apply volatility regime-aware threshold scaling
+            # PHASE 2: Extract volatility metrics for regime-adaptive parameters
+            volatility_metrics = self._extract_volatility_metrics(df_copy, epic)
+            close_price = df_copy['close'].iloc[-1] if len(df_copy) > 0 else None
+
+            # Get volatility-adaptive base threshold
+            base_threshold = self.get_histogram_strength_threshold(epic, volatility_metrics, close_price)
+
+            # Apply volatility regime-aware threshold scaling (legacy PHASE 2 system)
             strength_threshold = self.get_enhanced_threshold(df_copy, epic, base_threshold)
 
             # Get volatility regime info for logging
@@ -288,8 +301,10 @@ class MACDIndicatorCalculator:
                 final_bear_count = bear_cross.sum()
                 self.logger.info(f"🚨 BACKTEST GLOBAL + CALL LIMITER for {epic}: Bull {bull_count} -> {final_bull_count}, Bear {bear_count} -> {final_bear_count}")
             else:
-                # For live trading, apply simpler signal limiter
-                bull_cross, bear_cross = self._apply_global_signal_limiter(df_copy, bull_cross, bear_cross, epic)
+                # For live trading, apply volatility-aware signal limiter
+                bull_cross, bear_cross = self._apply_global_signal_limiter(
+                    df_copy, bull_cross, bear_cross, epic, volatility_metrics
+                )
 
                 final_bull_count = bull_cross.sum()
                 final_bear_count = bear_cross.sum()
@@ -321,41 +336,134 @@ class MACDIndicatorCalculator:
             self.logger.error(f"Error detecting MACD crossovers: {e}")
             return df_copy
     
-    def get_histogram_strength_threshold(self, epic: str) -> float:
+    def get_histogram_strength_threshold(
+        self,
+        epic: str,
+        volatility_metrics: Optional['VolatilityMetrics'] = None,
+        close_price: Optional[float] = None
+    ) -> float:
         """
-        Get MACD histogram strength threshold based on currency pair
-        
-        JPY pairs: 0.010 minimum histogram strength (calibrated from actual data)
-        Non-JPY pairs: 0.00010 minimum histogram strength (calibrated from actual data)
-        
+        Get MACD histogram strength threshold with volatility-adaptive scaling
+
+        Base thresholds:
+        - JPY pairs: 0.00005 (calibrated from actual data)
+        - Non-JPY pairs: 0.00002 (calibrated from actual data)
+
+        Volatility multipliers (if metrics provided):
+        - HIGH VOLATILITY (ATR > 90th percentile or ATR% > 0.8%): 2.0x stricter
+        - NORMAL VOLATILITY (ATR% 0.5-0.8%): 1.0x standard
+        - LOW VOLATILITY (ATR% < 0.5%): 0.7x more permissive
+
         Args:
             epic: Trading pair epic (e.g., 'CS.D.USDJPY.MINI.IP')
-            
+            volatility_metrics: Optional volatility metrics for regime adaptation
+            close_price: Current close price (for ATR% calculation)
+
         Returns:
-            Minimum histogram strength threshold
+            Volatility-adjusted histogram strength threshold
         """
         try:
-            # DYNAMIC THRESHOLD SCALING - Based on Senior Trader Experience
-            # Different pairs have vastly different MACD histogram scales
-            # Must adapt thresholds to each pair's characteristics
-
-            # QUALITY THRESHOLDS - Increased 20x for signal quality improvement
+            # Base thresholds by pair type
             if 'JPY' in epic.upper():
-                # JPY pairs: Proper threshold for high-quality signal detection
-                threshold = 0.00005  # QUALITY: 20x increase from over-optimized values
+                base_threshold = 0.00005  # JPY pairs
                 pair_type = 'JPY'
             else:
-                # Major pairs: Proper threshold for high-quality signal detection
-                threshold = 0.00002  # QUALITY: 20x increase from over-optimized values
+                base_threshold = 0.00002  # Major pairs
                 pair_type = 'Major'
 
-            self.logger.info(f"📊 DYNAMIC threshold for {epic} ({pair_type}): {threshold:.6f}")
-            return threshold
-            
+            # VOLATILITY-ADAPTIVE SCALING
+            if volatility_metrics and close_price:
+                # Calculate ATR as percentage of price
+                atr_pct = (volatility_metrics.atr / close_price) * 100
+
+                # Determine regime and multiplier
+                if atr_pct > 0.8 or volatility_metrics.atr_percentile > 90:
+                    # HIGH VOLATILITY - Require stronger signals to avoid noise
+                    multiplier = 2.0
+                    regime_name = "HIGH_VOL"
+                elif atr_pct > 0.5:
+                    # NORMAL VOLATILITY - Standard detection
+                    multiplier = 1.0
+                    regime_name = "NORMAL"
+                else:
+                    # LOW VOLATILITY - Accept weaker signals (less noise)
+                    multiplier = 0.7
+                    regime_name = "LOW_VOL"
+
+                final_threshold = base_threshold * multiplier
+
+                self.logger.info(
+                    f"🌊 Volatility-adaptive threshold for {epic} ({pair_type}): "
+                    f"{final_threshold:.6f} (base={base_threshold:.6f}, mult={multiplier:.1f}x, "
+                    f"regime={regime_name}, ATR%={atr_pct:.3f}%, percentile={volatility_metrics.atr_percentile:.0f}, "
+                    f"ADX={volatility_metrics.adx:.1f})"
+                )
+            else:
+                # No volatility metrics - use static threshold
+                final_threshold = base_threshold
+                self.logger.info(f"📊 Static threshold for {epic} ({pair_type}): {final_threshold:.6f}")
+
+            return final_threshold
+
         except Exception as e:
             self.logger.error(f"Error determining histogram threshold for {epic}: {e}")
-            return 0.00010  # Default to non-JPY threshold
-    
+            return 0.00010  # Safe default
+
+    def _extract_volatility_metrics(self, df: pd.DataFrame, epic: str) -> Optional['VolatilityMetrics']:
+        """
+        Extract VolatilityMetrics from dataframe for regime-adaptive thresholds
+
+        Reuses volatility infrastructure from adaptive SL/TP system to determine
+        market regime and adjust MACD detection sensitivity accordingly.
+
+        Args:
+            df: DataFrame with price and indicator data
+            epic: Trading pair epic
+
+        Returns:
+            VolatilityMetrics object if data available, None otherwise
+        """
+        if not VOLATILITY_METRICS_AVAILABLE:
+            return None
+
+        try:
+            if 'atr' not in df.columns or len(df) < 20:
+                return None
+
+            latest = df.iloc[-1]
+
+            # Calculate ATR percentile from last 20 periods
+            atr_20_period = df['atr'].tail(20)
+            if len(atr_20_period) > 0:
+                atr_percentile = (atr_20_period < latest['atr']).sum() / len(atr_20_period) * 100
+            else:
+                atr_percentile = 50.0
+
+            # Simple efficiency ratio approximation (Kaufman's style)
+            # Measures how efficiently price moves (straight line vs zigzag)
+            if len(df) >= 20:
+                price_change = abs(df['close'].iloc[-1] - df['close'].iloc[-20])
+                path_length = df['close'].tail(20).diff().abs().sum()
+                efficiency = price_change / path_length if path_length > 0 else 0.5
+            else:
+                efficiency = 0.5
+
+            # Get ADX if available
+            adx = latest.get('adx', 20.0)
+
+            return VolatilityMetrics(
+                atr=latest['atr'],
+                atr_percentile=atr_percentile,
+                adx=adx,
+                efficiency_ratio=efficiency,
+                bb_width_percentile=50.0,  # Not critical for threshold calculation
+                ema_separation=0.0,  # Not critical for threshold
+                timestamp=datetime.now()
+            )
+        except Exception as e:
+            self.logger.debug(f"Could not extract volatility metrics for {epic}: {e}")
+            return None
+
     def get_volatility_regime(self, df: pd.DataFrame) -> Dict:
         """
         PHASE 2: Detect volatility regime for adaptive threshold scaling
@@ -1391,12 +1499,24 @@ class MACDIndicatorCalculator:
             self.logger.error(f"Error in circuit breaker: {e}")
             return signals  # Return original signals if error
 
-    def _apply_global_signal_limiter(self, df: pd.DataFrame, bull_signals: pd.Series, bear_signals: pd.Series, epic: str) -> tuple:
+    def _apply_global_signal_limiter(
+        self,
+        df: pd.DataFrame,
+        bull_signals: pd.Series,
+        bear_signals: pd.Series,
+        epic: str,
+        volatility_metrics: Optional['VolatilityMetrics'] = None
+    ) -> tuple:
         """
-        EMERGENCY GLOBAL SIGNAL LIMITER: Prevent any signals (bull OR bear) within minimum spacing
+        VOLATILITY-AWARE GLOBAL SIGNAL LIMITER
 
-        This is the nuclear option to prevent the 500+ signals per pair issue.
-        Only allows ONE signal of ANY type every 4 hours minimum.
+        Adapts signal spacing and limits based on market regime:
+        - HIGH VOLATILITY/CHOPPY: Strict limits (8-bar spacing, max 3 signals)
+        - TRENDING: Relaxed limits (3-bar spacing, max 8 signals)
+        - NORMAL: Moderate limits (4-bar spacing, max 5 signals)
+
+        This prevents over-signaling in ranging markets while allowing
+        multiple entries in strong trends.
         """
         try:
             # Combine all signals to check global spacing
@@ -1406,8 +1526,36 @@ class MACDIndicatorCalculator:
             if total_before == 0:
                 return bull_signals, bear_signals
 
-            # QUALITY: Increased global spacing for better signal quality
-            min_spacing_bars = 4  # 1 hour minimum between ANY signals (4 x 15min bars)
+            # VOLATILITY-ADAPTIVE LIMITS
+            if volatility_metrics:
+                # High volatility or ranging = strict limits
+                if volatility_metrics.atr_percentile > 90 or (volatility_metrics.adx < 20 and volatility_metrics.efficiency_ratio < 0.4):
+                    min_spacing_bars = 8  # 2 hours
+                    max_signals = 3
+                    regime = "high_vol/ranging"
+                # Strong trend = relaxed limits
+                elif volatility_metrics.adx > 25 and volatility_metrics.efficiency_ratio > 0.6:
+                    min_spacing_bars = 3  # 45 minutes
+                    max_signals = 8
+                    regime = "trending"
+                else:
+                    # Normal conditions
+                    min_spacing_bars = 4  # 1 hour
+                    max_signals = 5
+                    regime = "normal"
+
+                self.logger.info(
+                    f"🎛️ Signal limiter for {epic}: regime={regime}, "
+                    f"spacing={min_spacing_bars}bars ({min_spacing_bars*15}min), max={max_signals} "
+                    f"(ATR%ile={volatility_metrics.atr_percentile:.0f}, ADX={volatility_metrics.adx:.1f}, "
+                    f"efficiency={volatility_metrics.efficiency_ratio:.2f})"
+                )
+            else:
+                # No volatility metrics - use conservative defaults
+                min_spacing_bars = 4  # 1 hour minimum between ANY signals (4 x 15min bars)
+                max_signals = 5
+                regime = "default"
+                self.logger.debug(f"🎛️ Signal limiter for {epic}: using default limits (no volatility data)")
 
             # Get all signal indices sorted by time
             signal_indices = [(idx, 'BULL' if bull_signals.loc[idx] else 'BEAR')
@@ -1441,8 +1589,8 @@ class MACDIndicatorCalculator:
                 last_signal_bar_idx = current_bar_idx
                 kept_signals += 1
 
-                # PRODUCTION BRAKE: Max 5 signals total per epic per session
-                if kept_signals >= 5:
+                # REGIME-ADAPTIVE BRAKE: Max signals based on volatility
+                if kept_signals >= max_signals:
                     break
 
             bull_after = filtered_bull.sum()
@@ -1450,7 +1598,10 @@ class MACDIndicatorCalculator:
             total_after = bull_after + bear_after
 
             if total_before != total_after:
-                self.logger.debug(f"🚨 EMERGENCY BRAKE for {epic}: {total_before} -> {total_after} signals (4hr spacing, max 3 total)")
+                self.logger.info(
+                    f"🚨 Signal limiter for {epic}: {total_before} -> {total_after} signals "
+                    f"({min_spacing_bars*15}min spacing, max {max_signals}, regime={regime})"
+                )
 
             return filtered_bull, filtered_bear
 
