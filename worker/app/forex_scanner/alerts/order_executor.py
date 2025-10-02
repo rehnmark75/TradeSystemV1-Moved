@@ -257,7 +257,22 @@ class OrderExecutor:
             # Calculate order parameters
             stop_distance = signal.get('stop_distance', self.default_stop_distance)
             limit_distance = signal.get('limit_distance', int(stop_distance * self.default_risk_reward))
-            
+
+            # ✅ DEFENSIVE FIX: Validate JPY pair stop/limit distances
+            # For JPY pairs, pips = points (no conversion needed), values should be 20-60 range
+            # If values are suspiciously large (>100), they've been incorrectly multiplied by 100
+            if 'JPY' in internal_epic:
+                if stop_distance > 100:
+                    # Incorrectly scaled - divide by 100 to get back to pips/points
+                    original_stop = stop_distance
+                    original_limit = limit_distance
+                    stop_distance = int(stop_distance / 100)
+                    limit_distance = int(limit_distance / 100)
+                    self.logger.warning(
+                        f"⚠️ JPY PAIR FIX {internal_epic}: SL/TP incorrectly scaled, "
+                        f"corrected {original_stop}/{original_limit} → {stop_distance}/{limit_distance} points"
+                    )
+
             # Create custom label with alert_id reference if available
             if alert_id:
                 custom_label = f"forex_scanner_alert_{alert_id}_{external_epic}_{direction}"

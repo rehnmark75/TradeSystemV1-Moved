@@ -758,6 +758,13 @@ class MACDStrategy(BaseStrategy):
                     f"{result.calculation_time_ms:.1f}ms)"
                 )
 
+                # ✅ DEBUG: Log actual types and values
+                self.logger.info(
+                    f"🔍 DEBUG SL/TP types: stop_distance type={type(result.stop_distance)} "
+                    f"value={result.stop_distance}, limit_distance type={type(result.limit_distance)} "
+                    f"value={result.limit_distance}"
+                )
+
                 return {
                     'stop_distance': result.stop_distance,
                     'limit_distance': result.limit_distance

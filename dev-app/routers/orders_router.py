@@ -412,7 +412,39 @@ async def ig_place_order(
                 sl_limit = max(25, min_distance + 10) if min_distance else 25
                 limit_distance = int(sl_limit * rr)
                 logger.info(f"🆘 Using emergency fallback: SL={sl_limit}, TP={limit_distance}")
-        
+
+        # ✅ CRITICAL SAFETY CHECK: Validate stop loss is not suspiciously large
+        # This prevents account-blowing bugs like the 100x multiplication error for JPY pairs
+        max_allowed_sl = 100  # Maximum 100 points/pips for any pair
+        max_allowed_tp = 200  # Maximum 200 points/pips for take profit
+
+        if sl_limit > max_allowed_sl:
+            logger.error(
+                f"🚨 CRITICAL: Stop loss {sl_limit} exceeds maximum allowed {max_allowed_sl} points! "
+                f"Epic: {symbol}, Direction: {direction}, Alert ID: {alert_id}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "Invalid stop loss",
+                    "message": f"Stop loss {sl_limit} points exceeds maximum allowed {max_allowed_sl} points",
+                    "stop_distance": sl_limit,
+                    "max_allowed": max_allowed_sl,
+                    "epic": symbol,
+                    "alert_id": alert_id,
+                    "safety_message": "This trade was blocked to protect your account from potential bugs"
+                }
+            )
+
+        if limit_distance > max_allowed_tp:
+            logger.warning(
+                f"⚠️ Take profit {limit_distance} exceeds maximum allowed {max_allowed_tp} points! "
+                f"Epic: {symbol}, Capping to {max_allowed_tp}"
+            )
+            limit_distance = max_allowed_tp
+
+        logger.info(f"✅ Safety check passed: SL={sl_limit}/{max_allowed_sl}, TP={limit_distance}/{max_allowed_tp}")
+
         # Place the market order with calculated SL and TP
         logger.info(f"📤 Placing market order: {symbol} {direction} with SL: {sl_limit}, TP: {limit_distance}")
         result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance)

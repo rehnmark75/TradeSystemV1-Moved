@@ -76,6 +76,19 @@ class SLTPResult:
     fallback_level: int  # 0=primary, 1=atr_standard, 2=high_low, 3=safe_default
     calculation_time_ms: float
 
+    def __post_init__(self):
+        """✅ CRITICAL FIX: Force int conversion to prevent float pip values
+
+        Python dataclasses don't auto-convert types, so we must enforce it manually.
+        This prevents catastrophic bugs like 28.84 (float pips) being sent to the API,
+        which then multiplies by 100 thinking it's a price, resulting in 2884 points
+        instead of 28 points - potentially blowing the account on a single trade!
+        """
+        if not isinstance(self.stop_distance, int):
+            self.stop_distance = int(self.stop_distance)
+        if not isinstance(self.limit_distance, int):
+            self.limit_distance = int(self.limit_distance)
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for logging"""
         return {
