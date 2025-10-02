@@ -963,8 +963,8 @@ class OrderExecutor:
         
         # Check minimum confidence
         confidence = signal.get('confidence_score', 0)
-        min_confidence = getattr(config, 'MIN_CONFIDENCE_FOR_ORDERS', 0.75)
-        
+        min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
+
         if confidence < min_confidence:
             self.logger.info(f"📊 Signal confidence {confidence:.1%} below threshold {min_confidence:.1%}")
             return False

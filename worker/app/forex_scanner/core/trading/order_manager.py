@@ -402,7 +402,7 @@ class OrderManager:
                 return False, f"Missing required field: {field}"
         
         # Check confidence threshold
-        min_confidence = getattr(config, 'MIN_CONFIDENCE_FOR_EXECUTION', 0.7)
+        min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
         if signal.get('confidence_score', 0) < min_confidence:
             return False, f"Confidence {signal['confidence_score']:.1%} below threshold {min_confidence:.1%}"
         

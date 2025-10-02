@@ -688,11 +688,11 @@ class OrderExecutionHelper:
                 return
             
             # Check confidence threshold for orders
-            min_confidence_for_orders = getattr(config, 'MIN_CONFIDENCE_FOR_ORDERS', 0.75)
+            min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
             signal_confidence = signal.get('confidence_score', 0)
-            
-            if signal_confidence < min_confidence_for_orders:
-                self.logger.info(f"🚫 Signal confidence {signal_confidence:.1%} below order threshold {min_confidence_for_orders:.1%}")
+
+            if signal_confidence < min_confidence:
+                self.logger.info(f"🚫 Signal confidence {signal_confidence:.1%} below threshold {min_confidence:.1%}")
                 return
             
             self.logger.info(f"💰 Executing order for {signal['epic']} {signal['signal_type']}")

@@ -95,7 +95,7 @@ class TradeValidator:
         self.backtest_mode = backtest_mode
 
         # Validation rules - UNIVERSAL FIX: Confidence format handling for all strategies
-        raw_confidence = float(getattr(config, 'MIN_CONFIDENCE_FOR_ORDERS', 0.75))
+        raw_confidence = float(getattr(config, 'MIN_CONFIDENCE', 0.6))
         self.min_confidence = self._normalize_confidence_threshold(raw_confidence)
         # FIXED: More flexible required fields - price can be in multiple field names
         self.required_fields = ['epic', 'signal_type', 'confidence_score']

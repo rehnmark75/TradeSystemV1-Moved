@@ -97,8 +97,8 @@ SPREAD_PIPS = 1.5   # default spread for BID/ASK adjustment
 
 USE_BID_ADJUSTMENT = False  # whether to adjust BID prices to MID
 DEFAULT_TIMEFRAME = '15m'  # Default timeframe for signals ('5m', '15m', '1h')
-# Signal confidence threshold
-MIN_CONFIDENCE = 0.45  # 45% confidence (relaxed for more signals)
+# Signal confidence threshold - unified for signal generation AND execution
+MIN_CONFIDENCE = 0.60  # 60% confidence (only generate signals that meet execution criteria)
 #=============================================================================
 # DATA FETCHER OPTIMIZATION CONFIGURATION
 # =============================================================================
@@ -249,9 +249,6 @@ DUPLICATE_SENSITIVITY = 'smart'
 
 # Signal cooldown period in minutes
 SIGNAL_COOLDOWN_MINUTES = 15
-
-# Minimum confidence for orders (separate from signal detection)
-MIN_CONFIDENCE_FOR_ORDERS = MIN_CONFIDENCE
 
 # =============================================================================
 # EMA200 DISTANCE VALIDATION
@@ -637,7 +634,6 @@ MAX_POSITION_SIZE = 1.0      # Maximum position size
 # Order parameters
 DEFAULT_STOP_DISTANCE = 20   # Stop loss distance in pips
 DEFAULT_RISK_REWARD = 2.0    # Risk:reward ratio for take profit
-MIN_CONFIDENCE_FOR_ORDERS = 0.60  # Lowered for backtest validation debugging
 
 # Your existing API configuration
 ORDER_API_URL = "http://fastapi-dev:8000/orders/place-order"  # Update if hosted elsewhere
@@ -676,7 +672,6 @@ DEFAULT_POSITION_SIZE = 1.0       # None = use broker default, or set specific s
 DYNAMIC_STOPS = True               # Adjust stops based on signal confidence
 
 # Risk management
-MIN_CONFIDENCE_FOR_ORDERS = 0.60  # Lowered for backtest validation debugging
 MAX_DAILY_TRADES = 10              # Maximum trades per day
 MAX_CONCURRENT_POSITIONS = 3       # Maximum open positions
 
@@ -718,7 +713,6 @@ MAX_CONCURRENT_POSITIONS = 3   # Maximum open positions
 
 # SIGNAL REQUIREMENTS
 # -------------------
-MIN_CONFIDENCE_FOR_ORDERS = 0.60  # Lowered for backtest validation debugging
 
 # =============================================================================
 # DIRECTION MAPPING (automatic)
@@ -735,7 +729,7 @@ HEARTBEAT_INTERVAL_SECONDS = 30        # Heartbeat frequency (seconds)
 HEARTBEAT_DB_CHECK = True              # Enable DB health check in heartbeat
 
 # Enhanced Trading Configuration
-MIN_CONFIDENCE_FOR_TRADING = MIN_CONFIDENCE  # Higher threshold for actual trades
+# MIN_CONFIDENCE_FOR_TRADING removed - use MIN_CONFIDENCE_FOR_ORDERS instead
 REQUIRE_CLAUDE_APPROVAL = False     # Require Claude to approve trades
 MIN_CLAUDE_QUALITY_SCORE = 6       # Minimum Claude score (1-10)
 CLAUDE_MIN_CONFIDENCE_THRESHOLD = 0.8  # 80%+ confidence only
