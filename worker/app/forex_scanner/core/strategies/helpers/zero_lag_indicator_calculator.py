@@ -505,3 +505,224 @@ class ZeroLagIndicatorCalculator:
             self.logger.error(f"Error calculating RSI: {e}")
             df['rsi'] = 50.0  # Fallback to neutral RSI
             return df
+
+    def _calculate_simple_sr_levels(self, df: pd.DataFrame, lookback: int = 100) -> Dict:
+        """
+        Calculate support/resistance levels for LIVE TRADING & BACKTESTING
+
+        REALISTIC TRADING LOGIC: Only look LEFT (historical data)
+        - Find local highs that are higher than N bars to the left
+        - Find local lows that are lower than N bars to the left
+        - Include recent highs/lows as primary levels (most relevant)
+
+        This works correctly for BOTH:
+        - Live trading: We don't have future bars
+        - Backtesting: Each bar only sees historical data (bar-by-bar simulation)
+
+        Args:
+            df: DataFrame with OHLC data (up to current bar only)
+            lookback: Number of bars to look back (default 100)
+
+        Returns:
+            Dictionary with support and resistance levels
+        """
+        try:
+            if len(df) < 20:
+                return {'support': [], 'resistance': []}
+
+            # Use last N bars for S/R calculation
+            recent_df = df.tail(min(lookback, len(df)))
+
+            # Number of bars to look LEFT for pivot detection
+            left_bars = 10
+
+            # Find swing highs (resistance) - only check LEFT side
+            resistance_levels = []
+
+            # Start from left_bars to end (we can always look left)
+            for i in range(left_bars, len(recent_df)):
+                high = recent_df.iloc[i]['high']
+
+                # Check if this is higher than the previous left_bars
+                is_swing_high = True
+                for j in range(i - left_bars, i):
+                    if recent_df.iloc[j]['high'] >= high:
+                        is_swing_high = False
+                        break
+
+                if is_swing_high:
+                    resistance_levels.append(high)
+
+            # Find swing lows (support) - only check LEFT side
+            support_levels = []
+
+            # Start from left_bars to end (we can always look left)
+            for i in range(left_bars, len(recent_df)):
+                low = recent_df.iloc[i]['low']
+
+                # Check if this is lower than the previous left_bars
+                is_swing_low = True
+                for j in range(i - left_bars, i):
+                    if recent_df.iloc[j]['low'] <= low:
+                        is_swing_low = False
+                        break
+
+                if is_swing_low:
+                    support_levels.append(low)
+
+            # CRITICAL: Cluster nearby levels to avoid too many S/R levels
+            # Merge levels within 0.2% of each other (they're essentially the same level)
+            def cluster_levels(levels, tolerance=0.002):
+                if not levels:
+                    return []
+
+                sorted_levels = sorted(levels)
+                clustered = []
+                current_cluster = [sorted_levels[0]]
+
+                for level in sorted_levels[1:]:
+                    # If within tolerance of current cluster, add to cluster
+                    if abs(level - current_cluster[0]) / current_cluster[0] < tolerance:
+                        current_cluster.append(level)
+                    else:
+                        # Save average of cluster and start new cluster
+                        clustered.append(sum(current_cluster) / len(current_cluster))
+                        current_cluster = [level]
+
+                # Don't forget the last cluster
+                if current_cluster:
+                    clustered.append(sum(current_cluster) / len(current_cluster))
+
+                return clustered
+
+            # Cluster nearby levels
+            resistance_levels = cluster_levels(resistance_levels)
+            support_levels = cluster_levels(support_levels)
+
+            # ALWAYS include the most recent high and low (last 20 bars)
+            # These are the most relevant for immediate trading decisions
+            recent_bars = min(20, len(recent_df))
+            recent_high = recent_df.tail(recent_bars)['high'].max()
+            recent_low = recent_df.tail(recent_bars)['low'].min()
+
+            # Add recent high if not already in list (within 0.2% tolerance)
+            add_recent_high = True
+            for r in resistance_levels:
+                if abs(recent_high - r) / recent_high < 0.002:
+                    add_recent_high = False
+                    break
+            if add_recent_high:
+                resistance_levels.append(recent_high)
+
+            # Add recent low if not already in list (within 0.2% tolerance)
+            add_recent_low = True
+            for s in support_levels:
+                if abs(recent_low - s) / recent_low < 0.002:
+                    add_recent_low = False
+                    break
+            if add_recent_low:
+                support_levels.append(recent_low)
+
+            # Keep only the most significant levels (max 5 each)
+            resistance_levels = sorted(resistance_levels)[-5:]
+            support_levels = sorted(support_levels)[:5]  # Take lowest 5 support levels
+
+            self.logger.debug(f"S/R levels found: {len(resistance_levels)} resistance, {len(support_levels)} support")
+
+            return {
+                'support': support_levels,
+                'resistance': resistance_levels
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error calculating S/R levels: {e}")
+            return {'support': [], 'resistance': []}
+
+    def validate_sr_proximity(self, df: pd.DataFrame, current_price: float, signal_type: str, epic: str) -> tuple:
+        """
+        Validate if signal is too close to support/resistance levels
+
+        Args:
+            df: DataFrame with OHLC data
+            current_price: Current price to check
+            signal_type: 'BULL' or 'BEAR'
+            epic: Trading pair epic
+
+        Returns:
+            (is_valid, reason, details) tuple
+        """
+        try:
+            # Calculate S/R levels
+            sr_levels = self._calculate_simple_sr_levels(df, lookback=200)
+
+            if not sr_levels['support'] and not sr_levels['resistance']:
+                return True, "No S/R levels found", {}
+
+            # Calculate volatility-aware minimum distance
+            pip_size = 0.01 if 'JPY' in epic.upper() else 0.0001
+
+            # Get multiplier from config
+            try:
+                from configdata.strategies import config_zerolag_strategy
+                multiplier = getattr(config_zerolag_strategy, 'ZERO_LAG_SR_MIN_DISTANCE_MULTIPLIER', 1.0)
+            except ImportError:
+                multiplier = 1.0
+
+            # Get ATR-based minimum distance
+            if 'atr' in df.columns and len(df) > 0:
+                recent_atr = df['atr'].iloc[-1]
+                atr_pips = (recent_atr / pip_size) if recent_atr and recent_atr > 0 else 0
+                # More lenient: 1.0x ATR or 8 pips minimum
+                min_distance_pips = max(8.0, atr_pips * multiplier)
+            else:
+                min_distance_pips = 8.0  # Fallback to 8 pips (reduced from 10)
+
+            # Check signal type specific validation
+            if signal_type == 'BULL':
+                # BUY signals: Check resistance ABOVE current price
+                # Reject if too close to resistance that could block upward movement
+                for resistance in sr_levels['resistance']:
+                    if resistance > current_price:
+                        distance_pips = (resistance - current_price) / pip_size
+                        if distance_pips < min_distance_pips:
+                            reason = f"Too close to resistance above: {distance_pips:.1f} pips (min: {min_distance_pips:.1f})"
+                            details = {
+                                'resistance_level': resistance,
+                                'distance_pips': distance_pips,
+                                'min_required': min_distance_pips
+                            }
+                            return False, reason, details
+
+            else:  # BEAR
+                # SELL signals: Check BOTH resistance above AND support below
+                # 1. Check if too close to resistance ABOVE (price might bounce back up)
+                for resistance in sr_levels['resistance']:
+                    if resistance > current_price:
+                        distance_pips = (resistance - current_price) / pip_size
+                        if distance_pips < min_distance_pips:
+                            reason = f"Too close to resistance above: {distance_pips:.1f} pips (min: {min_distance_pips:.1f})"
+                            details = {
+                                'resistance_level': resistance,
+                                'distance_pips': distance_pips,
+                                'min_required': min_distance_pips
+                            }
+                            return False, reason, details
+
+                # 2. Check if too close to support BELOW (might block downward movement)
+                for support in sr_levels['support']:
+                    if support < current_price:
+                        distance_pips = (current_price - support) / pip_size
+                        if distance_pips < min_distance_pips:
+                            reason = f"Too close to support below: {distance_pips:.1f} pips (min: {min_distance_pips:.1f})"
+                            details = {
+                                'support_level': support,
+                                'distance_pips': distance_pips,
+                                'min_required': min_distance_pips
+                            }
+                            return False, reason, details
+
+            return True, "Clear of S/R levels", {}
+
+        except Exception as e:
+            self.logger.error(f"Error validating S/R proximity: {e}")
+            return True, "Error in S/R validation", {}  # Allow signal on error

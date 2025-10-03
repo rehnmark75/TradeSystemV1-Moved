@@ -146,6 +146,27 @@ ZERO_LAG_MTF_VALIDATION_ENABLED = True
 ZERO_LAG_SMART_MONEY_ENABLED = False
 
 # =============================================================================
+# SUPPORT/RESISTANCE PROXIMITY FILTER SETTINGS
+# =============================================================================
+
+# Enable/disable support/resistance proximity filtering
+# When enabled, signals too close to key S/R levels will be rejected
+ZERO_LAG_SR_FILTER_ENABLED = True
+
+# Minimum distance multiplier for S/R levels (multiplied by ATR)
+# Lower value = more lenient (allow signals closer to S/R)
+# Higher value = more strict (require more distance from S/R)
+# Default: 1.0x ATR or 8 pips minimum (balanced)
+ZERO_LAG_SR_MIN_DISTANCE_MULTIPLIER = 1.0
+
+# Lookback period for S/R level detection (bars)
+ZERO_LAG_SR_LOOKBACK_PERIOD = 200
+
+# Pivot window for S/R detection (bars before and after)
+# Higher values = stronger, more significant levels
+ZERO_LAG_SR_PIVOT_WINDOW = 10
+
+# =============================================================================
 # MULTI-TIMEFRAME VALIDATION SETTINGS
 # =============================================================================
 

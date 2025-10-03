@@ -120,22 +120,33 @@ class ZeroLagBacktest:
         try:
             if use_optimal_parameters and epic:
                 # Try to initialize with optimal parameters
+                # CRITICAL: Use pipeline_mode=False for backtest to match live scanner behavior
                 self.strategy = ZeroLagStrategy(
                     data_fetcher=self.data_fetcher,
+                    backtest_mode=True,
                     epic=epic,
-                    use_optimal_parameters=True
+                    use_optimal_parameters=True,
+                    pipeline_mode=False  # Disable MTF validation to match live scanner
                 )
-                self.logger.info("✅ Zero Lag Strategy initialized with DATABASE OPTIMIZATION")
+                self.logger.info("✅ Zero Lag Strategy initialized with DATABASE OPTIMIZATION (backtest mode)")
             else:
                 # Fallback to standard initialization
-                self.strategy = ZeroLagStrategy(data_fetcher=self.data_fetcher)
-                self.logger.info("✅ Zero Lag Strategy initialized with STATIC CONFIGURATION")
+                self.strategy = ZeroLagStrategy(
+                    data_fetcher=self.data_fetcher,
+                    backtest_mode=True,
+                    pipeline_mode=False  # Disable MTF validation to match live scanner
+                )
+                self.logger.info("✅ Zero Lag Strategy initialized with STATIC CONFIGURATION (backtest mode)")
         except Exception as e:
             # Fallback in case optimal parameters fail
             self.logger.warning(f"❌ Failed to initialize with optimal parameters: {e}")
             self.logger.warning("   Falling back to standard initialization...")
-            self.strategy = ZeroLagStrategy(data_fetcher=self.data_fetcher)
-            self.logger.info("✅ Zero Lag Strategy initialized with FALLBACK CONFIGURATION")
+            self.strategy = ZeroLagStrategy(
+                data_fetcher=self.data_fetcher,
+                backtest_mode=True,
+                pipeline_mode=False  # Disable MTF validation to match live scanner
+            )
+            self.logger.info("✅ Zero Lag Strategy initialized with FALLBACK CONFIGURATION (backtest mode)")
         
         # Get strategy summary
         summary = self.strategy.get_strategy_summary()

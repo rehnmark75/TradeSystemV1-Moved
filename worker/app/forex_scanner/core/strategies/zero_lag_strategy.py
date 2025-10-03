@@ -53,7 +53,7 @@ class ZeroLagStrategy(BaseStrategy):
     - EMA200 validation delegated to TradeValidator for consistency
     """
     
-    def __init__(self, data_fetcher=None, epic=None, use_optimal_parameters=False, pipeline_mode=True):
+    def __init__(self, data_fetcher=None, backtest_mode: bool = False, epic=None, use_optimal_parameters=False, pipeline_mode=True):
         super().__init__('zero_lag_squeeze')
 
         # Initialize core components
@@ -61,8 +61,9 @@ class ZeroLagStrategy(BaseStrategy):
         self.data_fetcher = data_fetcher
         self.epic = epic
         self.use_optimal_parameters = use_optimal_parameters
+        self.backtest_mode = backtest_mode  # Track if running in backtest mode
         self.optimal_params = None  # Initialize to prevent AttributeError in base_strategy
-        
+
         # Enable/disable expensive features based on pipeline mode
         self.enhanced_validation = pipeline_mode and getattr(configdata, 'ZERO_LAG_ENHANCED_VALIDATION', True) if configdata else pipeline_mode
 
@@ -183,7 +184,7 @@ class ZeroLagStrategy(BaseStrategy):
             self.logger.info(f"   🎯 Min Confidence: {self.min_confidence:.1%}")
             self.logger.info(f"   🔍 Squeeze BB: {self.bb_length}/{self.bb_mult:.1f}")
             self.logger.info(f"   🔍 Squeeze KC: {self.kc_length}/{self.kc_mult:.1f}")
-            
+
         except Exception as e:
             self.logger.error(f"❌ Failed to load configuration: {e}")
             # Ultra-safe fallback
@@ -196,7 +197,11 @@ class ZeroLagStrategy(BaseStrategy):
             self.kc_mult = 1.5
             self.smart_money_enabled = False
             self.mtf_validation_enabled = False
-    
+
+        # Log backtest mode status after all initialization
+        if self.backtest_mode:
+            self.logger.info("🔥 BACKTEST MODE: Enhanced validation settings may differ from live")
+
     def get_strategy_metadata(self) -> Dict:
         """Get strategy configuration and optimization metadata"""
         return {
@@ -336,10 +341,17 @@ class ZeroLagStrategy(BaseStrategy):
                 return None
                 
             self.logger.debug(f"✅ Ribbon color matches: {signal_type} with trend={trend}")
-            
-            # EMA200 validation moved to TradeValidator for consistency across all strategies
+
+            # VALIDATION 2: SUPPORT/RESISTANCE PROXIMITY CHECK
             close = latest_row.get('close', 0)
-            
+            if not self._validate_sr_proximity(df, close, signal_type, epic):
+                self.logger.debug(f"❌ {signal_type} signal too close to S/R level")
+                return None
+
+            self.logger.debug(f"✅ S/R proximity check passed")
+
+            # EMA200 validation moved to TradeValidator for consistency across all strategies
+
             # VALIDATION 3: SQUEEZE MOMENTUM ALIGNMENT + NO SQUEEZE
             squeeze_momentum = latest_row.get('squeeze_momentum', 0)
             squeeze_on = latest_row.get('squeeze_on', False)
@@ -379,7 +391,10 @@ class ZeroLagStrategy(BaseStrategy):
             signal = self._create_base_signal(signal_type, epic, timeframe, latest_row, df, spread_pips)
 
             # VALIDATION 5: MULTI-TIMEFRAME ALIGNMENT (1H + 4H)
-            if self.data_fetcher:
+            # CRITICAL: Only run MTF validation if:
+            # 1. We have a data_fetcher (can fetch higher timeframe data)
+            # 2. enhanced_validation is enabled (not disabled for testing/live)
+            if self.data_fetcher and self.enhanced_validation:
                 import pandas as pd
                 current_timestamp = pd.Timestamp(signal['timestamp']) if isinstance(signal.get('timestamp'), str) else latest_row.name
                 if not isinstance(current_timestamp, pd.Timestamp):
@@ -485,6 +500,55 @@ class ZeroLagStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error(f"Error in three-component signal detection: {e}")
             return None
+
+    def _validate_sr_proximity(self, df: pd.DataFrame, current_price: float, signal_type: str, epic: str) -> bool:
+        """
+        Validate if signal is too close to support/resistance levels
+
+        Uses the indicator calculator's S/R proximity validation with volatility-aware distances.
+
+        Args:
+            df: DataFrame with OHLC data
+            current_price: Current price to check
+            signal_type: 'BULL' or 'BEAR'
+            epic: Trading pair epic
+
+        Returns:
+            True if signal is clear of S/R levels, False if too close
+        """
+        try:
+            # Check if S/R filter is enabled in config
+            try:
+                from configdata.strategies import config_zerolag_strategy
+                sr_filter_enabled = getattr(config_zerolag_strategy, 'ZERO_LAG_SR_FILTER_ENABLED', True)
+            except ImportError:
+                sr_filter_enabled = True  # Enabled by default
+
+            if not sr_filter_enabled:
+                self.logger.debug("S/R filter disabled in config")
+                return True
+
+            # Call indicator calculator's S/R validation
+            is_valid, reason, details = self.indicator_calculator.validate_sr_proximity(
+                df, current_price, signal_type, epic
+            )
+
+            if not is_valid:
+                self.logger.info(f"🚫 S/R FILTER: {signal_type} signal at {current_price:.5f} rejected - {reason}")
+                if details:
+                    level_key = 'resistance_level' if signal_type == 'BULL' else 'support_level'
+                    level = details.get(level_key, 0)
+                    distance = details.get('distance_pips', 0)
+                    min_req = details.get('min_required', 0)
+                    self.logger.info(f"   Level: {level:.5f}, Distance: {distance:.1f} pips, Required: {min_req:.1f} pips")
+            else:
+                self.logger.debug(f"✅ S/R check passed: {reason}")
+
+            return is_valid
+
+        except Exception as e:
+            self.logger.error(f"Error in S/R proximity validation: {e}")
+            return True  # Allow signal on error
 
     def _create_base_signal(self, signal_type: str, epic: str, timeframe: str, 
                            latest_row: pd.Series, df: pd.DataFrame, spread_pips: float) -> Dict:

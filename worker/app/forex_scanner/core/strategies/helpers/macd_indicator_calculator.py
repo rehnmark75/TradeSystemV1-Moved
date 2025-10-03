@@ -1976,13 +1976,25 @@ class MACDIndicatorCalculator:
             for idx in bear_signals[bear_signals].index:
                 price = df.loc[idx, 'close']
 
-                # Check if too close to any support level BELOW price (SELL signals fail near support below)
+                # SELL signals: Check BOTH resistance above AND support below
                 too_close = False
                 closest_distance = float('inf')
                 closest_level = None
+                level_type = None
 
+                # 1. Check if too close to resistance ABOVE (price might bounce back up)
+                for resistance in sr_levels['resistance']:
+                    if resistance > price:
+                        distance_pips = (resistance - price) / pip_size
+                        if distance_pips < min_distance_pips:
+                            too_close = True
+                            if distance_pips < closest_distance:
+                                closest_distance = distance_pips
+                                closest_level = resistance
+                                level_type = 'resistance above'
+
+                # 2. Check if too close to support BELOW (might block downward movement)
                 for support in sr_levels['support']:
-                    # Only check support BELOW current price
                     if support < price:
                         distance_pips = (price - support) / pip_size
                         if distance_pips < min_distance_pips:
@@ -1990,9 +2002,10 @@ class MACDIndicatorCalculator:
                             if distance_pips < closest_distance:
                                 closest_distance = distance_pips
                                 closest_level = support
+                                level_type = 'support below'
 
                 if too_close:
-                    self.logger.info(f"🚫 S/R PRE-FILTER: Rejected SELL signal at {price:.5f} - {closest_distance:.1f} pips above support {closest_level:.5f} (min: {min_distance_pips:.1f})")
+                    self.logger.info(f"🚫 S/R PRE-FILTER: Rejected SELL signal at {price:.5f} - {closest_distance:.1f} pips from {level_type} {closest_level:.5f} (min: {min_distance_pips:.1f})")
                     filtered_bear.loc[idx] = False
 
             final_bull = filtered_bull.sum()
@@ -2012,73 +2025,126 @@ class MACDIndicatorCalculator:
     
     def _calculate_simple_sr_levels(self, df: pd.DataFrame, lookback: int = 100) -> Dict:
         """
-        IMPROVED: Calculate support/resistance levels using 10-bar pivot points
+        Calculate support/resistance levels for LIVE TRADING & BACKTESTING
 
-        Uses a 10-bar lookback window to identify stronger, more significant S/R levels
-        that are more likely to hold and affect price action.
+        REALISTIC TRADING LOGIC: Only look LEFT (historical data)
+        - Find local highs that are higher than N bars to the left
+        - Find local lows that are lower than N bars to the left
+        - Include recent highs/lows as primary levels (most relevant)
+
+        This works correctly for BOTH:
+        - Live trading: We don't have future bars
+        - Backtesting: Each bar only sees historical data (bar-by-bar simulation)
 
         Args:
-            df: DataFrame with OHLC data
-            lookback: Number of bars to look back for pivots (default 100)
+            df: DataFrame with OHLC data (up to current bar only)
+            lookback: Number of bars to look back (default 100)
 
         Returns:
             Dictionary with support and resistance levels
         """
         try:
-            if len(df) < 50:
+            if len(df) < 20:
                 return {'support': [], 'resistance': []}
 
             # Use last N bars for S/R calculation
             recent_df = df.tail(min(lookback, len(df)))
 
-            # IMPROVED: Use 10-bar lookback for pivot detection (stronger levels)
-            pivot_window = 10
+            # Number of bars to look LEFT for pivot detection
+            left_bars = 10
 
-            # Find swing highs (resistance)
+            # Find swing highs (resistance) - only check LEFT side
             resistance_levels = []
-            for i in range(pivot_window, len(recent_df) - pivot_window):
+
+            # Start from left_bars to end (we can always look left)
+            for i in range(left_bars, len(recent_df)):
                 high = recent_df.iloc[i]['high']
 
-                # Check if this is a swing high (higher than 10 bars before and after)
+                # Check if this is higher than the previous left_bars
                 is_swing_high = True
-                for j in range(i - pivot_window, i):
+                for j in range(i - left_bars, i):
                     if recent_df.iloc[j]['high'] >= high:
                         is_swing_high = False
                         break
 
                 if is_swing_high:
-                    for j in range(i + 1, min(i + pivot_window + 1, len(recent_df))):
-                        if recent_df.iloc[j]['high'] >= high:
-                            is_swing_high = False
-                            break
-
-                if is_swing_high:
                     resistance_levels.append(float(high))
 
-            # Find swing lows (support)
+            # Find swing lows (support) - only check LEFT side
             support_levels = []
-            for i in range(pivot_window, len(recent_df) - pivot_window):
+
+            # Start from left_bars to end (we can always look left)
+            for i in range(left_bars, len(recent_df)):
                 low = recent_df.iloc[i]['low']
 
-                # Check if this is a swing low (lower than 10 bars before and after)
+                # Check if this is lower than the previous left_bars
                 is_swing_low = True
-                for j in range(i - pivot_window, i):
+                for j in range(i - left_bars, i):
                     if recent_df.iloc[j]['low'] <= low:
                         is_swing_low = False
                         break
 
                 if is_swing_low:
-                    for j in range(i + 1, min(i + pivot_window + 1, len(recent_df))):
-                        if recent_df.iloc[j]['low'] <= low:
-                            is_swing_low = False
-                            break
-
-                if is_swing_low:
                     support_levels.append(float(low))
 
-            # Remove duplicates and keep most recent levels
-            support_levels = sorted(list(set(support_levels)))[-10:]  # Keep top 10 most recent
-            resistance_levels = sorted(list(set(resistance_levels)))[-10:]
+            # CRITICAL: Cluster nearby levels to avoid too many S/R levels
+            # Merge levels within 0.2% of each other (they're essentially the same level)
+            def cluster_levels(levels, tolerance=0.002):
+                if not levels:
+                    return []
+
+                sorted_levels = sorted(levels)
+                clustered = []
+                current_cluster = [sorted_levels[0]]
+
+                for level in sorted_levels[1:]:
+                    # If within tolerance of current cluster, add to cluster
+                    if abs(level - current_cluster[0]) / current_cluster[0] < tolerance:
+                        current_cluster.append(level)
+                    else:
+                        # Save average of cluster and start new cluster
+                        clustered.append(sum(current_cluster) / len(current_cluster))
+                        current_cluster = [level]
+
+                # Don't forget the last cluster
+                if current_cluster:
+                    clustered.append(sum(current_cluster) / len(current_cluster))
+
+                return clustered
+
+            # Cluster nearby levels
+            resistance_levels = cluster_levels(resistance_levels)
+            support_levels = cluster_levels(support_levels)
+
+            # ALWAYS include the most recent high and low (last 20 bars)
+            # These are the most relevant for immediate trading decisions
+            recent_bars = min(20, len(recent_df))
+            recent_high = float(recent_df.tail(recent_bars)['high'].max())
+            recent_low = float(recent_df.tail(recent_bars)['low'].min())
+
+            # Add recent high if not already in list (within 0.2% tolerance)
+            add_recent_high = True
+            for r in resistance_levels:
+                if abs(recent_high - r) / recent_high < 0.002:
+                    add_recent_high = False
+                    break
+            if add_recent_high:
+                resistance_levels.append(recent_high)
+
+            # Add recent low if not already in list (within 0.2% tolerance)
+            add_recent_low = True
+            for s in support_levels:
+                if abs(recent_low - s) / recent_low < 0.002:
+                    add_recent_low = False
+                    break
+            if add_recent_low:
+                support_levels.append(recent_low)
+
+            # Keep only the most significant levels (max 5 each)
+            resistance_levels = sorted(resistance_levels)[-5:]
+            support_levels = sorted(support_levels)[:5]  # Take lowest 5 support levels
+
+            self.logger.debug(f"S/R levels found: {len(resistance_levels)} resistance, {len(support_levels)} support")
 
             return {
                 'support': support_levels,
