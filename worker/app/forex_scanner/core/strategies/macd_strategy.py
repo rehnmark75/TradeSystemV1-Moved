@@ -373,13 +373,12 @@ class MACDStrategy(BaseStrategy):
             
             self.logger.debug(f"Processing {len(df)} bars for {epic}")
 
-            # 0. Check cache first for performance optimization - TEMPORARILY DISABLED FOR TESTING
-            # cached_df = self._get_cached_enhanced_df(epic, df)
-            # if cached_df is not None:
-            #     self.logger.debug(f"⚡ [CACHE] Using cached enhanced DataFrame for {epic}")
-            #     df_enhanced = cached_df
-            # else:
-            if True:  # Force recalculation
+            # 0. Check cache first for performance optimization
+            cached_df = self._get_cached_enhanced_df(epic, df)
+            if cached_df is not None:
+                self.logger.debug(f"⚡ [CACHE] Using cached enhanced DataFrame for {epic}")
+                df_enhanced = cached_df
+            else:
                 # 1. Check if MACD indicators already exist (from data_fetcher optimization)
                 required_macd_cols = ['macd_line', 'macd_signal', 'macd_histogram']
                 macd_exists = all(col in df.columns for col in required_macd_cols)
@@ -514,8 +513,9 @@ class MACDStrategy(BaseStrategy):
                             signal_type_str = 'BULL' if bull_alert else 'BEAR'
                             self.logger.info(f"🎯 MACD Alert found {i} bars ago (at {bar_time})! {epic}: Bull={bull_alert}, Bear={bear_alert}")
 
-                            # Validate using LATEST row data (current price/indicators), but acknowledge crossover from recent bar
-                            signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df), signal_type=signal_type_str)
+                            # CRITICAL: Validate using crossover bar's data (matches backtest behavior)
+                            # This ensures backtest and live use identical validation logic
+                            signal = self._check_immediate_signal(row, epic, timeframe, spread_pips, len(df), signal_type=signal_type_str)
                             if signal:
                                 self.logger.info(f"✅ Delayed MACD {signal_type_str} signal validated from {i} bars ago")
                                 return signal
@@ -583,10 +583,10 @@ class MACDStrategy(BaseStrategy):
             if has_bull_alert:
                 self.logger.debug(f"Validating BULL crossover for {epic} at bar {bar_count}")
                 
-                # EMA 200 trend filter - CRITICAL SAFETY FILTER RESTORED
-                if not self.trend_validator.validate_ema_200_trend(latest_row, 'BULL'):
-                    self.logger.info("❌ MACD BULL signal REJECTED: Price below EMA 200 (against major trend)")
-                    return None
+                # EMA 200 trend filter - DISABLED (MACD is momentum strategy, can trade counter-trend)
+                # if not self.trend_validator.validate_ema_200_trend(latest_row, 'BULL'):
+                #     self.logger.info("❌ MACD BULL signal REJECTED: Price below EMA 200 (against major trend)")
+                #     return None
 
                 # Validate MACD histogram direction
                 if not self.trend_validator.validate_macd_histogram_direction(latest_row, 'BULL'):
@@ -605,13 +605,13 @@ class MACDStrategy(BaseStrategy):
                     self.logger.info(f"❌ MACD BULL signal REJECTED: ADX trend strength insufficient (ADX < {min_adx}, ranging market)")
                     return None
 
-                # PHASE 2: Market regime classification and adaptive validation - DISABLED FOR TESTING
-                # market_regime = self.trend_validator.classify_market_regime(latest_row)
-                # if market_regime['recommendation'] == 'avoid_trading':
-                #     self.logger.info(f"❌ MACD BULL signal REJECTED: Unfavorable market regime ({market_regime['regime']})")
-                #     return None
-                # elif market_regime['recommendation'] == 'trade_conservatively':
-                #     self.logger.info(f"⚠️ MACD BULL signal: Conservative regime ({market_regime['regime']}) - higher quality required")
+                # PHASE 2: Market regime classification and adaptive validation
+                market_regime = self.trend_validator.classify_market_regime(latest_row)
+                if market_regime['recommendation'] == 'avoid_trading':
+                    self.logger.info(f"❌ MACD BULL signal REJECTED: Unfavorable market regime ({market_regime['regime']})")
+                    return None
+                elif market_regime['recommendation'] == 'trade_conservatively':
+                    self.logger.info(f"⚠️ MACD BULL signal: Conservative regime ({market_regime['regime']}) - higher quality required")
                 
                 # Optional: Multi-timeframe validation (only in pipeline mode)
                 mtf_passed = True
@@ -640,10 +640,10 @@ class MACDStrategy(BaseStrategy):
             if has_bear_alert:
                 self.logger.debug(f"🎯 MACD BEAR crossover detected at bar {bar_count}")
                 
-                # EMA 200 trend filter - CRITICAL SAFETY FILTER RESTORED
-                if not self.trend_validator.validate_ema_200_trend(latest_row, 'BEAR'):
-                    self.logger.info("❌ MACD BEAR signal REJECTED: Price above EMA 200 (against major trend)")
-                    return None
+                # EMA 200 trend filter - DISABLED (MACD is momentum strategy, can trade counter-trend)
+                # if not self.trend_validator.validate_ema_200_trend(latest_row, 'BEAR'):
+                #     self.logger.info("❌ MACD BEAR signal REJECTED: Price above EMA 200 (against major trend)")
+                #     return None
 
                 # Validate MACD histogram direction
                 if not self.trend_validator.validate_macd_histogram_direction(latest_row, 'BEAR'):
@@ -662,13 +662,13 @@ class MACDStrategy(BaseStrategy):
                     self.logger.info(f"❌ MACD BEAR signal REJECTED: ADX trend strength insufficient (ADX < {min_adx}, ranging market)")
                     return None
 
-                # PHASE 2: Market regime classification and adaptive validation - DISABLED FOR TESTING
-                # market_regime = self.trend_validator.classify_market_regime(latest_row)
-                # if market_regime['recommendation'] == 'avoid_trading':
-                #     self.logger.info(f"❌ MACD BEAR signal REJECTED: Unfavorable market regime ({market_regime['regime']})")
-                #     return None
-                # elif market_regime['recommendation'] == 'trade_conservatively':
-                #     self.logger.info(f"⚠️ MACD BEAR signal: Conservative regime ({market_regime['regime']}) - higher quality required")
+                # PHASE 2: Market regime classification and adaptive validation
+                market_regime = self.trend_validator.classify_market_regime(latest_row)
+                if market_regime['recommendation'] == 'avoid_trading':
+                    self.logger.info(f"❌ MACD BEAR signal REJECTED: Unfavorable market regime ({market_regime['regime']})")
+                    return None
+                elif market_regime['recommendation'] == 'trade_conservatively':
+                    self.logger.info(f"⚠️ MACD BEAR signal: Conservative regime ({market_regime['regime']}) - higher quality required")
                 
                 # Optional: Multi-timeframe validation (only in pipeline mode)
                 mtf_passed = True

@@ -654,7 +654,7 @@ EPIC_MAP = {
 
 # Trading blacklist - epics to scan but NOT trade
 TRADING_BLACKLIST = {
-    "CS.D.EURUSD.CEEM.IP": "No trading permissions for FX_NOR exchange",
+    #"CS.D.EURUSD.CEEM.IP": "No trading permissions for FX_NOR exchange",
     # Add other blocked epics here as needed
 }
 

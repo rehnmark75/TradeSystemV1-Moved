@@ -82,11 +82,11 @@ MACD_MTF_CONFIG = {
 MACD_MOMENTUM_CONFIRMATION_ENABLED = True      # Enable delayed confirmation system
 MACD_CONFIRMATION_WINDOW = 3                   # Bars to wait for momentum after crossover
 MACD_MOMENTUM_MULTIPLIER = 1.5                 # Histogram must grow 1.5x from crossover
-MACD_ALLOW_DELAYED_SIGNALS = True              # Allow signals after crossover
+MACD_ALLOW_DELAYED_SIGNALS = False             # PHASE 1: Disable delayed signals for immediate entry
 MACD_CONTINUATION_ENABLED = True               # Enable strong momentum without crossover
 MACD_CONTINUATION_MULTIPLIER = 2.0             # Threshold multiplier for continuation (2x normal)
 MACD_TRACK_WEAK_CROSSOVERS = True             # Track crossovers that don't meet threshold
-MACD_CONFIRMATION_LOOKBACK = 20                 # Bars to prevent duplicate confirmations (increased for testing)
+MACD_CONFIRMATION_LOOKBACK = 1                  # PHASE 1: Only check latest bar (immediate signals only)
 
 # RSI Momentum Confirmation for MACD
 MACD_RSI_FILTER_ENABLED = True                     # Enable RSI momentum confirmation for MACD signals
@@ -116,9 +116,9 @@ MACD_TREND_EMA_PERIOD = 50               # EMA period for trend context (not man
 MACD_TREND_ALIGNMENT_BOOST = 0.10        # Confidence boost if aligned with trend
 
 # Market Regime Filter - Critical for momentum strategies
-MACD_ENABLE_REGIME_FILTER = False        # Filter out unfavorable market conditions - DISABLED FOR TESTING
-MACD_MIN_ADX = 0                         # Minimum trend strength (disabled for testing delayed signals)
-MACD_MIN_ATR_RATIO = 0.7                 # Current ATR > 0.7x baseline (momentum needs volatility)
+MACD_ENABLE_REGIME_FILTER = True         # Filter out unfavorable market conditions
+MACD_MIN_ADX = 25                        # PHASE 2: Increase to 25 (stronger trend requirement)
+MACD_MIN_ATR_RATIO = 0.8                 # PHASE 2: Increase to 0.8 (require higher volatility)
 MACD_MIN_EMA_SEPARATION = 0.2            # Price distance from EMA (in ATR units)
 
 # Confirmation Requirements - Strengthen signal quality
@@ -126,8 +126,8 @@ MACD_MIN_CONFIRMATIONS = 2               # Require 2 confirmations (MACD + RSI m
 MACD_CONFIRMATION_TYPES = ['macd_histogram', 'rsi_momentum', 'volume', 'price_action']
 
 # Risk Management - ATR-based stops for momentum
-MACD_STOP_LOSS_ATR_MULTIPLIER = 2.5      # Wider stops for momentum trades
-MACD_TAKE_PROFIT_ATR_MULTIPLIER = 3.0    # Larger targets for momentum (2.5:3.0 = 1:1.2 R:R)
+MACD_STOP_LOSS_ATR_MULTIPLIER = 1.8      # PHASE 1: Tighter stops (immediate entries allow closer stops)
+MACD_TAKE_PROFIT_ATR_MULTIPLIER = 4.0    # PHASE 1: Wider targets for better R:R (1.8:4.0 = 1:2.22 R:R)
 
 # Pair-Specific Parameters
 MACD_PAIR_SPECIFIC_PARAMS = {
@@ -160,8 +160,8 @@ MACD_PAIR_SPECIFIC_PARAMS = {
 # Structure-Based Stop Placement
 MACD_USE_STRUCTURE_STOPS = True          # Place stops beyond recent swing points
 MACD_STRUCTURE_LOOKBACK_BARS = 20        # Look back 20 bars for swing highs/lows
-MACD_MIN_STOP_DISTANCE_PIPS = 15.0       # Minimum stop distance (increased from 8.0 - was dangerously tight)
-MACD_MAX_STOP_DISTANCE_PIPS = 45.0       # Maximum stop distance (increased from 30.0 for wider range)
+MACD_MIN_STOP_DISTANCE_PIPS = 12.0       # PHASE 1: Reduced minimum (immediate entries don't need wide stops)
+MACD_MAX_STOP_DISTANCE_PIPS = 30.0       # PHASE 1: Reduced maximum (tighter risk control)
 MACD_STRUCTURE_BUFFER_PIPS = 2.0         # Buffer beyond swing point
 
 # Enhanced Confidence Calculation Factors
@@ -242,7 +242,7 @@ MACD_FILTER_PRESETS = {
 }
 
 # Current active preset (can be changed by user)
-ACTIVE_MACD_PRESET = 'balanced'  # Default to optimized balanced preset
+ACTIVE_MACD_PRESET = 'conservative'  # PHASE 2: Switch to high-quality signals
 
 # Legacy Safety Preset Configurations (kept for compatibility)
 MACD_SAFETY_PRESETS = {
