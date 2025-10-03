@@ -387,21 +387,21 @@ class MACDIndicatorCalculator:
             # Each pair has different MACD histogram scales
             # Target: ~15-25 validated signals/week total (2-4/day)
             pair_thresholds = {
-                # JPY pairs - ULTRA RELAXED for blocked pairs
-                'EURJPY': 0.00150,   # ULTRA LOW: Generate many crossovers, let filters work
-                'AUDJPY': 0.00300,   # ✅ WORKING (93 signals)
-                'USDJPY': 0.00350,   # ✅ WORKING (63 signals)
+                # JPY pairs - FINAL CALIBRATED
+                'EURJPY': 0.00150,   # ✅ WORKING (26 crossovers, 1 validated)
+                'AUDJPY': 0.00300,   # ✅ WORKING (292 crossovers)
+                'USDJPY': 0.00350,   # ✅ WORKING (254 crossovers, 4 validated)
                 'GBPJPY': 0.00300,   # Moderate
                 'NZDJPY': 0.00300,   # Moderate
                 'CADJPY': 0.00300,   # Moderate
                 'CHFJPY': 0.00300,   # Moderate
-                # Major pairs - ULTRA RELAXED for blocked pairs
-                'EURUSD': 0.000002,  # ULTRA LOW: Generate many crossovers, let filters work
-                'GBPUSD': 0.000025,  # ✅ WORKING (87 signals)
-                'AUDUSD': 0.000005,  # ✅ WORKING (33 signals)
-                'NZDUSD': 0.000002,  # ULTRA LOW: Generate many crossovers, let filters work
-                'USDCHF': 0.000002,  # ULTRA LOW: Generate many crossovers, let filters work
-                'USDCAD': 0.000020,  # ✅ WORKING (9 signals)
+                # Major pairs - FINAL CALIBRATED (EXTREME LOW for last 3 pairs)
+                'EURUSD': 0.000001,  # EXTREME: Last attempt for this pair
+                'GBPUSD': 0.000025,  # ✅ WORKING (298 crossovers, 10 validated)
+                'AUDUSD': 0.000005,  # ✅ WORKING (66 crossovers)
+                'NZDUSD': 0.000001,  # EXTREME: Last attempt for this pair
+                'USDCHF': 0.000001,  # EXTREME: Last attempt for this pair
+                'USDCAD': 0.000020,  # ✅ WORKING (34 crossovers)
             }
 
             # Find matching pair
