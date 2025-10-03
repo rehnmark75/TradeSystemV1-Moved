@@ -263,13 +263,13 @@ class RangingMarketStrategy(BaseStrategy):
             # Add required indicators if not present
             df = self._ensure_indicators(df)
 
-            # Market regime filtering - only trade in ranging conditions
-            is_ranging = self._is_ranging_market(df)
-            if not is_ranging:
-                latest_row = df.iloc[-1]
-                adx = latest_row.get('adx', 25)
-                self.logger.info(f"⏭️  Market trending (ADX: {adx:.1f}) - skipping {epic}")
-                return None
+            # Market regime filtering - DISABLED to allow strategy to run in all conditions
+            # is_ranging = self._is_ranging_market(df)
+            # if not is_ranging:
+            #     latest_row = df.iloc[-1]
+            #     adx = latest_row.get('adx', 25)
+            #     self.logger.info(f"⏭️  Market trending (ADX: {adx:.1f}) - skipping {epic}")
+            #     return None
 
             # Calculate oscillator signals
             oscillator_signals = self._calculate_oscillator_signals(df)

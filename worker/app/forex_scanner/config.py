@@ -388,7 +388,7 @@ ICHIMOKU_CLOUD_STRATEGY = True  # Ichimoku Kinko Hyo strategy
 MEAN_REVERSION_STRATEGY = True  # Multi-oscillator mean reversion strategy
 
 # Strategy Configurations - Additional strategies
-RANGING_MARKET_STRATEGY = True  # Multi-oscillator ranging market strategy
+RANGING_MARKET_STRATEGY = True  # Multi-oscillator ranging market strategy - Re-enabled, ADX filter removed from strategy
 
 # KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
 

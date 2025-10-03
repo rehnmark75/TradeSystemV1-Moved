@@ -348,16 +348,16 @@ class BaseStrategy(ABC):
         # IMPROVED: Only use DB params if they're based on recent optimization (not static defaults)
         use_db_params = False
         if self.optimal_params and hasattr(self.optimal_params, 'last_optimized'):
-            # Only use if optimized in last 30 days (otherwise use dynamic ATR)
+            # IMPROVED: Only use if optimized in last 14 days (stricter freshness requirement)
             from datetime import datetime, timedelta
             if self.optimal_params.last_optimized and \
-               (datetime.utcnow() - self.optimal_params.last_optimized) < timedelta(days=30):
+               (datetime.utcnow() - self.optimal_params.last_optimized) < timedelta(days=14):
                 stop_distance = int(self.optimal_params.stop_loss_pips)
                 limit_distance = int(self.optimal_params.take_profit_pips)
                 use_db_params = True
                 logger.info(f"{self.name}: Using recent optimal params from DB - SL={stop_distance}, TP={limit_distance}")
             else:
-                logger.info(f"{self.name}: DB params outdated, using dynamic ATR calculation")
+                logger.info(f"{self.name}: DB params outdated (>14 days), using dynamic ATR calculation")
 
         if not use_db_params:
             # Calculate based on ATR with 2.0x multiplier (more conservative than dev-app's 1.5x)

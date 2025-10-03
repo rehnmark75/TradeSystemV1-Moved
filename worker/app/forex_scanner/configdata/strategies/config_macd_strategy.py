@@ -86,7 +86,7 @@ MACD_ALLOW_DELAYED_SIGNALS = True              # Allow signals after crossover
 MACD_CONTINUATION_ENABLED = True               # Enable strong momentum without crossover
 MACD_CONTINUATION_MULTIPLIER = 2.0             # Threshold multiplier for continuation (2x normal)
 MACD_TRACK_WEAK_CROSSOVERS = True             # Track crossovers that don't meet threshold
-MACD_CONFIRMATION_LOOKBACK = 5                 # Bars to prevent duplicate confirmations
+MACD_CONFIRMATION_LOOKBACK = 20                 # Bars to prevent duplicate confirmations (increased for testing)
 
 # RSI Momentum Confirmation for MACD
 MACD_RSI_FILTER_ENABLED = True                     # Enable RSI momentum confirmation for MACD signals
@@ -116,8 +116,8 @@ MACD_TREND_EMA_PERIOD = 50               # EMA period for trend context (not man
 MACD_TREND_ALIGNMENT_BOOST = 0.10        # Confidence boost if aligned with trend
 
 # Market Regime Filter - Critical for momentum strategies
-MACD_ENABLE_REGIME_FILTER = True         # Filter out unfavorable market conditions
-MACD_MIN_ADX = 20                        # Minimum trend strength (lower than trend-following)
+MACD_ENABLE_REGIME_FILTER = False        # Filter out unfavorable market conditions - DISABLED FOR TESTING
+MACD_MIN_ADX = 0                         # Minimum trend strength (disabled for testing delayed signals)
 MACD_MIN_ATR_RATIO = 0.7                 # Current ATR > 0.7x baseline (momentum needs volatility)
 MACD_MIN_EMA_SEPARATION = 0.2            # Price distance from EMA (in ATR units)
 

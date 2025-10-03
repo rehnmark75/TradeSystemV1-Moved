@@ -726,10 +726,12 @@ class SignalDetector:
                     self.logger.error(f"❌ [EMA STRATEGY] Error for {epic}: {e}")
                     individual_results['ema'] = None
             
-            # 2. MACD Strategy  
-            if getattr(config, 'MACD_STRATEGY', True):
+            # 2. MACD Strategy
+            macd_enabled = getattr(config, 'MACD_STRATEGY', True)
+            self.logger.info(f"🔍 [DEBUG] MACD_STRATEGY config={macd_enabled} for {epic}")
+            if macd_enabled:
                 try:
-                    self.logger.debug(f"🔍 [MACD STRATEGY] Starting detection for {epic}")
+                    self.logger.info(f"🔍 [MACD STRATEGY] Starting detection for {epic}")
                     macd_signal = self.detect_macd_ema_signals(epic, pair, spread_pips, timeframe)
                     
                     # 🔧 NEW: Store result for combined strategy
@@ -1036,10 +1038,12 @@ class SignalDetector:
                     self.logger.error(f"❌ [EMA STRATEGY] Error for {epic}: {e}")
                     individual_results['ema'] = None
             
-            # 2. MACD Strategy  
-            if getattr(config, 'MACD_STRATEGY', True):
+            # 2. MACD Strategy
+            macd_enabled = getattr(config, 'MACD_STRATEGY', True)
+            self.logger.info(f"🔍 [DEBUG] MACD_STRATEGY config={macd_enabled} for {epic}")
+            if macd_enabled:
                 try:
-                    self.logger.debug(f"🔍 [MACD STRATEGY] Starting detection for {epic}")
+                    self.logger.info(f"🔍 [MACD STRATEGY] Starting detection for {epic}")
                     macd_signal = self.detect_macd_ema_signals(epic, pair, spread_pips, timeframe)
                     
                     individual_results['macd'] = macd_signal

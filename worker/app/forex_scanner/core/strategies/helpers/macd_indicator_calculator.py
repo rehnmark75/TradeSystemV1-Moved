@@ -287,9 +287,11 @@ class MACDIndicatorCalculator:
             # if volatility_filter_applied is not None:
             #     bull_cross, bear_cross = volatility_filter_applied
 
-            # 🎯 NEW: SUPPORT/RESISTANCE PRE-FILTER - Improve signal quality by avoiding bad levels
-            # This prevents 66% rejection rate at validation stage
-            bull_cross, bear_cross = self._apply_sr_level_filter(df_copy, bull_cross, bear_cross, epic)
+            # 🎯 NEW: SUPPORT/RESISTANCE PRE-FILTER - DISABLED (too aggressive, blocking all signals)
+            # bull_cross, bear_cross = self._apply_sr_level_filter(df_copy, bull_cross, bear_cross, epic)
+
+            # 🎯 NEW: HISTOGRAM DIVERGENCE FILTER - DISABLED (too aggressive, blocking all signals)
+            # bull_cross, bear_cross = self._apply_histogram_divergence_filter(df_copy, bull_cross, bear_cross, epic)
 
             # Log basic info for debugging
             bull_count = bull_cross.sum()
@@ -298,9 +300,10 @@ class MACDIndicatorCalculator:
 
             # CRITICAL FIX: Use the SAME volatility-aware signal limiter for both backtest and live
             # This ensures backtest results match what would happen in live trading
-            bull_cross, bear_cross = self._apply_global_signal_limiter(
-                df_copy, bull_cross, bear_cross, epic, volatility_metrics
-            )
+            # TEMPORARILY DISABLED FOR TESTING - keeping all crossovers
+            # bull_cross, bear_cross = self._apply_global_signal_limiter(
+            #     df_copy, bull_cross, bear_cross, epic, volatility_metrics
+            # )
 
             final_bull_count = bull_cross.sum()
             final_bear_count = bear_cross.sum()
@@ -342,14 +345,14 @@ class MACDIndicatorCalculator:
         """
         Get MACD histogram strength threshold with volatility-adaptive scaling
 
-        Base thresholds:
-        - JPY pairs: 0.00005 (calibrated from actual data)
-        - Non-JPY pairs: 0.00002 (calibrated from actual data)
+        Base thresholds (original balanced values):
+        - JPY pairs: 0.00005 - baseline for JPY volatility
+        - Other pairs: 0.00002 - baseline for major pairs
 
         Volatility multipliers (if metrics provided):
-        - HIGH VOLATILITY (ATR > 90th percentile or ATR% > 0.8%): 2.0x stricter
-        - NORMAL VOLATILITY (ATR% 0.5-0.8%): 1.0x standard
-        - LOW VOLATILITY (ATR% < 0.5%): 0.7x more permissive
+        - HIGH VOLATILITY (ATR > 90th percentile or ATR% > 0.8%): 2.0x
+        - NORMAL VOLATILITY (ATR% 0.5-0.8%): 1.0x baseline
+        - LOW VOLATILITY (ATR% < 0.5%): 0.7x - permissive for good signals
 
         Args:
             epic: Trading pair epic (e.g., 'CS.D.USDJPY.MINI.IP')
@@ -360,7 +363,7 @@ class MACDIndicatorCalculator:
             Volatility-adjusted histogram strength threshold
         """
         try:
-            # Base thresholds by pair type
+            # Original balanced thresholds (REVERTED)
             if 'JPY' in epic.upper():
                 base_threshold = 0.00005  # JPY pairs
                 pair_type = 'JPY'
@@ -368,22 +371,22 @@ class MACDIndicatorCalculator:
                 base_threshold = 0.00002  # Major pairs
                 pair_type = 'Major'
 
-            # VOLATILITY-ADAPTIVE SCALING
+            # Original volatility-adaptive scaling (REVERTED)
             if volatility_metrics and close_price:
                 # Calculate ATR as percentage of price
                 atr_pct = (volatility_metrics.atr / close_price) * 100
 
-                # Determine regime and multiplier
+                # Original regime multipliers
                 if atr_pct > 0.8 or volatility_metrics.atr_percentile > 90:
-                    # HIGH VOLATILITY - Require stronger signals to avoid noise
+                    # HIGH VOLATILITY
                     multiplier = 2.0
                     regime_name = "HIGH_VOL"
                 elif atr_pct > 0.5:
-                    # NORMAL VOLATILITY - Standard detection
+                    # NORMAL VOLATILITY
                     multiplier = 1.0
                     regime_name = "NORMAL"
                 else:
-                    # LOW VOLATILITY - Accept weaker signals (less noise)
+                    # LOW VOLATILITY
                     multiplier = 0.7
                     regime_name = "LOW_VOL"
 
@@ -1085,89 +1088,89 @@ class MACDIndicatorCalculator:
     def _apply_multi_candle_confirmation(self, df: pd.DataFrame, raw_signals: pd.Series, signal_type: str, epic: str) -> pd.Series:
         """
         Apply multi-candle confirmation like EMA strategy to reduce false MACD signals
-        
+
         Requires the MACD condition to be sustained for multiple consecutive candles
         before confirming the signal. This dramatically reduces false breakouts.
-        
+
         Args:
             df: DataFrame with MACD indicator data
             raw_signals: Boolean series of initial MACD crossover signals
-            signal_type: 'BULL' or 'BEAR' 
+            signal_type: 'BULL' or 'BEAR'
             epic: Trading pair epic
-            
+
         Returns:
             Confirmed signal series with multi-candle validation
         """
         try:
             if raw_signals.sum() == 0:
                 return raw_signals
-            
-            # Configuration - balanced candle confirmation for MACD
+
+            # Configuration - balanced candle confirmation for MACD (REVERTED)
             confirmation_candles = 2  # Back to 2 candles for balance
             confirmed_signals = pd.Series(False, index=raw_signals.index)
-            
+
             # Check each potential signal for multi-candle confirmation
             signal_indices = raw_signals[raw_signals].index
-            
+
             for signal_idx in signal_indices:
                 signal_position = df.index.get_loc(signal_idx)
-                
+
                 # Ensure we have enough future candles to check
                 if signal_position + confirmation_candles >= len(df):
                     continue
-                
+
                 # Get the candles following the signal (including signal candle)
                 check_start = signal_position
                 check_end = signal_position + confirmation_candles + 1
                 confirmation_candles_data = df.iloc[check_start:check_end]
-                
+
                 if signal_type == 'BULL':
                     # For bull signals: MACD histogram should stay positive for confirmation_candles
                     histogram_positive = (confirmation_candles_data['macd_histogram'] > 0).sum()
-                    
+
                     # Also check for momentum building (histogram increasing)
                     if len(confirmation_candles_data) >= 2:
                         momentum_building = (
-                            confirmation_candles_data['macd_histogram'].iloc[-1] > 
+                            confirmation_candles_data['macd_histogram'].iloc[-1] >
                             confirmation_candles_data['macd_histogram'].iloc[0]
                         )
                     else:
                         momentum_building = True
-                    
+
                     # Require at least 75% of candles to maintain positive histogram (balanced)
                     confirmation_strength = histogram_positive / len(confirmation_candles_data)
                     is_confirmed = confirmation_strength >= 0.75 and momentum_building  # Balanced between 0.7 and 0.85
-                    
+
                 else:  # BEAR
                     # For bear signals: MACD histogram should stay negative for confirmation_candles
                     histogram_negative = (confirmation_candles_data['macd_histogram'] < 0).sum()
-                    
+
                     # Also check for momentum building (histogram becoming more negative)
                     if len(confirmation_candles_data) >= 2:
                         momentum_building = (
-                            confirmation_candles_data['macd_histogram'].iloc[-1] < 
+                            confirmation_candles_data['macd_histogram'].iloc[-1] <
                             confirmation_candles_data['macd_histogram'].iloc[0]
                         )
                     else:
                         momentum_building = True
-                    
+
                     # Require at least 75% of candles to maintain negative histogram (balanced)
                     confirmation_strength = histogram_negative / len(confirmation_candles_data)
                     is_confirmed = confirmation_strength >= 0.75 and momentum_building  # Balanced between 0.7 and 0.85
-                
+
                 if is_confirmed:
                     confirmed_signals.loc[signal_idx] = True
                     self.logger.debug(f"Multi-candle confirmation: {signal_type} signal at {signal_idx} confirmed (strength: {confirmation_strength:.1%})")
-            
+
             # Log confirmation results
             original_count = raw_signals.sum()
             confirmed_count = confirmed_signals.sum()
             reduction_pct = ((original_count - confirmed_count) / max(original_count, 1)) * 100
-            
+
             self.logger.debug(f"Multi-candle confirmation for {epic}: {signal_type} signals reduced from {original_count} to {confirmed_count} ({reduction_pct:.1f}% reduction)")
-            
+
             return confirmed_signals
-            
+
         except Exception as e:
             self.logger.error(f"Error in multi-candle confirmation: {e}")
             return raw_signals  # Return original signals if error
@@ -1847,161 +1850,295 @@ class MACDIndicatorCalculator:
             return bull_signals, bear_signals
     def _apply_sr_level_filter(self, df: pd.DataFrame, bull_signals: pd.Series, bear_signals: pd.Series, epic: str) -> tuple:
         """
-        PRE-FILTER: Remove signals that would fail S/R validation
-        
+        IMPROVED: PRE-FILTER with volatility-aware distances and enhanced S/R detection
+
         This improves signal quality by rejecting bad signals BEFORE they go through
         the full validation pipeline, improving validation rate from 33% to 70%+
-        
+
+        Improvements:
+        - Volatility-aware minimum distance (scales with ATR)
+        - Enhanced S/R detection with 10-bar lookback
+        - Stricter filtering near key levels
+
         Args:
             df: DataFrame with OHLC data
             bull_signals: Boolean series of bull signals
             bear_signals: Boolean series of bear signals
             epic: Trading pair epic
-            
+
         Returns:
             tuple: (filtered_bull_signals, filtered_bear_signals)
         """
         try:
             original_bull = bull_signals.sum()
             original_bear = bear_signals.sum()
-            
+
             if original_bull == 0 and original_bear == 0:
                 return bull_signals, bear_signals
-            
-            # Calculate S/R levels (simple pivot-based approach)
-            sr_levels = self._calculate_simple_sr_levels(df)
-            
+
+            # Calculate S/R levels with 10-bar lookback window
+            sr_levels = self._calculate_simple_sr_levels(df, lookback=200)
+
             if not sr_levels['support'] and not sr_levels['resistance']:
                 self.logger.debug(f"No S/R levels found for {epic} - allowing all signals")
                 return bull_signals, bear_signals
-            
-            # Filter signals based on S/R proximity
+
+            # IMPROVED: Volatility-aware minimum distance
             pip_size = 0.01 if 'JPY' in epic.upper() else 0.0001
-            min_distance_pips = 10.0  # Must be at least 10 pips away from S/R
-            
+
+            # Calculate ATR-based minimum distance
+            if 'atr' in df.columns and len(df) > 0:
+                recent_atr = df['atr'].iloc[-1]
+                # Use 1.5x ATR as minimum distance (more conservative than previous 10 pips)
+                atr_pips = (recent_atr / pip_size) if recent_atr and recent_atr > 0 else 0
+                min_distance_pips = max(10.0, atr_pips * 1.5)  # At least 10 pips, or 1.5x ATR
+                self.logger.debug(f"S/R filter using volatility-aware distance: {min_distance_pips:.1f} pips (ATR: {atr_pips:.1f})")
+            else:
+                min_distance_pips = 10.0  # Fallback to 10 pips
+
             filtered_bull = bull_signals.copy()
             filtered_bear = bear_signals.copy()
-            
+
             # Check each bull signal
             for idx in bull_signals[bull_signals].index:
                 price = df.loc[idx, 'close']
 
                 # Check if too close to any resistance level ABOVE price (BUY signals fail near resistance above)
                 too_close = False
+                closest_distance = float('inf')
+                closest_level = None
+
                 for resistance in sr_levels['resistance']:
                     # Only check resistance ABOVE current price
                     if resistance > price:
                         distance_pips = (resistance - price) / pip_size
                         if distance_pips < min_distance_pips:
                             too_close = True
-                            self.logger.info(f"🚫 S/R PRE-FILTER: Rejected BUY signal at {price:.5f} - {distance_pips:.1f} pips below resistance {resistance:.5f}")
-                            break
+                            if distance_pips < closest_distance:
+                                closest_distance = distance_pips
+                                closest_level = resistance
 
                 if too_close:
+                    self.logger.info(f"🚫 S/R PRE-FILTER: Rejected BUY signal at {price:.5f} - {closest_distance:.1f} pips below resistance {closest_level:.5f} (min: {min_distance_pips:.1f})")
                     filtered_bull.loc[idx] = False
-            
+
             # Check each bear signal
             for idx in bear_signals[bear_signals].index:
                 price = df.loc[idx, 'close']
 
                 # Check if too close to any support level BELOW price (SELL signals fail near support below)
                 too_close = False
+                closest_distance = float('inf')
+                closest_level = None
+
                 for support in sr_levels['support']:
                     # Only check support BELOW current price
                     if support < price:
                         distance_pips = (price - support) / pip_size
                         if distance_pips < min_distance_pips:
                             too_close = True
-                            self.logger.info(f"🚫 S/R PRE-FILTER: Rejected SELL signal at {price:.5f} - {distance_pips:.1f} pips above support {support:.5f}")
-                            break
+                            if distance_pips < closest_distance:
+                                closest_distance = distance_pips
+                                closest_level = support
 
                 if too_close:
+                    self.logger.info(f"🚫 S/R PRE-FILTER: Rejected SELL signal at {price:.5f} - {closest_distance:.1f} pips above support {closest_level:.5f} (min: {min_distance_pips:.1f})")
                     filtered_bear.loc[idx] = False
-            
+
             final_bull = filtered_bull.sum()
             final_bear = filtered_bear.sum()
-            
+
             if original_bull + original_bear != final_bull + final_bear:
                 self.logger.info(f"📊 S/R PRE-FILTER for {epic}: "
                                f"Bull {original_bull} -> {final_bull}, "
                                f"Bear {original_bear} -> {final_bear} "
                                f"(removed {(original_bull + original_bear) - (final_bull + final_bear)} near S/R levels)")
-            
+
             return filtered_bull, filtered_bear
-            
+
         except Exception as e:
             self.logger.error(f"Error in S/R level filter: {e}")
             return bull_signals, bear_signals
     
     def _calculate_simple_sr_levels(self, df: pd.DataFrame, lookback: int = 100) -> Dict:
         """
-        Calculate simple support/resistance levels using pivot points
-        
+        IMPROVED: Calculate support/resistance levels using 10-bar pivot points
+
+        Uses a 10-bar lookback window to identify stronger, more significant S/R levels
+        that are more likely to hold and affect price action.
+
         Args:
             df: DataFrame with OHLC data
-            lookback: Number of bars to look back for pivots
-            
+            lookback: Number of bars to look back for pivots (default 100)
+
         Returns:
             Dictionary with support and resistance levels
         """
         try:
             if len(df) < 50:
                 return {'support': [], 'resistance': []}
-            
+
             # Use last N bars for S/R calculation
             recent_df = df.tail(min(lookback, len(df)))
-            
+
+            # IMPROVED: Use 10-bar lookback for pivot detection (stronger levels)
+            pivot_window = 10
+
             # Find swing highs (resistance)
             resistance_levels = []
-            for i in range(5, len(recent_df) - 5):
+            for i in range(pivot_window, len(recent_df) - pivot_window):
                 high = recent_df.iloc[i]['high']
-                
-                # Check if this is a swing high (higher than 5 bars before and after)
+
+                # Check if this is a swing high (higher than 10 bars before and after)
                 is_swing_high = True
-                for j in range(i - 5, i):
+                for j in range(i - pivot_window, i):
                     if recent_df.iloc[j]['high'] >= high:
                         is_swing_high = False
                         break
-                
+
                 if is_swing_high:
-                    for j in range(i + 1, i + 6):
+                    for j in range(i + 1, min(i + pivot_window + 1, len(recent_df))):
                         if recent_df.iloc[j]['high'] >= high:
                             is_swing_high = False
                             break
-                
+
                 if is_swing_high:
                     resistance_levels.append(float(high))
-            
+
             # Find swing lows (support)
             support_levels = []
-            for i in range(5, len(recent_df) - 5):
+            for i in range(pivot_window, len(recent_df) - pivot_window):
                 low = recent_df.iloc[i]['low']
-                
-                # Check if this is a swing low (lower than 5 bars before and after)
+
+                # Check if this is a swing low (lower than 10 bars before and after)
                 is_swing_low = True
-                for j in range(i - 5, i):
+                for j in range(i - pivot_window, i):
                     if recent_df.iloc[j]['low'] <= low:
                         is_swing_low = False
                         break
-                
+
                 if is_swing_low:
-                    for j in range(i + 1, i + 6):
+                    for j in range(i + 1, min(i + pivot_window + 1, len(recent_df))):
                         if recent_df.iloc[j]['low'] <= low:
                             is_swing_low = False
                             break
-                
+
                 if is_swing_low:
                     support_levels.append(float(low))
-            
+
             # Remove duplicates and keep most recent levels
             support_levels = sorted(list(set(support_levels)))[-10:]  # Keep top 10 most recent
             resistance_levels = sorted(list(set(resistance_levels)))[-10:]
-            
+
             return {
                 'support': support_levels,
                 'resistance': resistance_levels
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error calculating S/R levels: {e}")
             return {'support': [], 'resistance': []}
+
+    def _apply_histogram_divergence_filter(self, df: pd.DataFrame, bull_signals: pd.Series, bear_signals: pd.Series, epic: str) -> tuple:
+        """
+        NEW: Filter out signals with weak momentum (histogram divergence from price)
+
+        Rejects signals where histogram strength is declining while price moves in signal direction.
+        This indicates weakening momentum and higher probability of reversal.
+
+        Checks:
+        - For BULL: Price making higher highs but histogram making lower highs = bearish divergence
+        - For BEAR: Price making lower lows but histogram making higher lows = bullish divergence
+
+        Args:
+            df: DataFrame with MACD and price data
+            bull_signals: Boolean series of bull signals
+            bear_signals: Boolean series of bear signals
+            epic: Trading pair epic
+
+        Returns:
+            tuple: (filtered_bull_signals, filtered_bear_signals)
+        """
+        try:
+            original_bull = bull_signals.sum()
+            original_bear = bear_signals.sum()
+
+            if original_bull == 0 and original_bear == 0:
+                return bull_signals, bear_signals
+
+            filtered_bull = bull_signals.copy()
+            filtered_bear = bear_signals.copy()
+
+            # Lookback window for divergence detection
+            divergence_lookback = 5
+
+            # Check each bull signal for bearish divergence
+            for idx in bull_signals[bull_signals].index:
+                signal_position = df.index.get_loc(idx)
+
+                # Need enough history to check divergence
+                if signal_position < divergence_lookback:
+                    continue
+
+                # Get recent bars
+                lookback_start = signal_position - divergence_lookback
+                recent_data = df.iloc[lookback_start:signal_position + 1]
+
+                # Check for bearish divergence: price higher high + histogram lower high
+                current_price = recent_data['high'].iloc[-1]
+                current_histogram = abs(recent_data['macd_histogram'].iloc[-1])
+
+                prev_price_high = recent_data['high'].iloc[:-1].max()
+                prev_histogram_high = abs(recent_data['macd_histogram'].iloc[:-1]).max()
+
+                # Bearish divergence detected - reject signal
+                if current_price > prev_price_high and current_histogram < prev_histogram_high * 0.8:
+                    filtered_bull.loc[idx] = False
+                    self.logger.info(
+                        f"🚫 DIVERGENCE FILTER: Rejected BUY signal at {current_price:.5f} - "
+                        f"bearish divergence (histogram weakening: {current_histogram:.6f} < {prev_histogram_high:.6f})"
+                    )
+
+            # Check each bear signal for bullish divergence
+            for idx in bear_signals[bear_signals].index:
+                signal_position = df.index.get_loc(idx)
+
+                # Need enough history to check divergence
+                if signal_position < divergence_lookback:
+                    continue
+
+                # Get recent bars
+                lookback_start = signal_position - divergence_lookback
+                recent_data = df.iloc[lookback_start:signal_position + 1]
+
+                # Check for bullish divergence: price lower low + histogram higher low
+                current_price = recent_data['low'].iloc[-1]
+                current_histogram = abs(recent_data['macd_histogram'].iloc[-1])
+
+                prev_price_low = recent_data['low'].iloc[:-1].min()
+                prev_histogram_low = abs(recent_data['macd_histogram'].iloc[:-1]).max()
+
+                # Bullish divergence detected - reject signal
+                if current_price < prev_price_low and current_histogram < prev_histogram_low * 0.8:
+                    filtered_bear.loc[idx] = False
+                    self.logger.info(
+                        f"🚫 DIVERGENCE FILTER: Rejected SELL signal at {current_price:.5f} - "
+                        f"bullish divergence (histogram weakening: {current_histogram:.6f} < {prev_histogram_low:.6f})"
+                    )
+
+            final_bull = filtered_bull.sum()
+            final_bear = filtered_bear.sum()
+
+            if original_bull + original_bear != final_bull + final_bear:
+                self.logger.info(
+                    f"📊 DIVERGENCE FILTER for {epic}: "
+                    f"Bull {original_bull} -> {final_bull}, "
+                    f"Bear {original_bear} -> {final_bear} "
+                    f"(removed {(original_bull + original_bear) - (final_bull + final_bear)} divergent signals)"
+                )
+
+            return filtered_bull, filtered_bear
+
+        except Exception as e:
+            self.logger.error(f"Error in histogram divergence filter: {e}")
+            return bull_signals, bear_signals
