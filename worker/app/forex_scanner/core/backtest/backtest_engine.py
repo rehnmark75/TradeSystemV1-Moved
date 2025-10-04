@@ -173,11 +173,25 @@ class BacktestEngine:
                 pair = pair_info['pair']
                 
                 self.logger.info(f"Backtesting {epic} ({pair}) on {timeframe}...")
-                
-                # Get historical data
+
+                # CRITICAL FIX: Use optimal lookback hours (same as live scanner)
+                # This ensures backtest uses identical historical window
+                optimal_lookback_hours = self._get_optimal_lookback_hours(
+                    epic, timeframe, self.ema_strategy
+                )
+
+                # Log comparison for validation
+                old_lookback = lookback_days * 24
+                if optimal_lookback_hours != old_lookback:
+                    self.logger.warning(
+                        f"⚠️ Lookback mismatch for {epic}: "
+                        f"old={old_lookback}h, optimal={optimal_lookback_hours}h"
+                    )
+
+                # Get historical data with optimal lookback
                 df_data = self.data_fetcher.get_enhanced_data(
-                    epic, pair, timeframe=timeframe, 
-                    lookback_hours=lookback_days * 24
+                    epic, pair, timeframe=timeframe,
+                    lookback_hours=optimal_lookback_hours
                 )
                 
                 if df_data is None or len(df_data) < config.MIN_BARS_FOR_SIGNAL:
@@ -385,15 +399,23 @@ class BacktestEngine:
         
         signals = []
         start_idx = config.MIN_BARS_FOR_SIGNAL  # Start after we have enough data
-        
+
         self.logger.info(f"🔍 Scanning {len(df)} bars from index {start_idx} to {len(df)-1}")
-        
+
         for i in range(start_idx + 1, len(df)):
             try:
-                # Create mini DataFrame for signal detection
-                # Use enough history for indicators but focus on current decision point
-                history_start = max(0, i - 50)  # 50 bars of history should be enough
+                # CRITICAL FIX: Use FULL historical window (same as live scanner)
+                # Live scanner gets ALL available historical data for each signal
+                # Backtest MUST do the same for accurate comparison
+                history_start = 0  # Use all available history
                 current_data = df.iloc[history_start:i+1].copy()
+
+                # Log first iteration to verify full window usage
+                if i == start_idx + 1:
+                    self.logger.info(
+                        f"✅ Using FULL historical window: "
+                        f"{len(current_data)} bars (same as live scanner)"
+                    )
                 
                 if len(current_data) < 2:
                     continue
@@ -448,7 +470,70 @@ class BacktestEngine:
                 })
             
             return signal_enhanced
-            
+
         except Exception as e:
             self.logger.error(f"Error adding performance metrics: {e}")
             return signal
+
+    def _get_optimal_lookback_hours(self, epic: str, timeframe: str, ema_strategy=None) -> int:
+        """
+        Get optimal lookback hours - SAME LOGIC AS LIVE SCANNER
+        This ensures backtest uses identical historical window as live trading
+        """
+        try:
+            # Base lookback hours by timeframe (MUST MATCH DataFetcher logic)
+            base_lookback = {
+                '1m': 24,    # 1 day for 1m (1440 bars)
+                '5m': 48,    # 2 days for 5m (576 bars)
+                '15m': 168,  # 1 week for 15m (672 bars)
+                '1h': 720,   # 1 month for 1h (720 bars)
+                '1d': 8760   # 1 year for 1d (365 bars)
+            }.get(timeframe, 48)
+
+            # Adjust for dynamic EMA requirements
+            if ema_strategy and hasattr(ema_strategy, 'get_ema_periods'):
+                try:
+                    ema_periods = ema_strategy.get_ema_periods(epic)
+                    max_ema = max(ema_periods) if ema_periods else 200
+
+                    # Ensure we have enough data for the largest EMA (at least 3x the period)
+                    min_bars_needed = max_ema * 3
+                    timeframe_minutes = self._timeframe_to_minutes(timeframe)
+                    min_hours_needed = (min_bars_needed * timeframe_minutes) / 60
+
+                    base_lookback = max(base_lookback, int(min_hours_needed))
+                    self.logger.debug(f"🔧 Adjusted lookback for EMA {max_ema}: {base_lookback}h")
+                except Exception as e:
+                    self.logger.debug(f"Could not get EMA periods: {e}")
+
+            # Adjust for KAMA requirements if enabled
+            if getattr(config, 'KAMA_STRATEGY', False):
+                kama_configs = getattr(config, 'KAMA_STRATEGY_CONFIG', {})
+                default_config = getattr(config, 'DEFAULT_KAMA_CONFIG', 'default')
+
+                if default_config in kama_configs:
+                    kama_period = kama_configs[default_config].get('period', 10)
+                    min_bars_needed = kama_period * 3
+                    timeframe_minutes = self._timeframe_to_minutes(timeframe)
+                    min_hours_needed = (min_bars_needed * timeframe_minutes) / 60
+
+                    base_lookback = max(base_lookback, int(min_hours_needed))
+
+            self.logger.info(f"📊 Optimal lookback for {timeframe}: {base_lookback}h")
+            return base_lookback
+
+        except Exception as e:
+            self.logger.error(f"Error calculating optimal lookback: {e}")
+            # Fallback to conservative default
+            return 168  # 1 week
+
+    def _timeframe_to_minutes(self, timeframe: str) -> int:
+        """Convert timeframe string to minutes"""
+        if timeframe.endswith('m'):
+            return int(timeframe[:-1])
+        elif timeframe.endswith('h'):
+            return int(timeframe[:-1]) * 60
+        elif timeframe.endswith('d'):
+            return int(timeframe[:-1]) * 1440
+        else:
+            return 15  # Default to 15 minutes

@@ -130,6 +130,9 @@ class BacktestScanner(IntelligentForexScanner):
             'processing_errors': 0
         }
 
+        # CRITICAL VALIDATION: Log lookback configuration alignment
+        self._validate_lookback_alignment()
+
         self.logger.info(f"🧪 BacktestScanner initialized:")
         self.logger.info(f"   Execution ID: {self.execution_id}")
         self.logger.info(f"   Strategy: {self.strategy_name}")
@@ -248,6 +251,39 @@ class BacktestScanner(IntelligentForexScanner):
                 self.signal_detector.momentum_strategy.backtest_mode = True
                 # NOTE: pipeline_mode only controls TradeValidator, not strategy behavior
                 self.logger.info("✅ Momentum strategy configured for backtest mode")
+
+            # ADDED: Configure BB+Supertrend strategy for pipeline mode
+            if hasattr(self.signal_detector, 'bb_supertrend_strategy') and self.signal_detector.bb_supertrend_strategy:
+                self.signal_detector.bb_supertrend_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.bb_supertrend_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.bb_supertrend_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'BB_SUPERTREND_ENHANCED_VALIDATION', True)
+                if self.signal_detector.bb_supertrend_strategy.enhanced_validation:
+                    self.logger.info("✅ BB+Supertrend strategy configured for PIPELINE mode - enhanced validation enabled")
+                else:
+                    self.logger.info("✅ BB+Supertrend strategy configured for BASIC mode - enhanced validation disabled for fast testing")
+
+            # ADDED: Configure KAMA strategy for pipeline mode
+            if hasattr(self.signal_detector, 'kama_strategy') and self.signal_detector.kama_strategy:
+                self.signal_detector.kama_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.kama_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.kama_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'KAMA_ENHANCED_VALIDATION', True)
+                if self.signal_detector.kama_strategy.enhanced_validation:
+                    self.logger.info("✅ KAMA strategy configured for PIPELINE mode - enhanced validation enabled")
+                else:
+                    self.logger.info("✅ KAMA strategy configured for BASIC mode - enhanced validation disabled for fast testing")
+
+            # ADDED: Configure Scalping strategy for pipeline mode
+            if hasattr(self.signal_detector, 'scalping_strategy') and self.signal_detector.scalping_strategy:
+                self.signal_detector.scalping_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.scalping_strategy.backtest_mode = True
+                # Set enhanced validation based on pipeline mode
+                self.signal_detector.scalping_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'SCALPING_ENHANCED_VALIDATION', True)
+                if self.signal_detector.scalping_strategy.enhanced_validation:
+                    self.logger.info("✅ Scalping strategy configured for PIPELINE mode - enhanced validation enabled")
+                else:
+                    self.logger.info("✅ Scalping strategy configured for BASIC mode - enhanced validation disabled for fast testing")
 
             # CRITICAL FIX: Also configure any existing MACD strategies in cache for backtest mode
             if hasattr(self.signal_detector, 'macd_strategies_cache') and self.signal_detector.macd_strategies_cache:
@@ -500,7 +536,9 @@ class BacktestScanner(IntelligentForexScanner):
                 'MEAN_REVERSION': 'detect_mean_reversion_signals',
                 'MEANREV': 'detect_mean_reversion_signals',  # Fixed: Accept short form
                 'RANGING_MARKET': 'detect_ranging_market_signals',
-                'RANGING': 'detect_ranging_market_signals'
+                'RANGING': 'detect_ranging_market_signals',
+                'SCALPING': 'detect_scalping_signals',  # ADDED: Scalping strategy support
+                'SCALP': 'detect_scalping_signals'  # ADDED: Short form
             }
 
             # Use specific strategy if requested, otherwise use all strategies
@@ -950,6 +988,72 @@ class BacktestScanner(IntelligentForexScanner):
             },
             'order_logger_stats': self.order_logger.get_statistics()
         }
+
+    def _validate_lookback_alignment(self):
+        """
+        CRITICAL VALIDATION: Verify backtest uses same lookback as live scanner
+        This ensures optimization results are reliable
+        """
+        try:
+            # Get optimal lookback hours using the same method as DataFetcher
+            optimal_lookback = self._get_optimal_lookback_hours_from_config()
+
+            # Calculate total backtest period in hours
+            backtest_duration_hours = int((self.end_date - self.start_date).total_seconds() / 3600)
+
+            self.logger.info("=" * 80)
+            self.logger.info("📊 LOOKBACK ALIGNMENT VALIDATION")
+            self.logger.info("=" * 80)
+            self.logger.info(f"Timeframe: {self.timeframe}")
+            self.logger.info(f"Optimal lookback (live scanner uses): {optimal_lookback}h")
+            self.logger.info(f"Backtest period duration: {backtest_duration_hours}h")
+
+            # Calculate expected number of bars for validation
+            timeframe_minutes = self._timeframe_to_minutes(self.timeframe)
+            expected_bars_per_scan = int((optimal_lookback * 60) / timeframe_minutes)
+
+            self.logger.info(f"Expected bars per scan: {expected_bars_per_scan}")
+            self.logger.info(f"Minimum bars required: {config.MIN_BARS_FOR_SIGNAL}")
+
+            if expected_bars_per_scan < config.MIN_BARS_FOR_SIGNAL:
+                self.logger.warning(
+                    f"⚠️ WARNING: Lookback may be insufficient! "
+                    f"Expected {expected_bars_per_scan} < MIN_BARS {config.MIN_BARS_FOR_SIGNAL}"
+                )
+            else:
+                self.logger.info(f"✅ Lookback validation PASSED")
+
+            self.logger.info("=" * 80)
+
+        except Exception as e:
+            self.logger.error(f"❌ Error validating lookback alignment: {e}")
+
+    def _get_optimal_lookback_hours_from_config(self) -> int:
+        """
+        Get optimal lookback hours using same logic as DataFetcher
+        This is used for validation only
+        """
+        # Base lookback hours by timeframe (MUST MATCH DataFetcher._get_optimal_lookback_hours)
+        base_lookback = {
+            '1m': 24,    # 1 day for 1m (1440 bars)
+            '5m': 48,    # 2 days for 5m (576 bars)
+            '15m': 168,  # 1 week for 15m (672 bars)
+            '1h': 720,   # 1 month for 1h (720 bars)
+            '1d': 8760   # 1 year for 1d (365 bars)
+        }.get(self.timeframe, 48)
+
+        return base_lookback
+
+    def _timeframe_to_minutes(self, timeframe: str) -> int:
+        """Convert timeframe string to minutes (integer)"""
+        if timeframe.endswith('m'):
+            return int(timeframe[:-1])
+        elif timeframe.endswith('h'):
+            return int(timeframe[:-1]) * 60
+        elif timeframe.endswith('d'):
+            return int(timeframe[:-1]) * 1440
+        else:
+            return 15  # Default to 15 minutes
 
 
 # Factory function for creating backtest scanner
