@@ -189,10 +189,10 @@ class MACDTrendValidator:
             trend_strength_ok = adx >= min_adx
 
             if not trend_strength_ok:
-                self.logger.debug(f"{signal_type} signal rejected: ADX {adx:.1f} < {min_adx:.1f} (ranging market)")
+                self.logger.info(f"❌ {signal_type} signal REJECTED: ADX {adx:.1f} < {min_adx:.1f} (ranging market)")
                 return False
 
-            self.logger.debug(f"{signal_type} signal: ADX {adx:.1f} confirms trending market")
+            self.logger.info(f"✅ {signal_type} signal: ADX {adx:.1f} >= {min_adx:.1f} (trending market)")
             return True
 
         except Exception as e:

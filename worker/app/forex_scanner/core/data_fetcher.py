@@ -281,12 +281,24 @@ class DataFetcher:
                     config.MACD_PERIODS['signal_ema']
                 )
                 
-                # CRITICAL FIX: Ensure EMA 200 is always present for MACD strategy
+                # ALWAYS calculate EMA 50, 100, 200 for trend filtering
+                if 'ema_50' not in df_enhanced.columns:
+                    self.logger.debug(f"🔄 Adding EMA 50 for trend analysis")
+                    df_enhanced['ema_50'] = df_enhanced['close'].ewm(span=50).mean()
+                else:
+                    self.logger.debug(f"✅ EMA 50 already present")
+
+                if 'ema_100' not in df_enhanced.columns:
+                    self.logger.debug(f"🔄 Adding EMA 100 for trend analysis")
+                    df_enhanced['ema_100'] = df_enhanced['close'].ewm(span=100).mean()
+                else:
+                    self.logger.debug(f"✅ EMA 100 already present")
+
                 if 'ema_200' not in df_enhanced.columns:
-                    self.logger.debug(f"🔄 Adding EMA 200 for MACD strategy")
+                    self.logger.debug(f"🔄 Adding EMA 200 for trend analysis")
                     df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
                 else:
-                    self.logger.debug(f"✅ EMA 200 already present for MACD strategy")
+                    self.logger.debug(f"✅ EMA 200 already present")
             
             # Add KAMA indicators if strategy is enabled
             if getattr(config, 'KAMA_STRATEGY', False):
@@ -911,9 +923,17 @@ class DataFetcher:
                     config.MACD_PERIODS['signal_ema']
                 )
                 
-                # CRITICAL FIX: Ensure EMA 200 is always present for MACD strategy
+                # ALWAYS calculate EMA 50, 100, 200 for trend filtering (lazy loading)
+                if 'ema_50' not in df_enhanced.columns:
+                    self.logger.debug(f"🔄 Adding EMA 50 for trend analysis (lazy loading)")
+                    df_enhanced['ema_50'] = df_enhanced['close'].ewm(span=50).mean()
+
+                if 'ema_100' not in df_enhanced.columns:
+                    self.logger.debug(f"🔄 Adding EMA 100 for trend analysis (lazy loading)")
+                    df_enhanced['ema_100'] = df_enhanced['close'].ewm(span=100).mean()
+
                 if 'ema_200' not in df_enhanced.columns:
-                    self.logger.debug(f"🔄 Adding EMA 200 for MACD strategy (lazy loading)")
+                    self.logger.debug(f"🔄 Adding EMA 200 for trend analysis (lazy loading)")
                     df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
             
             # Add KAMA indicators if required
@@ -1126,31 +1146,43 @@ class DataFetcher:
 
     def _ensure_ema200_always_present(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        ALWAYS ensure EMA 200 is present for trend filtering, regardless of dynamic EMA config
-        
-        This separates the concern of trend filtering (always EMA 200) from 
-        the dynamic EMA periods used for signal generation (ema_trend)
-        
+        ALWAYS ensure EMA 50, 100, 200 are present for trend filtering
+
+        This separates the concern of trend filtering from dynamic EMA periods
+        used for signal generation (ema_short, ema_long, ema_trend)
+
         Args:
             df: DataFrame to enhance
-            
+
         Returns:
-            DataFrame with guaranteed ema_200 column
+            DataFrame with guaranteed ema_50, ema_100, ema_200 columns
         """
         try:
             df_enhanced = df.copy()
-            
-            # ALWAYS ensure EMA 200 exists for trend filtering
+
+            # ALWAYS ensure EMA 50, 100, 200 exist for trend filtering
+            if 'ema_50' not in df_enhanced.columns:
+                self.logger.debug("🔄 Adding EMA 50 for trend filtering (always present)")
+                df_enhanced['ema_50'] = df_enhanced['close'].ewm(span=50).mean()
+            else:
+                self.logger.debug("✅ EMA 50 already present")
+
+            if 'ema_100' not in df_enhanced.columns:
+                self.logger.debug("🔄 Adding EMA 100 for trend filtering (always present)")
+                df_enhanced['ema_100'] = df_enhanced['close'].ewm(span=100).mean()
+            else:
+                self.logger.debug("✅ EMA 100 already present")
+
             if 'ema_200' not in df_enhanced.columns:
                 self.logger.debug("🔄 Adding EMA 200 for trend filtering (always present)")
                 df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
             else:
                 self.logger.debug("✅ EMA 200 already present")
-            
+
             return df_enhanced
-            
+
         except Exception as e:
-            self.logger.error(f"❌ Error ensuring EMA 200: {e}")
+            self.logger.error(f"❌ Error ensuring EMAs: {e}")
             return df
 
     
@@ -1944,17 +1976,30 @@ class DataFetcher:
                     df_semantic['ema_21'] = df_semantic['close'].ewm(span=21).mean()
                     self.logger.debug(f"🔧 Created ema_21 for backward compatibility")
             
-            # Handle ema_200 compatibility  
+            # Handle ema_50, ema_100, ema_200 compatibility (always ensure these exist)
+            if 'ema_50' not in df_semantic.columns:
+                if f'ema_50' in df.columns:
+                    pass  # Already exists
+                else:
+                    df_semantic['ema_50'] = df_semantic['close'].ewm(span=50).mean()
+                    self.logger.debug(f"🔧 Created ema_50 for trend filtering")
+
+            if 'ema_100' not in df_semantic.columns:
+                if f'ema_100' in df.columns:
+                    pass  # Already exists
+                else:
+                    df_semantic['ema_100'] = df_semantic['close'].ewm(span=100).mean()
+                    self.logger.debug(f"🔧 Created ema_100 for trend filtering")
+
             if 'ema_200' not in df_semantic.columns:
                 if trend_period == 200 and f'ema_{trend_period}' in df.columns:
                     df_semantic['ema_200'] = df[f'ema_{trend_period}']
                 elif f'ema_200' in df.columns:
                     pass  # Already exists
                 else:
-                    # Create ema_200 if needed for MACD strategy compatibility
                     df_semantic['ema_200'] = df_semantic['close'].ewm(span=200).mean()
-                    self.logger.debug(f"🔧 Created ema_200 for MACD strategy compatibility")
-            
+                    self.logger.debug(f"🔧 Created ema_200 for trend filtering")
+
             return df_semantic
             
         except Exception as e:

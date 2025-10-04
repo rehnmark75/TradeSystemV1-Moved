@@ -21,88 +21,21 @@ class MACDSignalCalculator:
         self.trend_validator = trend_validator
         self.swing_validator = swing_validator  # NEW: Swing proximity validator
         self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.65)  # QUALITY: Raised to 65% for high-quality signals only
-
-        # PAIR-SPECIFIC CALIBRATION - Different pairs have different volatility characteristics
-        self.pair_configs = {
-            # JPY pairs: High volatility, wide swings, prone to false breakouts
-            'JPY': {
-                'adx_minimum': 35,  # Require very strong trend
-                'rsi_bull_max': 45,  # Only boost if RSI < 45 (stricter than 50)
-                'rsi_bear_min': 55,  # Only boost if RSI > 55 (stricter than 50)
-                'multi_factor_required': 4,  # Need 4 of 5 factors
-                'base_adjustment': -0.05,  # Lower base confidence for JPY
-            },
-            # GBP pairs: MOST erratic, whipsaws, needs strictest filtering
-            'GBP': {
-                'adx_minimum': 40,  # Require extremely strong trend
-                'rsi_bull_max': 40,  # Very strict: only < 40
-                'rsi_bear_min': 60,  # Very strict: only > 60
-                'multi_factor_required': 5,  # Need ALL 5 factors!
-                'base_adjustment': -0.10,  # Significant penalty for GBP
-            },
-            # Major pairs: EUR, USD crosses (lower volatility, cleaner)
-            'MAJOR': {
-                'adx_minimum': 30,  # Moderate requirement
-                'rsi_bull_max': 50,  # Standard midline
-                'rsi_bear_min': 50,  # Standard midline
-                'multi_factor_required': 4,  # Need 4 of 5
-                'base_adjustment': 0.0,  # No adjustment
-            },
-            # Commodity pairs: AUD, NZD (medium volatility)
-            'COMMODITY': {
-                'adx_minimum': 32,  # Slightly higher
-                'rsi_bull_max': 48,  # Slightly stricter
-                'rsi_bear_min': 52,  # Slightly stricter
-                'multi_factor_required': 4,  # Need 4 of 5
-                'base_adjustment': -0.03,  # Small penalty
-            },
-        }
-
-    def _get_pair_config(self, epic: str = None) -> dict:
-        """Get pair-specific configuration based on epic"""
-        if not epic:
-            return self.pair_configs['MAJOR']  # Default to major pairs
-
-        epic_upper = epic.upper()
-
-        # GBP pairs (highest priority - most volatile)
-        if 'GBP' in epic_upper:
-            return self.pair_configs['GBP']
-
-        # JPY pairs (high volatility)
-        if 'JPY' in epic_upper:
-            return self.pair_configs['JPY']
-
-        # Commodity pairs
-        if any(x in epic_upper for x in ['AUD', 'NZD']):
-            return self.pair_configs['COMMODITY']
-
-        # Default: Major pairs (EUR, USD, CHF, CAD)
-        return self.pair_configs['MAJOR']
     
     def calculate_simple_confidence(self, latest_row: pd.Series, signal_type: str, epic: str = None) -> float:
         """
-        ENHANCED CONFIDENCE CALCULATION: Multi-factor analysis with pair-specific calibration
-
-        Pair-specific filtering:
-        - JPY pairs: Stricter ADX (35+), RSI zones (< 45 / > 55)
-        - GBP pairs: STRICTEST - ADX 40+, RSI extremes (< 40 / > 60), need ALL 5 factors
-        - Major pairs: Standard filtering (ADX 30+, RSI < 50 / > 50)
-        - Commodity pairs: Medium strictness
+        ENHANCED CONFIDENCE CALCULATION: Multi-factor analysis with restrictive weighting
 
         Args:
             latest_row: DataFrame row with indicator data
             signal_type: 'BULL' or 'BEAR'
-            epic: Pair symbol for pair-specific calibration
+            epic: Pair symbol (reserved for future pair-specific calibration)
 
         Returns:
             Confidence score between 0.0 and 0.95 (higher threshold required)
         """
         try:
-            # Get pair-specific configuration
-            pair_config = self._get_pair_config(epic)
-
-            base_confidence = 0.15 + pair_config['base_adjustment']  # Pair-specific base adjustment
+            base_confidence = 0.15  # ULTRA CONSERVATIVE: Signals must EARN their way to 65%
             
             # Get enhanced indicator values
             macd_histogram = latest_row.get('macd_histogram', 0)
@@ -164,32 +97,29 @@ class MACDSignalCalculator:
             
             base_confidence += histogram_boost
             
-            # 3. RSI CONFLUENCE ANALYSIS - PAIR-SPECIFIC thresholds
+            # 3. RSI CONFLUENCE ANALYSIS - STRICT: Only boost in correct zones (< 50 for BULL, > 50 for BEAR)
             rsi_boost = 0.0
-            rsi_bull_max = pair_config['rsi_bull_max']  # Pair-specific threshold
-            rsi_bear_min = pair_config['rsi_bear_min']  # Pair-specific threshold
-
             if signal_type == 'BULL':
-                # BULL signals: Only boost if RSI < pair-specific threshold
+                # BULL signals: Only boost if RSI < 50 (below midline)
                 if rsi < 30:
                     rsi_boost = 0.20  # Oversold - excellent for bull signals
                 elif rsi < 40:
                     rsi_boost = 0.15  # Below midline - good
-                elif rsi < rsi_bull_max:
-                    rsi_boost = 0.10  # Approaching threshold - acceptable
+                elif rsi < 50:
+                    rsi_boost = 0.10  # Approaching neutral - acceptable
                 else:
-                    # RSI above threshold = no boost
+                    # RSI 50+ for BULL = neutral/overbought zone - NO BOOST
                     rsi_boost = 0.0  # No bonus for buying in neutral/overbought zone
             else:  # BEAR
-                # BEAR signals: Only boost if RSI > pair-specific threshold
+                # BEAR signals: Only boost if RSI > 50 (above midline)
                 if rsi > 70:
                     rsi_boost = 0.20  # Overbought - excellent for bear signals
                 elif rsi > 60:
                     rsi_boost = 0.15  # Above midline - good
-                elif rsi > rsi_bear_min:
-                    rsi_boost = 0.10  # Approaching threshold - acceptable
+                elif rsi > 50:
+                    rsi_boost = 0.10  # Approaching neutral - acceptable
                 else:
-                    # RSI below threshold = no boost
+                    # RSI 50- for BEAR = neutral/oversold zone - NO BOOST
                     rsi_boost = 0.0  # No bonus for selling in neutral/oversold zone
             
             base_confidence += rsi_boost
@@ -245,20 +175,18 @@ class MACDSignalCalculator:
             if divergence_boost == 0.0:  # No divergence detected
                 base_confidence = min(0.70, base_confidence)  # Cap non-divergence signals at 70%
 
-            # 9. MULTI-FACTOR GATE - PAIR-SPECIFIC requirements
-            # Factors: ADX ≥ threshold, RSI in correct zone, Alignment correct, Divergence present, Swing OK
+            # 9. MULTI-FACTOR GATE - Require at least 4 of 5 factors to be positive (STRICT)
+            # Factors: ADX ≥ 35, RSI in correct zone, Alignment correct, Divergence present, Swing OK
             positive_factors = 0
-            adx_minimum = pair_config['adx_minimum']  # Pair-specific ADX requirement
-            required_factors = pair_config['multi_factor_required']  # Pair-specific: 4 or 5
 
-            # Factor 1: Strong ADX (pair-specific threshold)
-            if adx >= adx_minimum:
+            # Factor 1: Strong ADX (≥ 35) - Raised from 30 to require very strong trends
+            if adx >= 35:
                 positive_factors += 1
 
-            # Factor 2: RSI in correct zone (pair-specific thresholds)
-            if signal_type == 'BULL' and rsi < rsi_bull_max:
+            # Factor 2: RSI in correct zone (< 50 for BULL, > 50 for BEAR)
+            if signal_type == 'BULL' and rsi < 50:
                 positive_factors += 1
-            elif signal_type == 'BEAR' and rsi > rsi_bear_min:
+            elif signal_type == 'BEAR' and rsi > 50:
                 positive_factors += 1
 
             # Factor 3: MACD/Signal alignment correct
@@ -274,28 +202,25 @@ class MACDSignalCalculator:
             if swing_proximity_penalty == 0.0:
                 positive_factors += 1
 
-            # Apply multi-factor gate penalty if less than required factors (PAIR-SPECIFIC)
+            # Apply multi-factor gate penalty if less than 4 factors positive (STRICT)
             multi_factor_penalty = 0.0
-            if positive_factors < required_factors:
-                multi_factor_penalty = -0.15  # STRONG PENALTY for weak multi-factor confirmation
-                self.logger.debug(f"Multi-factor gate: Only {positive_factors}/5 factors positive (need {required_factors}) - applying -0.15 penalty")
+            if positive_factors < 4:
+                multi_factor_penalty = 0.15  # STRONG PENALTY for weak multi-factor confirmation
+                self.logger.debug(f"Multi-factor gate: Only {positive_factors}/5 factors positive (need 4) - applying -0.15 penalty")
 
-            base_confidence -= multi_factor_penalty
+            base_confidence -= multi_factor_penalty  # Subtract penalty
 
             # Final confidence calculation (capped at 95%)
             final_confidence = min(0.95, base_confidence - swing_proximity_penalty)
 
             # Log confidence breakdown for debugging (only if debug enabled)
             if self.logger.isEnabledFor(logging.DEBUG):
-                pair_type = 'GBP' if epic and 'GBP' in epic.upper() else \
-                           'JPY' if epic and 'JPY' in epic.upper() else \
-                           'COMMODITY' if epic and any(x in epic.upper() for x in ['AUD', 'NZD']) else 'MAJOR'
-                self.logger.debug(f"CONFIDENCE BREAKDOWN for {signal_type} ({epic or 'unknown'} - {pair_type}):")
-                self.logger.debug(f"   Base: {0.15 + pair_config['base_adjustment']:.3f}, ADX: {adx_boost:.3f} (min: {adx_minimum})")
-                self.logger.debug(f"   Histogram: {histogram_boost:.3f}, RSI: {rsi_boost:.3f} (thresholds: <{rsi_bull_max} / >{rsi_bear_min})")
+                self.logger.debug(f"CONFIDENCE BREAKDOWN for {signal_type}:")
+                self.logger.debug(f"   Base: 0.15, ADX: {adx_boost:.3f}")
+                self.logger.debug(f"   Histogram: {histogram_boost:.3f}, RSI: {rsi_boost:.3f}")
                 self.logger.debug(f"   EMA: {ema_boost:.3f}, Alignment: {alignment_boost:.3f}")
                 self.logger.debug(f"   Divergence: {divergence_boost:.3f}")
-                self.logger.debug(f"   Multi-factor gate: {positive_factors}/5 factors (need {required_factors}), penalty: {multi_factor_penalty:.3f}")
+                self.logger.debug(f"   Multi-factor gate: {positive_factors}/5 factors (need 4), penalty: {multi_factor_penalty:.3f}")
                 self.logger.debug(f"   Swing penalty: {swing_proximity_penalty:.3f}")
                 self.logger.debug(f"   FINAL: {final_confidence:.3f} (min threshold: {self.min_confidence:.3f})")
 

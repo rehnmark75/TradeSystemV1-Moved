@@ -260,10 +260,10 @@ class MACDIndicatorCalculator:
                     bear_cross = raw_bear_cross
                     self.logger.info(f"🚨 NO EMERGENCY CROSSOVERS - Using threshold-based: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
             else:
-                # QUALITY: Apply multi-candle confirmation for high-quality signals
-                bull_cross = self._apply_multi_candle_confirmation(df_copy, raw_bull_cross, 'BULL', epic)
-                bear_cross = self._apply_multi_candle_confirmation(df_copy, raw_bear_cross, 'BEAR', epic)
-                self.logger.debug(f"🎯 QUALITY: Multi-candle confirmed signals for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
+                # SIMPLE: Use raw crossovers without multi-candle confirmation (which was causing duplicate signals)
+                bull_cross = raw_bull_cross
+                bear_cross = raw_bear_cross
+                self.logger.debug(f"🎯 SIMPLE: Raw crossover signals for {epic}: {bull_cross.sum()} bull, {bear_cross.sum()} bear")
             
             # Debug RSI and ADX data availability first
             if 'rsi' in df_copy.columns and 'adx' in df_copy.columns:

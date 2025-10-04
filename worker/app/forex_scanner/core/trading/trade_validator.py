@@ -953,7 +953,7 @@ class TradeValidator:
             signal_type = signal.get('signal_type', '').upper()
             epic = signal.get('epic', 'Unknown')
             strategy = signal.get('strategy', '').upper()
-            
+
             # GET CURRENT PRICE - flexible approach
             current_price = None
             price_candidates = ['price', 'current_price', 'close_price', 'entry_price', 'close']
@@ -981,13 +981,13 @@ class TradeValidator:
                                 break
                             except (ValueError, TypeError):
                                 continue
-            
+
             # GET EMA 200 - flexible approach for your signal format
             ema_200 = None
-            
+
             # Your strategies likely put EMA values directly in signal
             ema_200_candidates = ['ema_200', 'ema_trend', 'ema_200_current', 'ema_long']
-            
+
             for field in ema_200_candidates:
                 if field in signal and signal[field] is not None:
                     try:
@@ -996,7 +996,7 @@ class TradeValidator:
                         break
                     except (ValueError, TypeError):
                         continue
-            
+
             # Check nested structures if needed
             if ema_200 is None and 'ema_data' in signal:
                 ema_data = signal['ema_data']
@@ -1009,7 +1009,7 @@ class TradeValidator:
                                 break
                             except (ValueError, TypeError):
                                 continue
-            
+
             # STRICT: REJECT signals with missing data (no bypass allowed)
             if current_price is None:
                 self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: No current price data found")
@@ -1063,10 +1063,10 @@ class TradeValidator:
                     else:
                         self.logger.warning(f"🚫 SELL signal REJECTED {epic}: {current_price:.5f} >= {ema_200:.5f} (price at/above EMA200)")
                         return False, f"SELL rejected: price {current_price:.5f} at/above EMA200 {ema_200:.5f}"
-            
+
             else:
                 return True, f"Unknown signal type {signal_type} (allowing)"
-            
+
         except Exception as e:
             self.logger.error(f"❌ EMA200 trend filter error: {e}")
             self.logger.error(f"🚫 CRITICAL: Rejecting trade due to EMA200 validation failure - fail-safe mode")
