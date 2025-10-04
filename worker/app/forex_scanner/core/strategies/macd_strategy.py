@@ -722,8 +722,8 @@ class MACDStrategy(BaseStrategy):
                 'bear_crossover': latest_row.get('bear_crossover', False)
             })
             
-            # Calculate confidence using signal calculator
-            confidence = self.signal_calculator.calculate_simple_confidence(latest_row, signal_type)
+            # Calculate confidence using signal calculator (with pair-specific calibration)
+            confidence = self.signal_calculator.calculate_simple_confidence(latest_row, signal_type, epic=epic)
             
             # Add MTF boost if enabled and available (only in pipeline mode)
             if self.enhanced_validation and self.enable_mtf_analysis and self.mtf_analyzer and self.mtf_analyzer.is_mtf_enabled():
