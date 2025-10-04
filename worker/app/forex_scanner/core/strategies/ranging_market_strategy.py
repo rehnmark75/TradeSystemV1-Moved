@@ -102,6 +102,27 @@ class RangingMarketStrategy(BaseStrategy):
         # Price adjuster for spread calculations
         self.price_adjuster = PriceAdjuster()
 
+        # Swing proximity validator (NEW)
+        self.swing_validator = None
+        if self.config.get('swing_validation', {}).get('enabled', True):
+            try:
+                from .helpers.swing_proximity_validator import SwingProximityValidator
+                from .helpers.smc_market_structure import SMCMarketStructure
+
+                # Initialize SMC analyzer for swing detection
+                self.smc_analyzer = SMCMarketStructure(logger=self.logger, data_fetcher=data_fetcher)
+
+                # Initialize swing proximity validator
+                self.swing_validator = SwingProximityValidator(
+                    smc_analyzer=self.smc_analyzer,
+                    config=self.config.get('swing_validation', {}),
+                    logger=self.logger
+                )
+                self.logger.info(f"✅ Swing proximity validator initialized (min_distance={self.swing_validator.min_distance_pips} pips)")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Could not initialize swing validator: {e}")
+                self.swing_validator = None
+
         # Performance tracking
         self.performance_stats = {
             'total_signals': 0,
@@ -205,6 +226,17 @@ class RangingMarketStrategy(BaseStrategy):
                 'ranging_default_sl_pips': getattr(rm_config, 'RANGING_DEFAULT_SL_PIPS', 22),
                 'ranging_default_tp_pips': getattr(rm_config, 'RANGING_DEFAULT_TP_PIPS', 38),
                 'ranging_dynamic_sl_tp': getattr(rm_config, 'RANGING_DYNAMIC_SL_TP', True),
+
+                # Swing proximity validation (NEW)
+                'swing_validation': getattr(rm_config, 'RANGING_SWING_VALIDATION', {
+                    'enabled': True,
+                    'min_distance_pips': 8,
+                    'lookback_swings': 5,
+                    'swing_length': 5,
+                    'strict_mode': False,
+                    'resistance_buffer': 1.0,
+                    'support_buffer': 1.0
+                }),
 
                 # Debug settings
                 'debug_logging': getattr(rm_config, 'RANGING_MARKET_DEBUG_LOGGING', True)
@@ -861,6 +893,44 @@ class RangingMarketStrategy(BaseStrategy):
             # Additional confidence boost for backtest validation
             if self.backtest_mode:
                 base_confidence += 0.05  # Extra boost in backtest mode
+
+            # NEW: Swing proximity validation - prevent poor entry timing
+            swing_proximity_penalty = 0.0
+            if self.swing_validator:
+                try:
+                    # Analyze swing points if not already done
+                    if hasattr(self, 'smc_analyzer'):
+                        smc_config = {
+                            'swing_length': self.config.get('swing_validation', {}).get('swing_length', 5),
+                            'structure_confirmation': 3,
+                            'bos_threshold': 0.0001
+                        }
+                        df = self.smc_analyzer.analyze_market_structure(df, smc_config, epic, timeframe)
+
+                    # Validate swing proximity
+                    swing_result = self.swing_validator.validate_entry_proximity(
+                        df=df,
+                        current_price=latest_row['close'],
+                        direction=signal_type,
+                        epic=epic
+                    )
+
+                    if not swing_result['valid']:
+                        self.logger.warning(
+                            f"⚠️ Swing proximity violation: {swing_result.get('rejection_reason', 'Unknown')}"
+                        )
+
+                    # Apply confidence penalty
+                    swing_proximity_penalty = swing_result.get('confidence_penalty', 0.0)
+                    base_confidence -= swing_proximity_penalty
+
+                    if swing_proximity_penalty > 0:
+                        self.logger.info(
+                            f"📉 Swing proximity penalty: -{swing_proximity_penalty:.3f} "
+                            f"(distance: {swing_result.get('distance_to_swing', 0):.1f} pips to {swing_result.get('swing_type', 'swing')})"
+                        )
+                except Exception as e:
+                    self.logger.debug(f"Swing validation error (non-critical): {e}")
 
             # Calculate dynamic SL/TP if enabled
             sl_pips, tp_pips = self._calculate_dynamic_sl_tp(df, signal_type)

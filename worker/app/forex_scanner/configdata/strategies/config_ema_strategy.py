@@ -894,3 +894,25 @@ EMA_CONFIDENCE_VOLUME = 0.05             # Factor for volume confirmation
 EMA_MIN_EMA_SLOPE = 0.00005              # Minimum slope for trend validity
 EMA_REQUIRE_ALIGNED_EMAS = True          # EMAs must be in proper order (9<21<200 for uptrend)
 EMA_MAX_EMA_COMPRESSION = 0.002          # Max compression between EMAs (avoid ranging)
+
+# =============================================================================
+# SWING PROXIMITY VALIDATION CONFIGURATION (NEW)
+# =============================================================================
+
+# Swing Proximity Validation - Prevents poor entry timing near swing points
+EMA_SWING_VALIDATION = {
+    'enabled': True,  # Enable swing proximity validation
+    'min_distance_pips': 8,  # Minimum distance from swing high/low (20 pips)
+    'lookback_swings': 5,  # Number of recent swings to check
+    'swing_length': 5,  # Bars for swing detection (matches SMC default)
+    'strict_mode': False,  # False = reduce confidence, True = reject signal entirely
+    'resistance_buffer': 1.0,  # Multiplier for resistance proximity (more cautious on buys)
+    'support_buffer': 1.0,  # Multiplier for support proximity (more cautious on sells)
+}
+
+# Notes:
+# - Prevents BUY signals when price is too close to recent swing highs (resistance)
+# - Prevents SELL signals when price is too close to recent swing lows (support)
+# - Works in conjunction with existing S/R validation (different timeframes)
+# - Swing points: Recent pivots (5-50 bars)
+# - S/R levels: Long-term zones (100-500 bars)

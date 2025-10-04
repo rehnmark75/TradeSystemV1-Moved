@@ -12,7 +12,7 @@ Based on institutional trading concepts:
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -1143,11 +1143,11 @@ class SMCMarketStructure:
         try:
             htf_direction = htf_structure.get('trend_direction', 'neutral')
             htf_strength = htf_structure.get('trend_strength', 0)
-            
+
             # Require minimum trend strength for alignment
             if htf_strength < 0.3:
                 return False  # Too weak to provide meaningful alignment
-            
+
             # Check directional alignment
             if signal_direction == 'bullish' and htf_direction == 'bullish':
                 return True
@@ -1159,6 +1159,106 @@ class SMCMarketStructure:
             else:
                 # Opposite direction - reject signal
                 return False
-                
+
         except Exception:
             return False
+
+    def get_nearest_swing_levels(
+        self,
+        current_price: float,
+        direction: str,
+        lookback_count: int = 5
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get nearest swing high/low relative to current price
+        Used by swing proximity validator to prevent poor entry timing
+
+        Args:
+            current_price: Current market price
+            direction: 'BUY' or 'SELL' - trade direction
+            lookback_count: Number of recent swings to analyze
+
+        Returns:
+            Dictionary with swing level information:
+            {
+                'nearest_resistance': float,       # Nearest swing high above price
+                'nearest_support': float,          # Nearest swing low below price
+                'resistance_distance_pips': float, # Distance in pips
+                'support_distance_pips': float,    # Distance in pips
+                'swing_high_type': str,            # HH/LH/EQH
+                'swing_low_type': str              # HL/LL/EQL
+            }
+        """
+        try:
+            if not self.swing_points:
+                self.logger.debug("No swing points available for level calculation")
+                return None
+
+            # Get recent swing points
+            recent_swings = self.swing_points[-min(lookback_count * 2, len(self.swing_points)):]
+
+            # Separate swing highs and lows
+            swing_highs = [sp for sp in recent_swings
+                          if sp.swing_type in [SwingType.HIGHER_HIGH, SwingType.LOWER_HIGH, SwingType.EQUAL_HIGH]]
+            swing_lows = [sp for sp in recent_swings
+                         if sp.swing_type in [SwingType.HIGHER_LOW, SwingType.LOWER_LOW, SwingType.EQUAL_LOW]]
+
+            # Find nearest resistance (swing high above current price)
+            nearest_resistance = None
+            swing_high_type = 'HH'
+
+            if swing_highs:
+                # Get swing highs above current price
+                highs_above = [sp for sp in swing_highs if sp.price > current_price]
+
+                if highs_above:
+                    # Get the nearest one (smallest price above)
+                    nearest_swing_high = min(highs_above, key=lambda sp: sp.price)
+                    nearest_resistance = nearest_swing_high.price
+                    swing_high_type = nearest_swing_high.swing_type.value
+                else:
+                    # All swings below current price, get the highest recent one
+                    nearest_swing_high = max(swing_highs[-lookback_count:], key=lambda sp: sp.price)
+                    nearest_resistance = nearest_swing_high.price
+                    swing_high_type = nearest_swing_high.swing_type.value
+
+            # Find nearest support (swing low below current price)
+            nearest_support = None
+            swing_low_type = 'LL'
+
+            if swing_lows:
+                # Get swing lows below current price
+                lows_below = [sp for sp in swing_lows if sp.price < current_price]
+
+                if lows_below:
+                    # Get the nearest one (largest price below)
+                    nearest_swing_low = max(lows_below, key=lambda sp: sp.price)
+                    nearest_support = nearest_swing_low.price
+                    swing_low_type = nearest_swing_low.swing_type.value
+                else:
+                    # All swings above current price, get the lowest recent one
+                    nearest_swing_low = min(swing_lows[-lookback_count:], key=lambda sp: sp.price)
+                    nearest_support = nearest_swing_low.price
+                    swing_low_type = nearest_swing_low.swing_type.value
+
+            # Calculate distances (will be calculated with proper pip value by validator)
+            result = {
+                'nearest_resistance': nearest_resistance,
+                'nearest_support': nearest_support,
+                'swing_high_type': swing_high_type,
+                'swing_low_type': swing_low_type,
+                'resistance_distance_pips': None,  # Calculated by validator
+                'support_distance_pips': None      # Calculated by validator
+            }
+
+            self.logger.debug(
+                f"Swing levels for price {current_price:.5f}: "
+                f"resistance={nearest_resistance:.5f} ({swing_high_type}), "
+                f"support={nearest_support:.5f} ({swing_low_type})"
+            )
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Failed to get nearest swing levels: {e}")
+            return None

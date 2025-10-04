@@ -15,11 +15,13 @@ except ImportError:
 
 class ZeroLagSignalCalculator:
     """Calculates confidence scores and signal strength for Zero Lag signals"""
-    
-    def __init__(self, logger: logging.Logger = None, trend_validator=None, squeeze_analyzer=None, enhanced_validation: bool = True):
+
+    def __init__(self, logger: logging.Logger = None, trend_validator=None, squeeze_analyzer=None,
+                 swing_validator=None, enhanced_validation: bool = True):
         self.logger = logger or logging.getLogger(__name__)
         self.trend_validator = trend_validator
         self.squeeze_analyzer = squeeze_analyzer
+        self.swing_validator = swing_validator  # NEW: Swing proximity validator
         self.enhanced_validation = enhanced_validation
         self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.45)
     
@@ -520,3 +522,60 @@ class ZeroLagSignalCalculator:
         except Exception as e:
             self.logger.debug(f"RSI factor calculation failed: {e}")
             return 0.0
+
+    def validate_swing_proximity(
+        self,
+        df: pd.DataFrame,
+        current_price: float,
+        signal_type: str,
+        epic: str = None
+    ) -> Dict[str, any]:
+        """
+        Validate swing proximity for signal entry timing (NEW)
+
+        Args:
+            df: DataFrame with price data and swing analysis
+            current_price: Current market price
+            signal_type: 'BULL' or 'BEAR'
+            epic: Epic/symbol for pip calculation
+
+        Returns:
+            Dictionary with validation result and confidence adjustment
+        """
+        try:
+            if not self.swing_validator:
+                return {
+                    'valid': True,
+                    'confidence_penalty': 0.0,
+                    'reason': 'Swing validator not configured'
+                }
+
+            # Call swing proximity validator
+            result = self.swing_validator.validate_entry_proximity(
+                df=df,
+                current_price=current_price,
+                direction=signal_type,
+                epic=epic
+            )
+
+            if not result['valid']:
+                self.logger.warning(
+                    f"⚠️ Swing proximity violation: {result.get('rejection_reason', 'Unknown')}"
+                )
+
+            return {
+                'valid': result['valid'],
+                'confidence_penalty': result.get('confidence_penalty', 0.0),
+                'reason': result.get('rejection_reason'),
+                'swing_distance': result.get('distance_to_swing'),
+                'swing_price': result.get('nearest_swing_price'),
+                'swing_type': result.get('swing_type')
+            }
+
+        except Exception as e:
+            self.logger.error(f"Swing proximity validation error: {e}")
+            return {
+                'valid': True,
+                'confidence_penalty': 0.0,
+                'reason': f'Validation error: {str(e)}'
+            }

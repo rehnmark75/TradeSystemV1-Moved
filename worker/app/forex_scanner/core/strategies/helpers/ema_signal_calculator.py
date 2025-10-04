@@ -6,7 +6,7 @@ Handles confidence calculation and signal strength assessment for EMA strategy
 
 import pandas as pd
 import logging
-from typing import Optional
+from typing import Optional, Dict
 try:
     from configdata import config
 except ImportError:
@@ -15,10 +15,11 @@ except ImportError:
 
 class EMASignalCalculator:
     """Calculates confidence scores and signal strength for EMA signals"""
-    
-    def __init__(self, logger: logging.Logger = None, trend_validator=None):
+
+    def __init__(self, logger: logging.Logger = None, trend_validator=None, swing_validator=None):
         self.logger = logger or logging.getLogger(__name__)
         self.trend_validator = trend_validator
+        self.swing_validator = swing_validator  # NEW: Swing proximity validator
         self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.45)
     
     def calculate_simple_confidence(self, latest_row: pd.Series, signal_type: str) -> float:
@@ -187,10 +188,10 @@ class EMASignalCalculator:
     def validate_confidence_threshold(self, confidence: float) -> bool:
         """
         Check if confidence meets minimum threshold
-        
+
         Args:
             confidence: Calculated confidence score
-            
+
         Returns:
             True if confidence meets threshold, False otherwise
         """
@@ -198,3 +199,60 @@ class EMASignalCalculator:
             self.logger.debug(f"Signal confidence {confidence:.1%} below threshold {self.min_confidence:.1%}")
             return False
         return True
+
+    def validate_swing_proximity(
+        self,
+        df: pd.DataFrame,
+        current_price: float,
+        signal_type: str,
+        epic: str = None
+    ) -> Dict[str, any]:
+        """
+        Validate swing proximity for signal entry timing (NEW)
+
+        Args:
+            df: DataFrame with price data and swing analysis
+            current_price: Current market price
+            signal_type: 'BULL' or 'BEAR'
+            epic: Epic/symbol for pip calculation
+
+        Returns:
+            Dictionary with validation result and confidence adjustment
+        """
+        try:
+            if not self.swing_validator:
+                return {
+                    'valid': True,
+                    'confidence_penalty': 0.0,
+                    'reason': 'Swing validator not configured'
+                }
+
+            # Call swing proximity validator
+            result = self.swing_validator.validate_entry_proximity(
+                df=df,
+                current_price=current_price,
+                direction=signal_type,
+                epic=epic
+            )
+
+            if not result['valid']:
+                self.logger.warning(
+                    f"⚠️ Swing proximity violation: {result.get('rejection_reason', 'Unknown')}"
+                )
+
+            return {
+                'valid': result['valid'],
+                'confidence_penalty': result.get('confidence_penalty', 0.0),
+                'reason': result.get('rejection_reason'),
+                'swing_distance': result.get('distance_to_swing'),
+                'swing_price': result.get('nearest_swing_price'),
+                'swing_type': result.get('swing_type')
+            }
+
+        except Exception as e:
+            self.logger.error(f"Swing proximity validation error: {e}")
+            return {
+                'valid': True,
+                'confidence_penalty': 0.0,
+                'reason': f'Validation error: {str(e)}'
+            }

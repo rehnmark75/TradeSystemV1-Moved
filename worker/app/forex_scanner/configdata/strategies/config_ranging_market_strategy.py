@@ -444,3 +444,29 @@ try:
 except ValueError as e:
     import logging
     logging.getLogger(__name__).error(f"Ranging market configuration validation failed: {e}")
+
+# =============================================================================
+# SWING PROXIMITY VALIDATION CONFIGURATION (NEW)
+# =============================================================================
+
+# Swing Proximity Validation - Prevents poor entry timing near swing points
+RANGING_SWING_VALIDATION = {
+    'enabled': True,  # Enable swing proximity validation
+    'min_distance_pips': 8,  # Minimum distance from swing high/low (8 pips = 80 IG points)
+    'lookback_swings': 5,  # Number of recent swings to check
+    'swing_length': 5,  # Bars for swing detection (matches SMC default)
+    'strict_mode': False,  # False = reduce confidence, True = reject signal entirely
+    'resistance_buffer': 1.0,  # No multiplier - use 8 pips as-is
+    'support_buffer': 1.0,  # No multiplier - use 8 pips as-is
+}
+
+# Notes:
+# - Prevents BUY signals when price is too close to recent swing highs (resistance)
+# - Prevents SELL signals when price is too close to recent swing lows (support)
+# - Works in conjunction with existing S/R validation (different timeframes)
+# - Swing points: Recent pivots (5-50 bars) on 5m/15m charts
+# - S/R levels: Long-term zones (100-500 bars)
+# - 8 pips = 80 IG points (practical for intraday swings on 5m/15m)
+# - For JPY pairs: 8 pips = 0.08 price movement (80 IG points)
+# - Example: EUR/USD at 1.0850, swing high at 1.0857 → 7 pips away → WARNING
+# - Example: USD/JPY at 150.50, swing high at 150.57 → 7 pips away → WARNING
