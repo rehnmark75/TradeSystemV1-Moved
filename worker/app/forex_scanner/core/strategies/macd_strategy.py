@@ -75,6 +75,7 @@ class MACDStrategy(BaseStrategy):
             self.swing_validator = None
 
         self.logger.info(f"✅ Clean MACD Strategy initialized - ADX >= {self.min_adx}, Swing validation: {self.swing_validator is not None}")
+        self.logger.info(f"🔧 CRITICAL DEBUG: Using REBUILT MACD with NaN validation and dynamic EMA filter (v2.0)")
 
     def calculate_macd(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate MACD indicators"""
@@ -117,11 +118,20 @@ class MACDStrategy(BaseStrategy):
         3. RSI in reasonable zone
         4. Dynamic EMA trend filter (ADX-based volatility adaptation)
         """
-        # Check ADX
+        # Check ADX (handle NaN values)
         adx = row.get('adx', 0)
-        if adx < self.min_adx:
-            self.logger.debug(f"❌ {signal_type} rejected: ADX {adx:.1f} < {self.min_adx}")
+
+        # CRITICAL: Check for NaN or invalid ADX values
+        if pd.isna(adx) or adx <= 0:
+            self.logger.info(f"❌ {signal_type} rejected: Invalid ADX ({adx})")
             return False
+
+        if adx < self.min_adx:
+            self.logger.info(f"❌ {signal_type} rejected: ADX {adx:.1f} < {self.min_adx}")
+            return False
+
+        # Log ADX for signals that pass (for debugging)
+        self.logger.info(f"✅ {signal_type} passed ADX filter: ADX={adx:.1f} (min={self.min_adx})")
 
         # Check histogram direction
         histogram = row.get('macd_histogram', 0)
@@ -160,6 +170,11 @@ class MACDStrategy(BaseStrategy):
         else:  # ADX 25-30
             ema_filter = ema_200
             ema_name = "EMA200"
+
+        # CRITICAL: Validate EMA and price are valid numbers
+        if pd.isna(ema_filter) or pd.isna(price) or ema_filter <= 0 or price <= 0:
+            self.logger.info(f"❌ {signal_type} rejected: Invalid EMA or price (price={price}, {ema_name}={ema_filter})")
+            return False
 
         # Apply dynamic EMA filter
         if ema_filter > 0 and price > 0:
@@ -349,23 +364,39 @@ class MACDStrategy(BaseStrategy):
             return None
 
     def _calculate_adx(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate ADX indicator"""
+        """
+        Calculate ADX indicator using Wilder's smoothing (matches TradingView)
+
+        IMPORTANT: ADX uses Wilder's smoothing (RMA), not simple moving average
+        """
         df = df.copy()
+        period = 14
+
+        # True Range
         high_low = df['high'] - df['low']
         high_close = abs(df['high'] - df['close'].shift())
         low_close = abs(df['low'] - df['close'].shift())
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        atr = tr.rolling(14).mean()
 
+        # Directional Movement
         plus_dm = df['high'].diff()
         minus_dm = -df['low'].diff()
         plus_dm[plus_dm < 0] = 0
         minus_dm[minus_dm < 0] = 0
 
-        plus_di = 100 * (plus_dm.rolling(14).mean() / atr)
-        minus_di = 100 * (minus_dm.rolling(14).mean() / atr)
+        # Wilder's smoothing (RMA) = EWM with alpha=1/period
+        atr = tr.ewm(alpha=1/period, adjust=False).mean()
+        plus_di_smooth = plus_dm.ewm(alpha=1/period, adjust=False).mean()
+        minus_di_smooth = minus_dm.ewm(alpha=1/period, adjust=False).mean()
+
+        # Directional Indicators
+        plus_di = 100 * (plus_di_smooth / atr)
+        minus_di = 100 * (minus_di_smooth / atr)
+
+        # DX and ADX with Wilder's smoothing
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-        df['adx'] = dx.rolling(14).mean()
+        df['adx'] = dx.ewm(alpha=1/period, adjust=False).mean()
+
         return df
 
     def _calculate_rsi(self, df: pd.DataFrame) -> pd.DataFrame:
