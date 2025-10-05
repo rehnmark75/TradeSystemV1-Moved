@@ -969,8 +969,8 @@ class RangingMarketStrategy(BaseStrategy):
                     f"({bounce_confirmed.get('reason', 'Valid bounce')})"
                 )
 
-            # Calculate dynamic SL/TP if enabled
-            sl_pips, tp_pips = self._calculate_dynamic_sl_tp(df, signal_type)
+            # Calculate ranging-optimized SL/TP (live system handles breakeven/trailing)
+            sl_pips, tp_pips = self._calculate_ranging_sl_tp(df, signal_type)
 
             # Build the signal
             signal = {
@@ -1025,6 +1025,32 @@ class RangingMarketStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error(f"❌ Error building ranging market signal: {e}")
             return None
+
+    def _calculate_ranging_sl_tp(self, df: pd.DataFrame, signal_type: str) -> tuple:
+        """
+        Calculate SL/TP for ranging markets
+
+        Strategy: Use moderate stops with good R:R. Live system will:
+        - Move to breakeven after 10-15 pips profit
+        - Trail stop as price moves favorably
+
+        For backtest: Use realistic static targets
+        """
+        try:
+            # Use config defaults (already optimized for ranging)
+            sl_pips = self.config.get('ranging_default_sl_pips', 25)
+            tp_pips = self.config.get('ranging_default_tp_pips', 40)
+
+            # Ensure minimum R:R of 1.5:1
+            if tp_pips < sl_pips * 1.5:
+                tp_pips = sl_pips * 1.5
+
+            self.logger.info(f"💰 Ranging SL/TP: {sl_pips:.0f}/{tp_pips:.0f} pips (R:R = {tp_pips/sl_pips:.1f}:1)")
+            return sl_pips, tp_pips
+
+        except Exception as e:
+            self.logger.error(f"Error calculating ranging SL/TP: {e}")
+            return 25, 40
 
     def _calculate_dynamic_sl_tp(self, df: pd.DataFrame, signal_type: str) -> tuple:
         """Calculate dynamic stop loss and take profit levels"""
@@ -1392,6 +1418,125 @@ class RangingMarketStrategy(BaseStrategy):
             self.logger.error(f"Error in bounce confirmation: {e}")
             # On error, allow signal (fail-safe)
             return {'valid': True, 'reason': f'error_failsafe: {e}', 'confidence_boost': 0}
+
+    def _check_pullback_entry(self, df: pd.DataFrame, signal_type: str,
+                               zone_validation: Dict, latest_row: pd.Series) -> Dict[str, Any]:
+        """
+        Check if price has moved away from zone and is pulling back (optimal entry)
+
+        This prevents entering AT the zone bounce - instead wait for:
+        1. Price to move away from zone (rejection confirmed)
+        2. Small pullback toward the zone (re-entry opportunity)
+        3. Momentum still intact (not full reversal)
+
+        This gives much better entry timing and tighter stops.
+        """
+        try:
+            if len(df) < 5:
+                return {'valid': False, 'reason': 'insufficient_data'}
+
+            current_price = latest_row['close']
+            zone_level = zone_validation.get('zone_level', current_price)
+            zone_type = zone_validation.get('zone_type', '')
+
+            # Get last 5 candles for movement analysis
+            last_5 = df.tail(5)
+
+            # Calculate pip size
+            pip_value = 0.0001
+            if 'JPY' in str(self.epic).upper():
+                pip_value = 0.01
+
+            if signal_type in ['BUY', 'BULL']:
+                # BUY signal: Need to see price has bounced UP from support, then pulled back slightly
+
+                # Find lowest low in last 5 bars (should be the support test)
+                lowest_low = last_5['low'].min()
+                lowest_idx = last_5['low'].idxmin()
+
+                # Check if price moved up after the low (bounce happened)
+                bars_since_low = len(last_5) - list(last_5.index).index(lowest_idx) - 1
+
+                if bars_since_low < 1:
+                    # Still AT the low, too early
+                    return {'valid': False, 'reason': 'still_at_support_no_bounce_yet'}
+
+                # Price should have moved UP from the low (bounce)
+                bounce_size_pips = (current_price - lowest_low) / pip_value
+
+                if bounce_size_pips < 3:
+                    # Hasn't bounced enough
+                    return {'valid': False, 'reason': f'bounce_too_small_{bounce_size_pips:.1f}pips'}
+
+                # Check if current candle is pulling back (not just running away)
+                # Ideal: Small red candle or consolidation after bounce
+                prev_close = df.iloc[-2]['close']
+
+                if current_price < prev_close:
+                    # Pullback after bounce - PERFECT ENTRY
+                    return {
+                        'valid': True,
+                        'reason': f'pullback_after_{bounce_size_pips:.1f}pip_bounce',
+                        'confidence_boost': 0.08
+                    }
+                elif bounce_size_pips < 10:
+                    # Still early in bounce, acceptable
+                    return {
+                        'valid': True,
+                        'reason': f'early_bounce_{bounce_size_pips:.1f}pips',
+                        'confidence_boost': 0.05
+                    }
+                else:
+                    # Bounce too extended, missed entry
+                    return {'valid': False, 'reason': f'bounce_too_extended_{bounce_size_pips:.1f}pips'}
+
+            else:  # SELL signal
+                # SELL signal: Need to see price has bounced DOWN from resistance, then pulled back slightly
+
+                # Find highest high in last 5 bars (should be the resistance test)
+                highest_high = last_5['high'].max()
+                highest_idx = last_5['high'].idxmax()
+
+                # Check if price moved down after the high (bounce happened)
+                bars_since_high = len(last_5) - list(last_5.index).index(highest_idx) - 1
+
+                if bars_since_high < 1:
+                    # Still AT the high, too early
+                    return {'valid': False, 'reason': 'still_at_resistance_no_bounce_yet'}
+
+                # Price should have moved DOWN from the high (bounce)
+                bounce_size_pips = (highest_high - current_price) / pip_value
+
+                if bounce_size_pips < 3:
+                    # Hasn't bounced enough
+                    return {'valid': False, 'reason': f'bounce_too_small_{bounce_size_pips:.1f}pips'}
+
+                # Check if current candle is pulling back (not just running away)
+                # Ideal: Small green candle or consolidation after bounce
+                prev_close = df.iloc[-2]['close']
+
+                if current_price > prev_close:
+                    # Pullback after bounce - PERFECT ENTRY
+                    return {
+                        'valid': True,
+                        'reason': f'pullback_after_{bounce_size_pips:.1f}pip_bounce',
+                        'confidence_boost': 0.08
+                    }
+                elif bounce_size_pips < 10:
+                    # Still early in bounce, acceptable
+                    return {
+                        'valid': True,
+                        'reason': f'early_bounce_{bounce_size_pips:.1f}pips',
+                        'confidence_boost': 0.05
+                    }
+                else:
+                    # Bounce too extended, missed entry
+                    return {'valid': False, 'reason': f'bounce_too_extended_{bounce_size_pips:.1f}pips'}
+
+        except Exception as e:
+            self.logger.error(f"Error in pullback entry check: {e}")
+            # On error, reject (fail-safe to avoid bad entries)
+            return {'valid': False, 'reason': f'error: {e}'}
 
     def _get_bars_since_nearest_swing(self, df: pd.DataFrame, direction: str,
                                        swing_result: Dict[str, Any]) -> Optional[int]:

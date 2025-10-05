@@ -244,9 +244,9 @@ RANGING_POSITION_SIZE_MULTIPLIER = 0.5  # Reduced position size for ranging (con
 RANGING_MAX_DRAWDOWN_THRESHOLD = 0.04   # Stop strategy at 4% drawdown
 RANGING_MAX_DAILY_LOSS = 0.02           # Maximum daily loss threshold
 
-# Stop Loss and Take Profit
-RANGING_DEFAULT_SL_PIPS = 35            # OPTIMIZED: Balanced stop loss for ranging markets (was 45 - too wide)
-RANGING_DEFAULT_TP_PIPS = 53            # OPTIMIZED: Realistic target with 1.5:1 R:R (35 * 1.5 = 52.5)
+# Stop Loss and Take Profit (Live system uses breakeven + trailing)
+RANGING_DEFAULT_SL_PIPS = 25            # OPTIMIZED: Moderate stop for ranging noise tolerance
+RANGING_DEFAULT_TP_PIPS = 40            # OPTIMIZED: Conservative target (1.6:1 R:R) - live trailing improves this
 RANGING_DYNAMIC_SL_TP = True            # Use dynamic SL/TP based on range size
 RANGING_TRAIL_STOP_ENABLED = True       # Enable trailing stop
 
