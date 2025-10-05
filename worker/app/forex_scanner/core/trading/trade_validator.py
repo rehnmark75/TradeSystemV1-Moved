@@ -176,7 +176,7 @@ class TradeValidator:
                     'left_bars': getattr(config, 'SR_LEFT_BARS', 15),
                     'right_bars': getattr(config, 'SR_RIGHT_BARS', 15),
                     'volume_threshold': getattr(config, 'SR_VOLUME_THRESHOLD', 20.0),
-                    'level_tolerance_pips': getattr(config, 'SR_LEVEL_TOLERANCE_PIPS', 3.0),  # More sensitive for flip detection
+                    'level_tolerance_pips': getattr(config, 'SR_LEVEL_TOLERANCE_PIPS', 2.0),  # OPTIMIZED: Less restrictive (was 3.0)
                     'min_level_distance_pips': getattr(config, 'SR_MIN_LEVEL_DISTANCE_PIPS', 20.0),
                     'logger': self.logger
                 }

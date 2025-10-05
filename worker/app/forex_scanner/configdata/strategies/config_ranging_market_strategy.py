@@ -139,8 +139,8 @@ OSCILLATOR_WEIGHTS = {                 # Weight for each oscillator in confluenc
 }
 
 # Confluence Thresholds
-OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.35  # OPTIMIZED: Capture quality 0.35-0.43 signals (was 0.45 - missing good signals)
-OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.35  # OPTIMIZED: Capture quality 0.35-0.43 signals (was 0.45 - missing good signals)
+OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.22  # OPTIMIZED: Capture 0.22-0.28 range signals (was 0.28 - many 0.20-0.27 missed)
+OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.22  # OPTIMIZED: Capture 0.22-0.28 range signals (was 0.28 - many 0.20-0.27 missed)
 OSCILLATOR_EXTREME_CONFLUENCE_BOOST = 0.15   # Boost for extreme readings
 
 # Signal Quality Requirements
@@ -219,7 +219,7 @@ MTF_ZONE_CONFLUENCE = True             # Require S/R zone confluence
 # =============================================================================
 
 # Signal Quality Requirements
-SIGNAL_QUALITY_MIN_CONFIDENCE = 0.65   # OPTIMIZED: Balance quality vs quantity (was 0.70 - too strict)
+SIGNAL_QUALITY_MIN_CONFIDENCE = 0.60   # OPTIMIZED: Capture more signals (was 0.65 - still filtering good setups)
 SIGNAL_QUALITY_REQUIRE_VOLUME_CONFIRMATION = False  # Volume confirmation (if available)
 SIGNAL_QUALITY_MIN_RISK_REWARD = 1.5   # OPTIMIZED: Realistic for ranging markets (was 2.5 - unrealistic 112 pip targets)
 SIGNAL_QUALITY_MAX_SPREAD_IMPACT = 0.3  # Maximum spread impact on signal quality

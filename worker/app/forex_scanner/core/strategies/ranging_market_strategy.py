@@ -1309,6 +1309,14 @@ class RangingMarketStrategy(BaseStrategy):
                             'confidence_boost': 0.05
                         }
 
+                # FALLBACK: Accept decent wick (>20%) even if close not ideal - lower confidence
+                if lower_wick_ratio > 0.20:
+                    return {
+                        'valid': True,
+                        'reason': f'moderate_rejection_wick ({lower_wick_ratio:.1%} lower wick)',
+                        'confidence_boost': 0.02
+                    }
+
                 # Check if price tested lower and is now recovering
                 if prev_candle['low'] < current_candle['low'] and current_candle['close'] > prev_candle['close']:
                     return {
@@ -1347,6 +1355,14 @@ class RangingMarketStrategy(BaseStrategy):
                             'reason': f'bearish_rejection_wick ({upper_wick_ratio:.1%} upper wick)',
                             'confidence_boost': 0.05
                         }
+
+                # FALLBACK: Accept decent wick (>20%) even if close not ideal - lower confidence
+                if upper_wick_ratio > 0.20:
+                    return {
+                        'valid': True,
+                        'reason': f'moderate_rejection_wick ({upper_wick_ratio:.1%} upper wick)',
+                        'confidence_boost': 0.02
+                    }
 
                 # Check if price tested higher and is now falling
                 if prev_candle['high'] > current_candle['high'] and current_candle['close'] < prev_candle['close']:
