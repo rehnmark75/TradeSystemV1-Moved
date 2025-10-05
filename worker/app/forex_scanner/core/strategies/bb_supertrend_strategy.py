@@ -180,7 +180,7 @@ class BollingerSupertrendStrategy(BaseStrategy):
                 
             # Test if forex optimizer cache is working at all
             try:
-                test_epic = "CS.D.EURUSD.MINI.IP"
+                test_epic = "CS.D.EURUSD.CEEM.IP"
                 test_pair_type = self.forex_optimizer.get_forex_pair_type(test_epic)
                 self.logger.debug(f"  ✅ Test pair type call: {test_pair_type}")
                 

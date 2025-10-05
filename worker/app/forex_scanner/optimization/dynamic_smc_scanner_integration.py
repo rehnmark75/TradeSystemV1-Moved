@@ -251,7 +251,7 @@ class DynamicSMCScanner:
             )
             from configdata.strategies.config_smc_strategy import SMC_STRATEGY_CONFIG, ACTIVE_SMC_CONFIG
             
-            test_epic = epic or 'CS.D.EURUSD.MINI.IP'
+            test_epic = epic or 'CS.D.EURUSD.CEEM.IP'
             
             print(f"\n🔍 OPTIMIZATION vs STATIC COMPARISON: {test_epic}")
             print("="*80)
@@ -328,7 +328,7 @@ def main():
         scanner.print_optimization_status()
         
         # Show comparison between optimization vs static
-        scanner.compare_optimization_vs_static('CS.D.EURUSD.MINI.IP')
+        scanner.compare_optimization_vs_static('CS.D.EURUSD.CEEM.IP')
         
         # Demonstrate scanning with optimized parameters
         print("\n🔍 SCANNING WITH OPTIMIZED PARAMETERS:")

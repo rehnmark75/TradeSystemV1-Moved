@@ -81,7 +81,7 @@ def check_alert_history_manager():
         
         # Test saving a dummy signal
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BULL',
             'confidence_score': 0.75,
             'strategy': 'test_strategy',
@@ -126,7 +126,7 @@ def check_live_scanner_integration():
         # Check if scanner has alert_history attribute
         scanner = IntelligentForexScanner(
             db_manager=db,
-            epic_list=['CS.D.EURUSD.MINI.IP'],
+            epic_list=['CS.D.EURUSD.CEEM.IP'],
             enable_claude_analysis=False
         )
         
@@ -196,7 +196,7 @@ def get_signal_processing_status():
         db = DatabaseManager(config.DATABASE_URL)
         scanner = IntelligentForexScanner(
             db_manager=db,
-            epic_list=['CS.D.EURUSD.MINI.IP'],
+            epic_list=['CS.D.EURUSD.CEEM.IP'],
             enable_claude_analysis=False
         )
         

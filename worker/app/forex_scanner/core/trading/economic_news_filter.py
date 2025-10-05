@@ -146,7 +146,7 @@ class EconomicNewsFilter:
             if not epic:
                 return None
 
-            # Handle IG Markets format: CS.D.EURUSD.MINI.IP -> EURUSD
+            # Handle IG Markets format: CS.D.EURUSD.CEEM.IP -> EURUSD
             if 'CS.D.' in epic:
                 parts = epic.split('.')
                 if len(parts) >= 3:

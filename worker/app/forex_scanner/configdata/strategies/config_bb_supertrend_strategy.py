@@ -250,7 +250,7 @@ def get_bb_supertrend_config_for_epic(epic: str, market_condition: str = 'defaul
     Get BB SuperTrend configuration for specific epic and market condition
 
     Args:
-        epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
         market_condition: Market condition ('conservative', 'balanced', 'default', 'aggressive', etc.)
 
     Returns:
@@ -269,7 +269,7 @@ def get_bb_supertrend_confidence_for_epic(epic: str, market_condition: str = 'de
     Get BB SuperTrend base confidence for specific epic
 
     Args:
-        epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
         market_condition: Market condition
 
     Returns:

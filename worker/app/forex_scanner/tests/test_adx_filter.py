@@ -171,7 +171,7 @@ def test_adx_filter():
         # Test ADX validation directly first
         adx_validation = signal_detector._validate_adx_trend_strength(
             df_enhanced=df,
-            epic='CS.D.EURUSD.MINI.IP',
+            epic='CS.D.EURUSD.CEEM.IP',
             signal_type='BULL'
         )
         
@@ -195,7 +195,7 @@ def test_adx_filter():
             signal = signal_detector.detect_enhanced_macd_signal(
                 latest=latest,
                 previous=previous,
-                epic='CS.D.EURUSD.MINI.IP',
+                epic='CS.D.EURUSD.CEEM.IP',
                 timeframe='5m',
                 df_enhanced=df,
                 forex_optimizer=forex_optimizer
@@ -259,7 +259,7 @@ def test_adx_configuration():
         for mode in modes:
             result = adx_calc.validate_adx_signal(
                 adx_value=adx_value,
-                epic='CS.D.EURUSD.MINI.IP',
+                epic='CS.D.EURUSD.CEEM.IP',
                 filter_mode=mode
             )
             

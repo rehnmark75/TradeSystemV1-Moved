@@ -47,7 +47,7 @@ def test_bb_supertrend_directly():
             return False
         
         # Get data for last 7 days
-        epic = 'CS.D.EURUSD.MINI.IP'
+        epic = 'CS.D.EURUSD.CEEM.IP'
         pair = 'EURUSD'
         
         df = detector.data_fetcher.get_enhanced_data(epic, pair, timeframe='15m', lookback_hours=7*24)

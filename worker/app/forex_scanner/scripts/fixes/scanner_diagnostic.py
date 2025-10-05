@@ -57,7 +57,7 @@ def test_database_connection(config):
         print(f"✅ Database connection works")
         
         # Check for data
-        pairs_to_check = ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP']
+        pairs_to_check = ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP']
         
         for epic in pairs_to_check:
             try:
@@ -96,7 +96,7 @@ def test_confidence_thresholds(config):
         db = DatabaseManager(config.DATABASE_URL)
         
         # Test pairs from your config or use defaults
-        test_pairs = getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP'])[:3]
+        test_pairs = getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP'])[:3]
         
         print(f"Testing with pairs: {[p.replace('CS.D.', '').replace('.MINI.IP', '') for p in test_pairs]}")
         
@@ -159,7 +159,7 @@ def test_live_vs_backtest(config):
         from core.database import DatabaseManager
         
         db = DatabaseManager(config.DATABASE_URL)
-        test_epic = 'CS.D.EURUSD.MINI.IP'
+        test_epic = 'CS.D.EURUSD.CEEM.IP'
         
         scanner = IntelligentForexScanner(
             db_manager=db,
@@ -189,9 +189,9 @@ def test_debug_commands():
     print("-" * 50)
     
     print("Available debug commands to try manually:")
-    print("   python main.py debug --epic CS.D.EURUSD.MINI.IP")
-    print("   python main.py debug-combined --epic CS.D.EURUSD.MINI.IP")
-    print("   python main.py debug-macd --epic CS.D.EURUSD.MINI.IP")
+    print("   python main.py debug --epic CS.D.EURUSD.CEEM.IP")
+    print("   python main.py debug-combined --epic CS.D.EURUSD.CEEM.IP")
+    print("   python main.py debug-macd --epic CS.D.EURUSD.CEEM.IP")
     print("   python main.py scan --config-check")
     
     try:
@@ -256,7 +256,7 @@ def main():
     
     print("\n📋 NEXT STEPS:")
     print("1. Try manual debug commands listed above")
-    print("2. Run a backtest to verify: python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 3")
+    print("2. Run a backtest to verify: python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 3")
     print("3. If backtest works but live doesn't, check market hours/data freshness")
     print("4. Consider temporarily lowering MIN_CONFIDENCE for testing")
 

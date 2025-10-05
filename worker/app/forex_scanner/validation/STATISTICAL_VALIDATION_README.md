@@ -142,7 +142,7 @@ correlation_analyzer = create_realtime_correlation_analyzer(db_manager)
 correlation_results = correlation_analyzer.analyze_backtest_live_correlation(
     execution_id=123,
     strategy_name="momentum_strategy",
-    epic="CS.D.EURUSD.MINI.IP"
+    epic="CS.D.EURUSD.CEEM.IP"
 )
 
 # Check correlation quality

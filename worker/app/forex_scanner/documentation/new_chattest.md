@@ -5,4 +5,4 @@ When starting a new chat, lead with:
 4. Quick Health Check:
 Before starting a new chat, run:
 bashpython main.py scan --config-check
-python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 3
+python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 3

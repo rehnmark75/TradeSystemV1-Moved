@@ -75,7 +75,7 @@ def test_momentum_confirmation():
     
     # Create test data
     df = create_test_data()
-    epic = 'CS.D.EURUSD.MINI.IP'
+    epic = 'CS.D.EURUSD.CEEM.IP'
     timeframe = '5m'
     
     logger.info(f"Created test data with {len(df)} bars")
@@ -266,7 +266,7 @@ def test_weak_crossover_scenario():
     forex_optimizer = MACDForexOptimizer(logger=logger)
     signal_detector = MACDSignalDetector(logger=logger, forex_optimizer=forex_optimizer)
     
-    epic = 'CS.D.EURUSD.MINI.IP'
+    epic = 'CS.D.EURUSD.CEEM.IP'
     timeframe = '5m'
     
     signals_detected = []

@@ -20,7 +20,7 @@ The validation system provides:
 # Validate a single signal
 python -m forex_scanner.validation.signal_replay_validator \
     --timestamp "2025-01-15 14:30:00" \
-    --epic "CS.D.EURUSD.MINI.IP" \
+    --epic "CS.D.EURUSD.CEEM.IP" \
     --show-calculations
 
 # Validate all epics at a timestamp
@@ -32,7 +32,7 @@ python -m forex_scanner.validation.signal_replay_validator \
 # Debug specific strategy
 python -m forex_scanner.validation.signal_replay_validator \
     --timestamp "2025-01-15 14:30:00" \
-    --epic "CS.D.EURUSD.MINI.IP" \
+    --epic "CS.D.EURUSD.CEEM.IP" \
     --strategy "EMA" \
     --debug-mode \
     --show-intermediate-steps
@@ -43,7 +43,7 @@ python -m forex_scanner.validation.signal_replay_validator \
 ```bash
 # Analyze signals over time range
 python -m forex_scanner.validation.signal_replay_validator \
-    --epic "CS.D.EURUSD.MINI.IP" \
+    --epic "CS.D.EURUSD.CEEM.IP" \
     --start-time "2025-01-15 08:00:00" \
     --end-time "2025-01-15 18:00:00" \
     --interval 30 \
@@ -104,9 +104,9 @@ One of:
 ### Epic Selection
 
 One of:
-- `--epic "CS.D.EURUSD.MINI.IP"` - Validate single epic
+- `--epic "CS.D.EURUSD.CEEM.IP"` - Validate single epic
 - `--all-epics` - Validate all configured epics
-- `--epic-list "CS.D.EURUSD.MINI.IP" "CS.D.GBPUSD.MINI.IP"` - Validate specific list
+- `--epic-list "CS.D.EURUSD.CEEM.IP" "CS.D.GBPUSD.MINI.IP"` - Validate specific list
 
 ### Analysis Options
 
@@ -189,7 +189,7 @@ STRATEGY_REPLAY_CONFIG = {
 🔍 Signal Validation Report
 ═══════════════════════════════════════════════════════════
 📅 Target Timestamp: 2025-01-15 14:30:00 UTC
-🎯 Epic: CS.D.EURUSD.MINI.IP
+🎯 Epic: CS.D.EURUSD.CEEM.IP
 ⚙️  Strategy: EMA Strategy
 
 📊 Market Conditions at Timestamp:
@@ -230,7 +230,7 @@ STRATEGY_REPLAY_CONFIG = {
   "results": [
     {
       "success": true,
-      "epic": "CS.D.EURUSD.MINI.IP", 
+      "epic": "CS.D.EURUSD.CEEM.IP", 
       "timestamp": "2025-01-15T14:30:00Z",
       "signal_detected": true,
       "processing_time_ms": 234.5,
@@ -300,7 +300,7 @@ Run inside the task-worker container:
 ```bash
 docker-compose exec -T task-worker python -m forex_scanner.validation.signal_replay_validator \
     --timestamp "2025-01-15 14:30:00" \
-    --epic "CS.D.EURUSD.MINI.IP"
+    --epic "CS.D.EURUSD.CEEM.IP"
 ```
 
 ## Performance Considerations
@@ -333,7 +333,7 @@ Expected performance:
 
 1. **"No historical data found"**
    - Check timestamp is within available data range
-   - Verify epic name format (CS.D.EURUSD.MINI.IP)
+   - Verify epic name format (CS.D.EURUSD.CEEM.IP)
    - Ensure database connection is working
 
 2. **"Insufficient data for indicators"**
@@ -358,7 +358,7 @@ Enable verbose logging for troubleshooting:
 ```bash
 python -m forex_scanner.validation.signal_replay_validator \
     --timestamp "2025-01-15 14:30:00" \
-    --epic "CS.D.EURUSD.MINI.IP" \
+    --epic "CS.D.EURUSD.CEEM.IP" \
     --debug-mode \
     --verbose
 ```
@@ -378,7 +378,7 @@ python -m forex_scanner.validation.signal_replay_validator \
 # Test with recent timestamp (ensure data availability)
 python -m forex_scanner.validation.signal_replay_validator \
     --timestamp "$(date -d '2 hours ago' '+%Y-%m-%d %H:00:00')" \
-    --epic "CS.D.EURUSD.MINI.IP" \
+    --epic "CS.D.EURUSD.CEEM.IP" \
     --debug-mode
 
 # Test batch processing

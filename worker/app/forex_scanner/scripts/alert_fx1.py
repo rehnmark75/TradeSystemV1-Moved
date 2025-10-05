@@ -357,7 +357,7 @@ def test_completely_fixed_notification_manager():
         
         # Test 1: Basic signal alert
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BUY',
             'confidence_score': 0.85,
             'strategy': 'INTEGRATION_TEST',
@@ -439,7 +439,7 @@ def verify_claude_database_integration():
         db = DatabaseManager(config.DATABASE_URL)
         scanner = IntelligentForexScanner(
             db_manager=db,
-            epic_list=['CS.D.EURUSD.MINI.IP'],
+            epic_list=['CS.D.EURUSD.CEEM.IP'],
             intelligence_mode='disabled',
             min_confidence=0.1
         )
@@ -448,7 +448,7 @@ def verify_claude_database_integration():
         
         # Test signal processing
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BUY',
             'confidence_score': 0.85,
             'strategy': 'FINAL_INTEGRATION_TEST',

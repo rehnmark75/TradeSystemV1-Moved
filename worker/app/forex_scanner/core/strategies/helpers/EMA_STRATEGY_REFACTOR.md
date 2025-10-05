@@ -101,7 +101,7 @@ All configuration remains in the main `config` module:
 Successfully tested with existing backtest infrastructure:
 ```bash
 docker-compose exec -T backtester_live python /app/backtest_runner.py \
-  --epic CS.D.EURUSD.MINI.IP \
+  --epic CS.D.EURUSD.CEEM.IP \
   --timeframe 15m \
   --lookback_days 1 \
   --sl_type atr \

@@ -93,10 +93,16 @@ class KAMADataHelper:
         """
         try:
             # Get KAMA parameters from config
-            import config
-            er_period = getattr(config, 'KAMA_ER_PERIOD', 14)
-            fast_sc = getattr(config, 'KAMA_FAST_SC', 2)
-            slow_sc = getattr(config, 'KAMA_SLOW_SC', 30)
+            try:
+                from configdata.strategies import config_kama_strategy
+            except ImportError:
+                try:
+                    from forex_scanner.configdata.strategies import config_kama_strategy
+                except ImportError:
+                    from forex_scanner.configdata.strategies import config_kama_strategy as config_kama_strategy
+            er_period = getattr(config_kama_strategy, 'KAMA_ER_PERIOD', 14)
+            fast_sc = getattr(config_kama_strategy, 'KAMA_FAST_SC', 2)
+            slow_sc = getattr(config_kama_strategy, 'KAMA_SLOW_SC', 30)
             
             # Verify DataFrame structure
             if not isinstance(df, pd.DataFrame) or 'close' not in df.columns:
@@ -339,8 +345,16 @@ class KAMADataHelper:
             })
             
             # Calculate stop loss and take profit
-            import config
-            default_stop_distance = getattr(config, 'DEFAULT_STOP_DISTANCE', 20)
+            try:
+                from configdata.strategies import config_kama_strategy
+                default_stop_distance = getattr(config_kama_strategy, 'KAMA_DEFAULT_STOP_LOSS_PIPS', 20)
+            except ImportError:
+                try:
+                    from forex_scanner.configdata.strategies import config_kama_strategy
+                    default_stop_distance = getattr(config_kama_strategy, 'KAMA_DEFAULT_STOP_LOSS_PIPS', 20)
+                except ImportError:
+                    from forex_scanner.configdata import config
+                    default_stop_distance = getattr(config, 'DEFAULT_STOP_DISTANCE', 20)
             pip_size = 0.01 if 'JPY' in epic else 0.0001
             stop_distance_price = default_stop_distance * pip_size
             risk_reward = getattr(config, 'DEFAULT_RISK_REWARD', 2.0)

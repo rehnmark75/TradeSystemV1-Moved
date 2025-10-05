@@ -21,7 +21,7 @@ CREATE INDEX IF NOT EXISTS idx_forex_thresholds_active ON forex_thresholds(is_ac
 INSERT INTO forex_thresholds (epic, base_threshold, strength_thresholds, pair_type, notes)
 VALUES 
     -- Major USD pairs (CORRECTED - 5-6x increase from old values)
-    ('CS.D.EURUSD.MINI.IP', 0.00005000, 
+    ('CS.D.EURUSD.CEEM.IP', 0.00005000, 
      '{"moderate": 0.0004, "strong": 0.0008, "very_strong": 0.0012}',
      'eur_major', 'EUR/USD - Corrected from 0.000008'),
     

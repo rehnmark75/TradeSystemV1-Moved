@@ -31,9 +31,14 @@ from .helpers.kama_data_helper import KAMADataHelper
 from .helpers.kama_confidence_calculator import KAMAConfidenceCalculator
 
 try:
-    import config
+    from configdata import config
+    from configdata.strategies import config_kama_strategy
 except ImportError:
-    from forex_scanner import config
+    from forex_scanner.configdata import config
+    try:
+        from forex_scanner.configdata.strategies import config_kama_strategy
+    except ImportError:
+        from forex_scanner.configdata.strategies import config_kama_strategy as config_kama_strategy
 
 
 class KAMAStrategy(BaseStrategy):
@@ -121,7 +126,7 @@ class KAMAStrategy(BaseStrategy):
             confidence = self.calculate_kama_confidence(enhanced_signal_data, df_enhanced, epic)
             
             # 🔧 ADJUSTED: Lower minimum threshold since KAMA calculator is more realistic
-            min_threshold = getattr(config, 'KAMA_MIN_CONFIDENCE', 0.25)  # Default 25% instead of 30%
+            min_threshold = getattr(config_kama_strategy, 'KAMA_MIN_CONFIDENCE', 0.25)  # Default 25% instead of 30%
             
             if confidence < min_threshold:
                 self.logger.warning(f"[KAMA MODULAR REJECT] {epic} {signal_data['signal_type']} - "

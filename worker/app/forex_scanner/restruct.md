@@ -87,7 +87,7 @@ Edit `config.py`:
 ```python
 DATABASE_URL = "your_database_connection"
 CLAUDE_API_KEY = "your_anthropic_api_key"
-EPIC_LIST = ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP']
+EPIC_LIST = ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP']
 ```
 
 ### **Step 5: Test Setup**
@@ -160,7 +160,7 @@ from core.database import DatabaseManager
 db_manager = DatabaseManager("your_db_url")
 scanner = ForexScanner(
     db_manager=db_manager,
-    epic_list=['CS.D.EURUSD.MINI.IP'],
+    epic_list=['CS.D.EURUSD.CEEM.IP'],
     claude_api_key="your_key"
 )
 
@@ -177,7 +177,7 @@ from core.signal_detector import SignalDetector
 
 detector = SignalDetector(db_manager)
 results = detector.backtest_signals(
-    epic_list=['CS.D.EURUSD.MINI.IP'],
+    epic_list=['CS.D.EURUSD.CEEM.IP'],
     lookback_days=30,
     use_bid_adjustment=True
 )
@@ -295,7 +295,7 @@ python main.py backtest --days 30
 ```python
 # In config.py - customize your pairs
 EPIC_LIST = [
-    'CS.D.EURUSD.MINI.IP',    # EUR/USD
+    'CS.D.EURUSD.CEEM.IP',    # EUR/USD
     'CS.D.GBPUSD.MINI.IP',    # GBP/USD
     'CS.D.USDJPY.MINI.IP',    # USD/JPY (uses 100 pip multiplier)
     'CS.D.AUDUSD.MINI.IP',    # AUD/USD
@@ -388,7 +388,7 @@ Overall Rating: 8.5/10
 ```csv
 # signals.csv - automatic logging
 2025-06-26 14:32:15,CS.D.USDJPY.MINI.IP,BULL,148.245,0.785
-2025-06-26 15:15:22,CS.D.EURUSD.MINI.IP,BEAR,1.0845,0.723
+2025-06-26 15:15:22,CS.D.EURUSD.CEEM.IP,BEAR,1.0845,0.723
 ```
 
 ## 🔮 **Future Enhancements**
@@ -547,7 +547,7 @@ print(f"Win rate: {performance.win_rate:.1%}")
 ```python
 # Test specific pair with custom settings
 signals = detect_signals_for_epic(
-    epic='CS.D.EURUSD.MINI.IP',
+    epic='CS.D.EURUSD.CEEM.IP',
     spread_pips=1.2,
     confidence_threshold=0.7
 )

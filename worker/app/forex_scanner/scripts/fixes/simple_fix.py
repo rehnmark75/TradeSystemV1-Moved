@@ -36,7 +36,7 @@ def debug_ema_issue():
         db_manager = DatabaseManager(config.DATABASE_URL)
         data_fetcher = DataFetcher(db_manager, config.USER_TIMEZONE)
         
-        epic = 'CS.D.EURUSD.MINI.IP'
+        epic = 'CS.D.EURUSD.CEEM.IP'
         pair = 'EURUSD'
         
         print(f"  Testing with {epic} ({pair})...")

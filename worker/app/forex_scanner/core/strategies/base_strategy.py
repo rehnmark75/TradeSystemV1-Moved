@@ -373,7 +373,7 @@ class BaseStrategy(ABC):
 
             # Take profit: 2.0-2.5× risk/reward based on pair volatility
             # Major pairs get higher RR targets
-            if epic in ['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP']:
+            if epic in ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP']:
                 risk_reward = 2.5
             else:
                 risk_reward = 2.0

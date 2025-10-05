@@ -2296,7 +2296,7 @@ Respond with ONLY the three lines above, nothing else.
             
             self.logger.info(f"🔍 Analyzing {epic} at {timestamp_str}")
             
-            # Extract pair from epic (e.g., 'CS.D.EURUSD.MINI.IP' -> 'EURUSD')
+            # Extract pair from epic (e.g., 'CS.D.EURUSD.CEEM.IP' -> 'EURUSD')
             pair = epic.split('.')[2] if '.' in epic else epic
             
             # Get market data using the correct data_fetcher method
@@ -2515,7 +2515,7 @@ if __name__ == "__main__":
         
         # Test signal with your problematic data
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BULL',  # System suggests BULL
             'price': 0.813675,
             'confidence_score': 0.853,

@@ -85,7 +85,7 @@ class DynamicEMAConfigManager:
                 best_trend_strength='weak',
                 best_market_regime='ranging',
                 best_session=['london', 'new_york', 'overlap'],
-                preferred_pairs=['CS.D.EURUSD.MINI.IP', 'CS.D.GBPUSD.MINI.IP'],
+                preferred_pairs=['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP'],
                 min_pip_volatility=15.0,
                 max_pip_volatility=80.0
             ),
@@ -97,7 +97,7 @@ class DynamicEMAConfigManager:
                 best_trend_strength='medium',
                 best_market_regime='trending',
                 best_session=['london', 'new_york'],
-                preferred_pairs=['CS.D.EURUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP'],
+                preferred_pairs=['CS.D.EURUSD.CEEM.IP', 'CS.D.USDJPY.MINI.IP'],
                 min_pip_volatility=8.0,
                 max_pip_volatility=50.0
             ),
@@ -121,7 +121,7 @@ class DynamicEMAConfigManager:
                 best_trend_strength='weak',
                 best_market_regime='breakout',
                 best_session=['overlap', 'new_york'],
-                preferred_pairs=['CS.D.GBPUSD.MINI.IP', 'CS.D.EURUSD.MINI.IP'],
+                preferred_pairs=['CS.D.GBPUSD.MINI.IP', 'CS.D.EURUSD.CEEM.IP'],
                 min_pip_volatility=20.0,
                 max_pip_volatility=100.0
             ),

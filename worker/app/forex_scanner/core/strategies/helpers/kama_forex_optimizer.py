@@ -15,9 +15,14 @@ from typing import Dict, Optional, List, Tuple
 import logging
 from datetime import datetime
 try:
-    import config
+    from configdata import config
+    from configdata.strategies import config_kama_strategy
 except ImportError:
-    from forex_scanner import config
+    from forex_scanner.configdata import config
+    try:
+        from forex_scanner.configdata.strategies import config_kama_strategy
+    except ImportError:
+        from forex_scanner.configdata.strategies import config_kama_strategy as config_kama_strategy
 
 
 class KAMAForexOptimizer:
@@ -35,70 +40,71 @@ class KAMAForexOptimizer:
     def __init__(self, logger: logging.Logger = None):
         self.logger = logger or logging.getLogger(__name__)
         
-        # KAMA Parameters from config
-        self.er_period = getattr(config, 'KAMA_ER_PERIOD', 14)
-        self.fast_sc = getattr(config, 'KAMA_FAST_SC', 2)
-        self.slow_sc = getattr(config, 'KAMA_SLOW_SC', 30)
-        self.min_efficiency = getattr(config, 'KAMA_MIN_EFFICIENCY', 0.1)
-        self.trend_threshold = getattr(config, 'KAMA_TREND_THRESHOLD', 0.05)
-        self.min_bars = getattr(config, 'KAMA_MIN_BARS', 50)
-        self.base_confidence = getattr(config, 'KAMA_BASE_CONFIDENCE', 0.75)
+        # KAMA Parameters from config (TIGHTENED - Phase 1 Optimization)
+        self.er_period = getattr(config_kama_strategy, 'KAMA_ER_PERIOD', 14)
+        self.fast_sc = getattr(config_kama_strategy, 'KAMA_FAST_SC', 2)
+        self.slow_sc = getattr(config_kama_strategy, 'KAMA_SLOW_SC', 30)
+        self.min_efficiency = getattr(config_kama_strategy, 'KAMA_MIN_EFFICIENCY', 0.20)  # Increased from 0.1
+        self.trend_threshold = getattr(config_kama_strategy, 'KAMA_TREND_THRESHOLD', 0.05)
+        self.min_bars = getattr(config_kama_strategy, 'KAMA_MIN_BARS', 50)
+        self.base_confidence = getattr(config_kama_strategy, 'KAMA_BASE_CONFIDENCE', 0.75)
         
-        # 🔥 Forex-specific KAMA thresholds (optimized for each pair)
+        # 🔥 Forex-specific KAMA thresholds (TIGHTENED - Phase 1 Optimization)
+        # CHANGED: Increased min_efficiency thresholds for higher quality signals
         self.forex_kama_thresholds = {
             # === MAJOR USD PAIRS ===
-            'CS.D.EURUSD.MINI.IP': {
-                'min_efficiency': 0.12,
-                'trend_threshold': 0.04,
+            'CS.D.EURUSD.CEEM.IP': {
+                'min_efficiency': 0.20,  # Increased from 0.12 - EUR pairs trend well
+                'trend_threshold': 0.05,  # Slightly increased from 0.04
                 'volatility_multiplier': 1.0,
                 'confidence_bonus': 0.05
             },
             'CS.D.GBPUSD.MINI.IP': {
-                'min_efficiency': 0.15,  # GBP more volatile
+                'min_efficiency': 0.25,  # Increased from 0.15 - GBP more volatile, needs higher bar
                 'trend_threshold': 0.06,
                 'volatility_multiplier': 1.2,
                 'confidence_bonus': 0.03
             },
             'CS.D.AUDUSD.MINI.IP': {
-                'min_efficiency': 0.13,  # Commodity currency, moderate volatility
+                'min_efficiency': 0.22,  # Increased from 0.13 - Commodity currency
                 'trend_threshold': 0.05,
                 'volatility_multiplier': 1.1,
                 'confidence_bonus': 0.02
             },
             'CS.D.NZDUSD.MINI.IP': {
-                'min_efficiency': 0.14,  # Similar to AUD but slightly more volatile
+                'min_efficiency': 0.22,  # Increased from 0.14 - Similar to AUD
                 'trend_threshold': 0.055,
                 'volatility_multiplier': 1.15,
                 'confidence_bonus': 0.02
             },
             'CS.D.USDCAD.MINI.IP': {
-                'min_efficiency': 0.11,  # Relatively stable, oil correlation
+                'min_efficiency': 0.22,  # Increased from 0.11 - Commodity pair
                 'trend_threshold': 0.05,
                 'volatility_multiplier': 0.9,
                 'confidence_bonus': 0.03
             },
             'CS.D.USDCHF.MINI.IP': {
-                'min_efficiency': 0.10,  # Safe haven, very stable
+                'min_efficiency': 0.18,  # Increased from 0.10 - Safe haven, stable trends
                 'trend_threshold': 0.04,
                 'volatility_multiplier': 0.8,
                 'confidence_bonus': 0.04
             },
-            
+
             # === JPY PAIRS (Different pip structure) ===
             'CS.D.USDJPY.MINI.IP': {
-                'min_efficiency': 0.10,  # JPY pairs more stable
+                'min_efficiency': 0.18,  # Increased from 0.10 - JPY pairs stable but need quality
                 'trend_threshold': 0.08,  # Different pip structure (100 vs 10000)
                 'volatility_multiplier': 0.8,
                 'confidence_bonus': 0.04
             },
             'CS.D.EURJPY.MINI.IP': {
-                'min_efficiency': 0.12,  # EUR volatility + JPY stability
+                'min_efficiency': 0.20,  # Increased from 0.12 - EUR volatility + JPY stability
                 'trend_threshold': 0.09,
                 'volatility_multiplier': 0.95,
                 'confidence_bonus': 0.03
             },
             'CS.D.AUDJPY.MINI.IP': {
-                'min_efficiency': 0.13,  # Commodity + JPY, moderate volatility
+                'min_efficiency': 0.22,  # Increased from 0.13 - Commodity + JPY cross
                 'trend_threshold': 0.10,
                 'volatility_multiplier': 1.0,
                 'confidence_bonus': 0.025

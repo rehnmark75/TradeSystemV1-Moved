@@ -239,7 +239,7 @@ class MACDStrategy(BaseStrategy):
                 try:
                     from optimization.optimal_parameter_service import OptimalParameterService
                     service = OptimalParameterService()
-                    fallback_params = service._get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.MINI.IP', self.timeframe)
+                    fallback_params = service._get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.CEEM.IP', self.timeframe)
 
                     return {
                         'fast_ema': fallback_params.fast_ema,
@@ -271,7 +271,7 @@ class MACDStrategy(BaseStrategy):
             try:
                 from optimization.optimal_parameter_service import OptimalParameterService
                 service = OptimalParameterService()
-                fallback_params = service._get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.MINI.IP', self.timeframe)
+                fallback_params = service._get_macd_fallback_parameters(self.epic or 'CS.D.EURUSD.CEEM.IP', self.timeframe)
                 return {
                     'fast_ema': fallback_params.fast_ema,
                     'slow_ema': fallback_params.slow_ema,

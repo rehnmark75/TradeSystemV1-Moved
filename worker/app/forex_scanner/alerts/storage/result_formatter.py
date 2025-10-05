@@ -508,7 +508,7 @@ if __name__ == "__main__":
     
     # Test data
     test_signal = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BULL',
         'price': 1.0850,
         'strategy': 'ema',

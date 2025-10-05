@@ -6,7 +6,7 @@ Provides clean, focused interface for backtesting with detailed signal analysis
 
 Usage:
     python backtest_cli.py --days 7                    # Backtest all epics for 7 days
-    python backtest_cli.py --epic CS.D.EURUSD.MINI.IP --days 14 --show-signals
+    python backtest_cli.py --epic CS.D.EURUSD.CEEM.IP --days 14 --show-signals
     python backtest_cli.py --days 3 --show-signals --strategy EMA_CROSSOVER
 """
 
@@ -52,7 +52,7 @@ class BacktestCLI:
             epilog="""
 Examples:
   python backtest_cli.py --days 7                              # Test all pairs for 7 days (strategy only)
-  python backtest_cli.py --epic CS.D.EURUSD.MINI.IP --days 14  # Test EURUSD for 14 days
+  python backtest_cli.py --epic CS.D.EURUSD.CEEM.IP --days 14  # Test EURUSD for 14 days
   python backtest_cli.py --days 3 --show-signals               # Show detailed signal breakdown
   python backtest_cli.py --days 7 --strategy MACD_CROSSOVER    # Test specific strategy
   python backtest_cli.py --quick-test --epic CS.D.GBPUSD.MINI.IP  # Quick 24h test
@@ -80,7 +80,7 @@ Signal Display Format:
         parser.add_argument(
             '--epic',
             type=str,
-            help='Specific epic to test (e.g., CS.D.EURUSD.MINI.IP). If not provided, tests all epics from config.'
+            help='Specific epic to test (e.g., CS.D.EURUSD.CEEM.IP). If not provided, tests all epics from config.'
         )
 
         parser.add_argument(
@@ -207,7 +207,7 @@ Signal Display Format:
             "python backtest_cli.py --days 7",
             "",
             "# Test specific pair with detailed signals",
-            "python backtest_cli.py --epic CS.D.EURUSD.MINI.IP --days 14 --show-signals",
+            "python backtest_cli.py --epic CS.D.EURUSD.CEEM.IP --days 14 --show-signals",
             "",
             "# Quick 24-hour test",
             "python backtest_cli.py --quick-test --epic CS.D.GBPUSD.MINI.IP",

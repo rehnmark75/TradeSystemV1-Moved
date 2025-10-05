@@ -16,9 +16,14 @@ from typing import Dict, Optional, List, Tuple
 import logging
 from datetime import datetime
 try:
-    import config
+    from configdata import config
+    from configdata.strategies import config_kama_strategy
 except ImportError:
-    from forex_scanner import config
+    from forex_scanner.configdata import config
+    try:
+        from forex_scanner.configdata.strategies import config_kama_strategy
+    except ImportError:
+        from forex_scanner.configdata.strategies import config_kama_strategy as config_kama_strategy
 
 
 class KAMAConfidenceCalculator:
@@ -61,13 +66,14 @@ class KAMAConfidenceCalculator:
             }
         }
         
-        # Confidence component weights (KAMA-optimized)
+        # Confidence component weights (REBALANCED - Phase 1 Optimization)
+        # CHANGED: Reduced ER dominance, increased price alignment and context importance
         self.component_weights = {
-            'efficiency_ratio': 0.45,      # Most important for KAMA
-            'trend_strength': 0.25,        # KAMA trend momentum
-            'price_alignment': 0.15,       # Price-KAMA distance
-            'signal_strength': 0.10,       # Signal clarity
-            'market_context': 0.05         # Additional context
+            'efficiency_ratio': 0.30,      # Reduced from 0.45 - still important but not dominant
+            'trend_strength': 0.25,        # Kept at 0.25 - KAMA trend momentum
+            'price_alignment': 0.20,       # Increased from 0.15 - better entry timing critical
+            'signal_strength': 0.15,       # Increased from 0.10 - raw signal quality matters
+            'market_context': 0.10         # Increased from 0.05 - session/regime significant
         }
         
         # Confidence bonuses and penalties
@@ -85,9 +91,12 @@ class KAMAConfidenceCalculator:
             'consolidation_penalty': -0.05      # Consolidating market
         }
         
-        self.logger.info("🎯 KAMA-Specific Confidence Calculator initialized")
-        self.logger.info(f"   Efficiency Ratio Weight: {self.component_weights['efficiency_ratio']:.1%}")
+        self.logger.info("🎯 KAMA-Specific Confidence Calculator initialized (REBALANCED)")
+        self.logger.info(f"   Efficiency Ratio Weight: {self.component_weights['efficiency_ratio']:.1%} (reduced from 45%)")
         self.logger.info(f"   Trend Strength Weight: {self.component_weights['trend_strength']:.1%}")
+        self.logger.info(f"   Price Alignment Weight: {self.component_weights['price_alignment']:.1%} (increased from 15%)")
+        self.logger.info(f"   Signal Strength Weight: {self.component_weights['signal_strength']:.1%} (increased from 10%)")
+        self.logger.info(f"   Market Context Weight: {self.component_weights['market_context']:.1%} (increased from 5%)")
 
     def calculate_kama_confidence(
         self, 

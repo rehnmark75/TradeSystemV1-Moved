@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ENHANCED MACD Strategy Backtest with Smart Money Analysis - Complete Integration
-Run: python backtest_macd.py --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m --smart-money
+Run: python backtest_macd.py --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m --smart-money
 
 ENHANCEMENTS ADDED:
 - Smart Money Concepts (SMC) integration
@@ -247,7 +247,7 @@ class EnhancedMACDBacktest:
         NEW FEATURE: Validate a single signal and show all data and calculations used
         
         Args:
-            epic: Epic to analyze (e.g., CS.D.EURUSD.MINI.IP)
+            epic: Epic to analyze (e.g., CS.D.EURUSD.CEEM.IP)
             timestamp: Timestamp of the signal to validate (e.g., "2025-08-04 15:30:00")
             timeframe: Timeframe to use for analysis
             show_raw_data: Show raw OHLC data around the signal
@@ -2044,7 +2044,7 @@ class EnhancedMACDBacktest:
     def _extract_pair_from_epic(self, epic: str) -> str:
         """Extract currency pair from epic code (same as EMA backtest)"""
         try:
-            # Convert "CS.D.EURUSD.MINI.IP" to "EURUSD"
+            # Convert "CS.D.EURUSD.CEEM.IP" to "EURUSD"
             if '.D.' in epic and '.MINI.IP' in epic:
                 parts = epic.split('.D.')
                 if len(parts) > 1:
@@ -2627,7 +2627,7 @@ def main():
                            help='Run backtest using raw strategy signals (default)')
 
     # Required arguments
-    parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.MINI.IP)')
+    parser.add_argument('--epic', help='Epic to backtest (e.g., CS.D.EURUSD.CEEM.IP)')
     parser.add_argument('--days', type=int, default=7, help='Days to backtest (default: 7)')
     parser.add_argument('--timeframe', default=None, help=f'Timeframe (default: {getattr(config, "DEFAULT_TIMEFRAME", "15m")})')
 
@@ -2665,7 +2665,7 @@ def main():
     if args.validate_signal:
         if not args.epic:
             print("❌ ERROR: --epic is required when using --validate-signal")
-            print("   Example: python backtest_macd.py --epic CS.D.EURUSD.MINI.IP --validate-signal \"2025-08-04 15:30:00\"")
+            print("   Example: python backtest_macd.py --epic CS.D.EURUSD.CEEM.IP --validate-signal \"2025-08-04 15:30:00\"")
             sys.exit(1)
         
         print("🔍 SIGNAL VALIDATION MODE")

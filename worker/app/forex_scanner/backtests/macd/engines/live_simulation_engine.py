@@ -91,7 +91,7 @@ class LiveSimulationEngine:
             # Calculate lookback hours
             lookback_hours = (end_date - start_date).total_seconds() / 3600
 
-            # Extract pair name from epic (e.g., CS.D.EURUSD.MINI.IP -> EURUSD)
+            # Extract pair name from epic (e.g., CS.D.EURUSD.CEEM.IP -> EURUSD)
             pair = self.epic.split('.')[2] if '.' in self.epic else self.epic
 
             self.logger.info(f"   Fetching {lookback_hours:.1f} hours of {pair} data in {self.timeframe} timeframe")
@@ -369,7 +369,7 @@ if __name__ == "__main__":
     # Quick test of the live simulation engine
     logging.basicConfig(level=logging.INFO)
 
-    engine = LiveSimulationEngine('CS.D.EURUSD.MINI.IP', '15m')
+    engine = LiveSimulationEngine('CS.D.EURUSD.CEEM.IP', '15m')
 
     start = datetime(2024, 1, 1)
     end = datetime(2024, 1, 8)  # 7 days

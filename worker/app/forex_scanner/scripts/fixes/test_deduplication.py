@@ -26,7 +26,7 @@ def test_deduplication():
         
         # Test signal
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BULL',
             'confidence_score': 0.75,
             'strategy': 'test_deduplication',

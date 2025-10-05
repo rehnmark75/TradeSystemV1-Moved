@@ -13,7 +13,7 @@ def test_enhanced_alert_saving():
     # Create test signal with ALL possible fields that the alert_history.py might expect
     rich_signal = {
         # Basic data (working)
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'pair': 'EURUSD',
         'signal_type': 'BULL',
         'strategy': 'combined_strategy',
@@ -145,7 +145,7 @@ def test_minimal_signal():
     print("\n🧪 Testing minimal signal to identify required fields...")
     
     minimal_signal = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BULL',
         'strategy': 'test_strategy',
         'confidence_score': 0.75,

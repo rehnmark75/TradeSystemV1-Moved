@@ -115,7 +115,7 @@ def fix_alert_history_parameter_binding():
         alert_mgr = AlertHistoryManager(db)
         
         simple_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BULL',
             'confidence_score': 0.75,
             'strategy': 'test_strategy',
@@ -131,7 +131,7 @@ def fix_alert_history_parameter_binding():
             print("\n🧪 Testing AlertHistoryManager with JSON data...")
             
             json_signal = {
-                'epic': 'CS.D.EURUSD.MINI.IP',
+                'epic': 'CS.D.EURUSD.CEEM.IP',
                 'signal_type': 'BULL',
                 'confidence_score': 0.75,
                 'strategy': 'test_strategy',

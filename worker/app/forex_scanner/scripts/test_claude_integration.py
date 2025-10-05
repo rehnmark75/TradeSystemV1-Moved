@@ -23,7 +23,7 @@ def test_claude_integration():
         
         test_signal = {
             'signal_type': 'BULL',
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'confidence_score': 0.75,
             'price': 1.0850
         }
@@ -40,7 +40,7 @@ def test_claude_integration():
         
         scanner = IntelligentForexScanner(
             db_manager=db_manager,
-            epic_list=['CS.D.EURUSD.MINI.IP'],
+            epic_list=['CS.D.EURUSD.CEEM.IP'],
             claude_api_key=api_key,
             enable_claude_analysis=True
         )

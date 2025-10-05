@@ -62,7 +62,7 @@ CLAUDE_API_KEY = "your_anthropic_api_key"
 
 # Trading pairs
 EPIC_LIST = [
-    'CS.D.EURUSD.MINI.IP',
+    'CS.D.EURUSD.CEEM.IP',
     'CS.D.GBPUSD.MINI.IP',
     'CS.D.USDJPY.MINI.IP'
 ]
@@ -93,9 +93,9 @@ python main.py live
 #### Backtesting
 ```bash
 python main.py backtest --days 30
-python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 7
-python main.py debug --epic CS.D.EURUSD.MINI.IP --timestamp "2025-06-26 09:40"
-python main.py claude-timestamp --epic CS.D.EURUSD.MINI.IP --timestamp "2025-06-27 08:20"
+python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 7
+python main.py debug --epic CS.D.EURUSD.CEEM.IP --timestamp "2025-06-26 09:40"
+python main.py claude-timestamp --epic CS.D.EURUSD.CEEM.IP --timestamp "2025-06-27 08:20"
 ```
 
 #### Test Claude Integration
@@ -139,7 +139,7 @@ from core.database import DatabaseManager
 db_manager = DatabaseManager("your_db_url")
 scanner = ForexScanner(
     db_manager=db_manager,
-    epic_list=['CS.D.EURUSD.MINI.IP'],
+    epic_list=['CS.D.EURUSD.CEEM.IP'],
     claude_api_key="your_key"
 )
 

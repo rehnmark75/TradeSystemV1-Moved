@@ -67,19 +67,19 @@ python main.py scan
 python main.py live
 
 # Backtesting
-python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 
 # Debug individual signals
-python main.py debug --epic CS.D.EURUSD.MINI.IP
+python main.py debug --epic CS.D.EURUSD.CEEM.IP
 
 # Debug combined strategies
-python main.py debug-combined --epic CS.D.EURUSD.MINI.IP
+python main.py debug-combined --epic CS.D.EURUSD.CEEM.IP
 
 # Debug MACD strategy
-python main.py debug-macd --epic CS.D.EURUSD.MINI.IP
+python main.py debug-macd --epic CS.D.EURUSD.CEEM.IP
 
 # Debug backtesting issues
-python main.py debug-backtest --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+python main.py debug-backtest --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 
 # Test Claude integration
 python main.py test-claude
@@ -120,13 +120,13 @@ bash
 python main.py scan --config-check
 
 # Test individual components
-python main.py debug --epic CS.D.EURUSD.MINI.IP
+python main.py debug --epic CS.D.EURUSD.CEEM.IP
 
 # Check if combined strategies work
-python main.py debug-combined --epic CS.D.EURUSD.MINI.IP
+python main.py debug-combined --epic CS.D.EURUSD.CEEM.IP
 
 # Verify backtesting
-python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 3
+python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 3
 📈 Success Metrics:
 ✅ Modular Code: 800+ line file → 8 focused modules
 ✅ Working Backtest: 0 signals → 125 signals

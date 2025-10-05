@@ -210,14 +210,14 @@ from datetime import datetime
 
 # Test signal with deduplication metadata
 test_signal = {
-    'epic': 'CS.D.EURUSD.MINI.IP',
+    'epic': 'CS.D.EURUSD.CEEM.IP',
     'signal_type': 'BUY',
     'strategy': 'MINIMAL_TEST',
     'price': 1.0950,
     'confidence_score': 0.85,
     'timeframe': '1H',
     'signal_hash': 'test_hash_12345',
-    'cooldown_key': 'CS.D.EURUSD.MINI.IP:BUY:MINIMAL_TEST',
+    'cooldown_key': 'CS.D.EURUSD.CEEM.IP:BUY:MINIMAL_TEST',
     'data_source': 'minimal_test',
     'market_timestamp': datetime.now().isoformat()
 }

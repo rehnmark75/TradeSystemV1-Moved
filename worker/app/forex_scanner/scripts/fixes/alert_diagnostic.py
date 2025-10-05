@@ -369,7 +369,7 @@ def test_enhanced_alert_system():
         
         # Test signal with proper timestamps
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BULL',
             'strategy': 'enhanced_ema',
             'confidence_score': 0.85,

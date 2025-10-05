@@ -133,7 +133,7 @@ class SignalValidator:
             if not epic.startswith('CS.D.'):
                 # Convert short form like 'USDJPY' to full epic
                 epic_mapping = {
-                    'EURUSD': 'CS.D.EURUSD.MINI.IP',
+                    'EURUSD': 'CS.D.EURUSD.CEEM.IP',
                     'GBPUSD': 'CS.D.GBPUSD.MINI.IP', 
                     'USDJPY': 'CS.D.USDJPY.MINI.IP',
                     'AUDUSD': 'CS.D.AUDUSD.MINI.IP',

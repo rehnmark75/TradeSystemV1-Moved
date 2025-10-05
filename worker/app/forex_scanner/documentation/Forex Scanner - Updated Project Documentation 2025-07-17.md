@@ -302,10 +302,10 @@ python main.py scan --config-check
 
 ```bash
 # Standard backtest
-python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 
 # Compare EMA configurations
-python main.py compare-ema-configs --epic CS.D.EURUSD.MINI.IP --days 30
+python main.py compare-ema-configs --epic CS.D.EURUSD.CEEM.IP --days 30
 
 # Extended backtest with analysis
 python main.py backtest --days 30 --show-signals --bb-analysis
@@ -315,11 +315,11 @@ python main.py backtest --days 30 --show-signals --bb-analysis
 
 ```bash
 # Debug individual signals
-python main.py debug --epic CS.D.EURUSD.MINI.IP
+python main.py debug --epic CS.D.EURUSD.CEEM.IP
 
 # Debug specific strategies
-python main.py debug-combined --epic CS.D.EURUSD.MINI.IP
-python main.py debug-macd --epic CS.D.EURUSD.MINI.IP
+python main.py debug-combined --epic CS.D.EURUSD.CEEM.IP
+python main.py debug-macd --epic CS.D.EURUSD.CEEM.IP
 
 # System diagnostics
 python main.py diagnostic-check
@@ -332,7 +332,7 @@ python main.py diagnostic-check
 python main.py test-claude
 
 # Claude analysis of recent signals
-python main.py claude-analyze --epic CS.D.EURUSD.MINI.IP
+python main.py claude-analyze --epic CS.D.EURUSD.CEEM.IP
 ```
 
 ---
@@ -360,7 +360,7 @@ SPREAD_PIPS = 1.5
 
 # Currency Pairs
 EPIC_LIST = [
-    'CS.D.EURUSD.MINI.IP',
+    'CS.D.EURUSD.CEEM.IP',
     'CS.D.GBPUSD.MINI.IP',
     'CS.D.USDJPY.MINI.IP',
     # ... more pairs
@@ -397,7 +397,7 @@ docker exec <container> python trade_scan.py scan
 docker exec <container> python trade_scan.py live
 
 # Run backtesting
-docker exec <container> python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 7
+docker exec <container> python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 7
 ```
 
 ---
@@ -466,7 +466,7 @@ python test_imports.py
 python main.py scan --config-check
 
 # Test backtesting
-python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 3
+python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 3
 ```
 
 ### 3. Run Production
@@ -499,7 +499,7 @@ python trade_scan.py docker
 
 3. **No Signals Found**
    ```bash
-   python main.py debug --epic CS.D.EURUSD.MINI.IP
+   python main.py debug --epic CS.D.EURUSD.CEEM.IP
    ```
 
 4. **Claude API Issues**

@@ -130,7 +130,7 @@ class BacktestCommands:
         # Use provided configs or test all available
         test_configs = configs or list(config.EMA_STRATEGY_CONFIG.keys())
         
-        epic_list = [epic] if epic else ['CS.D.EURUSD.MINI.IP']  # Default to EURUSD
+        epic_list = [epic] if epic else ['CS.D.EURUSD.CEEM.IP']  # Default to EURUSD
         
         self.logger.info(f"🔄 Comparing EMA configurations: {test_configs}")
         self.logger.info(f"   Epic: {epic_list[0]}")
@@ -206,7 +206,7 @@ class BacktestCommands:
     ) -> bool:
         """Compare performance between individual strategies"""
         
-        epic_list = [epic] if epic else ['CS.D.EURUSD.MINI.IP']
+        epic_list = [epic] if epic else ['CS.D.EURUSD.CEEM.IP']
         
         self.logger.info(f"🎯 Comparing strategy performance")
         self.logger.info(f"   Epic: {epic_list[0]}")

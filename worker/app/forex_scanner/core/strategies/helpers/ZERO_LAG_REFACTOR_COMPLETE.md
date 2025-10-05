@@ -102,7 +102,7 @@ momentum = linreg(price - midpoint, period)
 ```bash
 # Enhanced backtest with all features
 python backtest_zero_lag.py \
-  --epic CS.D.EURUSD.MINI.IP \
+  --epic CS.D.EURUSD.CEEM.IP \
   --days 7 \
   --timeframe 15m \
   --squeeze-momentum \

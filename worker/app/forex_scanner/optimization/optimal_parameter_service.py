@@ -1173,7 +1173,7 @@ class OptimalParameterService:
         Get optimal SMC parameters for an epic from optimization results
         
         Args:
-            epic: Epic code (e.g., 'CS.D.EURUSD.MINI.IP')
+            epic: Epic code (e.g., 'CS.D.EURUSD.CEEM.IP')
             market_conditions: Optional market conditions for parameter adjustment
             
         Returns:

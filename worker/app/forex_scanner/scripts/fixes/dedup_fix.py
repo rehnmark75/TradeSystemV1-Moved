@@ -184,14 +184,14 @@ def test_direct_fix():
         
         # Test signal with deduplication metadata
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BUY',
             'strategy': 'DIRECT_FIX_TEST',
             'price': 1.0950,
             'confidence_score': 0.85,
             'timeframe': '1H',
             'signal_hash': 'direct_fix_hash_12345',
-            'cooldown_key': 'CS.D.EURUSD.MINI.IP:BUY:DIRECT_FIX_TEST', 
+            'cooldown_key': 'CS.D.EURUSD.CEEM.IP:BUY:DIRECT_FIX_TEST', 
             'data_source': 'direct_fix_test',
             'market_timestamp': datetime.now().isoformat()
         }

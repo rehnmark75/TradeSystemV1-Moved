@@ -41,21 +41,21 @@ def test_weak_signal_rejection():
     # Test cases with weak histograms that should be rejected
     test_cases = [
         {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'current_histogram': 0.00002,  # This was incorrectly passing through
             'previous_histogram': 0.00001,
             'expected': 'REJECT',
             'reason': 'Histogram too weak (0.00002 < 0.00005 threshold)'
         },
         {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'current_histogram': 0.00003,
             'previous_histogram': 0.00001,
             'expected': 'REJECT',
             'reason': 'Still below threshold (0.00003 < 0.00005)'
         },
         {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'current_histogram': 0.00006,
             'previous_histogram': 0.00001,
             'expected': 'PASS',
@@ -157,7 +157,7 @@ def test_weak_signal_rejection():
     logger.info("SPECIFIC TEST: 0.00002 EURUSD (the problematic case)")
     logger.info("=" * 80)
     
-    epic = 'CS.D.EURUSD.MINI.IP'
+    epic = 'CS.D.EURUSD.CEEM.IP'
     weak_histogram = 0.00002
     
     threshold = forex_optimizer.get_macd_threshold_for_epic(epic)

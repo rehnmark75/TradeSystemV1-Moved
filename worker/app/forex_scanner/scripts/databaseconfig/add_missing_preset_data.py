@@ -42,7 +42,7 @@ def get_preset_configurations():
                 
                 # Pair Management
                 "EPIC_LIST": [
-                    "CS.D.EURUSD.MINI.IP",
+                    "CS.D.EURUSD.CEEM.IP",
                     "CS.D.GBPUSD.MINI.IP",
                     "CS.D.USDJPY.MINI.IP"
                 ],
@@ -81,7 +81,7 @@ def get_preset_configurations():
                 
                 # Pair Management
                 "EPIC_LIST": [
-                    "CS.D.EURUSD.MINI.IP",
+                    "CS.D.EURUSD.CEEM.IP",
                     "CS.D.GBPUSD.MINI.IP",
                     "CS.D.USDJPY.MINI.IP",
                     "CS.D.USDCHF.MINI.IP",
@@ -124,7 +124,7 @@ def get_preset_configurations():
                 
                 # Pair Management
                 "EPIC_LIST": [
-                    "CS.D.EURUSD.MINI.IP",
+                    "CS.D.EURUSD.CEEM.IP",
                     "CS.D.GBPUSD.MINI.IP",
                     "CS.D.USDJPY.MINI.IP"
                 ],
@@ -163,7 +163,7 @@ def get_preset_configurations():
                 
                 # Pair Management
                 "EPIC_LIST": [
-                    "CS.D.EURUSD.MINI.IP",
+                    "CS.D.EURUSD.CEEM.IP",
                     "CS.D.GBPUSD.MINI.IP",
                     "CS.D.USDJPY.MINI.IP",
                     "CS.D.USDCHF.MINI.IP",

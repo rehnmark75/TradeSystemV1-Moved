@@ -69,7 +69,7 @@ class HistoricalDataManager:
         Fetch historical candle data for the specified epic and timestamp
         
         Args:
-            epic: Epic code (e.g., 'CS.D.EURUSD.MINI.IP')
+            epic: Epic code (e.g., 'CS.D.EURUSD.CEEM.IP')
             target_timestamp: Target timestamp for validation
             timeframe: Timeframe ('5m', '15m', '1h')
             lookback_bars: Number of bars to fetch before target (auto-calculated if None)

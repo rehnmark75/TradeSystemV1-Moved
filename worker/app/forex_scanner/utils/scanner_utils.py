@@ -931,7 +931,7 @@ def create_intelligent_scanner(intelligence_mode: str = 'backtest_consistent', *
         
         return IntelligentForexScanner(
             db_manager=db_manager,
-            epic_list=getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP']),
+            epic_list=getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP']),
             intelligence_mode=intelligence_mode,
             user_timezone=getattr(config, 'USER_TIMEZONE', 'Europe/Stockholm'),
             **kwargs

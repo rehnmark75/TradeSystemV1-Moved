@@ -81,7 +81,11 @@ class KAMASignalDetector:
             # MACD cross-validation
             if not self._validate_macd_alignment(current_row, signal_data['signal_type']):
                 return None
-            
+
+            # ADX trend strength validation (CRITICAL NEW ADDITION)
+            if not self._validate_adx_trend_strength(current_row, signal_data['signal_type']):
+                return None
+
             # Track detection statistics
             self._track_signal_detection(signal_data['signal_type'], signal_data['trigger_reason'])
             
@@ -97,8 +101,14 @@ class KAMASignalDetector:
         """
         try:
             # Get KAMA ER period from config
-            import config
-            er_period = getattr(config, 'KAMA_ER_PERIOD', 14)
+            try:
+                from configdata.strategies import config_kama_strategy
+            except ImportError:
+                try:
+                    from forex_scanner.configdata.strategies import config_kama_strategy
+                except ImportError:
+                    from forex_scanner.configdata.strategies import config_kama_strategy as config_kama_strategy
+            er_period = getattr(config_kama_strategy, 'KAMA_ER_PERIOD', 14)
             
             # Try different KAMA column names
             possible_kama_cols = [
@@ -212,10 +222,16 @@ class KAMASignalDetector:
             if self.forex_optimizer:
                 kama_thresholds = self.forex_optimizer.get_kama_thresholds_for_pair(epic)
             else:
-                import config
+                try:
+                    from configdata.strategies import config_kama_strategy
+                except ImportError:
+                    try:
+                        from forex_scanner.configdata.strategies import config_kama_strategy
+                    except ImportError:
+                        from forex_scanner.configdata.strategies import config_kama_strategy as config_kama_strategy
                 kama_thresholds = {
-                    'min_efficiency': getattr(config, 'KAMA_MIN_EFFICIENCY', 0.1),
-                    'trend_threshold': getattr(config, 'KAMA_TREND_THRESHOLD', 0.05)
+                    'min_efficiency': getattr(config_kama_strategy, 'KAMA_MIN_EFFICIENCY', 0.1),
+                    'trend_threshold': getattr(config_kama_strategy, 'KAMA_TREND_THRESHOLD', 0.05)
                 }
             
             signal_type = None
@@ -297,15 +313,39 @@ class KAMASignalDetector:
             if macd_histogram_col and macd_histogram_col in current_row.index:
                 try:
                     macd_histogram = float(current_row[macd_histogram_col])
-                    
-                    # Check for major contradictions
-                    if signal_type == 'BULL' and macd_histogram < -0.0001:  # Significantly negative
-                        self.logger.warning(f"🚫 KAMA BULL signal rejected: Strong negative MACD histogram ({macd_histogram:.6f})")
+
+                    # STRENGTHENED THRESHOLDS: Increased from 0.0001 to 0.0003 for forex
+                    MIN_MACD_THRESHOLD = 0.0003  # Minimum threshold for contradiction
+                    STRONG_MACD_THRESHOLD = 0.0005  # Strong confirmation threshold
+
+                    # Check for major contradictions (STRICTER THAN BEFORE)
+                    if signal_type == 'BULL' and macd_histogram < -MIN_MACD_THRESHOLD:
+                        self.logger.warning(
+                            f"🚫 KAMA BULL signal REJECTED: Negative MACD histogram "
+                            f"({macd_histogram:.6f} < -{MIN_MACD_THRESHOLD:.6f})"
+                        )
                         return False
-                        
-                    elif signal_type == 'BEAR' and macd_histogram > 0.0001:  # Significantly positive
-                        self.logger.warning(f"🚫 KAMA BEAR signal rejected: Strong positive MACD histogram ({macd_histogram:.6f})")
+
+                    elif signal_type == 'BEAR' and macd_histogram > MIN_MACD_THRESHOLD:
+                        self.logger.warning(
+                            f"🚫 KAMA BEAR signal REJECTED: Positive MACD histogram "
+                            f"({macd_histogram:.6f} > {MIN_MACD_THRESHOLD:.6f})"
+                        )
                         return False
+
+                    # STRONG CONFIRMATION: Add bonus flag for strong MACD alignment
+                    if signal_type == 'BULL' and macd_histogram > STRONG_MACD_THRESHOLD:
+                        self.logger.info(
+                            f"✅ KAMA BULL signal STRONG MACD confirmation "
+                            f"({macd_histogram:.6f} > {STRONG_MACD_THRESHOLD:.6f})"
+                        )
+                        # This can be used later for confidence boost
+                    elif signal_type == 'BEAR' and macd_histogram < -STRONG_MACD_THRESHOLD:
+                        self.logger.info(
+                            f"✅ KAMA BEAR signal STRONG MACD confirmation "
+                            f"({macd_histogram:.6f} < -{STRONG_MACD_THRESHOLD:.6f})"
+                        )
+                        # This can be used later for confidence boost
                     
                     # Log validation status
                     if signal_type == 'BULL' and macd_histogram >= 0:
@@ -337,10 +377,86 @@ class KAMASignalDetector:
                     self.logger.debug(f"⚠️ Could not validate MACD line/signal: {e}")
             
             return True  # No contradictions found
-            
+
         except Exception as e:
             self.logger.debug(f"MACD validation error: {e}")
             return True  # Don't reject on validation errors
+
+    def _validate_adx_trend_strength(self, current_row: pd.Series, signal_type: str) -> bool:
+        """
+        🎯 ADX TREND STRENGTH VALIDATION: Ensure signals align with strong enough trends
+
+        CRITICAL ADDITION: KAMA previously lacked ADX validation (unlike EMA strategy)
+        This prevents signals in weak trends that are likely to reverse.
+
+        Args:
+            current_row: Current market data row
+            signal_type: 'BULL' or 'BEAR'
+
+        Returns:
+            True if trend strength is adequate, False otherwise
+        """
+        try:
+            # Look for ADX column
+            adx_col = None
+            for col in current_row.index:
+                col_lower = col.lower()
+                if col_lower == 'adx' or 'adx' in col_lower:
+                    adx_col = col
+                    break
+
+            # If ADX not available, don't reject (graceful degradation)
+            if not adx_col:
+                self.logger.debug("ADX column not found - skipping ADX validation")
+                return True
+
+            try:
+                adx_value = float(current_row[adx_col])
+
+                # ADX thresholds for KAMA signals (forex-optimized)
+                MIN_ADX = 20  # Minimum trend strength required
+                STRONG_ADX = 25  # Strong trend confirmation
+                WEAK_ADX_WARNING = 18  # Warning threshold
+
+                # REJECTION: ADX too weak (< 20)
+                if adx_value < MIN_ADX:
+                    self.logger.warning(
+                        f"🚫 KAMA {signal_type} signal REJECTED: ADX too weak "
+                        f"({adx_value:.1f} < {MIN_ADX}) - Trend not established"
+                    )
+                    return False
+
+                # STRONG CONFIRMATION: ADX > 25
+                if adx_value >= STRONG_ADX:
+                    self.logger.info(
+                        f"✅ KAMA {signal_type} signal STRONG ADX confirmation "
+                        f"({adx_value:.1f} >= {STRONG_ADX}) - Excellent trend strength"
+                    )
+                    return True
+
+                # ACCEPTABLE: ADX 20-25 (moderate trend)
+                elif adx_value >= MIN_ADX:
+                    self.logger.debug(
+                        f"✅ KAMA {signal_type} signal validated: ADX acceptable "
+                        f"({adx_value:.1f} >= {MIN_ADX}) - Moderate trend"
+                    )
+                    return True
+
+                # WARNING: ADX 18-20 (marginal)
+                elif adx_value >= WEAK_ADX_WARNING:
+                    self.logger.warning(
+                        f"⚠️ KAMA {signal_type} signal: ADX marginal "
+                        f"({adx_value:.1f}) - Weak trend, proceed with caution"
+                    )
+                    return True  # Allow but warn
+
+            except (ValueError, TypeError) as e:
+                self.logger.debug(f"⚠️ Could not parse ADX value: {e}")
+                return True  # Don't reject on parsing errors
+
+        except Exception as e:
+            self.logger.debug(f"ADX validation error: {e}")
+            return True  # Don't reject on validation errors (graceful degradation)
 
     def detect_kama_trend_change(
         self, 

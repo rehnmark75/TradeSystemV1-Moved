@@ -202,7 +202,7 @@ EMA_STRATEGY_CONFIG = {
 
 # Currency Pairs
 EPIC_LIST = [
-    'CS.D.EURUSD.MINI.IP',
+    'CS.D.EURUSD.CEEM.IP',
     'CS.D.GBPUSD.MINI.IP',
     'CS.D.USDJPY.MINI.IP',
     'CS.D.AUDUSD.MINI.IP',
@@ -244,10 +244,10 @@ python main.py scan --config-check
 
 ```bash
 # Standard backtest
-python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 
 # Compare EMA configurations
-python main.py compare-ema-configs --epic CS.D.EURUSD.MINI.IP --days 30
+python main.py compare-ema-configs --epic CS.D.EURUSD.CEEM.IP --days 30
 
 # Extended backtest with analysis
 python main.py backtest --days 30 --show-signals --bb-analysis
@@ -257,29 +257,29 @@ python main.py backtest --days 30 --show-signals --bb-analysis
 
 ```bash
 # Debug individual signals
-python main.py debug --epic CS.D.EURUSD.MINI.IP
+python main.py debug --epic CS.D.EURUSD.CEEM.IP
 
 # Debug combined strategies
-python main.py debug-combined --epic CS.D.EURUSD.MINI.IP
+python main.py debug-combined --epic CS.D.EURUSD.CEEM.IP
 
 # Debug MACD strategy
-python main.py debug-macd --epic CS.D.EURUSD.MINI.IP
+python main.py debug-macd --epic CS.D.EURUSD.CEEM.IP
 
 # Debug backtesting process
-python main.py debug-backtest --epic CS.D.EURUSD.MINI.IP --days 7 --timeframe 15m
+python main.py debug-backtest --epic CS.D.EURUSD.CEEM.IP --days 7 --timeframe 15m
 
 # Bollinger Bands analysis
-python main.py test-bb --epic CS.D.EURUSD.MINI.IP
+python main.py test-bb --epic CS.D.EURUSD.CEEM.IP
 ```
 
 ### Analysis Commands
 
 ```bash
 # Market conditions analysis
-python main.py analyze-market --epic CS.D.EURUSD.MINI.IP
+python main.py analyze-market --epic CS.D.EURUSD.CEEM.IP
 
 # Volume pattern analysis
-python main.py analyze-volume --epic CS.D.EURUSD.MINI.IP
+python main.py analyze-volume --epic CS.D.EURUSD.CEEM.IP
 
 # List available EMA configurations
 python main.py list-ema-configs
@@ -292,10 +292,10 @@ python main.py list-ema-configs
 python main.py test-claude
 
 # Claude analysis for specific timestamp
-python main.py claude-timestamp --epic CS.D.EURUSD.MINI.IP --timestamp "2025-01-15 14:30:00"
+python main.py claude-timestamp --epic CS.D.EURUSD.CEEM.IP --timestamp "2025-01-15 14:30:00"
 
 # Batch Claude analysis
-python main.py claude-batch --epic CS.D.EURUSD.MINI.IP --days 1
+python main.py claude-batch --epic CS.D.EURUSD.CEEM.IP --days 1
 ```
 
 ### Scalping Commands
@@ -305,7 +305,7 @@ python main.py claude-batch --epic CS.D.EURUSD.MINI.IP --days 1
 python main.py scalp
 
 # Debug scalping strategy
-python main.py debug-scalping --epic CS.D.EURUSD.MINI.IP
+python main.py debug-scalping --epic CS.D.EURUSD.CEEM.IP
 ```
 
 ## 🧪 Testing and Debugging
@@ -333,10 +333,10 @@ python scripts/diagnostic_check.py
 **3. Strategy Testing**
 ```bash
 # Test individual strategy
-python main.py debug --epic CS.D.EURUSD.MINI.IP
+python main.py debug --epic CS.D.EURUSD.CEEM.IP
 
 # Compare strategies
-python main.py debug-combined --epic CS.D.EURUSD.MINI.IP
+python main.py debug-combined --epic CS.D.EURUSD.CEEM.IP
 ```
 
 ### Debugging Capabilities
@@ -362,7 +362,7 @@ python main.py debug-combined --epic CS.D.EURUSD.MINI.IP
 ### Common Debugging Scenarios
 
 **No Signals Found**
-1. Check confidence threshold: `python main.py debug --epic CS.D.EURUSD.MINI.IP`
+1. Check confidence threshold: `python main.py debug --epic CS.D.EURUSD.CEEM.IP`
 2. Verify data availability: `python main.py scan --config-check`
 3. Test with lower confidence: Temporarily reduce `MIN_CONFIDENCE`
 4. Check market hours and data freshness
@@ -406,12 +406,12 @@ python main.py debug-combined --epic CS.D.EURUSD.MINI.IP
 
 **1. Standard Backtesting**
 ```bash
-python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 30
+python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 30
 ```
 
 **2. Strategy Comparison**
 ```bash
-python main.py compare-ema-configs --epic CS.D.EURUSD.MINI.IP --days 30
+python main.py compare-ema-configs --epic CS.D.EURUSD.CEEM.IP --days 30
 ```
 
 **3. Extended Analysis**
@@ -629,7 +629,7 @@ DATABASE_URL = "postgresql://user:pass@host:5432/dbname"
 **3. No Signals Found**
 ```bash
 # Check confidence threshold
-python main.py debug --epic CS.D.EURUSD.MINI.IP
+python main.py debug --epic CS.D.EURUSD.CEEM.IP
 
 # Verify data availability
 python scripts/scanner_diagnostic.py
@@ -650,10 +650,10 @@ CLAUDE_API_KEY = "sk-ant-api03-..."
 **5. Backtesting Problems**
 ```bash
 # Debug backtest process
-python main.py debug-backtest --epic CS.D.EURUSD.MINI.IP --days 3
+python main.py debug-backtest --epic CS.D.EURUSD.CEEM.IP --days 3
 
 # Check data quality
-python main.py analyze-market --epic CS.D.EURUSD.MINI.IP
+python main.py analyze-market --epic CS.D.EURUSD.CEEM.IP
 ```
 
 ### Performance Optimization
@@ -740,7 +740,7 @@ python test_imports.py
 python main.py scan --config-check
 
 # Run test backtest
-python main.py backtest --epic CS.D.EURUSD.MINI.IP --days 3
+python main.py backtest --epic CS.D.EURUSD.CEEM.IP --days 3
 ```
 
 **5. Production Launch**

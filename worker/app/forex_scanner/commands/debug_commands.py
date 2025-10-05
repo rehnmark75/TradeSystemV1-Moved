@@ -357,7 +357,7 @@ class DebugCommands:
     
     def test_data_availability(self, epic: str = None) -> bool:
         """Test data availability for signal detection"""
-        test_epic = epic or 'CS.D.EURUSD.MINI.IP'
+        test_epic = epic or 'CS.D.EURUSD.CEEM.IP'
         self.logger.info(f"📊 Testing data availability for {test_epic}")
         
         try:

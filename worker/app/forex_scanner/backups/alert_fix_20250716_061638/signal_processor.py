@@ -1143,7 +1143,7 @@ class SignalProcessor:
         
         if test_signal is None:
             test_signal = {
-                'epic': 'CS.D.EURUSD.MINI.IP',
+                'epic': 'CS.D.EURUSD.CEEM.IP',
                 'signal_type': 'BUY',
                 'strategy': 'TEST',
                 'confidence_score': 0.75,
@@ -1187,7 +1187,7 @@ class SignalProcessor:
         
         if test_signal is None:
             test_signal = {
-                'epic': 'CS.D.EURUSD.MINI.IP',
+                'epic': 'CS.D.EURUSD.CEEM.IP',
                 'signal_type': 'BUY',
                 'strategy': 'TEST',
                 'confidence_score': 0.75,

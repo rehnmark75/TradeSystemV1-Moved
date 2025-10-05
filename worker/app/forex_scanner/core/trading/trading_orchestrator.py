@@ -162,7 +162,7 @@ class TradingOrchestrator:
         
         # SCANNER CONFIGURATION (passed to scanner)
         self.scan_interval = scan_interval or getattr(config, 'SCAN_INTERVAL', 60)
-        self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP'])
+        self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
         self.min_confidence = min_confidence or getattr(config, 'MIN_CONFIDENCE', 0.7)
         self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else getattr(config, 'USE_BID_ADJUSTMENT', False)
         self.spread_pips = spread_pips or getattr(config, 'SPREAD_PIPS', 1.5)

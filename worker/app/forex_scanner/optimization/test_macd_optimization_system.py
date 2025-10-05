@@ -46,7 +46,7 @@ class TestMACDOptimizationSystem(unittest.TestCase):
         logging.basicConfig(level=logging.INFO)
         
         cls.db_manager = DatabaseManager(config.DATABASE_URL)
-        cls.test_epic = "CS.D.EURUSD.MINI.IP"
+        cls.test_epic = "CS.D.EURUSD.CEEM.IP"
         cls.parameter_service = OptimalParameterService()
         
         # Test data

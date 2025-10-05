@@ -716,7 +716,7 @@ if __name__ == "__main__":
     
     # Test signal execution
     test_signal = {
-        'epic': 'CS.D.EURUSD.MINI.IP',
+        'epic': 'CS.D.EURUSD.CEEM.IP',
         'signal_type': 'BUY',
         'confidence_score': 0.85,
         'entry_price': 1.1234,

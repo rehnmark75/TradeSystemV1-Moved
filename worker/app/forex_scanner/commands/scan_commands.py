@@ -73,7 +73,7 @@ class ScanCommands:
             enable_claude_analysis: Enable Claude AI analysis
         """
         if pairs is None:
-            pairs = getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP'])
+            pairs = getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
         
         self.logger.info(f"🚀 Starting live scanning")
         self.logger.info(f"   Pairs: {len(pairs)} ({', '.join(pairs[:3])}{'...' if len(pairs) > 3 else ''})")
@@ -142,7 +142,7 @@ class ScanCommands:
             List of detected signals
         """
         if pairs is None:
-            pairs = getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP'])
+            pairs = getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
         
         self.logger.info(f"🔍 Scanning {len(pairs)} pairs with {strategy} strategy")
         
@@ -194,7 +194,7 @@ class ScanCommands:
             Dictionary with efficiency analysis results
         """
         if pairs is None:
-            pairs = getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.MINI.IP'])
+            pairs = getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
         
         self.logger.info(f"🔄 KAMA Efficiency Analysis across {len(pairs)} pairs")
         self.logger.info(f"   Min ER threshold: {min_efficiency_ratio}")

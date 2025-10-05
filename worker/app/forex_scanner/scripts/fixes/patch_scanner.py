@@ -445,7 +445,7 @@ def main():
     if success:
         print("\n🎉 PATCH COMPLETED SUCCESSFULLY!")
         print("\n📝 Next Steps:")
-        print("1. Test the scanner: python main.py scan --epic CS.D.EURUSD.MINI.IP")
+        print("1. Test the scanner: python main.py scan --epic CS.D.EURUSD.CEEM.IP")
         print("2. Check database: SELECT * FROM alert_history ORDER BY alert_timestamp DESC LIMIT 5;")
         print("3. Monitor logs for '💾 Signal saved to alert_history' messages")
     else:

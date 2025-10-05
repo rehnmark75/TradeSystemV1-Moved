@@ -43,7 +43,7 @@ Usage:
 Signal Replay:
     python -m forex_scanner.validation.signal_replay_validator \
         --timestamp "2025-01-15 14:30:00" \
-        --epic "CS.D.EURUSD.MINI.IP"
+        --epic "CS.D.EURUSD.CEEM.IP"
 
 Statistical Validation:
     from forex_scanner.validation import create_statistical_validation_framework

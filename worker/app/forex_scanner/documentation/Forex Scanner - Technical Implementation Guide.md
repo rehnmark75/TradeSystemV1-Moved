@@ -285,7 +285,7 @@ def test_my_custom_strategy():
         'bb_lower': [1.0905, 1.0905, 1.0905]
     })
     
-    signal = strategy.detect_signal(test_df, 'CS.D.EURUSD.MINI.IP', 1.5, '15m')
+    signal = strategy.detect_signal(test_df, 'CS.D.EURUSD.CEEM.IP', 1.5, '15m')
     
     assert signal is not None
     assert signal['signal_type'] == 'BUY'
@@ -424,7 +424,7 @@ class TestEMAStrategy(unittest.TestCase):
         
         # Test signal detection at crossover
         test_df = self.test_data.iloc[:crossover_idx+1]
-        signal = self.strategy.detect_signal(test_df, 'CS.D.EURUSD.MINI.IP', 1.5, '15m')
+        signal = self.strategy.detect_signal(test_df, 'CS.D.EURUSD.CEEM.IP', 1.5, '15m')
         
         if signal:  # Crossover detected
             self.assertEqual(signal['signal_type'], 'BULL')
@@ -433,7 +433,7 @@ class TestEMAStrategy(unittest.TestCase):
     def test_insufficient_data_handling(self):
         """Test behavior with insufficient data"""
         small_df = self.test_data.head(10)
-        signal = self.strategy.detect_signal(small_df, 'CS.D.EURUSD.MINI.IP', 1.5, '15m')
+        signal = self.strategy.detect_signal(small_df, 'CS.D.EURUSD.CEEM.IP', 1.5, '15m')
         self.assertIsNone(signal, "Should return None for insufficient data")
     
     def test_confidence_calculation(self):
@@ -493,7 +493,7 @@ class TestSignalPipeline(unittest.TestCase):
     def test_end_to_end_signal_processing(self):
         """Test complete signal processing pipeline"""
         # 1. Detect signals
-        signals = self.signal_detector.detect_signals(['CS.D.EURUSD.MINI.IP'])
+        signals = self.signal_detector.detect_signals(['CS.D.EURUSD.CEEM.IP'])
         
         if signals:
             # 2. Process with Claude
@@ -548,7 +548,7 @@ class TestPerformance(unittest.TestCase):
         
         # Process signals
         for _ in range(10):
-            signals = self.signal_detector.detect_signals(['CS.D.EURUSD.MINI.IP'])
+            signals = self.signal_detector.detect_signals(['CS.D.EURUSD.CEEM.IP'])
         
         final_memory = process.memory_info().rss / 1024 / 1024  # MB
         memory_increase = final_memory - initial_memory

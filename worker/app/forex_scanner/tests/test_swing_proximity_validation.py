@@ -113,7 +113,7 @@ def test_swing_proximity_validator_basic():
         df=df,
         current_price=current_price,
         direction='BUY',
-        epic='CS.D.EURUSD.MINI.IP'
+        epic='CS.D.EURUSD.CEEM.IP'
     )
 
     logger.info(f"\nScenario 1: Price at {current_price:.5f}, BUY signal")
@@ -135,7 +135,7 @@ def test_swing_proximity_validator_basic():
                 df=df,
                 current_price=close_price,
                 direction='BUY',
-                epic='CS.D.EURUSD.MINI.IP'
+                epic='CS.D.EURUSD.CEEM.IP'
             )
 
             logger.info(f"\nScenario 2: Price at {close_price:.5f} (near swing high {swing_high.price:.5f}), BUY signal")
@@ -177,7 +177,7 @@ def test_swing_proximity_different_directions():
         df=df,
         current_price=current_price,
         direction='BUY',
-        epic='CS.D.EURUSD.MINI.IP'
+        epic='CS.D.EURUSD.CEEM.IP'
     )
 
     # Test SELL direction (checks support/swing lows)
@@ -185,7 +185,7 @@ def test_swing_proximity_different_directions():
         df=df,
         current_price=current_price,
         direction='SELL',
-        epic='CS.D.EURUSD.MINI.IP'
+        epic='CS.D.EURUSD.CEEM.IP'
     )
 
     logger.info(f"\nPrice: {current_price:.5f}")
@@ -223,11 +223,11 @@ def test_swing_proximity_strict_mode():
         close_price = swing.price + 0.00010  # 10 pips away
 
         result_lenient = validator_lenient.validate_entry_proximity(
-            df=df, current_price=close_price, direction='BUY', epic='CS.D.EURUSD.MINI.IP'
+            df=df, current_price=close_price, direction='BUY', epic='CS.D.EURUSD.CEEM.IP'
         )
 
         result_strict = validator_strict.validate_entry_proximity(
-            df=df, current_price=close_price, direction='BUY', epic='CS.D.EURUSD.MINI.IP'
+            df=df, current_price=close_price, direction='BUY', epic='CS.D.EURUSD.CEEM.IP'
         )
 
         logger.info(f"\nPrice close to swing:")

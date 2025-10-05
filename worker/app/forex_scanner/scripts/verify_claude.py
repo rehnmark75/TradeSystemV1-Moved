@@ -125,7 +125,7 @@ def test_claude_analyzer_direct():
         
         # Test basic functionality
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BULL',
             'price': 1.0850,
             'confidence_score': 0.85,
@@ -295,7 +295,7 @@ def test_fallback_analysis():
     try:
         # Test the fallback system with various approaches
         test_signal = {
-            'epic': 'CS.D.EURUSD.MINI.IP',
+            'epic': 'CS.D.EURUSD.CEEM.IP',
             'signal_type': 'BULL',
             'price': 1.08756,
             'confidence_score': 0.8743,
@@ -397,7 +397,7 @@ def test_with_real_config():
                 
                 # Test with a simple signal
                 test_signal = {
-                    'epic': 'CS.D.EURUSD.MINI.IP',
+                    'epic': 'CS.D.EURUSD.CEEM.IP',
                     'signal_type': 'BULL',
                     'price': 1.0850,
                     'confidence_score': 0.85,

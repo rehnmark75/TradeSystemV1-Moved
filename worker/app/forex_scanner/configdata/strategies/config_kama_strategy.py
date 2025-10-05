@@ -106,23 +106,57 @@ KAMA_ADAPTIVE_SMOOTHING = True      # Enable adaptive smoothing based on market 
 # Additional KAMA periods to calculate (optional)
 ADDITIONAL_KAMA_PERIODS = [6, 14]   # Will calculate KAMA_6 and KAMA_14 in addition to default
 
-# KAMA Signal Generation Thresholds
-KAMA_MIN_EFFICIENCY_RATIO = 0.1     # Minimum ER for signal validity (10% efficiency minimum)
+# ============================================================================
+# PHASE 1 OPTIMIZATION SETTINGS (2025-10-05)
+# ============================================================================
+# These values were updated based on comprehensive analysis to improve signal quality
+
+# KAMA Parameters
+KAMA_ER_PERIOD = 14                 # Efficiency Ratio calculation period
+KAMA_FAST_SC = 2                    # Fast smoothing constant
+KAMA_SLOW_SC = 30                   # Slow smoothing constant
+
+# KAMA Signal Generation Thresholds (PHASE 1: TIGHTENED)
+KAMA_MIN_EFFICIENCY = 0.20          # Increased from 0.10 - Higher quality bar (Phase 1)
 KAMA_HIGH_EFFICIENCY_THRESHOLD = 0.6 # High trending market threshold (60% efficiency)
-KAMA_TREND_CHANGE_WEIGHT = 0.3      # Weight for trend change signals in confidence calculation
-KAMA_CROSSOVER_WEIGHT = 0.4         # Weight for price crossover signals in confidence calculation
-KAMA_ER_WEIGHT = 0.3               # Weight for efficiency ratio in confidence calculation
+KAMA_MIN_EFFICIENCY_RATIO = 0.20    # Alias for backward compatibility (TIGHTENED from 0.1)
+KAMA_TREND_THRESHOLD = 0.05         # Minimum trend change (5%) for signals
+
+# KAMA Confidence Component Weights (PHASE 1: REBALANCED)
+# OLD: ER=0.45, Trend=0.25, Alignment=0.15, Strength=0.10, Context=0.05
+KAMA_CONFIDENCE_WEIGHTS = {
+    'efficiency_ratio': 0.30,       # Reduced from 0.45 - Less ER dominance
+    'trend_strength': 0.25,         # Kept at 0.25 - KAMA trend momentum
+    'price_alignment': 0.20,        # Increased from 0.15 - Better entry timing
+    'signal_strength': 0.15,        # Increased from 0.10 - Raw quality matters
+    'market_context': 0.10          # Increased from 0.05 - Session/regime important
+}
+
+# Legacy weight settings (for backward compatibility)
+KAMA_TREND_CHANGE_WEIGHT = 0.3      # Weight for trend change signals
+KAMA_CROSSOVER_WEIGHT = 0.4         # Weight for price crossover signals
+KAMA_ER_WEIGHT = 0.3                # Weight for efficiency ratio
 
 # KAMA Signal Confidence Settings
-KAMA_MIN_CONFIDENCE = 0.15          # Minimum confidence threshold (15% - target 20-50 signals per week)
+KAMA_MIN_CONFIDENCE = 0.15          # Minimum confidence threshold (15%)
 KAMA_BASE_CONFIDENCE = 0.75         # Base confidence level for KAMA signals
 KAMA_MAX_CONFIDENCE = 0.95          # Maximum confidence cap
 
-# KAMA Enhanced Validation Settings
+# KAMA Validation Settings (PHASE 1: ENHANCED)
 KAMA_ENHANCED_VALIDATION = True     # Enable enhanced KAMA signal validation
 KAMA_MIN_BARS = 50                  # Minimum bars needed for KAMA calculation
-KAMA_TREND_THRESHOLD = 0.05         # Minimum trend change (5%) for signals
-KAMA_REQUIRE_TREND_CONFIRMATION = True # Require trend confirmation from other indicators
+KAMA_REQUIRE_TREND_CONFIRMATION = True # Require trend confirmation
+
+# ADX Validation Settings (PHASE 1: NEW - Critical Addition)
+KAMA_ADX_VALIDATION_ENABLED = True  # Enable ADX trend strength validation
+KAMA_MIN_ADX = 20                   # Minimum ADX for signal (moderate trend required)
+KAMA_STRONG_ADX = 25                # Strong trend confirmation threshold
+KAMA_WEAK_ADX_WARNING = 18          # Warning threshold for weak trends
+
+# MACD Validation Settings (PHASE 1: STRENGTHENED)
+KAMA_MACD_VALIDATION_ENABLED = True # Enable MACD validation
+KAMA_MIN_MACD_THRESHOLD = 0.0003    # Increased from 0.0001 (3x stricter)
+KAMA_STRONG_MACD_THRESHOLD = 0.0005 # Strong MACD confirmation threshold
 
 # Strategy Integration Settings
 STRATEGY_WEIGHT_KAMA = 0.2          # Weight for KAMA in combined strategy (20%)
@@ -180,7 +214,7 @@ def get_kama_config_for_epic(epic: str, market_condition: str = 'default') -> di
     Get KAMA configuration for specific epic and market condition
 
     Args:
-        epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
         market_condition: Market condition ('default', 'conservative', 'aggressive', etc.)
 
     Returns:
@@ -199,7 +233,7 @@ def get_kama_threshold_for_epic(epic: str) -> float:
     Get KAMA-specific efficiency ratio threshold based on currency pair
 
     Args:
-        epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
 
     Returns:
         Efficiency ratio threshold for the pair
@@ -225,7 +259,7 @@ def get_kama_confidence_adjustment_for_epic(epic: str) -> float:
     Get KAMA confidence adjustment for specific epic
 
     Args:
-        epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
 
     Returns:
         Confidence adjustment value (to be added to base confidence)

@@ -285,8 +285,14 @@ class KAMACache:
         """
         try:
             # Get KAMA ER period
-            import config
-            er_period = getattr(config, 'KAMA_ER_PERIOD', 14)
+            try:
+                from configdata.strategies import config_kama_strategy
+            except ImportError:
+                try:
+                    from forex_scanner.configdata.strategies import config_kama_strategy
+                except ImportError:
+                    from forex_scanner.configdata.strategies import config_kama_strategy as config_kama_strategy
+            er_period = getattr(config_kama_strategy, 'KAMA_ER_PERIOD', 14)
             
             period = min(er_period, len(df) - 1)
             if period < 3:

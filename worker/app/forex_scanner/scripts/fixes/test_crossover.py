@@ -19,7 +19,7 @@ def test_manual_signal_creation():
         db = DatabaseManager(config.DATABASE_URL)
         fetcher = DataFetcher(db, 'Europe/Stockholm')
         
-        epic = 'CS.D.EURUSD.MINI.IP'
+        epic = 'CS.D.EURUSD.CEEM.IP'
         pair = 'EURUSD'
         
         # Get latest data
@@ -154,7 +154,7 @@ def suggest_config_modifications():
     print()
     print("After adding these settings:")
     print("1. Save config.py")
-    print("2. Run: python main.py debug --epic CS.D.EURUSD.MINI.IP")
+    print("2. Run: python main.py debug --epic CS.D.EURUSD.CEEM.IP")
     print("3. You should see a BULL signal detected!")
 
 def main():
