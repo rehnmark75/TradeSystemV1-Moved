@@ -376,7 +376,7 @@ EMA_STRATEGY = True  # Core EMA strategy
 MACD_STRATEGY = True  # Core MACD strategy
 
 # Enable KAMA Strategy
-KAMA_STRATEGY = False  # This is the key setting that's missing
+KAMA_STRATEGY = True  # ENABLED - Phase 1 optimization complete, ready for testing
 
 # Enable SMC Strategy
 SMC_STRATEGY = True  # Smart Money Concepts strategy

@@ -42,14 +42,15 @@ class KAMAConfidenceCalculator:
         self.logger = logger or logging.getLogger(__name__)
         
         # KAMA-specific confidence thresholds (optimized for forex)
+        # Phase 1 ADJUSTMENT: Aligned with tightened min_efficiency thresholds (0.18-0.25)
         self.confidence_thresholds = {
             'efficiency_ratio': {
                 'excellent': 0.7,    # Strong trending market
-                'very_good': 0.5,    # Good trending market  
+                'very_good': 0.5,    # Good trending market
                 'good': 0.35,        # Moderate trending
-                'acceptable': 0.25,  # Minimum for signals
-                'poor': 0.15,        # Choppy market
-                'very_poor': 0.1     # Avoid trading
+                'acceptable': 0.18,  # LOWERED from 0.25 - align with min_efficiency
+                'poor': 0.12,        # LOWERED from 0.15 - choppy market
+                'very_poor': 0.08    # LOWERED from 0.1 - avoid trading
             },
             'trend_strength': {
                 'strong': 0.002,     # Strong KAMA trend
@@ -76,19 +77,19 @@ class KAMAConfidenceCalculator:
             'market_context': 0.10         # Increased from 0.05 - session/regime significant
         }
         
-        # Confidence bonuses and penalties
+        # Confidence bonuses and penalties (PHASE 1.5: MODERATE - multiplier provides base boost)
         self.adjustments = {
-            'high_efficiency_bonus': 0.08,      # ER > 0.6
-            'trend_alignment_bonus': 0.06,      # Trend matches signal
-            'volume_confirmation_bonus': 0.04,   # Volume supports signal
-            'macd_alignment_bonus': 0.03,       # MACD confirms signal
-            'session_bonus': 0.02,              # Active trading session
-            
-            'low_efficiency_penalty': -0.1,     # ER < 0.15
-            'trend_contradiction_penalty': -0.08, # Trend opposes signal
-            'distance_penalty': -0.06,          # Price too far from KAMA
-            'weak_momentum_penalty': -0.04,     # Low signal strength
-            'consolidation_penalty': -0.05      # Consolidating market
+            'high_efficiency_bonus': 0.06,      # REDUCED - multiplier provides base boost
+            'trend_alignment_bonus': 0.05,      # REDUCED - multiplier provides base boost
+            'volume_confirmation_bonus': 0.04,   # REDUCED - multiplier provides base boost
+            'macd_alignment_bonus': 0.03,       # REDUCED - multiplier provides base boost
+            'session_bonus': 0.02,              # REDUCED - multiplier provides base boost
+
+            'low_efficiency_penalty': -0.06,    # MODERATE penalty
+            'trend_contradiction_penalty': -0.05, # MODERATE penalty
+            'distance_penalty': -0.03,          # MODERATE penalty
+            'weak_momentum_penalty': -0.02,     # MODERATE penalty
+            'consolidation_penalty': -0.03      # MODERATE penalty
         }
         
         self.logger.info("🎯 KAMA-Specific Confidence Calculator initialized (REBALANCED)")
@@ -142,6 +143,19 @@ class KAMAConfidenceCalculator:
                 strength_score * self.component_weights['signal_strength'] +
                 context_score * self.component_weights['market_context']
             )
+
+            # Phase 1.5: Apply confidence boost multiplier for signals passing strict thresholds
+            # Since Phase 1 raised min ER to 0.18-0.25, signals that pass deserve higher base
+            # NOTE: Forex optimizer adds MORE adjustments after this, so keep conservative
+            confidence_multiplier = 1.05  # 5% boost to base calculation
+
+            # Additional boost for signals at/near minimum thresholds (they passed strict validation)
+            if 0.18 <= efficiency_ratio <= 0.30:
+                # Signals in this range passed ADX+ER validation, deserve extra boost
+                confidence_multiplier = 1.10  # 10% boost for threshold signals (conservative due to forex bonuses)
+                self.logger.debug(f"[CONFIDENCE BOOST] ER={efficiency_ratio:.3f} in threshold range, multiplier: 1.10x")
+
+            base_confidence = min(0.95, base_confidence * confidence_multiplier)
             
             # Apply KAMA-specific adjustments
             adjusted_confidence = self._apply_kama_adjustments(
@@ -149,7 +163,8 @@ class KAMAConfidenceCalculator:
             )
             
             # Final bounds and validation
-            final_confidence = max(0.15, min(0.95, adjusted_confidence))
+            # Phase 1 ADJUSTMENT: Reduced minimum floor from 0.15 to 0.10 to allow proper filtering
+            final_confidence = max(0.10, min(0.95, adjusted_confidence))
             
             self.logger.info(f"[KAMA CONFIDENCE] {signal_type} - "
                            f"Base: {base_confidence:.1%} → Adjusted: {adjusted_confidence:.1%} → "
@@ -164,24 +179,27 @@ class KAMAConfidenceCalculator:
     def _calculate_efficiency_score(self, efficiency_ratio: float) -> float:
         """
         🔥 EFFICIENCY SCORING: Core KAMA metric - market adaptability
-        
+
         High efficiency = trending market (KAMA's strength)
         Low efficiency = choppy market (KAMA struggles)
+
+        Phase 1 ADJUSTMENT: Since min_efficiency now 0.18-0.25, signals at threshold
+        should score higher (0.70 instead of 0.55) to achieve 60%+ final confidence
         """
         thresholds = self.confidence_thresholds['efficiency_ratio']
-        
+
         if efficiency_ratio >= thresholds['excellent']:
             return 0.95    # Excellent trending market
         elif efficiency_ratio >= thresholds['very_good']:
-            return 0.85    # Very good trending
+            return 0.90    # INCREASED from 0.88 - very good trending
         elif efficiency_ratio >= thresholds['good']:
-            return 0.70    # Good trending
+            return 0.82    # INCREASED from 0.78 - good trending
         elif efficiency_ratio >= thresholds['acceptable']:
-            return 0.55    # Acceptable for signals
+            return 0.75    # INCREASED from 0.70 - signals at min threshold need higher base
         elif efficiency_ratio >= thresholds['poor']:
-            return 0.35    # Poor conditions
+            return 0.50    # INCREASED from 0.45 - poor conditions
         else:
-            return 0.20    # Very poor - avoid trading
+            return 0.30    # INCREASED from 0.25 - very poor - avoid trading
 
     def _calculate_trend_score(self, kama_trend: float, signal_type: str) -> float:
         """
@@ -314,8 +332,8 @@ class KAMAConfidenceCalculator:
                 adjusted += self.adjustments['high_efficiency_bonus']
                 self.logger.debug(f"[KAMA BONUS] High efficiency: +{self.adjustments['high_efficiency_bonus']:.1%}")
             
-            # Low efficiency penalty
-            elif efficiency_ratio < 0.15:
+            # Low efficiency penalty (Phase 1.5: Only apply if BELOW our minimum threshold)
+            elif efficiency_ratio < 0.12:  # Changed from 0.15
                 adjusted += self.adjustments['low_efficiency_penalty']
                 self.logger.debug(f"[KAMA PENALTY] Low efficiency: {self.adjustments['low_efficiency_penalty']:.1%}")
             

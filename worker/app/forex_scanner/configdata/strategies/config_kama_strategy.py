@@ -15,7 +15,7 @@ Key Features:
 """
 
 # Strategy enable/disable
-KAMA_STRATEGY = False  # Currently disabled - enable when ready for testing
+KAMA_STRATEGY = True  # ENABLED - Phase 1 optimization complete, ready for testing
 
 # Main KAMA Strategy Configuration Dictionary
 KAMA_STRATEGY_CONFIG = {
@@ -137,9 +137,9 @@ KAMA_TREND_CHANGE_WEIGHT = 0.3      # Weight for trend change signals
 KAMA_CROSSOVER_WEIGHT = 0.4         # Weight for price crossover signals
 KAMA_ER_WEIGHT = 0.3                # Weight for efficiency ratio
 
-# KAMA Signal Confidence Settings
-KAMA_MIN_CONFIDENCE = 0.15          # Minimum confidence threshold (15%)
-KAMA_BASE_CONFIDENCE = 0.75         # Base confidence level for KAMA signals
+# KAMA Signal Confidence Settings (PHASE 1.5: BOOSTED)
+KAMA_MIN_CONFIDENCE = 0.10          # Minimum confidence threshold (10%) - lowered for filtering
+KAMA_BASE_CONFIDENCE = 0.80         # Base confidence level for KAMA signals (INCREASED from 0.75)
 KAMA_MAX_CONFIDENCE = 0.95          # Maximum confidence cap
 
 # KAMA Validation Settings (PHASE 1: ENHANCED)

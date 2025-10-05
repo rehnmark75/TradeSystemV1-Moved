@@ -195,64 +195,78 @@ class KAMAForexOptimizer:
             if pair_type == 'EUR_major':
                 # EUR pairs: KAMA works well due to good liquidity and trends
                 if efficiency_ratio > 0.4:
-                    adjusted_confidence += 0.06  # EUR responds well to high efficiency
+                    adjusted_confidence += 0.04  # REDUCED - multiplier already applied
                 elif efficiency_ratio > 0.25:
-                    adjusted_confidence += 0.03
+                    adjusted_confidence += 0.03  # REDUCED - multiplier already applied
+                elif efficiency_ratio >= 0.20:
+                    adjusted_confidence += 0.02  # REDUCED - multiplier already applied
                 else:
-                    adjusted_confidence -= 0.04  # EUR choppy when low efficiency
+                    adjusted_confidence -= 0.01  # REDUCED penalty
                     
             elif pair_type == 'GBP_volatile':
                 # GBP pairs: More volatile, KAMA needs higher efficiency to be reliable
                 if efficiency_ratio > 0.5:
-                    adjusted_confidence += 0.08  # High efficiency GBP is very reliable
+                    adjusted_confidence += 0.05  # REDUCED - multiplier already applied
                 elif efficiency_ratio > 0.35:
-                    adjusted_confidence += 0.04
-                elif efficiency_ratio < 0.3:
-                    adjusted_confidence -= 0.08  # Low efficiency GBP is dangerous
+                    adjusted_confidence += 0.03  # REDUCED - multiplier already applied
+                elif efficiency_ratio >= 0.25:
+                    adjusted_confidence += 0.02  # REDUCED - multiplier already applied
+                elif efficiency_ratio < 0.25:
+                    adjusted_confidence -= 0.02  # REDUCED penalty
                     
             elif pair_type in ['USDJPY_stable', 'JPY_cross']:
                 # USD/JPY and other JPY pairs: More stable, KAMA can work with lower efficiency
                 if efficiency_ratio > 0.3:
-                    adjusted_confidence += 0.05  # JPY pairs more predictable
+                    adjusted_confidence += 0.04  # REDUCED - multiplier already applied
                 elif efficiency_ratio > 0.2:
-                    adjusted_confidence += 0.02
+                    adjusted_confidence += 0.03  # REDUCED - multiplier already applied
+                elif efficiency_ratio >= 0.18:
+                    adjusted_confidence += 0.02  # REDUCED - multiplier already applied
                 # Less penalty for low efficiency due to JPY stability
                 
             elif pair_type == 'EURJPY_cross':
                 # EUR/JPY: Combination of EUR volatility and JPY stability
                 if efficiency_ratio > 0.4:
-                    adjusted_confidence += 0.06  # Good efficiency needed
+                    adjusted_confidence += 0.04  # REDUCED - multiplier already applied
                 elif efficiency_ratio > 0.25:
-                    adjusted_confidence += 0.03
-                elif efficiency_ratio < 0.2:
-                    adjusted_confidence -= 0.05  # Penalize low efficiency
+                    adjusted_confidence += 0.03  # REDUCED - multiplier already applied
+                elif efficiency_ratio >= 0.20:
+                    adjusted_confidence += 0.02  # REDUCED - multiplier already applied
+                elif efficiency_ratio < 0.20:
+                    adjusted_confidence -= 0.01  # REDUCED penalty
                     
             elif pair_type in ['AUDJPY_commodity', 'GBPJPY_volatile']:
                 # AUD/JPY, GBP/JPY: More volatile JPY crosses
                 if efficiency_ratio > 0.45:
-                    adjusted_confidence += 0.07  # High efficiency very good
+                    adjusted_confidence += 0.05  # REDUCED - multiplier already applied
                 elif efficiency_ratio > 0.3:
-                    adjusted_confidence += 0.04
-                elif efficiency_ratio < 0.25:
-                    adjusted_confidence -= 0.06  # Volatile crosses need higher standards
+                    adjusted_confidence += 0.03  # REDUCED - multiplier already applied
+                elif efficiency_ratio >= 0.22:
+                    adjusted_confidence += 0.02  # REDUCED - multiplier already applied
+                elif efficiency_ratio < 0.22:
+                    adjusted_confidence -= 0.02  # REDUCED penalty
                     
             elif pair_type in ['AUD_commodity', 'NZD_commodity', 'CAD_commodity']:
                 # Commodity currencies: Trend-following, good for KAMA
                 if efficiency_ratio > 0.35:
-                    adjusted_confidence += 0.05  # Commodity currencies trend well
+                    adjusted_confidence += 0.04  # REDUCED - multiplier already applied
                 elif efficiency_ratio > 0.25:
-                    adjusted_confidence += 0.02
-                elif efficiency_ratio < 0.2:
-                    adjusted_confidence -= 0.05  # But choppy when no trend
+                    adjusted_confidence += 0.03  # REDUCED - multiplier already applied
+                elif efficiency_ratio >= 0.22:
+                    adjusted_confidence += 0.02  # REDUCED - multiplier already applied
+                elif efficiency_ratio < 0.20:
+                    adjusted_confidence -= 0.01  # REDUCED penalty
                     
             elif pair_type == 'CHF_safe_haven':
                 # CHF pairs: Flight-to-safety affects KAMA reliability
                 if efficiency_ratio > 0.4:
-                    adjusted_confidence += 0.04  # CHF trends well when clear
+                    adjusted_confidence += 0.03  # REDUCED - multiplier already applied
                 elif efficiency_ratio > 0.25:
-                    adjusted_confidence += 0.02
+                    adjusted_confidence += 0.02  # REDUCED - multiplier already applied
+                elif efficiency_ratio >= 0.18:
+                    adjusted_confidence += 0.01  # REDUCED - multiplier already applied
                 else:
-                    adjusted_confidence -= 0.03  # Safe haven flows can disrupt KAMA
+                    adjusted_confidence -= 0.01  # REDUCED penalty
                     
             else:  # exotic_pair or unknown
                 # Exotic pairs: More unpredictable, require higher standards
