@@ -62,6 +62,16 @@ class MACDStrategy(BaseStrategy):
         self.min_adx = 20  # Trending markets threshold (testing for optimal value)
         self.min_confidence = 0.60  # 60% minimum confidence (lowered to allow more signals)
 
+        # EMA filter configuration (from config file)
+        ema_filter_config = getattr(config_macd_strategy, 'MACD_EMA_FILTER', {}) if config_macd_strategy else {}
+        self.ema_filter_enabled = ema_filter_config.get('enabled', False)  # Default: disabled
+        self.ema_filter_period = ema_filter_config.get('ema_period', 50)  # Default: 50
+
+        if self.ema_filter_enabled:
+            self.logger.info(f"✅ EMA {self.ema_filter_period} filter ENABLED for trend alignment")
+        else:
+            self.logger.info(f"⚪ EMA filter DISABLED - all trending signals allowed")
+
         # Initialize swing validator
         swing_config = getattr(config_macd_strategy, 'MACD_SWING_VALIDATION', {}) if config_macd_strategy else {}
         if swing_config.get('enabled', True):
@@ -151,24 +161,28 @@ class MACDStrategy(BaseStrategy):
             self.logger.debug(f"❌ BEAR rejected: RSI {rsi:.1f} oversold")
             return False
 
-        # SIMPLIFIED EMA FILTER: Use EMA 50 for all signals (faster trend alignment)
-        price = row.get('close', 0)
-        ema_50 = row.get('ema_50', 0)
+        # EMA FILTER (configurable via config file)
+        if self.ema_filter_enabled:
+            price = row.get('close', 0)
+            ema_col = f'ema_{self.ema_filter_period}'
+            ema_value = row.get(ema_col, 0)
 
-        # Validate EMA and price are valid numbers
-        if pd.isna(ema_50) or pd.isna(price) or ema_50 <= 0 or price <= 0:
-            self.logger.info(f"❌ {signal_type} rejected: Invalid EMA50 or price (price={price}, EMA50={ema_50})")
-            return False
+            # Validate EMA and price are valid numbers
+            if pd.isna(ema_value) or pd.isna(price) or ema_value <= 0 or price <= 0:
+                self.logger.info(f"❌ {signal_type} rejected: Invalid EMA{self.ema_filter_period} or price (price={price}, EMA={ema_value})")
+                return False
 
-        # Apply EMA 50 trend filter
-        if signal_type == 'BULL' and price < ema_50:
-            self.logger.debug(f"❌ BULL rejected: price {price:.5f} below EMA50 {ema_50:.5f} (ADX={adx:.1f})")
-            return False
-        if signal_type == 'BEAR' and price > ema_50:
-            self.logger.debug(f"❌ BEAR rejected: price {price:.5f} above EMA50 {ema_50:.5f} (ADX={adx:.1f})")
-            return False
+            # Apply EMA trend filter
+            if signal_type == 'BULL' and price < ema_value:
+                self.logger.debug(f"❌ BULL rejected: price {price:.5f} below EMA{self.ema_filter_period} {ema_value:.5f} (ADX={adx:.1f})")
+                return False
+            if signal_type == 'BEAR' and price > ema_value:
+                self.logger.debug(f"❌ BEAR rejected: price {price:.5f} above EMA{self.ema_filter_period} {ema_value:.5f} (ADX={adx:.1f})")
+                return False
 
-        self.logger.debug(f"✅ {signal_type} passed EMA50 filter: price={price:.5f}, EMA50={ema_50:.5f} (ADX={adx:.1f})")
+            self.logger.debug(f"✅ {signal_type} passed EMA{self.ema_filter_period} filter: price={price:.5f}, EMA={ema_value:.5f} (ADX={adx:.1f})")
+        else:
+            self.logger.debug(f"✅ {signal_type} passed (no EMA filter) - ADX={adx:.1f}")
 
         return True
 
@@ -224,8 +238,11 @@ class MACDStrategy(BaseStrategy):
                 self.logger.debug(f"❌ {signal_type} rejected: confidence {confidence:.1%} < {self.min_confidence:.1%}")
                 return None
 
-            # Using simplified EMA 50 filter for all signals
-            ema_filter_used = 'EMA50'
+            # Record which EMA filter was used (if any)
+            if self.ema_filter_enabled:
+                ema_filter_used = f'EMA{self.ema_filter_period}'
+            else:
+                ema_filter_used = 'None'
 
             # Create signal
             signal = {

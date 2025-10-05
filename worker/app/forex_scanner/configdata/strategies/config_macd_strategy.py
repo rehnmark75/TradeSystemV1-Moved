@@ -358,6 +358,18 @@ MACD_SWING_VALIDATION = {
     'support_buffer': 1.0,  # No multiplier - use 8 pips as-is
 }
 
+# =============================================================================
+# EMA TREND FILTER CONFIGURATION
+# =============================================================================
+
+# EMA Trend Filter - Filters signals based on EMA trend alignment
+# When enabled, BULL signals require price >= EMA, BEAR signals require price <= EMA
+MACD_EMA_FILTER = {
+    'enabled': False,  # Enable/disable EMA trend filter (default: disabled for more signals)
+    'ema_period': 50,  # EMA period to use (50, 100, or 200)
+    # Options: 50 = faster/more signals, 100 = balanced, 200 = slower/fewer signals
+}
+
 # Notes:
 # - Prevents BUY signals when price is too close to recent swing highs (resistance)
 # - Prevents SELL signals when price is too close to recent swing lows (support)
