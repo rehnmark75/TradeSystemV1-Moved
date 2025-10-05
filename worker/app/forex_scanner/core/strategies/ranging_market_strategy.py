@@ -1068,8 +1068,12 @@ class RangingMarketStrategy(BaseStrategy):
             sl_multiplier = self.config.get('ranging_range_sl_multiplier', 0.4)
             tp_multiplier = self.config.get('ranging_range_tp_multiplier', 0.8)
 
-            sl_pips = max(range_pips * sl_multiplier, 15)  # Minimum 15 pips
-            tp_pips = max(range_pips * tp_multiplier, 25)  # Minimum 25 pips
+            # Get configured minimums from config (use defaults from RANGING_DEFAULT_SL/TP_PIPS)
+            min_sl = self.config.get('ranging_default_sl_pips', 35)
+            min_tp = self.config.get('ranging_default_tp_pips', 53)
+
+            sl_pips = max(range_pips * sl_multiplier, min_sl)  # Use config minimum
+            tp_pips = max(range_pips * tp_multiplier, min_tp)  # Use config minimum
 
             # ✅ SAFETY CAP: Prevent excessive SL/TP even with valid ranges
             max_sl = 80 if 'JPY' in str(self.epic).upper() else 60
@@ -1292,11 +1296,11 @@ class RangingMarketStrategy(BaseStrategy):
 
             if signal_type in ['BUY', 'BULL']:
                 # BUY at support: Need bullish rejection pattern
-                # 1. Lower wick should be significant (>30% of range)
+                # 1. Lower wick should be significant (>25% of range) - OPTIMIZED from 30%
                 # 2. Price should close in upper half of candle
                 # 3. Or previous candle tested support and current closed higher
 
-                if lower_wick_ratio > 0.3:
+                if lower_wick_ratio > 0.25:
                     # Strong lower wick = rejection from support
                     if current_candle['close'] > (current_candle['high'] + current_candle['low']) / 2:
                         return {
@@ -1331,11 +1335,11 @@ class RangingMarketStrategy(BaseStrategy):
 
             else:  # SELL at resistance
                 # SELL at resistance: Need bearish rejection pattern
-                # 1. Upper wick should be significant (>30% of range)
+                # 1. Upper wick should be significant (>25% of range) - OPTIMIZED from 30%
                 # 2. Price should close in lower half of candle
                 # 3. Or previous candle tested resistance and current closed lower
 
-                if upper_wick_ratio > 0.3:
+                if upper_wick_ratio > 0.25:
                     # Strong upper wick = rejection from resistance
                     if current_candle['close'] < (current_candle['high'] + current_candle['low']) / 2:
                         return {

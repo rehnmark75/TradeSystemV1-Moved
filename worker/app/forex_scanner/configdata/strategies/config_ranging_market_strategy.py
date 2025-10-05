@@ -139,8 +139,8 @@ OSCILLATOR_WEIGHTS = {                 # Weight for each oscillator in confluenc
 }
 
 # Confluence Thresholds
-OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.45  # OPTIMIZED: Balanced quality vs quantity (was 0.60 - too strict, only 2 signals)
-OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.45  # OPTIMIZED: Balanced quality vs quantity (was 0.60 - too strict, only 2 signals)
+OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.35  # OPTIMIZED: Capture quality 0.35-0.43 signals (was 0.45 - missing good signals)
+OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.35  # OPTIMIZED: Capture quality 0.35-0.43 signals (was 0.45 - missing good signals)
 OSCILLATOR_EXTREME_CONFLUENCE_BOOST = 0.15   # Boost for extreme readings
 
 # Signal Quality Requirements
@@ -181,12 +181,12 @@ REGIME_TREND_PERIOD = 50              # Period for trend strength calculation
 REGIME_ADX_THRESHOLD = 25             # ADX threshold for trending vs ranging
 
 # Ranging Market Detection
-RANGING_MARKET_ADX_MAX = 30           # OPTIMIZED: Wider ADX range for more signals (was 25 - too narrow 10 point window)
-RANGING_MARKET_ADX_MIN = 12           # OPTIMIZED: Lower minimum to catch quality ranges (was 15 - too high)
+RANGING_MARKET_ADX_MAX = 35           # OPTIMIZED: Allow mild trends that still range (was 30 - too restrictive)
+RANGING_MARKET_ADX_MIN = 10           # OPTIMIZED: Capture quieter ranging periods (was 12 - missing signals)
 RANGING_MARKET_ATR_STABILITY = 0.8    # ATR stability coefficient
 RANGING_MARKET_MIN_DURATION = 10      # Minimum bars for ranging regime
 RANGING_MARKET_PRICE_OSCILLATION = 0.75  # Price oscillation within range coefficient
-RANGING_MARKET_MIN_ATR_PIPS = 8       # NEW: Minimum ATR in pips (avoid low volatility periods where 5 pip profit is meaningless)
+RANGING_MARKET_MIN_ATR_PIPS = 6       # OPTIMIZED: Lower threshold to capture more ranges (was 8 - too high)
 
 # Regime-Based Signal Filtering
 REGIME_DISABLE_IN_STRONG_TREND = True  # Disable strategy in strong trends
@@ -219,7 +219,7 @@ MTF_ZONE_CONFLUENCE = True             # Require S/R zone confluence
 # =============================================================================
 
 # Signal Quality Requirements
-SIGNAL_QUALITY_MIN_CONFIDENCE = 0.70   # INCREASED: from 0.50 to 0.70 (filter weak 52-55% signals)
+SIGNAL_QUALITY_MIN_CONFIDENCE = 0.65   # OPTIMIZED: Balance quality vs quantity (was 0.70 - too strict)
 SIGNAL_QUALITY_REQUIRE_VOLUME_CONFIRMATION = False  # Volume confirmation (if available)
 SIGNAL_QUALITY_MIN_RISK_REWARD = 1.5   # OPTIMIZED: Realistic for ranging markets (was 2.5 - unrealistic 112 pip targets)
 SIGNAL_QUALITY_MAX_SPREAD_IMPACT = 0.3  # Maximum spread impact on signal quality
