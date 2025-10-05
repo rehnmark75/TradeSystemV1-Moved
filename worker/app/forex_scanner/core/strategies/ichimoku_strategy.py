@@ -24,6 +24,8 @@ from datetime import datetime
 
 from .base_strategy import BaseStrategy
 from ..detection.price_adjuster import PriceAdjuster
+from .helpers.swing_proximity_validator import SwingProximityValidator
+from .helpers.smc_market_structure import SMCMarketStructure
 
 # Import optimization functions
 try:
@@ -107,6 +109,10 @@ class IchimokuStrategy(BaseStrategy):
         self.trend_validator = None
         self.signal_calculator = None
         self.mtf_analyzer = None
+
+        # SMC and Swing Proximity Validation - Initialize before helpers
+        self.smc_analyzer = None
+        self.swing_validator = None
 
         # Enable/disable expensive features based on pipeline mode
         self.enhanced_validation = pipeline_mode and getattr(config, 'ICHIMOKU_ENHANCED_VALIDATION', True)
@@ -262,6 +268,54 @@ class IchimokuStrategy(BaseStrategy):
                 self.logger.warning(f"⚠️ Ichimoku MTF analyzer not available: {e}")
                 self.mtf_analyzer = None
                 self.enable_mtf_analysis = False
+
+            # SMC Market Structure Analyzer (for swing detection)
+            try:
+                self.smc_analyzer = SMCMarketStructure(logger=self.logger, data_fetcher=self.data_fetcher)
+                self.logger.info("✅ SMC Market Structure analyzer initialized")
+            except Exception as e:
+                self.logger.warning(f"⚠️ SMC analyzer initialization failed: {e}")
+                self.smc_analyzer = None
+
+            # Swing Proximity Validator
+            swing_config = getattr(ichimoku_config, 'ICHIMOKU_SWING_VALIDATION', {})
+            if swing_config.get('enabled', True) and self.smc_analyzer:
+                try:
+                    self.swing_validator = SwingProximityValidator(
+                        smc_analyzer=self.smc_analyzer,
+                        config=swing_config,
+                        logger=self.logger
+                    )
+                    min_distance = swing_config.get('min_distance_pips', 8)
+                    self.logger.info(f"✅ Swing proximity validator initialized (min_distance={min_distance} pips)")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Swing validator initialization failed: {e}")
+                    self.swing_validator = None
+            else:
+                if not swing_config.get('enabled', True):
+                    self.logger.info("⚪ Swing proximity validation disabled in config")
+                if not self.smc_analyzer:
+                    self.logger.warning("⚠️ Swing proximity validation unavailable (SMC analyzer failed)")
+
+            # ADX Calculator (for trend strength filtering)
+            self.adx_enabled = getattr(ichimoku_config, 'ICHIMOKU_ADX_FILTER_ENABLED', False)
+            if self.adx_enabled:
+                try:
+                    from .helpers.adx_calculator import ADXCalculator
+                    adx_period = getattr(ichimoku_config, 'ICHIMOKU_ADX_PERIOD', 14)
+                    self.adx_calculator = ADXCalculator(period=adx_period, logger=self.logger)
+                    self.adx_min_threshold = getattr(ichimoku_config, 'ICHIMOKU_ADX_MIN_THRESHOLD', 20)
+                    self.adx_strong_threshold = getattr(ichimoku_config, 'ICHIMOKU_ADX_STRONG_THRESHOLD', 25)
+                    self.adx_strict_mode = getattr(ichimoku_config, 'ICHIMOKU_ADX_STRICT_MODE', False)
+                    self.adx_confidence_penalty = getattr(ichimoku_config, 'ICHIMOKU_ADX_CONFIDENCE_PENALTY', 0.15)
+                    self.logger.info(f"✅ ADX filter initialized (threshold: {self.adx_min_threshold}, strict: {self.adx_strict_mode})")
+                except ImportError as e:
+                    self.logger.warning(f"⚠️ ADX calculator not available: {e}")
+                    self.adx_calculator = None
+                    self.adx_enabled = False
+            else:
+                self.adx_calculator = None
+                self.logger.info("⚪ ADX trend strength filter disabled")
 
             # RAG Enhancement Module
             if self.rag_enabled:
@@ -479,6 +533,13 @@ class IchimokuStrategy(BaseStrategy):
                     self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal failed Chikou span validation")
                     return None
 
+                # ADX trend strength validation (if enabled)
+                if self.adx_enabled and self.adx_calculator:
+                    adx_result = self._validate_adx_strength(df_with_signals, epic, 'BULL')
+                    if adx_result['reject']:
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal rejected - {adx_result['reason']}")
+                        return None
+
                 # EMA200 trend filter validation (if enabled)
                 if getattr(ichimoku_config, 'ICHIMOKU_EMA_200_TREND_FILTER', False):
                     price = latest_row.get('close', latest_row.get('price', 0))
@@ -517,6 +578,45 @@ class IchimokuStrategy(BaseStrategy):
                         self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal failed MTF validation")
                         return None
 
+                # SWING PROXIMITY VALIDATION - Prevent poor entry timing near resistance
+                if self.swing_validator and self.smc_analyzer:
+                    try:
+                        # Analyze market structure for swing points
+                        smc_config = {
+                            'swing_length': getattr(ichimoku_config, 'ICHIMOKU_SWING_LENGTH', 5),
+                            'structure_confirmation': 3,
+                            'bos_threshold': 0.0001
+                        }
+                        df_with_swings = self.smc_analyzer.analyze_market_structure(
+                            df_with_signals, smc_config, epic, timeframe
+                        )
+
+                        # Validate proximity to swing points
+                        price = latest_row.get('close', latest_row.get('price', 0))
+                        swing_result = self.swing_validator.validate_entry_proximity(
+                            df=df_with_swings,
+                            current_price=price,
+                            direction='BULL',
+                            epic=epic
+                        )
+
+                        # Apply validation result
+                        if not swing_result.get('valid'):
+                            rejection_reason = swing_result.get('rejection_reason', 'Too close to swing point')
+                            self.logger.info(f"🌥️ Ichimoku {epic}: BULL signal rejected - {rejection_reason}")
+                            return None
+
+                        # Log proximity warning if penalty applied
+                        swing_penalty = swing_result.get('confidence_penalty', 0.0)
+                        if swing_penalty > 0:
+                            self.logger.info(
+                                f"📉 Ichimoku {epic}: Swing proximity penalty: -{swing_penalty:.3f} "
+                                f"(distance: {swing_result.get('distance_to_swing', 0):.1f} pips to {swing_result.get('swing_type', 'swing')})"
+                            )
+
+                    except Exception as e:
+                        self.logger.debug(f"Swing validation error (non-critical): {e}")
+
                 # Create bull signal
                 signal = self._create_signal(
                     signal_type='BULL',
@@ -547,6 +647,13 @@ class IchimokuStrategy(BaseStrategy):
                 if not self.trend_validator.validate_chikou_span(df_with_signals, 'BEAR'):
                     self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal failed Chikou span validation")
                     return None
+
+                # ADX trend strength validation (if enabled)
+                if self.adx_enabled and self.adx_calculator:
+                    adx_result = self._validate_adx_strength(df_with_signals, epic, 'BEAR')
+                    if adx_result['reject']:
+                        self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal rejected - {adx_result['reason']}")
+                        return None
 
                 # EMA200 trend filter validation (if enabled)
                 if getattr(ichimoku_config, 'ICHIMOKU_EMA_200_TREND_FILTER', False):
@@ -585,6 +692,45 @@ class IchimokuStrategy(BaseStrategy):
                     if not self.mtf_analyzer.validate_mtf_ichimoku(epic, current_time, 'BEAR'):
                         self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal failed MTF validation")
                         return None
+
+                # SWING PROXIMITY VALIDATION - Prevent poor entry timing near support
+                if self.swing_validator and self.smc_analyzer:
+                    try:
+                        # Analyze market structure for swing points
+                        smc_config = {
+                            'swing_length': getattr(ichimoku_config, 'ICHIMOKU_SWING_LENGTH', 5),
+                            'structure_confirmation': 3,
+                            'bos_threshold': 0.0001
+                        }
+                        df_with_swings = self.smc_analyzer.analyze_market_structure(
+                            df_with_signals, smc_config, epic, timeframe
+                        )
+
+                        # Validate proximity to swing points
+                        price = latest_row.get('close', latest_row.get('price', 0))
+                        swing_result = self.swing_validator.validate_entry_proximity(
+                            df=df_with_swings,
+                            current_price=price,
+                            direction='BEAR',
+                            epic=epic
+                        )
+
+                        # Apply validation result
+                        if not swing_result.get('valid'):
+                            rejection_reason = swing_result.get('rejection_reason', 'Too close to swing point')
+                            self.logger.info(f"🌥️ Ichimoku {epic}: BEAR signal rejected - {rejection_reason}")
+                            return None
+
+                        # Log proximity warning if penalty applied
+                        swing_penalty = swing_result.get('confidence_penalty', 0.0)
+                        if swing_penalty > 0:
+                            self.logger.info(
+                                f"📉 Ichimoku {epic}: Swing proximity penalty: -{swing_penalty:.3f} "
+                                f"(distance: {swing_result.get('distance_to_swing', 0):.1f} pips to {swing_result.get('swing_type', 'swing')})"
+                            )
+
+                    except Exception as e:
+                        self.logger.debug(f"Swing validation error (non-critical): {e}")
 
                 # Create bear signal
                 signal = self._create_signal(
@@ -730,21 +876,93 @@ class IchimokuStrategy(BaseStrategy):
         """Get optimal stop loss in pips"""
         if self.optimal_params:
             return self.optimal_params.stop_loss_pips
-        # Ichimoku typically uses wider stops due to cloud thickness
-        return 15.0
+        # OPTIMIZED: Tighter stop loss for better risk management
+        return 12.0  # Reduced from 15.0
 
     def get_optimal_take_profit(self) -> Optional[float]:
         """Get optimal take profit in pips"""
         if self.optimal_params:
             return self.optimal_params.take_profit_pips
-        # Ichimoku can target wider moves due to trend-following nature
-        return 30.0
+        # OPTIMIZED: Wider take profit for better reward/risk ratio
+        return 40.0  # Increased from 30.0
 
     def get_optimal_timeframe(self) -> Optional[str]:
         """Get optimal timeframe for this epic"""
         if self.optimal_params:
             return self.optimal_params.timeframe
         return '15m'  # Good balance for Ichimoku
+
+    def _validate_adx_strength(self, df: pd.DataFrame, epic: str, signal_type: str) -> Dict:
+        """
+        Validate trend strength using ADX
+
+        Returns dict with:
+        - reject: bool (True if signal should be rejected)
+        - reason: str (rejection reason)
+        - adx_value: float (current ADX value)
+        - confidence_adjustment: float (adjustment to confidence if not rejected)
+        """
+        try:
+            # Calculate ADX if not present
+            df_work = df.copy()
+            if 'adx' not in df_work.columns:
+                df_work = self.adx_calculator.calculate_adx(df_work)
+                if 'adx' not in df_work.columns:
+                    self.logger.warning(f"ADX calculation failed for {epic}")
+                    return {'reject': False, 'reason': 'ADX calculation failed', 'adx_value': 0, 'confidence_adjustment': 0}
+
+            # Get latest ADX value
+            adx_value = df_work['adx'].iloc[-1]
+
+            # Check if ADX is NaN or invalid
+            if pd.isna(adx_value):
+                self.logger.warning(f"ADX value is NaN for {epic}")
+                return {'reject': False, 'reason': 'ADX is NaN', 'adx_value': 0, 'confidence_adjustment': 0}
+
+            # Strict mode: Reject signals below threshold
+            if self.adx_strict_mode:
+                if adx_value < self.adx_min_threshold:
+                    return {
+                        'reject': True,
+                        'reason': f"ADX {adx_value:.1f} below threshold {self.adx_min_threshold} (weak trend)",
+                        'adx_value': adx_value,
+                        'confidence_adjustment': 0
+                    }
+
+            # Non-strict mode: Apply confidence penalty if below threshold
+            else:
+                if adx_value < self.adx_min_threshold:
+                    penalty = -self.adx_confidence_penalty
+                    self.logger.info(f"🌥️ Ichimoku {epic}: ADX {adx_value:.1f} below threshold {self.adx_min_threshold}, applying {penalty:.0%} confidence penalty")
+                    return {
+                        'reject': False,
+                        'reason': f"ADX {adx_value:.1f} below threshold (confidence penalty applied)",
+                        'adx_value': adx_value,
+                        'confidence_adjustment': penalty
+                    }
+
+            # Strong trend bonus
+            if adx_value >= self.adx_strong_threshold:
+                bonus = 0.05  # 5% confidence bonus for strong trends
+                self.logger.info(f"✅ Ichimoku {epic}: Strong trend (ADX {adx_value:.1f}), applying +{bonus:.0%} confidence bonus")
+                return {
+                    'reject': False,
+                    'reason': f"ADX {adx_value:.1f} indicates strong trend",
+                    'adx_value': adx_value,
+                    'confidence_adjustment': bonus
+                }
+
+            # Moderate trend: No adjustment
+            return {
+                'reject': False,
+                'reason': f"ADX {adx_value:.1f} indicates moderate trend",
+                'adx_value': adx_value,
+                'confidence_adjustment': 0
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error validating ADX strength for {epic}: {e}")
+            return {'reject': False, 'reason': f'ADX validation error: {e}', 'adx_value': 0, 'confidence_adjustment': 0}
 
     def should_enable_smart_money(self) -> bool:
         """Check if smart money analysis should be enabled"""

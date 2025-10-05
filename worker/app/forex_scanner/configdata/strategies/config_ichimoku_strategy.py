@@ -102,21 +102,21 @@ ACTIVE_ICHIMOKU_CONFIG = 'traditional'
 # ICHIMOKU VALIDATION FILTERS
 # =============================================================================
 
-# Cloud Filter Settings (TEMPORARILY DISABLED for testing)
-ICHIMOKU_CLOUD_FILTER_ENABLED = False                # DISABLED - For signal generation testing
-ICHIMOKU_CLOUD_BUFFER_PIPS = 8.0                     # Not used when disabled
-ICHIMOKU_CLOUD_THICKNESS_FILTER_ENABLED = False      # Keep disabled for signal generation
-ICHIMOKU_MIN_CLOUD_THICKNESS_RATIO = 0.00001         # Very low minimum cloud thickness requirement
+# Cloud Filter Settings (OPTIMAL: Cloud filters cause signal conflicts)
+ICHIMOKU_CLOUD_FILTER_ENABLED = False                # DISABLED - conflicts with signal generation logic
+ICHIMOKU_CLOUD_BUFFER_PIPS = 5.0                     # Not used when disabled
+ICHIMOKU_CLOUD_THICKNESS_FILTER_ENABLED = False      # DISABLED - not effective for this strategy
+ICHIMOKU_MIN_CLOUD_THICKNESS_RATIO = 0.0003          # Not used when disabled
 
 # TK Line Filter Settings
 ICHIMOKU_TK_FILTER_ENABLED = True                     # Validate Tenkan-Kijun alignment
 ICHIMOKU_MIN_TK_SEPARATION = 0.0005                  # Minimum TK separation for strong signals
 ICHIMOKU_TK_CROSS_CONFIRMATION_BARS = 1              # Bars to confirm TK crossover
 
-# Chikou Span Filter Settings
-ICHIMOKU_CHIKOU_FILTER_ENABLED = False               # Disable for now - too restrictive initially
-ICHIMOKU_CHIKOU_BUFFER_PIPS = 5.0                    # Larger buffer for Chikou validation
-ICHIMOKU_CHIKOU_PERIODS = 26                         # Chikou lookback period
+# Chikou Span Filter Settings (MOST EFFECTIVE FILTER - RE-ENABLED WITH LOOSER BUFFER)
+ICHIMOKU_CHIKOU_FILTER_ENABLED = True                # Re-enabled for signal quality
+ICHIMOKU_CHIKOU_BUFFER_PIPS = 0.5                    # Tighter buffer for more signals (was 1.5)
+ICHIMOKU_CHIKOU_PERIODS = 26                         # Chiimoku lookback period
 
 # =============================================================================
 # ICHIMOKU SIGNAL VALIDATION THRESHOLDS
@@ -186,13 +186,27 @@ USE_SMART_MONEY_ICHIMOKU = False                     # Enable smart money integr
 ENABLE_ICHIMOKU_CONTRADICTION_FILTER = True         # Prevent contradictory signals
 ICHIMOKU_SIGNAL_SPACING_MINUTES = 60                # Minimum time between signals (minutes)
 
-# Signal Quality Thresholds (MORE PERMISSIVE for signal generation)
-ICHIMOKU_MIN_SIGNAL_CONFIDENCE = 0.40               # More permissive confidence for signal generation
+# Signal Quality Thresholds (OPTIMIZED)
+ICHIMOKU_MIN_SIGNAL_CONFIDENCE = 0.50               # Raised to 50% for better quality
 ICHIMOKU_PERFECT_ALIGNMENT_BONUS = 0.1              # Bonus for perfect Ichimoku alignment
 
 # Detection Mode
 ICHIMOKU_DETECTION_MODE = 'balanced'                 # Balanced signal detection mode
 ICHIMOKU_REQUIRE_PERFECT_ALIGNMENT = False           # Don't require all components aligned
+
+# =============================================================================
+# ADX TREND STRENGTH FILTER
+# =============================================================================
+
+# ADX Filter Settings - Filters out ranging/weak trend markets
+ICHIMOKU_ADX_FILTER_ENABLED = True                  # Enable ADX trend strength filter
+ICHIMOKU_ADX_MIN_THRESHOLD = 20                     # OPTIMAL: Minimum ADX for signal generation (20 = moderate trend)
+ICHIMOKU_ADX_STRONG_THRESHOLD = 25                  # ADX above this = strong trend (confidence bonus)
+ICHIMOKU_ADX_PERIOD = 14                            # ADX calculation period (standard)
+
+# ADX Filter Modes
+ICHIMOKU_ADX_STRICT_MODE = False                    # OPTIMAL: Non-strict mode - apply confidence penalty instead of rejection
+ICHIMOKU_ADX_CONFIDENCE_PENALTY = 0.10              # Confidence penalty if ADX < threshold (10% penalty for weak trends)
 
 # Minimum bars for stable Ichimoku calculation
 MIN_BARS_FOR_ICHIMOKU = 80                          # Need 52 + 26 + buffer bars
@@ -285,3 +299,30 @@ ICHIMOKU_SCANNER_INTEGRATION = {
     'max_signals_per_scan': 10,                     # Max signals per scanner run
     'cooldown_minutes': 30                          # Cooldown between signals for same epic
 }
+# =============================================================================
+# SWING PROXIMITY VALIDATION SETTINGS
+# =============================================================================
+
+# Swing Proximity Validation - Prevents poor entry timing near support/resistance
+ICHIMOKU_SWING_VALIDATION = {
+    'enabled': True,                    # Test 1: Swing validation only
+    'min_distance_pips': 5,             # Reduced from 8 to 5 pips for testing
+    'lookback_swings': 5,               # Number of recent swings to check
+    'strict_mode': False,               # False = apply confidence penalty, True = reject signal entirely
+    'resistance_buffer': 1.0,           # Multiplier for resistance proximity (BUY signals)
+    'support_buffer': 1.0,              # Multiplier for support proximity (SELL signals)
+}
+
+# Swing Detection Parameters
+ICHIMOKU_SWING_LENGTH = 5               # Swing detection length in bars (matches SMC default)
+
+# Notes:
+# - Prevents BUY signals when price is too close to recent swing highs (resistance)
+# - Prevents SELL signals when price is too close to recent swing lows (support)
+# - Works in conjunction with S/R validation (different timeframes)
+# - Swing points: Recent pivots (5-50 bars) on current timeframe
+# - S/R levels: Long-term zones (100-500 bars)
+# - 8 pips = practical minimum for 15m timeframe intraday trading
+# - For JPY pairs: 8 pips = 0.08 price movement
+# - Example: EUR/USD at 1.0850, swing high at 1.0857 → 7 pips away → WARNING
+# - Example: USD/JPY at 150.50, swing high at 150.57 → 7 pips away → WARNING

@@ -95,8 +95,8 @@ class IchimokuQualityBacktest:
             'lookback_bars': 100,           # Bars needed for indicator calculation
             'signal_validation_bars': 5,    # Bars to validate signal persistence
             'max_trade_duration': 72,       # Maximum trade duration (hours)
-            'stop_loss_atr_multiplier': 2.0, # Stop loss as ATR multiple
-            'take_profit_atr_multiplier': 3.0, # Take profit as ATR multiple
+            'stop_loss_atr_multiplier': 1.5, # OPTIMIZED: Tighter stop loss (was 2.0)
+            'take_profit_atr_multiplier': 5.0, # OPTIMIZED: Wider take profit for better R:R (was 3.0)
         }
 
         # Risk management parameters
