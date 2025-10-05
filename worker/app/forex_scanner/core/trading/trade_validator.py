@@ -945,9 +945,12 @@ class TradeValidator:
 
         EMA Strategy: STRICT trend alignment required (must trade with EMA 200)
         MACD Strategy: OPTIONAL trend alignment (can trade counter-trend momentum reversals)
+        Ranging Market Strategy: NO trend filter (designed for non-trending/ranging conditions)
         Other Strategies: STRICT trend alignment by default
 
-        UPDATED: Strategy-aware filtering to support momentum reversals (MACD)
+        UPDATED: Strategy-aware filtering to support:
+        - Momentum reversals (MACD)
+        - Ranging market conditions (ranging_market)
         """
         try:
             signal_type = signal.get('signal_type', '').upper()
@@ -1032,8 +1035,11 @@ class TradeValidator:
                 self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: Invalid price values - price: {current_price}, ema200: {ema_200}")
                 return False, "EMA200 filter: Invalid price values - REJECTED"
 
-            # STRATEGY-AWARE FILTERING: MACD can trade counter-trend (momentum reversals)
+            # STRATEGY-AWARE FILTERING: Some strategies exempt from EMA200 trend filter
+            # - MACD: Can trade counter-trend (momentum reversals)
+            # - ranging_market: Specifically designed for ranging/non-trending conditions
             is_macd_strategy = 'MACD' in strategy
+            is_ranging_strategy = 'ranging_market' in strategy.lower()
 
             # Apply trend filter logic with comprehensive logging
             self.logger.info(f"📊 EMA200 validation for {epic} {signal_type} ({strategy}): price={current_price:.5f}, ema200={ema_200:.5f}")
@@ -1043,10 +1049,13 @@ class TradeValidator:
                     self.logger.info(f"✅ BUY signal APPROVED {epic}: {current_price:.5f} > {ema_200:.5f} (price above EMA200)")
                     return True, f"BUY valid: price {current_price:.5f} above EMA200 {ema_200:.5f}"
                 else:
-                    # MACD strategy can trade counter-trend (momentum reversals)
+                    # Strategy-specific exemptions
                     if is_macd_strategy:
                         self.logger.info(f"✅ MACD BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (counter-trend momentum reversal allowed)")
                         return True, f"MACD BUY valid: counter-trend reversal (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
+                    elif is_ranging_strategy:
+                        self.logger.info(f"✅ RANGING BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (ranging market strategy - no trend filter)")
+                        return True, f"RANGING BUY valid: ranging market condition (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
                     else:
                         self.logger.warning(f"🚫 BUY signal REJECTED {epic}: {current_price:.5f} <= {ema_200:.5f} (price at/below EMA200)")
                         return False, f"BUY rejected: price {current_price:.5f} at/below EMA200 {ema_200:.5f}"
@@ -1056,10 +1065,13 @@ class TradeValidator:
                     self.logger.info(f"✅ SELL signal APPROVED {epic}: {current_price:.5f} < {ema_200:.5f} (price below EMA200)")
                     return True, f"SELL valid: price {current_price:.5f} below EMA200 {ema_200:.5f}"
                 else:
-                    # MACD strategy can trade counter-trend (momentum reversals)
+                    # Strategy-specific exemptions
                     if is_macd_strategy:
                         self.logger.info(f"✅ MACD SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (counter-trend momentum reversal allowed)")
                         return True, f"MACD SELL valid: counter-trend reversal (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
+                    elif is_ranging_strategy:
+                        self.logger.info(f"✅ RANGING SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (ranging market strategy - no trend filter)")
+                        return True, f"RANGING SELL valid: ranging market condition (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
                     else:
                         self.logger.warning(f"🚫 SELL signal REJECTED {epic}: {current_price:.5f} >= {ema_200:.5f} (price at/above EMA200)")
                         return False, f"SELL rejected: price {current_price:.5f} at/above EMA200 {ema_200:.5f}"

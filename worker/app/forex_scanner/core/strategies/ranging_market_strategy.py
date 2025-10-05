@@ -20,7 +20,7 @@ Features:
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 import logging
 from datetime import datetime
 
@@ -912,16 +912,39 @@ class RangingMarketStrategy(BaseStrategy):
                         df=df,
                         current_price=latest_row['close'],
                         direction=signal_type,
-                        epic=epic
+                        epic=epic,
+                        timeframe=timeframe
                     )
 
                     if not swing_result['valid']:
                         self.logger.warning(
                             f"⚠️ Swing proximity violation: {swing_result.get('rejection_reason', 'Unknown')}"
                         )
+                        # In strict mode, this will reject the signal
+                        if self.config.get('swing_validation', {}).get('strict_mode', False):
+                            return None
 
-                    # Apply confidence penalty
+                    # Check for confirmation wait period (if significant violation)
                     swing_proximity_penalty = swing_result.get('confidence_penalty', 0.0)
+                    if swing_proximity_penalty > 0.15:  # Significant violation
+                        # Check bars since nearest swing
+                        bars_since_swing = self._get_bars_since_nearest_swing(
+                            df, signal_type, swing_result
+                        )
+                        min_confirmation_bars = self.config.get('swing_validation', {}).get(
+                            'min_confirmation_bars', 3
+                        )
+
+                        if bars_since_swing is not None and bars_since_swing < min_confirmation_bars:
+                            self.logger.warning(
+                                f"⏸️ Swing too recent ({bars_since_swing} bars < {min_confirmation_bars} required) - "
+                                f"waiting for confirmation"
+                            )
+                            # Apply heavy penalty or reject
+                            if self.config.get('swing_validation', {}).get('strict_mode', False):
+                                return None
+                            swing_proximity_penalty += 0.20  # Heavy penalty
+
                     base_confidence -= swing_proximity_penalty
 
                     if swing_proximity_penalty > 0:
@@ -1212,6 +1235,60 @@ class RangingMarketStrategy(BaseStrategy):
             'stop_distance': stop_distance,
             'limit_distance': limit_distance
         }
+
+    def _get_bars_since_nearest_swing(self, df: pd.DataFrame, direction: str,
+                                       swing_result: Dict[str, Any]) -> Optional[int]:
+        """
+        Calculate number of bars since the nearest swing point
+
+        Args:
+            df: DataFrame with swing data
+            direction: 'BUY' or 'SELL'
+            swing_result: Result from swing proximity validator
+
+        Returns:
+            Number of bars since nearest swing, or None if not found
+        """
+        try:
+            nearest_swing_price = swing_result.get('nearest_swing_price')
+            if nearest_swing_price is None:
+                return None
+
+            # Find the nearest swing point in the DataFrame
+            if direction.upper() in ['BUY', 'BULL']:
+                # Looking for swing high (resistance)
+                if 'swing_high' in df.columns:
+                    swing_highs = df[df['swing_high'] == True]
+                    if not swing_highs.empty:
+                        # Find the swing closest to the nearest_swing_price
+                        closest_swing = swing_highs.iloc[
+                            (swing_highs['high'] - nearest_swing_price).abs().argsort()[:1]
+                        ]
+                        if not closest_swing.empty:
+                            swing_idx = closest_swing.index[0]
+                            current_idx = df.index[-1]
+                            bars_since = current_idx - swing_idx
+                            return int(bars_since)
+            else:
+                # Looking for swing low (support)
+                if 'swing_low' in df.columns:
+                    swing_lows = df[df['swing_low'] == True]
+                    if not swing_lows.empty:
+                        # Find the swing closest to the nearest_swing_price
+                        closest_swing = swing_lows.iloc[
+                            (swing_lows['low'] - nearest_swing_price).abs().argsort()[:1]
+                        ]
+                        if not closest_swing.empty:
+                            swing_idx = closest_swing.index[0]
+                            current_idx = df.index[-1]
+                            bars_since = current_idx - swing_idx
+                            return int(bars_since)
+
+            return None
+
+        except Exception as e:
+            self.logger.debug(f"Error calculating bars since swing: {e}")
+            return None
 
     def __str__(self):
         return f"RangingMarketStrategy(epic={self.epic}, timeframe={self.timeframe})"

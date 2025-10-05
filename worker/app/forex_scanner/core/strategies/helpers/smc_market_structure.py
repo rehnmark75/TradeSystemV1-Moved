@@ -178,42 +178,86 @@ class SMCMarketStructure:
             self.logger.error(f"Swing point detection failed: {e}")
             return df
     
-    def _calculate_pivot_high(self, high_series: pd.Series, length: int) -> pd.Series:
-        """Calculate pivot highs using rolling window"""
+    def _calculate_pivot_high(self, high_series: pd.Series, length: int, allow_progressive: bool = True) -> pd.Series:
+        """
+        Calculate pivot highs using rolling window with progressive confirmation
+
+        Args:
+            high_series: High price series
+            length: Number of bars for confirmation
+            allow_progressive: If True, allow recent swings with partial confirmation
+        """
         try:
             pivot_highs = pd.Series(index=high_series.index, dtype=float)
-            
+
+            # Fully confirmed pivots (original logic)
             for i in range(length, len(high_series) - length):
                 center_price = high_series.iloc[i]
                 left_prices = high_series.iloc[i-length:i]
                 right_prices = high_series.iloc[i+1:i+length+1]
-                
+
                 # Check if center is highest
                 if (center_price > left_prices.max()) and (center_price > right_prices.max()):
                     pivot_highs.iloc[i] = center_price
-            
+
+            # Progressive confirmation for recent bars (if enabled)
+            if allow_progressive:
+                min_confirmation = 2  # Minimum 2 bars for progressive confirmation
+                for i in range(max(length, len(high_series) - length), len(high_series)):
+                    bars_available = len(high_series) - i - 1
+                    if bars_available >= min_confirmation:
+                        center_price = high_series.iloc[i]
+                        left_prices = high_series.iloc[i-length:i]
+                        right_prices = high_series.iloc[i+1:i+1+bars_available]
+
+                        # Check if center is highest with available confirmation
+                        if (center_price > left_prices.max()) and (center_price > right_prices.max()):
+                            pivot_highs.iloc[i] = center_price
+
             return pivot_highs
-            
+
         except Exception as e:
             self.logger.error(f"Pivot high calculation failed: {e}")
             return pd.Series(index=high_series.index, dtype=float)
     
-    def _calculate_pivot_low(self, low_series: pd.Series, length: int) -> pd.Series:
-        """Calculate pivot lows using rolling window"""
+    def _calculate_pivot_low(self, low_series: pd.Series, length: int, allow_progressive: bool = True) -> pd.Series:
+        """
+        Calculate pivot lows using rolling window with progressive confirmation
+
+        Args:
+            low_series: Low price series
+            length: Number of bars for confirmation
+            allow_progressive: If True, allow recent swings with partial confirmation
+        """
         try:
             pivot_lows = pd.Series(index=low_series.index, dtype=float)
-            
+
+            # Fully confirmed pivots (original logic)
             for i in range(length, len(low_series) - length):
                 center_price = low_series.iloc[i]
                 left_prices = low_series.iloc[i-length:i]
                 right_prices = low_series.iloc[i+1:i+length+1]
-                
+
                 # Check if center is lowest
                 if (center_price < left_prices.min()) and (center_price < right_prices.min()):
                     pivot_lows.iloc[i] = center_price
-            
+
+            # Progressive confirmation for recent bars (if enabled)
+            if allow_progressive:
+                min_confirmation = 2  # Minimum 2 bars for progressive confirmation
+                for i in range(max(length, len(low_series) - length), len(low_series)):
+                    bars_available = len(low_series) - i - 1
+                    if bars_available >= min_confirmation:
+                        center_price = low_series.iloc[i]
+                        left_prices = low_series.iloc[i-length:i]
+                        right_prices = low_series.iloc[i+1:i+1+bars_available]
+
+                        # Check if center is lowest with available confirmation
+                        if (center_price < left_prices.min()) and (center_price < right_prices.min()):
+                            pivot_lows.iloc[i] = center_price
+
             return pivot_lows
-            
+
         except Exception as e:
             self.logger.error(f"Pivot low calculation failed: {e}")
             return pd.Series(index=low_series.index, dtype=float)

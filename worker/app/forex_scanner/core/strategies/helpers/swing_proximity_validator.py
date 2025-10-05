@@ -39,20 +39,24 @@ class SwingProximityValidator:
 
         # Configuration parameters with defaults
         self.enabled = self.config.get('enabled', True)
-        self.min_distance_pips = self.config.get('min_distance_pips', 8)  # 8 pips = 80 IG points (practical for 5m/15m)
+        self.min_distance_pips = self.config.get('min_distance_pips', 8)  # Can be dict or int
+        self.timeframe_multipliers = self.config.get('timeframe_multipliers', {})
         self.lookback_swings = self.config.get('lookback_swings', 5)
         self.strict_mode = self.config.get('strict_mode', False)
         self.resistance_buffer = self.config.get('resistance_buffer', 1.0)  # No multiplier by default
         self.support_buffer = self.config.get('support_buffer', 1.0)  # No multiplier by default
+        self.equal_level_multiplier = self.config.get('equal_level_multiplier', 2.0)  # 2x for EQH/EQL
 
-        self.logger.debug(f"SwingProximityValidator initialized: min_distance={self.min_distance_pips} pips, "
-                         f"lookback={self.lookback_swings}, strict={self.strict_mode}")
+        self.logger.debug(f"SwingProximityValidator initialized: min_distance={self.min_distance_pips}, "
+                         f"lookback={self.lookback_swings}, strict={self.strict_mode}, "
+                         f"equal_level_mult={self.equal_level_multiplier}")
 
     def validate_entry_proximity(self,
                                  df: pd.DataFrame,
                                  current_price: float,
                                  direction: str,
-                                 epic: str = None) -> Dict[str, Any]:
+                                 epic: str = None,
+                                 timeframe: str = '15m') -> Dict[str, Any]:
         """
         Validate if entry price is at safe distance from recent swing points
 
@@ -102,18 +106,23 @@ class SwingProximityValidator:
             # Calculate pip value based on epic
             pip_value = self._get_pip_value(epic)
 
+            # Get adjusted minimum distance based on pair and timeframe
+            adjusted_min_dist = self._get_adjusted_min_distance(epic, timeframe)
+
             # Validate based on direction
             if direction.upper() in ['BUY', 'BULL']:
                 return self._validate_buy_proximity(
                     current_price,
                     swing_levels,
-                    pip_value
+                    pip_value,
+                    adjusted_min_dist
                 )
             else:  # SELL/BEAR
                 return self._validate_sell_proximity(
                     current_price,
                     swing_levels,
-                    pip_value
+                    pip_value,
+                    adjusted_min_dist
                 )
 
         except Exception as e:
@@ -131,7 +140,8 @@ class SwingProximityValidator:
     def _validate_buy_proximity(self,
                                 current_price: float,
                                 swing_levels: Dict,
-                                pip_value: float) -> Dict[str, Any]:
+                                pip_value: float,
+                                base_min_distance: float = None) -> Dict[str, Any]:
         """Validate BUY signal - check distance to nearest swing high (resistance)"""
 
         nearest_resistance = swing_levels.get('nearest_resistance')
@@ -151,19 +161,34 @@ class SwingProximityValidator:
         # Calculate distance in pips
         distance_pips = (nearest_resistance - current_price) / pip_value
 
+        # Get minimum distance (use provided or fallback to config)
+        min_dist = base_min_distance if base_min_distance is not None else self.min_distance_pips
+        if isinstance(min_dist, dict):
+            min_dist = min_dist.get('default', 12)
+
         # Apply resistance buffer (more cautious on buys near resistance)
-        adjusted_min_distance = self.min_distance_pips * self.resistance_buffer
+        adjusted_min_distance = min_dist * self.resistance_buffer
+
+        # Apply Equal High multiplier if this is an EQH
+        if resistance_type in ['EQH', 'Equal High']:
+            adjusted_min_distance *= self.equal_level_multiplier
+            self.logger.debug(f"Equal High detected - applying {self.equal_level_multiplier}x distance requirement")
+
+        # Get swing strength for weighting (if available)
+        swing_strength = swing_levels.get('swing_strength', 1.0)
 
         if distance_pips < adjusted_min_distance:
             # Too close to resistance
             confidence_penalty = self._calculate_proximity_penalty(
                 distance_pips,
-                adjusted_min_distance
+                adjusted_min_distance,
+                swing_strength
             )
 
             rejection_reason = (
                 f"BUY signal too close to swing {resistance_type} resistance at {nearest_resistance:.5f} "
-                f"(distance: {distance_pips:.1f} pips, minimum: {adjusted_min_distance:.1f} pips)"
+                f"(distance: {distance_pips:.1f} pips, minimum: {adjusted_min_distance:.1f} pips, "
+                f"strength: {swing_strength:.2f})"
             )
 
             return {
@@ -188,7 +213,8 @@ class SwingProximityValidator:
     def _validate_sell_proximity(self,
                                  current_price: float,
                                  swing_levels: Dict,
-                                 pip_value: float) -> Dict[str, Any]:
+                                 pip_value: float,
+                                 base_min_distance: float = None) -> Dict[str, Any]:
         """Validate SELL signal - check distance to nearest swing low (support)"""
 
         nearest_support = swing_levels.get('nearest_support')
@@ -208,19 +234,34 @@ class SwingProximityValidator:
         # Calculate distance in pips
         distance_pips = (current_price - nearest_support) / pip_value
 
+        # Get minimum distance (use provided or fallback to config)
+        min_dist = base_min_distance if base_min_distance is not None else self.min_distance_pips
+        if isinstance(min_dist, dict):
+            min_dist = min_dist.get('default', 12)
+
         # Apply support buffer (more cautious on sells near support)
-        adjusted_min_distance = self.min_distance_pips * self.support_buffer
+        adjusted_min_distance = min_dist * self.support_buffer
+
+        # Apply Equal Low multiplier if this is an EQL
+        if support_type in ['EQL', 'Equal Low']:
+            adjusted_min_distance *= self.equal_level_multiplier
+            self.logger.debug(f"Equal Low detected - applying {self.equal_level_multiplier}x distance requirement")
+
+        # Get swing strength for weighting (if available)
+        swing_strength = swing_levels.get('swing_strength', 1.0)
 
         if distance_pips < adjusted_min_distance:
             # Too close to support
             confidence_penalty = self._calculate_proximity_penalty(
                 distance_pips,
-                adjusted_min_distance
+                adjusted_min_distance,
+                swing_strength
             )
 
             rejection_reason = (
                 f"SELL signal too close to swing {support_type} support at {nearest_support:.5f} "
-                f"(distance: {distance_pips:.1f} pips, minimum: {adjusted_min_distance:.1f} pips)"
+                f"(distance: {distance_pips:.1f} pips, minimum: {adjusted_min_distance:.1f} pips, "
+                f"strength: {swing_strength:.2f})"
             )
 
             return {
@@ -242,11 +283,17 @@ class SwingProximityValidator:
             'confidence_penalty': 0.0
         }
 
-    def _calculate_proximity_penalty(self, actual_distance: float, min_distance: float) -> float:
+    def _calculate_proximity_penalty(self, actual_distance: float, min_distance: float,
+                                     swing_strength: float = 1.0) -> float:
         """
-        Calculate confidence penalty based on proximity violation
+        Calculate confidence penalty based on proximity violation and swing strength
 
-        Returns penalty between 0.05 and 0.20 based on severity
+        Args:
+            actual_distance: Actual distance to swing in pips
+            min_distance: Minimum required distance in pips
+            swing_strength: Swing strength (0-5 scale, default 1.0)
+
+        Returns penalty between 0.10 and 0.45 based on severity and strength
         """
         if actual_distance >= min_distance:
             return 0.0
@@ -254,15 +301,21 @@ class SwingProximityValidator:
         # Calculate violation ratio
         violation_ratio = actual_distance / min_distance  # 0.0 to 1.0
 
-        # Linear penalty: closer = higher penalty
-        # 0 pips away = 0.20 penalty
-        # min_distance pips away = 0.0 penalty
-        max_penalty = 0.20
-        min_penalty = 0.05
+        # Strength multiplier (1.0 to 1.5 based on swing significance)
+        # Higher strength swings = higher penalty
+        strength_multiplier = 1.0 + (min(swing_strength, 5.0) * 0.1)  # 1.0 to 1.5
 
-        penalty = max_penalty - (violation_ratio * (max_penalty - min_penalty))
+        # Base penalty calculation
+        max_penalty = 0.30  # Increased from 0.20
+        min_penalty = 0.10  # Increased from 0.05
 
-        return max(min_penalty, min(max_penalty, penalty))
+        base_penalty = max_penalty - (violation_ratio * (max_penalty - min_penalty))
+
+        # Apply strength multiplier
+        final_penalty = base_penalty * strength_multiplier
+
+        # Cap at maximum of 0.45
+        return max(min_penalty, min(0.45, final_penalty))
 
     def _get_swing_levels_from_df(self,
                                    df: pd.DataFrame,
@@ -339,6 +392,41 @@ class SwingProximityValidator:
         except Exception as e:
             self.logger.error(f"Failed to extract swing levels from DataFrame: {e}")
             return None
+
+    def _get_adjusted_min_distance(self, epic: Optional[str], timeframe: str = '15m') -> float:
+        """
+        Get adjusted minimum distance based on pair and timeframe
+
+        Args:
+            epic: Trading pair symbol
+            timeframe: Trading timeframe (e.g., '5m', '15m', '1h')
+
+        Returns:
+            Adjusted minimum distance in pips
+        """
+        # Get base distance from config
+        if isinstance(self.min_distance_pips, dict):
+            # Pair-specific configuration
+            base_distance = self.min_distance_pips.get('default', 12)
+
+            if epic:
+                # Check for specific pair matches
+                for currency in ['JPY', 'GBP', 'EUR', 'AUD', 'NZD', 'CAD', 'CHF']:
+                    if currency in epic.upper():
+                        base_distance = self.min_distance_pips.get(currency, base_distance)
+                        break
+        else:
+            # Single value configuration
+            base_distance = self.min_distance_pips
+
+        # Apply timeframe multiplier
+        tf_multiplier = self.timeframe_multipliers.get(timeframe, 1.0)
+        adjusted_distance = base_distance * tf_multiplier
+
+        self.logger.debug(f"Adjusted min distance for {epic} on {timeframe}: "
+                         f"{base_distance} pips × {tf_multiplier} = {adjusted_distance:.1f} pips")
+
+        return adjusted_distance
 
     def _get_pip_value(self, epic: Optional[str]) -> float:
         """

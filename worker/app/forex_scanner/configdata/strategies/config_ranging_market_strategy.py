@@ -452,12 +452,31 @@ except ValueError as e:
 # Swing Proximity Validation - Prevents poor entry timing near swing points
 RANGING_SWING_VALIDATION = {
     'enabled': True,  # Enable swing proximity validation
-    'min_distance_pips': 8,  # Minimum distance from swing high/low (8 pips = 80 IG points)
+    'min_distance_pips': {  # Pair-specific minimum distances (more conservative)
+        'default': 12,  # Default: 12 pips (increased from 8)
+        'JPY': 15,      # JPY pairs: 15 pips (more volatile)
+        'GBP': 15,      # GBP pairs: 15 pips (more volatile)
+        'EUR': 10,      # EUR pairs: 10 pips (standard)
+        'AUD': 12,      # AUD pairs: 12 pips (slightly volatile)
+        'NZD': 12,      # NZD pairs: 12 pips (slightly volatile)
+        'CAD': 10,      # CAD pairs: 10 pips (standard)
+        'CHF': 10,      # CHF pairs: 10 pips (standard)
+    },
+    'timeframe_multipliers': {  # Timeframe-based adjustments
+        '1m': 0.6,      # Tighter for very low TF
+        '5m': 0.8,      # Tighter for lower TF
+        '15m': 1.0,     # Baseline
+        '30m': 1.2,     # Wider for higher TF
+        '1h': 1.5,      # Wider for higher TF
+        '4h': 2.0,      # Much wider for high TF
+    },
     'lookback_swings': 5,  # Number of recent swings to check
     'swing_length': 5,  # Bars for swing detection (matches SMC default)
-    'strict_mode': False,  # False = reduce confidence, True = reject signal entirely
-    'resistance_buffer': 1.0,  # No multiplier - use 8 pips as-is
-    'support_buffer': 1.0,  # No multiplier - use 8 pips as-is
+    'strict_mode': True,  # CHANGED: True = reject signal entirely (was False)
+    'resistance_buffer': 1.2,  # CHANGED: 20% wider buffer for resistance (was 1.0)
+    'support_buffer': 1.0,  # Keep support as-is for now
+    'equal_level_multiplier': 2.0,  # NEW: 2x distance for Equal Highs/Lows (EQH/EQL)
+    'min_confirmation_bars': 3,  # NEW: Minimum bars after swing for confirmation (3 bars = 15 min on 5m)
 }
 
 # Notes:

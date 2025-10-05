@@ -19,6 +19,15 @@ SOLUTION:
 - Proper confidence weighting for market efficiency
 - Pre-Claude filtering to avoid wasting API calls on bad signals
 - FOREX-OPTIMIZED scaling factors for proper confidence calculation
+
+STRATEGY-SPECIFIC EXEMPTIONS (2025-10-05):
+- 'momentum' strategy: Skips efficiency checks (has own momentum validation)
+- 'ranging_market' strategy: Skips ALL trend-based filters:
+  * Efficiency ratio check (low efficiency expected in ranging markets)
+  * EMA compression check (compressed EMAs are the target condition)
+  * MACD histogram check (uses oscillator confluence instead)
+  * EMA separation check (close EMAs expected in ranging conditions)
+  * All confidence components set to 0.5 (neutral) instead of trend-based scores
 """
 
 import numpy as np
@@ -128,8 +137,10 @@ class EnhancedSignalValidator:
         """
 
         # ✅ RULE 1: Market efficiency too low (choppy market) - WITH CONTEXT
-        # Skip efficiency check for momentum-based strategies as they have their own momentum validation
-        if strategy_name != 'momentum':
+        # Skip efficiency check for:
+        # - Momentum strategies: have their own momentum validation
+        # - Ranging market strategies: specifically designed for low-efficiency/choppy markets
+        if strategy_name not in ['momentum', 'ranging_market']:
             efficiency_ratio = kama_data.get('efficiency_ratio', 0)
             min_required = self.hard_rejection_rules['min_efficiency_ratio']
 
@@ -137,77 +148,116 @@ class EnhancedSignalValidator:
                 self.logger.debug(f"[HARD REJECT] Efficiency check: {efficiency_ratio:.3f} < {min_required:.3f}")
                 return True, f"Market too choppy (efficiency: {efficiency_ratio:.3f} < {min_required:.3f})"
         else:
-            self.logger.debug(f"[MOMENTUM STRATEGY] Skipping efficiency check - using momentum-specific validation")
+            self.logger.debug(f"[{strategy_name.upper()} STRATEGY] Skipping efficiency check - using strategy-specific validation")
         
         # ✅ RULE 2: EMAs too compressed (consolidation) - DYNAMIC EMA SUPPORT
-        # Use semantic names instead of hardcoded periods
-        ema_short = ema_data.get('ema_short', 0)
-        ema_long = ema_data.get('ema_long', 0) 
-        ema_trend = ema_data.get('ema_trend', 0)
-        
-        # Fallback to hardcoded names if semantic names not available (backward compatibility)
-        if not ema_short:
-            ema_short = ema_data.get('ema_9', 0)
-        if not ema_long:
-            ema_long = ema_data.get('ema_21', 0)
-        if not ema_trend:
-            ema_trend = ema_data.get('ema_200', 0)
-        
-        if ema_short and ema_long and ema_trend:
-            ema_range = max(ema_short, ema_long, ema_trend) - min(ema_short, ema_long, ema_trend)
-            max_compression = self.hard_rejection_rules['max_ema_compression']
-            
-            self.logger.debug(f"[EMA CHECK] Short:{ema_short:.5f}, Long:{ema_long:.5f}, Trend:{ema_trend:.5f}")
-            self.logger.debug(f"[EMA CHECK] Range:{ema_range:.6f}, Threshold:{max_compression:.6f}")
-            
-            if ema_range < max_compression:
-                self.logger.debug(f"[HARD REJECT] EMA compression: {ema_range:.6f} < {max_compression:.6f}")
-                return True, f"EMAs too compressed (range: {ema_range:.6f} < {max_compression:.6f})"
+        # Skip for ranging_market strategy - it specifically trades compressed/ranging conditions
+        if strategy_name != 'ranging_market':
+            # Use semantic names instead of hardcoded periods
+            ema_short = ema_data.get('ema_short', 0)
+            ema_long = ema_data.get('ema_long', 0)
+            ema_trend = ema_data.get('ema_trend', 0)
+
+            # Fallback to hardcoded names if semantic names not available (backward compatibility)
+            if not ema_short:
+                ema_short = ema_data.get('ema_9', 0)
+            if not ema_long:
+                ema_long = ema_data.get('ema_21', 0)
+            if not ema_trend:
+                ema_trend = ema_data.get('ema_200', 0)
+
+            if ema_short and ema_long and ema_trend:
+                ema_range = max(ema_short, ema_long, ema_trend) - min(ema_short, ema_long, ema_trend)
+                max_compression = self.hard_rejection_rules['max_ema_compression']
+
+                self.logger.debug(f"[EMA CHECK] Short:{ema_short:.5f}, Long:{ema_long:.5f}, Trend:{ema_trend:.5f}")
+                self.logger.debug(f"[EMA CHECK] Range:{ema_range:.6f}, Threshold:{max_compression:.6f}")
+
+                if ema_range < max_compression:
+                    self.logger.debug(f"[HARD REJECT] EMA compression: {ema_range:.6f} < {max_compression:.6f}")
+                    return True, f"EMAs too compressed (range: {ema_range:.6f} < {max_compression:.6f})"
+            else:
+                self.logger.warning(f"[VALIDATION WARNING] Missing EMA data - using available: short={bool(ema_short)}, long={bool(ema_long)}, trend={bool(ema_trend)}")
         else:
-            self.logger.warning(f"[VALIDATION WARNING] Missing EMA data - using available: short={bool(ema_short)}, long={bool(ema_long)}, trend={bool(ema_trend)}")
+            self.logger.debug(f"[RANGING STRATEGY] Skipping EMA compression check - ranging strategy designed for compressed EMAs")
         
         # ✅ RULE 3: MACD histogram too weak - WITH BETTER SCALING
-        macd_histogram = abs(macd_data.get('macd_histogram', 0))
-        min_histogram = self.hard_rejection_rules['min_macd_histogram']
-        
-        if macd_histogram < min_histogram:
-            self.logger.debug(f"[HARD REJECT] MACD strength: {macd_histogram:.6f} < {min_histogram:.6f}")
-            return True, f"MACD momentum too weak (histogram: {macd_histogram:.6f} < {min_histogram:.6f})"
+        # Skip for ranging_market strategy - uses oscillator confluence instead of MACD
+        if strategy_name != 'ranging_market':
+            macd_histogram = abs(macd_data.get('macd_histogram', 0))
+            min_histogram = self.hard_rejection_rules['min_macd_histogram']
+
+            if macd_histogram < min_histogram:
+                self.logger.debug(f"[HARD REJECT] MACD strength: {macd_histogram:.6f} < {min_histogram:.6f}")
+                return True, f"MACD momentum too weak (histogram: {macd_histogram:.6f} < {min_histogram:.6f})"
+        else:
+            self.logger.debug(f"[RANGING STRATEGY] Skipping MACD check - uses multi-oscillator confluence instead")
         
         # ✅ RULE 4: Short and Long EMAs too close (no clear short-term trend)
-        # Use dynamic EMA periods instead of hardcoded 9/21
-        if ema_short and ema_long:
-            ema_separation = abs(ema_short - ema_long)
-            min_separation = self.hard_rejection_rules['min_ema_separation']
-            
-            self.logger.debug(f"[EMA SEPARATION] Short-Long separation: {ema_separation:.6f}, Threshold: {min_separation:.6f}")
-            
-            if ema_separation < min_separation:
-                self.logger.debug(f"[HARD REJECT] EMA separation: {ema_separation:.6f} < {min_separation:.6f}")
-                return True, f"Short/Long EMAs too close (separation: {ema_separation:.6f} < {min_separation:.6f})"
-        
+        # Skip for ranging_market strategy - close EMAs are expected in ranging conditions
+        if strategy_name != 'ranging_market':
+            # Need to redefine ema_short and ema_long if they were only defined in the skipped section above
+            if strategy_name == 'ranging_market':
+                ema_short = None
+                ema_long = None
+            else:
+                # Use semantic names or fallback
+                if 'ema_short' not in locals():
+                    ema_short = ema_data.get('ema_short', 0) or ema_data.get('ema_9', 0)
+                if 'ema_long' not in locals():
+                    ema_long = ema_data.get('ema_long', 0) or ema_data.get('ema_21', 0)
+
+            if ema_short and ema_long:
+                ema_separation = abs(ema_short - ema_long)
+                min_separation = self.hard_rejection_rules['min_ema_separation']
+
+                self.logger.debug(f"[EMA SEPARATION] Short-Long separation: {ema_separation:.6f}, Threshold: {min_separation:.6f}")
+
+                if ema_separation < min_separation:
+                    self.logger.debug(f"[HARD REJECT] EMA separation: {ema_separation:.6f} < {min_separation:.6f}")
+                    return True, f"Short/Long EMAs too close (separation: {ema_separation:.6f} < {min_separation:.6f})"
+        else:
+            self.logger.debug(f"[RANGING STRATEGY] Skipping EMA separation check - close EMAs expected in ranging markets")
+
         self.logger.debug(f"[VALIDATION] All hard rejection rules passed")
         return False, ""
 
     
     def _calculate_confidence_components(self, ema_data: Dict, macd_data: Dict, kama_data: Dict, signal_data: Dict = None) -> Dict:
         """Calculate individual confidence components with proper weighting and forex scaling"""
-        
+
         components = {}
-        
+        strategy_name = signal_data.get('strategy', '') if signal_data else ''
+
         # ✅ COMPONENT 1: Market Efficiency (most important) - FOREX SCALED
-        efficiency_ratio = kama_data.get('efficiency_ratio', 0)
-        components['market_efficiency'] = self._calculate_forex_scaled_efficiency(efficiency_ratio)
-        
+        # Skip for ranging_market - low efficiency is expected
+        if strategy_name != 'ranging_market':
+            efficiency_ratio = kama_data.get('efficiency_ratio', 0)
+            components['market_efficiency'] = self._calculate_forex_scaled_efficiency(efficiency_ratio)
+        else:
+            components['market_efficiency'] = 0.5  # Neutral score for ranging markets
+
         # ✅ COMPONENT 2: EMA Alignment - FOREX SCALED
-        components['ema_alignment'] = self._calculate_ema_alignment_score(ema_data, signal_data)
-        
+        # Skip for ranging_market - uses oscillator confluence instead
+        if strategy_name != 'ranging_market':
+            components['ema_alignment'] = self._calculate_ema_alignment_score(ema_data, signal_data)
+        else:
+            components['ema_alignment'] = 0.5  # Neutral score for ranging markets
+
         # ✅ COMPONENT 3: MACD Strength - FOREX SCALED
-        components['macd_strength'] = self._calculate_macd_strength_score(macd_data)
-        
+        # Skip for ranging_market - uses multi-oscillator confluence
+        if strategy_name != 'ranging_market':
+            components['macd_strength'] = self._calculate_macd_strength_score(macd_data)
+        else:
+            components['macd_strength'] = 0.5  # Neutral score for ranging markets
+
         # ✅ COMPONENT 4: Trend Clarity - FOREX SCALED
-        components['trend_clarity'] = self._calculate_trend_clarity_score(ema_data, kama_data)
-        
+        # Skip for ranging_market - explicitly trades unclear/ranging trends
+        if strategy_name != 'ranging_market':
+            components['trend_clarity'] = self._calculate_trend_clarity_score(ema_data, kama_data)
+        else:
+            components['trend_clarity'] = 0.5  # Neutral score for ranging markets
+
         return components
     
     def _calculate_forex_scaled_efficiency(self, efficiency_ratio: float) -> float:
