@@ -139,8 +139,8 @@ OSCILLATOR_WEIGHTS = {                 # Weight for each oscillator in confluenc
 }
 
 # Confluence Thresholds
-OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.40  # Minimum weighted score for bullish signal (quality over quantity)
-OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.40  # Minimum weighted score for bearish signal (quality over quantity)
+OSCILLATOR_BULL_CONFLUENCE_THRESHOLD = 0.45  # OPTIMIZED: Balanced quality vs quantity (was 0.60 - too strict, only 2 signals)
+OSCILLATOR_BEAR_CONFLUENCE_THRESHOLD = 0.45  # OPTIMIZED: Balanced quality vs quantity (was 0.60 - too strict, only 2 signals)
 OSCILLATOR_EXTREME_CONFLUENCE_BOOST = 0.15   # Boost for extreme readings
 
 # Signal Quality Requirements
@@ -156,7 +156,7 @@ CONFLUENCE_MIN_SIGNAL_STRENGTH = 0.6          # Minimum individual signal streng
 DYNAMIC_ZONES_ENABLED = True           # Enable zone validation for better entry quality
 ZONE_CALCULATION_PERIOD = 30          # Period for zone calculations (shorter for more frequent updates)
 ZONE_STRENGTH_THRESHOLD = 1           # Minimum touches for strong zone (more lenient)
-ZONE_PROXIMITY_PIPS = 35              # Pip proximity for zone interaction (extremely generous for production)
+ZONE_PROXIMITY_PIPS = 15              # OPTIMIZED: Tighter zone proximity for meaningful validation (was 35 - too wide)
 ZONE_AGE_LIMIT_BARS = 300            # Maximum age of zones in bars (longer to keep more zones)
 
 # Zone Validation
@@ -181,10 +181,12 @@ REGIME_TREND_PERIOD = 50              # Period for trend strength calculation
 REGIME_ADX_THRESHOLD = 25             # ADX threshold for trending vs ranging
 
 # Ranging Market Detection
-RANGING_MARKET_ADX_MAX = 20           # Maximum ADX for ranging market (strict - only true ranging conditions)
+RANGING_MARKET_ADX_MAX = 30           # OPTIMIZED: Wider ADX range for more signals (was 25 - too narrow 10 point window)
+RANGING_MARKET_ADX_MIN = 12           # OPTIMIZED: Lower minimum to catch quality ranges (was 15 - too high)
 RANGING_MARKET_ATR_STABILITY = 0.8    # ATR stability coefficient
 RANGING_MARKET_MIN_DURATION = 10      # Minimum bars for ranging regime
 RANGING_MARKET_PRICE_OSCILLATION = 0.75  # Price oscillation within range coefficient
+RANGING_MARKET_MIN_ATR_PIPS = 8       # NEW: Minimum ATR in pips (avoid low volatility periods where 5 pip profit is meaningless)
 
 # Regime-Based Signal Filtering
 REGIME_DISABLE_IN_STRONG_TREND = True  # Disable strategy in strong trends
@@ -217,9 +219,9 @@ MTF_ZONE_CONFLUENCE = True             # Require S/R zone confluence
 # =============================================================================
 
 # Signal Quality Requirements
-SIGNAL_QUALITY_MIN_CONFIDENCE = 0.50   # Minimum confidence for signal generation (aligned with confluence)
+SIGNAL_QUALITY_MIN_CONFIDENCE = 0.70   # INCREASED: from 0.50 to 0.70 (filter weak 52-55% signals)
 SIGNAL_QUALITY_REQUIRE_VOLUME_CONFIRMATION = False  # Volume confirmation (if available)
-SIGNAL_QUALITY_MIN_RISK_REWARD = 1.8   # Minimum risk-reward ratio (high quality)
+SIGNAL_QUALITY_MIN_RISK_REWARD = 1.5   # OPTIMIZED: Realistic for ranging markets (was 2.5 - unrealistic 112 pip targets)
 SIGNAL_QUALITY_MAX_SPREAD_IMPACT = 0.3  # Maximum spread impact on signal quality
 
 # Signal Filtering
@@ -243,8 +245,8 @@ RANGING_MAX_DRAWDOWN_THRESHOLD = 0.04   # Stop strategy at 4% drawdown
 RANGING_MAX_DAILY_LOSS = 0.02           # Maximum daily loss threshold
 
 # Stop Loss and Take Profit
-RANGING_DEFAULT_SL_PIPS = 35            # Default stop loss in pips (widened to reduce premature stops)
-RANGING_DEFAULT_TP_PIPS = 52            # Default take profit in pips (maintains ~1.5:1 R:R)
+RANGING_DEFAULT_SL_PIPS = 35            # OPTIMIZED: Balanced stop loss for ranging markets (was 45 - too wide)
+RANGING_DEFAULT_TP_PIPS = 53            # OPTIMIZED: Realistic target with 1.5:1 R:R (35 * 1.5 = 52.5)
 RANGING_DYNAMIC_SL_TP = True            # Use dynamic SL/TP based on range size
 RANGING_TRAIL_STOP_ENABLED = True       # Enable trailing stop
 
@@ -259,7 +261,7 @@ RANGING_RANGE_TP_MULTIPLIER = 0.8       # TP as % of range size
 # =============================================================================
 
 # Runtime regime-aware calculation - No hardcoded values!
-USE_ADAPTIVE_SL_TP = True                # 🧠 Enable adaptive volatility calculator for regime-aware SL/TP
+USE_ADAPTIVE_SL_TP = False               # 🧠 DISABLED: Adaptive calculator giving too-tight stops (15/25 instead of 35/53)
                                          # When True: Uses runtime regime detection (trending, ranging, breakout, high volatility)
                                          # When False: Falls back to ATR multipliers below
 
@@ -452,15 +454,15 @@ except ValueError as e:
 # Swing Proximity Validation - Prevents poor entry timing near swing points
 RANGING_SWING_VALIDATION = {
     'enabled': True,  # Enable swing proximity validation
-    'min_distance_pips': {  # Pair-specific minimum distances (more conservative)
-        'default': 12,  # Default: 12 pips (increased from 8)
-        'JPY': 15,      # JPY pairs: 15 pips (more volatile)
-        'GBP': 15,      # GBP pairs: 15 pips (more volatile)
-        'EUR': 10,      # EUR pairs: 10 pips (standard)
-        'AUD': 12,      # AUD pairs: 12 pips (slightly volatile)
-        'NZD': 12,      # NZD pairs: 12 pips (slightly volatile)
-        'CAD': 10,      # CAD pairs: 10 pips (standard)
-        'CHF': 10,      # CHF pairs: 10 pips (standard)
+    'min_distance_pips': {  # Pair-specific minimum distances (OPTIMIZED: reduced for more signals)
+        'default': 6,   # OPTIMIZED: 6 pips (was 12 - too strict, primary signal killer)
+        'JPY': 8,       # JPY pairs: 8 pips (was 15 - too strict)
+        'GBP': 8,       # GBP pairs: 8 pips (was 15 - too strict)
+        'EUR': 6,       # EUR pairs: 6 pips (was 10)
+        'AUD': 6,       # AUD pairs: 6 pips (was 12)
+        'NZD': 6,       # NZD pairs: 6 pips (was 12)
+        'CAD': 6,       # CAD pairs: 6 pips (was 10)
+        'CHF': 6,       # CHF pairs: 6 pips (was 10)
     },
     'timeframe_multipliers': {  # Timeframe-based adjustments
         '1m': 0.6,      # Tighter for very low TF
@@ -472,11 +474,11 @@ RANGING_SWING_VALIDATION = {
     },
     'lookback_swings': 5,  # Number of recent swings to check
     'swing_length': 5,  # Bars for swing detection (matches SMC default)
-    'strict_mode': True,  # CHANGED: True = reject signal entirely (was False)
-    'resistance_buffer': 1.2,  # CHANGED: 20% wider buffer for resistance (was 1.0)
-    'support_buffer': 1.0,  # Keep support as-is for now
+    'strict_mode': False,  # CRITICAL: False = penalty only, not rejection (was True - rejected valid signals)
+    'resistance_buffer': 1.0,  # OPTIMIZED: 1.0 (was 1.2 - too wide)
+    'support_buffer': 1.0,  # Keep support as-is
     'equal_level_multiplier': 2.0,  # NEW: 2x distance for Equal Highs/Lows (EQH/EQL)
-    'min_confirmation_bars': 3,  # NEW: Minimum bars after swing for confirmation (3 bars = 15 min on 5m)
+    'min_confirmation_bars': 2,  # OPTIMIZED: 2 bars (was 3 - too strict for 5m charts)
 }
 
 # Notes:

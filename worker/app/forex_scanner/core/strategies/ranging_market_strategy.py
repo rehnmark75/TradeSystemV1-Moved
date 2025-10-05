@@ -955,6 +955,20 @@ class RangingMarketStrategy(BaseStrategy):
                 except Exception as e:
                     self.logger.debug(f"Swing validation error (non-critical): {e}")
 
+            # NEW: Bounce confirmation - prevent premature entries
+            bounce_confirmed = self._check_bounce_confirmation(df, signal_type, latest_row)
+            if not bounce_confirmed['valid']:
+                self.logger.warning(
+                    f"⚠️ Bounce not confirmed: {bounce_confirmed.get('reason', 'Unknown')} - REJECTING signal"
+                )
+                return None
+            elif bounce_confirmed.get('confidence_boost', 0) > 0:
+                base_confidence += bounce_confirmed['confidence_boost']
+                self.logger.info(
+                    f"✅ Bounce confirmed: +{bounce_confirmed['confidence_boost']:.3f} confidence "
+                    f"({bounce_confirmed.get('reason', 'Valid bounce')})"
+                )
+
             # Calculate dynamic SL/TP if enabled
             sl_pips, tp_pips = self._calculate_dynamic_sl_tp(df, signal_type)
 
@@ -1235,6 +1249,129 @@ class RangingMarketStrategy(BaseStrategy):
             'stop_distance': stop_distance,
             'limit_distance': limit_distance
         }
+
+    def _check_bounce_confirmation(self, df: pd.DataFrame, signal_type: str,
+                                   latest_row: pd.Series) -> Dict[str, Any]:
+        """
+        Check for bounce confirmation before entry to prevent premature signals
+
+        For BUY (at support): Look for bullish rejection (lower wick > upper wick)
+        For SELL (at resistance): Look for bearish rejection (upper wick > lower wick)
+
+        Returns:
+            Dictionary with 'valid' (bool), 'reason' (str), 'confidence_boost' (float)
+        """
+        try:
+            # Get last 3 candles for confirmation pattern
+            if len(df) < 3:
+                return {'valid': False, 'reason': 'insufficient_data'}
+
+            last_3 = df.tail(3)
+            current_candle = latest_row
+            prev_candle = df.iloc[-2]
+
+            # Calculate wicks and body
+            current_body = abs(current_candle['close'] - current_candle['open'])
+            current_range = current_candle['high'] - current_candle['low']
+
+            if current_range == 0:
+                return {'valid': False, 'reason': 'zero_range_candle'}
+
+            # Calculate wick sizes
+            if current_candle['close'] > current_candle['open']:  # Bullish candle
+                upper_wick = current_candle['high'] - current_candle['close']
+                lower_wick = current_candle['open'] - current_candle['low']
+            else:  # Bearish candle
+                upper_wick = current_candle['high'] - current_candle['open']
+                lower_wick = current_candle['close'] - current_candle['low']
+
+            # Wick ratios
+            lower_wick_ratio = lower_wick / current_range
+            upper_wick_ratio = upper_wick / current_range
+            body_ratio = current_body / current_range
+
+            if signal_type in ['BUY', 'BULL']:
+                # BUY at support: Need bullish rejection pattern
+                # 1. Lower wick should be significant (>30% of range)
+                # 2. Price should close in upper half of candle
+                # 3. Or previous candle tested support and current closed higher
+
+                if lower_wick_ratio > 0.3:
+                    # Strong lower wick = rejection from support
+                    if current_candle['close'] > (current_candle['high'] + current_candle['low']) / 2:
+                        return {
+                            'valid': True,
+                            'reason': f'bullish_rejection_wick ({lower_wick_ratio:.1%} lower wick)',
+                            'confidence_boost': 0.05
+                        }
+
+                # Check if price tested lower and is now recovering
+                if prev_candle['low'] < current_candle['low'] and current_candle['close'] > prev_candle['close']:
+                    return {
+                        'valid': True,
+                        'reason': 'support_test_and_recovery',
+                        'confidence_boost': 0.03
+                    }
+
+                # Check for 3-bar reversal pattern
+                if len(last_3) == 3:
+                    if (last_3.iloc[0]['low'] > last_3.iloc[1]['low'] and  # Made lower low
+                        last_3.iloc[2]['close'] > last_3.iloc[1]['close']):  # Now recovering
+                        return {
+                            'valid': True,
+                            'reason': '3bar_reversal_pattern',
+                            'confidence_boost': 0.04
+                        }
+
+                # Reject if no confirmation
+                return {
+                    'valid': False,
+                    'reason': f'no_bullish_confirmation (lower_wick:{lower_wick_ratio:.1%}, upper_wick:{upper_wick_ratio:.1%})'
+                }
+
+            else:  # SELL at resistance
+                # SELL at resistance: Need bearish rejection pattern
+                # 1. Upper wick should be significant (>30% of range)
+                # 2. Price should close in lower half of candle
+                # 3. Or previous candle tested resistance and current closed lower
+
+                if upper_wick_ratio > 0.3:
+                    # Strong upper wick = rejection from resistance
+                    if current_candle['close'] < (current_candle['high'] + current_candle['low']) / 2:
+                        return {
+                            'valid': True,
+                            'reason': f'bearish_rejection_wick ({upper_wick_ratio:.1%} upper wick)',
+                            'confidence_boost': 0.05
+                        }
+
+                # Check if price tested higher and is now falling
+                if prev_candle['high'] > current_candle['high'] and current_candle['close'] < prev_candle['close']:
+                    return {
+                        'valid': True,
+                        'reason': 'resistance_test_and_rejection',
+                        'confidence_boost': 0.03
+                    }
+
+                # Check for 3-bar reversal pattern
+                if len(last_3) == 3:
+                    if (last_3.iloc[0]['high'] < last_3.iloc[1]['high'] and  # Made higher high
+                        last_3.iloc[2]['close'] < last_3.iloc[1]['close']):  # Now falling
+                        return {
+                            'valid': True,
+                            'reason': '3bar_reversal_pattern',
+                            'confidence_boost': 0.04
+                        }
+
+                # Reject if no confirmation
+                return {
+                    'valid': False,
+                    'reason': f'no_bearish_confirmation (lower_wick:{lower_wick_ratio:.1%}, upper_wick:{upper_wick_ratio:.1%})'
+                }
+
+        except Exception as e:
+            self.logger.error(f"Error in bounce confirmation: {e}")
+            # On error, allow signal (fail-safe)
+            return {'valid': True, 'reason': f'error_failsafe: {e}', 'confidence_boost': 0}
 
     def _get_bars_since_nearest_swing(self, df: pd.DataFrame, direction: str,
                                        swing_result: Dict[str, Any]) -> Optional[int]:
