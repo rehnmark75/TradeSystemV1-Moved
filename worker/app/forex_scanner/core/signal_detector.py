@@ -2436,7 +2436,26 @@ class SignalDetector:
                         except (ValueError, KeyError):
                             continue
             
-            # 5. OTHER TECHNICAL INDICATORS
+            # 5. ADX AND DIRECTIONAL INDICATORS
+            adx_indicators = {}
+            adx_mappings = {
+                'adx': ['adx', 'adx_14'],
+                'plus_di': ['plus_di', 'di_plus', 'plus_di_14', '+di'],
+                'minus_di': ['minus_di', 'di_minus', 'minus_di_14', '-di'],
+                'dx': ['dx', 'dx_14']
+            }
+
+            for standard_name, possible_cols in adx_mappings.items():
+                for col in possible_cols:
+                    if col in df.columns:
+                        try:
+                            adx_indicators[standard_name] = float(latest[col])
+                            signal[standard_name] = float(latest[col])
+                            break
+                        except (ValueError, KeyError):
+                            continue
+
+            # 6. OTHER TECHNICAL INDICATORS
             other_indicators = {}
             other_mappings = {
                 'rsi': ['rsi', 'rsi_14'],
@@ -2445,7 +2464,7 @@ class SignalDetector:
                 'bb_middle': ['bb_middle', 'bollinger_middle', 'bb_middle_20_2'],
                 'bb_lower': ['bb_lower', 'bollinger_lower', 'bb_lower_20_2']
             }
-            
+
             for standard_name, possible_cols in other_mappings.items():
                 for col in possible_cols:
                     if col in df.columns:
@@ -2455,8 +2474,8 @@ class SignalDetector:
                             break
                         except (ValueError, KeyError):
                             continue
-            
-            # 6. VOLUME DATA
+
+            # 7. VOLUME DATA
             volume_fields = ['ltv', 'volume', 'volume_sma_20', 'volume_ratio_20']
             for field in volume_fields:
                 if field in df.columns:
@@ -2467,17 +2486,64 @@ class SignalDetector:
                             signal[field] = float(latest[field])
                     except (ValueError, KeyError):
                         continue
-            
-            # 7. SUPPORT/RESISTANCE DATA
-            sr_fields = ['nearest_support', 'nearest_resistance', 'distance_to_support_pips', 'distance_to_resistance_pips']
-            for field in sr_fields:
-                if field in df.columns:
-                    try:
-                        signal[field] = float(latest[field])
-                    except (ValueError, KeyError):
-                        continue
-            
-            # 8. ADDITIONAL CONTEXT DATA
+
+            # 8. SWING POINT DATA (from SMC/market structure analysis)
+            swing_data = {}
+            swing_fields = {
+                'swing_high': ['swing_high', 'recent_swing_high', 'swing_high_price'],
+                'swing_low': ['swing_low', 'recent_swing_low', 'swing_low_price'],
+                'distance_to_swing_high_pips': ['distance_to_swing_high_pips', 'swing_high_distance_pips'],
+                'distance_to_swing_low_pips': ['distance_to_swing_low_pips', 'swing_low_distance_pips'],
+                'nearest_swing_type': ['nearest_swing_type', 'swing_type'],
+                'swing_strength': ['swing_strength', 'swing_level_strength']
+            }
+
+            for standard_name, possible_cols in swing_fields.items():
+                for col in possible_cols:
+                    if col in df.columns:
+                        try:
+                            value = latest[col]
+                            # Handle both numeric and string values
+                            if isinstance(value, (int, float)):
+                                swing_data[standard_name] = float(value)
+                            else:
+                                swing_data[standard_name] = str(value)
+                            signal[standard_name] = swing_data[standard_name]
+                            break
+                        except (ValueError, KeyError):
+                            continue
+
+            # 9. SUPPORT/RESISTANCE DATA (enhanced)
+            sr_data = {}
+            sr_fields = {
+                'nearest_support': ['nearest_support', 'support_level', 'support_price'],
+                'nearest_resistance': ['nearest_resistance', 'resistance_level', 'resistance_price'],
+                'distance_to_support_pips': ['distance_to_support_pips', 'support_distance_pips'],
+                'distance_to_resistance_pips': ['distance_to_resistance_pips', 'resistance_distance_pips'],
+                'support_strength': ['support_strength', 'support_level_strength'],
+                'resistance_strength': ['resistance_strength', 'resistance_level_strength'],
+                'level_flip_detected': ['level_flip_detected', 'sr_flip_detected'],
+                'cluster_risk_level': ['cluster_risk_level', 'sr_cluster_risk']
+            }
+
+            for standard_name, possible_cols in sr_fields.items():
+                for col in possible_cols:
+                    if col in df.columns:
+                        try:
+                            value = latest[col]
+                            # Handle both numeric and boolean/string values
+                            if isinstance(value, bool):
+                                sr_data[standard_name] = bool(value)
+                            elif isinstance(value, (int, float)):
+                                sr_data[standard_name] = float(value)
+                            else:
+                                sr_data[standard_name] = str(value)
+                            signal[standard_name] = sr_data[standard_name]
+                            break
+                        except (ValueError, KeyError):
+                            continue
+
+            # 10. ADDITIONAL CONTEXT DATA
             context_fields = [
                 'volume_confirmation', 'trend_alignment', 'market_session',
                 'consolidation_range_pips', 'bars_since_breakout'
@@ -2489,24 +2555,28 @@ class SignalDetector:
                     except (ValueError, KeyError):
                         continue
             
-            # 9. CREATE COMPREHENSIVE STRATEGY_INDICATORS JSON
+            # 11. CREATE COMPREHENSIVE STRATEGY_INDICATORS JSON
             all_indicators = {}
             all_indicators.update(ema_indicators)
             all_indicators.update(macd_indicators)
             all_indicators.update(kama_indicators)
+            all_indicators.update(adx_indicators)
             all_indicators.update(other_indicators)
-            
+
             if all_indicators:
                 signal['strategy_indicators'] = {
                     'ema_data': ema_indicators,
                     'macd_data': macd_indicators,
                     'kama_data': kama_indicators,
+                    'adx_data': adx_indicators,
+                    'swing_data': swing_data,
+                    'sr_data': sr_data,
                     'other_indicators': other_indicators,
                     'indicator_count': len(all_indicators),
                     'data_source': 'complete_dataframe_analysis'
                 }
-            
-            self.logger.debug(f"📊 Enhanced signal with {len(all_indicators)} technical indicators")
+
+            self.logger.debug(f"📊 Enhanced signal with {len(all_indicators)} indicators + swing/SR data")
             return signal
             
         except Exception as e:
