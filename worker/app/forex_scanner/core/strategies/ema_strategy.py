@@ -26,6 +26,8 @@ from .helpers.ema_signal_calculator import EMASignalCalculator
 from .helpers.ema_mtf_analyzer import EMAMultiTimeframeAnalyzer
 from .helpers.ema_indicator_calculator import EMAIndicatorCalculator
 from .helpers.adaptive_volatility_calculator import AdaptiveVolatilityCalculator
+from .helpers.adx_calculator import ADXCalculator
+from .helpers.swing_proximity_validator import SwingProximityValidator
 
 try:
     from configdata import config
@@ -108,7 +110,24 @@ class EMAStrategy(BaseStrategy):
         self.signal_calculator = EMASignalCalculator(logger=self.logger, trend_validator=self.trend_validator)
         self.mtf_analyzer = EMAMultiTimeframeAnalyzer(logger=self.logger, data_fetcher=data_fetcher)
         self.indicator_calculator = EMAIndicatorCalculator(logger=self.logger, eps=self.eps)
-        
+
+        # Initialize ADX calculator for trend strength analysis
+        self.adx_period = getattr(config_ema_strategy, 'EMA_ADX_PERIOD', 14) if config_ema_strategy else 14
+        self.min_adx = getattr(config_ema_strategy, 'EMA_MIN_ADX', 25) if config_ema_strategy else 25
+        self.adx_calculator = ADXCalculator(period=self.adx_period, logger=self.logger)
+        self.logger.info(f"📊 ADX calculator initialized - Period: {self.adx_period}, Min ADX: {self.min_adx}")
+
+        # Initialize swing proximity validator for entry quality
+        swing_config = getattr(config_ema_strategy, 'EMA_SWING_VALIDATION', {}) if config_ema_strategy else {}
+        self.swing_validator = SwingProximityValidator(
+            config=swing_config,
+            logger=self.logger
+        )
+        if swing_config.get('enabled', True):
+            self.logger.info(f"🎯 Swing proximity validator initialized - Min distance: {swing_config.get('min_distance_pips', 8)} pips")
+        else:
+            self.logger.info(f"⚪ Swing proximity validator disabled")
+
         # Initialize enhanced breakout validator only in pipeline mode
         self.enhanced_validation = pipeline_mode and getattr(config, 'EMA_ENHANCED_VALIDATION', True)
         if self.enhanced_validation:
@@ -294,6 +313,18 @@ class EMAStrategy(BaseStrategy):
             # Calculate EMAs if not present
             df_enhanced = self.indicator_calculator.ensure_emas(df.copy(), epic_ema_config)
 
+            # Calculate ADX for trend strength analysis
+            df_enhanced = self.adx_calculator.calculate_adx(df_enhanced)
+            self.logger.debug(f"📊 ADX calculated for {epic}")
+
+            # Calculate swing points for proximity validation (if SMC analyzer available)
+            try:
+                if hasattr(self, 'swing_validator') and self.swing_validator.smc_analyzer:
+                    df_enhanced = self.swing_validator.smc_analyzer.identify_swing_points(df_enhanced)
+                    self.logger.debug(f"🎯 Swing points identified for {epic}")
+            except Exception as e:
+                self.logger.debug(f"Swing point calculation skipped: {e}")
+
             # Apply core detection logic (based on detect_ema_alerts)
             df_with_signals = self.indicator_calculator.detect_ema_alerts(df_enhanced)
 
@@ -428,7 +459,29 @@ class EMAStrategy(BaseStrategy):
                 if not trend_valid:
                     self.logger.warning(f"❌ EMA BULL signal REJECTED: Price below EMA 200 (against major trend)")
                     return None
-                
+
+                # ADX TREND STRENGTH VALIDATION
+                adx_value = latest_row.get('adx', 0)
+                if adx_value < self.min_adx:
+                    self.logger.warning(f"❌ EMA BULL signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
+                    return None
+                else:
+                    self.logger.info(f"✅ ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
+
+                # SWING PROXIMITY VALIDATION
+                current_price = latest_row.get('close', 0)
+                swing_result = self.swing_validator.validate_entry_proximity(
+                    df_with_signals, current_price, 'BUY', epic, timeframe
+                )
+                if not swing_result['valid']:
+                    if self.swing_validator.strict_mode:
+                        self.logger.warning(f"❌ EMA BULL signal REJECTED: {swing_result['rejection_reason']}")
+                        return None
+                    else:
+                        self.logger.info(f"⚠️ Swing proximity warning: {swing_result['rejection_reason']}")
+                else:
+                    self.logger.info(f"✅ Swing proximity validation passed")
+
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:
                     is_valid_breakout, breakout_confidence, validation_details = self.breakout_validator.validate_breakout(
@@ -481,7 +534,29 @@ class EMAStrategy(BaseStrategy):
                 if not trend_valid:
                     self.logger.warning(f"❌ EMA BEAR signal REJECTED: Price above EMA 200 (against major trend)")
                     return None
-                
+
+                # ADX TREND STRENGTH VALIDATION
+                adx_value = latest_row.get('adx', 0)
+                if adx_value < self.min_adx:
+                    self.logger.warning(f"❌ EMA BEAR signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
+                    return None
+                else:
+                    self.logger.info(f"✅ ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
+
+                # SWING PROXIMITY VALIDATION
+                current_price = latest_row.get('close', 0)
+                swing_result = self.swing_validator.validate_entry_proximity(
+                    df_with_signals, current_price, 'SELL', epic, timeframe
+                )
+                if not swing_result['valid']:
+                    if self.swing_validator.strict_mode:
+                        self.logger.warning(f"❌ EMA BEAR signal REJECTED: {swing_result['rejection_reason']}")
+                        return None
+                    else:
+                        self.logger.info(f"⚠️ Swing proximity warning: {swing_result['rejection_reason']}")
+                else:
+                    self.logger.info(f"✅ Swing proximity validation passed")
+
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:
                     is_valid_breakout, breakout_confidence, validation_details = self.breakout_validator.validate_breakout(
