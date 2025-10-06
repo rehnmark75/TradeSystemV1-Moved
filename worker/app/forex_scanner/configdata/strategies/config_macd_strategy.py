@@ -380,3 +380,26 @@ MACD_EMA_FILTER = {
 # - For JPY pairs: 8 pips = 0.08 price movement (80 IG points)
 # - Example: EUR/USD at 1.0850, swing high at 1.0857 → 7 pips away → WARNING
 # - Example: USD/JPY at 150.50, swing high at 150.57 → 7 pips away → WARNING
+
+# =============================================================================
+# ADX CROSSOVER TRIGGER CONFIGURATION (NEW FEATURE)
+# =============================================================================
+# Additional signal trigger: ADX crosses above threshold while MACD histogram is aligned
+# This catches trend acceleration earlier than MACD histogram crossover
+
+MACD_ADX_CROSSOVER_ENABLED = True          # Enable ADX crossover trigger (in addition to MACD crossover)
+MACD_ADX_CROSSOVER_THRESHOLD = 25          # ADX level that triggers signal (default: 25 = strong trend)
+MACD_ADX_CROSSOVER_LOOKBACK = 3            # Bars to confirm ADX has been rising (prevents whipsaws)
+MACD_ADX_MIN_HISTOGRAM = 0.0001            # Minimum MACD histogram magnitude (prevents tiny movements)
+MACD_ADX_REQUIRE_EXPANSION = True          # Require MACD histogram to be expanding (not shrinking)
+MACD_ADX_MIN_CONFIDENCE = 0.60             # Minimum confidence for ADX crossover signals (matches MACD crossover 0.60)
+
+# ADX Crossover Signal Priority
+MACD_ADX_SIGNAL_PRIORITY = 2               # Priority: 1=MACD histogram crossover (stronger), 2=ADX crossover (earlier entry)
+
+# Notes:
+# - ADX crossover signals are "early entry" signals (lower confidence, better R:R)
+# - MACD histogram crossover signals remain the primary trigger (higher confidence)
+# - Lookback period prevents false breakouts (ADX crosses 25 but falls back immediately)
+# - Histogram expansion check ensures momentum is building, not fading
+# - Useful for catching trend acceleration from weak (ADX 20-24) to strong (ADX 25+)

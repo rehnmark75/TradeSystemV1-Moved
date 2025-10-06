@@ -86,6 +86,19 @@ class MACDStrategy(BaseStrategy):
         else:
             self.swing_validator = None
 
+        # ADX Crossover Trigger Configuration (NEW FEATURE)
+        self.adx_crossover_enabled = getattr(config_macd_strategy, 'MACD_ADX_CROSSOVER_ENABLED', True) if config_macd_strategy else True
+        self.adx_crossover_threshold = getattr(config_macd_strategy, 'MACD_ADX_CROSSOVER_THRESHOLD', 25) if config_macd_strategy else 25
+        self.adx_crossover_lookback = getattr(config_macd_strategy, 'MACD_ADX_CROSSOVER_LOOKBACK', 3) if config_macd_strategy else 3
+        self.adx_min_histogram = getattr(config_macd_strategy, 'MACD_ADX_MIN_HISTOGRAM', 0.0001) if config_macd_strategy else 0.0001
+        self.adx_require_expansion = getattr(config_macd_strategy, 'MACD_ADX_REQUIRE_EXPANSION', True) if config_macd_strategy else True
+        self.adx_min_confidence = getattr(config_macd_strategy, 'MACD_ADX_MIN_CONFIDENCE', 0.50) if config_macd_strategy else 0.50
+
+        if self.adx_crossover_enabled:
+            self.logger.info(f"🚀 ADX Crossover Trigger ENABLED - ADX crosses {self.adx_crossover_threshold} with MACD alignment")
+        else:
+            self.logger.info(f"⚪ ADX Crossover Trigger DISABLED")
+
         self.logger.info(f"✅ Clean MACD Strategy initialized - ADX >= {self.min_adx}, Swing validation: {self.swing_validator is not None}")
         self.logger.info(f"🔧 CRITICAL DEBUG: Using REBUILT MACD with NaN validation and dynamic EMA filter (v2.0)")
 
@@ -119,6 +132,134 @@ class MACDStrategy(BaseStrategy):
         df['bear_crossover'] = (df['macd_histogram'] < 0) & (df['histogram_prev'] >= 0)
 
         return df
+
+    def detect_adx_crossover(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Detect ADX crossovers above threshold (NEW FEATURE)
+
+        Triggers when:
+        1. ADX crosses above threshold (e.g., 25)
+        2. MACD histogram is already in correct direction (green for BULL, red for BEAR)
+        3. ADX has been rising for lookback period (prevents whipsaws)
+        4. MACD histogram is expanding (optional, prevents catching tops/bottoms)
+
+        This catches trend acceleration earlier than MACD histogram crossover
+        """
+        df = df.copy()
+
+        # Ensure histogram_prev exists (should be created by detect_crossover)
+        if 'histogram_prev' not in df.columns:
+            df['histogram_prev'] = df['macd_histogram'].shift(1)
+
+        # Shift ADX to get previous values
+        df['adx_prev'] = df['adx'].shift(1)
+
+        # Detect ADX crossing above threshold
+        df['adx_cross_up'] = (df['adx'] > self.adx_crossover_threshold) & (df['adx_prev'] <= self.adx_crossover_threshold)
+
+        # Initialize ADX crossover signals as False
+        df['bull_adx_crossover'] = False
+        df['bear_adx_crossover'] = False
+
+        # For each ADX crossover, check if MACD histogram is aligned
+        for idx in df[df['adx_cross_up']].index:
+            try:
+                # Get current bar data
+                histogram = df.loc[idx, 'macd_histogram']
+
+                # Check minimum histogram magnitude
+                if abs(histogram) < self.adx_min_histogram:
+                    self.logger.debug(f"ADX cross at {idx}: histogram too small ({abs(histogram):.6f} < {self.adx_min_histogram:.6f})")
+                    continue
+
+                # Check if ADX has been rising (lookback period)
+                if self.adx_crossover_lookback > 0:
+                    # Get lookback bars
+                    lookback_start = max(0, df.index.get_loc(idx) - self.adx_crossover_lookback)
+                    lookback_adx = df.iloc[lookback_start:df.index.get_loc(idx) + 1]['adx']
+
+                    # Check if ADX is monotonically increasing
+                    adx_diffs = lookback_adx.diff().dropna()
+                    if not all(adx_diffs > 0):
+                        self.logger.debug(f"ADX cross at {idx}: ADX not consistently rising (diffs: {adx_diffs.tolist()})")
+                        continue
+
+                # Check if MACD histogram is expanding (optional)
+                if self.adx_require_expansion:
+                    histogram_prev = df.loc[idx, 'histogram_prev']
+                    if abs(histogram) <= abs(histogram_prev):
+                        self.logger.debug(f"ADX cross at {idx}: histogram not expanding ({abs(histogram):.6f} <= {abs(histogram_prev):.6f})")
+                        continue
+
+                # Determine signal type based on MACD histogram color
+                if histogram > 0:
+                    # MACD green = BULL signal
+                    df.loc[idx, 'bull_adx_crossover'] = True
+                    self.logger.info(f"✅ ADX BULL crossover detected at {idx}: ADX={df.loc[idx, 'adx']:.2f}, histogram={histogram:.6f}")
+                elif histogram < 0:
+                    # MACD red = BEAR signal
+                    df.loc[idx, 'bear_adx_crossover'] = True
+                    self.logger.info(f"✅ ADX BEAR crossover detected at {idx}: ADX={df.loc[idx, 'adx']:.2f}, histogram={histogram:.6f}")
+
+            except Exception as e:
+                self.logger.debug(f"Error processing ADX crossover at {idx}: {e}")
+                continue
+
+        return df
+
+    def validate_adx_signal(self, row: pd.Series, signal_type: str) -> bool:
+        """
+        Validate ADX crossover signal meets quality requirements
+
+        Simplified validation for ADX crossover signals (less strict than MACD crossover)
+        ADX crossing above threshold already indicates trend strength
+        """
+        # Check histogram is in correct direction (already checked in detect_adx_crossover, but double-check)
+        histogram = row.get('macd_histogram', 0)
+        if signal_type == 'BULL' and histogram <= 0:
+            self.logger.debug(f"❌ ADX BULL rejected: negative histogram {histogram:.6f}")
+            return False
+        if signal_type == 'BEAR' and histogram >= 0:
+            self.logger.debug(f"❌ ADX BEAR rejected: positive histogram {histogram:.6f}")
+            return False
+
+        # Check MACD line position (same filter as regular signals)
+        macd_line = row.get('macd_line', 0)
+        if signal_type == 'BEAR' and macd_line > 0.05:
+            self.logger.info(f"❌ ADX BEAR rejected: MACD line too positive {macd_line:.6f}")
+            return False
+        if signal_type == 'BULL' and macd_line < -0.05:
+            self.logger.info(f"❌ ADX BULL rejected: MACD line too negative {macd_line:.6f}")
+            return False
+
+        # Check RSI (optional - avoid extreme zones)
+        rsi = row.get('rsi', 50)
+        if signal_type == 'BULL' and rsi > 70:
+            self.logger.debug(f"❌ ADX BULL rejected: RSI {rsi:.1f} overbought")
+            return False
+        if signal_type == 'BEAR' and rsi < 30:
+            self.logger.debug(f"❌ ADX BEAR rejected: RSI {rsi:.1f} oversold")
+            return False
+
+        # EMA filter (if enabled)
+        if self.ema_filter_enabled:
+            price = row.get('close', 0)
+            ema_col = f'ema_{self.ema_filter_period}'
+            ema_value = row.get(ema_col, 0)
+
+            if pd.isna(ema_value) or pd.isna(price) or ema_value <= 0 or price <= 0:
+                self.logger.info(f"❌ ADX {signal_type} rejected: Invalid EMA or price")
+                return False
+
+            if signal_type == 'BULL' and price < ema_value:
+                self.logger.debug(f"❌ ADX BULL rejected: price below EMA{self.ema_filter_period}")
+                return False
+            if signal_type == 'BEAR' and price > ema_value:
+                self.logger.debug(f"❌ ADX BEAR rejected: price above EMA{self.ema_filter_period}")
+                return False
+
+        self.logger.info(f"✅ ADX {signal_type} signal validated")
+        return True
 
     def validate_signal(self, row: pd.Series, signal_type: str) -> bool:
         """
@@ -248,14 +389,22 @@ class MACDStrategy(BaseStrategy):
 
         return min(0.95, confidence)
 
-    def create_signal(self, row: pd.Series, signal_type: str, epic: str, timeframe: str) -> Optional[Dict]:
-        """Create signal dictionary"""
+    def create_signal(self, row: pd.Series, signal_type: str, epic: str, timeframe: str, trigger_type: str = 'macd') -> Optional[Dict]:
+        """
+        Create signal dictionary
+
+        Args:
+            trigger_type: 'macd' for histogram crossover, 'adx' for ADX crossover trigger
+        """
         try:
             # Calculate confidence
             confidence = self.calculate_confidence(row, signal_type)
 
-            if confidence < self.min_confidence:
-                self.logger.debug(f"❌ {signal_type} rejected: confidence {confidence:.1%} < {self.min_confidence:.1%}")
+            # Use different minimum confidence for ADX crossover signals
+            min_conf = self.adx_min_confidence if trigger_type == 'adx' else self.min_confidence
+
+            if confidence < min_conf:
+                self.logger.debug(f"❌ {signal_type} rejected: confidence {confidence:.1%} < {min_conf:.1%}")
                 return None
 
             # Record which EMA filter was used (if any)
@@ -275,6 +424,7 @@ class MACDStrategy(BaseStrategy):
                 'confidence': confidence,
                 'confidence_score': confidence,  # For validator compatibility
                 'timestamp': row.name if hasattr(row, 'name') else datetime.now(),
+                'trigger_type': trigger_type,  # 'macd' or 'adx' - indicates which trigger fired
 
                 # MACD data
                 'macd_line': row.get('macd_line', 0),
@@ -323,8 +473,12 @@ class MACDStrategy(BaseStrategy):
             if 'rsi' not in df.columns:
                 df = self._calculate_rsi(df)
 
-            # Detect crossovers
+            # Detect MACD histogram crossovers (Priority 1)
             df = self.detect_crossover(df)
+
+            # Detect ADX crossovers if enabled (Priority 2)
+            if self.adx_crossover_enabled:
+                df = self.detect_adx_crossover(df)
 
             # CRITICAL FIX: Only check the LATEST bar for crossover
             # The backtest engine calls us once per bar with growing data
@@ -332,10 +486,10 @@ class MACDStrategy(BaseStrategy):
             # This prevents re-detecting the same crossover multiple times
             latest_bar = df.iloc[-1]
 
-            # Check for BULL crossover on THIS bar only
+            # PRIORITY 1: Check for MACD histogram BULL crossover (stronger signal)
             if latest_bar.get('bull_crossover', False):
                 if self.validate_signal(latest_bar, 'BULL'):
-                    signal = self.create_signal(latest_bar, 'BULL', epic, timeframe)
+                    signal = self.create_signal(latest_bar, 'BULL', epic, timeframe, trigger_type='macd')
                     if signal:
                         # Swing proximity validation (uses full DataFrame for context)
                         if self.swing_validator:
@@ -348,13 +502,13 @@ class MACDStrategy(BaseStrategy):
                             # Apply confidence penalty if needed
                             signal['confidence'] -= validation.get('confidence_penalty', 0)
 
-                        self.logger.info(f"✅ BULL signal: {latest_bar.name}, ADX={latest_bar['adx']:.1f}, confidence={signal['confidence']:.1%}")
+                        self.logger.info(f"✅ MACD BULL signal: {latest_bar.name}, ADX={latest_bar['adx']:.1f}, confidence={signal['confidence']:.1%}")
                         return signal
 
-            # Check for BEAR crossover on THIS bar only
+            # PRIORITY 1: Check for MACD histogram BEAR crossover (stronger signal)
             if latest_bar.get('bear_crossover', False):
                 if self.validate_signal(latest_bar, 'BEAR'):
-                    signal = self.create_signal(latest_bar, 'BEAR', epic, timeframe)
+                    signal = self.create_signal(latest_bar, 'BEAR', epic, timeframe, trigger_type='macd')
                     if signal:
                         # Swing proximity validation (uses full DataFrame for context)
                         if self.swing_validator:
@@ -367,7 +521,43 @@ class MACDStrategy(BaseStrategy):
                             # Apply confidence penalty if needed
                             signal['confidence'] -= validation.get('confidence_penalty', 0)
 
-                        self.logger.info(f"✅ BEAR signal: {latest_bar.name}, ADX={latest_bar['adx']:.1f}, confidence={signal['confidence']:.1%}")
+                        self.logger.info(f"✅ MACD BEAR signal: {latest_bar.name}, ADX={latest_bar['adx']:.1f}, confidence={signal['confidence']:.1%}")
+                        return signal
+
+            # PRIORITY 2: Check for ADX BULL crossover (earlier entry signal)
+            if self.adx_crossover_enabled and latest_bar.get('bull_adx_crossover', False):
+                if self.validate_adx_signal(latest_bar, 'BULL'):
+                    signal = self.create_signal(latest_bar, 'BULL', epic, timeframe, trigger_type='adx')
+                    if signal:
+                        # Swing proximity validation
+                        if self.swing_validator:
+                            validation = self.swing_validator.validate_entry_proximity(
+                                df, latest_bar['close'], 'BULL', epic
+                            )
+                            if not validation['valid']:
+                                self.logger.info(f"❌ ADX BULL rejected: {validation.get('rejection_reason', 'swing proximity')}")
+                                return None
+                            signal['confidence'] -= validation.get('confidence_penalty', 0)
+
+                        self.logger.info(f"✅ ADX BULL signal: {latest_bar.name}, ADX={latest_bar['adx']:.1f}, confidence={signal['confidence']:.1%} (early entry)")
+                        return signal
+
+            # PRIORITY 2: Check for ADX BEAR crossover (earlier entry signal)
+            if self.adx_crossover_enabled and latest_bar.get('bear_adx_crossover', False):
+                if self.validate_adx_signal(latest_bar, 'BEAR'):
+                    signal = self.create_signal(latest_bar, 'BEAR', epic, timeframe, trigger_type='adx')
+                    if signal:
+                        # Swing proximity validation
+                        if self.swing_validator:
+                            validation = self.swing_validator.validate_entry_proximity(
+                                df, latest_bar['close'], 'BEAR', epic
+                            )
+                            if not validation['valid']:
+                                self.logger.info(f"❌ ADX BEAR rejected: {validation.get('rejection_reason', 'swing proximity')}")
+                                return None
+                            signal['confidence'] -= validation.get('confidence_penalty', 0)
+
+                        self.logger.info(f"✅ ADX BEAR signal: {latest_bar.name}, ADX={latest_bar['adx']:.1f}, confidence={signal['confidence']:.1%} (early entry)")
                         return signal
 
             return None
