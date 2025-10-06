@@ -177,6 +177,38 @@ KAMA_LOG_SIGNAL_BREAKDOWN = True    # Log detailed signal breakdown
 # Multi-Timeframe KAMA Settings
 KAMA_MTF_ENABLED = True             # Enable multi-timeframe KAMA validation
 KAMA_MTF_TIMEFRAMES = ['5m', '15m', '1h'] # Timeframes for MTF analysis
+
+# ============================================================================
+# PHASE 2 ENHANCEMENT SETTINGS (2025-10-05)
+# ============================================================================
+# Advanced signal quality improvements: Volume, RSI, Dynamic SL/TP, S/R awareness
+
+# Volume Confirmation (Enhancement 1)
+KAMA_VOLUME_VALIDATION_ENABLED = True
+KAMA_MIN_VOLUME_MULTIPLIER = 1.5      # 50% above 20-period average required
+KAMA_STRONG_VOLUME_MULTIPLIER = 2.0   # 100% above average = strong confirmation
+KAMA_VOLUME_LOOKBACK_PERIOD = 20      # Volume average calculation period
+
+# RSI Momentum Filter (Enhancement 2)
+KAMA_RSI_VALIDATION_ENABLED = True
+KAMA_RSI_PERIOD = 14                  # RSI calculation period
+KAMA_RSI_OVERBOUGHT = 70              # Reject BULL signals if RSI > 70
+KAMA_RSI_OVERSOLD = 30                # Reject BEAR signals if RSI < 30
+KAMA_RSI_OPTIMAL_BULL_MIN = 50        # Optimal BULL entry zone start
+KAMA_RSI_OPTIMAL_BULL_MAX = 65        # Optimal BULL entry zone end
+KAMA_RSI_OPTIMAL_BEAR_MIN = 35        # Optimal BEAR entry zone start
+KAMA_RSI_OPTIMAL_BEAR_MAX = 50        # Optimal BEAR entry zone end
+
+# Dynamic SL/TP (Enhancement 3)
+KAMA_DYNAMIC_SL_TP_ENABLED = True
+KAMA_ATR_PERIOD = 14                  # ATR calculation period
+KAMA_BASE_SL_ATR_MULTIPLIER = 2.0     # Base SL: 2x ATR
+KAMA_BASE_TP_ATR_MULTIPLIER = 3.0     # Base TP: 3x ATR
+KAMA_MIN_RR_RATIO = 1.5               # Minimum risk:reward ratio
+
+# Support/Resistance Awareness (Enhancement 4)
+KAMA_SR_VALIDATION_ENABLED = True
+KAMA_SR_PROXIMITY_PIPS = 20           # Check within 20 pips of S/R levels
 KAMA_MTF_MIN_AGREEMENT = 0.6        # Minimum agreement required (60%)
 
 # KAMA Risk Management

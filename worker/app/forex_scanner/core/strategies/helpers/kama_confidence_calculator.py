@@ -161,6 +161,18 @@ class KAMAConfidenceCalculator:
             adjusted_confidence = self._apply_kama_adjustments(
                 base_confidence, signal_data, df, epic
             )
+
+            # Apply Phase 2 volume confidence adjustment (if present)
+            volume_adj = signal_data.get('volume_confidence_adj', 0.0)
+            if volume_adj != 0.0:
+                adjusted_confidence += volume_adj
+                self.logger.debug(f"[VOLUME ADJ] Applied {volume_adj:+.1%} from volume confirmation")
+
+            # Apply Phase 2 RSI confidence adjustment (if present)
+            rsi_adj = signal_data.get('rsi_confidence_adj', 0.0)
+            if rsi_adj != 0.0:
+                adjusted_confidence += rsi_adj
+                self.logger.debug(f"[RSI ADJ] Applied {rsi_adj:+.1%} from RSI momentum filter")
             
             # Final bounds and validation
             # Phase 1 ADJUSTMENT: Reduced minimum floor from 0.15 to 0.10 to allow proper filtering

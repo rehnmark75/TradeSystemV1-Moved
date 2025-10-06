@@ -82,9 +82,33 @@ class KAMASignalDetector:
             if not self._validate_macd_alignment(current_row, signal_data['signal_type']):
                 return None
 
-            # ADX trend strength validation (CRITICAL NEW ADDITION)
+            # ADX trend strength validation (Phase 1)
             if not self._validate_adx_trend_strength(current_row, signal_data['signal_type']):
                 return None
+
+            # Volume confirmation validation (Phase 2.1)
+            volume_valid, volume_confidence_adjustment = self._validate_volume_confirmation(
+                current_row, df, signal_data['signal_type']
+            )
+            if not volume_valid:
+                return None  # Signal rejected due to very low volume
+
+            # Apply volume confidence adjustment to signal data
+            if volume_confidence_adjustment != 0.0:
+                signal_data['volume_confidence_adj'] = volume_confidence_adjustment
+                self.logger.debug(f"Volume confidence adjustment: {volume_confidence_adjustment:+.1%}")
+
+            # RSI momentum filter (Phase 2.2)
+            rsi_valid, rsi_confidence_adjustment = self._validate_rsi_momentum(
+                current_row, signal_data['signal_type']
+            )
+            if not rsi_valid:
+                return None  # Signal rejected due to RSI extreme (overbought/oversold)
+
+            # Apply RSI confidence adjustment to signal data
+            if rsi_confidence_adjustment != 0.0:
+                signal_data['rsi_confidence_adj'] = rsi_confidence_adjustment
+                self.logger.debug(f"RSI confidence adjustment: {rsi_confidence_adjustment:+.1%}")
 
             # Track detection statistics
             self._track_signal_detection(signal_data['signal_type'], signal_data['trigger_reason'])
@@ -457,6 +481,260 @@ class KAMASignalDetector:
         except Exception as e:
             self.logger.debug(f"ADX validation error: {e}")
             return True  # Don't reject on validation errors (graceful degradation)
+
+    def _validate_volume_confirmation(self, current_row: pd.Series, df: pd.DataFrame, signal_type: str) -> Tuple[bool, float]:
+        """
+        📊 PHASE 2: Volume Confirmation Validation
+
+        Validates signal based on volume compared to recent average.
+        Returns: (is_valid, confidence_adjustment)
+
+        Logic:
+        - Volume >2.0x average: +5% confidence (strong confirmation)
+        - Volume 1.5-2.0x average: +3% confidence (good confirmation)
+        - Volume 1.0-1.5x average: 0% adjustment (neutral)
+        - Volume <1.0x average: -5% confidence (low volume warning)
+        - Volume <0.5x average: Signal REJECTED (very low volume)
+        """
+        try:
+            # Check if volume validation is enabled
+            volume_enabled = getattr(config_kama_strategy, 'KAMA_VOLUME_VALIDATION_ENABLED', False)
+            if not volume_enabled:
+                self.logger.debug("Volume validation disabled - skipping")
+                return True, 0.0
+
+            # Get volume configuration
+            min_volume_mult = getattr(config_kama_strategy, 'KAMA_MIN_VOLUME_MULTIPLIER', 1.5)
+            strong_volume_mult = getattr(config_kama_strategy, 'KAMA_STRONG_VOLUME_MULTIPLIER', 2.0)
+            volume_lookback = getattr(config_kama_strategy, 'KAMA_VOLUME_LOOKBACK_PERIOD', 20)
+
+            # Look for volume column
+            volume_col = None
+            for col in current_row.index:
+                col_lower = col.lower()
+                if col_lower == 'volume' or 'volume' in col_lower:
+                    volume_col = col
+                    break
+
+            # If volume not available, don't reject (graceful degradation)
+            if not volume_col:
+                self.logger.debug("Volume column not found - skipping volume validation")
+                return True, 0.0
+
+            # Get current volume
+            current_volume = float(current_row[volume_col])
+            if current_volume <= 0:
+                self.logger.debug("Volume is zero or negative - skipping validation")
+                return True, 0.0
+
+            # Calculate average volume over lookback period
+            if len(df) < volume_lookback:
+                self.logger.debug(f"Insufficient data for volume average ({len(df)} < {volume_lookback})")
+                return True, 0.0
+
+            recent_volumes = df[volume_col].tail(volume_lookback)
+            avg_volume = recent_volumes.mean()
+
+            if avg_volume <= 0:
+                self.logger.debug("Average volume is zero - skipping validation")
+                return True, 0.0
+
+            # Calculate volume ratio
+            volume_ratio = current_volume / avg_volume
+
+            # REJECTION: Very low volume (< 0.5x average)
+            if volume_ratio < 0.5:
+                self.logger.warning(
+                    f"🚫 KAMA {signal_type} signal REJECTED: Very low volume "
+                    f"({volume_ratio:.2f}x average) - Insufficient liquidity"
+                )
+                return False, 0.0
+
+            # STRONG CONFIRMATION: Volume > 2.0x average
+            if volume_ratio >= strong_volume_mult:
+                confidence_boost = 0.05
+                self.logger.info(
+                    f"✅ KAMA {signal_type} STRONG VOLUME: {volume_ratio:.2f}x average "
+                    f"(+{confidence_boost:.1%} confidence)"
+                )
+                return True, confidence_boost
+
+            # GOOD CONFIRMATION: Volume 1.5-2.0x average
+            elif volume_ratio >= min_volume_mult:
+                confidence_boost = 0.03
+                self.logger.info(
+                    f"✅ KAMA {signal_type} GOOD VOLUME: {volume_ratio:.2f}x average "
+                    f"(+{confidence_boost:.1%} confidence)"
+                )
+                return True, confidence_boost
+
+            # NEUTRAL: Volume 1.0-1.5x average
+            elif volume_ratio >= 1.0:
+                self.logger.debug(
+                    f"✅ KAMA {signal_type} NORMAL VOLUME: {volume_ratio:.2f}x average (neutral)"
+                )
+                return True, 0.0
+
+            # LOW VOLUME WARNING: Volume < 1.0x average
+            else:
+                confidence_penalty = -0.05
+                self.logger.warning(
+                    f"⚠️ KAMA {signal_type} LOW VOLUME: {volume_ratio:.2f}x average "
+                    f"({confidence_penalty:.1%} confidence penalty)"
+                )
+                return True, confidence_penalty
+
+        except Exception as e:
+            self.logger.error(f"❌ Volume validation failed: {e}")
+            return True, 0.0  # Don't reject on errors, graceful degradation
+
+    def _validate_rsi_momentum(self, current_row: pd.Series, signal_type: str) -> Tuple[bool, float]:
+        """
+        📊 PHASE 2: RSI Momentum Filter
+
+        Prevents signals at extreme overbought/oversold levels.
+        Returns: (is_valid, confidence_adjustment)
+
+        Logic:
+        - BULL signal at RSI >70: REJECTED (overbought)
+        - BEAR signal at RSI <30: REJECTED (oversold)
+        - RSI in optimal zone: +4% confidence
+        - RSI approaching extreme: -3% confidence penalty
+        """
+        try:
+            # Check if RSI validation is enabled
+            rsi_enabled = getattr(config_kama_strategy, 'KAMA_RSI_VALIDATION_ENABLED', False)
+            if not rsi_enabled:
+                self.logger.debug("RSI validation disabled - skipping")
+                return True, 0.0
+
+            # Get RSI configuration
+            rsi_overbought = getattr(config_kama_strategy, 'KAMA_RSI_OVERBOUGHT', 70)
+            rsi_oversold = getattr(config_kama_strategy, 'KAMA_RSI_OVERSOLD', 30)
+            rsi_optimal_bull_min = getattr(config_kama_strategy, 'KAMA_RSI_OPTIMAL_BULL_MIN', 50)
+            rsi_optimal_bull_max = getattr(config_kama_strategy, 'KAMA_RSI_OPTIMAL_BULL_MAX', 65)
+            rsi_optimal_bear_min = getattr(config_kama_strategy, 'KAMA_RSI_OPTIMAL_BEAR_MIN', 35)
+            rsi_optimal_bear_max = getattr(config_kama_strategy, 'KAMA_RSI_OPTIMAL_BEAR_MAX', 50)
+
+            # Look for RSI column
+            rsi_col = None
+            for col in current_row.index:
+                col_lower = col.lower()
+                if col_lower == 'rsi' or col_lower.startswith('rsi'):
+                    rsi_col = col
+                    break
+
+            # If RSI not available, don't reject (graceful degradation)
+            if not rsi_col:
+                self.logger.debug("RSI column not found - skipping RSI validation")
+                return True, 0.0
+
+            # Get current RSI value
+            rsi_value = float(current_row[rsi_col])
+
+            # Validate RSI range
+            if rsi_value < 0 or rsi_value > 100:
+                self.logger.warning(f"Invalid RSI value: {rsi_value} - skipping validation")
+                return True, 0.0
+
+            # === BULL SIGNAL RSI VALIDATION ===
+            if signal_type in ['BULL', 'BUY']:
+
+                # REJECTION: Overbought (RSI > 70)
+                if rsi_value > rsi_overbought:
+                    self.logger.warning(
+                        f"🚫 KAMA BULL signal REJECTED: RSI overbought "
+                        f"({rsi_value:.1f} > {rsi_overbought}) - High reversal risk"
+                    )
+                    return False, 0.0
+
+                # OPTIMAL ZONE: RSI 50-65 for BULL
+                elif rsi_optimal_bull_min <= rsi_value <= rsi_optimal_bull_max:
+                    confidence_boost = 0.04
+                    self.logger.info(
+                        f"✅ KAMA BULL OPTIMAL RSI: {rsi_value:.1f} in zone [{rsi_optimal_bull_min}-{rsi_optimal_bull_max}] "
+                        f"(+{confidence_boost:.1%} confidence)"
+                    )
+                    return True, confidence_boost
+
+                # APPROACHING OVERBOUGHT: RSI 65-70
+                elif rsi_optimal_bull_max < rsi_value <= rsi_overbought:
+                    confidence_penalty = -0.03
+                    self.logger.warning(
+                        f"⚠️ KAMA BULL approaching overbought: RSI {rsi_value:.1f} "
+                        f"({confidence_penalty:.1%} confidence penalty)"
+                    )
+                    return True, confidence_penalty
+
+                # NEUTRAL: RSI 40-50
+                elif 40 <= rsi_value < rsi_optimal_bull_min:
+                    self.logger.debug(f"✅ KAMA BULL neutral RSI: {rsi_value:.1f} (acceptable)")
+                    return True, 0.0
+
+                # LOW RSI FOR BULL: RSI < 40 (potentially good entry)
+                else:
+                    confidence_boost = 0.02
+                    self.logger.info(
+                        f"✅ KAMA BULL low RSI: {rsi_value:.1f} - Good entry zone "
+                        f"(+{confidence_boost:.1%} confidence)"
+                    )
+                    return True, confidence_boost
+
+            # === BEAR SIGNAL RSI VALIDATION ===
+            elif signal_type in ['BEAR', 'SELL']:
+
+                # REJECTION: Oversold (RSI < 30)
+                if rsi_value < rsi_oversold:
+                    self.logger.warning(
+                        f"🚫 KAMA BEAR signal REJECTED: RSI oversold "
+                        f"({rsi_value:.1f} < {rsi_oversold}) - High reversal risk"
+                    )
+                    return False, 0.0
+
+                # OPTIMAL ZONE: RSI 35-50 for BEAR
+                elif rsi_optimal_bear_min <= rsi_value <= rsi_optimal_bear_max:
+                    confidence_boost = 0.04
+                    self.logger.info(
+                        f"✅ KAMA BEAR OPTIMAL RSI: {rsi_value:.1f} in zone [{rsi_optimal_bear_min}-{rsi_optimal_bear_max}] "
+                        f"(+{confidence_boost:.1%} confidence)"
+                    )
+                    return True, confidence_boost
+
+                # APPROACHING OVERSOLD: RSI 30-35
+                elif rsi_oversold <= rsi_value < rsi_optimal_bear_min:
+                    confidence_penalty = -0.03
+                    self.logger.warning(
+                        f"⚠️ KAMA BEAR approaching oversold: RSI {rsi_value:.1f} "
+                        f"({confidence_penalty:.1%} confidence penalty)"
+                    )
+                    return True, confidence_penalty
+
+                # NEUTRAL: RSI 50-60
+                elif rsi_optimal_bear_max < rsi_value <= 60:
+                    self.logger.debug(f"✅ KAMA BEAR neutral RSI: {rsi_value:.1f} (acceptable)")
+                    return True, 0.0
+
+                # HIGH RSI FOR BEAR: RSI > 60 (potentially good entry)
+                else:
+                    confidence_boost = 0.02
+                    self.logger.info(
+                        f"✅ KAMA BEAR high RSI: {rsi_value:.1f} - Good entry zone "
+                        f"(+{confidence_boost:.1%} confidence)"
+                    )
+                    return True, confidence_boost
+
+            else:
+                # Unknown signal type
+                self.logger.warning(f"Unknown signal type for RSI validation: {signal_type}")
+                return True, 0.0
+
+        except (ValueError, TypeError) as e:
+            self.logger.warning(f"⚠️ Could not parse RSI value: {e}")
+            return True, 0.0  # Don't reject on parsing errors
+
+        except Exception as e:
+            self.logger.error(f"❌ RSI validation failed: {e}")
+            return True, 0.0  # Don't reject on errors, graceful degradation
 
     def detect_kama_trend_change(
         self, 
