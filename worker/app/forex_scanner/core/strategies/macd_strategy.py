@@ -152,6 +152,24 @@ class MACDStrategy(BaseStrategy):
             self.logger.debug(f"❌ BEAR rejected: positive histogram {histogram:.6f}")
             return False
 
+        # CRITICAL FIX: Check MACD line position (zero line filter)
+        # BULL signals should have MACD line trending upward (can be below zero if reversing)
+        # BEAR signals should have MACD line trending downward (can be above zero if reversing)
+        # But we should avoid signals when MACD line contradicts direction strongly
+        macd_line = row.get('macd_line', 0)
+
+        # For BEAR signals, if MACD line is strongly positive (>0.1 for forex), it's a bad signal
+        # This prevents selling during strong uptrends just because histogram dipped slightly
+        if signal_type == 'BEAR' and macd_line > 0.05:
+            self.logger.info(f"❌ BEAR rejected: MACD line too positive {macd_line:.6f} (still in bullish territory)")
+            return False
+
+        # For BULL signals, if MACD line is strongly negative (<-0.1), it's a bad signal
+        # This prevents buying during strong downtrends just because histogram rose slightly
+        if signal_type == 'BULL' and macd_line < -0.05:
+            self.logger.info(f"❌ BULL rejected: MACD line too negative {macd_line:.6f} (still in bearish territory)")
+            return False
+
         # Check RSI (optional - just avoid extreme zones)
         rsi = row.get('rsi', 50)
         if signal_type == 'BULL' and rsi > 70:
