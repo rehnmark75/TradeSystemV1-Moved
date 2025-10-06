@@ -762,8 +762,8 @@ TIMEFRAME_WEIGHTS = {
 }
 
 # Alert Deduplication Configuration
-ALERT_COOLDOWN_MINUTES = 15      # Minutes between same epic+signal alerts
-STRATEGY_COOLDOWN_MINUTES = 10
+ALERT_COOLDOWN_MINUTES = 5       # Minutes between same epic+signal alerts (reduced from 15 - hash check disabled)
+STRATEGY_COOLDOWN_MINUTES = 3    # Strategy-specific cooldown (reduced from 10)
 GLOBAL_COOLDOWN_SECONDS = 30            # Global cooldown between any alerts 
 MAX_ALERTS_PER_HOUR = 50        # Global hourly alert limit
 MAX_ALERTS_PER_EPIC_HOUR = 6    # Per-epic hourly alert limit
@@ -781,7 +781,7 @@ CONFIDENCE_SIMILARITY_THRESHOLD = 0.05  # 5% confidence similarity threshold
 SIGNAL_HASH_CACHE_SIZE = 1000           # How many signal hashes to keep in memory
 SIGNAL_HASH_CACHE_EXPIRY_MINUTES = 15   # Minutes before cache entries expire (matches database check)
 MAX_SIGNAL_HASH_CACHE_SIZE = 1000       # Max cache size before forced cleanup
-ENABLE_TIME_BASED_HASH_COMPONENTS = True # Include time buckets in hash generation
+ENABLE_TIME_BASED_HASH_COMPONENTS = False # Disabled - Hash check too strict, blocking valid signals. Rely on cooldown layer instead.
 DEDUPLICATION_DEBUG_MODE = False        # Enable verbose deduplication logging
 DEDUPLICATION_CLEANUP_INTERVAL = 100    # Clean cache every N checks
 
