@@ -9,7 +9,7 @@ Configuration module for Ichimoku Kinko Hyo (One Glance Equilibrium Chart) strat
 # =============================================================================
 
 # Core Strategy Settings
-ICHIMOKU_CLOUD_STRATEGY = True          # True = enable Ichimoku Cloud strategy
+ICHIMOKU_CLOUD_STRATEGY = False         # True = enable Ichimoku Cloud strategy
 STRATEGY_WEIGHT_ICHIMOKU = 0.6          # Ichimoku strategy weight (slightly higher due to comprehensive nature)
 
 # Epic Filtering Configuration - ICHIMOKU STRATEGY ONLY

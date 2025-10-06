@@ -15,6 +15,15 @@ from typing import Dict, Optional, List, Tuple
 import logging
 from datetime import datetime
 
+# Import KAMA configuration
+try:
+    from configdata.strategies import config_kama_strategy
+except ImportError:
+    try:
+        from forex_scanner.configdata.strategies import config_kama_strategy
+    except ImportError:
+        config_kama_strategy = None
+
 
 class KAMASignalDetector:
     """
@@ -125,14 +134,7 @@ class KAMASignalDetector:
         """
         try:
             # Get KAMA ER period from config
-            try:
-                from configdata.strategies import config_kama_strategy
-            except ImportError:
-                try:
-                    from forex_scanner.configdata.strategies import config_kama_strategy
-                except ImportError:
-                    from forex_scanner.configdata.strategies import config_kama_strategy as config_kama_strategy
-            er_period = getattr(config_kama_strategy, 'KAMA_ER_PERIOD', 14)
+            er_period = getattr(config_kama_strategy, 'KAMA_ER_PERIOD', 14) if config_kama_strategy else 14
             
             # Try different KAMA column names
             possible_kama_cols = [
@@ -246,16 +248,9 @@ class KAMASignalDetector:
             if self.forex_optimizer:
                 kama_thresholds = self.forex_optimizer.get_kama_thresholds_for_pair(epic)
             else:
-                try:
-                    from configdata.strategies import config_kama_strategy
-                except ImportError:
-                    try:
-                        from forex_scanner.configdata.strategies import config_kama_strategy
-                    except ImportError:
-                        from forex_scanner.configdata.strategies import config_kama_strategy as config_kama_strategy
                 kama_thresholds = {
-                    'min_efficiency': getattr(config_kama_strategy, 'KAMA_MIN_EFFICIENCY', 0.1),
-                    'trend_threshold': getattr(config_kama_strategy, 'KAMA_TREND_THRESHOLD', 0.05)
+                    'min_efficiency': getattr(config_kama_strategy, 'KAMA_MIN_EFFICIENCY', 0.1) if config_kama_strategy else 0.1,
+                    'trend_threshold': getattr(config_kama_strategy, 'KAMA_TREND_THRESHOLD', 0.05) if config_kama_strategy else 0.05
                 }
             
             signal_type = None
@@ -497,6 +492,11 @@ class KAMASignalDetector:
         - Volume <0.5x average: Signal REJECTED (very low volume)
         """
         try:
+            # Check if config is available
+            if not config_kama_strategy:
+                self.logger.debug("KAMA config not available - skipping volume validation")
+                return True, 0.0
+
             # Check if volume validation is enabled
             volume_enabled = getattr(config_kama_strategy, 'KAMA_VOLUME_VALIDATION_ENABLED', False)
             if not volume_enabled:
@@ -602,6 +602,11 @@ class KAMASignalDetector:
         - RSI approaching extreme: -3% confidence penalty
         """
         try:
+            # Check if config is available
+            if not config_kama_strategy:
+                self.logger.debug("KAMA config not available - skipping RSI validation")
+                return True, 0.0
+
             # Check if RSI validation is enabled
             rsi_enabled = getattr(config_kama_strategy, 'KAMA_RSI_VALIDATION_ENABLED', False)
             if not rsi_enabled:

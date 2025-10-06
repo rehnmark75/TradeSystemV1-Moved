@@ -379,16 +379,16 @@ MACD_STRATEGY = True  # Core MACD strategy
 KAMA_STRATEGY = True  # ENABLED - Phase 1 optimization complete, ready for testing
 
 # Enable SMC Strategy
-SMC_STRATEGY = True  # Smart Money Concepts strategy
+SMC_STRATEGY = False  # Smart Money Concepts strategy
 
 # Enable Ichimoku Cloud Strategy
-ICHIMOKU_CLOUD_STRATEGY = True  # Ichimoku Kinko Hyo strategy
+ICHIMOKU_CLOUD_STRATEGY = False  # Ichimoku Kinko Hyo strategy
 
 # Mean Reversion Strategy
-MEAN_REVERSION_STRATEGY = True  # Multi-oscillator mean reversion strategy
+MEAN_REVERSION_STRATEGY = False  # Multi-oscillator mean reversion strategy
 
 # Strategy Configurations - Additional strategies
-RANGING_MARKET_STRATEGY = True  # Multi-oscillator ranging market strategy - Re-enabled, ADX filter removed from strategy
+RANGING_MARKET_STRATEGY = False  # Multi-oscillator ranging market strategy - Re-enabled, ADX filter removed from strategy
 
 # KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
 

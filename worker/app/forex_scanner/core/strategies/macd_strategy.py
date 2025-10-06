@@ -58,9 +58,11 @@ class MACDStrategy(BaseStrategy):
         self.slow_period = 26
         self.signal_period = 9
 
-        # Validation thresholds
-        self.min_adx = 20  # Trending markets threshold (testing for optimal value)
+        # Validation thresholds (read from config)
+        self.min_adx = getattr(config_macd_strategy, 'MACD_MIN_ADX', 20) if config_macd_strategy else 20
         self.min_confidence = 0.60  # 60% minimum confidence (lowered to allow more signals)
+
+        self.logger.info(f"🎯 MACD ADX threshold set to: {self.min_adx} (from config)")
 
         # EMA filter configuration (from config file)
         ema_filter_config = getattr(config_macd_strategy, 'MACD_EMA_FILTER', {}) if config_macd_strategy else {}

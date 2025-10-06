@@ -13,7 +13,7 @@ Features:
 """
 
 # Strategy enable/disable
-SMC_STRATEGY = True
+SMC_STRATEGY = False
 
 # Main configuration dictionary with multiple presets
 SMC_STRATEGY_CONFIG = {

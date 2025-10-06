@@ -10,7 +10,7 @@ Based on TradingView analysis: LazyBear Squeeze Momentum, Wave Trend Oscillator,
 # =============================================================================
 
 # Core Strategy Settings
-RANGING_MARKET_STRATEGY = True     # True = enable ranging market strategy
+RANGING_MARKET_STRATEGY = False     # True = enable ranging market strategy
 STRATEGY_WEIGHT_RANGING_MARKET = 0.35   # Ranging market strategy weight
 
 # =============================================================================
