@@ -86,19 +86,19 @@ class ADXCalculator:
             df['DM_minus_smooth'] = self._wilders_smoothing(df['DM_minus'], self.period)
             
             # Calculate Directional Indicators (+DI and -DI)
-            df['DI_plus'] = 100 * (df['DM_plus_smooth'] / df['TR_smooth'])
-            df['DI_minus'] = 100 * (df['DM_minus_smooth'] / df['TR_smooth'])
-            
+            df['plus_di'] = 100 * (df['DM_plus_smooth'] / df['TR_smooth'])
+            df['minus_di'] = 100 * (df['DM_minus_smooth'] / df['TR_smooth'])
+
             # Calculate DX (Directional Index)
-            di_sum = df['DI_plus'] + df['DI_minus']
-            di_diff = abs(df['DI_plus'] - df['DI_minus'])
-            df['DX'] = 100 * (di_diff / di_sum)
-            
+            di_sum = df['plus_di'] + df['minus_di']
+            di_diff = abs(df['plus_di'] - df['minus_di'])
+            df['dx'] = 100 * (di_diff / di_sum)
+
             # Calculate ADX using Wilder's smoothing on DX
-            df['ADX'] = self._wilders_smoothing(df['DX'], self.period)
+            df['adx'] = self._wilders_smoothing(df['dx'], self.period)
             
             # Clean up intermediate columns
-            df.drop(['TR_smooth', 'DM_plus_smooth', 'DM_minus_smooth', 'DX'], axis=1, inplace=True, errors='ignore')
+            df.drop(['TR_smooth', 'DM_plus_smooth', 'DM_minus_smooth'], axis=1, inplace=True, errors='ignore')
             
             self.logger.debug(f"ADX calculation completed for {len(df)} bars")
             return df

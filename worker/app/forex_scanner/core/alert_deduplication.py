@@ -73,6 +73,7 @@ class AlertDeduplicationManager:
         self._signal_hash_cache = {}  # Dict of {hash: timestamp} for time-aware expiry
         self._cache_expiry_minutes = getattr(config, 'SIGNAL_HASH_CACHE_EXPIRY_MINUTES', 15)
         self._max_cache_size = getattr(config, 'MAX_SIGNAL_HASH_CACHE_SIZE', 1000)
+        self._enable_hash_check = getattr(config, 'ENABLE_SIGNAL_HASH_CHECK', True)
         self._enable_time_hash = getattr(config, 'ENABLE_TIME_BASED_HASH_COMPONENTS', True)
         self._hourly_alert_count = 0
         self._last_count_reset = datetime.now()
@@ -343,9 +344,12 @@ class AlertDeduplicationManager:
         checks = [
             ("Global Rate Limit", self._check_global_rate_limits()),
             ("Epic Rate Limit", self._check_epic_rate_limits(epic)),
-            ("Signal Hash Duplicate", self._check_signal_hash_duplicate(signal_hash)),
             ("Cooldown Period", self._check_cooldown_periods(cooldown_key)),
         ]
+
+        # Only add hash check if enabled (master switch)
+        if self._enable_hash_check:
+            checks.insert(2, ("Signal Hash Duplicate", self._check_signal_hash_duplicate(signal_hash)))
         
         # Log check results
         self.logger.debug(f"🔍 Deduplication checks for {epic} {signal_type}:")

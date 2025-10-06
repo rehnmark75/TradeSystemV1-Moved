@@ -22,6 +22,19 @@ MACD_PERIODS = {
 # MACD Threshold Settings
 MACD_THRESHOLD_BUFFER_MULTIPLIER = 1.1  # Require MACD histogram to exceed threshold by this multiplier
 
+# Minimum Histogram Thresholds (Pair-Specific)
+# Prevents tiny, invisible crossovers from generating signals
+MACD_MIN_HISTOGRAM_THRESHOLDS = {
+    'default': 0.0002,       # EUR/USD, GBP/USD, AUD/USD, etc. (~0.02 pips)
+    'EURJPY': 0.020,         # EUR/JPY (price ~160, needs 2 pips)
+    'GBPJPY': 0.020,         # GBP/JPY (price ~190, needs 2 pips)
+    'AUDJPY': 0.012,         # AUD/JPY (price ~98, needs 1.2 pips)
+    'NZDJPY': 0.010,         # NZD/JPY (price ~90, needs 1 pip)
+    'USDJPY': 0.015,         # USD/JPY (price ~150, needs 1.5 pips)
+    'CADJPY': 0.012,         # CAD/JPY (price ~110, needs 1.2 pips)
+    'CHFJPY': 0.015,         # CHF/JPY (price ~170, needs 1.5 pips)
+}
+
 # Technical Validation Thresholds (Enhanced MACD Detection)
 CLAUDE_MACD_CRITICAL_THRESHOLD = -0.0001      # Critical MACD histogram threshold for BULL signals
 CLAUDE_MACD_BEAR_CRITICAL_THRESHOLD = 0.0001  # Critical MACD histogram threshold for BEAR signals

@@ -781,6 +781,7 @@ CONFIDENCE_SIMILARITY_THRESHOLD = 0.05  # 5% confidence similarity threshold
 SIGNAL_HASH_CACHE_SIZE = 1000           # How many signal hashes to keep in memory
 SIGNAL_HASH_CACHE_EXPIRY_MINUTES = 15   # Minutes before cache entries expire (matches database check)
 MAX_SIGNAL_HASH_CACHE_SIZE = 1000       # Max cache size before forced cleanup
+ENABLE_SIGNAL_HASH_CHECK = False        # Master switch - Completely disable hash duplicate check (cooldown layer sufficient)
 ENABLE_TIME_BASED_HASH_COMPONENTS = False # Disabled - Hash check too strict, blocking valid signals. Rely on cooldown layer instead.
 DEDUPLICATION_DEBUG_MODE = False        # Enable verbose deduplication logging
 DEDUPLICATION_CLEANUP_INTERVAL = 100    # Clean cache every N checks

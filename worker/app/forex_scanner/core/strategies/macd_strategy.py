@@ -99,7 +99,23 @@ class MACDStrategy(BaseStrategy):
         else:
             self.logger.info(f"⚪ ADX Crossover Trigger DISABLED")
 
+        # ATR-based SL/TP configuration
+        self.stop_atr_multiplier = getattr(config_macd_strategy, 'MACD_STOP_LOSS_ATR_MULTIPLIER', 1.8) if config_macd_strategy else 1.8
+        self.target_atr_multiplier = getattr(config_macd_strategy, 'MACD_TAKE_PROFIT_ATR_MULTIPLIER', 4.0) if config_macd_strategy else 4.0
+        self.use_structure_stops = getattr(config_macd_strategy, 'MACD_USE_STRUCTURE_STOPS', True) if config_macd_strategy else True
+        self.min_stop_pips = getattr(config_macd_strategy, 'MACD_MIN_STOP_DISTANCE_PIPS', 12.0) if config_macd_strategy else 12.0
+        self.max_stop_pips = getattr(config_macd_strategy, 'MACD_MAX_STOP_DISTANCE_PIPS', 30.0) if config_macd_strategy else 30.0
+
+        # Minimum histogram thresholds (pair-specific to prevent tiny crossovers)
+        self.min_histogram_thresholds = getattr(config_macd_strategy, 'MACD_MIN_HISTOGRAM_THRESHOLDS', {
+            'default': 0.0002,
+            'EURJPY': 0.020, 'GBPJPY': 0.020, 'AUDJPY': 0.012,
+            'NZDJPY': 0.010, 'USDJPY': 0.015, 'CADJPY': 0.012, 'CHFJPY': 0.015
+        }) if config_macd_strategy else {}
+
         self.logger.info(f"✅ Clean MACD Strategy initialized - ADX >= {self.min_adx}, Swing validation: {self.swing_validator is not None}")
+        self.logger.info(f"📊 SL/TP: {self.stop_atr_multiplier}x ATR stop, {self.target_atr_multiplier}x ATR target (Structure stops: {self.use_structure_stops})")
+        self.logger.info(f"📏 Histogram thresholds: Default={self.min_histogram_thresholds.get('default', 0.0002)}, JPY pairs scaled 50-100x higher")
         self.logger.info(f"🔧 CRITICAL DEBUG: Using REBUILT MACD with NaN validation and dynamic EMA filter (v2.0)")
 
     def calculate_macd(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -261,13 +277,13 @@ class MACDStrategy(BaseStrategy):
         self.logger.info(f"✅ ADX {signal_type} signal validated")
         return True
 
-    def validate_signal(self, row: pd.Series, signal_type: str) -> bool:
+    def validate_signal(self, row: pd.Series, signal_type: str, epic: str = None) -> bool:
         """
         Validate signal meets quality requirements
 
         Checks:
         1. ADX >= 30 (strong trend)
-        2. Histogram in correct direction
+        2. Histogram in correct direction AND magnitude
         3. RSI in reasonable zone
         4. Dynamic EMA trend filter (ADX-based volatility adaptation)
         """
@@ -285,6 +301,16 @@ class MACDStrategy(BaseStrategy):
 
         # Log ADX for signals that pass (for debugging)
         self.logger.info(f"✅ {signal_type} passed ADX filter: ADX={adx:.1f} (min={self.min_adx})")
+
+        # Check histogram magnitude (pair-specific thresholds)
+        histogram = row.get('macd_histogram', 0)
+        if epic:
+            min_histogram = self._get_min_histogram(epic)
+            if abs(histogram) < min_histogram:
+                self.logger.info(f"❌ {signal_type} rejected: Histogram {histogram:.6f} too small (min={min_histogram:.6f}) - not visible on chart")
+                return False
+            else:
+                self.logger.debug(f"✅ Histogram magnitude OK: {abs(histogram):.6f} >= {min_histogram:.6f}")
 
         # Check histogram direction
         histogram = row.get('macd_histogram', 0)
@@ -440,11 +466,30 @@ class MACDStrategy(BaseStrategy):
                 'ema_100': row.get('ema_100', 0),
                 'ema_200': row.get('ema_200', 0),
                 'ema_filter_used': ema_filter_used,  # Which EMA was used for filtering
-
-                # Stop loss / Take profit (will be set later)
-                'stop_distance': 20,
-                'limit_distance': 30,
             }
+
+            # Calculate ATR-based SL/TP
+            atr = row.get('atr', None)
+            if atr and atr > 0:
+                # Get pip value for this epic
+                pip_value = self._get_pip_value(epic)
+
+                # Calculate ATR in pips
+                atr_pips = atr / pip_value
+
+                # Calculate SL/TP based on ATR multipliers
+                stop_distance = max(self.min_stop_pips, min(self.max_stop_pips, atr_pips * self.stop_atr_multiplier))
+                limit_distance = atr_pips * self.target_atr_multiplier
+
+                self.logger.debug(f"📊 ATR-based SL/TP: ATR={atr_pips:.1f} pips, SL={stop_distance:.1f}, TP={limit_distance:.1f}")
+            else:
+                # Fallback to defaults if ATR not available
+                stop_distance = self.min_stop_pips
+                limit_distance = self.min_stop_pips * 2.5
+                self.logger.warning(f"⚠️ ATR not available, using default SL/TP: {stop_distance}/{limit_distance} pips")
+
+            signal['stop_distance'] = stop_distance
+            signal['limit_distance'] = limit_distance
 
             return signal
 
@@ -473,6 +518,14 @@ class MACDStrategy(BaseStrategy):
             if 'rsi' not in df.columns:
                 df = self._calculate_rsi(df)
 
+            # Identify swing points for proximity validation and strategy_indicators
+            if self.swing_validator and self.swing_validator.smc_analyzer:
+                try:
+                    df = self.swing_validator.smc_analyzer.identify_swing_points(df)
+                    self.logger.debug(f"Swing points identified for {epic}")
+                except Exception as e:
+                    self.logger.debug(f"Swing point identification skipped: {e}")
+
             # Detect MACD histogram crossovers (Priority 1)
             df = self.detect_crossover(df)
 
@@ -488,7 +541,7 @@ class MACDStrategy(BaseStrategy):
 
             # PRIORITY 1: Check for MACD histogram BULL crossover (stronger signal)
             if latest_bar.get('bull_crossover', False):
-                if self.validate_signal(latest_bar, 'BULL'):
+                if self.validate_signal(latest_bar, 'BULL', epic=epic):
                     signal = self.create_signal(latest_bar, 'BULL', epic, timeframe, trigger_type='macd')
                     if signal:
                         # Swing proximity validation (uses full DataFrame for context)
@@ -507,7 +560,7 @@ class MACDStrategy(BaseStrategy):
 
             # PRIORITY 1: Check for MACD histogram BEAR crossover (stronger signal)
             if latest_bar.get('bear_crossover', False):
-                if self.validate_signal(latest_bar, 'BEAR'):
+                if self.validate_signal(latest_bar, 'BEAR', epic=epic):
                     signal = self.create_signal(latest_bar, 'BEAR', epic, timeframe, trigger_type='macd')
                     if signal:
                         # Swing proximity validation (uses full DataFrame for context)
@@ -592,12 +645,22 @@ class MACDStrategy(BaseStrategy):
         plus_di_smooth = plus_dm.ewm(alpha=1/period, adjust=False).mean()
         minus_di_smooth = minus_dm.ewm(alpha=1/period, adjust=False).mean()
 
+        # Add ATR to DataFrame for SL/TP calculation
+        df['atr'] = atr
+
         # Directional Indicators
         plus_di = 100 * (plus_di_smooth / atr)
         minus_di = 100 * (minus_di_smooth / atr)
 
+        # Add directional indicators to DataFrame
+        df['plus_di'] = plus_di
+        df['minus_di'] = minus_di
+        df['di_plus'] = plus_di  # Alternative name
+        df['di_minus'] = minus_di  # Alternative name
+
         # DX and ADX with Wilder's smoothing
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        df['dx'] = dx
         df['adx'] = dx.ewm(alpha=1/period, adjust=False).mean()
 
         return df
@@ -611,6 +674,43 @@ class MACDStrategy(BaseStrategy):
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
         return df
+
+    def _get_pip_value(self, epic: str) -> float:
+        """
+        Get pip value for epic/instrument
+
+        Returns:
+            Pip value (e.g., 0.0001 for EUR pairs, 0.01 for JPY pairs)
+        """
+        # JPY pairs use 0.01 as pip value (2 decimal places)
+        if 'JPY' in epic or 'jpy' in epic.lower():
+            return 0.01
+        # Most other forex pairs use 0.0001 (4 decimal places)
+        else:
+            return 0.0001
+
+    def _get_min_histogram(self, epic: str) -> float:
+        """
+        Get minimum histogram threshold for this epic/pair
+
+        JPY pairs need much larger histogram movement to be visible
+        because their price values are 100x larger (e.g., 150 vs 1.5)
+
+        Returns:
+            Minimum histogram value required for valid signal
+        """
+        # Extract pair name from epic (e.g., CS.D.EURJPY.MINI.IP -> EURJPY)
+        pair = epic.upper()
+        for p in ['EURJPY', 'GBPJPY', 'AUDJPY', 'NZDJPY', 'USDJPY', 'CADJPY', 'CHFJPY']:
+            if p in pair:
+                threshold = self.min_histogram_thresholds.get(p, 0.015)
+                self.logger.debug(f"📏 {p} minimum histogram: {threshold}")
+                return threshold
+
+        # Default for non-JPY pairs
+        default = self.min_histogram_thresholds.get('default', 0.0002)
+        self.logger.debug(f"📏 Default minimum histogram: {default}")
+        return default
 
     # Required abstract methods from BaseStrategy
     def get_required_indicators(self):

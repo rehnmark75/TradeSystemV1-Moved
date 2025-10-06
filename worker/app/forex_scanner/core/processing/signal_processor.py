@@ -486,6 +486,7 @@ class SignalProcessor:
         smart_money_strategies = {
             'ema': True,
             'macd': True,
+            'kama': True,
             'combined': True,
             'ichimoku': True,
             'smc': True,
