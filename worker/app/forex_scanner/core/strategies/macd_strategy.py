@@ -428,18 +428,15 @@ class MACDStrategy(BaseStrategy):
         # Log ADX for signals that pass (for debugging)
         self.logger.info(f"✅ {signal_type} passed ADX filter: ADX={adx:.1f} (min={self.min_adx})")
 
-        # DISABLED: Histogram magnitude check - blocks legitimate crossovers at zero-line
-        # The histogram is always tiny at the moment of crossover by mathematical necessity
-        # ADX >= 25 filter already confirms strong trends, making this redundant
-        #
-        # histogram = row.get('macd_histogram', 0)
-        # if epic:
-        #     min_histogram = self._get_min_histogram(epic)
-        #     if abs(histogram) < min_histogram:
-        #         self.logger.info(f"❌ {signal_type} rejected: Histogram {histogram:.6f} too small (min={min_histogram:.6f}) - not visible on chart")
-        #         return False
-        #     else:
-        #         self.logger.debug(f"✅ Histogram magnitude OK: {abs(histogram):.6f} >= {min_histogram:.6f}")
+        # ENABLED: Histogram magnitude check - ensures signal has sufficient momentum
+        histogram = row.get('macd_histogram', 0)
+        if epic:
+            min_histogram = self._get_min_histogram(epic)
+            if abs(histogram) < min_histogram:
+                self.logger.info(f"❌ {signal_type} rejected: Histogram {abs(histogram):.6f} too small (min={min_histogram:.6f} for {epic})")
+                return False
+            else:
+                self.logger.info(f"✅ {signal_type} histogram magnitude OK: {abs(histogram):.6f} >= {min_histogram:.6f}")
 
         # Check histogram direction
         histogram = row.get('macd_histogram', 0)
@@ -671,6 +668,7 @@ class MACDStrategy(BaseStrategy):
 
             # PRIORITY 1: Check for MACD histogram BULL crossover (stronger signal)
             if latest_bar.get('bull_crossover', False):
+                self.logger.info(f"🎯 BULL crossover triggered, validating signal for {epic}...")
                 if self.validate_signal(latest_bar, 'BULL', epic=epic):
                     signal = self.create_signal(latest_bar, 'BULL', epic, timeframe, trigger_type='macd')
                     if signal:
@@ -690,6 +688,7 @@ class MACDStrategy(BaseStrategy):
 
             # PRIORITY 1: Check for MACD histogram BEAR crossover (stronger signal)
             if latest_bar.get('bear_crossover', False):
+                self.logger.info(f"🎯 BEAR crossover triggered, validating signal for {epic}...")
                 if self.validate_signal(latest_bar, 'BEAR', epic=epic):
                     signal = self.create_signal(latest_bar, 'BEAR', epic, timeframe, trigger_type='macd')
                     if signal:
@@ -773,15 +772,18 @@ class MACDStrategy(BaseStrategy):
             # Log BULL crossover events
             if latest.get('bull_cross_initial', False):
                 hist = latest['macd_histogram']
-                self.logger.info(f"🔵 BULL crossover detected: histogram={hist:.6f}, threshold={min_histogram:.6f}{adx_info}")
+                meets_threshold = hist >= min_histogram
+                threshold_emoji = "✅" if meets_threshold else "❌"
+                self.logger.info(f"🔵 BULL CROSSOVER DETECTED (Bar 0/3)")
+                self.logger.info(f"   📊 Histogram: {hist:.6f} {threshold_emoji} (threshold: {min_histogram:.6f}){adx_info}")
 
                 if self.expansion_allow_immediate and hist >= min_histogram:
                     if not self.require_adx_rising or latest.get('adx_is_rising', True):
-                        self.logger.info(f"   ✅ IMMEDIATE trigger approved (histogram > threshold & ADX rising)")
+                        self.logger.info(f"   ✅ IMMEDIATE TRIGGER APPROVED - All conditions met on crossover bar")
                     else:
-                        self.logger.info(f"   ❌ IMMEDIATE trigger BLOCKED (ADX not rising)")
+                        self.logger.info(f"   ❌ IMMEDIATE TRIGGER BLOCKED - ADX not rising")
                 else:
-                    self.logger.info(f"   ⏳ Waiting for expansion (need histogram={min_histogram:.6f}, ADX rising)")
+                    self.logger.info(f"   ⏳ WAITING FOR EXPANSION - Tracking for next 3 bars...")
 
             elif latest.get('bull_window', False):
                 bars_since = int(latest.get('bull_bars_since_cross', 0))
@@ -789,44 +791,45 @@ class MACDStrategy(BaseStrategy):
                 hist_ok = hist >= min_histogram
                 adx_ok = latest.get('adx_is_rising', True) if self.require_adx_rising else True
 
-                status_parts = []
-                status_parts.append(f"histogram={hist:.6f} {'✅' if hist_ok else '❌'}")
-                if self.require_adx_rising:
-                    status_parts.append(f"ADX {'✅ rising' if adx_ok else '❌ flat/falling'}")
-                status = ", ".join(status_parts)
+                hist_emoji = "✅" if hist_ok else "❌"
+                adx_emoji = "✅" if adx_ok else "❌"
 
-                self.logger.debug(f"🔵 BULL expansion check (bar {bars_since}/{self.expansion_window_bars}): {status}")
+                self.logger.info(f"🔵 BULL EXPANSION CHECK (Bar {bars_since}/{self.expansion_window_bars})")
+                self.logger.info(f"   📊 Histogram: {hist:.6f} {hist_emoji} (need: {min_histogram:.6f}){adx_info}")
 
                 if latest.get('bull_crossover', False):
-                    self.logger.info(f"   ✅ EXPANSION CONFIRMED (bar {bars_since}): All conditions met!")
+                    self.logger.info(f"   🎯 ✅ EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
                 elif bars_since >= self.expansion_window_bars:
                     reasons = []
                     if not hist_ok:
-                        reasons.append(f"histogram never reached {min_histogram:.6f}")
+                        reasons.append(f"histogram never reached {min_histogram:.6f} (max: {hist:.6f})")
                     if self.require_adx_rising and not adx_ok:
                         reasons.append("ADX not rising")
-                    self.logger.info(f"   ❌ EXPANSION FAILED: {', '.join(reasons)}")
+                    self.logger.info(f"   ⏰ ❌ EXPANSION WINDOW EXPIRED - Signal abandoned: {', '.join(reasons)}")
                 else:
                     waiting_for = []
                     if not hist_ok:
-                        waiting_for.append(f"histogram expansion ({hist:.6f} < {min_histogram:.6f})")
+                        waiting_for.append(f"histogram to reach {min_histogram:.6f} (current: {hist:.6f})")
                     if self.require_adx_rising and not adx_ok:
                         waiting_for.append("ADX to rise")
                     if waiting_for:
-                        self.logger.debug(f"   ⏳ Still waiting for: {', '.join(waiting_for)}")
+                        self.logger.info(f"   ⏳ Still waiting: {', '.join(waiting_for)}")
 
             # Log BEAR crossover events
             if latest.get('bear_cross_initial', False):
                 hist = latest['macd_histogram']
-                self.logger.info(f"🔴 BEAR crossover detected: histogram={hist:.6f}, threshold={min_histogram:.6f}{adx_info}")
+                meets_threshold = abs(hist) >= min_histogram
+                threshold_emoji = "✅" if meets_threshold else "❌"
+                self.logger.info(f"🔴 BEAR CROSSOVER DETECTED (Bar 0/3)")
+                self.logger.info(f"   📊 Histogram: {hist:.6f} {threshold_emoji} (threshold: {min_histogram:.6f}){adx_info}")
 
                 if self.expansion_allow_immediate and abs(hist) >= min_histogram:
                     if not self.require_adx_rising or latest.get('adx_is_rising', True):
-                        self.logger.info(f"   ✅ IMMEDIATE trigger approved (|histogram| > threshold & ADX rising)")
+                        self.logger.info(f"   ✅ IMMEDIATE TRIGGER APPROVED - All conditions met on crossover bar")
                     else:
-                        self.logger.info(f"   ❌ IMMEDIATE trigger BLOCKED (ADX not rising)")
+                        self.logger.info(f"   ❌ IMMEDIATE TRIGGER BLOCKED - ADX not rising")
                 else:
-                    self.logger.info(f"   ⏳ Waiting for expansion (need |histogram|={min_histogram:.6f}, ADX rising)")
+                    self.logger.info(f"   ⏳ WAITING FOR EXPANSION - Tracking for next 3 bars...")
 
             elif latest.get('bear_window', False):
                 bars_since = int(latest.get('bear_bars_since_cross', 0))
@@ -834,31 +837,29 @@ class MACDStrategy(BaseStrategy):
                 hist_ok = abs(hist) >= min_histogram
                 adx_ok = latest.get('adx_is_rising', True) if self.require_adx_rising else True
 
-                status_parts = []
-                status_parts.append(f"|histogram|={abs(hist):.6f} {'✅' if hist_ok else '❌'}")
-                if self.require_adx_rising:
-                    status_parts.append(f"ADX {'✅ rising' if adx_ok else '❌ flat/falling'}")
-                status = ", ".join(status_parts)
+                hist_emoji = "✅" if hist_ok else "❌"
+                adx_emoji = "✅" if adx_ok else "❌"
 
-                self.logger.debug(f"🔴 BEAR expansion check (bar {bars_since}/{self.expansion_window_bars}): {status}")
+                self.logger.info(f"🔴 BEAR EXPANSION CHECK (Bar {bars_since}/{self.expansion_window_bars})")
+                self.logger.info(f"   📊 Histogram: {hist:.6f} (|{abs(hist):.6f}|) {hist_emoji} (need: {min_histogram:.6f}){adx_info}")
 
                 if latest.get('bear_crossover', False):
-                    self.logger.info(f"   ✅ EXPANSION CONFIRMED (bar {bars_since}): All conditions met!")
+                    self.logger.info(f"   🎯 ✅ EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
                 elif bars_since >= self.expansion_window_bars:
                     reasons = []
                     if not hist_ok:
-                        reasons.append(f"|histogram| never reached {min_histogram:.6f}")
+                        reasons.append(f"|histogram| never reached {min_histogram:.6f} (max: {abs(hist):.6f})")
                     if self.require_adx_rising and not adx_ok:
                         reasons.append("ADX not rising")
-                    self.logger.info(f"   ❌ EXPANSION FAILED: {', '.join(reasons)}")
+                    self.logger.info(f"   ⏰ ❌ EXPANSION WINDOW EXPIRED - Signal abandoned: {', '.join(reasons)}")
                 else:
                     waiting_for = []
                     if not hist_ok:
-                        waiting_for.append(f"histogram expansion ({abs(hist):.6f} < {min_histogram:.6f})")
+                        waiting_for.append(f"|histogram| to reach {min_histogram:.6f} (current: {abs(hist):.6f})")
                     if self.require_adx_rising and not adx_ok:
                         waiting_for.append("ADX to rise")
                     if waiting_for:
-                        self.logger.debug(f"   ⏳ Still waiting for: {', '.join(waiting_for)}")
+                        self.logger.info(f"   ⏳ Still waiting: {', '.join(waiting_for)}")
 
         except Exception as e:
             self.logger.debug(f"Error logging expansion status: {e}")
