@@ -2563,8 +2563,21 @@ class SignalDetector:
             all_indicators.update(adx_indicators)
             all_indicators.update(other_indicators)
 
+            # Helper function to clean NaN values from dict (PostgreSQL JSON doesn't accept NaN)
+            def clean_nan_values(obj):
+                """Recursively replace NaN with None in dict/list structures"""
+                if isinstance(obj, dict):
+                    return {k: clean_nan_values(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [clean_nan_values(item) for item in obj]
+                elif isinstance(obj, float):
+                    import math
+                    return None if math.isnan(obj) or math.isinf(obj) else obj
+                else:
+                    return obj
+
             if all_indicators:
-                signal['strategy_indicators'] = {
+                signal['strategy_indicators'] = clean_nan_values({
                     'ema_data': ema_indicators,
                     'macd_data': macd_indicators,
                     'kama_data': kama_indicators,
@@ -2574,7 +2587,7 @@ class SignalDetector:
                     'other_indicators': other_indicators,
                     'indicator_count': len(all_indicators),
                     'data_source': 'complete_dataframe_analysis'
-                }
+                })
 
             self.logger.debug(f"📊 Enhanced signal with {len(all_indicators)} indicators + swing/SR data")
             return signal

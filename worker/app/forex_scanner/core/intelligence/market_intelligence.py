@@ -45,7 +45,7 @@ class MarketIntelligenceEngine:
         Comprehensive market regime analysis - FIXED VERSION
         Returns: trending, ranging, breakout, reversal, high_vol, low_vol
         """
-        self.logger.info(f"🧠 Analyzing market regime for {len(epic_list)} pairs...")
+        self.logger.info(f"🧠 Analyzing market regime for {len(epic_list)} pairs: {[e.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '') for e in epic_list]}")
         
         regime_scores = {
             'trending': 0,

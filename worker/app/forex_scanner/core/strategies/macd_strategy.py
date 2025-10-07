@@ -108,15 +108,37 @@ class MACDStrategy(BaseStrategy):
 
         # Minimum histogram thresholds (pair-specific to prevent tiny crossovers)
         self.min_histogram_thresholds = getattr(config_macd_strategy, 'MACD_MIN_HISTOGRAM_THRESHOLDS', {
-            'default': 0.0002,
-            'EURJPY': 0.020, 'GBPJPY': 0.020, 'AUDJPY': 0.012,
+            'default': 0.00003,
+            'EURJPY': 0.030, 'GBPJPY': 0.020, 'AUDJPY': 0.012,
             'NZDJPY': 0.010, 'USDJPY': 0.015, 'CADJPY': 0.012, 'CHFJPY': 0.015
         }) if config_macd_strategy else {}
 
+        # Histogram expansion confirmation settings
+        self.expansion_enabled = getattr(config_macd_strategy, 'MACD_EXPANSION_ENABLED', True) if config_macd_strategy else True
+        self.expansion_window_bars = getattr(config_macd_strategy, 'MACD_EXPANSION_WINDOW_BARS', 3) if config_macd_strategy else 3
+        self.expansion_allow_immediate = getattr(config_macd_strategy, 'MACD_EXPANSION_ALLOW_IMMEDIATE', True) if config_macd_strategy else True
+        self.expansion_debug = getattr(config_macd_strategy, 'MACD_EXPANSION_DEBUG_LOGGING', True) if config_macd_strategy else True
+
+        # ADX trend validation settings
+        self.require_adx_rising = getattr(config_macd_strategy, 'MACD_REQUIRE_ADX_RISING', True) if config_macd_strategy else True
+        self.adx_rising_lookback = getattr(config_macd_strategy, 'MACD_ADX_RISING_LOOKBACK', 2) if config_macd_strategy else 2
+        self.adx_min_increase = getattr(config_macd_strategy, 'MACD_ADX_MIN_INCREASE', 0.5) if config_macd_strategy else 0.5
+
         self.logger.info(f"✅ Clean MACD Strategy initialized - ADX >= {self.min_adx}, Swing validation: {self.swing_validator is not None}")
         self.logger.info(f"📊 SL/TP: {self.stop_atr_multiplier}x ATR stop, {self.target_atr_multiplier}x ATR target (Structure stops: {self.use_structure_stops})")
-        self.logger.info(f"📏 Histogram thresholds: Default={self.min_histogram_thresholds.get('default', 0.0002)}, JPY pairs scaled 50-100x higher")
-        self.logger.info(f"🔧 CRITICAL DEBUG: Using REBUILT MACD with NaN validation and dynamic EMA filter (v2.0)")
+        self.logger.info(f"📏 Histogram thresholds: Default={self.min_histogram_thresholds.get('default', 0.00003)}, JPY pairs scaled 50-100x higher")
+
+        if self.expansion_enabled:
+            self.logger.info(f"📊 Histogram Expansion Confirmation ENABLED: Wait up to {self.expansion_window_bars} bars for expansion")
+        else:
+            self.logger.info(f"📊 Histogram Expansion Confirmation DISABLED: Immediate crossover signals")
+
+        if self.require_adx_rising:
+            self.logger.info(f"📈 ADX Rising Validation ENABLED: Require ADX increasing over {self.adx_rising_lookback} bars (min +{self.adx_min_increase})")
+        else:
+            self.logger.info(f"📈 ADX Rising Validation DISABLED")
+
+        self.logger.info(f"🔧 CRITICAL DEBUG: Using REBUILT MACD with expansion + ADX rising validation (v3.0)")
 
     def calculate_macd(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate MACD indicators"""
@@ -133,19 +155,123 @@ class MACDStrategy(BaseStrategy):
 
         return df
 
-    def detect_crossover(self, df: pd.DataFrame) -> pd.DataFrame:
+    def detect_crossover(self, df: pd.DataFrame, epic: str = None) -> pd.DataFrame:
         """
-        Detect MACD histogram crossovers (zero line crosses)
-        Returns ONE signal per crossover event
+        Detect MACD histogram crossovers with expansion confirmation and ADX trend validation
+
+        Features:
+        1. Detects zero-line crossovers
+        2. Waits for histogram expansion (configurable)
+        3. Validates ADX is rising (strengthening trend)
+
+        Args:
+            df: DataFrame with MACD and ADX data
+            epic: Epic code for pair-specific thresholds
+
+        Returns:
+            DataFrame with 'bull_crossover' and 'bear_crossover' columns
         """
         df = df.copy()
+
+        # Ensure ADX columns exist for trend validation
+        if 'adx' not in df.columns:
+            df = self._calculate_adx(df)
 
         # Shift histogram to get previous value
         df['histogram_prev'] = df['macd_histogram'].shift(1)
 
-        # Detect crossovers: current > 0 and previous <= 0 (or vice versa)
-        df['bull_crossover'] = (df['macd_histogram'] > 0) & (df['histogram_prev'] <= 0)
-        df['bear_crossover'] = (df['macd_histogram'] < 0) & (df['histogram_prev'] >= 0)
+        # Detect INITIAL zero-line crossovers
+        df['bull_cross_initial'] = (df['macd_histogram'] > 0) & (df['histogram_prev'] <= 0)
+        df['bear_cross_initial'] = (df['macd_histogram'] < 0) & (df['histogram_prev'] >= 0)
+
+        # If expansion disabled, use immediate crossover (old behavior)
+        if not self.expansion_enabled:
+            df['bull_crossover'] = df['bull_cross_initial']
+            df['bear_crossover'] = df['bear_cross_initial']
+            df.drop(['histogram_prev', 'bull_cross_initial', 'bear_cross_initial'],
+                    axis=1, inplace=True, errors='ignore')
+            return df
+
+        # EXPANSION CONFIRMATION LOGIC
+        # Get pair-specific threshold
+        if epic:
+            min_histogram = self._get_min_histogram(epic)
+        else:
+            min_histogram = self.min_histogram_thresholds.get('default', 0.00003)
+
+        # Create "crossover window" - marks bars within N bars after initial cross
+        bull_window = df['bull_cross_initial'].copy()
+        bear_window = df['bear_cross_initial'].copy()
+
+        for i in range(1, self.expansion_window_bars + 1):
+            bull_window = bull_window | df['bull_cross_initial'].shift(i).fillna(False)
+            bear_window = bear_window | df['bear_cross_initial'].shift(i).fillna(False)
+
+        df['bull_window'] = bull_window
+        df['bear_window'] = bear_window
+
+        # BULL EXPANSION: In window AND histogram >= threshold
+        df['bull_expansion_met'] = df['bull_window'] & (df['macd_histogram'] >= min_histogram)
+
+        # BEAR EXPANSION: In window AND |histogram| >= threshold
+        df['bear_expansion_met'] = df['bear_window'] & (abs(df['macd_histogram']) >= min_histogram)
+
+        # Add ADX trend validation if enabled
+        if self.require_adx_rising:
+            # Calculate ADX change over lookback period
+            df['adx_prev'] = df['adx'].shift(self.adx_rising_lookback)
+            df['adx_change'] = df['adx'] - df['adx_prev']
+            df['adx_is_rising'] = df['adx_change'] >= self.adx_min_increase
+
+            # Apply ADX filter to expansion conditions
+            df['bull_expansion_met'] = df['bull_expansion_met'] & df['adx_is_rising']
+            df['bear_expansion_met'] = df['bear_expansion_met'] & df['adx_is_rising']
+
+        # Calculate "bars since crossover" for logging
+        df['bull_bars_since_cross'] = 0
+        df['bear_bars_since_cross'] = 0
+
+        for idx in df[df['bull_cross_initial']].index:
+            for offset in range(self.expansion_window_bars + 1):
+                try:
+                    future_idx = df.index.get_loc(idx) + offset
+                    if future_idx < len(df):
+                        df.iloc[future_idx, df.columns.get_loc('bull_bars_since_cross')] = offset
+                except:
+                    pass
+
+        for idx in df[df['bear_cross_initial']].index:
+            for offset in range(self.expansion_window_bars + 1):
+                try:
+                    future_idx = df.index.get_loc(idx) + offset
+                    if future_idx < len(df):
+                        df.iloc[future_idx, df.columns.get_loc('bear_bars_since_cross')] = offset
+                except:
+                    pass
+
+        # TRIGGER SIGNAL: First bar in window where expansion AND ADX conditions are met
+        df['bull_crossover'] = (
+            df['bull_expansion_met'] &
+            (~df['bull_expansion_met'].shift(1).fillna(False))  # First time all conditions met
+        )
+
+        df['bear_crossover'] = (
+            df['bear_expansion_met'] &
+            (~df['bear_expansion_met'].shift(1).fillna(False))
+        )
+
+        # DETAILED LOGGING for latest bar (continued in next edit due to size)
+        if self.expansion_debug and len(df) > 0:
+            self._log_expansion_status(df, min_histogram)
+
+        # Clean up intermediate columns
+        cleanup_cols = ['histogram_prev', 'bull_cross_initial', 'bear_cross_initial',
+                        'bull_window', 'bear_window', 'bull_expansion_met', 'bear_expansion_met',
+                        'bull_bars_since_cross', 'bear_bars_since_cross']
+        if self.require_adx_rising:
+            cleanup_cols.extend(['adx_prev', 'adx_change', 'adx_is_rising'])
+
+        df.drop(cleanup_cols, axis=1, inplace=True, errors='ignore')
 
         return df
 
@@ -302,15 +428,18 @@ class MACDStrategy(BaseStrategy):
         # Log ADX for signals that pass (for debugging)
         self.logger.info(f"✅ {signal_type} passed ADX filter: ADX={adx:.1f} (min={self.min_adx})")
 
-        # Check histogram magnitude (pair-specific thresholds)
-        histogram = row.get('macd_histogram', 0)
-        if epic:
-            min_histogram = self._get_min_histogram(epic)
-            if abs(histogram) < min_histogram:
-                self.logger.info(f"❌ {signal_type} rejected: Histogram {histogram:.6f} too small (min={min_histogram:.6f}) - not visible on chart")
-                return False
-            else:
-                self.logger.debug(f"✅ Histogram magnitude OK: {abs(histogram):.6f} >= {min_histogram:.6f}")
+        # DISABLED: Histogram magnitude check - blocks legitimate crossovers at zero-line
+        # The histogram is always tiny at the moment of crossover by mathematical necessity
+        # ADX >= 25 filter already confirms strong trends, making this redundant
+        #
+        # histogram = row.get('macd_histogram', 0)
+        # if epic:
+        #     min_histogram = self._get_min_histogram(epic)
+        #     if abs(histogram) < min_histogram:
+        #         self.logger.info(f"❌ {signal_type} rejected: Histogram {histogram:.6f} too small (min={min_histogram:.6f}) - not visible on chart")
+        #         return False
+        #     else:
+        #         self.logger.debug(f"✅ Histogram magnitude OK: {abs(histogram):.6f} >= {min_histogram:.6f}")
 
         # Check histogram direction
         histogram = row.get('macd_histogram', 0)
@@ -488,8 +617,9 @@ class MACDStrategy(BaseStrategy):
                 limit_distance = self.min_stop_pips * 2.5
                 self.logger.warning(f"⚠️ ATR not available, using default SL/TP: {stop_distance}/{limit_distance} pips")
 
-            signal['stop_distance'] = stop_distance
-            signal['limit_distance'] = limit_distance
+            # Convert to integers (API requirement)
+            signal['stop_distance'] = int(round(stop_distance))
+            signal['limit_distance'] = int(round(limit_distance))
 
             return signal
 
@@ -526,8 +656,8 @@ class MACDStrategy(BaseStrategy):
                 except Exception as e:
                     self.logger.debug(f"Swing point identification skipped: {e}")
 
-            # Detect MACD histogram crossovers (Priority 1)
-            df = self.detect_crossover(df)
+            # Detect MACD histogram crossovers with expansion + ADX trend validation (Priority 1)
+            df = self.detect_crossover(df, epic=epic)
 
             # Detect ADX crossovers if enabled (Priority 2)
             if self.adx_crossover_enabled:
@@ -618,6 +748,120 @@ class MACDStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error(f"Error detecting signal: {e}", exc_info=True)
             return None
+
+    def _log_expansion_status(self, df: pd.DataFrame, min_histogram: float):
+        """
+        Log detailed expansion confirmation status for latest bar
+
+        Args:
+            df: DataFrame with expansion tracking columns
+            min_histogram: Minimum histogram threshold
+        """
+        try:
+            latest = df.iloc[-1]
+
+            # Get ADX trend info
+            adx_info = ""
+            if self.require_adx_rising and 'adx_change' in df.columns:
+                adx_current = latest['adx']
+                adx_prev = latest['adx_prev'] if pd.notna(latest.get('adx_prev')) else adx_current
+                adx_change = latest['adx_change'] if pd.notna(latest.get('adx_change')) else 0
+                adx_rising = latest.get('adx_is_rising', False)
+                adx_status = "✅ rising" if adx_rising else "❌ falling/flat"
+                adx_info = f", ADX: {adx_prev:.1f}→{adx_current:.1f} ({adx_change:+.1f}) {adx_status}"
+
+            # Log BULL crossover events
+            if latest.get('bull_cross_initial', False):
+                hist = latest['macd_histogram']
+                self.logger.info(f"🔵 BULL crossover detected: histogram={hist:.6f}, threshold={min_histogram:.6f}{adx_info}")
+
+                if self.expansion_allow_immediate and hist >= min_histogram:
+                    if not self.require_adx_rising or latest.get('adx_is_rising', True):
+                        self.logger.info(f"   ✅ IMMEDIATE trigger approved (histogram > threshold & ADX rising)")
+                    else:
+                        self.logger.info(f"   ❌ IMMEDIATE trigger BLOCKED (ADX not rising)")
+                else:
+                    self.logger.info(f"   ⏳ Waiting for expansion (need histogram={min_histogram:.6f}, ADX rising)")
+
+            elif latest.get('bull_window', False):
+                bars_since = int(latest.get('bull_bars_since_cross', 0))
+                hist = latest['macd_histogram']
+                hist_ok = hist >= min_histogram
+                adx_ok = latest.get('adx_is_rising', True) if self.require_adx_rising else True
+
+                status_parts = []
+                status_parts.append(f"histogram={hist:.6f} {'✅' if hist_ok else '❌'}")
+                if self.require_adx_rising:
+                    status_parts.append(f"ADX {'✅ rising' if adx_ok else '❌ flat/falling'}")
+                status = ", ".join(status_parts)
+
+                self.logger.debug(f"🔵 BULL expansion check (bar {bars_since}/{self.expansion_window_bars}): {status}")
+
+                if latest.get('bull_crossover', False):
+                    self.logger.info(f"   ✅ EXPANSION CONFIRMED (bar {bars_since}): All conditions met!")
+                elif bars_since >= self.expansion_window_bars:
+                    reasons = []
+                    if not hist_ok:
+                        reasons.append(f"histogram never reached {min_histogram:.6f}")
+                    if self.require_adx_rising and not adx_ok:
+                        reasons.append("ADX not rising")
+                    self.logger.info(f"   ❌ EXPANSION FAILED: {', '.join(reasons)}")
+                else:
+                    waiting_for = []
+                    if not hist_ok:
+                        waiting_for.append(f"histogram expansion ({hist:.6f} < {min_histogram:.6f})")
+                    if self.require_adx_rising and not adx_ok:
+                        waiting_for.append("ADX to rise")
+                    if waiting_for:
+                        self.logger.debug(f"   ⏳ Still waiting for: {', '.join(waiting_for)}")
+
+            # Log BEAR crossover events
+            if latest.get('bear_cross_initial', False):
+                hist = latest['macd_histogram']
+                self.logger.info(f"🔴 BEAR crossover detected: histogram={hist:.6f}, threshold={min_histogram:.6f}{adx_info}")
+
+                if self.expansion_allow_immediate and abs(hist) >= min_histogram:
+                    if not self.require_adx_rising or latest.get('adx_is_rising', True):
+                        self.logger.info(f"   ✅ IMMEDIATE trigger approved (|histogram| > threshold & ADX rising)")
+                    else:
+                        self.logger.info(f"   ❌ IMMEDIATE trigger BLOCKED (ADX not rising)")
+                else:
+                    self.logger.info(f"   ⏳ Waiting for expansion (need |histogram|={min_histogram:.6f}, ADX rising)")
+
+            elif latest.get('bear_window', False):
+                bars_since = int(latest.get('bear_bars_since_cross', 0))
+                hist = latest['macd_histogram']
+                hist_ok = abs(hist) >= min_histogram
+                adx_ok = latest.get('adx_is_rising', True) if self.require_adx_rising else True
+
+                status_parts = []
+                status_parts.append(f"|histogram|={abs(hist):.6f} {'✅' if hist_ok else '❌'}")
+                if self.require_adx_rising:
+                    status_parts.append(f"ADX {'✅ rising' if adx_ok else '❌ flat/falling'}")
+                status = ", ".join(status_parts)
+
+                self.logger.debug(f"🔴 BEAR expansion check (bar {bars_since}/{self.expansion_window_bars}): {status}")
+
+                if latest.get('bear_crossover', False):
+                    self.logger.info(f"   ✅ EXPANSION CONFIRMED (bar {bars_since}): All conditions met!")
+                elif bars_since >= self.expansion_window_bars:
+                    reasons = []
+                    if not hist_ok:
+                        reasons.append(f"|histogram| never reached {min_histogram:.6f}")
+                    if self.require_adx_rising and not adx_ok:
+                        reasons.append("ADX not rising")
+                    self.logger.info(f"   ❌ EXPANSION FAILED: {', '.join(reasons)}")
+                else:
+                    waiting_for = []
+                    if not hist_ok:
+                        waiting_for.append(f"histogram expansion ({abs(hist):.6f} < {min_histogram:.6f})")
+                    if self.require_adx_rising and not adx_ok:
+                        waiting_for.append("ADX to rise")
+                    if waiting_for:
+                        self.logger.debug(f"   ⏳ Still waiting for: {', '.join(waiting_for)}")
+
+        except Exception as e:
+            self.logger.debug(f"Error logging expansion status: {e}")
 
     def _calculate_adx(self, df: pd.DataFrame) -> pd.DataFrame:
         """

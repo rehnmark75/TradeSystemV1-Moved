@@ -22,17 +22,36 @@ MACD_PERIODS = {
 # MACD Threshold Settings
 MACD_THRESHOLD_BUFFER_MULTIPLIER = 1.1  # Require MACD histogram to exceed threshold by this multiplier
 
-# Minimum Histogram Thresholds (Pair-Specific)
-# Prevents tiny, invisible crossovers from generating signals
+# =============================================================================
+# HISTOGRAM EXPANSION CONFIRMATION (Post-Crossover Validation)
+# =============================================================================
+
+# Enable wait-for-expansion logic (recommended for quality filtering)
+MACD_EXPANSION_ENABLED = True          # Enable expansion confirmation
+MACD_EXPANSION_WINDOW_BARS = 3         # Wait up to 3 bars for expansion (15-45 min on 15m chart)
+MACD_EXPANSION_ALLOW_IMMEDIATE = True  # Trigger immediately if histogram already > threshold at crossover
+
+# ADX Trend Validation (require ADX to be rising = strengthening trend)
+MACD_REQUIRE_ADX_RISING = False        # Require ADX to be increasing (filters weakening trends)
+MACD_ADX_RISING_LOOKBACK = 2           # Check ADX trend over N bars (2 = compare current vs 2 bars ago)
+MACD_ADX_MIN_INCREASE = 0.5            # Minimum ADX increase required (0.5 = half a point increase)
+
+# Expansion confirmation logging
+MACD_EXPANSION_DEBUG_LOGGING = True    # Enable detailed expansion tracking logs
+
+# Minimum Histogram Thresholds (Post-Crossover Expansion)
+# After zero-line crossover, histogram must expand to this size within N bars
+# This filters weak/choppy crossovers while allowing strong trends to trigger quickly
 MACD_MIN_HISTOGRAM_THRESHOLDS = {
-    'default': 0.0002,       # EUR/USD, GBP/USD, AUD/USD, etc. (~0.02 pips)
-    'EURJPY': 0.020,         # EUR/JPY (price ~160, needs 2 pips)
-    'GBPJPY': 0.020,         # GBP/JPY (price ~190, needs 2 pips)
-    'AUDJPY': 0.012,         # AUD/JPY (price ~98, needs 1.2 pips)
-    'NZDJPY': 0.010,         # NZD/JPY (price ~90, needs 1 pip)
-    'USDJPY': 0.015,         # USD/JPY (price ~150, needs 1.5 pips)
-    'CADJPY': 0.012,         # CAD/JPY (price ~110, needs 1.2 pips)
-    'CHFJPY': 0.015,         # CHF/JPY (price ~170, needs 1.5 pips)
+    'default': 0.00005,
+    'GBPUSD': 0.000010,         # EUR/USD, GBP/USD, AUD/USD (~0.3 pips expansion)
+    'EURJPY': 0.030,          # EUR/JPY (price ~160, ~3 pips expansion)
+    'GBPJPY': 0.020,          # GBP/JPY (price ~190, ~2 pips expansion)
+    'AUDJPY': 0.012,          # AUD/JPY (price ~98, ~1.2 pips expansion)
+    'NZDJPY': 0.010,          # NZD/JPY (price ~90, ~1 pip expansion)
+    'USDJPY': 0.015,          # USD/JPY (price ~150, ~1.5 pips expansion)
+    'CADJPY': 0.012,          # CAD/JPY (price ~110, ~1.2 pips expansion)
+    'CHFJPY': 0.015,          # CHF/JPY (price ~170, ~1.5 pips expansion)
 }
 
 # Technical Validation Thresholds (Enhanced MACD Detection)

@@ -352,6 +352,8 @@ class IntelligentForexScanner:
             
             if not raw_signals:
                 self.logger.info("✓ No signals detected")
+                # Still capture market intelligence even with no signals
+                self._capture_scan_market_intelligence(scan_start, [])
                 return []
             
             self.logger.info(f"📊 {len(raw_signals)} raw signals detected")
