@@ -262,7 +262,7 @@ class MACDStrategy(BaseStrategy):
 
         # DETAILED LOGGING for latest bar (continued in next edit due to size)
         if self.expansion_debug and len(df) > 0:
-            self._log_expansion_status(df, min_histogram)
+            self._log_expansion_status(df, min_histogram, epic)
 
         # Clean up intermediate columns
         cleanup_cols = ['histogram_prev', 'bull_cross_initial', 'bear_cross_initial',
@@ -748,16 +748,20 @@ class MACDStrategy(BaseStrategy):
             self.logger.error(f"Error detecting signal: {e}", exc_info=True)
             return None
 
-    def _log_expansion_status(self, df: pd.DataFrame, min_histogram: float):
+    def _log_expansion_status(self, df: pd.DataFrame, min_histogram: float, epic: str = None):
         """
         Log detailed expansion confirmation status for latest bar
 
         Args:
             df: DataFrame with expansion tracking columns
             min_histogram: Minimum histogram threshold
+            epic: Epic code for pair identification in logs
         """
         try:
             latest = df.iloc[-1]
+
+            # Format epic for logging
+            epic_display = f"[{epic}] " if epic else ""
 
             # Get ADX trend info
             adx_info = ""
@@ -774,7 +778,7 @@ class MACDStrategy(BaseStrategy):
                 hist = latest['macd_histogram']
                 meets_threshold = hist >= min_histogram
                 threshold_emoji = "✅" if meets_threshold else "❌"
-                self.logger.info(f"🔵 BULL CROSSOVER DETECTED (Bar 0/3)")
+                self.logger.info(f"🔵 {epic_display}BULL CROSSOVER DETECTED (Bar 0/3)")
                 self.logger.info(f"   📊 Histogram: {hist:.6f} {threshold_emoji} (threshold: {min_histogram:.6f}){adx_info}")
 
                 if self.expansion_allow_immediate and hist >= min_histogram:
@@ -794,7 +798,7 @@ class MACDStrategy(BaseStrategy):
                 hist_emoji = "✅" if hist_ok else "❌"
                 adx_emoji = "✅" if adx_ok else "❌"
 
-                self.logger.info(f"🔵 BULL EXPANSION CHECK (Bar {bars_since}/{self.expansion_window_bars})")
+                self.logger.info(f"🔵 {epic_display}BULL EXPANSION CHECK (Bar {bars_since}/{self.expansion_window_bars})")
                 self.logger.info(f"   📊 Histogram: {hist:.6f} {hist_emoji} (need: {min_histogram:.6f}){adx_info}")
 
                 if latest.get('bull_crossover', False):
@@ -820,7 +824,7 @@ class MACDStrategy(BaseStrategy):
                 hist = latest['macd_histogram']
                 meets_threshold = abs(hist) >= min_histogram
                 threshold_emoji = "✅" if meets_threshold else "❌"
-                self.logger.info(f"🔴 BEAR CROSSOVER DETECTED (Bar 0/3)")
+                self.logger.info(f"🔴 {epic_display}BEAR CROSSOVER DETECTED (Bar 0/3)")
                 self.logger.info(f"   📊 Histogram: {hist:.6f} {threshold_emoji} (threshold: {min_histogram:.6f}){adx_info}")
 
                 if self.expansion_allow_immediate and abs(hist) >= min_histogram:
@@ -840,7 +844,7 @@ class MACDStrategy(BaseStrategy):
                 hist_emoji = "✅" if hist_ok else "❌"
                 adx_emoji = "✅" if adx_ok else "❌"
 
-                self.logger.info(f"🔴 BEAR EXPANSION CHECK (Bar {bars_since}/{self.expansion_window_bars})")
+                self.logger.info(f"🔴 {epic_display}BEAR EXPANSION CHECK (Bar {bars_since}/{self.expansion_window_bars})")
                 self.logger.info(f"   📊 Histogram: {hist:.6f} (|{abs(hist):.6f}|) {hist_emoji} (need: {min_histogram:.6f}){adx_info}")
 
                 if latest.get('bear_crossover', False):
