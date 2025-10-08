@@ -120,7 +120,7 @@ class MACDStrategy(BaseStrategy):
         self.expansion_debug = getattr(config_macd_strategy, 'MACD_EXPANSION_DEBUG_LOGGING', True) if config_macd_strategy else True
 
         # ADX trend validation settings
-        self.require_adx_rising = getattr(config_macd_strategy, 'MACD_REQUIRE_ADX_RISING', True) if config_macd_strategy else True
+        self.require_adx_rising = getattr(config_macd_strategy, 'MACD_REQUIRE_ADX_RISING', False) if config_macd_strategy else False
         self.adx_rising_lookback = getattr(config_macd_strategy, 'MACD_ADX_RISING_LOOKBACK', 2) if config_macd_strategy else 2
         self.adx_min_increase = getattr(config_macd_strategy, 'MACD_ADX_MIN_INCREASE', 0.5) if config_macd_strategy else 0.5
 

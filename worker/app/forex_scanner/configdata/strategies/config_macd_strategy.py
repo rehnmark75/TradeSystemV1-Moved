@@ -45,6 +45,7 @@ MACD_EXPANSION_DEBUG_LOGGING = True    # Enable detailed expansion tracking logs
 MACD_MIN_HISTOGRAM_THRESHOLDS = {
     'default': 0.00005,
     'GBPUSD': 0.000010,
+    'EURUSD': 0.000007,
     'USDCHF': 0.000010,
     'NZDUSD': 0.000010,
     'AUDUSD': 0.000010,                    # EUR/USD, GBP/USD, AUD/USD (~0.3 pips expansion)

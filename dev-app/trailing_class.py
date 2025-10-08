@@ -49,10 +49,10 @@ class TrailingConfig:
     min_trail_distance: int = 5
     max_trail_distance: int = 50
 
-    monitor_interval_seconds: int = 60  # ✅ NEW: poll interval between trade checks
+    monitor_interval_seconds: int = 30  # ✅ NEW: poll interval between trade checks
 
     # Standard 3-stage trailing settings (simplified)
-    stage1_trigger_points: int = 7    # Fallback: Break-even trigger (IG min+4 used when available)
+    stage1_trigger_points: int = 12   # Fallback: Break-even trigger (IG min+4 used when available)
     stage1_lock_points: int = 2       # Fallback: Minimum profit guarantee (IG min used when available)
     stage2_trigger_points: int = 16   # Profit lock trigger
     stage2_lock_points: int = 10      # Profit guarantee
