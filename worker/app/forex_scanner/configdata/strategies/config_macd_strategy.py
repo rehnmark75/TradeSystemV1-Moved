@@ -43,13 +43,16 @@ MACD_EXPANSION_DEBUG_LOGGING = True    # Enable detailed expansion tracking logs
 # After zero-line crossover, histogram must expand to this size within N bars
 # This filters weak/choppy crossovers while allowing strong trends to trigger quickly
 MACD_MIN_HISTOGRAM_THRESHOLDS = {
-    'default': 0.00005,
-    'GBPUSD': 0.000010,
-    'EURUSD': 0.000007,
-    'USDCHF': 0.000010,
-    'NZDUSD': 0.000010,
-    'AUDUSD': 0.000010,                    # EUR/USD, GBP/USD, AUD/USD (~0.3 pips expansion)
-    'EURJPY': 0.025,          # EUR/JPY (price ~160, ~3 pips expansion)
+    'default': 0.00005,       # Increased 10x - require stronger momentum
+    'GBPUSD': 0.00010,        # Higher volatility pair
+    'EURUSD': 0.00005,        # Moderate volatility
+    'USDCHF': 0.00006,        # Moderate volatility
+    'NZDUSD': 0.00006,        # Increased from 0.00001 - require 2x your example (0.00003)
+    'AUDUSD': 0.00006,        # Similar to NZDUSD
+    'USDCAD': 0.00005,        # Moderate volatility
+    'GBPAUD': 0.00010,        # High volatility cross
+    'GBPNZD': 0.00010,        # High volatility cross
+    'EURJPY': 0.025,          # EUR/JPY (price ~160, ~2.5 pips expansion)
     'GBPJPY': 0.020,          # GBP/JPY (price ~190, ~2 pips expansion)
     'AUDJPY': 0.012,          # AUD/JPY (price ~98, ~1.2 pips expansion)
     'NZDJPY': 0.010,          # NZD/JPY (price ~90, ~1 pip expansion)
