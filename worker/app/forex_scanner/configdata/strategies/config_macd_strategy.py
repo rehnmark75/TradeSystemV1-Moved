@@ -45,7 +45,9 @@ MACD_EXPANSION_DEBUG_LOGGING = True    # Enable detailed expansion tracking logs
 MACD_MIN_HISTOGRAM_THRESHOLDS = {
     'default': 0.00005,
     'GBPUSD': 0.000010,
-    'USDCHF': 0.000010,         # EUR/USD, GBP/USD, AUD/USD (~0.3 pips expansion)
+    'USDCHF': 0.000010,
+    'NZDUSD': 0.000010,
+    'AUDUSD': 0.000010,                    # EUR/USD, GBP/USD, AUD/USD (~0.3 pips expansion)
     'EURJPY': 0.030,          # EUR/JPY (price ~160, ~3 pips expansion)
     'GBPJPY': 0.020,          # GBP/JPY (price ~190, ~2 pips expansion)
     'AUDJPY': 0.012,          # AUD/JPY (price ~98, ~1.2 pips expansion)
