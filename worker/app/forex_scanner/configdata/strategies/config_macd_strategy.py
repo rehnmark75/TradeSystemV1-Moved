@@ -19,6 +19,7 @@ MACD_PERIODS = {
     'signal_ema': 9
 }
 
+USE_DYNAMIC_PARAMS = False
 # MACD Threshold Settings
 MACD_THRESHOLD_BUFFER_MULTIPLIER = 1.1  # Require MACD histogram to exceed threshold by this multiplier
 

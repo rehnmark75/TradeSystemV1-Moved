@@ -1896,9 +1896,12 @@ class TradeValidator:
                         timeout_ms=50
                     )
 
-                    # Start background worker for common epics
-                    common_epics = ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP']
-                    self._cached_intelligence_engine.start_background_worker(common_epics, 30)
+                    # Start background worker for all configured epics (from EPIC_LIST)
+                    # This runs in background and updates cache every 30s to avoid recalculating during signal validation
+                    epic_list = getattr(config, 'EPIC_LIST', [
+                        'CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP'
+                    ])
+                    self._cached_intelligence_engine.start_background_worker(epic_list, 30)
 
                     self.logger.info(f"🚀 {epic}: Initialized enhanced intelligence system with 5-level fallback")
 

@@ -675,6 +675,14 @@ class MACDStrategy(BaseStrategy):
             # This prevents re-detecting the same crossover multiple times
             latest_bar = df.iloc[-1]
 
+            # CRITICAL FIX: Only generate signals on COMPLETE bars
+            # Incomplete bars have changing histogram values that can cause false triggers
+            # Wait for bar to complete before checking crossover conditions
+            if not self.backtest_mode:  # In live mode, check if bar is complete
+                if 'is_complete' in df.columns and not latest_bar.get('is_complete', True):
+                    self.logger.debug(f"⏳ Skipping incomplete bar for {epic} - waiting for bar to complete")
+                    return None
+
             # PRIORITY 1: Check for MACD histogram BULL crossover (stronger signal)
             if latest_bar.get('bull_crossover', False):
                 self.logger.info(f"🎯 BULL crossover triggered, validating signal for {epic}...")
@@ -812,7 +820,7 @@ class MACDStrategy(BaseStrategy):
 
                 if latest.get('bull_crossover', False):
                     self.logger.info(f"   🎯 ✅ {epic_display}EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
-                elif bars_since >= self.expansion_window_bars:
+                elif bars_since > self.expansion_window_bars:
                     reasons = []
                     if not hist_ok:
                         reasons.append(f"histogram never reached {min_histogram:.6f} (max: {hist:.6f})")
@@ -858,7 +866,7 @@ class MACDStrategy(BaseStrategy):
 
                 if latest.get('bear_crossover', False):
                     self.logger.info(f"   🎯 ✅ {epic_display}EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
-                elif bars_since >= self.expansion_window_bars:
+                elif bars_since > self.expansion_window_bars:
                     reasons = []
                     if not hist_ok:
                         reasons.append(f"|histogram| never reached {min_histogram:.6f} (max: {abs(hist):.6f})")

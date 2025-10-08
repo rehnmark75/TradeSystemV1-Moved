@@ -86,7 +86,8 @@
       "Bash(docker-compose:*)",
       "Bash(sed:*)",
       "Read(//tmp/**)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Read(///**)"
     ],
     "deny": [],
     "ask": []
