@@ -18,7 +18,7 @@ EPIC_MAP = {
 
 # Trading blacklist - prevent trading for specific epics (scan-only mode)
 TRADING_BLACKLIST = [
-    "EURUSD.1.MINI",  # No IG trading permissions for FX_NOR exchange
+    # "EURUSD.1.MINI",  # Removed - trading now enabled
     # Add other blocked epics here as needed
 ]
 
