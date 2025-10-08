@@ -44,7 +44,7 @@ MACD_EXPANSION_DEBUG_LOGGING = True    # Enable detailed expansion tracking logs
 # This filters weak/choppy crossovers while allowing strong trends to trigger quickly
 MACD_MIN_HISTOGRAM_THRESHOLDS = {
     'default': 0.00005,       # Increased 10x - require stronger momentum
-    'GBPUSD': 0.00010,        # Higher volatility pair
+    'GBPUSD': 0.00015,        # Higher volatility pair
     'EURUSD': 0.00005,        # Moderate volatility
     'USDCHF': 0.00006,        # Moderate volatility
     'NZDUSD': 0.00006,        # Increased from 0.00001 - require 2x your example (0.00003)
