@@ -163,12 +163,15 @@ class TradePnLCorrelator:
             # Filter by specific deal IDs if provided
             if specific_deal_ids:
                 query = query.filter(TradeLog.activity_close_deal_id.in_(specific_deal_ids))
-            
-            # Only process trades that haven't been updated with P&L yet
+
+            # Process trades that need P/L update (including those with status='expired')
+            # Don't skip trades with existing P&L=0 as they might need recalculation
             query = query.filter(
-                (TradeLog.profit_loss.is_(None)) | (TradeLog.profit_loss == 0)
+                (TradeLog.profit_loss.is_(None)) |
+                (TradeLog.profit_loss == 0) |
+                (TradeLog.status == 'expired')  # Include expired trades for status fix
             )
-            
+
             trades = query.all()
             
             self.logger.info(f"📋 Found {len(trades)} trade entries with close_deal_ids needing P&L update")
@@ -197,56 +200,60 @@ class TradePnLCorrelator:
     def _extract_reference_from_deal_id(self, close_deal_id: str) -> str:
         """
         Extract transaction reference from close_deal_id
-        Format: DIAAAAUQJJCCFAM -> QJJCCFAM (remove DIAAAAU prefix)
+        Format: DIAAAAVA4EZYRAQ -> A4EZYRAQ (last 8 characters)
+        Format: DIAAAAUQJJCCFAM -> QJJCCFAM (last 8 characters)
+
+        IG deal IDs have variable-length prefixes (DIAAAAU, DIAAAAVA, etc.)
+        but transaction references are always the last 8 characters
         """
         if not close_deal_id:
             return ""
-        
-        # Remove the DIAAAAU prefix
-        prefix_to_remove = "DIAAAAU"
-        if close_deal_id.startswith(prefix_to_remove):
-            extracted = close_deal_id[len(prefix_to_remove):]
+
+        # Extract last 8 characters (standard IG reference length)
+        if len(close_deal_id) >= 8:
+            extracted = close_deal_id[-8:]
             self.logger.debug(f"🔍 Extracted reference: {close_deal_id} -> {extracted}")
             return extracted
         else:
-            # Handle different prefixes or formats if needed
-            self.logger.warning(f"⚠️ Unexpected close_deal_id format: {close_deal_id}")
+            # If shorter than 8 chars, use the whole string
+            self.logger.warning(f"⚠️ Unexpected close_deal_id length: {close_deal_id}")
             return close_deal_id
     
     async def _fetch_transactions_from_ig(
-        self, 
-        trading_headers: dict, 
+        self,
+        trading_headers: dict,
         days_back: int
     ) -> List[TransactionMatch]:
-        """Fetch transaction data from IG history/transactions endpoint"""
+        """Fetch transaction data from IG history/transactions endpoint using V2 API"""
         try:
-            # Calculate date range for API  
+            # Calculate date range for API
             end_time = datetime.now()
             start_time = end_time - timedelta(days=days_back)
-            
-            # FIXED: Use proper timestamp calculation for IG API
-            # IG API expects timestamp in milliseconds since epoch
-            start_timestamp_ms = int(start_time.timestamp() * 1000)
-            
-            # FIXED: Use correct IG API format as confirmed by user
-            # Working format: /gateway/deal/history/transactions/ALL/{timestamp}?pageSize=500
-            url = f"{self.api_base_url}/history/transactions/ALL/{start_timestamp_ms}?pageSize=500"
-            
+
+            # Use V2 API with proper date filtering
+            url = f"{self.api_base_url}/history/transactions"
+
             headers = {
                 "X-IG-API-KEY": trading_headers["X-IG-API-KEY"],
                 "CST": trading_headers["CST"],
                 "X-SECURITY-TOKEN": trading_headers["X-SECURITY-TOKEN"],
                 "Accept": "application/json",
-                "Version": "1"  # FIXED: Use version 1 as confirmed by user
+                "Version": "2"  # V2 supports date filtering
             }
-            
-            self.logger.info(f"🌐 Fetching transactions from IG API: {start_time.strftime('%Y-%m-%d')} to {end_time.strftime('%Y-%m-%d')}")
-            self.logger.info(f"🔍 API URL: {url}")
-            self.logger.info(f"🔍 Timestamp used: {start_timestamp_ms}")
-            
+
+            # V2 API parameters with date range
+            params = {
+                "from": start_time.strftime("%Y-%m-%d"),
+                "to": end_time.strftime("%Y-%m-%d"),
+                "maxSpanSeconds": days_back * 86400,  # Convert days to seconds
+                "pageSize": 500
+            }
+
+            self.logger.info(f"🌐 Fetching transactions from IG API: {params['from']} to {params['to']}")
+
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, headers=headers)
-                
+                response = await client.get(url, headers=headers, params=params)
+
                 if response.status_code == 200:
                     data = response.json()
                     transactions = self._parse_transaction_data(data)
@@ -255,7 +262,7 @@ class TradePnLCorrelator:
                 else:
                     self.logger.error(f"❌ IG API error: {response.status_code} - {response.text}")
                     return []
-                    
+
         except Exception as e:
             self.logger.error(f"❌ Error fetching transactions from IG API: {e}")
             return []
@@ -376,22 +383,25 @@ class TradePnLCorrelator:
                     await self._ensure_pnl_columns_exist()
                     
                     # Update the trade_log entry
+                    # Status should be 'closed' since we have transaction P/L
                     update_data = {
                         "profit_loss": correlation.transaction_match.profit_loss,
                         "pnl_currency": correlation.transaction_match.currency,
-                        "status": "closed",
+                        "status": "closed",  # Change from expired/tracking to closed
                         "closed_at": datetime.now(),
-                        "updated_at": datetime.now()
+                        "updated_at": datetime.now(),
+                        "pnl_updated_at": datetime.now()
                     }
                     
                     self.db_session.execute(
                         text("""
-                            UPDATE trade_log 
+                            UPDATE trade_log
                             SET profit_loss = :profit_loss,
                                 pnl_currency = :pnl_currency,
                                 status = :status,
                                 closed_at = :closed_at,
-                                updated_at = :updated_at
+                                updated_at = :updated_at,
+                                pnl_updated_at = :pnl_updated_at
                             WHERE id = :trade_log_id
                         """),
                         {**update_data, "trade_log_id": correlation.trade_log_id}

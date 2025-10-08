@@ -281,7 +281,7 @@ class UnifiedTradingDashboard:
             # Enhance DataFrame
             if not df.empty:
                 df['trade_result'] = df['profit_loss'].apply(
-                    lambda x: 'WIN' if x > 0 else 'LOSS' if x < 0 else 'PENDING'
+                    lambda x: 'WIN' if pd.notna(x) and x > 0 else 'LOSS' if pd.notna(x) and x < 0 else 'PENDING'
                 )
                 df['profit_loss_formatted'] = df['profit_loss'].apply(
                     lambda x: f"{x:.2f} {df.iloc[0]['pnl_currency']}" if pd.notna(x) else "Pending"
@@ -360,7 +360,7 @@ class UnifiedTradingDashboard:
                     '90_days': '90 Days'
                 }[x],
                 key='overview_timeframe',
-                index=0
+                index=1  # Default to 7 days instead of 1 day
             )
 
         with col2:

@@ -142,27 +142,36 @@ async def complete_trading_automation():
                             logger.error("❌ Cannot fetch transactions - no trading headers")
                             continue
                         
-                        # Fetch transactions from IG API (last 1 day)
+                        # Fetch transactions from IG API (last 2 days for better coverage)
                         end_time = datetime.now()
-                        start_time = end_time - timedelta(days=1)
-                        start_timestamp_ms = int(start_time.timestamp() * 1000)
-                        
+                        start_time = end_time - timedelta(days=2)
+
                         from config import API_BASE_URL
-                        ig_url = f"{API_BASE_URL}/history/transactions/ALL/{start_timestamp_ms}"
-                        
+                        ig_url = f"{API_BASE_URL}/history/transactions"
+
                         ig_headers = {
                             "X-IG-API-KEY": trading_headers["X-IG-API-KEY"],
                             "CST": trading_headers["CST"],
                             "X-SECURITY-TOKEN": trading_headers["X-SECURITY-TOKEN"],
                             "Accept": "application/json",
-                            "Version": "1"
+                            "Version": "2"  # V2 supports proper date filtering
                         }
-                        
+
+                        # V2 API parameters with date range
+                        params = {
+                            "from": start_time.strftime("%Y-%m-%d"),
+                            "to": end_time.strftime("%Y-%m-%d"),
+                            "maxSpanSeconds": 172800,  # 2 days in seconds
+                            "pageSize": 500
+                        }
+
                         # Fetch from IG API with timeout
                         async with httpx.AsyncClient(timeout=30.0) as client:
-                            response = await client.get(ig_url, headers=ig_headers)
+                            response = await client.get(ig_url, headers=ig_headers, params=params)
                             response.raise_for_status()
                             ig_data = response.json()
+
+                        logger.info(f"📊 Fetched {len(ig_data.get('transactions', []))} transactions from {params['from']} to {params['to']}")
                         
                         # Parse and store transactions
                         analyzer = BrokerTransactionAnalyzer(db_manager=db, logger=logger)
