@@ -49,7 +49,7 @@ MACD_MIN_HISTOGRAM_THRESHOLDS = {
     'USDCHF': 0.000010,
     'NZDUSD': 0.000010,
     'AUDUSD': 0.000010,                    # EUR/USD, GBP/USD, AUD/USD (~0.3 pips expansion)
-    'EURJPY': 0.030,          # EUR/JPY (price ~160, ~3 pips expansion)
+    'EURJPY': 0.025,          # EUR/JPY (price ~160, ~3 pips expansion)
     'GBPJPY': 0.020,          # GBP/JPY (price ~190, ~2 pips expansion)
     'AUDJPY': 0.012,          # AUD/JPY (price ~98, ~1.2 pips expansion)
     'NZDJPY': 0.010,          # NZD/JPY (price ~90, ~1 pip expansion)

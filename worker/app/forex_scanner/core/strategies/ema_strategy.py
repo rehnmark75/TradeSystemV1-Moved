@@ -256,7 +256,12 @@ class EMAStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error(f"❌ MACD configuration validation failed: {e}")
             return False
-    
+
+    def _format_log_prefix(self, epic: str = None) -> str:
+        """Format consistent log prefix with strategy name and epic"""
+        epic_part = f"[{epic}] " if epic else ""
+        return f"[EMA] {epic_part}"
+
     def should_enable_smart_money(self) -> bool:
         """Check if smart money analysis should be enabled"""
         if self.optimal_params:
@@ -300,12 +305,15 @@ class EMAStrategy(BaseStrategy):
         """
         
         try:
+            # Format log prefix
+            log_prefix = self._format_log_prefix(epic)
+
             # Validate data requirements
             if not self.indicator_calculator.validate_data_requirements(df, self.min_bars):
-                self.logger.info(f"❌ EMA Strategy: Data validation failed for {epic} - need {self.min_bars} bars, got {len(df)}")
+                self.logger.info(f"❌ {log_prefix}Data validation failed - need {self.min_bars} bars, got {len(df)}")
                 return None
 
-            self.logger.info(f"✅ EMA Strategy: Processing {len(df)} bars for {epic}")
+            self.logger.info(f"✅ {log_prefix}Processing {len(df)} bars")
 
             # CRITICAL FIX: Get epic-specific EMA configuration (including optimal parameters)
             epic_ema_config = self._get_ema_periods(epic)
@@ -315,15 +323,15 @@ class EMAStrategy(BaseStrategy):
 
             # Calculate ADX for trend strength analysis
             df_enhanced = self.adx_calculator.calculate_adx(df_enhanced)
-            self.logger.debug(f"📊 ADX calculated for {epic}")
+            self.logger.debug(f"📊 {log_prefix}ADX calculated")
 
             # Calculate swing points for proximity validation (if SMC analyzer available)
             try:
                 if hasattr(self, 'swing_validator') and self.swing_validator.smc_analyzer:
                     df_enhanced = self.swing_validator.smc_analyzer.identify_swing_points(df_enhanced)
-                    self.logger.debug(f"🎯 Swing points identified for {epic}")
+                    self.logger.debug(f"🎯 {log_prefix}Swing points identified")
             except Exception as e:
-                self.logger.debug(f"Swing point calculation skipped: {e}")
+                self.logger.debug(f"{log_prefix}Swing point calculation skipped: {e}")
 
             # Apply core detection logic (based on detect_ema_alerts)
             df_with_signals = self.indicator_calculator.detect_ema_alerts(df_enhanced)
@@ -339,7 +347,7 @@ class EMAStrategy(BaseStrategy):
                 alert_at_current_time = df_with_signals[df_with_signals['start_time'] == current_timestamp]
                 if len(alert_at_current_time) > 0:
                     latest_row = alert_at_current_time.iloc[-1]  # Use the row at current timestamp
-                    self.logger.info(f"🔍 BACKTEST: Checking alerts at timestamp {current_timestamp}")
+                    self.logger.info(f"🔍 {log_prefix}BACKTEST: Checking alerts at timestamp {current_timestamp}")
                 else:
                     # No data at current timestamp, use latest available
                     pass
@@ -347,14 +355,14 @@ class EMAStrategy(BaseStrategy):
             # DEBUG: Check alert flags
             bull_alert = latest_row.get('bull_alert', False)
             bear_alert = latest_row.get('bear_alert', False)
-            self.logger.info(f"🔍 EMA Debug: Bull alert: {bull_alert}, Bear alert: {bear_alert}")
+            self.logger.info(f"🔍 {log_prefix}Debug: Bull alert: {bull_alert}, Bear alert: {bear_alert}")
 
             # Debug logging for troubleshooting
             if len(df) < 80:  # Only log for small datasets to avoid spam
                 bull_alert = latest_row.get('bull_alert', False)
                 bear_alert = latest_row.get('bear_alert', False)
                 if bull_alert or bear_alert:
-                    self.logger.info(f"🎯 EMA Alert detected! Bull: {bull_alert}, Bear: {bear_alert}")
+                    self.logger.info(f"🎯 {log_prefix}Alert detected! Bull: {bull_alert}, Bear: {bear_alert}")
 
             signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df), df_with_signals)
             if signal:
@@ -363,7 +371,8 @@ class EMAStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            self.logger.error(f"Signal detection error: {e}")
+            log_prefix = self._format_log_prefix(epic)
+            self.logger.error(f"{log_prefix}Signal detection error: {e}")
             return None
 
     def _check_backtest_signals(self, df_with_signals: pd.DataFrame, epic: str, timeframe: str, spread_pips: float) -> Optional[Dict]:
@@ -432,41 +441,44 @@ class EMAStrategy(BaseStrategy):
     def _check_immediate_signal(self, latest_row: pd.Series, epic: str, timeframe: str, spread_pips: float, bar_count: int, df_with_signals: pd.DataFrame) -> Optional[Dict]:
         """Original immediate signal detection logic (fallback)"""
         try:
+            # Format log prefix
+            log_prefix = self._format_log_prefix(epic)
+
             # Check for bull alert with Two-Pole Oscillator color validation
             if latest_row.get('bull_alert', False):
-                self.logger.info(f"🎯 EMA BULL alert detected at bar {bar_count}")
+                self.logger.info(f"🎯 {log_prefix}BULL alert detected at bar {bar_count}")
 
                 # CRITICAL: Reject BULL signals if Two-Pole Oscillator is PURPLE (wrong color)
                 if not self.trend_validator.validate_two_pole_color(latest_row, 'BULL', self.backtest_mode):
-                    self.logger.info(f"❌ EMA BULL signal REJECTED by Two-Pole Oscillator validation")
+                    self.logger.info(f"❌ {log_prefix}BULL signal REJECTED by Two-Pole Oscillator validation")
                     return None
-                    
+
                 # ✅ RE-ENABLED: 1H Two-Pole color validation for both live and backtest modes
                 if getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BULL'):
-                        self.logger.info(f"❌ EMA BULL signal REJECTED by 1H Two-Pole validation")
+                        self.logger.info(f"❌ {log_prefix}BULL signal REJECTED by 1H Two-Pole validation")
                         return None
-                
-                
+
+
                 # ✅ RE-ENABLED: MACD momentum validation for both live and backtest modes
                 if not self.trend_validator.validate_macd_momentum(df_with_signals, 'BULL'):
-                    self.logger.info(f"❌ EMA BULL signal REJECTED by MACD momentum validation")
+                    self.logger.info(f"❌ {log_prefix}BULL signal REJECTED by MACD momentum validation")
                     return None
-                
+
                 # EMA 200 trend filter check
                 trend_valid = self._validate_ema_200_trend(latest_row, 'BULL')
                 if not trend_valid:
-                    self.logger.warning(f"❌ EMA BULL signal REJECTED: Price below EMA 200 (against major trend)")
+                    self.logger.warning(f"❌ {log_prefix}BULL signal REJECTED: Price below EMA 200 (against major trend)")
                     return None
 
                 # ADX TREND STRENGTH VALIDATION
                 adx_value = latest_row.get('adx', 0)
                 if adx_value < self.min_adx:
-                    self.logger.warning(f"❌ EMA BULL signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
+                    self.logger.warning(f"❌ {log_prefix}BULL signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
                     return None
                 else:
-                    self.logger.info(f"✅ ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
+                    self.logger.info(f"✅ {log_prefix}ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
 
                 # SWING PROXIMITY VALIDATION
                 current_price = latest_row.get('close', 0)
@@ -475,26 +487,26 @@ class EMAStrategy(BaseStrategy):
                 )
                 if not swing_result['valid']:
                     if self.swing_validator.strict_mode:
-                        self.logger.warning(f"❌ EMA BULL signal REJECTED: {swing_result['rejection_reason']}")
+                        self.logger.warning(f"❌ {log_prefix}BULL signal REJECTED: {swing_result['rejection_reason']}")
                         return None
                     else:
-                        self.logger.info(f"⚠️ Swing proximity warning: {swing_result['rejection_reason']}")
+                        self.logger.info(f"⚠️ {log_prefix}Swing proximity warning: {swing_result['rejection_reason']}")
                 else:
-                    self.logger.info(f"✅ Swing proximity validation passed")
+                    self.logger.info(f"✅ {log_prefix}Swing proximity validation passed")
 
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:
                     is_valid_breakout, breakout_confidence, validation_details = self.breakout_validator.validate_breakout(
                         df_with_signals, 'BULL', epic
                     )
-                    
+
                     if not is_valid_breakout:
-                        self.logger.warning(f"❌ EMA BULL signal REJECTED by enhanced validation (confidence: {breakout_confidence:.1%})")
-                        self.logger.debug(f"   Validation details: {validation_details}")
+                        self.logger.warning(f"❌ {log_prefix}BULL signal REJECTED by enhanced validation (confidence: {breakout_confidence:.1%})")
+                        self.logger.debug(f"   {log_prefix}Validation details: {validation_details}")
                         return None
                     else:
-                        self.logger.info(f"✅ Enhanced validation passed for BULL signal (confidence: {breakout_confidence:.1%})")
-                
+                        self.logger.info(f"✅ {log_prefix}Enhanced validation passed for BULL signal (confidence: {breakout_confidence:.1%})")
+
                 signal = self._create_signal(
                     signal_type='BULL',
                     epic=epic,
@@ -503,45 +515,45 @@ class EMAStrategy(BaseStrategy):
                     spread_pips=spread_pips
                 )
                 if signal:
-                    self.logger.info(f"✅ EMA BULL signal generated: {signal['confidence']:.1%}")
+                    self.logger.info(f"✅ {log_prefix}BULL signal generated: {signal['confidence']:.1%}")
                     return signal
                 else:
-                    self.logger.info(f"❌ EMA BULL signal creation failed")
+                    self.logger.info(f"❌ {log_prefix}BULL signal creation failed")
             
             # Check for bear alert with Two-Pole Oscillator color validation
             if latest_row.get('bear_alert', False):
-                self.logger.info(f"🎯 EMA BEAR alert detected at bar {bar_count}")
-                
+                self.logger.info(f"🎯 {log_prefix}BEAR alert detected at bar {bar_count}")
+
                 # CRITICAL: Reject BEAR signals if Two-Pole Oscillator is GREEN (wrong color)
                 if not self.trend_validator.validate_two_pole_color(latest_row, 'BEAR', self.backtest_mode):
                     return None
-                    
+
                 # ✅ RE-ENABLED: 1H Two-Pole color validation for both live and backtest modes
                 if getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
                     if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BEAR'):
-                        self.logger.info(f"❌ EMA BEAR signal REJECTED by 1H Two-Pole validation")
+                        self.logger.info(f"❌ {log_prefix}BEAR signal REJECTED by 1H Two-Pole validation")
                         return None
-                
-                
+
+
                 # ✅ RE-ENABLED: MACD momentum validation for both live and backtest modes
                 if not self.trend_validator.validate_macd_momentum(df_with_signals, 'BEAR'):
-                    self.logger.info(f"❌ EMA BEAR signal REJECTED by MACD momentum validation")
+                    self.logger.info(f"❌ {log_prefix}BEAR signal REJECTED by MACD momentum validation")
                     return None
-                
+
                 # EMA 200 trend filter check
                 trend_valid = self._validate_ema_200_trend(latest_row, 'BEAR')
                 if not trend_valid:
-                    self.logger.warning(f"❌ EMA BEAR signal REJECTED: Price above EMA 200 (against major trend)")
+                    self.logger.warning(f"❌ {log_prefix}BEAR signal REJECTED: Price above EMA 200 (against major trend)")
                     return None
 
                 # ADX TREND STRENGTH VALIDATION
                 adx_value = latest_row.get('adx', 0)
                 if adx_value < self.min_adx:
-                    self.logger.warning(f"❌ EMA BEAR signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
+                    self.logger.warning(f"❌ {log_prefix}BEAR signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
                     return None
                 else:
-                    self.logger.info(f"✅ ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
+                    self.logger.info(f"✅ {log_prefix}ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
 
                 # SWING PROXIMITY VALIDATION
                 current_price = latest_row.get('close', 0)
@@ -550,43 +562,44 @@ class EMAStrategy(BaseStrategy):
                 )
                 if not swing_result['valid']:
                     if self.swing_validator.strict_mode:
-                        self.logger.warning(f"❌ EMA BEAR signal REJECTED: {swing_result['rejection_reason']}")
+                        self.logger.warning(f"❌ {log_prefix}BEAR signal REJECTED: {swing_result['rejection_reason']}")
                         return None
                     else:
-                        self.logger.info(f"⚠️ Swing proximity warning: {swing_result['rejection_reason']}")
+                        self.logger.info(f"⚠️ {log_prefix}Swing proximity warning: {swing_result['rejection_reason']}")
                 else:
-                    self.logger.info(f"✅ Swing proximity validation passed")
+                    self.logger.info(f"✅ {log_prefix}Swing proximity validation passed")
 
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:
                     is_valid_breakout, breakout_confidence, validation_details = self.breakout_validator.validate_breakout(
                         df_with_signals, 'BEAR', epic
                     )
-                    
+
                     if not is_valid_breakout:
-                        self.logger.warning(f"❌ EMA BEAR signal REJECTED by enhanced validation (confidence: {breakout_confidence:.1%})")
-                        self.logger.debug(f"   Validation details: {validation_details}")
+                        self.logger.warning(f"❌ {log_prefix}BEAR signal REJECTED by enhanced validation (confidence: {breakout_confidence:.1%})")
+                        self.logger.debug(f"   {log_prefix}Validation details: {validation_details}")
                         return None
                     else:
-                        self.logger.info(f"✅ Enhanced validation passed for BEAR signal (confidence: {breakout_confidence:.1%})")
-                
+                        self.logger.info(f"✅ {log_prefix}Enhanced validation passed for BEAR signal (confidence: {breakout_confidence:.1%})")
+
                 signal = self._create_signal(
-                    signal_type='BEAR', 
+                    signal_type='BEAR',
                     epic=epic,
                     timeframe=timeframe,
                     latest_row=latest_row,
                     spread_pips=spread_pips
                 )
                 if signal:
-                    self.logger.info(f"✅ EMA BEAR signal generated: {signal['confidence']:.1%}")
+                    self.logger.info(f"✅ {log_prefix}BEAR signal generated: {signal['confidence']:.1%}")
                     return signal
                 else:
-                    self.logger.info(f"❌ EMA BEAR signal creation failed")
-            
+                    self.logger.info(f"❌ {log_prefix}BEAR signal creation failed")
+
             return None
-            
+
         except Exception as e:
-            self.logger.error(f"Signal detection error: {e}")
+            log_prefix = self._format_log_prefix(epic)
+            self.logger.error(f"{log_prefix}Signal detection error: {e}")
             return None
     
     def _ensure_emas(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -704,13 +717,16 @@ class EMAStrategy(BaseStrategy):
     def _create_signal(
         self,
         signal_type: str,
-        epic: str, 
+        epic: str,
         timeframe: str,
         latest_row: pd.Series,
         spread_pips: float
     ) -> Dict:
         """Create a signal dictionary with all required fields"""
         try:
+            # Format log prefix
+            log_prefix = self._format_log_prefix(epic)
+
             # Create base signal using parent method
             signal = self.create_base_signal(signal_type, epic, timeframe, latest_row)
             
@@ -747,11 +763,12 @@ class EMAStrategy(BaseStrategy):
             if not self.signal_calculator.validate_confidence_threshold(confidence):
                 return None
 
-            self.logger.info(f"🎯 EMA {signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}, SL/TP={sl_tp['stop_distance']}/{sl_tp['limit_distance']}")
+            self.logger.info(f"🎯 {log_prefix}{signal_type} signal generated: {confidence:.1%} confidence at {signal['price']:.5f}, SL/TP={sl_tp['stop_distance']}/{sl_tp['limit_distance']}")
             return signal
-            
+
         except Exception as e:
-            self.logger.error(f"Error creating signal: {e}")
+            log_prefix = self._format_log_prefix(epic)
+            self.logger.error(f"{log_prefix}Error creating signal: {e}")
             return None
     
     def create_enhanced_signal_data(self, latest_row: pd.Series, signal_type: str) -> Dict:

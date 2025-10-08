@@ -349,38 +349,41 @@ class MACDStrategy(BaseStrategy):
 
         return df
 
-    def validate_adx_signal(self, row: pd.Series, signal_type: str) -> bool:
+    def validate_adx_signal(self, row: pd.Series, signal_type: str, epic: str = None) -> bool:
         """
         Validate ADX crossover signal meets quality requirements
 
         Simplified validation for ADX crossover signals (less strict than MACD crossover)
         ADX crossing above threshold already indicates trend strength
         """
+        # Format epic for logging
+        epic_display = f"[{epic}] " if epic else ""
+
         # Check histogram is in correct direction (already checked in detect_adx_crossover, but double-check)
         histogram = row.get('macd_histogram', 0)
         if signal_type == 'BULL' and histogram <= 0:
-            self.logger.debug(f"❌ ADX BULL rejected: negative histogram {histogram:.6f}")
+            self.logger.debug(f"❌ {epic_display}ADX BULL rejected: negative histogram {histogram:.6f}")
             return False
         if signal_type == 'BEAR' and histogram >= 0:
-            self.logger.debug(f"❌ ADX BEAR rejected: positive histogram {histogram:.6f}")
+            self.logger.debug(f"❌ {epic_display}ADX BEAR rejected: positive histogram {histogram:.6f}")
             return False
 
         # Check MACD line position (same filter as regular signals)
         macd_line = row.get('macd_line', 0)
         if signal_type == 'BEAR' and macd_line > 0.05:
-            self.logger.info(f"❌ ADX BEAR rejected: MACD line too positive {macd_line:.6f}")
+            self.logger.info(f"❌ {epic_display}ADX BEAR rejected: MACD line too positive {macd_line:.6f}")
             return False
         if signal_type == 'BULL' and macd_line < -0.05:
-            self.logger.info(f"❌ ADX BULL rejected: MACD line too negative {macd_line:.6f}")
+            self.logger.info(f"❌ {epic_display}ADX BULL rejected: MACD line too negative {macd_line:.6f}")
             return False
 
         # Check RSI (optional - avoid extreme zones)
         rsi = row.get('rsi', 50)
         if signal_type == 'BULL' and rsi > 70:
-            self.logger.debug(f"❌ ADX BULL rejected: RSI {rsi:.1f} overbought")
+            self.logger.debug(f"❌ {epic_display}ADX BULL rejected: RSI {rsi:.1f} overbought")
             return False
         if signal_type == 'BEAR' and rsi < 30:
-            self.logger.debug(f"❌ ADX BEAR rejected: RSI {rsi:.1f} oversold")
+            self.logger.debug(f"❌ {epic_display}ADX BEAR rejected: RSI {rsi:.1f} oversold")
             return False
 
         # EMA filter (if enabled)
@@ -390,17 +393,17 @@ class MACDStrategy(BaseStrategy):
             ema_value = row.get(ema_col, 0)
 
             if pd.isna(ema_value) or pd.isna(price) or ema_value <= 0 or price <= 0:
-                self.logger.info(f"❌ ADX {signal_type} rejected: Invalid EMA or price")
+                self.logger.info(f"❌ {epic_display}ADX {signal_type} rejected: Invalid EMA or price")
                 return False
 
             if signal_type == 'BULL' and price < ema_value:
-                self.logger.debug(f"❌ ADX BULL rejected: price below EMA{self.ema_filter_period}")
+                self.logger.debug(f"❌ {epic_display}ADX BULL rejected: price below EMA{self.ema_filter_period}")
                 return False
             if signal_type == 'BEAR' and price > ema_value:
-                self.logger.debug(f"❌ ADX BEAR rejected: price above EMA{self.ema_filter_period}")
+                self.logger.debug(f"❌ {epic_display}ADX BEAR rejected: price above EMA{self.ema_filter_period}")
                 return False
 
-        self.logger.info(f"✅ ADX {signal_type} signal validated")
+        self.logger.info(f"✅ {epic_display}ADX {signal_type} signal validated")
         return True
 
     def validate_signal(self, row: pd.Series, signal_type: str, epic: str = None) -> bool:
@@ -413,38 +416,41 @@ class MACDStrategy(BaseStrategy):
         3. RSI in reasonable zone
         4. Dynamic EMA trend filter (ADX-based volatility adaptation)
         """
+        # Format epic for logging
+        epic_display = f"[{epic}] " if epic else ""
+
         # Check ADX (handle NaN values)
         adx = row.get('adx', 0)
 
         # CRITICAL: Check for NaN or invalid ADX values
         if pd.isna(adx) or adx <= 0:
-            self.logger.info(f"❌ {signal_type} rejected: Invalid ADX ({adx})")
+            self.logger.info(f"❌ {epic_display}{signal_type} rejected: Invalid ADX ({adx})")
             return False
 
         if adx < self.min_adx:
-            self.logger.info(f"❌ {signal_type} rejected: ADX {adx:.1f} < {self.min_adx}")
+            self.logger.info(f"❌ {epic_display}{signal_type} rejected: ADX {adx:.1f} < {self.min_adx}")
             return False
 
         # Log ADX for signals that pass (for debugging)
-        self.logger.info(f"✅ {signal_type} passed ADX filter: ADX={adx:.1f} (min={self.min_adx})")
+        self.logger.info(f"✅ {epic_display}{signal_type} passed ADX filter: ADX={adx:.1f} (min={self.min_adx})")
 
         # ENABLED: Histogram magnitude check - ensures signal has sufficient momentum
         histogram = row.get('macd_histogram', 0)
         if epic:
             min_histogram = self._get_min_histogram(epic)
             if abs(histogram) < min_histogram:
-                self.logger.info(f"❌ {signal_type} rejected: Histogram {abs(histogram):.6f} too small (min={min_histogram:.6f} for {epic})")
+                self.logger.info(f"❌ {epic_display}{signal_type} rejected: Histogram {abs(histogram):.6f} too small (min={min_histogram:.6f} for {epic})")
                 return False
             else:
-                self.logger.info(f"✅ {signal_type} histogram magnitude OK: {abs(histogram):.6f} >= {min_histogram:.6f}")
+                self.logger.info(f"✅ {epic_display}{signal_type} histogram magnitude OK: {abs(histogram):.6f} >= {min_histogram:.6f}")
 
         # Check histogram direction
         histogram = row.get('macd_histogram', 0)
         if signal_type == 'BULL' and histogram <= 0:
-            self.logger.debug(f"❌ BULL rejected: negative histogram {histogram:.6f}")
+            self.logger.debug(f"❌ {epic_display}BULL rejected: negative histogram {histogram:.6f}")
             return False
         if signal_type == 'BEAR' and histogram >= 0:
-            self.logger.debug(f"❌ BEAR rejected: positive histogram {histogram:.6f}")
+            self.logger.debug(f"❌ {epic_display}BEAR rejected: positive histogram {histogram:.6f}")
             return False
 
         # CRITICAL FIX: Check MACD line position (zero line filter)
@@ -456,22 +462,22 @@ class MACDStrategy(BaseStrategy):
         # For BEAR signals, if MACD line is strongly positive (>0.1 for forex), it's a bad signal
         # This prevents selling during strong uptrends just because histogram dipped slightly
         if signal_type == 'BEAR' and macd_line > 0.05:
-            self.logger.info(f"❌ BEAR rejected: MACD line too positive {macd_line:.6f} (still in bullish territory)")
+            self.logger.info(f"❌ {epic_display}BEAR rejected: MACD line too positive {macd_line:.6f} (still in bullish territory)")
             return False
 
         # For BULL signals, if MACD line is strongly negative (<-0.1), it's a bad signal
         # This prevents buying during strong downtrends just because histogram rose slightly
         if signal_type == 'BULL' and macd_line < -0.05:
-            self.logger.info(f"❌ BULL rejected: MACD line too negative {macd_line:.6f} (still in bearish territory)")
+            self.logger.info(f"❌ {epic_display}BULL rejected: MACD line too negative {macd_line:.6f} (still in bearish territory)")
             return False
 
         # Check RSI (optional - just avoid extreme zones)
         rsi = row.get('rsi', 50)
         if signal_type == 'BULL' and rsi > 70:
-            self.logger.debug(f"❌ BULL rejected: RSI {rsi:.1f} overbought")
+            self.logger.debug(f"❌ {epic_display}BULL rejected: RSI {rsi:.1f} overbought")
             return False
         if signal_type == 'BEAR' and rsi < 30:
-            self.logger.debug(f"❌ BEAR rejected: RSI {rsi:.1f} oversold")
+            self.logger.debug(f"❌ {epic_display}BEAR rejected: RSI {rsi:.1f} oversold")
             return False
 
         # EMA FILTER (configurable via config file)
@@ -482,20 +488,20 @@ class MACDStrategy(BaseStrategy):
 
             # Validate EMA and price are valid numbers
             if pd.isna(ema_value) or pd.isna(price) or ema_value <= 0 or price <= 0:
-                self.logger.info(f"❌ {signal_type} rejected: Invalid EMA{self.ema_filter_period} or price (price={price}, EMA={ema_value})")
+                self.logger.info(f"❌ {epic_display}{signal_type} rejected: Invalid EMA{self.ema_filter_period} or price (price={price}, EMA={ema_value})")
                 return False
 
             # Apply EMA trend filter
             if signal_type == 'BULL' and price < ema_value:
-                self.logger.debug(f"❌ BULL rejected: price {price:.5f} below EMA{self.ema_filter_period} {ema_value:.5f} (ADX={adx:.1f})")
+                self.logger.debug(f"❌ {epic_display}BULL rejected: price {price:.5f} below EMA{self.ema_filter_period} {ema_value:.5f} (ADX={adx:.1f})")
                 return False
             if signal_type == 'BEAR' and price > ema_value:
-                self.logger.debug(f"❌ BEAR rejected: price {price:.5f} above EMA{self.ema_filter_period} {ema_value:.5f} (ADX={adx:.1f})")
+                self.logger.debug(f"❌ {epic_display}BEAR rejected: price {price:.5f} above EMA{self.ema_filter_period} {ema_value:.5f} (ADX={adx:.1f})")
                 return False
 
-            self.logger.debug(f"✅ {signal_type} passed EMA{self.ema_filter_period} filter: price={price:.5f}, EMA={ema_value:.5f} (ADX={adx:.1f})")
+            self.logger.debug(f"✅ {epic_display}{signal_type} passed EMA{self.ema_filter_period} filter: price={price:.5f}, EMA={ema_value:.5f} (ADX={adx:.1f})")
         else:
-            self.logger.debug(f"✅ {signal_type} passed (no EMA filter) - ADX={adx:.1f}")
+            self.logger.debug(f"✅ {epic_display}{signal_type} passed (no EMA filter) - ADX={adx:.1f}")
 
         return True
 
@@ -548,6 +554,9 @@ class MACDStrategy(BaseStrategy):
         Args:
             trigger_type: 'macd' for histogram crossover, 'adx' for ADX crossover trigger
         """
+        # Format epic for logging
+        epic_display = f"[{epic}] " if epic else ""
+
         try:
             # Calculate confidence
             confidence = self.calculate_confidence(row, signal_type)
@@ -556,7 +565,7 @@ class MACDStrategy(BaseStrategy):
             min_conf = self.adx_min_confidence if trigger_type == 'adx' else self.min_confidence
 
             if confidence < min_conf:
-                self.logger.debug(f"❌ {signal_type} rejected: confidence {confidence:.1%} < {min_conf:.1%}")
+                self.logger.debug(f"❌ {epic_display}{signal_type} rejected: confidence {confidence:.1%} < {min_conf:.1%}")
                 return None
 
             # Record which EMA filter was used (if any)
@@ -607,12 +616,12 @@ class MACDStrategy(BaseStrategy):
                 stop_distance = max(self.min_stop_pips, min(self.max_stop_pips, atr_pips * self.stop_atr_multiplier))
                 limit_distance = atr_pips * self.target_atr_multiplier
 
-                self.logger.debug(f"📊 ATR-based SL/TP: ATR={atr_pips:.1f} pips, SL={stop_distance:.1f}, TP={limit_distance:.1f}")
+                self.logger.debug(f"📊 {epic_display}ATR-based SL/TP: ATR={atr_pips:.1f} pips, SL={stop_distance:.1f}, TP={limit_distance:.1f}")
             else:
                 # Fallback to defaults if ATR not available
                 stop_distance = self.min_stop_pips
                 limit_distance = self.min_stop_pips * 2.5
-                self.logger.warning(f"⚠️ ATR not available, using default SL/TP: {stop_distance}/{limit_distance} pips")
+                self.logger.warning(f"⚠️ {epic_display}ATR not available, using default SL/TP: {stop_distance}/{limit_distance} pips")
 
             # Convert to integers (API requirement)
             signal['stop_distance'] = int(round(stop_distance))
@@ -621,7 +630,7 @@ class MACDStrategy(BaseStrategy):
             return signal
 
         except Exception as e:
-            self.logger.error(f"Error creating signal: {e}")
+            self.logger.error(f"{epic_display}Error creating signal: {e}")
             return None
 
     def detect_signal(self, df: pd.DataFrame, epic: str, spread_pips: float = 1.5,
@@ -708,7 +717,7 @@ class MACDStrategy(BaseStrategy):
 
             # PRIORITY 2: Check for ADX BULL crossover (earlier entry signal)
             if self.adx_crossover_enabled and latest_bar.get('bull_adx_crossover', False):
-                if self.validate_adx_signal(latest_bar, 'BULL'):
+                if self.validate_adx_signal(latest_bar, 'BULL', epic=epic):
                     signal = self.create_signal(latest_bar, 'BULL', epic, timeframe, trigger_type='adx')
                     if signal:
                         # Swing proximity validation
@@ -726,7 +735,7 @@ class MACDStrategy(BaseStrategy):
 
             # PRIORITY 2: Check for ADX BEAR crossover (earlier entry signal)
             if self.adx_crossover_enabled and latest_bar.get('bear_adx_crossover', False):
-                if self.validate_adx_signal(latest_bar, 'BEAR'):
+                if self.validate_adx_signal(latest_bar, 'BEAR', epic=epic):
                     signal = self.create_signal(latest_bar, 'BEAR', epic, timeframe, trigger_type='adx')
                     if signal:
                         # Swing proximity validation
@@ -802,7 +811,7 @@ class MACDStrategy(BaseStrategy):
                 self.logger.info(f"   📊 Histogram: {hist:.6f} {hist_emoji} (need: {min_histogram:.6f}){adx_info}")
 
                 if latest.get('bull_crossover', False):
-                    self.logger.info(f"   🎯 ✅ EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
+                    self.logger.info(f"   🎯 ✅ {epic_display}EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
                 elif bars_since >= self.expansion_window_bars:
                     reasons = []
                     if not hist_ok:
@@ -848,7 +857,7 @@ class MACDStrategy(BaseStrategy):
                 self.logger.info(f"   📊 Histogram: {hist:.6f} (|{abs(hist):.6f}|) {hist_emoji} (need: {min_histogram:.6f}){adx_info}")
 
                 if latest.get('bear_crossover', False):
-                    self.logger.info(f"   🎯 ✅ EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
+                    self.logger.info(f"   🎯 ✅ {epic_display}EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
                 elif bars_since >= self.expansion_window_bars:
                     reasons = []
                     if not hist_ok:
