@@ -47,7 +47,7 @@ class CombinedTrailingConfig(TrailingConfig):
     min_limit_distance: int = 3
     
     # ✅ NEW: Universal Profit Protection Rule
-    enable_profit_protection_rule: bool = True
+    enable_profit_protection_rule: bool = False  # Default disabled - enable per pair in config
     profit_protection_trigger: int = 15  # When profit reaches 15 points
     profit_protection_stop: int = 10     # Move stop to 10 points profit
 
@@ -710,7 +710,7 @@ SCALPING_CONFIG_WITH_EMA = CombinedTrailingConfig(
     limit_trail_ratio=1.0,
     min_limit_distance=3,
     # ✅ NEW: Profit Protection Rule
-    enable_profit_protection_rule=True,
+    enable_profit_protection_rule=False,  # DISABLED BY DEFAULT - configure per pair
     profit_protection_trigger=15,
     profit_protection_stop=10
 )
@@ -732,7 +732,7 @@ SCALPING_CONFIG_WITH_PROTECTION = CombinedTrailingConfig(
     limit_trail_ratio=1.0,
     min_limit_distance=3,
     # ✅ PROFIT PROTECTION RULE - This fixes the diagnostic issue
-    enable_profit_protection_rule=True,
+    enable_profit_protection_rule=False,  # DISABLED BY DEFAULT - configure per pair
     profit_protection_trigger=15,    # At 15 points profit
     profit_protection_stop=10        # Move stop to 10 points profit
 )
@@ -750,7 +750,7 @@ SWING_CONFIG_WITH_EMA = CombinedTrailingConfig(
     ema_confirmation_candles=3,
     ema_timeframe=240,
     # ✅ NEW: Profit Protection Rule
-    enable_profit_protection_rule=True,
+    enable_profit_protection_rule=False,  # DISABLED BY DEFAULT - configure per pair
     profit_protection_trigger=15,
     profit_protection_stop=10
 )
@@ -765,7 +765,7 @@ SCALPING_CONFIG_NO_EMA = CombinedTrailingConfig(
     monitor_interval_seconds=60,
     enable_ema_exit=False,
     # ✅ NEW: Profit Protection Rule
-    enable_profit_protection_rule=True,
+    enable_profit_protection_rule=False,  # DISABLED BY DEFAULT - configure per pair
     profit_protection_trigger=15,
     profit_protection_stop=10
 )
@@ -785,7 +785,7 @@ CONSERVATIVE_CONFIG_WITH_PROTECTION = CombinedTrailingConfig(
     limit_trail_ratio=1.2,
     min_limit_distance=8,
     # ✅ NEW: Profit Protection Rule - More conservative for volatile pairs
-    enable_profit_protection_rule=True,
+    enable_profit_protection_rule=False,  # DISABLED BY DEFAULT - configure per pair
     profit_protection_trigger=18,  # Wait a bit longer for volatile pairs
     profit_protection_stop=12      # Secure slightly higher profit
 )

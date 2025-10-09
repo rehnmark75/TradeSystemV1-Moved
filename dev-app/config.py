@@ -124,76 +124,76 @@ PAIR_TRAILING_CONFIGS = {
 
     'CS.D.EURUSD.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 2,          # Minimum profit lock
+        'stage1_lock_points': 4,          # Minimum profit lock
         'stage2_trigger_points': 22,      # Profit lock trigger
         'stage2_lock_points': 10,         # Profit guarantee
         'stage3_trigger_points': 30,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 2,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 6,   # Move to BE after 6 pts
+        'break_even_trigger_points': 12,   # Move to BE after 6 pts
     },
 
     'CS.D.AUDUSD.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 2,          # Minimum profit lock
+        'stage1_lock_points': 4,          # Minimum profit lock
         'stage2_trigger_points': 22,      # Profit lock trigger
         'stage2_lock_points': 10,         # Profit guarantee
         'stage3_trigger_points': 30,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 2,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 6, 
+        'break_even_trigger_points': 12, 
     },
 
     'CS.D.NZDUSD.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 2,          # Minimum profit lock
+        'stage1_lock_points': 4,          # Minimum profit lock
         'stage2_trigger_points': 22,      # Profit lock trigger
         'stage2_lock_points': 10,         # Profit guarantee
         'stage3_trigger_points': 30,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 2,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 6, 
+        'break_even_trigger_points': 12, 
     },
 
     'CS.D.USDCAD.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 2,          # Minimum profit lock
+        'stage1_lock_points': 4,          # Minimum profit lock
         'stage2_trigger_points': 22,      # Profit lock trigger
         'stage2_lock_points': 10,         # Profit guarantee
         'stage3_trigger_points': 30,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 2,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 6, 
+        'break_even_trigger_points': 12, 
     },
 
     'CS.D.USDCHF.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 2,          # Minimum profit lock
+        'stage1_lock_points': 4,          # Minimum profit lock
         'stage2_trigger_points': 22,      # Profit lock trigger
         'stage2_lock_points': 10,         # Profit guarantee
         'stage3_trigger_points': 30,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 2,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 6, 
+        'break_even_trigger_points': 12, 
     },
 
     # ========== GBP PAIRS - High Volatility ==========
 
     'CS.D.GBPUSD.MINI.IP': {
         'stage1_trigger_points': 20,      # Wider activation
-        'stage1_lock_points': 3,          # More profit lock
+        'stage1_lock_points': 4,          # More profit lock
         'stage2_trigger_points': 25,      # Higher trigger
         'stage2_lock_points': 12,         # More protection
         'stage3_trigger_points': 35,      # Later trailing start
         'stage3_atr_multiplier': 1.0,     # Wider trailing
         'stage3_min_distance': 3,         # More distance
         'min_trail_distance': 18,         # Higher minimum
-        'break_even_trigger_points': 8,   # Later BE
+        'break_even_trigger_points': 12,   # Later BE
     },
 
     'CS.D.GBPJPY.MINI.IP': {
@@ -243,7 +243,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,
         'stage3_min_distance': 2,
         'min_trail_distance': 12,
-        'break_even_trigger_points': 6,
+        'break_even_trigger_points': 12,
     },
 
     'CS.D.EURJPY.MINI.IP': {
@@ -255,7 +255,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.9,
         'stage3_min_distance': 2,
         'min_trail_distance': 15,
-        'break_even_trigger_points': 7,
+        'break_even_trigger_points': 12,
     },
 
     'CS.D.AUDJPY.MINI.IP': {
@@ -267,7 +267,9 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.9,
         'stage3_min_distance': 2,
         'min_trail_distance': 15,
-        'break_even_trigger_points': 7,
+        'break_even_trigger_points': 12,
+        # Profit Protection Rule
+        'enable_profit_protection': False,
     },
 
     'CS.D.CADJPY.MINI.IP': {
@@ -353,7 +355,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.75,
         'stage3_min_distance': 2,
         'min_trail_distance': 14,
-        'break_even_trigger_points': 6,
+        'break_even_trigger_points': 12,
     },
 }
 
@@ -367,7 +369,7 @@ DEFAULT_TRAILING_CONFIG = {
     'stage3_atr_multiplier': 0.8,
     'stage3_min_distance': 2,
     'min_trail_distance': 15,
-    'break_even_trigger_points': 6,
+    'break_even_trigger_points': 12,
 }
 
 
