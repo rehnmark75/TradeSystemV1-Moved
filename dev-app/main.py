@@ -19,7 +19,7 @@ except ImportError as e:
     print(f"⚠️ Trading analytics router not available: {e}")
     print("📝 To enable enhanced analytics, ensure:")
     print("   1. Create routers/trading_analytics_router.py")
-    print("   2. Create services/broker_transaction_analyzer.py") 
+    print("   2. Create services/broker_transaction_analyzer.py")
     print("   3. Create services/activity_pnl_correlator.py")     # NEW
     print("   4. Create services/price_based_pnl_calculator.py") # NEW
     print("   5. Create services/trade_pnl_correlator.py")       # NEW - YOUR NEW SERVICE
@@ -27,6 +27,19 @@ except ImportError as e:
     print("   7. Install dependencies: pip install httpx pandas")
     ANALYTICS_AVAILABLE = False
     trading_analytics_router = None
+
+# 🆕 NEW: Trade analysis router for detailed trailing stop analysis
+try:
+    from routers.trade_analysis_router import router as trade_analysis_router
+    TRADE_ANALYSIS_AVAILABLE = True
+    print("✅ Trade analysis router imported successfully")
+    print("   📊 Individual trade trailing stop analysis available")
+    print("   📈 Stage activation timeline available")
+    print("   🔍 Log parsing and event tracking available")
+except ImportError as e:
+    print(f"⚠️ Trade analysis router not available: {e}")
+    TRADE_ANALYSIS_AVAILABLE = False
+    trade_analysis_router = None
 
 from threading import Thread
 import logging
@@ -978,6 +991,14 @@ if ANALYTICS_AVAILABLE and trading_analytics_router:
     print("✅ Enhanced trading analytics router registered with /api/trading prefix")
     print("🎯 Activity-based P/L correlation endpoints available (FAST):")
     print("   • POST /api/trading/deals/correlate-activities")
+
+# 🆕 NEW: Add trade analysis router
+if TRADE_ANALYSIS_AVAILABLE and trade_analysis_router:
+    app.include_router(trade_analysis_router, tags=["trade-analysis"])
+    print("✅ Trade analysis router registered")
+    print("📊 Trade analysis endpoints available:")
+    print("   • GET /api/trade-analysis/trade/{trade_id} - Comprehensive trade analysis")
+    print("   • GET /api/trade-analysis/trade/{trade_id}/timeline - Event timeline")
     print("   • POST /api/trading/deals/calculate-complete-pnl") 
     print("   • GET  /api/trading/deals/pnl-calculation-status")
     print("🔗 🆕 Transaction-based P/L correlation endpoints available (FAST):")  # NEW

@@ -1652,6 +1652,250 @@ class UnifiedTradingDashboard:
         except Exception as e:
             st.error(f"❌ Error rendering individual epic regimes: {e}")
 
+    def render_trade_analysis_tab(self):
+        """Render the Trade Analysis tab for detailed trailing stop analysis"""
+        st.header("🔍 Individual Trade Analysis")
+        st.markdown("*Analyze trailing stop stages and performance for specific trades*")
+
+        # Input for trade ID
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            trade_id = st.number_input("Enter Trade ID", min_value=1, value=1273, step=1, key="trade_id_input")
+
+        with col2:
+            analyze_btn = st.button("🔍 Analyze Trade", type="primary")
+
+        if analyze_btn or trade_id:
+            try:
+                import requests
+
+                # Call the FastAPI endpoint
+                headers = {
+                    "X-APIM-Gateway": "verified",
+                    "X-API-KEY": "436abe054a074894a0517e5172f0e5b6"
+                }
+
+                with st.spinner(f"Analyzing trade {trade_id}..."):
+                    response = requests.get(
+                        f"http://fastapi-dev:8000/api/trade-analysis/trade/{trade_id}",
+                        headers=headers
+                    )
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    # Trade Details Section
+                    st.subheader("📋 Trade Details")
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        st.metric("Symbol", data['trade_details']['symbol'].replace('CS.D.', '').replace('.MINI.IP', ''))
+                        st.metric("Direction", data['trade_details']['direction'])
+
+                    with col2:
+                        st.metric("Entry Price", f"{data['trade_details']['entry_price']:.5f}")
+                        st.metric("Stop Loss", f"{data['trade_details']['sl_price']:.5f}")
+
+                    with col3:
+                        st.metric("Take Profit", f"{data['trade_details']['tp_price']:.5f}")
+                        st.metric("Status", data['trade_details']['status'].upper())
+
+                    with col4:
+                        metrics = data['calculated_metrics']
+                        sl_color = "🟢" if metrics['sl_above_entry'] else "🔴"
+                        st.metric("SL Distance", f"{metrics['sl_distance_pts']:.1f} pts")
+                        st.metric("Protection", f"{sl_color} {'+' if metrics['sl_above_entry'] else ''}{metrics['sl_distance_pts']:.1f}")
+
+                    # Pair Configuration Section
+                    st.subheader("⚙️ Pair-Specific Configuration")
+                    cfg = data['pair_configuration']
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📊 Stage 1 (Break-Even)</h4>
+                            <p><strong>Trigger:</strong> {cfg['stage1_trigger_points']} points</p>
+                            <p><strong>Lock:</strong> {cfg['stage1_lock_points']} points profit</p>
+                            <p><strong>BE Trigger:</strong> {cfg['break_even_trigger_points']} points</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>🎯 Stage 2 (Profit Lock)</h4>
+                            <p><strong>Trigger:</strong> {cfg['stage2_trigger_points']} points</p>
+                            <p><strong>Lock:</strong> {cfg['stage2_lock_points']} points profit</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col3:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>🚀 Stage 3 (ATR Trailing)</h4>
+                            <p><strong>Trigger:</strong> {cfg['stage3_trigger_points']} points</p>
+                            <p><strong>ATR:</strong> {cfg['stage3_atr_multiplier']}x multiplier</p>
+                            <p><strong>Min Distance:</strong> {cfg['stage3_min_distance']} points</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # Stage Activation Analysis
+                    st.subheader("📈 Stage Activation Analysis")
+                    stages = data['stage_analysis']
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        stage1_emoji = "✅" if stages['stage1']['activated'] else "❌"
+                        stage1_bg = '#d4edda' if stages['stage1']['activated'] else '#f8d7da'
+                        stage1_status = 'ACTIVATED' if stages['stage1']['activated'] else 'NOT REACHED'
+
+                        # Build conditional content
+                        stage1_extra = ""
+                        if stages['stage1']['activated']:
+                            stage1_extra = f"<p><strong>Time:</strong> {stages['stage1']['activation_time']}</p><p><strong>Max Profit:</strong> {stages['stage1']['max_profit_reached']} pts</p><p><strong>Final Lock:</strong> +{stages['stage1']['final_lock']} pts</p>"
+
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: {stage1_bg};">
+                            <h4>{stage1_emoji} Stage 1: Break-Even</h4>
+                            <p><strong>Status:</strong> {stage1_status}</p>
+                            {stage1_extra}
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        stage2_emoji = "✅" if stages['stage2']['activated'] else "❌"
+                        stage2_bg = '#d4edda' if stages['stage2']['activated'] else '#fff3cd'
+                        stage2_status = 'ACTIVATED' if stages['stage2']['activated'] else 'NOT REACHED'
+
+                        # Build conditional content
+                        stage2_extra = ""
+                        if stages['stage2']['activated']:
+                            stage2_extra = f"<p><strong>Time:</strong> {stages['stage2']['activation_time']}</p>"
+                        else:
+                            stage2_extra = f"<p><strong>Would Lock:</strong> +{stages['stage2']['lock_amount']} pts</p>"
+
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: {stage2_bg};">
+                            <h4>{stage2_emoji} Stage 2: Profit Lock</h4>
+                            <p><strong>Status:</strong> {stage2_status}</p>
+                            <p><strong>Required:</strong> {stages['stage2']['trigger_threshold']} pts</p>
+                            {stage2_extra}
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col3:
+                        stage3_emoji = "✅" if stages['stage3']['activated'] else "❌"
+                        stage3_bg = '#d4edda' if stages['stage3']['activated'] else '#fff3cd'
+                        stage3_status = 'ACTIVATED' if stages['stage3']['activated'] else 'NOT REACHED'
+
+                        # Build conditional content
+                        stage3_extra = ""
+                        if stages['stage3']['activated']:
+                            stage3_extra = f"<p><strong>Time:</strong> {stages['stage3']['activation_time']}</p>"
+
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: {stage3_bg};">
+                            <h4>{stage3_emoji} Stage 3: ATR Trailing</h4>
+                            <p><strong>Status:</strong> {stage3_status}</p>
+                            <p><strong>Required:</strong> {stages['stage3']['trigger_threshold']} pts</p>
+                            {stage3_extra}
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # Performance Summary
+                    st.subheader("📊 Performance Summary")
+                    summary = data['summary']
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        st.metric("Stages Activated", f"{summary['stages_activated']}/3")
+
+                    with col2:
+                        st.metric("Max Profit Reached", f"{summary['max_profit_reached']} pts")
+
+                    with col3:
+                        profit_protected = summary['final_protection']
+                        protection_emoji = "🟢" if profit_protected > 0 else "🔴"
+                        st.metric("Final Protection", f"{protection_emoji} +{profit_protected:.1f} pts")
+
+                    with col4:
+                        fully_trailed = "Yes ✅" if summary['fully_trailed'] else "No ❌"
+                        st.metric("Fully Trailed", fully_trailed)
+
+                    # Profit Timeline Chart
+                    if data['timeline']['profit_progression']:
+                        st.subheader("📈 Profit Progression Timeline")
+
+                        import plotly.graph_objects as go
+
+                        profit_data = data['timeline']['profit_progression']
+                        timestamps = [p['timestamp'] for p in profit_data]
+                        profits = [p['profit_pts'] for p in profit_data]
+
+                        fig = go.Figure()
+
+                        # Add profit line
+                        fig.add_trace(go.Scatter(
+                            x=timestamps,
+                            y=profits,
+                            mode='lines+markers',
+                            name='Profit (pts)',
+                            line=dict(color='blue', width=2),
+                            marker=dict(size=6)
+                        ))
+
+                        # Add stage threshold lines
+                        fig.add_hline(y=cfg['break_even_trigger_points'], line_dash="dash",
+                                     line_color="green", annotation_text="Stage 1 Trigger")
+                        fig.add_hline(y=cfg['stage2_trigger_points'], line_dash="dash",
+                                     line_color="orange", annotation_text="Stage 2 Trigger")
+                        fig.add_hline(y=cfg['stage3_trigger_points'], line_dash="dash",
+                                     line_color="red", annotation_text="Stage 3 Trigger")
+
+                        fig.update_layout(
+                            title=f"Trade {trade_id} - Profit Evolution",
+                            xaxis_title="Time",
+                            yaxis_title="Profit (points)",
+                            hovermode='x unified',
+                            height=400
+                        )
+
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    # Event Log
+                    st.subheader("📝 Event Log")
+
+                    # Break-even events
+                    if data['timeline']['break_even_events']:
+                        st.markdown("**🎯 Break-Even Triggers:**")
+                        for event in data['timeline']['break_even_events']:
+                            st.info(f"⏰ {event['timestamp']}: Profit {event['profit_pts']}pts ≥ Trigger {event['trigger_pts']}pts")
+
+                    # Stop adjustments
+                    if data['timeline']['stop_adjustments']:
+                        st.markdown("**📤 Stop Adjustments:**")
+                        for event in data['timeline']['stop_adjustments']:
+                            st.success(f"⏰ {event['timestamp']}: Stop moved to {event['new_stop']:.5f}")
+
+                    # Raw Data (Expandable)
+                    with st.expander("🔍 View Raw Analysis Data"):
+                        st.json(data)
+
+                elif response.status_code == 404:
+                    st.error(f"❌ Trade {trade_id} not found in database")
+                else:
+                    st.error(f"❌ API Error: {response.status_code} - {response.text}")
+
+            except Exception as e:
+                st.error(f"❌ Error analyzing trade: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
     def render_settings_debug_tab(self):
         """Render the settings and debug tab"""
         st.header("🔧 Settings & Debug")
@@ -1902,7 +2146,7 @@ class UnifiedTradingDashboard:
         st.markdown("*Unified dashboard for comprehensive trading analysis*")
 
         # Tab navigation
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "🎯 Strategy Analysis", "💰 Trade Performance", "🧠 Market Intelligence", "🔧 Settings & Debug"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Overview", "🎯 Strategy Analysis", "💰 Trade Performance", "🧠 Market Intelligence", "🔍 Trade Analysis", "🔧 Settings & Debug"])
 
         with tab1:
             self.render_overview_tab()
@@ -1917,6 +2161,9 @@ class UnifiedTradingDashboard:
             self.render_market_intelligence_tab()
 
         with tab5:
+            self.render_trade_analysis_tab()
+
+        with tab6:
             self.render_settings_debug_tab()
 
         # Footer
