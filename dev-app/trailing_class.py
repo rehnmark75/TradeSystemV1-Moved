@@ -1205,7 +1205,7 @@ class EnhancedTradeProcessor:
             # ✅ CRITICAL FIX: Use the SAME distance that the trailing strategy uses
             # Instead of calculate_safe_trail_distance(), use the config minimum
             # This ensures consistency between calculation and validation
-            strategy_distance = self.config.min_trail_distance
+            strategy_distance = getattr(trade, "min_stop_distance_points", 4)  # USE IG MIN ONLY - min_trail_distance DISABLED
             min_distance_price = strategy_distance * point_value
             
             self.logger.debug(f"[VALIDATION SYNC] {trade.symbol}: Using strategy distance {strategy_distance} points "
