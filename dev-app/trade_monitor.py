@@ -770,17 +770,17 @@ class TradeMonitor:
                 self.logger.error(f"❌ Could not get current price for {trade.symbol}")
                 return False
             
-            # Use standard trailing configuration (simplified)
-            if self.pair_config_manager:
-                try:
-                    pair_config = self.pair_config_manager.get_optimized_config_for_trade(trade)
-                    self.logger.debug(f"📊 Using pair-specific config for {trade.symbol}")
-                except Exception as config_error:
-                    self.logger.warning(f"⚠️ Failed to get pair config for {trade.symbol}, using default: {config_error}")
-                    pair_config = self.trade_config
-            else:
-                pair_config = self.trade_config
-                self.logger.debug(f"🎯 Using standard config for {trade.symbol}")
+            # ✅ NEW: Log pair-specific configuration info
+            # Note: EnhancedTradeProcessor handles pair-specific configs internally via get_trailing_config_for_epic()
+            from config import get_trailing_config_for_epic
+
+            try:
+                pair_config = get_trailing_config_for_epic(trade.symbol)
+                self.logger.debug(f"📊 [MONITOR] Using pair-specific config for {trade.symbol}: "
+                                f"Stage2({pair_config['stage2_trigger_points']}pts→{pair_config['stage2_lock_points']}pts) "
+                                f"Stage3({pair_config['stage3_trigger_points']}pts)")
+            except Exception as config_error:
+                self.logger.warning(f"⚠️ Failed to get pair config for {trade.symbol}: {config_error}")
             
             # ✅ FIX: Use correct method name and pass all required parameters
             with SessionLocal() as db:

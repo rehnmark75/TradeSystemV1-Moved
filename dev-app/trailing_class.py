@@ -43,6 +43,9 @@ class TrailingConfig:
     """Configuration for advanced trailing strategies"""
     method: TrailingMethod = TrailingMethod.PROGRESSIVE_3_STAGE
 
+    # Epic identifier for pair-specific settings
+    epic: Optional[str] = None
+
     # Universal settings
     initial_trigger_points: int = 7
     break_even_trigger_points: int = 3  # UPDATED: move to BE after +3 points (was 7)
@@ -62,7 +65,7 @@ class TrailingConfig:
 
     # EMA Exit compatibility (disabled by default for progressive trailing)
     enable_ema_exit: bool = False
-    
+
     # Percentage-based
     trail_percentage: float = 1.5
 
@@ -84,6 +87,56 @@ class TrailingConfig:
     volatility_threshold: float = 1.5
     momentum_lookback: int = 5
     trend_strength_min: float = 0.6
+
+    @classmethod
+    def from_epic(cls, epic: str, method: TrailingMethod = TrailingMethod.PROGRESSIVE_3_STAGE):
+        """
+        Create TrailingConfig with pair-specific settings from config.py
+
+        Args:
+            epic: Trading symbol (e.g., 'CS.D.EURUSD.MINI.IP')
+            method: Trailing method to use (default: PROGRESSIVE_3_STAGE)
+
+        Returns:
+            TrailingConfig instance with pair-specific values
+
+        Note: IG's min_stop_distance_points from trade_log ALWAYS takes priority when available
+        """
+        from config import get_trailing_config_for_epic
+
+        pair_config = get_trailing_config_for_epic(epic)
+
+        return cls(
+            method=method,
+            epic=epic,
+            # Use pair-specific values
+            stage1_trigger_points=pair_config['stage1_trigger_points'],
+            stage1_lock_points=pair_config['stage1_lock_points'],
+            stage2_trigger_points=pair_config['stage2_trigger_points'],
+            stage2_lock_points=pair_config['stage2_lock_points'],
+            stage3_trigger_points=pair_config['stage3_trigger_points'],
+            stage3_atr_multiplier=pair_config['stage3_atr_multiplier'],
+            stage3_min_distance=pair_config['stage3_min_distance'],
+            min_trail_distance=pair_config['min_trail_distance'],
+            break_even_trigger_points=pair_config['break_even_trigger_points'],
+            # Keep other defaults for non-stage-specific settings
+            initial_trigger_points=7,
+            max_trail_distance=50,
+            monitor_interval_seconds=30,
+            enable_ema_exit=False,
+            trail_percentage=1.5,
+            atr_multiplier=2.0,
+            atr_period=14,
+            atr_timeframe=60,
+            chandelier_period=14,
+            chandelier_multiplier=3.0,
+            sar_initial_af=0.02,
+            sar_max_af=0.20,
+            sar_increment=0.02,
+            volatility_threshold=1.5,
+            momentum_lookback=5,
+            trend_strength_min=0.6,
+        )
 
 class TrailingStrategy(ABC):
     """Base class for trailing stop strategies"""
@@ -1242,8 +1295,17 @@ class EnhancedTradeProcessor:
         self.logger.info(f"🔧 [ENHANCED] Processing trade {trade.id} {trade.symbol} status={trade.status}")
 
         try:
-            # Use standard 3-stage configuration (simplified - removed per-epic progressive config)
-            from config import STAGE2_TRIGGER_POINTS, STAGE2_LOCK_POINTS, STAGE3_TRIGGER_POINTS
+            # ✅ NEW: Use pair-specific configuration dynamically
+            from config import get_trailing_config_for_epic
+
+            trailing_config = get_trailing_config_for_epic(trade.symbol)
+            STAGE2_TRIGGER_POINTS = trailing_config['stage2_trigger_points']
+            STAGE2_LOCK_POINTS = trailing_config['stage2_lock_points']
+            STAGE3_TRIGGER_POINTS = trailing_config['stage3_trigger_points']
+
+            self.logger.info(f"📊 [PAIR CONFIG] {trade.symbol}: "
+                           f"Stage2({STAGE2_TRIGGER_POINTS}pts→{STAGE2_LOCK_POINTS}pts) "
+                           f"Stage3({STAGE3_TRIGGER_POINTS}pts)")
 
             point_value = get_point_value(trade.symbol)
 
@@ -1255,7 +1317,7 @@ class EnhancedTradeProcessor:
                 stage1_offset = 8 if is_jpy_pair(trade.symbol) else 4
                 break_even_trigger_points = int(ig_min_distance + stage1_offset)
             else:
-                break_even_trigger_points = 7  # Fallback from config
+                break_even_trigger_points = trailing_config['break_even_trigger_points']  # Use pair-specific fallback
             break_even_trigger = break_even_trigger_points * point_value
             
             # Calculate safe trailing distance
@@ -1302,9 +1364,9 @@ class EnhancedTradeProcessor:
                     lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
                     self.logger.info(f"🎯 [USING IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts")
                 else:
-                    from config import STAGE1_LOCK_POINTS
-                    lock_points = STAGE1_LOCK_POINTS
-                    self.logger.info(f"⚠️ [FALLBACK CONFIG] Trade {trade.id}: No IG minimum distance, using config {lock_points}pts")
+                    # ✅ NEW: Use pair-specific configuration
+                    lock_points = trailing_config['stage1_lock_points']
+                    self.logger.info(f"⚠️ [FALLBACK CONFIG] Trade {trade.id}: No IG minimum distance, using pair config {lock_points}pts")
                 if trade.direction.upper() == "BUY":
                     break_even_stop = trade.entry_price + (lock_points * point_value)  # Entry + lock_points
                 else:
