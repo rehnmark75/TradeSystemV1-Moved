@@ -450,3 +450,80 @@ MACD_ADX_SIGNAL_PRIORITY = 2               # Priority: 1=MACD histogram crossove
 # - Lookback period prevents false breakouts (ADX crosses 25 but falls back immediately)
 # - Histogram expansion check ensures momentum is building, not fading
 # - Useful for catching trend acceleration from weak (ADX 20-24) to strong (ADX 25+)
+
+# =============================================================================
+# KAMA EFFICIENCY VALIDATION (NEW - Non-Blocking Quality Filter)
+# =============================================================================
+
+# Enable KAMA efficiency-based confidence adjustments for MACD
+# KAMA efficiency measures market directional clarity (0-1 scale)
+# Higher efficiency = clearer trend, lower efficiency = choppy/ranging
+MACD_USE_KAMA_EFFICIENCY = True
+
+# KAMA Efficiency Thresholds (non-blocking, for confidence adjustments only)
+# Based on analysis of real trades:
+#   Alert 5561 (7.0/10 quality): 0.593 efficiency (EXCELLENT)
+#   Alert 5576 (6.5/10 quality): 0.302 efficiency (GOOD)
+#   Alert 5575 (4.5/10 quality): 0.036 efficiency (VERY POOR)
+MACD_KAMA_EFFICIENCY_THRESHOLDS = {
+    'excellent': 0.50,    # >= 0.50: Strong directional movement with minimal noise
+    'good': 0.30,         # >= 0.30: Moderate trend clarity
+    'acceptable': 0.15,   # >= 0.15: Minimal acceptable efficiency
+    'poor': 0.10,         # >= 0.10: Choppy market conditions
+    'very_poor': 0.05     # < 0.05: Extremely noisy, whipsaw conditions
+}
+
+# KAMA Efficiency Confidence Modifiers (added to base signal confidence)
+# Conservative adjustments to avoid over-filtering while rewarding quality
+MACD_KAMA_CONFIDENCE_ADJUSTMENTS = {
+    'excellent_boost': 0.10,      # +10% confidence for efficiency >= 0.50
+    'good_boost': 0.05,           # +5% confidence for efficiency >= 0.30
+    'acceptable_neutral': 0.0,    # No change for efficiency 0.15-0.30
+    'poor_penalty': -0.05,        # -5% confidence for efficiency 0.10-0.15
+    'very_poor_penalty': -0.10    # -10% confidence for efficiency < 0.10
+}
+
+# KAMA Trend Alignment Check (optional, disabled by default)
+# When enabled, checks if KAMA trend direction matches signal direction
+# Example: BULL signal should have KAMA trend > 0 (bullish)
+MACD_REQUIRE_KAMA_TREND_ALIGNMENT = False  # Start disabled (too strict)
+MACD_KAMA_TREND_CONFLICT_PENALTY = -0.08  # Additional -8% penalty if trends conflict
+
+# Logging Configuration
+MACD_LOG_KAMA_EFFICIENCY = True  # Log KAMA efficiency analysis for transparency
+
+# Performance Notes:
+# - Non-blocking: Never rejects signals, only adjusts confidence
+# - Gradual: Smooth confidence curve based on market clarity
+# - Validated: Based on 16x quality difference in real trade analysis
+# - Safe: Conservative ±5-10% adjustments prevent over-fitting
+# - Transparent: All adjustments logged for analysis and tuning
+
+# =============================================================================
+# RANGING MARKET PENALTY (NEW - Additional Quality Filter for MACD)
+# =============================================================================
+
+# MACD performs poorly in ranging markets (generates false signals)
+# This adds an additional confidence penalty when ranging score is high
+MACD_RANGING_PENALTY_ENABLED = True
+
+# Ranging score thresholds for penalties
+MACD_RANGING_THRESHOLDS = {
+    'high_ranging': 0.55,      # >= 55% ranging (e.g., Alert 5575: 60.7%)
+    'moderate_ranging': 0.45,  # >= 45% ranging
+}
+
+# Confidence penalties for ranging markets
+MACD_RANGING_PENALTIES = {
+    'high_ranging_penalty': -0.15,      # -15% for ranging >= 55%
+    'moderate_ranging_penalty': -0.08,  # -8% for ranging >= 45%
+}
+
+# Logging
+MACD_LOG_RANGING_ANALYSIS = True
+
+# Combined Effect Example (Alert 5575):
+# Base confidence: 70%
+# KAMA penalty (0.036 efficiency): -10%
+# Ranging penalty (60.7% ranging): -15%
+# Final confidence: 45% → Would be BLOCKED by 60% minimum threshold

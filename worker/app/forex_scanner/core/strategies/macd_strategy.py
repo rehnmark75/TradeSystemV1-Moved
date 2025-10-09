@@ -148,6 +148,64 @@ class MACDStrategy(BaseStrategy):
         else:
             self.logger.info(f"📈 ADX Rising Validation DISABLED")
 
+        # Ranging Market Penalty Settings (NEW - Additional Quality Filter)
+        self.ranging_penalty_enabled = getattr(config_macd_strategy, 'MACD_RANGING_PENALTY_ENABLED', True) if config_macd_strategy else True
+
+        if self.ranging_penalty_enabled:
+            ranging_thresholds = getattr(config_macd_strategy, 'MACD_RANGING_THRESHOLDS', {}) if config_macd_strategy else {}
+            self.ranging_high_threshold = ranging_thresholds.get('high_ranging', 0.55)
+            self.ranging_moderate_threshold = ranging_thresholds.get('moderate_ranging', 0.45)
+
+            ranging_penalties = getattr(config_macd_strategy, 'MACD_RANGING_PENALTIES', {}) if config_macd_strategy else {}
+            self.ranging_high_penalty = ranging_penalties.get('high_ranging_penalty', -0.15)
+            self.ranging_moderate_penalty = ranging_penalties.get('moderate_ranging_penalty', -0.08)
+
+            self.log_ranging_analysis = getattr(config_macd_strategy, 'MACD_LOG_RANGING_ANALYSIS', True) if config_macd_strategy else True
+
+            self.logger.info(f"📊 Ranging Market Penalty ENABLED:")
+            self.logger.info(f"   High Ranging (>= {self.ranging_high_threshold:.0%}): {self.ranging_high_penalty:+.0%} confidence")
+            self.logger.info(f"   Moderate Ranging (>= {self.ranging_moderate_threshold:.0%}): {self.ranging_moderate_penalty:+.0%} confidence")
+        else:
+            self.logger.info(f"⚪ Ranging Market Penalty DISABLED")
+
+        # KAMA Efficiency Validation Settings (NEW - Non-Blocking Quality Filter)
+        self.use_kama_efficiency = getattr(config_macd_strategy, 'MACD_USE_KAMA_EFFICIENCY', True) if config_macd_strategy else True
+
+        if self.use_kama_efficiency:
+            # Load thresholds
+            kama_thresholds = getattr(config_macd_strategy, 'MACD_KAMA_EFFICIENCY_THRESHOLDS', {}) if config_macd_strategy else {}
+            self.kama_excellent_threshold = kama_thresholds.get('excellent', 0.50)
+            self.kama_good_threshold = kama_thresholds.get('good', 0.30)
+            self.kama_acceptable_threshold = kama_thresholds.get('acceptable', 0.15)
+            self.kama_poor_threshold = kama_thresholds.get('poor', 0.10)
+            self.kama_very_poor_threshold = kama_thresholds.get('very_poor', 0.05)
+
+            # Load confidence adjustments
+            kama_adjustments = getattr(config_macd_strategy, 'MACD_KAMA_CONFIDENCE_ADJUSTMENTS', {}) if config_macd_strategy else {}
+            self.kama_excellent_boost = kama_adjustments.get('excellent_boost', 0.10)
+            self.kama_good_boost = kama_adjustments.get('good_boost', 0.05)
+            self.kama_acceptable_neutral = kama_adjustments.get('acceptable_neutral', 0.0)
+            self.kama_poor_penalty = kama_adjustments.get('poor_penalty', -0.05)
+            self.kama_very_poor_penalty = kama_adjustments.get('very_poor_penalty', -0.10)
+
+            # Optional trend alignment check
+            self.require_kama_trend_alignment = getattr(config_macd_strategy, 'MACD_REQUIRE_KAMA_TREND_ALIGNMENT', False) if config_macd_strategy else False
+            self.kama_trend_conflict_penalty = getattr(config_macd_strategy, 'MACD_KAMA_TREND_CONFLICT_PENALTY', -0.08) if config_macd_strategy else -0.08
+
+            # Logging
+            self.log_kama_efficiency = getattr(config_macd_strategy, 'MACD_LOG_KAMA_EFFICIENCY', True) if config_macd_strategy else True
+
+            self.logger.info(f"🎯 KAMA Efficiency Validation ENABLED:")
+            self.logger.info(f"   Excellent (>= {self.kama_excellent_threshold:.2f}): {self.kama_excellent_boost:+.0%} confidence")
+            self.logger.info(f"   Good (>= {self.kama_good_threshold:.2f}): {self.kama_good_boost:+.0%} confidence")
+            self.logger.info(f"   Acceptable (>= {self.kama_acceptable_threshold:.2f}): {self.kama_acceptable_neutral:+.0%} confidence")
+            self.logger.info(f"   Poor (>= {self.kama_poor_threshold:.2f}): {self.kama_poor_penalty:+.0%} confidence")
+            self.logger.info(f"   Very Poor (< {self.kama_poor_threshold:.2f}): {self.kama_very_poor_penalty:+.0%} confidence")
+            if self.require_kama_trend_alignment:
+                self.logger.info(f"   KAMA Trend Alignment REQUIRED (conflict penalty: {self.kama_trend_conflict_penalty:+.0%})")
+        else:
+            self.logger.info(f"⚪ KAMA Efficiency Validation DISABLED")
+
         self.logger.info(f"🔧 CRITICAL DEBUG: Using REBUILT MACD with expansion + ADX rising validation (v3.0)")
 
     def calculate_macd(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -620,8 +678,98 @@ class MACDStrategy(BaseStrategy):
         epic_display = f"[{epic}] " if epic else ""
 
         try:
-            # Calculate confidence
+            # Calculate base confidence
             confidence = self.calculate_confidence(row, signal_type)
+
+            # KAMA Efficiency Validation (NEW - Non-Blocking Quality Filter)
+            kama_adjustment = 0.0
+            kama_quality = "N/A"
+            kama_efficiency_value = None
+
+            if self.use_kama_efficiency:
+                # Note: We pass the row index, but since row is a Series, we need to handle this
+                # For now, we'll extract the data directly from the row
+                kama_efficiency_value = row.get('efficiency_ratio', None)
+                kama_trend = row.get('kama_trend', 0)
+
+                if kama_efficiency_value is not None and not pd.isna(kama_efficiency_value):
+                    # Determine confidence adjustment based on efficiency tier
+                    if kama_efficiency_value >= self.kama_excellent_threshold:
+                        kama_adjustment = self.kama_excellent_boost
+                        kama_quality = "EXCELLENT"
+                        emoji = "⭐⭐⭐⭐⭐"
+                    elif kama_efficiency_value >= self.kama_good_threshold:
+                        kama_adjustment = self.kama_good_boost
+                        kama_quality = "GOOD"
+                        emoji = "⭐⭐⭐"
+                    elif kama_efficiency_value >= self.kama_acceptable_threshold:
+                        kama_adjustment = self.kama_acceptable_neutral
+                        kama_quality = "ACCEPTABLE"
+                        emoji = "⭐⭐"
+                    elif kama_efficiency_value >= self.kama_poor_threshold:
+                        kama_adjustment = self.kama_poor_penalty
+                        kama_quality = "POOR"
+                        emoji = "⭐"
+                    else:
+                        kama_adjustment = self.kama_very_poor_penalty
+                        kama_quality = "VERY POOR"
+                        emoji = "❌"
+
+                    # Optional: Check KAMA trend alignment
+                    trend_note = ""
+                    if self.require_kama_trend_alignment:
+                        trend_aligned = (
+                            (signal_type == 'BULL' and kama_trend > 0) or
+                            (signal_type == 'BEAR' and kama_trend < 0)
+                        )
+                        if not trend_aligned:
+                            kama_adjustment += self.kama_trend_conflict_penalty
+                            trend_note = f" (TREND CONFLICT: kama_trend={kama_trend:+.1f})"
+                            kama_quality += " + CONFLICT"
+
+                    # Log KAMA analysis
+                    if self.log_kama_efficiency:
+                        self.logger.info(
+                            f"🎯 {epic_display}KAMA Efficiency: {kama_efficiency_value:.3f} {emoji} {kama_quality}{trend_note} "
+                            f"→ Confidence adjustment: {kama_adjustment:+.1%}"
+                        )
+
+                    # Apply KAMA adjustment to confidence
+                    confidence += kama_adjustment
+
+            # Ranging Market Penalty (NEW - Additional Quality Filter)
+            ranging_adjustment = 0.0
+            ranging_quality = "N/A"
+            ranging_score_value = None
+
+            if self.ranging_penalty_enabled:
+                # Try to get ranging score from row (if available from market intelligence)
+                ranging_score_value = row.get('ranging_score', None)
+
+                if ranging_score_value is not None and not pd.isna(ranging_score_value):
+                    # Determine ranging penalty based on ranging score
+                    if ranging_score_value >= self.ranging_high_threshold:
+                        ranging_adjustment = self.ranging_high_penalty
+                        ranging_quality = "HIGH RANGING"
+                        emoji = "🔀"
+                    elif ranging_score_value >= self.ranging_moderate_threshold:
+                        ranging_adjustment = self.ranging_moderate_penalty
+                        ranging_quality = "MODERATE RANGING"
+                        emoji = "↔️"
+                    else:
+                        ranging_adjustment = 0.0
+                        ranging_quality = "LOW RANGING"
+                        emoji = "➡️"
+
+                    # Log ranging analysis
+                    if self.log_ranging_analysis:
+                        self.logger.info(
+                            f"📊 {epic_display}Ranging Score: {ranging_score_value:.1%} {emoji} {ranging_quality} "
+                            f"→ Confidence adjustment: {ranging_adjustment:+.1%}"
+                        )
+
+                    # Apply ranging adjustment to confidence
+                    confidence += ranging_adjustment
 
             # Use different minimum confidence for ADX crossover signals
             min_conf = self.adx_min_confidence if trigger_type == 'adx' else self.min_confidence
@@ -663,6 +811,17 @@ class MACDStrategy(BaseStrategy):
                 'ema_100': row.get('ema_100', 0),
                 'ema_200': row.get('ema_200', 0),
                 'ema_filter_used': ema_filter_used,  # Which EMA was used for filtering
+
+                # KAMA efficiency data (NEW - for analysis and tracking)
+                'kama_efficiency': kama_efficiency_value,
+                'kama_efficiency_adjustment': kama_adjustment,
+                'kama_quality': kama_quality,
+                'kama_trend': row.get('kama_trend', None),
+
+                # Ranging market data (NEW - for analysis and tracking)
+                'ranging_score': ranging_score_value,
+                'ranging_adjustment': ranging_adjustment,
+                'ranging_quality': ranging_quality,
             }
 
             # Calculate ATR-based SL/TP
@@ -1002,6 +1161,85 @@ class MACDStrategy(BaseStrategy):
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
         return df
+
+    def _validate_kama_efficiency(self, df: pd.DataFrame, idx: int, signal_type: str) -> tuple:
+        """
+        Validate KAMA efficiency and calculate confidence adjustment
+
+        Non-blocking: Only adjusts confidence, never blocks signals
+
+        KAMA efficiency measures market directional clarity:
+        - High efficiency (>0.5): Strong trending with minimal noise
+        - Medium efficiency (0.15-0.5): Moderate trend clarity
+        - Low efficiency (<0.15): Choppy/ranging conditions
+
+        Args:
+            df: DataFrame with KAMA indicators
+            idx: Current row index
+            signal_type: 'BULL' or 'BEAR'
+
+        Returns:
+            tuple: (confidence_adjustment, quality_label, efficiency_ratio)
+        """
+        try:
+            # Get KAMA data from current row
+            current_row = df.iloc[idx]
+            kama_efficiency = current_row.get('efficiency_ratio', None)
+            kama_trend = current_row.get('kama_trend', 0)
+
+            # If KAMA data not available, return neutral (no adjustment)
+            if kama_efficiency is None or pd.isna(kama_efficiency):
+                if self.log_kama_efficiency:
+                    self.logger.debug("⚪ KAMA efficiency data not available - no adjustment")
+                return (0.0, "N/A", None)
+
+            # Determine confidence adjustment based on efficiency tier
+            if kama_efficiency >= self.kama_excellent_threshold:
+                adjustment = self.kama_excellent_boost
+                quality = "EXCELLENT"
+                emoji = "⭐⭐⭐⭐⭐"
+            elif kama_efficiency >= self.kama_good_threshold:
+                adjustment = self.kama_good_boost
+                quality = "GOOD"
+                emoji = "⭐⭐⭐"
+            elif kama_efficiency >= self.kama_acceptable_threshold:
+                adjustment = self.kama_acceptable_neutral
+                quality = "ACCEPTABLE"
+                emoji = "⭐⭐"
+            elif kama_efficiency >= self.kama_poor_threshold:
+                adjustment = self.kama_poor_penalty
+                quality = "POOR"
+                emoji = "⭐"
+            else:
+                adjustment = self.kama_very_poor_penalty
+                quality = "VERY POOR"
+                emoji = "❌"
+
+            # Optional: Check KAMA trend alignment with signal direction
+            trend_note = ""
+            if self.require_kama_trend_alignment:
+                trend_aligned = (
+                    (signal_type == 'BULL' and kama_trend > 0) or
+                    (signal_type == 'BEAR' and kama_trend < 0)
+                )
+
+                if not trend_aligned:
+                    adjustment += self.kama_trend_conflict_penalty
+                    trend_note = f" (TREND CONFLICT: kama_trend={kama_trend:+.1f})"
+                    quality += " + CONFLICT"
+
+            # Log the analysis
+            if self.log_kama_efficiency:
+                self.logger.info(
+                    f"🎯 KAMA Efficiency: {kama_efficiency:.3f} {emoji} {quality}{trend_note} "
+                    f"→ Confidence adjustment: {adjustment:+.1%}"
+                )
+
+            return (adjustment, quality, kama_efficiency)
+
+        except Exception as e:
+            self.logger.error(f"❌ KAMA efficiency validation error: {e}")
+            return (0.0, "ERROR", None)
 
     def _get_pip_value(self, epic: str) -> float:
         """

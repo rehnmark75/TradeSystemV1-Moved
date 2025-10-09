@@ -140,8 +140,8 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         'scalping': 0.9,        # Excellent - ranges perfect for scalping
 
         # Trend-following in ranges (moderate to poor)
-        'macd': 0.8,            # GOOD - divergence analysis in ranges
-        'smart_money_macd': 0.8, # Good - MACD with smart money
+        'macd': 0.4,            # POOR - momentum crossovers generate false signals in ranging markets
+        'smart_money_macd': 0.45, # POOR - slightly better with smart money but still unsuitable
         'ichimoku': 0.6,        # Moderate - cloud can define ranges
         'kama': 0.7,            # Good - adapts to ranging conditions
         'momentum': 0.5,        # Poor - little momentum in ranges
@@ -184,8 +184,8 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         'bollinger': 0.8,       # Good - mean reversion in consolidation
 
         # Moderate performers
-        'macd': 0.75,           # Good - can detect subtle momentum shifts
-        'smart_money_macd': 0.75, # Good - MACD with smart money
+        'macd': 0.45,           # POOR - consolidation lacks momentum for reliable MACD signals
+        'smart_money_macd': 0.5, # MODERATE - slightly better with smart money
         'ichimoku': 0.7,        # Good - cloud consolidation patterns
         'kama': 0.7,            # Good - adapts to low volatility
 
@@ -202,8 +202,8 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         # High volatility specialists (excellent)
         'zero_lag': 1.0,        # PERFECT - designed for fast markets
         'momentum': 1.0,        # PERFECT - volatility creates momentum
-        'macd': 1.0,            # PERFECT - thrives in volatile conditions
-        'smart_money_macd': 1.0, # PERFECT - MACD with smart money
+        'macd': 0.6,            # MODERATE - high vol alone doesn't guarantee trending (can be choppy ranging)
+        'smart_money_macd': 0.65, # MODERATE - slightly better with smart money context
         'kama': 1.0,            # PERFECT - adapts to high volatility
         'bb_supertrend': 1.0,   # PERFECT - volatility breakouts
         'scalping': 0.9,        # Excellent - volatility creates opportunities
@@ -284,7 +284,8 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
 ENABLE_PROBABILISTIC_CONFIDENCE_MODIFIERS = True
 
 # Minimum confidence modifier threshold (signals below this are still blocked)
-MIN_CONFIDENCE_MODIFIER = 0.2
+# Raised from 0.2 to 0.5 to filter out poor regime-strategy combinations
+MIN_CONFIDENCE_MODIFIER = 0.5
 
 # =============================================================================
 # INTELLIGENCE THRESHOLDS AND WEIGHTS
