@@ -7,6 +7,22 @@ Modular configuration following the new architectural pattern
 # Strategy enable/disable
 ZERO_LAG_STRATEGY = True
 
+# =============================================================================
+# PAIR BLACKLIST CONFIGURATION
+# =============================================================================
+
+# Enable/disable pair blacklist filtering
+ZERO_LAG_PAIR_BLACKLIST_ENABLED = True
+
+# Blacklisted currency pairs or currencies
+# Can contain full epic names (e.g., 'CS.D.USDJPY.MINI.IP') or partial matches (e.g., 'JPY')
+# Set to empty list [] to disable all blacklisting
+ZERO_LAG_BLACKLISTED_PAIRS = [
+    'JPY',  # Blocks all JPY pairs (USDJPY, EURJPY, GBPJPY, etc.)
+]
+
+# =============================================================================
+
 # Main configuration dictionary with multiple presets
 ZERO_LAG_STRATEGY_CONFIG = {
     'default': {

@@ -302,7 +302,7 @@ class ZeroLagStrategy(BaseStrategy):
             self.logger.error(f"Error ensuring indicators: {e}")
             return None
 
-    def _detect_three_component_signal(self, df: pd.DataFrame, epic: str, 
+    def _detect_three_component_signal(self, df: pd.DataFrame, epic: str,
                                        spread_pips: float, timeframe: str) -> Optional[Dict]:
         """
         Detect signals using the 2-component system + TradeValidator:
@@ -311,11 +311,16 @@ class ZeroLagStrategy(BaseStrategy):
         3. EMA200 Filter (handled by TradeValidator)
         """
         try:
+            # VALIDATION 0: PAIR BLACKLIST CHECK
+            if not self._is_pair_allowed(epic):
+                self.logger.debug(f"❌ Pair {epic} is blacklisted for Zero Lag strategy")
+                return None
+
             if len(df) < 2:
                 return None
-            
+
             latest_row = df.iloc[-1]
-            
+
             # Check for Zero Lag TREND CROSSOVER signals (ribbon color changes ONLY)
             bull_alert = latest_row.get('bull_alert', False)
             bear_alert = latest_row.get('bear_alert', False)
@@ -500,6 +505,46 @@ class ZeroLagStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error(f"Error in three-component signal detection: {e}")
             return None
+
+    def _is_pair_allowed(self, epic: str) -> bool:
+        """
+        Check if a trading pair is allowed based on blacklist configuration
+
+        Args:
+            epic: Trading pair epic (e.g., 'CS.D.USDJPY.MINI.IP')
+
+        Returns:
+            True if pair is allowed, False if blacklisted
+        """
+        try:
+            # Import blacklist configuration
+            from configdata.strategies import config_zerolag_strategy
+
+            # Check if blacklist is enabled
+            blacklist_enabled = getattr(config_zerolag_strategy, 'ZERO_LAG_PAIR_BLACKLIST_ENABLED', False)
+            if not blacklist_enabled:
+                return True  # Blacklist disabled, allow all pairs
+
+            # Get blacklisted pairs/currencies
+            blacklisted = getattr(config_zerolag_strategy, 'ZERO_LAG_BLACKLISTED_PAIRS', [])
+            if not blacklisted:
+                return True  # Empty blacklist, allow all pairs
+
+            # Check if epic contains any blacklisted pattern
+            epic_upper = epic.upper()
+            for pattern in blacklisted:
+                if pattern.upper() in epic_upper:
+                    self.logger.debug(f"Pair {epic} blocked by blacklist pattern: {pattern}")
+                    return False
+
+            return True
+
+        except ImportError:
+            # Config not available, allow all pairs
+            return True
+        except Exception as e:
+            self.logger.warning(f"Error checking pair blacklist for {epic}: {e}")
+            return True  # On error, allow the pair
 
     def _validate_sr_proximity(self, df: pd.DataFrame, current_price: float, signal_type: str, epic: str) -> bool:
         """
