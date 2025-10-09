@@ -161,6 +161,13 @@ MACD_MIN_ADX = 25                        # PHASE 2: Increase to 25 (stronger tre
 MACD_MIN_ATR_RATIO = 0.8                 # PHASE 2: Increase to 0.8 (require higher volatility)
 MACD_MIN_EMA_SEPARATION = 0.2            # Price distance from EMA (in ATR units)
 
+# ADX Catch-Up Window (Similar to MACD Expansion Window)
+# Allows ADX to reach threshold within N bars AFTER MACD threshold is met
+# IMPORTANT: MACD must meet threshold first - ADX sliding window does NOT override this requirement
+MACD_ADX_CATCHUP_ENABLED = True          # Allow ADX to reach threshold within N bars of MACD crossover
+MACD_ADX_CATCHUP_WINDOW_BARS = 3         # Check up to 3 bars for ADX >= 25 (same window as MACD expansion)
+MACD_ADX_ALLOW_IMMEDIATE = True          # Trigger immediately if ADX already >= 25 when MACD meets threshold
+
 # Confirmation Requirements - Strengthen signal quality
 MACD_MIN_CONFIRMATIONS = 2               # Require 2 confirmations (MACD + RSI minimum)
 MACD_CONFIRMATION_TYPES = ['macd_histogram', 'rsi_momentum', 'volume', 'price_action']

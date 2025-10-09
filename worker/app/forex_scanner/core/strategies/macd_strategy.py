@@ -124,6 +124,11 @@ class MACDStrategy(BaseStrategy):
         self.adx_rising_lookback = getattr(config_macd_strategy, 'MACD_ADX_RISING_LOOKBACK', 2) if config_macd_strategy else 2
         self.adx_min_increase = getattr(config_macd_strategy, 'MACD_ADX_MIN_INCREASE', 0.5) if config_macd_strategy else 0.5
 
+        # ADX catch-up window settings (allows ADX to reach threshold within N bars AFTER MACD threshold is met)
+        self.adx_catchup_enabled = getattr(config_macd_strategy, 'MACD_ADX_CATCHUP_ENABLED', True) if config_macd_strategy else True
+        self.adx_catchup_window_bars = getattr(config_macd_strategy, 'MACD_ADX_CATCHUP_WINDOW_BARS', 3) if config_macd_strategy else 3
+        self.adx_catchup_allow_immediate = getattr(config_macd_strategy, 'MACD_ADX_ALLOW_IMMEDIATE', True) if config_macd_strategy else True
+
         self.logger.info(f"✅ Clean MACD Strategy initialized - ADX >= {self.min_adx}, Swing validation: {self.swing_validator is not None}")
         self.logger.info(f"📊 SL/TP: {self.stop_atr_multiplier}x ATR stop, {self.target_atr_multiplier}x ATR target (Structure stops: {self.use_structure_stops})")
         self.logger.info(f"📏 Histogram thresholds: Default={self.min_histogram_thresholds.get('default', 0.00003)}, JPY pairs scaled 50-100x higher")
@@ -132,6 +137,11 @@ class MACDStrategy(BaseStrategy):
             self.logger.info(f"📊 Histogram Expansion Confirmation ENABLED: Wait up to {self.expansion_window_bars} bars for expansion")
         else:
             self.logger.info(f"📊 Histogram Expansion Confirmation DISABLED: Immediate crossover signals")
+
+        if self.adx_catchup_enabled:
+            self.logger.info(f"⏳ ADX Catch-up Window ENABLED: ADX can reach {self.min_adx} within {self.adx_catchup_window_bars} bars AFTER MACD threshold met")
+        else:
+            self.logger.info(f"⏳ ADX Catch-up Window DISABLED: ADX must be >= {self.min_adx} immediately")
 
         if self.require_adx_rising:
             self.logger.info(f"📈 ADX Rising Validation ENABLED: Require ADX increasing over {self.adx_rising_lookback} bars (min +{self.adx_min_increase})")
@@ -210,11 +220,56 @@ class MACDStrategy(BaseStrategy):
         df['bull_window'] = bull_window
         df['bear_window'] = bear_window
 
-        # BULL EXPANSION: In window AND histogram >= threshold
+        # BULL EXPANSION: In window AND histogram >= threshold (MACD requirement - must be met first)
         df['bull_expansion_met'] = df['bull_window'] & (df['macd_histogram'] >= min_histogram)
 
-        # BEAR EXPANSION: In window AND |histogram| >= threshold
+        # BEAR EXPANSION: In window AND |histogram| >= threshold (MACD requirement - must be met first)
         df['bear_expansion_met'] = df['bear_window'] & (abs(df['macd_histogram']) >= min_histogram)
+
+        # ADX CATCH-UP WINDOW: Check if ADX reaches threshold within window AFTER MACD threshold is met
+        # CRITICAL: MACD expansion_met must be True first, then we check for ADX within the same window
+        if self.adx_catchup_enabled:
+            # For each bar where MACD expansion is met, check forward window for ADX >= threshold
+            df['adx_met_in_window'] = False
+
+            # Get indices where MACD expansion is met (these are our anchor points)
+            bull_expansion_indices = df[df['bull_expansion_met']].index
+            bear_expansion_indices = df[df['bear_expansion_met']].index
+
+            # For each MACD expansion point, check if ADX >= threshold in the catchup window
+            for idx in bull_expansion_indices:
+                idx_loc = df.index.get_loc(idx)
+                # Check current bar and next N bars for ADX >= threshold
+                for offset in range(self.adx_catchup_window_bars + 1):
+                    check_loc = idx_loc + offset
+                    if check_loc < len(df):
+                        check_idx = df.index[check_loc]
+                        adx_value = df.loc[check_idx, 'adx']
+                        if not pd.isna(adx_value) and adx_value >= self.min_adx:
+                            # Mark all bars in the window from MACD expansion to ADX confirmation
+                            for mark_offset in range(offset + 1):
+                                mark_loc = idx_loc + mark_offset
+                                if mark_loc < len(df):
+                                    df.iloc[mark_loc, df.columns.get_loc('adx_met_in_window')] = True
+                            break
+
+            for idx in bear_expansion_indices:
+                idx_loc = df.index.get_loc(idx)
+                for offset in range(self.adx_catchup_window_bars + 1):
+                    check_loc = idx_loc + offset
+                    if check_loc < len(df):
+                        check_idx = df.index[check_loc]
+                        adx_value = df.loc[check_idx, 'adx']
+                        if not pd.isna(adx_value) and adx_value >= self.min_adx:
+                            for mark_offset in range(offset + 1):
+                                mark_loc = idx_loc + mark_offset
+                                if mark_loc < len(df):
+                                    df.iloc[mark_loc, df.columns.get_loc('adx_met_in_window')] = True
+                            break
+
+            # Apply ADX catch-up filter: MACD expansion met AND ADX met in window
+            df['bull_expansion_met'] = df['bull_expansion_met'] & df['adx_met_in_window']
+            df['bear_expansion_met'] = df['bear_expansion_met'] & df['adx_met_in_window']
 
         # Add ADX trend validation if enabled
         if self.require_adx_rising:
@@ -420,19 +475,26 @@ class MACDStrategy(BaseStrategy):
         epic_display = f"[{epic}] " if epic else ""
 
         # Check ADX (handle NaN values)
-        adx = row.get('adx', 0)
+        # NOTE: If ADX catch-up window is enabled, ADX validation is already done in expansion window logic
+        # This check is only for immediate validation when catch-up is disabled
+        if not self.adx_catchup_enabled:
+            adx = row.get('adx', 0)
 
-        # CRITICAL: Check for NaN or invalid ADX values
-        if pd.isna(adx) or adx <= 0:
-            self.logger.info(f"❌ {epic_display}{signal_type} rejected: Invalid ADX ({adx})")
-            return False
+            # CRITICAL: Check for NaN or invalid ADX values
+            if pd.isna(adx) or adx <= 0:
+                self.logger.info(f"❌ {epic_display}{signal_type} rejected: Invalid ADX ({adx})")
+                return False
 
-        if adx < self.min_adx:
-            self.logger.info(f"❌ {epic_display}{signal_type} rejected: ADX {adx:.1f} < {self.min_adx}")
-            return False
+            if adx < self.min_adx:
+                self.logger.info(f"❌ {epic_display}{signal_type} rejected: ADX {adx:.1f} < {self.min_adx}")
+                return False
 
-        # Log ADX for signals that pass (for debugging)
-        self.logger.info(f"✅ {epic_display}{signal_type} passed ADX filter: ADX={adx:.1f} (min={self.min_adx})")
+            # Log ADX for signals that pass (for debugging)
+            self.logger.info(f"✅ {epic_display}{signal_type} passed ADX filter: ADX={adx:.1f} (min={self.min_adx})")
+        else:
+            # ADX catch-up enabled - validation already done in expansion window
+            adx = row.get('adx', 0)
+            self.logger.info(f"⏳ {epic_display}{signal_type} using ADX catch-up window (current ADX={adx:.1f}, validated in expansion window)")
 
         # ENABLED: Histogram magnitude check - ensures signal has sufficient momentum
         histogram = row.get('macd_histogram', 0)
