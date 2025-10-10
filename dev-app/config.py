@@ -124,7 +124,7 @@ PAIR_TRAILING_CONFIGS = {
 
     'CS.D.EURUSD.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 4,          # Minimum profit lock
+        'stage1_lock_points': 8,          # Minimum profit lock
         'stage2_trigger_points': 20,      # Profit lock trigger
         'stage2_lock_points': 12,         # Profit guarantee
         'stage3_trigger_points': 23,      # Start percentage trailing
@@ -136,7 +136,7 @@ PAIR_TRAILING_CONFIGS = {
 
     'CS.D.AUDUSD.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 4,          # Minimum profit lock
+        'stage1_lock_points': 8,          # Minimum profit lock
         'stage2_trigger_points': 22,      # Profit lock trigger
         'stage2_lock_points': 12,         # Profit guarantee
         'stage3_trigger_points': 23,      # Start percentage trailing
@@ -148,7 +148,7 @@ PAIR_TRAILING_CONFIGS = {
 
     'CS.D.NZDUSD.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 4,          # Minimum profit lock
+        'stage1_lock_points': 8,          # Minimum profit lock
         'stage2_trigger_points': 22,      # Profit lock trigger
         'stage2_lock_points': 12,         # Profit guarantee
         'stage3_trigger_points': 23,      # Start percentage trailing
@@ -160,7 +160,7 @@ PAIR_TRAILING_CONFIGS = {
 
     'CS.D.USDCAD.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 4,          # Minimum profit lock
+        'stage1_lock_points': 8,          # Minimum profit lock
         'stage2_trigger_points': 22,      # Profit lock trigger
         'stage2_lock_points': 12,         # Profit guarantee
         'stage3_trigger_points': 23,      # Start percentage trailing
@@ -172,7 +172,7 @@ PAIR_TRAILING_CONFIGS = {
 
     'CS.D.USDCHF.MINI.IP': {
         'stage1_trigger_points': 16,      # Break-even trigger
-        'stage1_lock_points': 4,          # Minimum profit lock
+        'stage1_lock_points': 8,          # Minimum profit lock
         'stage2_trigger_points': 22,      # Profit lock trigger
         'stage2_lock_points': 12,         # Profit guarantee
         'stage3_trigger_points': 23,      # Start percentage trailing
@@ -186,7 +186,7 @@ PAIR_TRAILING_CONFIGS = {
 
     'CS.D.GBPUSD.MINI.IP': {
         'stage1_trigger_points': 20,      # Wider activation
-        'stage1_lock_points': 4,          # More profit lock
+        'stage1_lock_points': 10,          # More profit lock
         'stage2_trigger_points': 25,      # Higher trigger
         'stage2_lock_points': 15,         # More protection
         'stage3_trigger_points': 30,      # Later trailing start
@@ -235,8 +235,8 @@ PAIR_TRAILING_CONFIGS = {
     # ========== JPY PAIRS - Different Pip Scale ==========
 
     'CS.D.USDJPY.MINI.IP': {
-        'stage1_trigger_points': 15,      # Tighter for JPY scale
-        'stage1_lock_points': 2,
+        'stage1_trigger_points': 16,      # Tighter for JPY scale
+        'stage1_lock_points': 8,
         'stage2_trigger_points': 20,      # Adjusted for JPY
         'stage2_lock_points': 10,
         'stage3_trigger_points': 25,
@@ -248,10 +248,10 @@ PAIR_TRAILING_CONFIGS = {
 
     'CS.D.EURJPY.MINI.IP': {
         'stage1_trigger_points': 20,      # Slightly wider (more volatile)
-        'stage1_lock_points': 4,
-        'stage2_trigger_points': 30,
-        'stage2_lock_points': 10,
-        'stage3_trigger_points': 35,
+        'stage1_lock_points': 10,
+        'stage2_trigger_points': 25,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 30,
         'stage3_atr_multiplier': 0.9,
         'stage3_min_distance': 2,
         'min_trail_distance': 15,
@@ -260,8 +260,8 @@ PAIR_TRAILING_CONFIGS = {
 
     'CS.D.AUDJPY.MINI.IP': {
         'stage1_trigger_points': 18,
-        'stage1_lock_points': 4,
-        'stage2_trigger_points': 22,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 20,
         'stage2_lock_points': 10,
         'stage3_trigger_points': 26,
         'stage3_atr_multiplier': 0.9,
