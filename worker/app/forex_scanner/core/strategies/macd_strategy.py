@@ -746,6 +746,21 @@ class MACDStrategy(BaseStrategy):
                 # Try to get ranging score from row (if available from market intelligence)
                 ranging_score_value = row.get('ranging_score', None)
 
+                # FALLBACK: If ranging score not available (e.g., in backtest mode),
+                # calculate a simple ranging indicator using KAMA efficiency
+                if ranging_score_value is None or pd.isna(ranging_score_value):
+                    if kama_efficiency_value is not None and not pd.isna(kama_efficiency_value):
+                        # Low KAMA efficiency suggests ranging market
+                        # Convert KAMA efficiency (0-1) to ranging score (0-1)
+                        # Lower efficiency = higher ranging score
+                        ranging_score_value = 1.0 - kama_efficiency_value
+
+                        if self.log_ranging_analysis:
+                            self.logger.debug(
+                                f"📊 {epic_display}Ranging score calculated from KAMA efficiency "
+                                f"(1.0 - {kama_efficiency_value:.3f} = {ranging_score_value:.3f})"
+                            )
+
                 if ranging_score_value is not None and not pd.isna(ranging_score_value):
                     # Determine ranging penalty based on ranging score
                     if ranging_score_value >= self.ranging_high_threshold:
