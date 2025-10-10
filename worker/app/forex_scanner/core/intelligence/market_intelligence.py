@@ -82,9 +82,10 @@ class MarketIntelligenceEngine:
         else:
             # All analyses failed - use neutral scores
             regime_scores = {k: 0.5 for k in regime_scores.keys()}
-        
-        # Determine dominant regime
-        dominant_regime = max(regime_scores, key=regime_scores.get)
+
+        # CRITICAL FIX: Strategy-aware regime selection
+        # Volatility is orthogonal to market structure (trending/ranging)
+        dominant_regime = self._determine_dominant_regime(regime_scores, strategy=None)
         confidence = regime_scores[dominant_regime]
         
         # FIXED: Safe access to market strength and correlation analysis
@@ -116,6 +117,66 @@ class MarketIntelligenceEngine:
             'recommended_strategy': recommended_strategy
         }
     
+    def _determine_dominant_regime(self, regime_scores: Dict, strategy: str = None) -> str:
+        """
+        🔥 CRITICAL FIX: Strategy-aware regime selection
+
+        Volatility is orthogonal to market structure (trending/ranging).
+        For trend-following strategies (EMA, MACD), prioritize trending/ranging classification.
+
+        Problem: Alert 5568 had high_volatility:1.0, ranging:0.566, trending:0.434
+                 max() selected high_volatility, gave EMA 1.0 modifier instead of 0.8 (ranging)
+
+        Solution: Separate structure regimes from volatility regimes for trend strategies
+        """
+        try:
+            # Separate volatility from structure regimes
+            structure_regimes = {
+                'trending': regime_scores.get('trending', 0),
+                'ranging': regime_scores.get('ranging', 0),
+                'breakout': regime_scores.get('breakout', 0),
+                'consolidation': regime_scores.get('consolidation', 0),
+                'reversal': regime_scores.get('reversal', 0)
+            }
+
+            volatility_regimes = {
+                'high_volatility': regime_scores.get('high_volatility', 0),
+                'low_volatility': regime_scores.get('low_volatility', 0)
+            }
+
+            # For trend-following strategies, use market structure as primary regime
+            trend_strategies = ['ema', 'macd', 'ichimoku', 'kama', 'smart_money_ema', 'smart_money_macd']
+
+            if strategy and any(ts in strategy.lower() for ts in trend_strategies):
+                # Use trending vs ranging as primary classification
+                dominant_structure = max(structure_regimes, key=structure_regimes.get)
+                dominant_volatility = max(volatility_regimes, key=volatility_regimes.get)
+
+                self.logger.info(
+                    f"🎯 Strategy-aware regime: Structure={dominant_structure} ({structure_regimes[dominant_structure]:.1%}), "
+                    f"Volatility={dominant_volatility} ({volatility_regimes[dominant_volatility]:.1%}) "
+                    f"[Strategy: {strategy}]"
+                )
+                return dominant_structure
+
+            # For other strategies or no strategy specified, use original logic (highest score)
+            dominant = max(regime_scores, key=regime_scores.get)
+
+            # Log if volatility dominated over structure
+            if dominant in ['high_volatility', 'low_volatility']:
+                dominant_structure = max(structure_regimes, key=structure_regimes.get)
+                self.logger.debug(
+                    f"⚠️ Volatility regime dominant ({dominant}), "
+                    f"market structure is {dominant_structure} ({structure_regimes[dominant_structure]:.1%})"
+                )
+
+            return dominant
+
+        except Exception as e:
+            self.logger.error(f"Error in regime determination: {e}")
+            # Fallback to original logic
+            return max(regime_scores, key=regime_scores.get)
+
     def _get_fallback_analysis(self) -> Dict:
         """Get fallback analysis for failed epic analysis"""
         return {

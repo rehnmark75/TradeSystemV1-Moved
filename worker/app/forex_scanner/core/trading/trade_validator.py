@@ -2012,8 +2012,29 @@ class TradeValidator:
                         # This could be used later to adjust the final signal confidence
                         signal['market_intelligence_confidence_modifier'] = confidence_modifier
 
+                        # CRITICAL FIX #5: MARKET BIAS ALIGNMENT PENALTY
+                        # Counter-trend signals get additional confidence reduction
+                        market_context = intelligence_report.get('market_context', {})
+                        market_strength = market_context.get('market_strength', {})
+                        market_bias = market_strength.get('market_bias', 'neutral')
+
+                        if market_bias == 'bearish' and signal_type in ['BUY', 'BULL']:
+                            bias_penalty = 0.8  # 20% confidence reduction for counter-trend
+                            signal['market_intelligence_confidence_modifier'] *= bias_penalty
+                            self.logger.warning(
+                                f"🧠⚠️ {epic}: BULL signal in BEARISH market - "
+                                f"Confidence modifier reduced by 20% (now {signal['market_intelligence_confidence_modifier']:.1%})"
+                            )
+                        elif market_bias == 'bullish' and signal_type in ['SELL', 'BEAR']:
+                            bias_penalty = 0.8  # 20% confidence reduction for counter-trend
+                            signal['market_intelligence_confidence_modifier'] *= bias_penalty
+                            self.logger.warning(
+                                f"🧠⚠️ {epic}: BEAR signal in BULLISH market - "
+                                f"Confidence modifier reduced by 20% (now {signal['market_intelligence_confidence_modifier']:.1%})"
+                            )
+
                         self.logger.info(f"🧠✅ {epic}: Probabilistic compatibility PASSED - Strategy '{strategy}' in '{dominant_regime}' regime")
-                        self.logger.info(f"🧠📊 {epic}: Confidence modifier applied: {confidence_modifier:.1%} (Original regime confidence: {regime_confidence:.1%})")
+                        self.logger.info(f"🧠📊 {epic}: Final confidence modifier: {signal['market_intelligence_confidence_modifier']:.1%} (Regime confidence: {regime_confidence:.1%})")
 
                     else:
                         # Fall back to binary compatibility check if probabilistic scoring is disabled

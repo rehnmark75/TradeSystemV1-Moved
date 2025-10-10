@@ -1094,21 +1094,40 @@ class MACDStrategy(BaseStrategy):
                 self.logger.info(f"🔵 {epic_display}BULL EXPANSION CHECK (Bar {bars_since}/{self.expansion_window_bars})")
                 self.logger.info(f"   📊 Histogram: {hist:.6f} {hist_emoji} (need: {min_histogram:.6f}){adx_info}")
 
+                # Check ADX catch-up window status (if enabled)
+                if self.adx_catchup_enabled:
+                    adx_current = latest.get('adx', 0)
+                    adx_met_in_window = latest.get('adx_met_in_window', False)
+                    adx_catchup_emoji = "✅" if adx_met_in_window else "❌"
+                    self.logger.info(f"   🎯 ADX Catch-up: {adx_catchup_emoji} ADX={adx_current:.1f} (need {self.min_adx} within {self.adx_catchup_window_bars} bars)")
+
                 if latest.get('bull_crossover', False):
                     self.logger.info(f"   🎯 ✅ {epic_display}EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
-                elif bars_since > self.expansion_window_bars:
+                elif bars_since >= self.expansion_window_bars:
                     reasons = []
                     if not hist_ok:
                         reasons.append(f"histogram never reached {min_histogram:.6f} (max: {hist:.6f})")
                     if self.require_adx_rising and not adx_ok:
                         reasons.append("ADX not rising")
-                    self.logger.info(f"   ⏰ ❌ EXPANSION WINDOW EXPIRED - Signal abandoned: {', '.join(reasons)}")
+                    # Add ADX catch-up window failure reason
+                    if self.adx_catchup_enabled and hist_ok:
+                        adx_current = latest.get('adx', 0)
+                        adx_met_in_window = latest.get('adx_met_in_window', False)
+                        if not adx_met_in_window:
+                            reasons.append(f"ADX never reached {self.min_adx} within {self.adx_catchup_window_bars} bars (current: {adx_current:.1f})")
+                    self.logger.info(f"   ⏰ ❌ EXPANSION WINDOW EXPIRED - Signal abandoned: {', '.join(reasons) if reasons else 'Unknown reason'}")
                 else:
                     waiting_for = []
                     if not hist_ok:
                         waiting_for.append(f"histogram to reach {min_histogram:.6f} (current: {hist:.6f})")
                     if self.require_adx_rising and not adx_ok:
                         waiting_for.append("ADX to rise")
+                    # Add ADX catch-up waiting message if histogram is met but ADX isn't
+                    if self.adx_catchup_enabled and hist_ok:
+                        adx_current = latest.get('adx', 0)
+                        adx_met_in_window = latest.get('adx_met_in_window', False)
+                        if not adx_met_in_window:
+                            waiting_for.append(f"ADX to reach {self.min_adx} (current: {adx_current:.1f}, window: {bars_since}/{self.adx_catchup_window_bars} bars)")
                     if waiting_for:
                         self.logger.info(f"   ⏳ Still waiting: {', '.join(waiting_for)}")
 
@@ -1140,21 +1159,40 @@ class MACDStrategy(BaseStrategy):
                 self.logger.info(f"🔴 {epic_display}BEAR EXPANSION CHECK (Bar {bars_since}/{self.expansion_window_bars})")
                 self.logger.info(f"   📊 Histogram: {hist:.6f} (|{abs(hist):.6f}|) {hist_emoji} (need: {min_histogram:.6f}){adx_info}")
 
+                # Check ADX catch-up window status (if enabled)
+                if self.adx_catchup_enabled:
+                    adx_current = latest.get('adx', 0)
+                    adx_met_in_window = latest.get('adx_met_in_window', False)
+                    adx_catchup_emoji = "✅" if adx_met_in_window else "❌"
+                    self.logger.info(f"   🎯 ADX Catch-up: {adx_catchup_emoji} ADX={adx_current:.1f} (need {self.min_adx} within {self.adx_catchup_window_bars} bars)")
+
                 if latest.get('bear_crossover', False):
                     self.logger.info(f"   🎯 ✅ {epic_display}EXPANSION CONFIRMED - Signal triggered on bar {bars_since}!")
-                elif bars_since > self.expansion_window_bars:
+                elif bars_since >= self.expansion_window_bars:
                     reasons = []
                     if not hist_ok:
                         reasons.append(f"|histogram| never reached {min_histogram:.6f} (max: {abs(hist):.6f})")
                     if self.require_adx_rising and not adx_ok:
                         reasons.append("ADX not rising")
-                    self.logger.info(f"   ⏰ ❌ EXPANSION WINDOW EXPIRED - Signal abandoned: {', '.join(reasons)}")
+                    # Add ADX catch-up window failure reason
+                    if self.adx_catchup_enabled and hist_ok:
+                        adx_current = latest.get('adx', 0)
+                        adx_met_in_window = latest.get('adx_met_in_window', False)
+                        if not adx_met_in_window:
+                            reasons.append(f"ADX never reached {self.min_adx} within {self.adx_catchup_window_bars} bars (current: {adx_current:.1f})")
+                    self.logger.info(f"   ⏰ ❌ EXPANSION WINDOW EXPIRED - Signal abandoned: {', '.join(reasons) if reasons else 'Unknown reason'}")
                 else:
                     waiting_for = []
                     if not hist_ok:
                         waiting_for.append(f"|histogram| to reach {min_histogram:.6f} (current: {abs(hist):.6f})")
                     if self.require_adx_rising and not adx_ok:
                         waiting_for.append("ADX to rise")
+                    # Add ADX catch-up waiting message if histogram is met but ADX isn't
+                    if self.adx_catchup_enabled and hist_ok:
+                        adx_current = latest.get('adx', 0)
+                        adx_met_in_window = latest.get('adx_met_in_window', False)
+                        if not adx_met_in_window:
+                            waiting_for.append(f"ADX to reach {self.min_adx} (current: {adx_current:.1f}, window: {bars_since}/{self.adx_catchup_window_bars} bars)")
                     if waiting_for:
                         self.logger.info(f"   ⏳ Still waiting: {', '.join(waiting_for)}")
 

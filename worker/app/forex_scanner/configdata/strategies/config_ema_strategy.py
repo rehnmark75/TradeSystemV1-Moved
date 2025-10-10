@@ -902,10 +902,10 @@ EMA_MAX_EMA_COMPRESSION = 0.002          # Max compression between EMAs (avoid r
 # Swing Proximity Validation - Prevents poor entry timing near swing points
 EMA_SWING_VALIDATION = {
     'enabled': True,  # Enable swing proximity validation
-    'min_distance_pips': 8,  # Minimum distance from swing high/low (20 pips)
+    'min_distance_pips': 12,  # RAISED from 8 - Minimum distance from swing high/low (Fix #3)
     'lookback_swings': 5,  # Number of recent swings to check
     'swing_length': 5,  # Bars for swing detection (matches SMC default)
-    'strict_mode': False,  # False = reduce confidence, True = reject signal entirely
+    'strict_mode': True,  # CHANGED from False - REJECT signals near swings (Fix #2)
     'resistance_buffer': 1.0,  # Multiplier for resistance proximity (more cautious on buys)
     'support_buffer': 1.0,  # Multiplier for support proximity (more cautious on sells)
 }

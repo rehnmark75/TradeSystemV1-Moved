@@ -494,6 +494,22 @@ class EMAStrategy(BaseStrategy):
                 else:
                     self.logger.info(f"✅ {log_prefix}Swing proximity validation passed")
 
+                # CRITICAL FIX #4: S/R PROXIMITY VALIDATION (long-term zones)
+                # Checks S/R data captured by scanner (100-500 bar zones)
+                if hasattr(latest_row, 'index') and 'nearest_resistance' in latest_row.index:
+                    sr_resistance = latest_row.get('nearest_resistance')
+                    MIN_SR_DISTANCE = 10  # pips minimum for S/R zones (stricter than swings)
+
+                    if sr_resistance and sr_resistance > current_price:
+                        dist_pips = latest_row.get('distance_to_resistance_pips', 999)
+                        if dist_pips < MIN_SR_DISTANCE:
+                            self.logger.warning(
+                                f"❌ {log_prefix}BULL REJECTED: {dist_pips:.1f} pips to S/R resistance "
+                                f"at {sr_resistance:.5f} (minimum: {MIN_SR_DISTANCE} pips)"
+                            )
+                            return None
+                        self.logger.info(f"✅ {log_prefix}S/R resistance check passed ({dist_pips:.1f} pips)")
+
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:
                     is_valid_breakout, breakout_confidence, validation_details = self.breakout_validator.validate_breakout(
@@ -568,6 +584,22 @@ class EMAStrategy(BaseStrategy):
                         self.logger.info(f"⚠️ {log_prefix}Swing proximity warning: {swing_result['rejection_reason']}")
                 else:
                     self.logger.info(f"✅ {log_prefix}Swing proximity validation passed")
+
+                # CRITICAL FIX #4: S/R PROXIMITY VALIDATION (long-term zones)
+                # Checks S/R data captured by scanner (100-500 bar zones)
+                if hasattr(latest_row, 'index') and 'nearest_support' in latest_row.index:
+                    sr_support = latest_row.get('nearest_support')
+                    MIN_SR_DISTANCE = 10  # pips minimum for S/R zones (stricter than swings)
+
+                    if sr_support and sr_support < current_price:
+                        dist_pips = latest_row.get('distance_to_support_pips', 999)
+                        if dist_pips < MIN_SR_DISTANCE:
+                            self.logger.warning(
+                                f"❌ {log_prefix}BEAR REJECTED: {dist_pips:.1f} pips to S/R support "
+                                f"at {sr_support:.5f} (minimum: {MIN_SR_DISTANCE} pips)"
+                            )
+                            return None
+                        self.logger.info(f"✅ {log_prefix}S/R support check passed ({dist_pips:.1f} pips)")
 
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:
