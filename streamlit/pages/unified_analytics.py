@@ -1756,7 +1756,7 @@ class UnifiedTradingDashboard:
                         # Build conditional content
                         stage1_extra = ""
                         if stages['stage1']['activated']:
-                            stage1_extra = f"<p><strong>Time:</strong> {stages['stage1']['activation_time']}</p><p><strong>Max Profit:</strong> {stages['stage1']['max_profit_reached']} pts</p><p><strong>Final Lock:</strong> +{stages['stage1']['final_lock']} pts</p>"
+                            stage1_extra = f"<p><strong>Time:</strong> {stages['stage1']['activation_time']}</p><p><strong>Highest Trigger:</strong> {stages['stage1']['max_profit_reached']} pts</p><p><strong>Final Lock:</strong> +{stages['stage1']['final_lock']} pts</p>"
 
                         st.markdown(f"""
                         <div class="metric-card" style="background: {stage1_bg};">
@@ -1816,7 +1816,7 @@ class UnifiedTradingDashboard:
                         st.metric("Stages Activated", f"{summary['stages_activated']}/3")
 
                     with col2:
-                        st.metric("Max Profit Reached", f"{summary['max_profit_reached']} pts")
+                        st.metric("Highest Trigger Reached", f"{summary['max_profit_reached']} pts")
 
                     with col3:
                         profit_protected = summary['final_protection']
