@@ -206,13 +206,27 @@ class KAMASignalDetector:
     def _extract_signal_values(self, current_row: pd.Series, previous_row: pd.Series, kama_column: str, er_column: str) -> Optional[Dict]:
         """
         📊 Extract values needed for signal detection
+        CRITICAL FIX: Handle NaN efficiency ratios and calculate fallback
         """
         try:
             current_price = float(current_row['close'])
             previous_price = float(previous_row['close'])
             current_kama = float(current_row[kama_column])
             previous_kama = float(previous_row[kama_column])
-            current_er = float(current_row[er_column])
+
+            # CRITICAL FIX: Handle NaN efficiency ratio values
+            current_er_raw = current_row[er_column]
+            if pd.isna(current_er_raw) or current_er_raw == 0.0:
+                # CRITICAL: This should NOT happen if ensure_kama_indicators worked correctly
+                # Use a conservative fallback that will trigger rejection
+                self.logger.error(
+                    f"🚫 CRITICAL: Invalid efficiency ratio ({current_er_raw}) in {er_column} "
+                    f"- KAMA indicators not properly calculated. Signal will be REJECTED."
+                )
+                # Use fallback below minimum threshold - signal will be rejected
+                current_er = 0.05  # Below 0.20 minimum - will fail validation
+            else:
+                current_er = float(current_er_raw)
             
             # Calculate KAMA trend and slope
             kama_change = current_kama - previous_kama
@@ -241,7 +255,7 @@ class KAMASignalDetector:
 
     def _detect_signal_patterns(self, values: Dict, epic: str) -> Optional[Dict]:
         """
-        🎯 Detect KAMA signal patterns
+        🎯 Detect KAMA signal patterns - FIXED: Signal-trend alignment validation
         """
         try:
             # Get forex-specific thresholds
@@ -249,14 +263,22 @@ class KAMASignalDetector:
                 kama_thresholds = self.forex_optimizer.get_kama_thresholds_for_pair(epic)
             else:
                 kama_thresholds = {
-                    'min_efficiency': getattr(config_kama_strategy, 'KAMA_MIN_EFFICIENCY', 0.1) if config_kama_strategy else 0.1,
+                    'min_efficiency': getattr(config_kama_strategy, 'KAMA_MIN_EFFICIENCY', 0.2) if config_kama_strategy else 0.2,
                     'trend_threshold': getattr(config_kama_strategy, 'KAMA_TREND_THRESHOLD', 0.05) if config_kama_strategy else 0.05
                 }
-            
+
             signal_type = None
             trigger_reason = None
             signal_strength = 0
-            
+
+            # 🚫 CRITICAL FIX: Enforce minimum efficiency threshold globally
+            if values['current_er'] < kama_thresholds['min_efficiency']:
+                self.logger.debug(
+                    f"❌ Signal REJECTED: Efficiency too low "
+                    f"({values['current_er']:.3f} < {kama_thresholds['min_efficiency']:.3f})"
+                )
+                return None
+
             # 1. KAMA Trend Change Signals (primary signal type)
             if abs(values['kama_trend']) > kama_thresholds['trend_threshold'] and values['current_er'] > kama_thresholds['min_efficiency']:
                 if values['kama_trend'] > 0:
@@ -265,29 +287,50 @@ class KAMASignalDetector:
                     trigger_reason = f'KAMA trending up (slope: {values["kama_trend"]:.4f})'
                     signal_strength = min(abs(values['kama_trend']) * 1000, 0.8)
                 elif values['kama_trend'] < 0:
-                    # KAMA trending down  
+                    # KAMA trending down
                     signal_type = 'BEAR'
                     trigger_reason = f'KAMA trending down (slope: {values["kama_trend"]:.4f})'
                     signal_strength = min(abs(values['kama_trend']) * 1000, 0.8)
-            
-            # 2. Price-KAMA Crossover Signals (with efficiency confirmation)
-            if not signal_type and values['current_er'] > 0.3:  # Higher efficiency required for crossovers
+
+            # 2. Price-KAMA Crossover Signals (FIXED: Use config min_efficiency, not hardcoded 0.3)
+            # 🔥 CRITICAL FIX: Much higher efficiency required for crossovers (0.4 instead of 0.3)
+            CROSSOVER_MIN_EFFICIENCY = 0.4  # Crossovers need clearer trends than trend changes
+
+            if not signal_type and values['current_er'] >= CROSSOVER_MIN_EFFICIENCY:
                 if not values['prev_price_above_kama'] and values['price_above_kama']:
-                    # Bullish crossover
+                    # Bullish crossover - VALIDATE ALIGNMENT WITH KAMA TREND
+                    if values['kama_trend'] < -0.001:  # KAMA trending down significantly
+                        self.logger.warning(
+                            f"🚫 BULL crossover REJECTED: KAMA trend is bearish "
+                            f"({values['kama_trend']:.4f} < -0.001) - Signal-trend conflict"
+                        )
+                        return None
+
                     signal_type = 'BULL'
                     trigger_reason = 'Price crossed above KAMA'
                     signal_strength = min(values['current_er'], 0.8)
-                    
+
                 elif values['prev_price_above_kama'] and not values['price_above_kama']:
-                    # Bearish crossover
+                    # Bearish crossover - VALIDATE ALIGNMENT WITH KAMA TREND
+                    if values['kama_trend'] > 0.001:  # KAMA trending up significantly
+                        self.logger.warning(
+                            f"🚫 BEAR crossover REJECTED: KAMA trend is bullish "
+                            f"({values['kama_trend']:.4f} > 0.001) - Signal-trend conflict"
+                        )
+                        return None
+
                     signal_type = 'BEAR'
                     trigger_reason = 'Price crossed below KAMA'
                     signal_strength = min(values['current_er'], 0.8)
-            
+
             if signal_type:
+                # 🔥 FINAL VALIDATION: Verify signal-trend alignment for ALL signal types
+                if not self._validate_signal_trend_alignment(signal_type, values['kama_trend']):
+                    return None
+
                 # Calculate additional KAMA metrics
                 kama_distance = abs(values['current_price'] - values['current_kama']) / values['current_kama']
-                
+
                 return {
                     'signal_type': signal_type,
                     'trigger_reason': trigger_reason,
@@ -302,12 +345,58 @@ class KAMASignalDetector:
                     'er_column_used': values['er_column_used'],
                     'current_price': values['current_price']
                 }
-            
+
             return None
             
         except Exception as e:
             self.logger.error(f"Signal pattern detection error: {e}")
             return None
+
+    def _validate_signal_trend_alignment(self, signal_type: str, kama_trend: float) -> bool:
+        """
+        🔥 CRITICAL: Validate that signal direction aligns with KAMA trend
+
+        This prevents fundamental signal-trend conflicts like:
+        - BEAR signal when KAMA trend is +1.0 (bullish)
+        - BULL signal when KAMA trend is -1.0 (bearish)
+
+        Args:
+            signal_type: 'BULL' or 'BEAR'
+            kama_trend: KAMA trend value (positive = uptrend, negative = downtrend)
+
+        Returns:
+            True if alignment is valid, False if conflict detected
+        """
+        try:
+            # Define strong trend thresholds
+            STRONG_BULLISH_TREND = 0.005   # KAMA strongly trending up
+            STRONG_BEARISH_TREND = -0.005  # KAMA strongly trending down
+
+            # BEAR signal validation
+            if signal_type == 'BEAR':
+                if kama_trend > STRONG_BULLISH_TREND:
+                    self.logger.warning(
+                        f"🚫 CRITICAL: BEAR signal REJECTED due to BULLISH KAMA trend "
+                        f"({kama_trend:.4f} > {STRONG_BULLISH_TREND:.4f}) - Signal-trend conflict"
+                    )
+                    return False
+
+            # BULL signal validation
+            elif signal_type == 'BULL':
+                if kama_trend < STRONG_BEARISH_TREND:
+                    self.logger.warning(
+                        f"🚫 CRITICAL: BULL signal REJECTED due to BEARISH KAMA trend "
+                        f"({kama_trend:.4f} < {STRONG_BEARISH_TREND:.4f}) - Signal-trend conflict"
+                    )
+                    return False
+
+            # Signal-trend alignment validated
+            self.logger.debug(f"✅ {signal_type} signal aligned with KAMA trend ({kama_trend:.4f})")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Signal-trend alignment validation error: {e}")
+            return True  # Don't block on validation errors
 
     def _validate_macd_alignment(self, current_row: pd.Series, signal_type: str) -> bool:
         """

@@ -42,15 +42,15 @@ class KAMAConfidenceCalculator:
         self.logger = logger or logging.getLogger(__name__)
         
         # KAMA-specific confidence thresholds (optimized for forex)
-        # Phase 1 ADJUSTMENT: Aligned with tightened min_efficiency thresholds (0.18-0.25)
+        # REBALANCED: Since min_efficiency is 0.20, signals at threshold should reach 60%+ confidence
         self.confidence_thresholds = {
             'efficiency_ratio': {
-                'excellent': 0.7,    # Strong trending market
-                'very_good': 0.5,    # Good trending market
-                'good': 0.35,        # Moderate trending
-                'acceptable': 0.18,  # LOWERED from 0.25 - align with min_efficiency
-                'poor': 0.12,        # LOWERED from 0.15 - choppy market
-                'very_poor': 0.08    # LOWERED from 0.1 - avoid trading
+                'excellent': 0.6,    # Strong trending market (lowered from 0.7)
+                'very_good': 0.45,   # Good trending market (lowered from 0.5)
+                'good': 0.30,        # Moderate trending (lowered from 0.35)
+                'acceptable': 0.20,  # RAISED to match min_efficiency (was 0.18)
+                'poor': 0.15,        # RAISED from 0.12 - below minimum
+                'very_poor': 0.10    # RAISED from 0.08 - far below minimum
             },
             'trend_strength': {
                 'strong': 0.002,     # Strong KAMA trend
@@ -67,14 +67,14 @@ class KAMAConfidenceCalculator:
             }
         }
         
-        # Confidence component weights (REBALANCED - Phase 1 Optimization)
-        # CHANGED: Reduced ER dominance, increased price alignment and context importance
+        # Confidence component weights (REBALANCED - Boost signals that pass strict validation)
+        # Since min_efficiency is now 0.20 (strict), signals that pass deserve higher confidence
         self.component_weights = {
-            'efficiency_ratio': 0.30,      # Reduced from 0.45 - still important but not dominant
-            'trend_strength': 0.25,        # Kept at 0.25 - KAMA trend momentum
-            'price_alignment': 0.20,       # Increased from 0.15 - better entry timing critical
-            'signal_strength': 0.15,       # Increased from 0.10 - raw signal quality matters
-            'market_context': 0.10         # Increased from 0.05 - session/regime significant
+            'efficiency_ratio': 0.35,      # RAISED from 0.30 - core KAMA metric
+            'trend_strength': 0.25,        # KAMA trend momentum
+            'price_alignment': 0.15,       # Entry timing
+            'signal_strength': 0.15,       # Raw signal quality
+            'market_context': 0.10         # Session/regime
         }
         
         # Confidence bonuses and penalties (PHASE 1.5: MODERATE - multiplier provides base boost)
@@ -85,11 +85,12 @@ class KAMAConfidenceCalculator:
             'macd_alignment_bonus': 0.03,       # REDUCED - multiplier provides base boost
             'session_bonus': 0.02,              # REDUCED - multiplier provides base boost
 
-            'low_efficiency_penalty': -0.06,    # MODERATE penalty
+            'low_efficiency_penalty': -0.06,     # MODERATE penalty (ER 0.12-0.18)
+            'very_low_efficiency_penalty': -0.15, # CRITICAL FIX: SEVERE penalty (ER < 0.12)
             'trend_contradiction_penalty': -0.05, # MODERATE penalty
-            'distance_penalty': -0.03,          # MODERATE penalty
-            'weak_momentum_penalty': -0.02,     # MODERATE penalty
-            'consolidation_penalty': -0.03      # MODERATE penalty
+            'distance_penalty': -0.03,           # MODERATE penalty
+            'weak_momentum_penalty': -0.02,      # MODERATE penalty
+            'consolidation_penalty': -0.03       # MODERATE penalty
         }
         
         self.logger.info("🎯 KAMA-Specific Confidence Calculator initialized (REBALANCED)")
@@ -144,16 +145,23 @@ class KAMAConfidenceCalculator:
                 context_score * self.component_weights['market_context']
             )
 
-            # Phase 1.5: Apply confidence boost multiplier for signals passing strict thresholds
-            # Since Phase 1 raised min ER to 0.18-0.25, signals that pass deserve higher base
-            # NOTE: Forex optimizer adds MORE adjustments after this, so keep conservative
-            confidence_multiplier = 1.05  # 5% boost to base calculation
+            # REBALANCED: Moderate multiplier for signals passing strict 0.20 minimum efficiency
+            # These signals already passed multiple validation layers (ADX, ER, trend alignment)
+            confidence_multiplier = 1.10  # 10% boost to base calculation
 
             # Additional boost for signals at/near minimum thresholds (they passed strict validation)
-            if 0.18 <= efficiency_ratio <= 0.30:
-                # Signals in this range passed ADX+ER validation, deserve extra boost
-                confidence_multiplier = 1.10  # 10% boost for threshold signals (conservative due to forex bonuses)
-                self.logger.debug(f"[CONFIDENCE BOOST] ER={efficiency_ratio:.3f} in threshold range, multiplier: 1.10x")
+            if 0.20 <= efficiency_ratio <= 0.30:
+                # Signals at minimum threshold need boost to reach 60%+
+                confidence_multiplier = 1.12  # 12% boost for threshold signals
+                self.logger.debug(f"[CONFIDENCE BOOST] ER={efficiency_ratio:.3f} at threshold, multiplier: 1.12x")
+            elif 0.30 < efficiency_ratio <= 0.45:
+                # Good efficiency signals
+                confidence_multiplier = 1.15  # 15% boost for good efficiency
+                self.logger.debug(f"[CONFIDENCE BOOST] ER={efficiency_ratio:.3f} good efficiency, multiplier: 1.15x")
+            elif efficiency_ratio > 0.45:
+                # Strong efficiency signals get highest multiplier
+                confidence_multiplier = 1.18  # 18% boost for strong efficiency
+                self.logger.debug(f"[CONFIDENCE BOOST] ER={efficiency_ratio:.3f} strong efficiency, multiplier: 1.18x")
 
             base_confidence = min(0.95, base_confidence * confidence_multiplier)
             
@@ -195,54 +203,57 @@ class KAMAConfidenceCalculator:
         High efficiency = trending market (KAMA's strength)
         Low efficiency = choppy market (KAMA struggles)
 
-        Phase 1 ADJUSTMENT: Since min_efficiency now 0.18-0.25, signals at threshold
-        should score higher (0.70 instead of 0.55) to achieve 60%+ final confidence
+        REBALANCED: Signals at min_efficiency (0.20) should score ~0.80 to reach 60%+ final confidence
+        with 30% weight. 0.80 * 0.30 = 0.24 base contribution.
         """
         thresholds = self.confidence_thresholds['efficiency_ratio']
 
-        if efficiency_ratio >= thresholds['excellent']:
+        if efficiency_ratio >= thresholds['excellent']:  # >= 0.6
             return 0.95    # Excellent trending market
-        elif efficiency_ratio >= thresholds['very_good']:
-            return 0.90    # INCREASED from 0.88 - very good trending
-        elif efficiency_ratio >= thresholds['good']:
-            return 0.82    # INCREASED from 0.78 - good trending
-        elif efficiency_ratio >= thresholds['acceptable']:
-            return 0.75    # INCREASED from 0.70 - signals at min threshold need higher base
-        elif efficiency_ratio >= thresholds['poor']:
-            return 0.50    # INCREASED from 0.45 - poor conditions
-        else:
-            return 0.30    # INCREASED from 0.25 - very poor - avoid trading
+        elif efficiency_ratio >= thresholds['very_good']:  # >= 0.45
+            return 0.88    # Very good trending
+        elif efficiency_ratio >= thresholds['good']:  # >= 0.30
+            return 0.82    # Good trending
+        elif efficiency_ratio >= thresholds['acceptable']:  # >= 0.20 (minimum)
+            return 0.75    # Signals at minimum - balanced to reach 60-65% final
+        elif efficiency_ratio >= thresholds['poor']:  # >= 0.15
+            return 0.45    # LOWERED from 0.50 - below minimum threshold
+        elif efficiency_ratio >= thresholds['very_poor']:  # >= 0.10
+            return 0.20    # LOWERED from 0.25 - critically low efficiency
+        else:  # < 0.10
+            return 0.10    # CATASTROPHIC - efficiency below 0.10 = total noise
 
     def _calculate_trend_score(self, kama_trend: float, signal_type: str) -> float:
         """
         📈 TREND SCORING: KAMA trend strength and alignment
+        REBALANCED: More generous for validated signals (they passed trend alignment check)
         """
         abs_trend = abs(kama_trend)
         thresholds = self.confidence_thresholds['trend_strength']
-        
-        # Base trend strength score
-        if abs_trend >= thresholds['strong']:
-            trend_strength = 0.9
-        elif abs_trend >= thresholds['moderate']:
-            trend_strength = 0.75
-        elif abs_trend >= thresholds['weak']:
-            trend_strength = 0.6
-        elif abs_trend >= thresholds['minimal']:
-            trend_strength = 0.4
+
+        # Base trend strength score (RAISED baseline scores)
+        if abs_trend >= thresholds['strong']:  # >= 0.002
+            trend_strength = 0.90
+        elif abs_trend >= thresholds['moderate']:  # >= 0.001
+            trend_strength = 0.80  # RAISED from 0.75
+        elif abs_trend >= thresholds['weak']:  # >= 0.0005
+            trend_strength = 0.70  # RAISED from 0.60
+        elif abs_trend >= thresholds['minimal']:  # >= 0.0002
+            trend_strength = 0.60  # RAISED from 0.40
         else:
-            trend_strength = 0.2
-        
-        # Trend alignment bonus/penalty
+            trend_strength = 0.50  # RAISED from 0.20 - weak but validated
+
+        # Trend alignment bonus (signals already passed alignment validation)
         if signal_type in ['BULL', 'BUY'] and kama_trend > 0:
-            trend_strength += 0.1  # Trend supports signal
+            trend_strength += 0.08  # REDUCED from 0.10 - already validated
         elif signal_type in ['BEAR', 'SELL'] and kama_trend < 0:
-            trend_strength += 0.1  # Trend supports signal
+            trend_strength += 0.08  # REDUCED from 0.10 - already validated
         elif signal_type in ['BULL', 'BUY'] and kama_trend < -thresholds['weak']:
-            trend_strength -= 0.15  # Strong opposing trend
+            trend_strength -= 0.10  # REDUCED from 0.15 - shouldn't happen (validated)
         elif signal_type in ['BEAR', 'SELL'] and kama_trend > thresholds['weak']:
-            trend_strength -= 0.15  # Strong opposing trend
-        
-        return max(0.1, min(1.0, trend_strength))
+            trend_strength -= 0.10  # REDUCED from 0.15 - shouldn't happen (validated)
+
+        return max(0.5, min(1.0, trend_strength))  # Min raised to 0.5
 
     def _calculate_price_alignment_score(self, price: float, kama_value: float) -> float:
         """
@@ -270,17 +281,18 @@ class KAMAConfidenceCalculator:
     def _calculate_signal_strength_score(self, signal_strength: float) -> float:
         """
         💪 SIGNAL STRENGTH: Clarity and conviction of the signal
+        REBALANCED: More generous for validated signals
         """
         if signal_strength >= 0.8:
-            return 0.9     # Very strong signal
+            return 0.90    # Very strong signal
         elif signal_strength >= 0.6:
-            return 0.75    # Strong signal
+            return 0.80    # RAISED from 0.75 - strong signal
         elif signal_strength >= 0.4:
-            return 0.6     # Moderate signal
+            return 0.70    # RAISED from 0.60 - moderate signal
         elif signal_strength >= 0.2:
-            return 0.45    # Weak signal
+            return 0.60    # RAISED from 0.45 - weak but validated
         else:
-            return 0.25    # Very weak signal
+            return 0.50    # RAISED from 0.25 - very weak but passed filters
 
     def _calculate_market_context_score(
         self, 
@@ -340,14 +352,19 @@ class KAMAConfidenceCalculator:
             efficiency_ratio = signal_data.get('efficiency_ratio', 0.1)
             
             # High efficiency bonus
-            if efficiency_ratio > 0.6:
+            if efficiency_ratio >= 0.5:
                 adjusted += self.adjustments['high_efficiency_bonus']
                 self.logger.debug(f"[KAMA BONUS] High efficiency: +{self.adjustments['high_efficiency_bonus']:.1%}")
-            
-            # Low efficiency penalty (Phase 1.5: Only apply if BELOW our minimum threshold)
-            elif efficiency_ratio < 0.12:  # Changed from 0.15
+
+            # CRITICAL FIX: Very low efficiency gets SEVERE penalty (below minimum threshold)
+            elif efficiency_ratio < 0.15:  # Well below 0.20 minimum
+                adjusted += self.adjustments['very_low_efficiency_penalty']
+                self.logger.warning(f"[KAMA SEVERE PENALTY] Very low efficiency ({efficiency_ratio:.3f}): {self.adjustments['very_low_efficiency_penalty']:.1%}")
+
+            # Low efficiency penalty (below minimum but not catastrophic)
+            elif efficiency_ratio < 0.20:  # Below minimum threshold
                 adjusted += self.adjustments['low_efficiency_penalty']
-                self.logger.debug(f"[KAMA PENALTY] Low efficiency: {self.adjustments['low_efficiency_penalty']:.1%}")
+                self.logger.debug(f"[KAMA PENALTY] Below minimum efficiency: {self.adjustments['low_efficiency_penalty']:.1%}")
             
             # Trend alignment
             kama_trend = signal_data.get('kama_trend', 0)

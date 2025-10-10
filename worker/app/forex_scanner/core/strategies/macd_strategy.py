@@ -223,6 +223,42 @@ class MACDStrategy(BaseStrategy):
 
         return df
 
+    def _ensure_kama_efficiency(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Ensure KAMA efficiency_ratio is available in dataframe
+        If not present (backtest mode), calculate a simple version
+        """
+        if 'efficiency_ratio' in df.columns and not df['efficiency_ratio'].isna().all():
+            return df  # Already has KAMA efficiency
+
+        try:
+            # Calculate simple KAMA efficiency ratio
+            # ER = Net Change / Total Change
+            period = 10  # KAMA period
+
+            # Net change (absolute distance from start to end)
+            net_change = abs(df['close'].diff(period))
+
+            # Total change (sum of absolute price movements)
+            total_change = df['close'].diff().abs().rolling(period).sum()
+
+            # Efficiency Ratio = Net / Total (0 to 1 scale)
+            df['efficiency_ratio'] = net_change / total_change
+
+            # Fill NaN values with small default (low efficiency)
+            df['efficiency_ratio'] = df['efficiency_ratio'].fillna(0.1)
+
+            # Cap at 1.0
+            df['efficiency_ratio'] = df['efficiency_ratio'].clip(upper=1.0)
+
+            self.logger.debug(f"✅ Calculated KAMA efficiency ratio for MACD strategy")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to calculate KAMA efficiency: {e}")
+            df['efficiency_ratio'] = 0.1  # Default to low efficiency
+
+        return df
+
     def detect_crossover(self, df: pd.DataFrame, epic: str = None) -> pd.DataFrame:
         """
         Detect MACD histogram crossovers with expansion confirmation and ADX trend validation
@@ -897,6 +933,10 @@ class MACDStrategy(BaseStrategy):
                     self.logger.debug(f"Swing points identified for {epic}")
                 except Exception as e:
                     self.logger.debug(f"Swing point identification skipped: {e}")
+
+            # Ensure KAMA efficiency is available (for quality filtering)
+            if self.use_kama_efficiency or self.ranging_penalty_enabled:
+                df = self._ensure_kama_efficiency(df)
 
             # Detect MACD histogram crossovers with expansion + ADX trend validation (Priority 1)
             df = self.detect_crossover(df, epic=epic)

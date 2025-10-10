@@ -84,22 +84,45 @@ class KAMADataHelper:
     def ensure_kama_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         🔄 Ensure KAMA indicators are present in the DataFrame
+        CRITICAL FIX: Validate efficiency_ratio values, not just column existence
         """
         try:
             # Check if KAMA indicators already exist
             kama_cols = [col for col in df.columns if 'kama' in col.lower()]
             er_cols = [col for col in df.columns if 'efficiency' in col.lower() or 'er' in col.lower()]
-            
+
+            # CRITICAL FIX: Check if efficiency_ratio has valid values
+            needs_recalculation = False
+
             if kama_cols and er_cols:
-                self.logger.debug("✅ KAMA indicators already present")
-                return df
-            
-            self.logger.info("🔄 Adding missing KAMA indicators")
-            df_enhanced = self._calculate_kama_indicators(df.copy())
-            self._indicators_calculated += 1
-            
-            return df_enhanced
-            
+                # Verify efficiency_ratio column has valid data
+                er_col = er_cols[0]  # Use first efficiency ratio column found
+                if er_col in df.columns:
+                    # Check last 10 rows for invalid values
+                    recent_er = df[er_col].tail(10)
+                    invalid_count = (recent_er.isna() | (recent_er == 0.0)).sum()
+
+                    if invalid_count > 5:  # More than half are invalid
+                        self.logger.warning(
+                            f"⚠️ Efficiency ratio column '{er_col}' has {invalid_count}/10 invalid values, recalculating"
+                        )
+                        needs_recalculation = True
+                    else:
+                        self.logger.debug("✅ KAMA indicators already present with valid data")
+                        return df
+                else:
+                    needs_recalculation = True
+            else:
+                needs_recalculation = True
+
+            if needs_recalculation:
+                self.logger.info("🔄 Calculating KAMA indicators")
+                df_enhanced = self._calculate_kama_indicators(df.copy())
+                self._indicators_calculated += 1
+                return df_enhanced
+
+            return df
+
         except Exception as e:
             self.logger.error(f"Error ensuring KAMA indicators: {e}")
             return df
