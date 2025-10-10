@@ -1331,7 +1331,15 @@ class EnhancedTradeProcessor:
                 trade.moved_to_breakeven = True
                 # ✅ NEW: Also set moved_to_stage2 since profit_protected implies Stage 2 completed
                 trade.moved_to_stage2 = True
-                db.commit()
+
+                # ✅ ROBUST: Wrap commit in try-except
+                try:
+                    db.commit()
+                    self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Profit protected flags updated")
+                except Exception as commit_error:
+                    db.rollback()
+                    self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                    raise
                 # Don't change status if already profit_protected
             elif not getattr(trade, 'moved_to_breakeven', False) and is_profitable_for_breakeven:
                 self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
@@ -1392,11 +1400,21 @@ class EnhancedTradeProcessor:
                 if would_worsen:
                     self.logger.info(f"🛡️ [SKIP BREAK-EVEN] Trade {trade.id}: Current stop ({current_stop:.5f}) is better than break-even ({break_even_stop:.5f})")
                     # Set flag to allow trailing without actually moving stop
+                    old_status = trade.status
                     trade.moved_to_breakeven = True
                     # Don't change status if already profit_protected
                     if trade.status != "profit_protected":
                         trade.status = "break_even"
-                    db.commit()
+
+                    # ✅ ROBUST: Wrap commit in try-except
+                    self.logger.info(f"💾 [DB PREPARE] Trade {trade.id}: status {old_status} → {trade.status}, moved_to_breakeven=True")
+                    try:
+                        db.commit()
+                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Break-even flags updated (skip scenario)")
+                    except Exception as commit_error:
+                        db.rollback()
+                        self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                        raise
                 else:
                     # ✅ CRITICAL FIX: Enhanced validation for break-even stops
                     is_valid_stop = self.validate_stop_level(trade, current_price, break_even_stop)
@@ -1423,20 +1441,40 @@ class EnhancedTradeProcessor:
                                 if isinstance(api_result, dict) and api_result.get("status") == "updated":
                                     sent_payload = api_result.get("sentPayload", {})
                                     ig_actual_stop = sent_payload.get("stopLevel")
+
+                                    old_sl = trade.sl_price
                                     trade.sl_price = float(ig_actual_stop) if ig_actual_stop else immediate_stop
                                     trade.moved_to_breakeven = True
                                     trade.status = "trailing"
                                     trade.last_trigger_price = current_price
                                     trade.trigger_time = datetime.utcnow()
-                                    db.commit()
-                                    self.logger.info(f"✅ [IMMEDIATE TRAIL SUCCESS] Trade {trade.id}: Stop moved to {trade.sl_price:.5f}")
-                                    return True
+                                    trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+
+                                    self.logger.info(f"💾 [DB PREPARE SELL-IMMEDIATE] Trade {trade.id}: sl_price {old_sl} → {trade.sl_price}, changes: {trade.stop_limit_changes_count}")
+                                    try:
+                                        db.commit()
+                                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Immediate SELL trail persisted")
+                                        self.logger.info(f"✅ [IMMEDIATE TRAIL SUCCESS] Trade {trade.id}: Stop moved to {trade.sl_price:.5f}")
+                                        return True
+                                    except Exception as commit_error:
+                                        db.rollback()
+                                        self.logger.error(f"❌ [DB COMMIT FAILED SELL-IMMEDIATE] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                                        raise
 
                         # Set the flag even if we couldn't trail
+                        old_status = trade.status
                         trade.moved_to_breakeven = True
                         if trade.status != "profit_protected":
                             trade.status = "break_even"
-                        db.commit()
+
+                        self.logger.info(f"💾 [DB PREPARE SELL-FALLBACK] Trade {trade.id}: status {old_status} → {trade.status}")
+                        try:
+                            db.commit()
+                            self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: SELL fallback flags updated")
+                        except Exception as commit_error:
+                            db.rollback()
+                            self.logger.error(f"❌ [DB COMMIT FAILED SELL-FALLBACK] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                            raise
                         is_valid_stop = False  # Skip the API call
 
                     # For BUY trades, stop cannot be below current price
@@ -1461,20 +1499,40 @@ class EnhancedTradeProcessor:
                                 if isinstance(api_result, dict) and api_result.get("status") == "updated":
                                     sent_payload = api_result.get("sentPayload", {})
                                     ig_actual_stop = sent_payload.get("stopLevel")
+
+                                    old_sl = trade.sl_price
                                     trade.sl_price = float(ig_actual_stop) if ig_actual_stop else immediate_stop
                                     trade.moved_to_breakeven = True
                                     trade.status = "trailing"
                                     trade.last_trigger_price = current_price
                                     trade.trigger_time = datetime.utcnow()
-                                    db.commit()
-                                    self.logger.info(f"✅ [IMMEDIATE TRAIL SUCCESS] Trade {trade.id}: Stop moved to {trade.sl_price:.5f}")
-                                    return True
+                                    trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+
+                                    self.logger.info(f"💾 [DB PREPARE BUY-IMMEDIATE] Trade {trade.id}: sl_price {old_sl} → {trade.sl_price}, changes: {trade.stop_limit_changes_count}")
+                                    try:
+                                        db.commit()
+                                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Immediate BUY trail persisted")
+                                        self.logger.info(f"✅ [IMMEDIATE TRAIL SUCCESS] Trade {trade.id}: Stop moved to {trade.sl_price:.5f}")
+                                        return True
+                                    except Exception as commit_error:
+                                        db.rollback()
+                                        self.logger.error(f"❌ [DB COMMIT FAILED BUY-IMMEDIATE] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                                        raise
 
                         # Set the flag even if we couldn't trail
+                        old_status = trade.status
                         trade.moved_to_breakeven = True
                         if trade.status != "profit_protected":
                             trade.status = "break_even"
-                        db.commit()
+
+                        self.logger.info(f"💾 [DB PREPARE BUY-FALLBACK] Trade {trade.id}: status {old_status} → {trade.status}")
+                        try:
+                            db.commit()
+                            self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: BUY fallback flags updated")
+                        except Exception as commit_error:
+                            db.rollback()
+                            self.logger.error(f"❌ [DB COMMIT FAILED BUY-FALLBACK] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                            raise
                         is_valid_stop = False  # Skip the API call
 
                     if is_valid_stop:
@@ -1510,6 +1568,12 @@ class EnhancedTradeProcessor:
                                 sent_payload = api_result.get("sentPayload", {})
                                 ig_actual_stop = sent_payload.get("stopLevel")
 
+                                # Store old values for logging
+                                old_sl = trade.sl_price
+                                old_status = trade.status
+                                old_moved_to_breakeven = getattr(trade, 'moved_to_breakeven', False)
+
+                                # Update trade object fields
                                 trade.moved_to_breakeven = True
                                 # ✅ IMPORTANT: Don't change status if already profit_protected
                                 if trade.status != "profit_protected":
@@ -1525,10 +1589,32 @@ class EnhancedTradeProcessor:
 
                                 trade.last_trigger_price = current_price
                                 trade.trigger_time = datetime.utcnow()
-                                db.commit()
 
-                                self.logger.info(f"🎉 [BREAK-EVEN] Trade {trade.id} {trade.symbol} "
-                                            f"moved to break-even: {trade.sl_price:.5f}")
+                                # ✅ FIX: Increment stop_limit_changes_count
+                                trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+
+                                # Log changes before commit
+                                self.logger.info(f"💾 [DB PREPARE] Trade {trade.id}: Preparing database commit")
+                                self.logger.info(f"   → sl_price: {old_sl} → {trade.sl_price}")
+                                self.logger.info(f"   → status: {old_status} → {trade.status}")
+                                self.logger.info(f"   → moved_to_breakeven: {old_moved_to_breakeven} → {trade.moved_to_breakeven}")
+                                self.logger.info(f"   → stop_limit_changes_count: {(trade.stop_limit_changes_count or 1) - 1} → {trade.stop_limit_changes_count}")
+
+                                # ✅ ROBUST: Wrap commit in try-except with detailed logging
+                                try:
+                                    db.commit()
+                                    self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: All changes persisted to database")
+                                    self.logger.info(f"🎉 [BREAK-EVEN] Trade {trade.id} {trade.symbol} "
+                                                f"moved to break-even: {trade.sl_price:.5f}")
+                                except Exception as commit_error:
+                                    db.rollback()
+                                    self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: Database commit failed!")
+                                    self.logger.error(f"   → Error type: {type(commit_error).__name__}")
+                                    self.logger.error(f"   → Error message: {str(commit_error)}")
+                                    self.logger.error(f"   → IG Markets was updated successfully but database sync failed")
+                                    self.logger.error(f"   → This will cause database/broker mismatch!")
+                                    # Re-raise to ensure error is visible
+                                    raise
                                 # Don't return early - continue to Stage 2/3 progression check
                             else:
                                 error_msg = api_result.get("message", "Unknown error") if isinstance(api_result, dict) else "API call failed"
@@ -1536,10 +1622,19 @@ class EnhancedTradeProcessor:
                         else:
                             self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Adjustment points = 0")
                             # Set flag anyway to prevent repeated attempts
+                            old_status = trade.status
                             trade.moved_to_breakeven = True
                             if trade.status != "profit_protected":
                                 trade.status = "break_even"
-                            db.commit()
+
+                            self.logger.info(f"💾 [DB PREPARE BE-ZERO] Trade {trade.id}: status {old_status} → {trade.status}")
+                            try:
+                                db.commit()
+                                self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Break-even zero adjustment flags persisted")
+                            except Exception as commit_error:
+                                db.rollback()
+                                self.logger.error(f"❌ [DB COMMIT FAILED BE-ZERO] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                                raise
                     else:
                         self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Break-even level validation failed")
 
@@ -1584,14 +1679,28 @@ class EnhancedTradeProcessor:
 
                             if adjustment_points >= min_adjustment:
                                 success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
-                                if success:
+                                if isinstance(success, dict) and success.get("status") == "updated":
+                                    old_sl = trade.sl_price
+                                    old_status = trade.status
+
                                     trade.sl_price = new_trail_level
                                     trade.status = "stage3_trailing"
                                     trade.last_trigger_price = current_price
                                     trade.trigger_time = datetime.utcnow()
-                                    db.commit()
-                                    self.logger.info(f"🎯 [STAGE 3] Trade {trade.id}: Percentage trailing to {new_trail_level:.5f} ({adjustment_points}pts)")
-                                    return True
+                                    # ✅ FIX: Increment counter
+                                    trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+
+                                    self.logger.info(f"💾 [DB PREPARE STAGE3] Trade {trade.id}: sl_price {old_sl} → {trade.sl_price}, changes: {trade.stop_limit_changes_count}")
+
+                                    try:
+                                        db.commit()
+                                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Stage 3 changes persisted")
+                                        self.logger.info(f"🎯 [STAGE 3] Trade {trade.id}: Percentage trailing to {new_trail_level:.5f} ({adjustment_points}pts)")
+                                        return True
+                                    except Exception as commit_error:
+                                        db.rollback()
+                                        self.logger.error(f"❌ [DB COMMIT FAILED STAGE3] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                                        raise
                             else:
                                 self.logger.debug(f"📊 [STAGE 3 SKIP] Trade {trade.id}: Adjustment {adjustment_points}pts < minimum {min_adjustment}pts")
                     except Exception as e:
@@ -1627,20 +1736,39 @@ class EnhancedTradeProcessor:
                                 direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
                                 self.logger.info(f"📤 [STAGE 2 SEND] Trade {trade.id}: Moving to profit lock (+{lock_points}pts), adjustment={adjustment_points}pts")
                                 success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
-                                if success:
+                                if isinstance(success, dict) and success.get("status") == "updated":
+                                    old_sl = trade.sl_price
+                                    old_status = trade.status
                                     trade.sl_price = stage2_stop
                                     trade.status = "stage2_profit_lock"
                                     trade.moved_to_stage2 = True  # ✅ NEW: Set flag to prevent re-execution
                                     trade.last_trigger_price = current_price
                                     trade.trigger_time = datetime.utcnow()
-                                    db.commit()
-                                    self.logger.info(f"💎 [STAGE 2] Trade {trade.id}: Profit locked at {stage2_stop:.5f} (+{lock_points}pts)")
-                                    return True
+                                    trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+
+                                    self.logger.info(f"💾 [DB PREPARE STAGE2] Trade {trade.id}: sl_price {old_sl} → {trade.sl_price}, status {old_status} → {trade.status}, changes: {trade.stop_limit_changes_count}")
+                                    try:
+                                        db.commit()
+                                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Stage 2 changes persisted")
+                                        self.logger.info(f"💎 [STAGE 2] Trade {trade.id}: Profit locked at {stage2_stop:.5f} (+{lock_points}pts)")
+                                        return True
+                                    except Exception as commit_error:
+                                        db.rollback()
+                                        self.logger.error(f"❌ [DB COMMIT FAILED STAGE2] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                                        raise
                         else:
                             # Stage 2 stop not better than current - mark as executed anyway
                             self.logger.info(f"📊 [STAGE 2 SKIP] Trade {trade.id}: Stage 2 stop {stage2_stop:.5f} not better than current {current_stop:.5f}")
                             trade.moved_to_stage2 = True
-                            db.commit()
+
+                            self.logger.info(f"💾 [DB PREPARE STAGE2-SKIP] Trade {trade.id}: moved_to_stage2=True")
+                            try:
+                                db.commit()
+                                self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Stage 2 skip flag persisted")
+                            except Exception as commit_error:
+                                db.rollback()
+                                self.logger.error(f"❌ [DB COMMIT FAILED STAGE2-SKIP] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                                raise
                 else:
                     # Still in Stage 1, continue normal processing
                     self.logger.debug(f"📊 [STAGE 1] Trade {trade.id}: Profit {profit_points}pts < Stage 2 trigger {stage2_trigger}pts")
@@ -1712,6 +1840,8 @@ class EnhancedTradeProcessor:
                                 sent_payload = api_result.get("sentPayload", {})
                                 ig_actual_stop = sent_payload.get("stopLevel")
 
+                                old_sl = trade.sl_price
+                                old_status = trade.status
                                 if ig_actual_stop:
                                     # Use IG's actual stop level instead of our calculation
                                     trade.sl_price = float(ig_actual_stop)
@@ -1724,11 +1854,19 @@ class EnhancedTradeProcessor:
                                 trade.last_trigger_price = current_price
                                 trade.trigger_time = datetime.utcnow()
                                 trade.status = "trailing"
-                                db.commit()
+                                trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
 
-                                self.logger.info(f"🎯 [TRAILING SUCCESS] Trade {trade.id} {trade.symbol}: "
-                                               f"Stop moved to {trade.sl_price:.5f} ({adjustment_points} pts)")
-                                return True
+                                self.logger.info(f"💾 [DB PREPARE TRAILING] Trade {trade.id}: sl_price {old_sl} → {trade.sl_price}, status {old_status} → {trade.status}, changes: {trade.stop_limit_changes_count}")
+                                try:
+                                    db.commit()
+                                    self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Trailing changes persisted")
+                                    self.logger.info(f"🎯 [TRAILING SUCCESS] Trade {trade.id} {trade.symbol}: "
+                                                   f"Stop moved to {trade.sl_price:.5f} ({adjustment_points} pts)")
+                                    return True
+                                except Exception as commit_error:
+                                    db.rollback()
+                                    self.logger.error(f"❌ [DB COMMIT FAILED TRAILING] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                                    raise
                             else:
                                 error_msg = api_result.get("message", "Unknown error") if isinstance(api_result, dict) else "API call failed"
                                 self.logger.error(f"❌ [TRAILING FAILED] Trade {trade.id}: {error_msg}")

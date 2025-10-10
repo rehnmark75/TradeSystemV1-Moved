@@ -87,7 +87,8 @@
       "Bash(sed:*)",
       "Read(//tmp/**)",
       "Bash(tee:*)",
-      "Read(///**)"
+      "Read(///**)",
+      "Bash(do echo \"=== Line $line ===\")"
     ],
     "deny": [],
     "ask": []
