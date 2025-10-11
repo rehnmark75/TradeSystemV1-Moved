@@ -140,23 +140,29 @@ class KAMAStrategy(BaseStrategy):
             
             # Build final signal using data helper
             final_signal = self.data_helper.build_complete_signal(
-                signal_data, enhanced_signal_data, adjusted_price, confidence, 
+                signal_data, enhanced_signal_data, adjusted_price, confidence,
                 epic, timeframe, spread_pips
             )
-            
+
+            # ✅ Calculate SL/TP using base class method (NEW - was missing!)
+            sl_tp = self.calculate_optimal_sl_tp(final_signal, epic, df_enhanced.iloc[-1], spread_pips)
+            final_signal['stop_distance'] = sl_tp['stop_distance']
+            final_signal['limit_distance'] = sl_tp['limit_distance']
+
             # Add confidence breakdown for debugging
             if self.logger.isEnabledFor(logging.DEBUG):
                 confidence_breakdown = self.confidence_calculator.get_confidence_breakdown(
                     enhanced_signal_data, df_enhanced, epic
                 )
                 final_signal['confidence_breakdown'] = confidence_breakdown
-            
+
             # Log performance stats from cache
             self.cache.log_cache_performance()
-            
+
             self.logger.info(f"🎯 [KAMA MODULAR FIXED] {signal_data['signal_type']} signal for {epic} "
-                           f"(confidence: {confidence:.2f}, ER: {signal_data.get('efficiency_ratio', 0):.3f})")
-            
+                           f"(confidence: {confidence:.2f}, ER: {signal_data.get('efficiency_ratio', 0):.3f}, "
+                           f"SL/TP={sl_tp['stop_distance']}/{sl_tp['limit_distance']})")
+
             return final_signal
             
         except Exception as e:

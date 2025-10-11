@@ -311,100 +311,170 @@ class BaseStrategy(ABC):
         spread_pips: float
     ) -> Dict[str, int]:
         """
-        Calculate optimized SL/TP in POINTS (not price levels) for order API.
+        Calculate Stop Loss / Take Profit with reliable fallback chain
 
-        Uses optimal parameters from database if available, otherwise calculates
-        based on ATR with conservative multipliers.
+        Calculation Priority:
+        1. Database optimal params (only if USE_OPTIMIZED_DATABASE_PARAMS = True)
+        2. ATR-based dynamic calculation
+        3. Static config fallback values
 
-        Args:
-            signal: The trading signal dictionary
-            epic: Trading pair epic code
-            latest_row: Latest candle data with indicators
-            spread_pips: Current spread in pips
+        Always enforces:
+        - Pair-specific minimum stops (15-20 pips)
+        - Maximum caps for risk management
 
         Returns:
             {
-                'stop_distance': int,  # Stop loss distance in points
-                'limit_distance': int  # Take profit distance in points
+                'stop_distance': int,  # Stop loss in pips
+                'limit_distance': int  # Take profit in pips
             }
         """
         import logging
         logger = logging.getLogger(__name__)
 
-        # Get ATR for the pair
-        atr = latest_row.get('atr', 0)
-        if not atr or atr <= 0:
-            # Fallback: estimate from current volatility (high-low range)
-            atr = abs(latest_row.get('high', 0) - latest_row.get('low', 0))
-            logger.warning(f"No ATR indicator, using high-low range: {atr}")
+        # Import config
+        try:
+            from configdata import config
+        except:
+            from forex_scanner.configdata import config
 
-        # Convert ATR to pips/points
-        if 'JPY' in epic:
-            atr_pips = atr * 100  # JPY pairs: 0.01 = 1 pip
-        else:
-            atr_pips = atr * 10000  # Standard pairs: 0.0001 = 1 pip
+        # Extract pair name from epic (CS.D.GBPUSD.MINI.IP → GBPUSD)
+        pair = self._extract_pair_from_epic(epic)
 
-        # Check for optimal parameters from database
-        # IMPROVED: Only use DB params if they're based on recent optimization (not static defaults)
-        use_db_params = False
-        if self.optimal_params and hasattr(self.optimal_params, 'last_optimized'):
-            # IMPROVED: Only use if optimized in last 14 days (stricter freshness requirement)
+        # Get pair-specific minimum stop
+        min_stop = config.PAIR_MINIMUM_STOPS.get(pair, config.PAIR_MINIMUM_STOPS['DEFAULT'])
+
+        logger.info(f"🎯 [{self.name}] Calculating SL/TP for {pair} (min_stop={min_stop} pips)")
+
+        # =================================================================
+        # STEP 1: Check if database parameters are enabled
+        # =================================================================
+        use_db_params = getattr(config, 'USE_OPTIMIZED_DATABASE_PARAMS', False)
+
+        if use_db_params and self.optimal_params and hasattr(self.optimal_params, 'stop_loss_pips'):
+            # Database params enabled - use them
             from datetime import datetime, timedelta
-            if self.optimal_params.last_optimized and \
-               (datetime.utcnow() - self.optimal_params.last_optimized) < timedelta(days=14):
-                stop_distance = int(self.optimal_params.stop_loss_pips)
-                limit_distance = int(self.optimal_params.take_profit_pips)
-                use_db_params = True
-                logger.info(f"{self.name}: Using recent optimal params from DB - SL={stop_distance}, TP={limit_distance}")
+
+            param_age_days = (datetime.utcnow() - self.optimal_params.last_optimized).days if self.optimal_params.last_optimized else 999
+            freshness_days = getattr(config, 'DB_PARAM_FRESHNESS_DAYS', 30)
+
+            if param_age_days <= freshness_days:
+                db_stop = int(self.optimal_params.stop_loss_pips)
+                db_limit = int(self.optimal_params.take_profit_pips)
+
+                # Enforce minimum even for DB params
+                if db_stop < min_stop:
+                    logger.warning(f"⚠️ DB stop {db_stop} < minimum {min_stop}, using minimum")
+                    db_stop = min_stop
+                    db_limit = int(db_stop * 2.0)
+
+                logger.info(f"✅ Using DB params: SL={db_stop}, TP={db_limit} (age={param_age_days}d)")
+                return self._apply_maximum_caps(epic, pair, db_stop, db_limit, logger)
             else:
-                logger.info(f"{self.name}: DB params outdated (>14 days), using dynamic ATR calculation")
-
-        if not use_db_params:
-            # Calculate based on ATR with 2.0x multiplier (more conservative than dev-app's 1.5x)
-            raw_stop = atr_pips * 2.0
-
-            # Apply minimum safe distances
-            if 'JPY' in epic:
-                min_sl = 20  # Minimum 20 pips for JPY
-            else:
-                min_sl = 15  # Minimum 15 pips for others
-
-            stop_distance = max(int(raw_stop), min_sl)
-
-            # Take profit: 2.0-2.5× risk/reward based on pair volatility
-            # Major pairs get higher RR targets
-            if epic in ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP']:
-                risk_reward = 2.5
-            else:
-                risk_reward = 2.0
-
-            limit_distance = int(stop_distance * risk_reward)
-
-            logger.info(f"{self.name}: Calculated ATR-based SL/TP - ATR={atr_pips:.1f}, SL={stop_distance} points, TP={limit_distance} points, RR={risk_reward}")
-
-        # NOTE: Values are already in IG API POINTS (not pips despite variable name!)
-        # The ATR calculation above converts to points:
-        # - JPY: atr_pips = atr * 100 (e.g., 0.20 JPY → 20 points, which is 0.2 pips)
-        # - USD: atr_pips = atr * 10000 (e.g., 0.0020 → 20 points, which is 20 pips)
-        # So stop_distance is already in points, ready for IG API!
-
-        # Apply reasonable maximums to prevent excessive risk (all in points)
-        if 'JPY' in epic:
-            max_sl = 5500  # ~55 pips (5500 points = 55 JPY)
-        elif 'GBP' in epic:
-            max_sl = 60  # GBP pairs are more volatile
+                logger.info(f"⚠️ DB params too old ({param_age_days}d > {freshness_days}d), falling back to ATR")
         else:
-            max_sl = 45
+            logger.info(f"📊 DB params DISABLED or unavailable, using ATR/static calculation")
 
-        if stop_distance > max_sl:
-            logger.warning(f"Stop distance {stop_distance} exceeds max {max_sl}, capping to maximum")
-            stop_distance = max_sl
-            limit_distance = int(stop_distance * 2.0)  # Maintain reasonable RR
+        # =================================================================
+        # STEP 2: ATR-Based Dynamic Calculation (Primary Method)
+        # =================================================================
+        atr = latest_row.get('atr', 0)
 
-        return {
-            'stop_distance': stop_distance,
-            'limit_distance': limit_distance
-        }
+        if atr and atr > 0:
+            # Get ATR multipliers from config
+            stop_multiplier = getattr(config, 'DEFAULT_STOP_ATR_MULTIPLIER', 2.0)
+            target_multiplier = getattr(config, 'DEFAULT_TARGET_ATR_MULTIPLIER', 4.0)
+
+            # Convert ATR to pips
+            if 'JPY' in pair:
+                atr_pips = atr * 100  # JPY: 0.01 = 1 pip
+            else:
+                atr_pips = atr * 10000  # Others: 0.0001 = 1 pip
+
+            # Calculate raw values
+            raw_stop = atr_pips * stop_multiplier
+            raw_limit = atr_pips * target_multiplier
+
+            # Apply minimum
+            stop_distance = max(int(raw_stop), min_stop)
+            limit_distance = int(raw_limit)
+
+            # Ensure TP is at least 1.5x SL (minimum risk/reward)
+            min_rr = getattr(config, 'MINIMUM_RISK_REWARD_RATIO', 1.5)
+            if limit_distance < stop_distance * min_rr:
+                limit_distance = int(stop_distance * 2.0)
+
+            logger.info(
+                f"✅ ATR calculation: ATR={atr_pips:.1f}p, "
+                f"raw_SL={raw_stop:.1f}p, final_SL={stop_distance}p, "
+                f"TP={limit_distance}p (RR={limit_distance/stop_distance:.1f})"
+            )
+
+            return self._apply_maximum_caps(epic, pair, stop_distance, limit_distance, logger)
+
+        # =================================================================
+        # STEP 3: Static Config Fallback (ATR unavailable)
+        # =================================================================
+        logger.warning(f"⚠️ ATR not available for {pair}, using static config fallback")
+
+        fallback = config.STATIC_FALLBACK_SL_TP.get(pair, config.STATIC_FALLBACK_SL_TP['DEFAULT'])
+        stop_distance = max(fallback['sl'], min_stop)  # Enforce minimum
+        limit_distance = fallback['tp']
+
+        logger.info(f"📋 Static fallback: SL={stop_distance}p, TP={limit_distance}p")
+
+        return self._apply_maximum_caps(epic, pair, stop_distance, limit_distance, logger)
+
+    def _extract_pair_from_epic(self, epic: str) -> str:
+        """Extract pair name from epic code"""
+        # CS.D.GBPUSD.MINI.IP → GBPUSD
+        parts = epic.upper().split('.')
+        for part in parts:
+            # Check if part matches a currency pair pattern (6-7 chars, contains USD/EUR/GBP/etc)
+            if len(part) in [6, 7] and any(curr in part for curr in ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'NZD', 'CAD', 'CHF']):
+                return part
+
+        # Fallback: check if any known pair is in epic
+        try:
+            from configdata import config
+            for pair in config.PAIR_MINIMUM_STOPS.keys():
+                if pair != 'DEFAULT' and pair in epic.upper():
+                    return pair
+        except:
+            pass
+
+        return 'DEFAULT'
+
+    def _apply_maximum_caps(self, epic: str, pair: str, stop_distance: int, limit_distance: int, logger) -> Dict[str, int]:
+        """Apply maximum stop loss caps for risk management"""
+        try:
+            from configdata import config
+
+            # Determine maximum based on pair type
+            if 'JPY' in pair:
+                max_stop = config.PAIR_MAXIMUM_STOPS['JPY_PAIRS']
+            elif 'GBP' in pair:
+                max_stop = config.PAIR_MAXIMUM_STOPS['GBP_PAIRS']
+            else:
+                max_stop = config.PAIR_MAXIMUM_STOPS['DEFAULT']
+
+            # Apply cap if exceeded
+            if stop_distance > max_stop:
+                logger.warning(f"⚠️ Stop {stop_distance}p exceeds max {max_stop}p, capping")
+                stop_distance = max_stop
+                limit_distance = int(stop_distance * 2.0)  # Maintain 2:1 RR
+
+            logger.info(f"✅ Final SL/TP: {stop_distance}p / {limit_distance}p (max_allowed={max_stop}p)")
+
+            return {
+                'stop_distance': stop_distance,
+                'limit_distance': limit_distance
+            }
+        except Exception as e:
+            logger.error(f"Error applying caps: {e}, returning uncapped values")
+            return {
+                'stop_distance': stop_distance,
+                'limit_distance': limit_distance
+            }
 
     # ✅ NEW: Validation helper methods
     def get_validation_status(self) -> Dict:

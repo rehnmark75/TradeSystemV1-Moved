@@ -445,6 +445,16 @@ class MeanReversionStrategy(BaseStrategy):
             # Add execution prices
             signal = self.add_execution_prices(signal, spread_pips)
 
+            # ✅ Calculate SL/TP using base class method
+            sl_tp = self.calculate_optimal_sl_tp(signal, epic, latest_row, spread_pips)
+            signal['stop_distance'] = sl_tp['stop_distance']
+            signal['limit_distance'] = sl_tp['limit_distance']
+
+            self.logger.info(
+                f"🎯 Mean Reversion {signal_type} signal: "
+                f"confidence={confidence:.1%}, SL={sl_tp['stop_distance']}p, TP={sl_tp['limit_distance']}p"
+            )
+
             # Add mean reversion specific execution guidance
             signal['execution_guidance'] = {
                 'strategy_type': 'mean_reversion',
@@ -454,9 +464,6 @@ class MeanReversionStrategy(BaseStrategy):
                 'risk_level': self._assess_risk_level(latest_row, signal_type)
             }
 
-            self.logger.debug(
-                f"🎯 Mean Reversion {signal_type} signal created: {confidence:.1%} confidence at {signal['price']:.5f}"
-            )
             return signal
 
         except Exception as e:

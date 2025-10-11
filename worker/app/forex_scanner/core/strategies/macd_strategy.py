@@ -875,29 +875,10 @@ class MACDStrategy(BaseStrategy):
                 'ranging_quality': ranging_quality,
             }
 
-            # Calculate ATR-based SL/TP
-            atr = row.get('atr', None)
-            if atr and atr > 0:
-                # Get pip value for this epic
-                pip_value = self._get_pip_value(epic)
-
-                # Calculate ATR in pips
-                atr_pips = atr / pip_value
-
-                # Calculate SL/TP based on ATR multipliers
-                stop_distance = max(self.min_stop_pips, min(self.max_stop_pips, atr_pips * self.stop_atr_multiplier))
-                limit_distance = atr_pips * self.target_atr_multiplier
-
-                self.logger.debug(f"📊 {epic_display}ATR-based SL/TP: ATR={atr_pips:.1f} pips, SL={stop_distance:.1f}, TP={limit_distance:.1f}")
-            else:
-                # Fallback to defaults if ATR not available
-                stop_distance = self.min_stop_pips
-                limit_distance = self.min_stop_pips * 2.5
-                self.logger.warning(f"⚠️ {epic_display}ATR not available, using default SL/TP: {stop_distance}/{limit_distance} pips")
-
-            # Convert to integers (API requirement)
-            signal['stop_distance'] = int(round(stop_distance))
-            signal['limit_distance'] = int(round(limit_distance))
+            # Calculate SL/TP using base class method (consistent with other strategies)
+            sl_tp = self.calculate_optimal_sl_tp(signal, epic, row, 0)  # spread_pips not used in new calc
+            signal['stop_distance'] = sl_tp['stop_distance']
+            signal['limit_distance'] = sl_tp['limit_distance']
 
             return signal
 

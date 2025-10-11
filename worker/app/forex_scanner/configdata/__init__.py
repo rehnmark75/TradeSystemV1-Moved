@@ -9,17 +9,20 @@ try:
     from forex_scanner.configdata.smc.smc_configdata import *
     from forex_scanner.configdata.strategies import *
     from forex_scanner.configdata.market_intelligence_config import *
+    from forex_scanner.configdata.trading_config import *
 except ImportError:
     # Fallback for different execution contexts (e.g., Docker container)
     try:
         from .smc.smc_configdata import *
         from .strategies import *
         from .market_intelligence_config import *
+        from .trading_config import *
     except ImportError:
         # Last resort - try relative imports
         from smc.smc_configdata import *
         from strategies import *
         from market_intelligence_config import *
+        from trading_config import *
 
 # Future config imports (examples for the pattern)
 # from configdata.support_and_resistance.sr_config import *
@@ -48,25 +51,29 @@ class Config:
             from forex_scanner.configdata.smc import smc_configdata
             from forex_scanner.configdata import strategies
             from forex_scanner.configdata import market_intelligence_config
+            from forex_scanner.configdata import trading_config
         except ImportError:
             # Fallback for different execution contexts
             try:
                 from .smc import smc_configdata
                 from . import strategies
                 from . import market_intelligence_config
+                from . import trading_config
             except ImportError:
                 # Last resort
                 import smc.smc_configdata as smc_configdata
                 import strategies
                 import market_intelligence_config
+                import trading_config
 
         # Store module references for dot notation access
         self.smc = smc_configdata
         self.strategies = strategies
         self.intelligence = market_intelligence_config
+        self.trading = trading_config
 
         # For backward compatibility, add all module attributes to self
-        for module in [smc_configdata, strategies, market_intelligence_config]:
+        for module in [smc_configdata, strategies, market_intelligence_config, trading_config]:
             for attr in dir(module):
                 if not attr.startswith('_') and attr.isupper():
                     setattr(self, attr, getattr(module, attr))
@@ -406,3 +413,4 @@ except Exception as e:
 print(f"📊 ConfigData system loaded - SMC enabled: {getattr(config, 'SMART_MONEY_ENABLED', False)}")
 print(f"📈 Strategy configs loaded - ZeroLag: {getattr(config, 'ZERO_LAG_STRATEGY', False)}, MACD: {getattr(config, 'MACD_EMA_STRATEGY', False)}, EMA: {getattr(config, 'SIMPLE_EMA_STRATEGY', False)}")
 print(f"🧠 Intelligence config loaded - Enabled: {getattr(config, 'ENABLE_MARKET_INTELLIGENCE', False)}, Preset: {getattr(config, 'INTELLIGENCE_PRESET', 'unknown')}")
+print(f"💰 Trading config loaded - DB params: {'ENABLED' if getattr(config, 'USE_OPTIMIZED_DATABASE_PARAMS', False) else 'DISABLED (testing mode)'}, Min SL: {getattr(config, 'PAIR_MINIMUM_STOPS', {}).get('DEFAULT', 20)} pips")
