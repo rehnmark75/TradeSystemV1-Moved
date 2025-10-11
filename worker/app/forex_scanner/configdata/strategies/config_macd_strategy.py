@@ -157,7 +157,7 @@ MACD_TREND_ALIGNMENT_BOOST = 0.10        # Confidence boost if aligned with tren
 
 # Market Regime Filter - Critical for momentum strategies
 MACD_ENABLE_REGIME_FILTER = True         # Filter out unfavorable market conditions
-MACD_MIN_ADX = 25                        # PHASE 2: Increase to 25 (stronger trend requirement)
+MACD_MIN_ADX = 21                        # PHASE 2: Increase to 25 (stronger trend requirement)
 MACD_MIN_ATR_RATIO = 0.8                 # PHASE 2: Increase to 0.8 (require higher volatility)
 MACD_MIN_EMA_SEPARATION = 0.2            # Price distance from EMA (in ATR units)
 
@@ -176,33 +176,7 @@ MACD_CONFIRMATION_TYPES = ['macd_histogram', 'rsi_momentum', 'volume', 'price_ac
 MACD_STOP_LOSS_ATR_MULTIPLIER = 1.8      # PHASE 1: Tighter stops (immediate entries allow closer stops)
 MACD_TAKE_PROFIT_ATR_MULTIPLIER = 4.0    # PHASE 1: Wider targets for better R:R (1.8:4.0 = 1:2.22 R:R)
 
-# Pair-Specific Parameters
-MACD_PAIR_SPECIFIC_PARAMS = {
-    'EURUSD': {
-        'histogram_threshold': 0.0001,
-        'stop_atr_multiplier': 2.5,
-        'target_atr_multiplier': 3.0,
-        'min_adx': 20
-    },
-    'GBPUSD': {
-        'histogram_threshold': 0.00012,  # Higher volatility
-        'stop_atr_multiplier': 2.8,
-        'target_atr_multiplier': 3.2,
-        'min_adx': 22
-    },
-    'USDJPY': {
-        'histogram_threshold': 0.01,     # Different scale
-        'stop_atr_multiplier': 2.5,
-        'target_atr_multiplier': 3.0,
-        'min_adx': 20
-    },
-    'AUDUSD': {
-        'histogram_threshold': 0.0001,
-        'stop_atr_multiplier': 2.6,
-        'target_atr_multiplier': 3.0,
-        'min_adx': 20
-    }
-}
+
 
 # Structure-Based Stop Placement
 MACD_USE_STRUCTURE_STOPS = True          # Place stops beyond recent swing points
