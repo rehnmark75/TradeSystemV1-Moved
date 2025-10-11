@@ -58,11 +58,16 @@ class MACDStrategy(BaseStrategy):
         self.slow_period = 26
         self.signal_period = 9
 
-        # Validation thresholds (read from config)
-        self.min_adx = getattr(config_macd_strategy, 'MACD_MIN_ADX', 20) if config_macd_strategy else 20
+        # Validation thresholds (pair-specific ADX with fallback to global default)
+        if config_macd_strategy and hasattr(config_macd_strategy, 'get_macd_min_adx'):
+            self.min_adx = config_macd_strategy.get_macd_min_adx(epic) if epic else getattr(config_macd_strategy, 'MACD_MIN_ADX', 20)
+        else:
+            self.min_adx = getattr(config_macd_strategy, 'MACD_MIN_ADX', 20) if config_macd_strategy else 20
+
         self.min_confidence = 0.60  # 60% minimum confidence (lowered to allow more signals)
 
-        self.logger.info(f"🎯 MACD ADX threshold set to: {self.min_adx} (from config)")
+        epic_display = f"{epic} " if epic else ""
+        self.logger.info(f"🎯 {epic_display}MACD ADX threshold set to: {self.min_adx} (pair-specific)")
 
         # EMA filter configuration (from config file)
         ema_filter_config = getattr(config_macd_strategy, 'MACD_EMA_FILTER', {}) if config_macd_strategy else {}
@@ -88,16 +93,19 @@ class MACDStrategy(BaseStrategy):
 
         # ADX Crossover Trigger Configuration (NEW FEATURE)
         self.adx_crossover_enabled = getattr(config_macd_strategy, 'MACD_ADX_CROSSOVER_ENABLED', True) if config_macd_strategy else True
-        self.adx_crossover_threshold = getattr(config_macd_strategy, 'MACD_ADX_CROSSOVER_THRESHOLD', 25) if config_macd_strategy else 25
+
+        # Use same pair-specific ADX threshold for crossover trigger (aligned with main ADX threshold)
+        self.adx_crossover_threshold = self.min_adx  # Use same threshold as main MACD signals for consistency
+
         self.adx_crossover_lookback = getattr(config_macd_strategy, 'MACD_ADX_CROSSOVER_LOOKBACK', 3) if config_macd_strategy else 3
         self.adx_min_histogram = getattr(config_macd_strategy, 'MACD_ADX_MIN_HISTOGRAM', 0.0001) if config_macd_strategy else 0.0001
         self.adx_require_expansion = getattr(config_macd_strategy, 'MACD_ADX_REQUIRE_EXPANSION', True) if config_macd_strategy else True
         self.adx_min_confidence = getattr(config_macd_strategy, 'MACD_ADX_MIN_CONFIDENCE', 0.50) if config_macd_strategy else 0.50
 
         if self.adx_crossover_enabled:
-            self.logger.info(f"🚀 ADX Crossover Trigger ENABLED - ADX crosses {self.adx_crossover_threshold} with MACD alignment")
+            self.logger.info(f"🚀 {epic_display}ADX Crossover Trigger ENABLED - ADX crosses {self.adx_crossover_threshold} with MACD alignment")
         else:
-            self.logger.info(f"⚪ ADX Crossover Trigger DISABLED")
+            self.logger.info(f"⚪ {epic_display}ADX Crossover Trigger DISABLED")
 
         # ATR-based SL/TP configuration
         self.stop_atr_multiplier = getattr(config_macd_strategy, 'MACD_STOP_LOSS_ATR_MULTIPLIER', 1.8) if config_macd_strategy else 1.8
@@ -1336,21 +1344,43 @@ class MACDStrategy(BaseStrategy):
         JPY pairs need much larger histogram movement to be visible
         because their price values are 100x larger (e.g., 150 vs 1.5)
 
+        Supports both legacy format (float) and new format (dict with 'histogram' and 'min_adx')
+
         Returns:
             Minimum histogram value required for valid signal
         """
+        if not epic:
+            default_config = self.min_histogram_thresholds.get('default', 0.0002)
+            if isinstance(default_config, dict):
+                return default_config.get('histogram', 0.0002)
+            return default_config
+
         # Extract pair name from epic (e.g., CS.D.EURJPY.MINI.IP -> EURJPY)
         pair = epic.upper()
-        for p in ['EURJPY', 'GBPJPY', 'AUDJPY', 'NZDJPY', 'USDJPY', 'CADJPY', 'CHFJPY']:
-            if p in pair:
-                threshold = self.min_histogram_thresholds.get(p, 0.015)
-                self.logger.debug(f"📏 {p} minimum histogram: {threshold}")
-                return threshold
 
-        # Default for non-JPY pairs
-        default = self.min_histogram_thresholds.get('default', 0.0002)
-        self.logger.debug(f"📏 Default minimum histogram: {default}")
-        return default
+        # Try to find matching pair in thresholds
+        for pair_name, config in self.min_histogram_thresholds.items():
+            if pair_name == 'default':
+                continue
+            if pair_name in pair:
+                # Handle both old format (float) and new format (dict)
+                if isinstance(config, dict):
+                    threshold = config.get('histogram', 0.015)
+                    self.logger.debug(f"📏 {pair_name} minimum histogram: {threshold}")
+                    return threshold
+                else:
+                    # Legacy format: config is a float
+                    self.logger.debug(f"📏 {pair_name} minimum histogram: {config}")
+                    return config
+
+        # Default for pairs not found
+        default_config = self.min_histogram_thresholds.get('default', 0.0002)
+        if isinstance(default_config, dict):
+            threshold = default_config.get('histogram', 0.0002)
+        else:
+            threshold = default_config
+        self.logger.debug(f"📏 Default minimum histogram: {threshold}")
+        return threshold
 
     # Required abstract methods from BaseStrategy
     def get_required_indicators(self):
