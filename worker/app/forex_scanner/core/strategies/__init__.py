@@ -17,6 +17,7 @@ from .mean_reversion_strategy import MeanReversionStrategy, create_mean_reversio
 from .ichimoku_strategy import IchimokuStrategy
 from .ranging_market_strategy import RangingMarketStrategy
 from .scalping_strategy import ScalpingStrategy
+from .volume_profile_strategy import VolumeProfileStrategy
 __all__ = [
     'BaseStrategy',
     'EMAStrategy',
@@ -33,5 +34,6 @@ __all__ = [
     'create_mean_reversion_strategy',
     'IchimokuStrategy',
     'RangingMarketStrategy',
-    'ScalpingStrategy'
+    'ScalpingStrategy',
+    'VolumeProfileStrategy'
 ]

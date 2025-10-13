@@ -15,6 +15,7 @@ from .config_momentum_strategy import *
 from .config_kama_strategy import *
 from .config_scalping_strategy import *
 from .config_bb_supertrend_strategy import *
+from .config_volume_profile_strategy import *
 
 # Import TradingView integration (optional)
 try:
@@ -735,7 +736,79 @@ __all__ = [
     'get_bb_supertrend_risk_parameters',
     'validate_bb_supertrend_config',
     'get_bb_supertrend_config_summary',
-    'set_bb_supertrend_frequency_preset'
+    'set_bb_supertrend_frequency_preset',
+
+    # Volume Profile Strategy Core Settings
+    'VOLUME_PROFILE_STRATEGY',
+    'STRATEGY_WEIGHT_VOLUME_PROFILE',
+    'VP_LOOKBACK_PERIODS',
+    'ACTIVE_VP_LOOKBACK',
+    'VP_NUM_BINS',
+    'VP_VOLUME_COLUMN',
+    'VP_USE_TICK_VOLUME',
+
+    # Volume Profile Configuration Presets
+    'VP_STRATEGY_CONFIG',
+    'ACTIVE_VP_CONFIG',
+
+    # HVN/LVN Detection Settings
+    'VP_HVN_DETECTION',
+    'VP_LVN_DETECTION',
+
+    # Value Area Configuration
+    'VP_VALUE_AREA_PERCENT',
+    'VP_VALUE_AREA_STRICT',
+    'VP_VAH_VAL_AS_SUPPORT_RESISTANCE',
+
+    # Signal Types Configuration
+    'VP_SIGNAL_TYPES',
+
+    # Confidence Scoring
+    'VP_CONFIDENCE_BASE',
+    'VP_CONFIDENCE_FACTORS',
+    'VP_CONFIDENCE_PENALTIES',
+
+    # Risk Management
+    'VP_STOP_LOSS_CONFIG',
+    'VP_TAKE_PROFIT_CONFIG',
+    'VP_POSITION_SIZING',
+
+    # Signal Filtering
+    'VP_SIGNAL_FILTERS',
+    'VP_PROXIMITY_FILTERS',
+    'VP_VOLUME_FILTERS',
+    'VP_TREND_FILTER',
+
+    # Market Regime Configuration
+    'VP_ADX_FILTER',
+    'VP_ATR_FILTER',
+    'VP_SESSION_FILTER',
+
+    # Pair-Specific Configuration
+    'VP_PAIR_CONFIG',
+
+    # Performance Settings
+    'VP_PERFORMANCE',
+    'VP_DEBUG',
+
+    # Strategy Integration
+    'VP_STRATEGY_WEIGHT',
+    'VP_ALLOW_COMBINED',
+    'VP_PRIORITY_LEVEL',
+    'VP_ENABLE_BACKTESTING',
+    'VP_MIN_DATA_PERIODS',
+    'VP_ENABLE_PERFORMANCE_TRACKING',
+
+    # Volume Profile Helper Functions
+    'get_vp_config_for_epic',
+    'extract_pair_from_epic',
+    'get_vp_lookback_periods',
+    'get_vp_proximity_threshold',
+    'get_vp_stop_loss_config',
+    'get_vp_take_profit_config',
+    'set_vp_preset',
+    'get_available_vp_presets',
+    'get_vp_config_summary'
 ]
 
 # Add TradingView integration functions if available

@@ -27,6 +27,7 @@ try:
     from .strategies.mean_reversion_strategy import MeanReversionStrategy
     from .strategies.ranging_market_strategy import RangingMarketStrategy
     from .strategies.momentum_strategy import MomentumStrategy
+    from .strategies.volume_profile_strategy import VolumeProfileStrategy
     from .detection.large_candle_filter import LargeCandleFilter
 except ImportError:
     from forex_scanner.core.database import DatabaseManager
@@ -45,6 +46,7 @@ except ImportError:
     from forex_scanner.core.strategies.mean_reversion_strategy import MeanReversionStrategy
     from forex_scanner.core.strategies.ranging_market_strategy import RangingMarketStrategy
     from forex_scanner.core.strategies.momentum_strategy import MomentumStrategy
+    from forex_scanner.core.strategies.volume_profile_strategy import VolumeProfileStrategy
     from forex_scanner.core.detection.large_candle_filter import LargeCandleFilter
 
 try:
@@ -212,6 +214,29 @@ class SignalDetector:
         else:
             self.ranging_market_strategy = None
             self.logger.info("⚪ Ranging Market strategy disabled")
+
+        # Initialize Volume Profile Strategy if enabled
+        if getattr(config, 'VOLUME_PROFILE_STRATEGY', False):
+            try:
+                # Get the active Volume Profile config name for proper logging
+                try:
+                    from configdata.strategies.config_volume_profile_strategy import ACTIVE_VP_CONFIG
+                    active_vp_config = ACTIVE_VP_CONFIG
+                except ImportError:
+                    active_vp_config = 'default'
+
+                self.volume_profile_strategy = VolumeProfileStrategy(data_fetcher=self.data_fetcher)
+                self.logger.info(f"✅ Volume Profile strategy initialized with '{active_vp_config}' configuration")
+                self.logger.info("📊 Features: HVN/LVN zones, POC reversion, Value Area breakouts")
+            except ImportError as e:
+                self.logger.error(f"❌ Failed to import Volume Profile strategy: {e}")
+                self.volume_profile_strategy = None
+            except Exception as e:
+                self.logger.error(f"❌ Failed to initialize Volume Profile strategy: {e}")
+                self.volume_profile_strategy = None
+        else:
+            self.volume_profile_strategy = None
+            self.logger.info("⚪ Volume Profile strategy disabled")
 
         # Initialize analysis components
         self.backtest_engine = BacktestEngine(self.data_fetcher)
@@ -2017,6 +2042,83 @@ class SignalDetector:
         trend_score = min(1.0, trend_score)
         
         return (volume_score + range_score + trend_score) / 3
+
+    def detect_volume_profile_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None
+    ) -> Optional[Dict]:
+        """
+        Detect Volume Profile signals using institutional volume analysis
+
+        Signals:
+        - HVN Bounce: Price bounces at High Volume Nodes (support/resistance)
+        - POC Reversion: Mean reversion to Point of Control
+        - Value Area Breakout: Price breaks above VAH or below VAL
+        - LVN Breakout: Price breaks through Low Volume Nodes
+
+        Args:
+            epic: Epic code
+            pair: Currency pair
+            spread_pips: Spread in pips
+            timeframe: Timeframe (default: 15m)
+
+        Returns:
+            Volume Profile signal or None
+        """
+        # Check if Volume Profile strategy is enabled
+        if not self.volume_profile_strategy:
+            self.logger.debug("Volume Profile strategy not initialized")
+            return None
+
+        try:
+            # Get enhanced data
+            df = self.data_fetcher.get_enhanced_data(epic, pair, timeframe=timeframe, ema_strategy=self.ema_strategy)
+
+            if df is None or len(df) < 70:  # Need sufficient data for volume profile
+                self.logger.debug(f"Insufficient data for Volume Profile: {len(df) if df is not None else 0} bars")
+                return None
+
+            # Use Volume Profile strategy
+            signal = self.volume_profile_strategy.detect_signal(df, epic, spread_pips, timeframe or '15m')
+
+            if signal:
+                # Add Volume Profile specific market context
+                signal = self._add_volume_profile_context(signal, df)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"Error detecting Volume Profile signals for {epic}: {e}")
+            return None
+
+    def _add_volume_profile_context(self, signal: Dict, df: pd.DataFrame) -> Dict:
+        """Add Volume Profile specific market context"""
+        try:
+            latest = df.iloc[-1]
+
+            # Add VP-relevant context
+            vp_context = {
+                'hvn_price': signal.get('metadata', {}).get('hvn_price'),
+                'poc': signal.get('metadata', {}).get('poc'),
+                'vah': signal.get('metadata', {}).get('vah'),
+                'val': signal.get('metadata', {}).get('val'),
+                'signal_source': signal.get('signal_source', 'unknown'),
+                'distance_to_poc_pips': signal.get('metadata', {}).get('distance_to_poc_pips'),
+            }
+
+            if 'market_context' not in signal:
+                signal['market_context'] = {}
+
+            signal['market_context']['volume_profile'] = vp_context
+
+            return signal
+
+        except Exception as e:
+            self.logger.debug(f"Could not add Volume Profile context: {e}")
+            return signal
 
     def detect_signals_multi_timeframe(
         self, 

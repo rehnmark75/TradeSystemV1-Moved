@@ -54,7 +54,7 @@ def main():
                 # Don't add --epic, let it default to all
 
             # Handle strategy shortcuts (based on actual strategies in core/strategies/)
-            elif arg.upper() in ["EMA", "MACD", "BB", "SMC", "MOMENTUM", "ICHIMOKU", "KAMA", "ZEROLAG", "MEANREV", "RANGING", "SCALPING"]:
+            elif arg.upper() in ["EMA", "MACD", "BB", "SMC", "MOMENTUM", "ICHIMOKU", "KAMA", "ZEROLAG", "MEANREV", "RANGING", "SCALPING", "VP", "VOLUME_PROFILE"]:
                 strategy_mapping = {
                     "EMA": "EMA",
                     "MACD": "MACD",
@@ -66,7 +66,9 @@ def main():
                     "ZEROLAG": "ZERO_LAG",
                     "MEANREV": "MEAN_REVERSION",
                     "RANGING": "RANGING_MARKET",
-                    "SCALPING": "SCALPING"
+                    "SCALPING": "SCALPING",
+                    "VP": "VOLUME_PROFILE",
+                    "VOLUME_PROFILE": "VOLUME_PROFILE"
                 }
                 strategy_name = strategy_mapping[arg.upper()]
                 processed_args.extend(["--strategy", strategy_name])
@@ -146,7 +148,7 @@ Supported Pairs:
   EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY, GBPJPY
 
 Supported Strategies:
-  EMA, MACD, BB, SMC, MOMENTUM, ICHIMOKU, KAMA, ZEROLAG, MEANREV, RANGING, SCALPING
+  EMA, MACD, BB, SMC, MOMENTUM, ICHIMOKU, KAMA, ZEROLAG, MEANREV, RANGING, SCALPING, VP (VOLUME_PROFILE)
 
 Additional Options:
   --show-signals     Show detailed signal breakdown

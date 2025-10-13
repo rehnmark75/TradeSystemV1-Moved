@@ -390,6 +390,9 @@ MEAN_REVERSION_STRATEGY = False  # Multi-oscillator mean reversion strategy
 # Strategy Configurations - Additional strategies
 RANGING_MARKET_STRATEGY = False  # Multi-oscillator ranging market strategy - Re-enabled, ADX filter removed from strategy
 
+# Volume Profile Strategy
+VOLUME_PROFILE_STRATEGY = True  # Institutional Volume-by-Price analysis strategy
+
 # KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
 
 

@@ -538,7 +538,9 @@ class BacktestScanner(IntelligentForexScanner):
                 'RANGING_MARKET': 'detect_ranging_market_signals',
                 'RANGING': 'detect_ranging_market_signals',
                 'SCALPING': 'detect_scalping_signals',  # ADDED: Scalping strategy support
-                'SCALP': 'detect_scalping_signals'  # ADDED: Short form
+                'SCALP': 'detect_scalping_signals',  # ADDED: Short form
+                'VOLUME_PROFILE': 'detect_volume_profile_signals',  # ADDED: Volume Profile strategy
+                'VP': 'detect_volume_profile_signals'  # ADDED: Short form
             }
 
             # Use specific strategy if requested, otherwise use all strategies
