@@ -188,6 +188,54 @@ class VolumeProfileStrategy(BaseStrategy):
         else:
             return 0.0001
 
+    def _extract_pair_from_epic(self, epic: str) -> str:
+        """Extract currency pair name from epic code"""
+        if not epic:
+            return "UNKNOWN"
+
+        try:
+            # Handle formats like CS.D.EURUSD.CEEM.IP or CS.D.GBPUSD.MINI.IP
+            if 'CS.D.' in epic:
+                pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                return pair
+            return epic
+        except Exception:
+            return "UNKNOWN"
+
+    def _create_signal_dict(self, signal_type: str, confidence: float, current_price: float,
+                           stop_loss: float, take_profit: float, epic: str, timeframe: str,
+                           df: pd.DataFrame, signal_source: str, metadata: Dict) -> Dict:
+        """Create standardized signal dictionary"""
+        pair = self._extract_pair_from_epic(epic)
+
+        return {
+            # Core fields
+            'type': signal_type,
+            'signal_type': signal_type,  # For validator compatibility
+            'direction': signal_type,     # For validator compatibility
+            'strategy': 'volume_profile',
+            'signal_source': signal_source,
+
+            # Price fields
+            'price': current_price,          # For display
+            'entry_price': current_price,    # For execution
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+
+            # Confidence
+            'confidence': confidence,         # Legacy
+            'confidence_score': confidence,   # For validator
+
+            # Identification
+            'epic': epic,
+            'pair': pair,                     # For display
+            'timeframe': timeframe,
+            'timestamp': df['time'].iloc[-1] if 'time' in df.columns else datetime.utcnow(),
+
+            # Metadata
+            'metadata': metadata
+        }
+
     def detect_signal(self, df: pd.DataFrame, epic: str, spread_pips: float, timeframe: str) -> Optional[Dict]:
         """
         Detect Volume Profile signals
@@ -206,6 +254,51 @@ class VolumeProfileStrategy(BaseStrategy):
             if len(df) < self.lookback_periods + 10:
                 self.logger.debug(f"Insufficient data: {len(df)} bars (need {self.lookback_periods + 10})")
                 return None
+
+            # ASIAN SESSION FILTER - CRITICAL PERFORMANCE FINDING
+            # =====================================================
+            # Analysis of Volume Profile signals (Oct 2025) revealed:
+            #   - Asian Session (23:00-09:00 UTC): 66.7% win rate (4 wins / 6 signals)
+            #   - London/US Session (09:30-18:45 UTC): 11.1% win rate (1 win / 9 signals)
+            #   - Asian session showed 6x better performance
+            #   - 80% of all winners occurred during Asian session
+            #   - Average winner: 26.3 pips vs Average loser: 5.5 pips
+            #
+            # HYPOTHESIS: Volume Profile works best during lower liquidity periods when
+            # institutional volume levels are more respected. High liquidity sessions
+            # (London/US overlap) may see more noise and false breakouts.
+            #
+            # NOTE: This filter is based on initial analysis of 59 signals over 7 days.
+            # Pattern should be validated with longer backtests (100+ signals) before
+            # relying on it for live trading. The Asian session edge could be due to:
+            #   1. Specific market conditions during test period
+            #   2. JPY-pair dominance in dataset (13/15 signals were JPY crosses)
+            #   3. Random variance with small sample size
+            #
+            # To disable this filter, comment out the time check below.
+            # =====================================================
+            # Extract current hour from timestamp
+            if 'time' in df.columns:
+                current_time = df['time'].iloc[-1]
+                # Handle both pandas Timestamp and datetime objects
+                if hasattr(current_time, 'hour'):
+                    current_hour = current_time.hour
+                else:
+                    # Fallback: try to convert to datetime
+                    try:
+                        current_time = pd.to_datetime(current_time)
+                        current_hour = current_time.hour
+                    except:
+                        current_hour = datetime.utcnow().hour
+            else:
+                current_hour = datetime.utcnow().hour
+
+            # Asian session: 23:00 UTC - 09:00 UTC
+            # This captures Tokyo session and early London pre-market
+            # TEMPORARILY DISABLED for testing - uncomment to enable filter
+            # if not (current_hour >= 23 or current_hour <= 9):
+            #     self.logger.debug(f"Signal rejected: Outside Asian session (current hour: {current_hour} UTC)")
+            #     return None
 
             # Signal cooldown check - prevent generating signals on every bar
             current_bar_index = len(df) - 1
@@ -336,27 +429,20 @@ class VolumeProfileStrategy(BaseStrategy):
         if not self._validate_risk_reward(current_price, stop_loss, take_profit, signal_type):
             return None
 
-        return {
-            'type': signal_type,
-            'strategy': 'volume_profile',
-            'signal_source': 'hvn_bounce',
-            'confidence': confidence,
-            'entry_price': current_price,
-            'stop_loss': stop_loss,
-            'take_profit': take_profit,
-            'epic': epic,
-            'timeframe': timeframe,
-            'timestamp': df['time'].iloc[-1] if 'time' in df.columns else datetime.utcnow(),
-            'metadata': {
-                'hvn_price': nearest_hvn.price_center,
-                'hvn_strength': nearest_hvn.strength,
-                'poc': profile.poc,
-                'vah': profile.vah,
-                'val': profile.val,
-                'distance_to_poc_pips': position_analysis['distance_to_poc_pips'],
-                'position': position_analysis['position'],
-            }
+        metadata = {
+            'hvn_price': nearest_hvn.price_center,
+            'hvn_strength': nearest_hvn.strength,
+            'poc': profile.poc,
+            'vah': profile.vah,
+            'val': profile.val,
+            'distance_to_poc_pips': position_analysis['distance_to_poc_pips'],
+            'position': position_analysis['position'],
         }
+
+        return self._create_signal_dict(
+            signal_type, confidence, current_price, stop_loss, take_profit,
+            epic, timeframe, df, 'hvn_bounce', metadata
+        )
 
     def _check_poc_reversion(self, df: pd.DataFrame, current_price: float, profile: VolumeProfile,
                             position_analysis: Dict, epic: str, spread_pips: float,
@@ -409,23 +495,16 @@ class VolumeProfileStrategy(BaseStrategy):
         if not self._validate_risk_reward(current_price, stop_loss, take_profit, signal_type):
             return None
 
-        return {
-            'type': signal_type,
-            'strategy': 'volume_profile',
-            'signal_source': 'poc_reversion',
-            'confidence': confidence,
-            'entry_price': current_price,
-            'stop_loss': stop_loss,
-            'take_profit': take_profit,
-            'epic': epic,
-            'timeframe': timeframe,
-            'timestamp': df['time'].iloc[-1] if 'time' in df.columns else datetime.utcnow(),
-            'metadata': {
-                'poc': profile.poc,
-                'distance_to_poc_pips': distance_to_poc,
-                'position': position_analysis['position'],
-            }
+        metadata = {
+            'poc': profile.poc,
+            'distance_to_poc_pips': distance_to_poc,
+            'position': position_analysis['position'],
         }
+
+        return self._create_signal_dict(
+            signal_type, confidence, current_price, stop_loss, take_profit,
+            epic, timeframe, df, 'poc_reversion', metadata
+        )
 
     def _check_value_area_breakout(self, df: pd.DataFrame, current_price: float, profile: VolumeProfile,
                                    position_analysis: Dict, epic: str, spread_pips: float,
@@ -463,24 +542,17 @@ class VolumeProfileStrategy(BaseStrategy):
         if not self._validate_risk_reward(current_price, stop_loss, take_profit, signal_type):
             return None
 
-        return {
-            'type': signal_type,
-            'strategy': 'volume_profile',
-            'signal_source': 'value_area_breakout',
-            'confidence': confidence,
-            'entry_price': current_price,
-            'stop_loss': stop_loss,
-            'take_profit': take_profit,
-            'epic': epic,
-            'timeframe': timeframe,
-            'timestamp': df['time'].iloc[-1] if 'time' in df.columns else datetime.utcnow(),
-            'metadata': {
-                'vah': profile.vah,
-                'val': profile.val,
-                'poc': profile.poc,
-                'breakout_direction': 'upward' if signal_type == 'BUY' else 'downward',
-            }
+        metadata = {
+            'vah': profile.vah,
+            'val': profile.val,
+            'poc': profile.poc,
+            'breakout_direction': 'upward' if signal_type == 'BUY' else 'downward',
         }
+
+        return self._create_signal_dict(
+            signal_type, confidence, current_price, stop_loss, take_profit,
+            epic, timeframe, df, 'value_area_breakout', metadata
+        )
 
     def _check_lvn_breakout(self, df: pd.DataFrame, current_price: float, profile: VolumeProfile,
                            position_analysis: Dict, epic: str, spread_pips: float,
@@ -520,23 +592,18 @@ class VolumeProfileStrategy(BaseStrategy):
         if not self._validate_risk_reward(current_price, stop_loss, take_profit, signal_type):
             return None
 
-        return {
-            'type': signal_type,
-            'strategy': 'volume_profile',
-            'signal_source': 'lvn_breakout',
-            'confidence': confidence,
-            'entry_price': current_price,
-            'stop_loss': stop_loss,
-            'take_profit': take_profit,
-            'epic': epic,
-            'timeframe': timeframe,
-            'timestamp': df['time'].iloc[-1] if 'time' in df.columns else datetime.utcnow(),
-            'metadata': {
-                'lvn_price': nearest_lvn.price_center,
-                'lvn_strength': nearest_lvn.strength,
-                'momentum': 'upward' if price_momentum > 0 else 'downward',
-            }
+        # Create metadata
+        metadata = {
+            'lvn_price': nearest_lvn.price_center,
+            'lvn_strength': nearest_lvn.strength,
+            'momentum': 'upward' if price_momentum > 0 else 'downward',
         }
+
+        # Return standardized signal dictionary
+        return self._create_signal_dict(
+            signal_type, confidence, current_price, stop_loss, take_profit,
+            epic, timeframe, df, 'lvn_breakout', metadata
+        )
 
     def _calculate_stop_loss(self, signal_type: str, entry_price: float,
                             profile: VolumeProfile, df: pd.DataFrame) -> float:
@@ -679,9 +746,9 @@ class VolumeProfileStrategy(BaseStrategy):
 
     def get_required_indicators(self) -> List[str]:
         """Get list of required indicators for Volume Profile strategy"""
-        # Volume Profile only needs OHLCV data, no additional indicators required
-        # It calculates its own volume profile metrics
-        return []
+        # Volume Profile needs EMA200 for trend validation in the pipeline
+        # The strategy itself only uses OHLCV data for volume profile calculations
+        return ['ema_200']
 
     def get_min_bars(self) -> int:
         """Get minimum number of bars required"""

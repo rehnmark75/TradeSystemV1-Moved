@@ -2074,8 +2074,16 @@ class SignalDetector:
             return None
 
         try:
-            # Get enhanced data
-            df = self.data_fetcher.get_enhanced_data(epic, pair, timeframe=timeframe, ema_strategy=self.ema_strategy)
+            # Get required indicators from strategy
+            required_indicators = self.volume_profile_strategy.get_required_indicators()
+
+            # Get enhanced data with required indicators
+            df = self.data_fetcher.get_enhanced_data(
+                epic, pair,
+                timeframe=timeframe,
+                ema_strategy=self.ema_strategy,
+                required_indicators=required_indicators
+            )
 
             if df is None or len(df) < 70:  # Need sufficient data for volume profile
                 self.logger.debug(f"Insufficient data for Volume Profile: {len(df) if df is not None else 0} bars")
@@ -2095,9 +2103,12 @@ class SignalDetector:
             return None
 
     def _add_volume_profile_context(self, signal: Dict, df: pd.DataFrame) -> Dict:
-        """Add Volume Profile specific market context"""
+        """Add Volume Profile specific market context and technical indicators"""
         try:
             latest = df.iloc[-1]
+
+            # Add complete technical indicators (including EMA200 for validation)
+            signal = self._add_complete_technical_indicators(signal, df)
 
             # Add VP-relevant context
             vp_context = {
