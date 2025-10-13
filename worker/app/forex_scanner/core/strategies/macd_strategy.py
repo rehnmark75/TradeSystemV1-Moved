@@ -176,6 +176,20 @@ class MACDStrategy(BaseStrategy):
         else:
             self.logger.info(f"⚪ Ranging Market Penalty DISABLED")
 
+        # Market Bias Conflict Detection Settings (NEW - Market Direction Alignment)
+        self.market_bias_filter_enabled = getattr(config_macd_strategy, 'MACD_ENABLE_MARKET_BIAS_FILTER', True) if config_macd_strategy else True
+
+        if self.market_bias_filter_enabled:
+            self.market_bias_conflict_penalty = getattr(config_macd_strategy, 'MACD_MARKET_BIAS_CONFLICT_PENALTY', -0.10) if config_macd_strategy else -0.10
+            self.market_bias_strong_consensus_threshold = getattr(config_macd_strategy, 'MACD_STRONG_CONSENSUS_THRESHOLD', 0.8) if config_macd_strategy else 0.8
+            self.market_bias_strong_consensus_penalty = getattr(config_macd_strategy, 'MACD_STRONG_CONSENSUS_PENALTY', -0.15) if config_macd_strategy else -0.15
+
+            self.logger.info(f"📊 Market Bias Conflict Detection ENABLED:")
+            self.logger.info(f"   Normal conflict penalty: {self.market_bias_conflict_penalty:+.0%}")
+            self.logger.info(f"   Strong consensus (>{self.market_bias_strong_consensus_threshold:.0%}) penalty: {self.market_bias_strong_consensus_penalty:+.0%}")
+        else:
+            self.logger.info(f"⚪ Market Bias Conflict Detection DISABLED")
+
         # KAMA Efficiency Validation Settings (NEW - Non-Blocking Quality Filter)
         self.use_kama_efficiency = getattr(config_macd_strategy, 'MACD_USE_KAMA_EFFICIENCY', True) if config_macd_strategy else True
 
@@ -830,6 +844,51 @@ class MACDStrategy(BaseStrategy):
                     # Apply ranging adjustment to confidence
                     confidence += ranging_adjustment
 
+            # Market Bias Conflict Detection (NEW - Alignment with broader market direction)
+            bias_adjustment = 0.0
+            bias_conflict = False
+            market_bias = None
+            directional_consensus = None
+
+            if self.market_bias_filter_enabled:
+                # Try to extract market bias from row (populated by market intelligence)
+                market_bias = row.get('market_bias', None)
+                directional_consensus = row.get('directional_consensus', None)
+
+                if market_bias:
+                    # Check for directional conflict
+                    is_bullish_signal = signal_type == 'BULL'
+                    is_bearish_signal = signal_type == 'BEAR'
+                    market_is_bullish = market_bias.lower() in ['bullish', 'bull']
+                    market_is_bearish = market_bias.lower() in ['bearish', 'bear']
+
+                    # Detect conflict: BULL signal in bearish market or BEAR signal in bullish market
+                    if (is_bullish_signal and market_is_bearish) or (is_bearish_signal and market_is_bullish):
+                        bias_conflict = True
+
+                        # Determine penalty based on consensus strength
+                        if directional_consensus and directional_consensus > self.market_bias_strong_consensus_threshold:
+                            # Strong consensus against signal = larger penalty
+                            bias_adjustment = self.market_bias_strong_consensus_penalty
+                            self.logger.warning(
+                                f"⚠️ {epic_display}STRONG market bias conflict: {signal_type} signal in {market_bias} market "
+                                f"(consensus: {directional_consensus:.1%}) → Confidence penalty: {bias_adjustment:+.1%}"
+                            )
+                        else:
+                            # Normal conflict penalty
+                            bias_adjustment = self.market_bias_conflict_penalty
+                            self.logger.info(
+                                f"⚠️ {epic_display}Market bias conflict: {signal_type} signal in {market_bias} market "
+                                f"→ Confidence penalty: {bias_adjustment:+.1%}"
+                            )
+
+                        # Apply bias conflict penalty
+                        confidence += bias_adjustment
+                    else:
+                        self.logger.debug(
+                            f"✅ {epic_display}Market bias aligned: {signal_type} signal with {market_bias} market bias"
+                        )
+
             # Use different minimum confidence for ADX crossover signals
             min_conf = self.adx_min_confidence if trigger_type == 'adx' else self.min_confidence
 
@@ -881,6 +940,11 @@ class MACDStrategy(BaseStrategy):
                 'ranging_score': ranging_score_value,
                 'ranging_adjustment': ranging_adjustment,
                 'ranging_quality': ranging_quality,
+
+                # Market bias tracking (NEW - for conflict detection and database storage)
+                'market_bias': market_bias,
+                'market_bias_conflict': bias_conflict,
+                'directional_consensus': directional_consensus,
             }
 
             # Calculate SL/TP using base class method (consistent with other strategies)

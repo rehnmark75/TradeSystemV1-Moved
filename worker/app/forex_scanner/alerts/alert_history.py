@@ -181,7 +181,14 @@ class AlertHistoryManager:
                     macd_line DECIMAL(10,6),
                     macd_signal DECIMAL(10,6),
                     macd_histogram DECIMAL(10,6),
-                    
+
+                    -- Technical indicators (ADX, RSI, ATR)
+                    adx DECIMAL(6,2),
+                    adx_plus DECIMAL(6,2),
+                    adx_minus DECIMAL(6,2),
+                    rsi DECIMAL(6,2),
+                    atr DECIMAL(10,6),
+
                     volume DECIMAL(15,2),
                     volume_ratio DECIMAL(8,4),
                     volume_confirmation BOOLEAN DEFAULT FALSE,
@@ -199,7 +206,18 @@ class AlertHistoryManager:
                     signal_trigger VARCHAR(50),
                     signal_conditions JSON,
                     crossover_type VARCHAR(30),
-                    
+
+                    -- Signal validation metadata
+                    trigger_type VARCHAR(20),
+                    validation_details JSON,
+                    swing_proximity_distance DECIMAL(8,2),
+                    swing_proximity_valid BOOLEAN,
+
+                    -- Market bias tracking
+                    market_bias VARCHAR(20),
+                    market_bias_conflict BOOLEAN,
+                    directional_consensus DECIMAL(4,3),
+
                     -- ENHANCED Claude Analysis Fields
                     claude_analysis JSON,           -- Full Claude analysis response
                     claude_score INTEGER,           -- Claude score (1-10)
@@ -288,6 +306,14 @@ class AlertHistoryManager:
                 'CREATE INDEX IF NOT EXISTS idx_alert_history_confidence ON alert_history(confidence_score)',
                 'CREATE INDEX IF NOT EXISTS idx_alert_history_status ON alert_history(status)',
                 'CREATE INDEX IF NOT EXISTS idx_alert_history_trigger ON alert_history(signal_trigger)',
+
+                # Technical indicator indexes
+                'CREATE INDEX IF NOT EXISTS idx_alert_history_adx ON alert_history(adx)',
+                'CREATE INDEX IF NOT EXISTS idx_alert_history_rsi ON alert_history(rsi)',
+                'CREATE INDEX IF NOT EXISTS idx_alert_history_trigger_type ON alert_history(trigger_type)',
+                'CREATE INDEX IF NOT EXISTS idx_alert_history_market_bias ON alert_history(market_bias)',
+                'CREATE INDEX IF NOT EXISTS idx_alert_history_bias_conflict ON alert_history(market_bias_conflict)',
+                'CREATE INDEX IF NOT EXISTS idx_alert_history_swing_valid ON alert_history(swing_proximity_valid)',
                 
                 # ENHANCED Claude Analysis Indexes
                 'CREATE INDEX IF NOT EXISTS idx_alert_history_claude_approved ON alert_history(claude_approved)',
@@ -476,10 +502,13 @@ class AlertHistoryManager:
                         epic, pair, signal_type, strategy, confidence_score, price, bid_price, ask_price,
                         spread_pips, timeframe, strategy_config, strategy_indicators, strategy_metadata,
                         ema_short, ema_long, ema_trend, macd_line, macd_signal, macd_histogram,
+                        adx, adx_plus, adx_minus, rsi, atr,
                         volume, volume_ratio, volume_confirmation,
                         nearest_support, nearest_resistance, distance_to_support_pips, distance_to_resistance_pips, risk_reward_ratio,
                         market_session, is_market_hours, market_regime,
                         signal_trigger, signal_conditions, crossover_type,
+                        trigger_type, validation_details, swing_proximity_distance, swing_proximity_valid,
+                        market_bias, market_bias_conflict, directional_consensus,
                         claude_analysis, claude_score, claude_decision, claude_approved,
                         claude_reason, claude_mode, claude_raw_response,
                         alert_message, alert_level,
@@ -490,11 +519,14 @@ class AlertHistoryManager:
                         %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(price)s, %(bid_price)s, %(ask_price)s,
                         %(spread_pips)s, %(timeframe)s, %(strategy_config)s, %(strategy_indicators)s, %(strategy_metadata)s,
                         %(ema_short)s, %(ema_long)s, %(ema_trend)s, %(macd_line)s, %(macd_signal)s, %(macd_histogram)s,
+                        %(adx)s, %(adx_plus)s, %(adx_minus)s, %(rsi)s, %(atr)s,
                         %(volume)s, %(volume_ratio)s, %(volume_confirmation)s,
                         %(nearest_support)s, %(nearest_resistance)s,
                         %(distance_to_support_pips)s, %(distance_to_resistance_pips)s, %(risk_reward_ratio)s,
                         %(market_session)s, %(is_market_hours)s, %(market_regime)s,
                         %(signal_trigger)s, %(signal_conditions)s, %(crossover_type)s,
+                        %(trigger_type)s, %(validation_details)s, %(swing_proximity_distance)s, %(swing_proximity_valid)s,
+                        %(market_bias)s, %(market_bias_conflict)s, %(directional_consensus)s,
                         %(claude_analysis)s, %(claude_score)s, %(claude_decision)s, %(claude_approved)s,
                         %(claude_reason)s, %(claude_mode)s, %(claude_raw_response)s,
                         %(alert_message)s, %(alert_level)s,
@@ -918,7 +950,14 @@ class AlertHistoryManager:
             macd_line = signal.get('macd_line', signal.get('macd'))
             macd_signal = signal.get('macd_signal')
             macd_histogram = signal.get('macd_histogram', signal.get('macd_hist'))
-            
+
+            # ADX/RSI/ATR indicators (NEW)
+            adx = signal.get('adx')
+            adx_plus = signal.get('adx_plus', signal.get('di_plus', signal.get('plus_di')))
+            adx_minus = signal.get('adx_minus', signal.get('di_minus', signal.get('minus_di')))
+            rsi = signal.get('rsi')
+            atr = signal.get('atr')
+
             # ================================
             # VOLUME DATA
             # ================================
@@ -951,7 +990,27 @@ class AlertHistoryManager:
             signal_strength = signal.get('signal_strength')
             signal_quality = signal.get('signal_quality')
             technical_score = signal.get('technical_score')
-            
+
+            # ================================
+            # VALIDATION METADATA (NEW)
+            # ================================
+            trigger_type = signal.get('trigger_type')  # e.g., 'macd', 'adx', 'ema_crossover'
+            validation_details = signal.get('validation_details')  # JSON with full validation context
+            swing_proximity_distance = signal.get('swing_proximity_distance')
+            swing_proximity_valid = signal.get('swing_proximity_valid')
+
+            # ================================
+            # MARKET BIAS TRACKING (NEW)
+            # ================================
+            # Extract from market_intelligence if available
+            market_intelligence = signal.get('market_intelligence', {})
+            market_context = market_intelligence.get('market_context', {})
+            market_strength = market_context.get('market_strength', {})
+
+            market_bias = signal.get('market_bias', market_strength.get('market_bias'))
+            market_bias_conflict = signal.get('market_bias_conflict')
+            directional_consensus = signal.get('directional_consensus', market_strength.get('directional_consensus'))
+
             # ================================
             # DEDUPLICATION FIELDS
             # ================================
@@ -1047,7 +1106,14 @@ class AlertHistoryManager:
                 'macd_line': macd_line,
                 'macd_signal': macd_signal,
                 'macd_histogram': macd_histogram,
-                
+
+                # ADX/RSI/ATR indicators (NEW)
+                'adx': adx,
+                'adx_plus': adx_plus,
+                'adx_minus': adx_minus,
+                'rsi': rsi,
+                'atr': atr,
+
                 # Volume
                 'volume': volume,
                 'volume_ratio': volume_ratio,
@@ -1071,7 +1137,18 @@ class AlertHistoryManager:
                 'signal_strength': signal_strength,
                 'signal_quality': signal_quality,
                 'technical_score': technical_score,
-                
+
+                # Validation metadata (NEW)
+                'trigger_type': trigger_type,
+                'validation_details': validation_details,
+                'swing_proximity_distance': swing_proximity_distance,
+                'swing_proximity_valid': swing_proximity_valid,
+
+                # Market bias tracking (NEW)
+                'market_bias': market_bias,
+                'market_bias_conflict': market_bias_conflict,
+                'directional_consensus': directional_consensus,
+
                 # Deduplication
                 'signal_hash': signal_hash,
                 'data_source': data_source,
@@ -1134,7 +1211,21 @@ class AlertHistoryManager:
             except Exception as e:
                 self.logger.warning(f"⚠️ Error serializing signal_conditions: {e}")
                 alert_data['signal_conditions'] = str(signal_conditions) if signal_conditions else None
-            
+
+            # Clean and serialize validation_details (NEW)
+            try:
+                if validation_details is not None:
+                    cleaned_validation = safe_json_serialize(validation_details)
+                    if isinstance(cleaned_validation, (dict, list)):
+                        alert_data['validation_details'] = json.dumps(cleaned_validation)
+                    else:
+                        alert_data['validation_details'] = str(cleaned_validation) if cleaned_validation else None
+                else:
+                    alert_data['validation_details'] = None
+            except Exception as e:
+                self.logger.warning(f"⚠️ Error serializing validation_details: {e}")
+                alert_data['validation_details'] = str(validation_details) if validation_details else None
+
             # ================================
             # HANDLE DATETIME CONVERSIONS
             # ================================
@@ -1154,9 +1245,11 @@ class AlertHistoryManager:
             numeric_fields = [
                 'confidence_score', 'price', 'bid_price', 'ask_price', 'spread_pips',
                 'ema_short', 'ema_long', 'ema_trend', 'macd_line', 'macd_signal', 'macd_histogram',
+                'adx', 'adx_plus', 'adx_minus', 'rsi', 'atr',  # NEW: Technical indicators
                 'volume', 'volume_ratio', 'nearest_support', 'nearest_resistance',
                 'distance_to_support_pips', 'distance_to_resistance_pips', 'risk_reward_ratio',
-                'signal_strength', 'technical_score'
+                'signal_strength', 'technical_score',
+                'swing_proximity_distance', 'directional_consensus'  # NEW: Validation/market bias fields
             ]
             
             for field in numeric_fields:

@@ -56,7 +56,8 @@ class SwingProximityValidator:
                                  current_price: float,
                                  direction: str,
                                  epic: str = None,
-                                 timeframe: str = '15m') -> Dict[str, Any]:
+                                 timeframe: str = '15m',
+                                 signal: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Validate if entry price is at safe distance from recent swing points
 
@@ -65,6 +66,8 @@ class SwingProximityValidator:
             current_price: Current market price
             direction: 'BUY' or 'SELL'
             epic: Epic/symbol name (for pip calculation)
+            timeframe: Trading timeframe (default: '15m')
+            signal: Optional signal dictionary containing S/R data for fallback
 
         Returns:
             Dictionary with validation result:
@@ -85,11 +88,13 @@ class SwingProximityValidator:
                     'rejection_reason': None,
                     'nearest_swing_price': None,
                     'swing_type': None,
-                    'confidence_penalty': 0.0
+                    'confidence_penalty': 0.0,
+                    'swing_proximity_distance': None,
+                    'swing_proximity_valid': True
                 }
 
-            # Get nearest swing levels
-            swing_levels = self._get_swing_levels_from_df(df, current_price, direction)
+            # Get nearest swing levels (with S/R fallback)
+            swing_levels = self._get_swing_levels_from_df(df, current_price, direction, signal)
 
             if not swing_levels:
                 # No swing data available - allow trade but log warning
@@ -100,7 +105,9 @@ class SwingProximityValidator:
                     'rejection_reason': None,
                     'nearest_swing_price': None,
                     'swing_type': None,
-                    'confidence_penalty': 0.0
+                    'confidence_penalty': 0.0,
+                    'swing_proximity_distance': None,
+                    'swing_proximity_valid': True
                 }
 
             # Calculate pip value based on epic
@@ -134,7 +141,9 @@ class SwingProximityValidator:
                 'rejection_reason': None,
                 'nearest_swing_price': None,
                 'swing_type': None,
-                'confidence_penalty': 0.0
+                'confidence_penalty': 0.0,
+                'swing_proximity_distance': None,
+                'swing_proximity_valid': True  # Allow on error
             }
 
     def _validate_buy_proximity(self,
@@ -155,7 +164,9 @@ class SwingProximityValidator:
                 'rejection_reason': None,
                 'nearest_swing_price': None,
                 'swing_type': None,
-                'confidence_penalty': 0.0
+                'confidence_penalty': 0.0,
+                'swing_proximity_distance': None,
+                'swing_proximity_valid': True
             }
 
         # Calculate distance in pips
@@ -197,7 +208,9 @@ class SwingProximityValidator:
                 'rejection_reason': rejection_reason if self.strict_mode else None,
                 'nearest_swing_price': nearest_resistance,
                 'swing_type': resistance_type,
-                'confidence_penalty': confidence_penalty
+                'confidence_penalty': confidence_penalty,
+                'swing_proximity_distance': distance_pips,
+                'swing_proximity_valid': not self.strict_mode  # False if strict mode rejects
             }
 
         # Safe distance from resistance
@@ -207,7 +220,9 @@ class SwingProximityValidator:
             'rejection_reason': None,
             'nearest_swing_price': nearest_resistance,
             'swing_type': resistance_type,
-            'confidence_penalty': 0.0
+            'confidence_penalty': 0.0,
+            'swing_proximity_distance': distance_pips,
+            'swing_proximity_valid': True
         }
 
     def _validate_sell_proximity(self,
@@ -228,7 +243,9 @@ class SwingProximityValidator:
                 'rejection_reason': None,
                 'nearest_swing_price': None,
                 'swing_type': None,
-                'confidence_penalty': 0.0
+                'confidence_penalty': 0.0,
+                'swing_proximity_distance': None,
+                'swing_proximity_valid': True
             }
 
         # Calculate distance in pips
@@ -270,7 +287,9 @@ class SwingProximityValidator:
                 'rejection_reason': rejection_reason if self.strict_mode else None,
                 'nearest_swing_price': nearest_support,
                 'swing_type': support_type,
-                'confidence_penalty': confidence_penalty
+                'confidence_penalty': confidence_penalty,
+                'swing_proximity_distance': distance_pips,
+                'swing_proximity_valid': not self.strict_mode  # False if strict mode rejects
             }
 
         # Safe distance from support
@@ -280,7 +299,9 @@ class SwingProximityValidator:
             'rejection_reason': None,
             'nearest_swing_price': nearest_support,
             'swing_type': support_type,
-            'confidence_penalty': 0.0
+            'confidence_penalty': 0.0,
+            'swing_proximity_distance': distance_pips,
+            'swing_proximity_valid': True
         }
 
     def _calculate_proximity_penalty(self, actual_distance: float, min_distance: float,
@@ -320,21 +341,52 @@ class SwingProximityValidator:
     def _get_swing_levels_from_df(self,
                                    df: pd.DataFrame,
                                    current_price: float,
-                                   direction: str) -> Optional[Dict]:
+                                   direction: str,
+                                   signal: Optional[Dict] = None) -> Optional[Dict]:
         """
         Extract swing levels from DataFrame (with swing point columns)
-        Falls back to SMC analyzer if available
+        Falls back to:
+        1. SMC analyzer if available
+        2. S/R data from signal (nearest_resistance/nearest_support)
+
+        Args:
+            df: DataFrame with swing point data
+            current_price: Current market price
+            direction: Signal direction ('BULL' or 'BEAR')
+            signal: Optional signal dictionary containing S/R data
         """
         try:
             # Check if DataFrame has swing point columns
             if 'swing_high' not in df.columns or 'swing_low' not in df.columns:
                 # Try to use SMC analyzer
                 if self.smc_analyzer:
+                    self.logger.debug("Using SMC analyzer for swing levels (no swing columns in df)")
                     return self.smc_analyzer.get_nearest_swing_levels(
                         current_price,
                         direction,
                         self.lookback_swings
                     )
+
+                # FALLBACK: Use S/R data from signal if available
+                if signal:
+                    nearest_resistance = signal.get('nearest_resistance')
+                    nearest_support = signal.get('nearest_support')
+
+                    if nearest_resistance is not None or nearest_support is not None:
+                        self.logger.info(
+                            f"🔄 Using S/R data from signal as fallback - "
+                            f"Resistance: {nearest_resistance}, Support: {nearest_support}"
+                        )
+                        return {
+                            'nearest_resistance': nearest_resistance,
+                            'nearest_support': nearest_support,
+                            'swing_high_type': 'S/R',  # Mark as from S/R analyzer
+                            'swing_low_type': 'S/R',
+                            'resistance_distance_pips': None,  # Calculated later
+                            'support_distance_pips': None,
+                            'source': 'sr_analyzer'  # Track data source
+                        }
+
                 return None
 
             # Get recent swing highs and lows from DataFrame

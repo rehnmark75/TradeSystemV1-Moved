@@ -557,3 +557,37 @@ MACD_LOG_RANGING_ANALYSIS = True
 # KAMA penalty (0.036 efficiency): -10%
 # Ranging penalty (60.7% ranging): -15%
 # Final confidence: 45% → Would be BLOCKED by 60% minimum threshold
+
+# =============================================================================
+# MARKET BIAS CONFLICT DETECTION (Directional Alignment with Broader Market)
+# =============================================================================
+# Penalizes signals that contradict the overall market direction/bias
+# Example: BULL signal when market intelligence shows bearish bias
+#
+# Use Case (Alert 5593):
+# - USDJPY BULL signal @ 152.26750
+# - Market intelligence: bearish bias, high_volatility regime
+# - Result: Signal conflicts with bearish market → Apply penalty
+#
+# Impact: Reduces confidence for counter-trend signals, improving win rate
+
+# Enable/disable market bias conflict detection
+MACD_ENABLE_MARKET_BIAS_FILTER = True
+
+# Confidence penalty for normal bias conflicts
+# Example: BULL signal in bearish market (or vice versa)
+MACD_MARKET_BIAS_CONFLICT_PENALTY = -0.10  # -10% confidence penalty
+
+# Strong consensus threshold (directional_consensus score)
+# If market has strong directional consensus (>80%), apply heavier penalty
+MACD_STRONG_CONSENSUS_THRESHOLD = 0.8  # 80% consensus
+
+# Confidence penalty for strong consensus conflicts
+# Example: BULL signal in strongly bearish market (consensus >80%)
+MACD_STRONG_CONSENSUS_PENALTY = -0.15  # -15% confidence penalty
+
+# Combined Effect Example (Alert 5593 - USDJPY BULL):
+# Base confidence: 62%
+# Market bias conflict (bearish market): -10%
+# Swing proximity (1.45 pips from resistance): -15% (from swing validator)
+# Final confidence: 37% → Would be REJECTED (below 60% minimum)
