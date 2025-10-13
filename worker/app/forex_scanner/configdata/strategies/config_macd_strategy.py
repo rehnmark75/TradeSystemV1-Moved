@@ -465,7 +465,7 @@ MACD_EMA_FILTER = {
 # This catches trend acceleration earlier than MACD histogram crossover
 
 MACD_ADX_CROSSOVER_ENABLED = True          # Enable ADX crossover trigger (in addition to MACD crossover)
-MACD_ADX_CROSSOVER_THRESHOLD = 25          # ADX level that triggers signal (default: 25 = strong trend)
+MACD_ADX_CROSSOVER_THRESHOLD = 20          # ADX level that triggers signal (default: 25 = strong trend)
 MACD_ADX_CROSSOVER_LOOKBACK = 3            # Bars to confirm ADX has been rising (prevents whipsaws)
 MACD_ADX_MIN_HISTOGRAM = 0.0001            # Minimum MACD histogram magnitude (prevents tiny movements)
 MACD_ADX_REQUIRE_EXPANSION = True          # Require MACD histogram to be expanding (not shrinking)

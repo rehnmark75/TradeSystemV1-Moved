@@ -14,8 +14,8 @@ Key Features:
 - Multiple configuration presets for different market conditions
 """
 
-# Strategy enable/disable
-KAMA_STRATEGY = True  # ENABLED - Phase 1 optimization complete, ready for testing
+# Strategy enable/disables
+KAMA_STRATEGY = False  # ENABLED - Phase 1 optimization complete, ready for testing
 
 # Main KAMA Strategy Configuration Dictionary
 KAMA_STRATEGY_CONFIG = {
