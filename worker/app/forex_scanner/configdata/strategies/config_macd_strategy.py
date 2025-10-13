@@ -55,8 +55,8 @@ MACD_MIN_HISTOGRAM_THRESHOLDS = {
     'default': {'histogram': 0.00005, 'min_adx': 18},  # Default for unlisted pairs
 
     # Major pairs - Based on median histogram of WINNING trades
-    'GBPUSD': {'histogram': 0.000050, 'min_adx': 18},  # Median of 11 winners, 73.3% WR, +£810
-    'EURUSD': {'histogram': 0.000055, 'min_adx': 18},  # Below median of 2 winners, 66.7% WR, +£79
+    'GBPUSD': {'histogram': 0.000055, 'min_adx': 18},  # Median of 11 winners, 73.3% WR, +£810
+    'EURUSD': {'histogram': 0.000045, 'min_adx': 18},  # Below median of 2 winners, 66.7% WR, +£79
     'AUDUSD': {'histogram': 0.000052, 'min_adx': 18},  # Median of 7 winners, 100% WR, +£521 (optimal!)
     'USDCHF': {'histogram': 0.000035, 'min_adx': 18},  # Median of 6 winners, 66.7% WR, +£275
     'USDCAD': {'histogram': 0.000040, 'min_adx': 18},  # Median of 4 winners, 80% WR, +£107
