@@ -62,12 +62,34 @@ SMC_STRATEGY_CONFIG = {
         'max_distance_to_zone': 8,  # Maximum pips from entry to nearest zone - Reduced
         'min_confidence': 0.65,     # Minimum signal confidence - NEW
         
-        # Multi-timeframe Settings
+        # Multi-timeframe Settings (ENHANCED)
+        'mtf_enabled': True,                    # Enable MTF validation
+        'mtf_check_timeframes': ['15m', '4h'],  # Timeframes to validate (15m + 4h)
+        'mtf_timeframe_weights': {
+            '15m': 0.6,  # Near-term structure weight (session-based)
+            '4h': 0.4    # Macro structure weight (daily trend)
+        },
+        'mtf_min_alignment_ratio': 0.5,         # Minimum 50% alignment (1 of 2)
+        'mtf_require_both_for_high_conf': True, # Both needed for >80% confidence
+        'mtf_cache_minutes': 5,                 # Cache HTF data for 5 min
+
+        # MTF Confidence Adjustments
+        'mtf_both_aligned_boost': 0.15,         # Both 15m + 4h aligned
+        'mtf_15m_only_boost': 0.05,             # Only 15m aligned (weak)
+        'mtf_4h_only_boost': 0.08,              # Only 4h aligned (moderate)
+        'mtf_both_opposing_penalty': -0.20,     # Conflicting timeframes
+
+        # MTF Validation Thresholds
+        'mtf_15m_structure_min_significance': 0.4,  # Min significance for 15m structure
+        'mtf_4h_structure_min_significance': 0.5,   # Min significance for 4h structure
+        'mtf_order_block_min_strength': 0.5,        # Min OB strength on HTF
+
+        # Legacy MTF settings (kept for compatibility)
         'use_higher_tf': True,      # Use higher timeframe confirmation
         'higher_tf_multiplier': 4,  # Higher TF = current TF * multiplier
         'structure_alignment_required': True, # Require HTF structure alignment
         'mtf_confluence_weight': 0.8,        # Weight for multi-timeframe confluence
-        
+
         # Session Analysis (NEW)
         'session_filtering_enabled': True,    # Enable session-based filtering
         'london_session_boost': 1.2,         # Confluence boost during London
@@ -132,12 +154,34 @@ SMC_STRATEGY_CONFIG = {
         'max_distance_to_zone': 15,    # More distance allowed
         'min_confidence': 0.35,        # MAJOR REDUCTION for more signals
         
-        # Multi-timeframe Settings - Relaxed
-        'use_higher_tf': True,         # Keep multi-timeframe
-        'higher_tf_multiplier': 4,     # Keep multiplier
+        # Multi-timeframe Settings (ENHANCED) - Relaxed for more signals
+        'mtf_enabled': True,                    # Enable MTF validation
+        'mtf_check_timeframes': ['15m', '4h'],  # Timeframes to validate
+        'mtf_timeframe_weights': {
+            '15m': 0.6,
+            '4h': 0.4
+        },
+        'mtf_min_alignment_ratio': 0.5,         # At least 1 of 2 must align
+        'mtf_require_both_for_high_conf': False, # Don't require both (relaxed)
+        'mtf_cache_minutes': 5,
+
+        # MTF Confidence Adjustments - Smaller boosts
+        'mtf_both_aligned_boost': 0.10,         # Smaller boost for moderate preset
+        'mtf_15m_only_boost': 0.04,
+        'mtf_4h_only_boost': 0.06,
+        'mtf_both_opposing_penalty': -0.10,     # Smaller penalty
+
+        # MTF Validation Thresholds - Relaxed
+        'mtf_15m_structure_min_significance': 0.3,
+        'mtf_4h_structure_min_significance': 0.4,
+        'mtf_order_block_min_strength': 0.4,
+
+        # Legacy MTF settings
+        'use_higher_tf': True,
+        'higher_tf_multiplier': 4,
         'structure_alignment_required': False, # DISABLE strict alignment
-        'mtf_confluence_weight': 0.6,  # Reduced weight
-        
+        'mtf_confluence_weight': 0.6,
+
         # Session Analysis - Relaxed
         'session_filtering_enabled': False,   # DISABLE session filtering
         'london_session_boost': 1.1,         # Smaller boost
@@ -174,9 +218,25 @@ SMC_STRATEGY_CONFIG = {
         'confluence_required': 3,
         'min_risk_reward': 2.0,
         'max_distance_to_zone': 5,
+
+        # Multi-timeframe Settings (ENHANCED) - Strict validation
+        'mtf_enabled': True,
+        'mtf_check_timeframes': ['15m', '4h'],
+        'mtf_timeframe_weights': {'15m': 0.6, '4h': 0.4},
+        'mtf_min_alignment_ratio': 1.0,          # BOTH must align
+        'mtf_require_both_for_high_conf': True,  # Strict requirement
+        'mtf_cache_minutes': 5,
+        'mtf_both_aligned_boost': 0.20,          # Strong boost
+        'mtf_15m_only_boost': 0.00,              # Not allowed
+        'mtf_4h_only_boost': 0.00,               # Not allowed
+        'mtf_both_opposing_penalty': -0.30,
+        'mtf_15m_structure_min_significance': 0.5,
+        'mtf_4h_structure_min_significance': 0.6,
+        'mtf_order_block_min_strength': 0.6,
         'use_higher_tf': True,
         'higher_tf_multiplier': 4,
         'structure_alignment_required': True,
+
         'description': 'Conservative SMC for high-confidence signals only',
         'best_for': ['low_volatility', 'risk_averse', 'news_safe'],
         'best_volatility_regime': 'low_to_medium',
@@ -205,9 +265,25 @@ SMC_STRATEGY_CONFIG = {
         'confluence_required': 1,
         'min_risk_reward': 1.2,
         'max_distance_to_zone': 15,
+
+        # Multi-timeframe Settings (ENHANCED) - DISABLED for max signals
+        'mtf_enabled': False,                   # Disable MTF for aggressive mode
+        'mtf_check_timeframes': ['15m'],        # Minimal TF if enabled
+        'mtf_timeframe_weights': {'15m': 1.0},
+        'mtf_min_alignment_ratio': 0.0,         # Don't require alignment
+        'mtf_require_both_for_high_conf': False,
+        'mtf_cache_minutes': 5,
+        'mtf_both_aligned_boost': 0.05,         # Minimal boost
+        'mtf_15m_only_boost': 0.05,
+        'mtf_4h_only_boost': 0.00,
+        'mtf_both_opposing_penalty': 0.00,      # No penalty
+        'mtf_15m_structure_min_significance': 0.1,
+        'mtf_4h_structure_min_significance': 0.0,
+        'mtf_order_block_min_strength': 0.2,
         'use_higher_tf': False,
         'higher_tf_multiplier': 3,
         'structure_alignment_required': False,
+
         'description': 'Aggressive SMC for high-frequency trading',
         'best_for': ['scalping', 'high_volatility', 'breakouts'],
         'best_volatility_regime': 'high',
@@ -236,9 +312,31 @@ SMC_STRATEGY_CONFIG = {
         'confluence_required': 1,
         'min_risk_reward': 1.0,
         'max_distance_to_zone': 20,
+
+        # Multi-timeframe Settings (ENHANCED) - Only 15m for speed
+        'mtf_enabled': True,                    # Enable MTF validation
+        'mtf_check_timeframes': ['15m'],        # Only 15m for fast execution
+        'mtf_timeframe_weights': {'15m': 1.0},  # Single TF weight
+        'mtf_min_alignment_ratio': 1.0,         # Must align with 15m
+        'mtf_require_both_for_high_conf': False,
+        'mtf_cache_minutes': 5,
+
+        # MTF Confidence Adjustments - Higher boost for single TF
+        'mtf_both_aligned_boost': 0.08,         # Single TF aligned
+        'mtf_15m_only_boost': 0.08,             # Same as both for scalping
+        'mtf_4h_only_boost': 0.00,              # Not checked
+        'mtf_both_opposing_penalty': -0.15,
+
+        # MTF Validation Thresholds - Relaxed for scalping
+        'mtf_15m_structure_min_significance': 0.2,
+        'mtf_4h_structure_min_significance': 0.0,
+        'mtf_order_block_min_strength': 0.3,
+
+        # Legacy MTF settings
         'use_higher_tf': False,
         'higher_tf_multiplier': 2,
         'structure_alignment_required': False,
+
         'description': 'High-frequency SMC scalping configuration',
         'best_for': ['scalping', 'quick_moves', 'high_frequency'],
         'best_volatility_regime': 'any',
@@ -267,9 +365,34 @@ SMC_STRATEGY_CONFIG = {
         'confluence_required': 4,
         'min_risk_reward': 3.0,
         'max_distance_to_zone': 3,
+
+        # Multi-timeframe Settings (ENHANCED) - 4h + 1d for swing trades
+        'mtf_enabled': True,                    # Enable MTF validation
+        'mtf_check_timeframes': ['4h', '1d'],   # Higher TFs for swing trades
+        'mtf_timeframe_weights': {
+            '4h': 0.6,   # Intraday swing structure
+            '1d': 0.4    # Daily trend
+        },
+        'mtf_min_alignment_ratio': 1.0,         # BOTH must align for swings
+        'mtf_require_both_for_high_conf': True, # Strict for swing trading
+        'mtf_cache_minutes': 10,                # Longer cache for HTF
+
+        # MTF Confidence Adjustments - Stronger boost for swing trading
+        'mtf_both_aligned_boost': 0.20,         # Strong boost for both aligned
+        'mtf_15m_only_boost': 0.00,             # Not checked
+        'mtf_4h_only_boost': 0.10,              # Partial boost for 4h only
+        'mtf_both_opposing_penalty': -0.30,     # Strong penalty for opposition
+
+        # MTF Validation Thresholds - Strict for swing trading
+        'mtf_15m_structure_min_significance': 0.0,
+        'mtf_4h_structure_min_significance': 0.6,
+        'mtf_order_block_min_strength': 0.7,
+
+        # Legacy MTF settings
         'use_higher_tf': True,
         'higher_tf_multiplier': 6,
         'structure_alignment_required': True,
+
         'description': 'Swing trading SMC for longer-term positions',
         'best_for': ['swing_trading', 'position_trading', 'weekly_holds'],
         'best_volatility_regime': 'low_to_medium',

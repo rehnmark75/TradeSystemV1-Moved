@@ -188,6 +188,9 @@ class BacktestScanner(IntelligentForexScanner):
             if hasattr(self.signal_detector, 'smc_strategy') and self.signal_detector.smc_strategy:
                 self.signal_detector.smc_strategy.data_fetcher = backtest_data_fetcher
                 self.signal_detector.smc_strategy.backtest_mode = True
+                # CRITICAL: Reinitialize MTF analyzer with backtest data_fetcher
+                if hasattr(self.signal_detector.smc_strategy, 'reinitialize_mtf_analyzer'):
+                    self.signal_detector.smc_strategy.reinitialize_mtf_analyzer(backtest_data_fetcher)
                 # Set enhanced validation based on pipeline mode
                 self.signal_detector.smc_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'SMC_ENHANCED_VALIDATION', True)
                 if self.signal_detector.smc_strategy.enhanced_validation:

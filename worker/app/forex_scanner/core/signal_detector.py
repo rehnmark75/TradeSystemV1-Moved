@@ -150,7 +150,10 @@ class SignalDetector:
                 except ImportError:
                     active_smc_config = 'default'
 
-                self.smc_strategy = SMCStrategyFast(smc_config_name=active_smc_config)
+                self.smc_strategy = SMCStrategyFast(
+                    smc_config_name=active_smc_config,
+                    data_fetcher=self.data_fetcher  # Pass data_fetcher for MTF analysis
+                )
                 self.logger.info("✅ SMC (Smart Money Concepts) strategy initialized")
             except ImportError as e:
                 self.logger.error(f"❌ Failed to import SMC strategy: {e}")
