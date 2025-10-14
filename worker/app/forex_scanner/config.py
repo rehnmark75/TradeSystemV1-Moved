@@ -379,7 +379,7 @@ MACD_STRATEGY = True  # Core MACD strategy
 KAMA_STRATEGY = False  # ENABLED - Phase 1 optimization complete, ready for testing
 
 # Enable SMC Strategy
-SMC_STRATEGY = False  # Smart Money Concepts strategy
+SMC_STRATEGY =True  # Smart Money Concepts strategy
 
 # Enable Ichimoku Cloud Strategy
 ICHIMOKU_CLOUD_STRATEGY = False  # Ichimoku Kinko Hyo strategy
