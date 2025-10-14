@@ -92,66 +92,98 @@ SMART_MACD_ORDER_FLOW_BOOST = 1.2  # Confidence boost for strong order flow alig
 SMART_MACD_ORDER_FLOW_PENALTY = 0.8  # Confidence penalty for poor order flow alignment
 USE_SMART_MONEY_MACD = False
 
-# MACD Momentum Filter (Prevents momentum contradictions)
-ENABLE_MACD_CONTRADICTION_FILTER = True  
-MACD_STRONG_THRESHOLD = 0.0001  # Threshold for "strong" MACD momentum
+# =============================================================================
+# LEGACY MTF & FILTER SETTINGS (DEPRECATED - Not used by current MACD strategy)
+# =============================================================================
+# These settings were part of an older MTF (Multi-Timeframe) implementation.
+# The current strategy (rebuilt Oct 2024) uses a simpler, more reliable approach:
+#   - Histogram expansion confirmation (MACD_EXPANSION_ENABLED)
+#   - ADX catch-up window (MACD_ADX_CATCHUP_ENABLED)
+#   - Swing proximity validation (MACD_SWING_VALIDATION)
+#
+# The MTF system is disconnected:
+#   - macd_strategy.py doesn't have detect_signal_with_mtf() method
+#   - macd_mtf_analyzer.py exists but is never imported/used
+#   - signal_detector.py checks for MTF but condition always fails
+#
+# If you need MTF analysis, consider implementing it in the current strategy
+# rather than relying on these legacy settings.
+# =============================================================================
 
-# MACD Enhanced Filter Configuration
-MACD_ENHANCED_FILTERS_ENABLED = True       # Required for MTF
-MACD_DETECTION_MODE = 'permissive'         # Start permissive
-MACD_REQUIRE_EMA200_ALIGNMENT = False
-MACD_DISABLE_EMA200_FILTER = True
-MACD_EMA200_FILTER_MODE = 'permissive' 
-MIN_BARS_FOR_MACD = 50
+# MACD Momentum Filter (DEPRECATED - Not used)
+# ENABLE_MACD_CONTRADICTION_FILTER = True
+# MACD_STRONG_THRESHOLD = 0.0001  # Threshold for "strong" MACD momentum
 
-# MTF (Multi-Timeframe) Settings
-MACD_MTF_DEBUG = True
-MACD_LOG_MTF_DECISIONS = True
-MACD_MTF_ENABLED = False  # Currently disabled for debugging
-MACD_MTF_TIMEFRAMES = ['15m', '1h']
-MACD_MTF_MIN_ALIGNMENT = 0.5
+# MACD Enhanced Filter Configuration (DEPRECATED - Not used)
+# MACD_ENHANCED_FILTERS_ENABLED = True       # Required for MTF
+# MACD_DETECTION_MODE = 'permissive'         # Start permissive
+# MACD_REQUIRE_EMA200_ALIGNMENT = False
+MACD_DISABLE_EMA200_FILTER = True             # Keep enabled - used by macd_trend_validator.py (orphaned file)
+# MACD_EMA200_FILTER_MODE = 'permissive'
+MIN_BARS_FOR_MACD = 50                        # Keep enabled - used by signal_detector.py:363
 
-MACD_MTF_LOGGING = {
-    'enabled': True,
-    'level': 'INFO',
-    'show_decisions': True,
-    'show_calculations': True
-}
+# MTF (Multi-Timeframe) Settings (DEPRECATED - Not used)
+# MACD_MTF_DEBUG = True
+# MACD_LOG_MTF_DECISIONS = True
+# MACD_MTF_ENABLED = False  # Currently disabled for debugging
+# MACD_MTF_TIMEFRAMES = ['15m', '1h']
+# MACD_MTF_MIN_ALIGNMENT = 0.5
 
-MACD_FILTER_CONFIG = {
-    'strict_mode': False,
-    'histogram_threshold': 0.0001,
-    'require_momentum_alignment': True,
-    'enable_contradiction_filter': True
-}
+# MACD_MTF_LOGGING = {
+#     'enabled': True,
+#     'level': 'INFO',
+#     'show_decisions': True,
+#     'show_calculations': True
+# }
 
-MACD_MTF_CONFIG = {
-    'timeframes': ['15m', '1h'],
-    'min_alignment_score': 0.6,
-    'macd_confidence_boost': 0.15,
-    'require_higher_tf_confirmation': True
-}
+# MACD_FILTER_CONFIG = {
+#     'strict_mode': False,
+#     'histogram_threshold': 0.0001,
+#     'require_momentum_alignment': True,
+#     'enable_contradiction_filter': True
+# }
 
-# MACD Momentum Confirmation Settings (Professional Trading Approach)
-MACD_MOMENTUM_CONFIRMATION_ENABLED = True      # Enable delayed confirmation system
-MACD_CONFIRMATION_WINDOW = 3                   # Bars to wait for momentum after crossover
-MACD_MOMENTUM_MULTIPLIER = 1.5                 # Histogram must grow 1.5x from crossover
-MACD_ALLOW_DELAYED_SIGNALS = False             # PHASE 1: Disable delayed signals for immediate entry
-MACD_CONTINUATION_ENABLED = True               # Enable strong momentum without crossover
-MACD_CONTINUATION_MULTIPLIER = 2.0             # Threshold multiplier for continuation (2x normal)
-MACD_TRACK_WEAK_CROSSOVERS = True             # Track crossovers that don't meet threshold
-MACD_CONFIRMATION_LOOKBACK = 1                  # PHASE 1: Only check latest bar (immediate signals only)
+# MACD_MTF_CONFIG = {
+#     'timeframes': ['15m', '1h'],
+#     'min_alignment_score': 0.6,
+#     'macd_confidence_boost': 0.15,
+#     'require_higher_tf_confirmation': True
+# }
 
-# RSI Momentum Confirmation for MACD
-MACD_RSI_FILTER_ENABLED = True                     # Enable RSI momentum confirmation for MACD signals
-MACD_RSI_PERIOD = 14                              # RSI calculation period
-MACD_RSI_MIDDLE = 50                              # RSI neutral level (above = bullish, below = bearish)
-MACD_RSI_QUALITY_THRESHOLD_BULL = 55              # Require RSI > 55 for high-quality long signals (optional)
-MACD_RSI_QUALITY_THRESHOLD_BEAR = 45              # Require RSI < 45 for high-quality short signals (optional)
-MACD_RSI_OVERBOUGHT_THRESHOLD = 70                # Skip long signals if RSI > 70 (overbought)
-MACD_RSI_OVERSOLD_THRESHOLD = 30                  # Skip short signals if RSI < 30 (oversold)
-MACD_RSI_REQUIRE_RISING = True                    # Require RSI rising for long, falling for short
-MACD_RSI_REQUIRE_QUALITY_THRESHOLDS = False      # Enable optional quality thresholds (55/45)
+# MACD Momentum Confirmation Settings (DEPRECATED - Not used by current MACD strategy)
+# These settings were part of an older implementation that was replaced in October 2024
+# The current strategy uses histogram expansion + ADX catch-up window instead
+# See macd_strategy.py lines 124-138 for the active confirmation system (MACD_EXPANSION_ENABLED, MACD_ADX_CATCHUP_ENABLED)
+# MACD_MOMENTUM_CONFIRMATION_ENABLED = True      # Enable delayed confirmation system
+# MACD_CONFIRMATION_WINDOW = 3                   # Bars to wait for momentum after crossover
+# MACD_MOMENTUM_MULTIPLIER = 1.5                 # Histogram must grow 1.5x from crossover
+# MACD_ALLOW_DELAYED_SIGNALS = False             # PHASE 1: Disable delayed signals for immediate entry
+# MACD_CONTINUATION_ENABLED = True               # Enable strong momentum without crossover
+# MACD_CONTINUATION_MULTIPLIER = 2.0             # Threshold multiplier for continuation (2x normal)
+# MACD_TRACK_WEAK_CROSSOVERS = True             # Track crossovers that don't meet threshold
+# MACD_CONFIRMATION_LOOKBACK = 1                  # PHASE 1: Only check latest bar (immediate signals only)
+
+# =============================================================================
+# LEGACY RSI FILTER SETTINGS (DEPRECATED - RSI logic is hardcoded)
+# =============================================================================
+# The current strategy has RSI filtering hardcoded with these values:
+#   - Reject BULL if RSI > 70 (overbought)
+#   - Reject BEAR if RSI < 30 (oversold)
+#   - Confidence boost for RSI < 40 (BULL) or > 60 (BEAR)
+#
+# These config settings are not consulted by the code.
+# To change RSI behavior, modify macd_strategy.py lines 553-558, 654-659, 717-724
+# =============================================================================
+# MACD_RSI_FILTER_ENABLED = True                     # Always enabled, no toggle check
+# MACD_RSI_PERIOD = 14                              # RSI calculated in indicator layer
+# MACD_RSI_MIDDLE = 50                              # Hardcoded as default value
+# MACD_RSI_QUALITY_THRESHOLD_BULL = 55              # Not used (code uses 40/50)
+# MACD_RSI_QUALITY_THRESHOLD_BEAR = 45              # Not used (code uses 50/60)
+# MACD_RSI_OVERBOUGHT_THRESHOLD = 70                # Hardcoded in strategy
+# MACD_RSI_OVERSOLD_THRESHOLD = 30                  # Hardcoded in strategy
+# MACD_RSI_REQUIRE_RISING = True                    # Not implemented
+# MACD_RSI_REQUIRE_QUALITY_THRESHOLDS = False      # Not implemented
+# =============================================================================
 
 # =============================================================================
 # PHASE 1+2+3 ENHANCEMENTS (Ported from Momentum Strategy + Adaptive Volatility)
@@ -160,20 +192,22 @@ MACD_RSI_REQUIRE_QUALITY_THRESHOLDS = False      # Enable optional quality thres
 
 # PHASE 3: Adaptive Volatility-Based SL/TP (NEW)
 # Runtime regime-aware calculation - No hardcoded values!
-USE_ADAPTIVE_SL_TP = False               # 🧠 Enable adaptive volatility calculator (default: False for gradual rollout)
-                                         # When True: Uses runtime regime detection (trending, ranging, breakout, high volatility)
-                                         # When False: Falls back to ATR multipliers below
+# =============================================================================
+# LEGACY TREND & REGIME SETTINGS (DEPRECATED - Not used by current strategy)
+# =============================================================================
+# These settings were part of an older trend alignment and regime detection system
+# The current strategy uses simpler, more reliable approaches
+# USE_ADAPTIVE_SL_TP = False              # Used by EMA/Ranging strategies, not MACD
+# MACD_REQUIRE_TREND_ALIGNMENT = False    # Old trend alignment filter (not used)
+# MACD_TREND_EMA_PERIOD = 50              # Old trend EMA period (not used)
+# MACD_TREND_ALIGNMENT_BOOST = 0.10       # Old confidence boost (not used)
+# MACD_ENABLE_REGIME_FILTER = True        # Old regime filter system (not used)
+# MACD_MIN_ATR_RATIO = 0.8                # Old ATR ratio filter (not used)
+# MACD_MIN_EMA_SEPARATION = 0.2           # Old EMA separation filter (not used)
+# =============================================================================
 
-# Trend Alignment Filter - MACD as momentum strategy can work counter-trend with confirmation
-MACD_REQUIRE_TREND_ALIGNMENT = False      # MACD can trade counter-trend (momentum reversals)
-MACD_TREND_EMA_PERIOD = 50               # EMA period for trend context (not mandatory)
-MACD_TREND_ALIGNMENT_BOOST = 0.10        # Confidence boost if aligned with trend
-
-# Market Regime Filter - Critical for momentum strategies
-MACD_ENABLE_REGIME_FILTER = True         # Filter out unfavorable market conditions
-MACD_MIN_ADX = 21                        # PHASE 2: Increase to 25 (stronger trend requirement)
-MACD_MIN_ATR_RATIO = 0.8                 # PHASE 2: Increase to 0.8 (require higher volatility)
-MACD_MIN_EMA_SEPARATION = 0.2            # Price distance from EMA (in ATR units)
+# Market Regime Filter - ADX threshold for trend strength
+MACD_MIN_ADX = 21                        # Global fallback ADX threshold (pair-specific values in MACD_MIN_HISTOGRAM_THRESHOLDS)
 
 # ADX Catch-Up Window (Similar to MACD Expansion Window)
 # Allows ADX to reach threshold within N bars AFTER MACD threshold is met
@@ -182,124 +216,17 @@ MACD_ADX_CATCHUP_ENABLED = True          # Allow ADX to reach threshold within N
 MACD_ADX_CATCHUP_WINDOW_BARS = 3         # Check up to 3 bars for ADX >= 25 (same window as MACD expansion)
 MACD_ADX_ALLOW_IMMEDIATE = True          # Trigger immediately if ADX already >= 25 when MACD meets threshold
 
-# Confirmation Requirements - Strengthen signal quality
-MACD_MIN_CONFIRMATIONS = 2               # Require 2 confirmations (MACD + RSI minimum)
-MACD_CONFIRMATION_TYPES = ['macd_histogram', 'rsi_momentum', 'volume', 'price_action']
-
 # Risk Management - ATR-based stops for momentum
 MACD_STOP_LOSS_ATR_MULTIPLIER = 1.8      # PHASE 1: Tighter stops (immediate entries allow closer stops)
 MACD_TAKE_PROFIT_ATR_MULTIPLIER = 4.0    # PHASE 1: Wider targets for better R:R (1.8:4.0 = 1:2.22 R:R)
 
 # Structure-Based Stop Placement
 MACD_USE_STRUCTURE_STOPS = True          # Place stops beyond recent swing points
-MACD_STRUCTURE_LOOKBACK_BARS = 20        # Look back 20 bars for swing highs/lows
 MACD_MIN_STOP_DISTANCE_PIPS = 12.0       # PHASE 1: Reduced minimum (immediate entries don't need wide stops)
 MACD_MAX_STOP_DISTANCE_PIPS = 30.0       # PHASE 1: Reduced maximum (tighter risk control)
-MACD_STRUCTURE_BUFFER_PIPS = 2.0         # Buffer beyond swing point
-
-# Enhanced Confidence Calculation Factors
-MACD_CONFIDENCE_BASE = 0.50              # Start conservative
-MACD_CONFIDENCE_MACD_STRENGTH = 0.25     # Factor for MACD histogram strength
-MACD_CONFIDENCE_TREND_ALIGNMENT = 0.10   # Bonus if trend-aligned (optional)
-MACD_CONFIDENCE_REGIME_FAVORABLE = 0.10  # Bonus for favorable regime
-MACD_CONFIDENCE_RSI_MOMENTUM = 0.15      # Factor for RSI momentum
-MACD_CONFIDENCE_VOLUME = 0.10            # Factor for volume confirmation
-MACD_RSI_SKIP_EXTREME_ZONES = True               # Skip signals in overbought/oversold zones
 
 # MACD Zero Line Filter (Mean-Reversion Focus)
-# Require MACD and Signal lines to be on specific side of zero line for quality entries
-MACD_ZERO_LINE_FILTER_ENABLED = False                 # Enable zero line validation filter
-MACD_ZERO_LINE_REQUIRE_BOTH_LINES = True           # False = either line can meet criteria, True = both lines required
-MACD_ZERO_LINE_BULL_BELOW_ZERO = True               # Bull signals: crossover below zero line
-MACD_ZERO_LINE_BEAR_ABOVE_ZERO = True               # Bear signals: crossover above zero line
-MACD_ZERO_LINE_STRICT_MODE = True                  # False = allow if either line meets criteria, True = require both
-
-# OPTIMIZED FILTER PRESETS - Post-optimization balanced configurations
-MACD_FILTER_PRESETS = {
-    'conservative': {
-        'name': 'Conservative - High Quality',
-        'description': 'Higher quality signals, fewer in quantity',
-        'histogram_threshold_jpy': 0.00005,  # Higher thresholds
-        'histogram_threshold_major': 0.000025,
-        'min_confidence': 0.50,  # Higher confidence requirement
-        'max_daily_signals': 4,
-        'min_spacing_minutes': 60,  # 1 hour spacing
-        'adx_weight': 0.15,  # Higher ADX influence
-        'enable_adaptive_scoring': True,
-        'enable_volatility_filter': True,
-        'enable_divergence_detection': True,
-        'enable_vwap': True
-    },
-    'balanced': {
-        'name': 'Balanced - Medium Quality & Quantity',
-        'description': 'Balanced between signal quality and quantity (CURRENT OPTIMIZED)',
-        'histogram_threshold_jpy': 0.00003,  # Current optimized values
-        'histogram_threshold_major': 0.00001,
-        'min_confidence': 0.35,  # Current optimized confidence
-        'max_daily_signals': 8,
-        'min_spacing_minutes': 30,  # 30 minute spacing
-        'adx_weight': 0.10,  # Current optimized ADX weight
-        'enable_adaptive_scoring': False,  # Currently disabled
-        'enable_volatility_filter': False,  # Currently disabled
-        'enable_divergence_detection': False,  # Currently disabled
-        'enable_vwap': False  # Currently disabled
-    },
-    'aggressive': {
-        'name': 'Aggressive - Maximum Signals',
-        'description': 'Maximum signal generation, lower quality thresholds',
-        'histogram_threshold_jpy': 0.00001,  # Very low thresholds
-        'histogram_threshold_major': 0.000005,
-        'min_confidence': 0.25,  # Lower confidence requirement
-        'max_daily_signals': 15,
-        'min_spacing_minutes': 15,  # 15 minute spacing
-        'adx_weight': 0.05,  # Minimal ADX influence
-        'enable_adaptive_scoring': False,
-        'enable_volatility_filter': False,
-        'enable_divergence_detection': False,
-        'enable_vwap': False
-    },
-    'maximum': {
-        'name': 'Maximum - All Signals',
-        'description': 'Catch every possible signal, minimal filtering',
-        'histogram_threshold_jpy': 0.000005,  # Extremely low thresholds
-        'histogram_threshold_major': 0.000001,
-        'min_confidence': 0.20,  # Very low confidence requirement
-        'max_daily_signals': 50,  # No practical limit
-        'min_spacing_minutes': 0,  # No spacing requirement
-        'adx_weight': 0.02,  # Minimal ADX influence
-        'enable_adaptive_scoring': False,
-        'enable_volatility_filter': False,
-        'enable_divergence_detection': False,
-        'enable_vwap': False
-    }
-}
-
-# Current active preset (can be changed by user)
-ACTIVE_MACD_PRESET = 'conservative'  # PHASE 2: Switch to high-quality signals
-
-# Legacy Safety Preset Configurations (kept for compatibility)
-MACD_SAFETY_PRESETS = {
-    'conservative': {
-        'ENABLE_MACD_CONTRADICTION_FILTER': True,
-        'MACD_STRONG_THRESHOLD': 0.00005,  # Very sensitive
-        'CLAUDE_MACD_CRITICAL_THRESHOLD': -0.00005,  # Very strict
-    },
-    'balanced': {
-        'ENABLE_MACD_CONTRADICTION_FILTER': True,
-        'MACD_STRONG_THRESHOLD': 0.0001,   # Standard sensitivity
-        'CLAUDE_MACD_CRITICAL_THRESHOLD': -0.0001,   # Standard
-    },
-    'aggressive': {
-        'ENABLE_MACD_CONTRADICTION_FILTER': False,  # Disabled
-        'MACD_STRONG_THRESHOLD': 0.0002,   # Less sensitive
-        'CLAUDE_MACD_CRITICAL_THRESHOLD': -0.0002,   # More lenient
-    },
-    'very_aggressive': {
-        'ENABLE_MACD_CONTRADICTION_FILTER': False,
-        'MACD_STRONG_THRESHOLD': 0.0005,   # Much less sensitive
-        'CLAUDE_MACD_CRITICAL_THRESHOLD': -0.0005,   # Very lenient
-    }
-}
+MACD_ZERO_LINE_FILTER_ENABLED = False                 # Enable zero line validation filter (used in get_macd_config_summary)
 
 # Strategy Integration Settings
 MACD_STRATEGY_WEIGHT = 0.15         # Weight in combined strategy mode
@@ -368,55 +295,18 @@ def get_macd_min_adx(epic: str) -> float:
     return MACD_MIN_ADX
 
 # Configuration summary function
-def get_active_macd_preset() -> dict:
-    """Get the currently active MACD preset configuration"""
-    try:
-        return MACD_FILTER_PRESETS.get(ACTIVE_MACD_PRESET, MACD_FILTER_PRESETS['balanced'])
-    except Exception:
-        return MACD_FILTER_PRESETS['balanced']  # Fallback to balanced
-
-def set_macd_preset(preset_name: str) -> bool:
-    """Set the active MACD preset"""
-    global ACTIVE_MACD_PRESET
-    if preset_name in MACD_FILTER_PRESETS:
-        ACTIVE_MACD_PRESET = preset_name
-        return True
-    return False
-
-def get_available_macd_presets() -> dict:
-    """Get all available MACD presets with descriptions"""
-    return {
-        name: {
-            'name': config['name'],
-            'description': config['description']
-        }
-        for name, config in MACD_FILTER_PRESETS.items()
-    }
-
 def get_macd_config_summary() -> dict:
     """Get a summary of MACD configuration settings"""
-    preset = get_active_macd_preset()
     return {
         'strategy_enabled': MACD_EMA_STRATEGY,
-        'active_preset': ACTIVE_MACD_PRESET,
-        'preset_name': preset.get('name', 'Unknown'),
-        'preset_description': preset.get('description', 'No description'),
-        'mtf_enabled': MACD_MTF_ENABLED,
         'smart_money_enabled': USE_SMART_MONEY_MACD,
-        'rsi_filter_enabled': MACD_RSI_FILTER_ENABLED,
-        'momentum_confirmation_enabled': MACD_MOMENTUM_CONFIRMATION_ENABLED,
         'zero_line_filter_enabled': MACD_ZERO_LINE_FILTER_ENABLED,
-        'contradiction_filter_enabled': ENABLE_MACD_CONTRADICTION_FILTER,
         'macd_periods': MACD_PERIODS,
         'min_data_periods': MACD_MIN_DATA_PERIODS,
         'debug_logging': MACD_DEBUG_LOGGING,
-        'optimization_settings': {
-            'histogram_threshold_jpy': preset.get('histogram_threshold_jpy'),
-            'histogram_threshold_major': preset.get('histogram_threshold_major'),
-            'min_confidence': preset.get('min_confidence'),
-            'max_daily_signals': preset.get('max_daily_signals'),
-            'adx_weight': preset.get('adx_weight')
-        }
+        'expansion_enabled': MACD_EXPANSION_ENABLED,
+        'adx_catchup_enabled': MACD_ADX_CATCHUP_ENABLED,
+        'swing_validation_enabled': MACD_SWING_VALIDATION.get('enabled', False)
     }
 
 
