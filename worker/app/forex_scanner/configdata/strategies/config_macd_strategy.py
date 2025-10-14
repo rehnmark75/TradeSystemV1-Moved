@@ -29,7 +29,7 @@ MACD_THRESHOLD_BUFFER_MULTIPLIER = 1.1  # Require MACD histogram to exceed thres
 
 # Enable wait-for-expansion logic (recommended for quality filtering)
 MACD_EXPANSION_ENABLED = True          # Enable expansion confirmation
-MACD_EXPANSION_WINDOW_BARS = 3         # Wait up to 3 bars for expansion (15-45 min on 15m chart)
+MACD_EXPANSION_WINDOW_BARS = 6         # Wait up to 3 bars for expansion (15-45 min on 15m chart)
 MACD_EXPANSION_ALLOW_IMMEDIATE = True  # Trigger immediately if histogram already > threshold at crossover
 
 # ADX Trend Validation (require ADX to be rising = strengthening trend)
@@ -57,10 +57,10 @@ MACD_MIN_HISTOGRAM_THRESHOLDS = {
     # Major pairs - Based on median histogram of WINNING trades
     'GBPUSD': {'histogram': 0.000055, 'min_adx': 18},  # Median of 11 winners, 73.3% WR, +£810
     'EURUSD': {'histogram': 0.000045, 'min_adx': 18},  # Below median of 2 winners, 66.7% WR, +£79
-    'AUDUSD': {'histogram': 0.000052, 'min_adx': 18},  # Median of 7 winners, 100% WR, +£521 (optimal!)
+    'AUDUSD': {'histogram': 0.000072, 'min_adx': 18},  # Median of 7 winners, 100% WR, +£521 (optimal!)
     'USDCHF': {'histogram': 0.000035, 'min_adx': 18},  # Median of 6 winners, 66.7% WR, +£275
     'USDCAD': {'histogram': 0.000040, 'min_adx': 18},  # Median of 4 winners, 80% WR, +£107
-    'NZDUSD': {'histogram': 0.000050, 'min_adx': 18},  # Median of 3 winners, 42.9% WR, -£323 (needs work)
+    'NZDUSD': {'histogram': 0.000070, 'min_adx': 18},  # Median of 3 winners, 42.9% WR, -£323 (needs work)
 
     # JPY pairs - Based on median/avg of WINNING trades
     'USDJPY': {'histogram': 0.012, 'min_adx': 18},     # Below avg of 8 winners, 57.1% WR, +¥487
@@ -465,7 +465,7 @@ MACD_EMA_FILTER = {
 # This catches trend acceleration earlier than MACD histogram crossover
 
 MACD_ADX_CROSSOVER_ENABLED = True          # Enable ADX crossover trigger (in addition to MACD crossover)
-MACD_ADX_CROSSOVER_THRESHOLD = 20          # ADX level that triggers signal (default: 25 = strong trend)
+MACD_ADX_CROSSOVER_THRESHOLD = 18          # ADX level that triggers signal (default: 25 = strong trend)
 MACD_ADX_CROSSOVER_LOOKBACK = 3            # Bars to confirm ADX has been rising (prevents whipsaws)
 MACD_ADX_MIN_HISTOGRAM = 0.0001            # Minimum MACD histogram magnitude (prevents tiny movements)
 MACD_ADX_REQUIRE_EXPANSION = True          # Require MACD histogram to be expanding (not shrinking)

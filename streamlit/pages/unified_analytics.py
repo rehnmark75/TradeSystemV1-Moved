@@ -1711,19 +1711,27 @@ class UnifiedTradingDashboard:
                     st.subheader("⚙️ Pair-Specific Configuration")
                     cfg = data['pair_configuration']
 
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
 
                     with col1:
                         st.markdown(f"""
                         <div class="metric-card">
-                            <h4>📊 Stage 1 (Break-Even)</h4>
-                            <p><strong>Trigger:</strong> {cfg['stage1_trigger_points']} points</p>
-                            <p><strong>Lock:</strong> {cfg['stage1_lock_points']} points profit</p>
-                            <p><strong>BE Trigger:</strong> {cfg['break_even_trigger_points']} points</p>
+                            <h4>🛡️ Break-Even</h4>
+                            <p><strong>Trigger:</strong> {cfg['break_even_trigger_points']} points</p>
+                            <p><strong>Lock:</strong> 0 points (entry)</p>
                         </div>
                         """, unsafe_allow_html=True)
 
                     with col2:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📊 Stage 1 (Profit Lock)</h4>
+                            <p><strong>Trigger:</strong> {cfg['stage1_trigger_points']} points</p>
+                            <p><strong>Lock:</strong> {cfg['stage1_lock_points']} points profit</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col3:
                         st.markdown(f"""
                         <div class="metric-card">
                             <h4>🎯 Stage 2 (Profit Lock)</h4>
@@ -1732,13 +1740,12 @@ class UnifiedTradingDashboard:
                         </div>
                         """, unsafe_allow_html=True)
 
-                    with col3:
+                    with col4:
                         st.markdown(f"""
                         <div class="metric-card">
                             <h4>🚀 Stage 3 (ATR Trailing)</h4>
                             <p><strong>Trigger:</strong> {cfg['stage3_trigger_points']} points</p>
                             <p><strong>ATR:</strong> {cfg['stage3_atr_multiplier']}x multiplier</p>
-                            <p><strong>Min Distance:</strong> {cfg['stage3_min_distance']} points</p>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -1746,27 +1753,50 @@ class UnifiedTradingDashboard:
                     st.subheader("📈 Stage Activation Analysis")
                     stages = data['stage_analysis']
 
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
 
                     with col1:
+                        be_emoji = "✅" if stages['breakeven']['activated'] else "❌"
+                        be_bg = '#d4edda' if stages['breakeven']['activated'] else '#f8d7da'
+                        be_status = 'ACTIVATED' if stages['breakeven']['activated'] else 'NOT REACHED'
+
+                        # Build conditional content
+                        be_extra = ""
+                        if stages['breakeven']['activated']:
+                            be_extra = f"<p><strong>Time:</strong> {stages['breakeven']['activation_time']}</p><p><strong>Highest Profit:</strong> {stages['breakeven']['max_profit_reached']} pts</p><p><strong>Final Lock:</strong> +{stages['breakeven']['final_lock']} pts</p>"
+                        else:
+                            be_extra = f"<p><strong>Required:</strong> {stages['breakeven']['trigger_threshold']} pts</p>"
+
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: {be_bg};">
+                            <h4>{be_emoji} Break-Even</h4>
+                            <p><strong>Status:</strong> {be_status}</p>
+                            {be_extra}
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
                         stage1_emoji = "✅" if stages['stage1']['activated'] else "❌"
-                        stage1_bg = '#d4edda' if stages['stage1']['activated'] else '#f8d7da'
+                        stage1_bg = '#d4edda' if stages['stage1']['activated'] else '#fff3cd'
                         stage1_status = 'ACTIVATED' if stages['stage1']['activated'] else 'NOT REACHED'
 
                         # Build conditional content
                         stage1_extra = ""
                         if stages['stage1']['activated']:
-                            stage1_extra = f"<p><strong>Time:</strong> {stages['stage1']['activation_time']}</p><p><strong>Highest Trigger:</strong> {stages['stage1']['max_profit_reached']} pts</p><p><strong>Final Lock:</strong> +{stages['stage1']['final_lock']} pts</p>"
+                            actual_lock = stages['stage1'].get('actual_lock', stages['stage1']['lock_amount'])
+                            stage1_extra = f"<p><strong>Time:</strong> {stages['stage1']['activation_time']}</p><p><strong>Actual Lock:</strong> +{actual_lock} pts</p><p><strong>Expected:</strong> +{stages['stage1']['lock_amount']} pts</p>"
+                        else:
+                            stage1_extra = f"<p><strong>Required:</strong> {stages['stage1']['trigger_threshold']} pts</p><p><strong>Would Lock:</strong> +{stages['stage1']['lock_amount']} pts</p>"
 
                         st.markdown(f"""
                         <div class="metric-card" style="background: {stage1_bg};">
-                            <h4>{stage1_emoji} Stage 1: Break-Even</h4>
+                            <h4>{stage1_emoji} Stage 1: Profit Lock</h4>
                             <p><strong>Status:</strong> {stage1_status}</p>
                             {stage1_extra}
                         </div>
                         """, unsafe_allow_html=True)
 
-                    with col2:
+                    with col3:
                         stage2_emoji = "✅" if stages['stage2']['activated'] else "❌"
                         stage2_bg = '#d4edda' if stages['stage2']['activated'] else '#fff3cd'
                         stage2_status = 'ACTIVATED' if stages['stage2']['activated'] else 'NOT REACHED'
@@ -1776,18 +1806,17 @@ class UnifiedTradingDashboard:
                         if stages['stage2']['activated']:
                             stage2_extra = f"<p><strong>Time:</strong> {stages['stage2']['activation_time']}</p>"
                         else:
-                            stage2_extra = f"<p><strong>Would Lock:</strong> +{stages['stage2']['lock_amount']} pts</p>"
+                            stage2_extra = f"<p><strong>Required:</strong> {stages['stage2']['trigger_threshold']} pts</p><p><strong>Would Lock:</strong> +{stages['stage2']['lock_amount']} pts</p>"
 
                         st.markdown(f"""
                         <div class="metric-card" style="background: {stage2_bg};">
                             <h4>{stage2_emoji} Stage 2: Profit Lock</h4>
                             <p><strong>Status:</strong> {stage2_status}</p>
-                            <p><strong>Required:</strong> {stages['stage2']['trigger_threshold']} pts</p>
                             {stage2_extra}
                         </div>
                         """, unsafe_allow_html=True)
 
-                    with col3:
+                    with col4:
                         stage3_emoji = "✅" if stages['stage3']['activated'] else "❌"
                         stage3_bg = '#d4edda' if stages['stage3']['activated'] else '#fff3cd'
                         stage3_status = 'ACTIVATED' if stages['stage3']['activated'] else 'NOT REACHED'
@@ -1796,12 +1825,13 @@ class UnifiedTradingDashboard:
                         stage3_extra = ""
                         if stages['stage3']['activated']:
                             stage3_extra = f"<p><strong>Time:</strong> {stages['stage3']['activation_time']}</p>"
+                        else:
+                            stage3_extra = f"<p><strong>Required:</strong> {stages['stage3']['trigger_threshold']} pts</p>"
 
                         st.markdown(f"""
                         <div class="metric-card" style="background: {stage3_bg};">
                             <h4>{stage3_emoji} Stage 3: ATR Trailing</h4>
                             <p><strong>Status:</strong> {stage3_status}</p>
-                            <p><strong>Required:</strong> {stages['stage3']['trigger_threshold']} pts</p>
                             {stage3_extra}
                         </div>
                         """, unsafe_allow_html=True)

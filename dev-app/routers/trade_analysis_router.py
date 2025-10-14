@@ -129,63 +129,113 @@ def analyze_stage_activation(trade: TradeLog, log_events: Dict[str, Any], pair_c
     """
     Analyze which trailing stop stages were activated
 
+    Structure:
+    - Break-even: Moves stop to entry (0 profit)
+    - Stage 1: First profit lock
+    - Stage 2: Second profit lock
+    - Stage 3: ATR-based trailing
+
     Returns:
         Dictionary with stage analysis
     """
     analysis = {
-        "stage1": {
+        "breakeven": {
             "activated": False,
-            "trigger_threshold": pair_config.get('break_even_trigger_points', 6),
-            "lock_amount": pair_config.get('stage1_lock_points', 2),
+            "trigger_threshold": pair_config.get('break_even_trigger_points', 12),
+            "lock_amount": 0,  # Break-even locks at 0 profit (entry price)
             "activation_time": None,
             "max_profit_reached": 0,
             "final_lock": 0
         },
+        "stage1": {
+            "activated": False,
+            "trigger_threshold": pair_config.get('stage1_trigger_points', 16),
+            "lock_amount": pair_config.get('stage1_lock_points', 8),
+            "activation_time": None
+        },
         "stage2": {
             "activated": False,
-            "trigger_threshold": pair_config['stage2_trigger_points'],
-            "lock_amount": pair_config['stage2_lock_points'],
+            "trigger_threshold": pair_config.get('stage2_trigger_points', 22),
+            "lock_amount": pair_config.get('stage2_lock_points', 12),
             "activation_time": None
         },
         "stage3": {
             "activated": False,
-            "trigger_threshold": pair_config['stage3_trigger_points'],
-            "atr_multiplier": pair_config['stage3_atr_multiplier'],
+            "trigger_threshold": pair_config.get('stage3_trigger_points', 23),
+            "atr_multiplier": pair_config.get('stage3_atr_multiplier', 0.8),
             "activation_time": None
         }
     }
 
-    # Check Stage 1 (Break-even)
-    if log_events["break_even_triggers"]:
-        analysis["stage1"]["activated"] = True
-        analysis["stage1"]["activation_time"] = log_events["break_even_triggers"][0]["timestamp"]
-
-    # Calculate max profit from updates
+    # Calculate max profit from updates FIRST
     if log_events["profit_updates"]:
         max_profit = max(event["profit_pts"] for event in log_events["profit_updates"])
-        analysis["stage1"]["max_profit_reached"] = max_profit
+        analysis["breakeven"]["max_profit_reached"] = max_profit
+    else:
+        max_profit = 0
 
-    # Calculate final lock from trade data
-    if trade.entry_price and trade.sl_price:
-        if trade.direction == "BUY":
-            lock_distance = trade.sl_price - trade.entry_price
+    # Helper function to calculate lock distance in points
+    def calculate_lock_points(stop_price: float, entry_price: float, symbol: str, direction: str) -> float:
+        """Calculate how many points profit the stop is locking in"""
+        if direction == "BUY":
+            lock_distance = stop_price - entry_price
         else:
-            lock_distance = trade.entry_price - trade.sl_price
+            lock_distance = entry_price - stop_price
 
         # Convert to points
-        if "JPY" in trade.symbol:
-            analysis["stage1"]["final_lock"] = round(abs(lock_distance * 100), 1)
+        if "JPY" in symbol:
+            return round(lock_distance * 100, 1)
         else:
-            analysis["stage1"]["final_lock"] = round(abs(lock_distance * 10000), 1)
+            return round(lock_distance * 10000, 1)
+
+    # Calculate final lock from current trade data (for overall summary)
+    final_lock_pts = 0
+    if trade.entry_price and trade.sl_price:
+        final_lock_pts = calculate_lock_points(trade.sl_price, trade.entry_price, trade.symbol, trade.direction)
+
+    # Check Break-even activation and find what it locked
+    if max_profit >= analysis["breakeven"]["trigger_threshold"]:
+        analysis["breakeven"]["activated"] = True
+        # Find when it was triggered and what stop was set
+        for event in log_events["profit_updates"]:
+            if event["profit_pts"] >= analysis["breakeven"]["trigger_threshold"]:
+                analysis["breakeven"]["activation_time"] = event["timestamp"]
+                # Find the next stop adjustment after this time
+                for stop_adj in log_events["stop_adjustments"]:
+                    if stop_adj["timestamp"] >= event["timestamp"]:
+                        lock_pts = calculate_lock_points(stop_adj["new_stop"], trade.entry_price, trade.symbol, trade.direction)
+                        analysis["breakeven"]["final_lock"] = lock_pts
+                        break
+                break
+
+    # Check Stage 1
+    if max_profit >= analysis["stage1"]["trigger_threshold"]:
+        analysis["stage1"]["activated"] = True
+        # Find when it was triggered and what stop was set
+        for event in log_events["profit_updates"]:
+            if event["profit_pts"] >= analysis["stage1"]["trigger_threshold"]:
+                analysis["stage1"]["activation_time"] = event["timestamp"]
+                # Find the next stop adjustment after this time
+                for stop_adj in log_events["stop_adjustments"]:
+                    if stop_adj["timestamp"] >= event["timestamp"]:
+                        lock_pts = calculate_lock_points(stop_adj["new_stop"], trade.entry_price, trade.symbol, trade.direction)
+                        analysis["stage1"]["actual_lock"] = lock_pts
+                        break
+                break
 
     # Check Stage 2
-    max_profit = analysis["stage1"]["max_profit_reached"]
     if max_profit >= analysis["stage2"]["trigger_threshold"]:
         analysis["stage2"]["activated"] = True
-        # Find when it was triggered
+        # Find when it was triggered and what stop was set
         for event in log_events["profit_updates"]:
             if event["profit_pts"] >= analysis["stage2"]["trigger_threshold"]:
                 analysis["stage2"]["activation_time"] = event["timestamp"]
+                # Find the next stop adjustment after this time
+                for stop_adj in log_events["stop_adjustments"]:
+                    if stop_adj["timestamp"] >= event["timestamp"]:
+                        lock_pts = calculate_lock_points(stop_adj["new_stop"], trade.entry_price, trade.symbol, trade.direction)
+                        analysis["stage2"]["actual_lock"] = lock_pts
+                        break
                 break
 
     # Check Stage 3
@@ -195,6 +245,9 @@ def analyze_stage_activation(trade: TradeLog, log_events: Dict[str, Any], pair_c
             if event["profit_pts"] >= analysis["stage3"]["trigger_threshold"]:
                 analysis["stage3"]["activation_time"] = event["timestamp"]
                 break
+
+    # Set overall final lock for summary
+    analysis["breakeven"]["final_lock"] = analysis["breakeven"].get("final_lock", final_lock_pts)
 
     return analysis
 
@@ -278,13 +331,14 @@ async def get_trade_analysis(trade_id: int, db: Session = Depends(get_db)):
             "status_changes": log_events["status_changes"][-20:],  # Last 20 status changes
         },
         "summary": {
+            "breakeven_activated": stage_analysis["breakeven"]["activated"],
             "stages_activated": sum([
                 stage_analysis["stage1"]["activated"],
                 stage_analysis["stage2"]["activated"],
                 stage_analysis["stage3"]["activated"]
             ]),
-            "max_profit_reached": stage_analysis["stage1"]["max_profit_reached"],
-            "final_protection": stage_analysis["stage1"]["final_lock"],
+            "max_profit_reached": stage_analysis["breakeven"]["max_profit_reached"],
+            "final_protection": stage_analysis["breakeven"]["final_lock"],
             "fully_trailed": stage_analysis["stage3"]["activated"]
         }
     }
