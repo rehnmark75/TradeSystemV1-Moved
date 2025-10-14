@@ -29,9 +29,9 @@ class BacktestEngine:
         self.data_fetcher = data_fetcher
         self.logger = logging.getLogger(__name__)
         
-        # Initialize strategies with BACKTEST MODE
-        self.ema_strategy = EMAStrategy(backtest_mode=True)
-        self.macd_strategy = MACDStrategy(backtest_mode=True)
+        # Initialize strategies with BACKTEST MODE and data_fetcher for MTF checks
+        self.ema_strategy = EMAStrategy(backtest_mode=True, data_fetcher=data_fetcher)
+        self.macd_strategy = MACDStrategy(backtest_mode=True, data_fetcher=data_fetcher)
         # self.combined_strategy = CombinedStrategy()  # Removed - strategy was disabled and unused
         
         # Initialize BB+Supertrend strategy if enabled
@@ -328,8 +328,8 @@ class BacktestEngine:
         """Backtest MACD strategy on historical data"""
         if not hasattr(self, 'macd_strategy') or self.macd_strategy is None:
             try:
-                self.macd_strategy = MACDStrategy(backtest_mode=True)
-                self.logger.info("✅ MACD strategy initialized for backtest")
+                self.macd_strategy = MACDStrategy(backtest_mode=True, data_fetcher=self.data_fetcher)
+                self.logger.info("✅ MACD strategy initialized for backtest with data_fetcher for MTF checks")
             except Exception as e:
                 self.logger.error(f"❌ Failed to initialize MACD strategy: {e}")
                 return []
@@ -393,12 +393,15 @@ class BacktestEngine:
         timeframe: str = None
     ) -> List[Dict]:
         """Scan DataFrame for historical signals using specific strategy"""
-        # Use default timeframe if not specified  
+        # Use default timeframe if not specified
         if timeframe is None:
             timeframe = getattr(config, 'DEFAULT_TIMEFRAME', '15m')
-        
+
         signals = []
         start_idx = config.MIN_BARS_FOR_SIGNAL  # Start after we have enough data
+
+        # Track seen signals to prevent duplicates (timestamp + epic + signal_type)
+        seen_signals = set()
 
         self.logger.info(f"🔍 Scanning {len(df)} bars from index {start_idx} to {len(df)-1}")
 
@@ -416,23 +419,40 @@ class BacktestEngine:
                         f"✅ Using FULL historical window: "
                         f"{len(current_data)} bars (same as live scanner)"
                     )
-                
+
                 if len(current_data) < 2:
                     continue
-                
+
                 # Detect signal using the strategy
                 signal = strategy.detect_signal(current_data, epic, spread_pips, timeframe)
-                
+
                 if signal:
+                    # DEDUPLICATION: Check if we've already seen this signal
+                    # Key is timestamp + epic + signal_type to prevent duplicate signals
+                    signal_timestamp = signal.get('timestamp')
+                    signal_type = signal.get('signal_type', 'UNKNOWN')
+                    signal_key = (signal_timestamp, epic, signal_type)
+
+                    if signal_key in seen_signals:
+                        self.logger.debug(f"⏭️  Skipping duplicate signal: {epic} {signal_type} at {signal_timestamp}")
+                        continue
+
+                    # Mark as seen and add to results
+                    seen_signals.add(signal_key)
+
                     # Add performance metrics by looking ahead
                     signal = self._add_backtest_performance(signal, df, i)
                     signals.append(signal)
-                    
+
             except Exception as e:
                 self.logger.error(f"Error scanning at index {i}: {e}")
                 continue
-        
-        self.logger.info(f"📈 Strategy scan complete: {len(signals)} signals found")
+
+        if len(seen_signals) > len(signals):
+            duplicates_prevented = len(seen_signals) - len(signals)
+            self.logger.info(f"📈 Strategy scan complete: {len(signals)} unique signals found ({duplicates_prevented} duplicates prevented)")
+        else:
+            self.logger.info(f"📈 Strategy scan complete: {len(signals)} signals found")
         return signals
     
     def _add_backtest_performance(self, signal: Dict, df: pd.DataFrame, signal_idx: int) -> Dict:

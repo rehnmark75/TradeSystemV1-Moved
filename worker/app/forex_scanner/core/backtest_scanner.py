@@ -439,10 +439,28 @@ class BacktestScanner(IntelligentForexScanner):
         return results
 
     def _create_time_iterator(self) -> Iterator[datetime]:
-        """Create iterator for backtest time periods"""
+        """
+        Create iterator for backtest time periods
+
+        CRITICAL: Skips weekends (Saturday/Sunday) when forex market is closed
+        This prevents false signals from being generated on non-trading days
+        """
         current_time = self.start_date
 
         while current_time <= self.end_date:
+            # Skip weekends: Saturday (5) and Sunday (6)
+            # Forex market is closed from Friday 22:00 UTC to Sunday 22:00 UTC
+            day_of_week = current_time.weekday()
+
+            if day_of_week == 5:  # Saturday
+                self.logger.debug(f"⏭️  Skipping Saturday: {current_time}")
+                current_time += self.time_increment
+                continue
+            elif day_of_week == 6:  # Sunday
+                self.logger.debug(f"⏭️  Skipping Sunday: {current_time}")
+                current_time += self.time_increment
+                continue
+
             yield current_time
             current_time += self.time_increment
 

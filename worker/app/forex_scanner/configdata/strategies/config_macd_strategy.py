@@ -228,6 +228,65 @@ MACD_MAX_STOP_DISTANCE_PIPS = 30.0       # PHASE 1: Reduced maximum (tighter ris
 # MACD Zero Line Filter (Mean-Reversion Focus)
 MACD_ZERO_LINE_FILTER_ENABLED = False                 # Enable zero line validation filter (used in get_macd_config_summary)
 
+# =============================================================================
+# MULTI-TIMEFRAME (MTF) MACD HISTOGRAM ALIGNMENT FILTER (NEW)
+# =============================================================================
+# Ensures signals align with higher timeframe MACD histogram direction
+# This prevents trading against the larger trend
+#
+# Example: 15m BULL signal requires:
+#   - 1H MACD histogram > 0 (positive/bullish)
+#   - 4H MACD histogram > 0 (positive/bullish)
+#
+# If 15m shows BULL but 1H/4H show BEAR histogram → signal REJECTED
+# =============================================================================
+
+MACD_MTF_HISTOGRAM_FILTER_ENABLED = True             # Enable MTF histogram alignment check
+
+# Timeframes to validate (in addition to signal timeframe)
+# These must be HIGHER timeframes than the signal timeframe
+# Format: list of timeframe strings ('1h', '4h', '1d')
+MACD_MTF_HISTOGRAM_TIMEFRAMES = ['1h', '4h']         # Check 1H and 4H alignment
+
+# Alignment requirements
+MACD_MTF_REQUIRE_ALL_ALIGNED = True                  # True = ALL timeframes must align, False = majority (2/3)
+MACD_MTF_MINIMUM_HISTOGRAM_MAGNITUDE = 0.000001      # Ignore very tiny histograms (noise threshold)
+
+# Confidence penalties for misalignment
+MACD_MTF_PARTIAL_MISALIGNMENT_PENALTY = -0.10        # -10% if 1 timeframe misaligned (when require_all=False)
+MACD_MTF_FULL_REJECTION = True                       # True = reject misaligned signals, False = apply penalty only
+
+# Logging configuration
+MACD_MTF_LOG_ALIGNMENT_CHECKS = True                 # Log detailed MTF alignment analysis
+
+# Notes:
+# - This filter is applied BEFORE signal validation
+# - Prevents counter-trend signals (reduces false signals in ranging/choppy conditions)
+# - Higher timeframe histogram direction = trend direction
+# - Histogram color: Positive (green) = bullish, Negative (red) = bearish
+# - Example use case: 15m BULL signal aligned with 1H + 4H bullish histograms = high confidence
+# - Example rejection: 15m BULL signal but 4H histogram negative = rejected (trend conflict)
+
+# =============================================================================
+# RSI Configuration
+# =============================================================================
+# RSI is used for confidence adjustment, not signal rejection
+#
+# Instead of rejecting signals in extreme zones, we adjust confidence:
+# - BULL signals: Higher confidence when RSI < 50 (not overbought)
+# - BEAR signals: Higher confidence when RSI > 50 (not oversold)
+#
+# Confidence boosts (applied in calculate_confidence method):
+# - BULL with RSI < 40: +10% confidence
+# - BULL with RSI < 50: +5% confidence
+# - BEAR with RSI > 60: +10% confidence
+# - BEAR with RSI > 50: +5% confidence
+# =============================================================================
+
+MACD_RSI_FILTER_ENABLED = False  # Disable rejection - use RSI for confidence only
+MACD_RSI_OVERBOUGHT_THRESHOLD = 999  # Effectively disabled (set very high)
+MACD_RSI_OVERSOLD_THRESHOLD = 0      # Effectively disabled (set very low)
+
 # Strategy Integration Settings
 MACD_STRATEGY_WEIGHT = 0.15         # Weight in combined strategy mode
 MACD_ALLOW_COMBINED = True          # Allow in combined strategies
@@ -306,7 +365,10 @@ def get_macd_config_summary() -> dict:
         'debug_logging': MACD_DEBUG_LOGGING,
         'expansion_enabled': MACD_EXPANSION_ENABLED,
         'adx_catchup_enabled': MACD_ADX_CATCHUP_ENABLED,
-        'swing_validation_enabled': MACD_SWING_VALIDATION.get('enabled', False)
+        'swing_validation_enabled': MACD_SWING_VALIDATION.get('enabled', False),
+        'mtf_histogram_filter_enabled': MACD_MTF_HISTOGRAM_FILTER_ENABLED,
+        'mtf_timeframes': MACD_MTF_HISTOGRAM_TIMEFRAMES,
+        'mtf_require_all_aligned': MACD_MTF_REQUIRE_ALL_ALIGNED
     }
 
 
@@ -355,9 +417,9 @@ MACD_EMA_FILTER = {
 # This catches trend acceleration earlier than MACD histogram crossover
 
 MACD_ADX_CROSSOVER_ENABLED = True          # Enable ADX crossover trigger (in addition to MACD crossover)
-MACD_ADX_CROSSOVER_THRESHOLD = 18          # ADX level that triggers signal (default: 25 = strong trend)
+MACD_ADX_CROSSOVER_THRESHOLD = 21          # ADX level that triggers signal (25 = strong trend, 18 = weak trend)
 MACD_ADX_CROSSOVER_LOOKBACK = 3            # Bars to confirm ADX has been rising (prevents whipsaws)
-MACD_ADX_MIN_HISTOGRAM = 0.0001            # Minimum MACD histogram magnitude (prevents tiny movements)
+MACD_ADX_MIN_HISTOGRAM = 0.0002            # Minimum MACD histogram magnitude (increased from 0.0001 to reduce noise)
 MACD_ADX_REQUIRE_EXPANSION = True          # Require MACD histogram to be expanding (not shrinking)
 MACD_ADX_MIN_CONFIDENCE = 0.60             # Minimum confidence for ADX crossover signals (matches MACD crossover 0.60)
 

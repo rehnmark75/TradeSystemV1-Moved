@@ -1540,6 +1540,103 @@ class DataFetcher:
             self.logger.error(f"❌ Error in 60m resampling: {e}")
             return df
 
+    def _resample_to_4h_optimized(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Enhanced 4H resampling optimized for multi-timeframe analysis
+
+        Resamples 5m data to 4-hour candles for higher timeframe trend analysis.
+        """
+        try:
+            # Validate input data
+            if df is None or len(df) == 0:
+                self.logger.warning("⚠️ Empty dataframe provided for 4H resampling")
+                return df
+
+            if len(df) < 48:
+                self.logger.warning("⚠️ Insufficient 5m data for 4H resampling (need at least 48 bars)")
+                return df
+
+            # Ensure start_time is datetime
+            if 'start_time' not in df.columns:
+                self.logger.error("❌ Missing 'start_time' column for resampling")
+                return df
+
+            # Sort by time to ensure proper order
+            df = df.sort_values('start_time')
+
+            # Create indexed dataframe
+            df_indexed = df.set_index('start_time')
+
+            # Resample to 4H
+            df_4h = df_indexed.resample(
+                '4h',
+                label='left',
+                closed='left',
+                origin='epoch'
+            ).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'ltv': 'sum'
+            })
+
+            # Add data completeness analysis
+            def calculate_completeness(group):
+                """Calculate how complete each 4H period is"""
+                expected_candles = 48  # 48 x 5m candles per 4H period
+                actual_candles = len(group)
+                return {
+                    'actual_5m_candles': actual_candles,
+                    'expected_5m_candles': expected_candles,
+                    'completeness_ratio': actual_candles / expected_candles,
+                    'is_complete': actual_candles >= 45,  # Allow 95% complete
+                    'missing_minutes': (expected_candles - actual_candles) * 5
+                }
+
+            # Calculate completeness for each 4H period
+            completeness_data = []
+            for timestamp in df_4h.index:
+                period_start = timestamp
+                period_end = timestamp + pd.Timedelta(hours=4)
+
+                period_candles = df_indexed[
+                    (df_indexed.index >= period_start) &
+                    (df_indexed.index < period_end)
+                ]
+
+                completeness = calculate_completeness(period_candles)
+                completeness['period_start'] = timestamp
+                completeness_data.append(completeness)
+
+            # Convert to DataFrame and merge
+            completeness_df = pd.DataFrame(completeness_data).set_index('period_start')
+            df_4h = df_4h.join(completeness_df)
+
+            # Add trading confidence score
+            df_4h['trading_confidence'] = (df_4h['completeness_ratio'] * 100).round(1)
+            df_4h['suitable_for_analysis'] = df_4h['trading_confidence'] >= 80.0
+
+            # Drop rows where ALL OHLC values are missing
+            df_4h = df_4h.dropna(subset=['open', 'high', 'low', 'close'], how='all')
+
+            # Reset index to get start_time back as column
+            df_4h_reset = df_4h.reset_index()
+
+            # Log quality metrics
+            total_candles = len(df_4h_reset)
+            complete_candles = len(df_4h_reset[df_4h_reset['is_complete']])
+
+            self.logger.info(f"✅ 4h synthesis quality:")
+            self.logger.info(f"   Total 4h candles: {total_candles}")
+            self.logger.info(f"   Complete candles: {complete_candles}/{total_candles} ({complete_candles/total_candles*100:.1f}%)")
+
+            return df_4h_reset
+
+        except Exception as e:
+            self.logger.error(f"❌ Error in 4H resampling: {e}")
+            return df
+
     def should_trade_on_candle(self, candle_row) -> Dict[str, any]:
         """
         Determine if a 15m candle is suitable for trading decisions
@@ -1814,7 +1911,7 @@ class DataFetcher:
             # Add timezone columns using the correct method
             df = tz_manager.add_timezone_columns_to_df(df)
             
-            # FIXED: Complete 15m and 60m resampling implementation
+            # FIXED: Complete 15m, 60m, and 4H resampling implementation
             if timeframe == '15m' and source_tf == 5:
                 self.logger.info(f"🔄 Resampling 5m data to 15m for {epic}")
                 df = self._resample_to_15m_optimized(df)
@@ -1829,7 +1926,14 @@ class DataFetcher:
                 if df is None or len(df) == 0:
                     self.logger.error(f"❌ 60m resampling failed for {epic}")
                     return None
-            
+            elif timeframe == '4h' and source_tf == 5:
+                self.logger.info(f"🔄 Resampling 5m data to 4h for {epic}")
+                df = self._resample_to_4h_optimized(df)
+
+                if df is None or len(df) == 0:
+                    self.logger.error(f"❌ 4h resampling failed for {epic}")
+                    return None
+
             return df.reset_index(drop=True)
             
         except Exception as e:

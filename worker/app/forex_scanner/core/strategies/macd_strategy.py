@@ -228,6 +228,35 @@ class MACDStrategy(BaseStrategy):
         else:
             self.logger.info(f"⚪ KAMA Efficiency Validation DISABLED")
 
+        # MTF MACD Histogram Alignment Filter (NEW - Trend Alignment)
+        self.mtf_histogram_filter_enabled = getattr(config_macd_strategy, 'MACD_MTF_HISTOGRAM_FILTER_ENABLED', True) if config_macd_strategy else True
+        self.mtf_histogram_timeframes = getattr(config_macd_strategy, 'MACD_MTF_HISTOGRAM_TIMEFRAMES', ['1h', '4h']) if config_macd_strategy else ['1h', '4h']
+        self.mtf_require_all_aligned = getattr(config_macd_strategy, 'MACD_MTF_REQUIRE_ALL_ALIGNED', True) if config_macd_strategy else True
+        self.mtf_minimum_histogram_magnitude = getattr(config_macd_strategy, 'MACD_MTF_MINIMUM_HISTOGRAM_MAGNITUDE', 0.000001) if config_macd_strategy else 0.000001
+        self.mtf_partial_misalignment_penalty = getattr(config_macd_strategy, 'MACD_MTF_PARTIAL_MISALIGNMENT_PENALTY', -0.10) if config_macd_strategy else -0.10
+        self.mtf_full_rejection = getattr(config_macd_strategy, 'MACD_MTF_FULL_REJECTION', True) if config_macd_strategy else True
+        self.mtf_log_alignment_checks = getattr(config_macd_strategy, 'MACD_MTF_LOG_ALIGNMENT_CHECKS', True) if config_macd_strategy else True
+
+        if self.mtf_histogram_filter_enabled:
+            self.logger.info(f"🔍 MTF MACD Histogram Alignment ENABLED:")
+            self.logger.info(f"   Checking timeframes: {', '.join(self.mtf_histogram_timeframes)}")
+            self.logger.info(f"   Require all aligned: {self.mtf_require_all_aligned}")
+            self.logger.info(f"   Full rejection on misalignment: {self.mtf_full_rejection}")
+        else:
+            self.logger.info(f"⚪ MTF MACD Histogram Alignment DISABLED")
+
+        # RSI Filter Configuration
+        self.rsi_filter_enabled = getattr(config_macd_strategy, 'MACD_RSI_FILTER_ENABLED', False) if config_macd_strategy else False
+        self.rsi_overbought_threshold = getattr(config_macd_strategy, 'MACD_RSI_OVERBOUGHT_THRESHOLD', 70) if config_macd_strategy else 70
+        self.rsi_oversold_threshold = getattr(config_macd_strategy, 'MACD_RSI_OVERSOLD_THRESHOLD', 30) if config_macd_strategy else 30
+
+        if self.rsi_filter_enabled:
+            self.logger.info(f"📊 RSI Filter ENABLED:")
+            self.logger.info(f"   Overbought threshold: {self.rsi_overbought_threshold}")
+            self.logger.info(f"   Oversold threshold: {self.rsi_oversold_threshold}")
+        else:
+            self.logger.info(f"⚪ RSI Filter DISABLED")
+
         self.logger.info(f"🔧 CRITICAL DEBUG: Using REBUILT MACD with expansion + ADX rising validation (v3.0)")
 
     def calculate_macd(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -244,6 +273,174 @@ class MACDStrategy(BaseStrategy):
         df['macd_histogram'] = df['macd_line'] - df['macd_signal']
 
         return df
+
+    def _check_mtf_histogram_alignment(self, df: pd.DataFrame, signal_direction: str, epic: str, signal_bar_time: pd.Timestamp = None) -> Dict:
+        """
+        Check if MACD histogram aligns with higher timeframes (1H, 4H)
+
+        Args:
+            df: DataFrame with MACD histogram on signal timeframe
+            signal_direction: 'BULL' or 'BEAR'
+            epic: Currency pair epic code
+            signal_bar_time: Timestamp of the signal bar (for backtest time-awareness)
+
+        Returns:
+            Dict with 'aligned', 'misaligned_timeframes', 'confidence_penalty'
+        """
+        if not self.mtf_histogram_filter_enabled:
+            if self.mtf_log_alignment_checks:
+                self.logger.debug(f"⚪ MTF filter DISABLED for {epic} - allowing all signals")
+            return {'aligned': True, 'misaligned_timeframes': [], 'confidence_penalty': 0}
+
+        # Log MTF check initiation
+        if self.mtf_log_alignment_checks:
+            self.logger.info(f"🔍 MTF Histogram Alignment Check for {epic} {signal_direction} signal...")
+            self.logger.info(f"   data_fetcher: {type(self.data_fetcher).__name__ if self.data_fetcher else 'None'}")
+
+        # If no data fetcher available, skip MTF check (backtest mode without MTF data)
+        if not self.data_fetcher:
+            if self.mtf_log_alignment_checks:
+                self.logger.warning(f"⚠️ MTF check SKIPPED - no data_fetcher available")
+                self.logger.warning(f"   Strategy was likely initialized without data_fetcher parameter")
+            return {'aligned': True, 'misaligned_timeframes': [], 'confidence_penalty': 0}
+
+        try:
+            misaligned_timeframes = []
+            aligned_timeframes = []
+
+            # Get latest signal timeframe histogram
+            signal_tf_histogram = df.iloc[-1]['macd_histogram']
+
+            # Expected histogram direction for signal
+            # BULL signal should have positive histogram on higher timeframes
+            # BEAR signal should have negative histogram on higher timeframes
+            expected_sign = 1 if signal_direction == 'BULL' else -1
+
+            for timeframe in self.mtf_histogram_timeframes:
+                try:
+                    # CRITICAL: Set backtest time to signal bar time before fetching HTF data
+                    # This ensures we only use data available at the signal bar's timestamp
+                    if signal_bar_time and hasattr(self.data_fetcher, 'current_backtest_time'):
+                        original_backtest_time = self.data_fetcher.current_backtest_time
+                        self.data_fetcher.current_backtest_time = signal_bar_time
+                        if self.mtf_log_alignment_checks:
+                            self.logger.debug(f"   Setting backtest cutoff to signal bar time: {signal_bar_time}")
+
+                    # Fetch higher timeframe data
+                    # Use data fetcher's get_enhanced_data method
+                    # Note: BacktestDataFetcher requires both epic and pair parameters
+                    # MACD needs: slow_period (26) + signal_period (9) = 35 periods minimum
+                    # For 1H: 35 hours, for 4H: 35*4 = 140 hours minimum
+                    # Use extra buffer to account for gaps and resampling
+                    if timeframe == '4h':
+                        lookback = 336  # 14 days for 4H to ensure enough bars after resampling
+                    elif timeframe == '1h':
+                        lookback = 168  # 7 days for 1H
+                    else:
+                        lookback = 168  # Default 7 days
+
+                    htf_df = self.data_fetcher.get_enhanced_data(
+                        epic=epic,
+                        pair=epic,
+                        timeframe=timeframe,
+                        lookback_hours=lookback
+                    )
+
+                    # Restore original backtest time
+                    if signal_bar_time and hasattr(self.data_fetcher, 'current_backtest_time'):
+                        self.data_fetcher.current_backtest_time = original_backtest_time
+
+                    if htf_df is None or len(htf_df) < self.slow_period + self.signal_period:
+                        self.logger.warning(f"⚠️ {timeframe} data insufficient for MTF check")
+                        continue
+
+                    # Calculate MACD on higher timeframe
+                    htf_df = self.calculate_macd(htf_df)
+
+                    # CRITICAL: Use only COMPLETED candles for MTF check
+                    # The latest candle might be incomplete (still forming)
+                    # We need to check the PREVIOUS completed candle instead
+                    if len(htf_df) < 2:
+                        self.logger.warning(f"⚠️ {timeframe} insufficient completed candles for MTF check")
+                        continue
+
+                    # Use the second-to-last candle (latest COMPLETED candle)
+                    # This ensures we're not using incomplete/forming candle data
+                    htf_histogram = htf_df.iloc[-2]['macd_histogram']
+
+                    # Log timestamp for debugging
+                    if self.mtf_log_alignment_checks and 'start_time' in htf_df.columns:
+                        latest_time = htf_df.iloc[-1].get('start_time', 'unknown')
+                        completed_time = htf_df.iloc[-2].get('start_time', 'unknown')
+                        self.logger.debug(f"   {timeframe} latest: {latest_time}, using completed: {completed_time}")
+
+                    # Check if histogram magnitude is significant (not noise)
+                    if abs(htf_histogram) < self.mtf_minimum_histogram_magnitude:
+                        if self.mtf_log_alignment_checks:
+                            self.logger.info(f"   {timeframe}: histogram too small ({htf_histogram:.6f}), treating as neutral")
+                        aligned_timeframes.append(timeframe)  # Treat as aligned if too small
+                        continue
+
+                    # Check alignment
+                    htf_sign = 1 if htf_histogram > 0 else -1
+
+                    if htf_sign == expected_sign:
+                        aligned_timeframes.append(timeframe)
+                        if self.mtf_log_alignment_checks:
+                            self.logger.info(f"   ✅ {timeframe}: histogram {htf_histogram:.6f} ({'BULLISH' if htf_sign > 0 else 'BEARISH'}) - ALIGNED")
+                    else:
+                        misaligned_timeframes.append(timeframe)
+                        if self.mtf_log_alignment_checks:
+                            self.logger.warning(f"   ❌ {timeframe}: histogram {htf_histogram:.6f} ({'BULLISH' if htf_sign > 0 else 'BEARISH'}) - MISALIGNED")
+
+                except Exception as e:
+                    self.logger.error(f"Error checking {timeframe} histogram: {e}")
+                    # Don't reject signal due to data fetch errors
+                    continue
+
+            # Determine if signal should be rejected or penalized
+            total_checked = len(aligned_timeframes) + len(misaligned_timeframes)
+
+            if total_checked == 0:
+                # No timeframes could be checked - allow signal
+                return {'aligned': True, 'misaligned_timeframes': [], 'confidence_penalty': 0}
+
+            # Check alignment requirements
+            if self.mtf_require_all_aligned:
+                # ALL timeframes must align
+                is_aligned = len(misaligned_timeframes) == 0
+                confidence_penalty = 0 if is_aligned else (self.mtf_partial_misalignment_penalty if not self.mtf_full_rejection else 0)
+            else:
+                # Majority must align (50% or more)
+                alignment_ratio = len(aligned_timeframes) / total_checked
+                is_aligned = alignment_ratio >= 0.5
+
+                if is_aligned:
+                    confidence_penalty = 0
+                else:
+                    # Apply partial penalty if not rejecting
+                    confidence_penalty = self.mtf_partial_misalignment_penalty if not self.mtf_full_rejection else 0
+
+            # Log final decision
+            if self.mtf_log_alignment_checks:
+                if is_aligned:
+                    self.logger.info(f"✅ MTF Histogram Alignment CHECK PASSED: {len(aligned_timeframes)}/{total_checked} aligned")
+                else:
+                    if self.mtf_full_rejection:
+                        self.logger.warning(f"❌ MTF Histogram Alignment CHECK FAILED: {len(aligned_timeframes)}/{total_checked} aligned - SIGNAL REJECTED")
+                    else:
+                        self.logger.warning(f"⚠️ MTF Histogram Alignment WARNING: {len(aligned_timeframes)}/{total_checked} aligned - penalty {confidence_penalty:+.0%}")
+
+            return {
+                'aligned': is_aligned if self.mtf_full_rejection else True,  # If not rejecting, always return True
+                'misaligned_timeframes': misaligned_timeframes,
+                'confidence_penalty': confidence_penalty
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error in MTF histogram alignment check: {e}", exc_info=True)
+            # Don't reject signal due to errors
+            return {'aligned': True, 'misaligned_timeframes': [], 'confidence_penalty': 0}
 
     def _ensure_kama_efficiency(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -362,11 +559,10 @@ class MACDStrategy(BaseStrategy):
                         check_idx = df.index[check_loc]
                         adx_value = df.loc[check_idx, 'adx']
                         if not pd.isna(adx_value) and adx_value >= self.min_adx:
-                            # Mark all bars in the window from MACD expansion to ADX confirmation
-                            for mark_offset in range(offset + 1):
-                                mark_loc = idx_loc + mark_offset
-                                if mark_loc < len(df):
-                                    df.iloc[mark_loc, df.columns.get_loc('adx_met_in_window')] = True
+                            # CRITICAL FIX: Only mark the FIRST bar (MACD expansion point) when ADX confirms
+                            # This prevents duplicate signals in backtest mode
+                            # Previously marked ALL bars in window, causing bars 100,101,102,103 to all be crossovers
+                            df.iloc[idx_loc, df.columns.get_loc('adx_met_in_window')] = True
                             break
 
             for idx in bear_expansion_indices:
@@ -377,10 +573,8 @@ class MACDStrategy(BaseStrategy):
                         check_idx = df.index[check_loc]
                         adx_value = df.loc[check_idx, 'adx']
                         if not pd.isna(adx_value) and adx_value >= self.min_adx:
-                            for mark_offset in range(offset + 1):
-                                mark_loc = idx_loc + mark_offset
-                                if mark_loc < len(df):
-                                    df.iloc[mark_loc, df.columns.get_loc('adx_met_in_window')] = True
+                            # CRITICAL FIX: Only mark the FIRST bar (MACD expansion point) when ADX confirms
+                            df.iloc[idx_loc, df.columns.get_loc('adx_met_in_window')] = True
                             break
 
             # Apply ADX catch-up filter: MACD expansion met AND ADX met in window
@@ -457,6 +651,9 @@ class MACDStrategy(BaseStrategy):
         4. MACD histogram is expanding (optional, prevents catching tops/bottoms)
 
         This catches trend acceleration earlier than MACD histogram crossover
+
+        IMPORTANT: In backtest mode, we're called with growing DataFrames each iteration.
+        We must ONLY process the LATEST bar to avoid re-detecting old crossovers.
         """
         df = df.copy()
 
@@ -474,8 +671,17 @@ class MACDStrategy(BaseStrategy):
         df['bull_adx_crossover'] = False
         df['bear_adx_crossover'] = False
 
-        # For each ADX crossover, check if MACD histogram is aligned
-        for idx in df[df['adx_cross_up']].index:
+        # CRITICAL FIX: Only check the LATEST bar for ADX crossover
+        # Prevents re-detecting and re-logging old crossovers in backtest mode
+        if len(df) == 0:
+            return df
+
+        latest_idx = df.index[-1]
+        if not df.loc[latest_idx, 'adx_cross_up']:
+            return df  # No crossover on latest bar
+
+        # Process only the latest bar's ADX crossover
+        for idx in [latest_idx]:
             try:
                 # Get current bar data
                 histogram = df.loc[idx, 'macd_histogram']
@@ -549,13 +755,14 @@ class MACDStrategy(BaseStrategy):
             return False
 
         # Check RSI (optional - avoid extreme zones)
-        rsi = row.get('rsi', 50)
-        if signal_type == 'BULL' and rsi > 70:
-            self.logger.debug(f"❌ {epic_display}ADX BULL rejected: RSI {rsi:.1f} overbought")
-            return False
-        if signal_type == 'BEAR' and rsi < 30:
-            self.logger.debug(f"❌ {epic_display}ADX BEAR rejected: RSI {rsi:.1f} oversold")
-            return False
+        if self.rsi_filter_enabled:
+            rsi = row.get('rsi', 50)
+            if signal_type == 'BULL' and rsi > self.rsi_overbought_threshold:
+                self.logger.info(f"❌ {epic_display}ADX BULL rejected: RSI {rsi:.1f} overbought (>{self.rsi_overbought_threshold})")
+                return False
+            if signal_type == 'BEAR' and rsi < self.rsi_oversold_threshold:
+                self.logger.info(f"❌ {epic_display}ADX BEAR rejected: RSI {rsi:.1f} oversold (<{self.rsi_oversold_threshold})")
+                return False
 
         # EMA filter (if enabled)
         if self.ema_filter_enabled:
@@ -650,13 +857,14 @@ class MACDStrategy(BaseStrategy):
             return False
 
         # Check RSI (optional - just avoid extreme zones)
-        rsi = row.get('rsi', 50)
-        if signal_type == 'BULL' and rsi > 70:
-            self.logger.debug(f"❌ {epic_display}BULL rejected: RSI {rsi:.1f} overbought")
-            return False
-        if signal_type == 'BEAR' and rsi < 30:
-            self.logger.debug(f"❌ {epic_display}BEAR rejected: RSI {rsi:.1f} oversold")
-            return False
+        if self.rsi_filter_enabled:
+            rsi = row.get('rsi', 50)
+            if signal_type == 'BULL' and rsi > self.rsi_overbought_threshold:
+                self.logger.info(f"❌ {epic_display}BULL rejected: RSI {rsi:.1f} overbought (>{self.rsi_overbought_threshold})")
+                return False
+            if signal_type == 'BEAR' and rsi < self.rsi_oversold_threshold:
+                self.logger.info(f"❌ {epic_display}BEAR rejected: RSI {rsi:.1f} oversold (<{self.rsi_oversold_threshold})")
+                return False
 
         # EMA FILTER (configurable via config file)
         if self.ema_filter_enabled:
@@ -1004,6 +1212,9 @@ class MACDStrategy(BaseStrategy):
             # This prevents re-detecting the same crossover multiple times
             latest_bar = df.iloc[-1]
 
+            # Extract signal bar timestamp for MTF time-aware checking
+            signal_bar_time = latest_bar.get('start_time') if 'start_time' in df.columns else None
+
             # CRITICAL FIX: Only generate signals on COMPLETE bars
             # Incomplete bars have changing histogram values that can cause false triggers
             # Wait for bar to complete before checking crossover conditions
@@ -1015,9 +1226,22 @@ class MACDStrategy(BaseStrategy):
             # PRIORITY 1: Check for MACD histogram BULL crossover (stronger signal)
             if latest_bar.get('bull_crossover', False):
                 self.logger.info(f"🎯 BULL crossover triggered, validating signal for {epic}...")
+
+                # MTF Histogram Alignment Check (NEW - prevents counter-trend signals)
+                if self.mtf_histogram_filter_enabled:
+                    mtf_result = self._check_mtf_histogram_alignment(df, 'BULL', epic, signal_bar_time)
+                    if not mtf_result['aligned']:
+                        self.logger.warning(f"❌ BULL rejected: MTF histogram misalignment on {', '.join(mtf_result['misaligned_timeframes'])}")
+                        return None
+
                 if self.validate_signal(latest_bar, 'BULL', epic=epic):
                     signal = self.create_signal(latest_bar, 'BULL', epic, timeframe, trigger_type='macd')
                     if signal:
+                        # Apply MTF confidence penalty if any
+                        if self.mtf_histogram_filter_enabled:
+                            mtf_result = self._check_mtf_histogram_alignment(df, 'BULL', epic, signal_bar_time)
+                            signal['confidence'] += mtf_result.get('confidence_penalty', 0)
+
                         # Swing proximity validation (uses full DataFrame for context)
                         if self.swing_validator:
                             validation = self.swing_validator.validate_entry_proximity(
@@ -1035,9 +1259,22 @@ class MACDStrategy(BaseStrategy):
             # PRIORITY 1: Check for MACD histogram BEAR crossover (stronger signal)
             if latest_bar.get('bear_crossover', False):
                 self.logger.info(f"🎯 BEAR crossover triggered, validating signal for {epic}...")
+
+                # MTF Histogram Alignment Check (NEW - prevents counter-trend signals)
+                if self.mtf_histogram_filter_enabled:
+                    mtf_result = self._check_mtf_histogram_alignment(df, 'BEAR', epic, signal_bar_time)
+                    if not mtf_result['aligned']:
+                        self.logger.warning(f"❌ BEAR rejected: MTF histogram misalignment on {', '.join(mtf_result['misaligned_timeframes'])}")
+                        return None
+
                 if self.validate_signal(latest_bar, 'BEAR', epic=epic):
                     signal = self.create_signal(latest_bar, 'BEAR', epic, timeframe, trigger_type='macd')
                     if signal:
+                        # Apply MTF confidence penalty if any
+                        if self.mtf_histogram_filter_enabled:
+                            mtf_result = self._check_mtf_histogram_alignment(df, 'BEAR', epic, signal_bar_time)
+                            signal['confidence'] += mtf_result.get('confidence_penalty', 0)
+
                         # Swing proximity validation (uses full DataFrame for context)
                         if self.swing_validator:
                             validation = self.swing_validator.validate_entry_proximity(
@@ -1054,9 +1291,21 @@ class MACDStrategy(BaseStrategy):
 
             # PRIORITY 2: Check for ADX BULL crossover (earlier entry signal)
             if self.adx_crossover_enabled and latest_bar.get('bull_adx_crossover', False):
+                # MTF Histogram Alignment Check (prevents counter-trend signals)
+                if self.mtf_histogram_filter_enabled:
+                    mtf_result = self._check_mtf_histogram_alignment(df, 'BULL', epic, signal_bar_time)
+                    if not mtf_result['aligned']:
+                        self.logger.warning(f"❌ ADX BULL rejected: MTF histogram misalignment on {', '.join(mtf_result['misaligned_timeframes'])}")
+                        return None
+
                 if self.validate_adx_signal(latest_bar, 'BULL', epic=epic):
                     signal = self.create_signal(latest_bar, 'BULL', epic, timeframe, trigger_type='adx')
                     if signal:
+                        # Apply MTF confidence penalty if any
+                        if self.mtf_histogram_filter_enabled:
+                            mtf_result = self._check_mtf_histogram_alignment(df, 'BULL', epic, signal_bar_time)
+                            signal['confidence'] += mtf_result.get('confidence_penalty', 0)
+
                         # Swing proximity validation
                         if self.swing_validator:
                             validation = self.swing_validator.validate_entry_proximity(
@@ -1072,9 +1321,21 @@ class MACDStrategy(BaseStrategy):
 
             # PRIORITY 2: Check for ADX BEAR crossover (earlier entry signal)
             if self.adx_crossover_enabled and latest_bar.get('bear_adx_crossover', False):
+                # MTF Histogram Alignment Check (prevents counter-trend signals)
+                if self.mtf_histogram_filter_enabled:
+                    mtf_result = self._check_mtf_histogram_alignment(df, 'BEAR', epic, signal_bar_time)
+                    if not mtf_result['aligned']:
+                        self.logger.warning(f"❌ ADX BEAR rejected: MTF histogram misalignment on {', '.join(mtf_result['misaligned_timeframes'])}")
+                        return None
+
                 if self.validate_adx_signal(latest_bar, 'BEAR', epic=epic):
                     signal = self.create_signal(latest_bar, 'BEAR', epic, timeframe, trigger_type='adx')
                     if signal:
+                        # Apply MTF confidence penalty if any
+                        if self.mtf_histogram_filter_enabled:
+                            mtf_result = self._check_mtf_histogram_alignment(df, 'BEAR', epic, signal_bar_time)
+                            signal['confidence'] += mtf_result.get('confidence_penalty', 0)
+
                         # Swing proximity validation
                         if self.swing_validator:
                             validation = self.swing_validator.validate_entry_proximity(
