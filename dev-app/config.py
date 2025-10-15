@@ -127,7 +127,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage1_lock_points': 20,          # Minimum profit lock
         'stage2_trigger_points': 28,      # Profit lock trigger
         'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
+        'stage3_trigger_points': 29,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
@@ -139,7 +139,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage1_lock_points': 20,          # Minimum profit lock
         'stage2_trigger_points': 28,      # Profit lock trigger
         'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
+        'stage3_trigger_points': 29,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
@@ -151,7 +151,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage1_lock_points': 20,          # Minimum profit lock
         'stage2_trigger_points': 28,      # Profit lock trigger
         'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
+        'stage3_trigger_points': 29,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
@@ -163,7 +163,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage1_lock_points': 20,          # Minimum profit lock
         'stage2_trigger_points': 28,      # Profit lock trigger
         'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
+        'stage3_trigger_points': 29,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
@@ -175,7 +175,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage1_lock_points': 20,          # Minimum profit lock
         'stage2_trigger_points': 28,      # Profit lock trigger
         'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
+        'stage3_trigger_points': 29,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
@@ -189,7 +189,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage1_lock_points': 20,          # Minimum profit lock
         'stage2_trigger_points': 28,      # Profit lock trigger
         'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
+        'stage3_trigger_points': 29,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
@@ -239,7 +239,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage1_lock_points': 20,          # Minimum profit lock
         'stage2_trigger_points': 28,      # Profit lock trigger
         'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
+        'stage3_trigger_points': 29,      # Start percentage trailing
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance

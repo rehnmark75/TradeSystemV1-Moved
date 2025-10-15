@@ -1286,14 +1286,11 @@ class EnhancedTradeProcessor:
             from config import get_trailing_config_for_epic
 
             trailing_config = get_trailing_config_for_epic(trade.symbol)
-            STAGE1_TRIGGER_POINTS = trailing_config['stage1_trigger_points']
-            STAGE1_LOCK_POINTS = trailing_config['stage1_lock_points']
             STAGE2_TRIGGER_POINTS = trailing_config['stage2_trigger_points']
             STAGE2_LOCK_POINTS = trailing_config['stage2_lock_points']
             STAGE3_TRIGGER_POINTS = trailing_config['stage3_trigger_points']
 
             self.logger.info(f"📊 [PAIR CONFIG] {trade.symbol}: "
-                           f"Stage1({STAGE1_TRIGGER_POINTS}pts→{STAGE1_LOCK_POINTS}pts) "
                            f"Stage2({STAGE2_TRIGGER_POINTS}pts→{STAGE2_LOCK_POINTS}pts) "
                            f"Stage3({STAGE3_TRIGGER_POINTS}pts)")
 
@@ -1642,12 +1639,11 @@ class EnhancedTradeProcessor:
                         self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Break-even level validation failed")
 
             # --- STEP 1.5: Standard Stage Check ---
-            # Check for Stage 1, Stage 2 and Stage 3 progression after break-even
+            # Check for Stage 2 and Stage 3 progression after break-even
             if getattr(trade, 'moved_to_breakeven', False):
                 # Use standard 3-stage configuration
-                stage1_trigger = STAGE1_TRIGGER_POINTS
-                stage2_trigger = STAGE2_TRIGGER_POINTS
-                stage3_trigger = STAGE3_TRIGGER_POINTS
+                stage2_trigger = STAGE2_TRIGGER_POINTS  # 16 points
+                stage3_trigger = STAGE3_TRIGGER_POINTS  # 17 points
 
                 if profit_points >= stage3_trigger:
                     # Stage 3: Percentage-based trailing
@@ -1773,74 +1769,9 @@ class EnhancedTradeProcessor:
                                 db.rollback()
                                 self.logger.error(f"❌ [DB COMMIT FAILED STAGE2-SKIP] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
                                 raise
-
-                elif profit_points >= stage1_trigger:
-                    # Stage 1: Initial profit protection
-                    # ✅ NEW: Check if Stage 1 already executed
-                    if getattr(trade, 'moved_to_stage1', False):
-                        self.logger.debug(f"📊 [STAGE 1 SKIP] Trade {trade.id}: Stage 1 already executed, waiting for Stage 2")
-                    else:
-                        self.logger.info(f"💰 [STAGE 1 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 1 trigger {stage1_trigger}pts - Initial profit lock")
-
-                        # Calculate Stage 1 profit lock level (entry + lock points)
-                        lock_points = STAGE1_LOCK_POINTS
-                        if trade.direction.upper() == "BUY":
-                            stage1_stop = trade.entry_price + (lock_points * point_value)
-                        else:
-                            stage1_stop = trade.entry_price - (lock_points * point_value)
-
-                        # Check if this improves current stop
-                        current_stop = trade.sl_price or 0.0
-                        should_update = False
-                        if trade.direction.upper() == "BUY":
-                            should_update = stage1_stop > current_stop
-                        else:
-                            should_update = stage1_stop < current_stop
-
-                        if should_update:
-                            adjustment_distance = abs(stage1_stop - current_stop)
-                            adjustment_points = int(adjustment_distance / point_value)
-                            if adjustment_points > 0:
-                                direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
-                                self.logger.info(f"📤 [STAGE 1 SEND] Trade {trade.id}: Moving to profit lock (+{lock_points}pts), adjustment={adjustment_points}pts")
-                                success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
-                                if isinstance(success, dict) and success.get("status") == "updated":
-                                    old_sl = trade.sl_price
-                                    old_status = trade.status
-                                    trade.sl_price = stage1_stop
-                                    trade.status = "stage1_profit_lock"
-                                    trade.moved_to_stage1 = True  # ✅ NEW: Set flag to prevent re-execution
-                                    trade.last_trigger_price = current_price
-                                    trade.trigger_time = datetime.utcnow()
-                                    trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
-
-                                    self.logger.info(f"💾 [DB PREPARE STAGE1] Trade {trade.id}: sl_price {old_sl} → {trade.sl_price}, status {old_status} → {trade.status}, changes: {trade.stop_limit_changes_count}")
-                                    try:
-                                        db.commit()
-                                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Stage 1 changes persisted")
-                                        self.logger.info(f"💎 [STAGE 1] Trade {trade.id}: Profit locked at {stage1_stop:.5f} (+{lock_points}pts)")
-                                        return True
-                                    except Exception as commit_error:
-                                        db.rollback()
-                                        self.logger.error(f"❌ [DB COMMIT FAILED STAGE1] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
-                                        raise
-                        else:
-                            # Stage 1 stop not better than current - mark as executed anyway
-                            self.logger.info(f"📊 [STAGE 1 SKIP] Trade {trade.id}: Stage 1 stop {stage1_stop:.5f} not better than current {current_stop:.5f}")
-                            trade.moved_to_stage1 = True
-
-                            self.logger.info(f"💾 [DB PREPARE STAGE1-SKIP] Trade {trade.id}: moved_to_stage1=True")
-                            try:
-                                db.commit()
-                                self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Stage 1 skip flag persisted")
-                            except Exception as commit_error:
-                                db.rollback()
-                                self.logger.error(f"❌ [DB COMMIT FAILED STAGE1-SKIP] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
-                                raise
-
                 else:
-                    # Below Stage 1 trigger, continue normal processing
-                    self.logger.debug(f"📊 [STAGE 0] Trade {trade.id}: Profit {profit_points}pts < Stage 1 trigger {stage1_trigger}pts")
+                    # Still in Stage 1, continue normal processing
+                    self.logger.debug(f"📊 [STAGE 1] Trade {trade.id}: Profit {profit_points}pts < Stage 2 trigger {stage2_trigger}pts")
 
             # --- STEP 2: Advanced trailing logic ---
             should_trail = False
