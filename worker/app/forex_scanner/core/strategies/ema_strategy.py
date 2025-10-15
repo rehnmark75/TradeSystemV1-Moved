@@ -70,12 +70,24 @@ class EMAStrategy(BaseStrategy):
         # Required attributes for backtest compatibility
         self.enable_mtf_analysis = True  # ✅ RE-ENABLED: Multi-timeframe analysis
         self.mtf_analyzer = None
-        
-        # EMA configuration - now with dynamic optimization support
-        self.ema_config = self._get_ema_periods(epic)
-        self.ema_short = self.ema_config.get('short', 12)
-        self.ema_long = self.ema_config.get('long', 50) 
-        self.ema_trend = self.ema_config.get('trend', 200)
+
+        # SUPERTREND MODE DETECTION
+        self.use_supertrend = getattr(config_ema_strategy, 'USE_SUPERTREND_MODE', False) if config_ema_strategy else False
+
+        if self.use_supertrend:
+            # Supertrend configuration
+            self.supertrend_config = self._get_supertrend_config(epic)
+            self.logger.info(f"🎯 SUPERTREND MODE: {self.supertrend_config.get('description', 'Multi-Supertrend')}")
+            # Set placeholder values for compatibility
+            self.ema_short = None
+            self.ema_long = None
+            self.ema_trend = None
+        else:
+            # EMA configuration - legacy mode
+            self.ema_config = self._get_ema_periods(epic)
+            self.ema_short = self.ema_config.get('short', 12)
+            self.ema_long = self.ema_config.get('long', 50)
+            self.ema_trend = self.ema_config.get('trend', 200)
         
         # Basic parameters
         self.eps = 1e-8  # Epsilon for stability (from detect_ema_alerts)
@@ -96,20 +108,39 @@ class EMAStrategy(BaseStrategy):
             self.adaptive_calculator = AdaptiveVolatilityCalculator(logger=self.logger)
             self.logger.info("🧠 Adaptive volatility calculator enabled - Runtime regime-aware SL/TP")
         else:
-            # Fallback: Use ATR multipliers from config
+            # Fallback: Use ATR multipliers from config (mode-specific)
             self.adaptive_calculator = None
-            self.stop_atr_multiplier = getattr(config_ema_strategy, 'EMA_STOP_LOSS_ATR_MULTIPLIER', 2.0) if config_ema_strategy else 2.0
-            self.target_atr_multiplier = getattr(config_ema_strategy, 'EMA_TAKE_PROFIT_ATR_MULTIPLIER', 4.0) if config_ema_strategy else 4.0
-            self.logger.info(f"🎯 ATR-based dynamic stops: SL={self.stop_atr_multiplier}x ATR, TP={self.target_atr_multiplier}x ATR")
+            if self.use_supertrend:
+                # Use Supertrend-specific wider multipliers
+                self.stop_atr_multiplier = getattr(config_ema_strategy, 'SUPERTREND_STOP_LOSS_ATR_MULTIPLIER', 2.5) if config_ema_strategy else 2.5
+                self.target_atr_multiplier = getattr(config_ema_strategy, 'SUPERTREND_TAKE_PROFIT_ATR_MULTIPLIER', 5.0) if config_ema_strategy else 5.0
+                self.logger.info(f"🎯 SUPERTREND ATR-based stops: SL={self.stop_atr_multiplier}x ATR, TP={self.target_atr_multiplier}x ATR")
+            else:
+                # Use EMA-specific multipliers
+                self.stop_atr_multiplier = getattr(config_ema_strategy, 'EMA_STOP_LOSS_ATR_MULTIPLIER', 2.0) if config_ema_strategy else 2.0
+                self.target_atr_multiplier = getattr(config_ema_strategy, 'EMA_TAKE_PROFIT_ATR_MULTIPLIER', 4.0) if config_ema_strategy else 4.0
+                self.logger.info(f"🎯 EMA ATR-based stops: SL={self.stop_atr_multiplier}x ATR, TP={self.target_atr_multiplier}x ATR")
         
         # Use reasonable minimum bars for EMA strategy
         self.min_bars = 50  # 50 bars minimum for EMA 50 to be stable
         
-        # Initialize helper modules
+        # Initialize helper modules with mode awareness
         self.trend_validator = EMATrendValidator(logger=self.logger)
-        self.signal_calculator = EMASignalCalculator(logger=self.logger, trend_validator=self.trend_validator)
-        self.mtf_analyzer = EMAMultiTimeframeAnalyzer(logger=self.logger, data_fetcher=data_fetcher)
-        self.indicator_calculator = EMAIndicatorCalculator(logger=self.logger, eps=self.eps)
+        self.signal_calculator = EMASignalCalculator(
+            logger=self.logger,
+            trend_validator=self.trend_validator,
+            use_supertrend=self.use_supertrend
+        )
+        self.mtf_analyzer = EMAMultiTimeframeAnalyzer(
+            logger=self.logger,
+            data_fetcher=data_fetcher,
+            use_supertrend=self.use_supertrend
+        )
+        self.indicator_calculator = EMAIndicatorCalculator(
+            logger=self.logger,
+            eps=self.eps,
+            use_supertrend=self.use_supertrend
+        )
 
         # Initialize ADX calculator for trend strength analysis
         self.adx_period = getattr(config_ema_strategy, 'EMA_ADX_PERIOD', 14) if config_ema_strategy else 14
@@ -158,6 +189,36 @@ class EMAStrategy(BaseStrategy):
         # Configuration validation check
         self._validate_macd_configuration()
     
+    def _get_supertrend_config(self, epic: str = None) -> Dict:
+        """Get Supertrend configuration"""
+        try:
+            # Get active Supertrend configuration
+            active_config = getattr(config_ema_strategy, 'ACTIVE_SUPERTREND_CONFIG', 'default') if config_ema_strategy else 'default'
+            supertrend_configs = getattr(config_ema_strategy, 'SUPERTREND_STRATEGY_CONFIG', {}) if config_ema_strategy else {}
+
+            if active_config in supertrend_configs:
+                config_dict = supertrend_configs[active_config]
+                self.logger.info(f"📊 Using Supertrend config '{active_config}': {config_dict.get('description', '')}")
+                return config_dict
+
+            # Default Supertrend configuration
+            return {
+                'fast_period': 7, 'fast_multiplier': 1.5,
+                'medium_period': 14, 'medium_multiplier': 2.0,
+                'slow_period': 21, 'slow_multiplier': 3.0,
+                'atr_period': 14,
+                'description': 'Default balanced Supertrend'
+            }
+
+        except Exception as e:
+            self.logger.warning(f"Could not load Supertrend config: {e}, using defaults")
+            return {
+                'fast_period': 7, 'fast_multiplier': 1.5,
+                'medium_period': 14, 'medium_multiplier': 2.0,
+                'slow_period': 21, 'slow_multiplier': 3.0,
+                'atr_period': 14
+            }
+
     def _get_ema_periods(self, epic: str = None) -> Dict:
         """Get EMA periods - now with dynamic optimization support"""
         try:
@@ -170,17 +231,17 @@ class EMAStrategy(BaseStrategy):
                     return optimal_config
                 except Exception as e:
                     self.logger.warning(f"Could not load optimal parameters for {epic}: {e}, falling back to config")
-            
+
             # FALLBACK: Get EMA configuration from configdata structure
             ema_configs = getattr(config, 'EMA_STRATEGY_CONFIG', {})
             active_config = getattr(config, 'ACTIVE_EMA_CONFIG', 'default')
-            
+
             if active_config in ema_configs:
                 return ema_configs[active_config]
-            
+
             # Standard EMA defaults if config not available
             return {'short': 21, 'long': 50, 'trend': 200}
-            
+
         except Exception as e:
             self.logger.warning(f"Could not load EMA config: {e}, using defaults")
             return {'short': 21, 'long': 50, 'trend': 200}
@@ -315,58 +376,81 @@ class EMAStrategy(BaseStrategy):
 
             self.logger.info(f"✅ {log_prefix}Processing {len(df)} bars")
 
-            # CRITICAL FIX: Get epic-specific EMA configuration (including optimal parameters)
-            epic_ema_config = self._get_ema_periods(epic)
+            # MODE-AWARE: Route between Supertrend and EMA
+            if self.use_supertrend:
+                # SUPERTREND MODE
+                self.logger.info(f"📊 {log_prefix}SUPERTREND MODE - Calculating multi-Supertrend indicators")
 
-            # Calculate EMAs if not present
-            df_enhanced = self.indicator_calculator.ensure_emas(df.copy(), epic_ema_config)
+                # Calculate Supertrends
+                df_enhanced = self.indicator_calculator.ensure_supertrends(df.copy(), self.supertrend_config)
 
-            # Calculate ADX for trend strength analysis
-            df_enhanced = self.adx_calculator.calculate_adx(df_enhanced)
-            self.logger.debug(f"📊 {log_prefix}ADX calculated")
+                # Detect Supertrend signals
+                df_with_signals = self.signal_calculator.detect_supertrend_signals(df_enhanced)
+                self.logger.debug(f"🎯 {log_prefix}Supertrend signals detected")
 
-            # Calculate swing points for proximity validation (if SMC analyzer available)
-            try:
-                if hasattr(self, 'swing_validator') and self.swing_validator.smc_analyzer:
-                    df_enhanced = self.swing_validator.smc_analyzer.identify_swing_points(df_enhanced)
-                    self.logger.debug(f"🎯 {log_prefix}Swing points identified")
-            except Exception as e:
-                self.logger.debug(f"{log_prefix}Swing point calculation skipped: {e}")
+            else:
+                # EMA MODE (Legacy)
+                self.logger.info(f"📊 {log_prefix}EMA MODE - Calculating EMA indicators")
 
-            # Apply core detection logic (based on detect_ema_alerts)
-            df_with_signals = self.indicator_calculator.detect_ema_alerts(df_enhanced)
+                # Get epic-specific EMA configuration
+                epic_ema_config = self._get_ema_periods(epic)
 
-            # UNIFIED MODE: Use same logic for both live and backtest
-            # The backtest scanner will call this method iteratively for each timestamp
-            latest_row = df_with_signals.iloc[-1]
-            current_timestamp = latest_row.get('start_time')
+                # Calculate EMAs
+                df_enhanced = self.indicator_calculator.ensure_emas(df.copy(), epic_ema_config)
 
-            # BACKTEST FIX: Check if any alert occurred at the current timestamp
+                # Calculate ADX for trend strength
+                df_enhanced = self.adx_calculator.calculate_adx(df_enhanced)
+                self.logger.debug(f"📊 {log_prefix}ADX calculated")
+
+                # Calculate swing points for proximity validation
+                try:
+                    if hasattr(self, 'swing_validator') and self.swing_validator.smc_analyzer:
+                        df_enhanced = self.swing_validator.smc_analyzer.identify_swing_points(df_enhanced)
+                        self.logger.debug(f"🎯 {log_prefix}Swing points identified")
+                except Exception as e:
+                    self.logger.debug(f"{log_prefix}Swing point calculation skipped: {e}")
+
+                # Apply EMA detection logic
+                from configdata.strategies.config_ema_strategy import EMA_TRIGGER_MODE
+                trigger_mode = EMA_TRIGGER_MODE
+                df_with_signals = self.indicator_calculator.detect_ema_signals(df_enhanced, trigger_mode=trigger_mode)
+                self.logger.debug(f"🎯 {log_prefix}Using EMA trigger mode: {trigger_mode}")
+
+            # BACKTEST MODE: Scan entire DataFrame for ANY alerts
             if self.backtest_mode:
-                # In backtest mode, find if there's an alert specifically at the current timestamp
-                alert_at_current_time = df_with_signals[df_with_signals['start_time'] == current_timestamp]
-                if len(alert_at_current_time) > 0:
-                    latest_row = alert_at_current_time.iloc[-1]  # Use the row at current timestamp
-                    self.logger.info(f"🔍 {log_prefix}BACKTEST: Checking alerts at timestamp {current_timestamp}")
+                # Find ALL rows with alerts
+                alert_rows = df_with_signals[
+                    (df_with_signals['bull_alert'] == True) |
+                    (df_with_signals['bear_alert'] == True)
+                ]
+
+                if len(alert_rows) > 0:
+                    # Get the MOST RECENT alert
+                    latest_alert_row = alert_rows.iloc[-1]
+                    alert_timestamp = latest_alert_row.get('start_time')
+
+                    self.logger.info(f"🔍 {log_prefix}BACKTEST: Found alert at {alert_timestamp}")
+                    self.logger.info(f"🔍 {log_prefix}Debug: Bull alert: {latest_alert_row.get('bull_alert')}, Bear alert: {latest_alert_row.get('bear_alert')}")
+
+                    signal = self._check_immediate_signal(latest_alert_row, epic, timeframe, spread_pips, len(df), df_with_signals)
+                    if signal:
+                        return signal
                 else:
-                    # No data at current timestamp, use latest available
-                    pass
+                    self.logger.debug(f"🔍 {log_prefix}No alerts found in DataFrame")
+                    return None
+            else:
+                # LIVE MODE: Check only the latest row
+                latest_row = df_with_signals.iloc[-1]
+                current_timestamp = latest_row.get('start_time')
 
-            # DEBUG: Check alert flags
-            bull_alert = latest_row.get('bull_alert', False)
-            bear_alert = latest_row.get('bear_alert', False)
-            self.logger.info(f"🔍 {log_prefix}Debug: Bull alert: {bull_alert}, Bear alert: {bear_alert}")
-
-            # Debug logging for troubleshooting
-            if len(df) < 80:  # Only log for small datasets to avoid spam
+                # DEBUG: Check alert flags
                 bull_alert = latest_row.get('bull_alert', False)
                 bear_alert = latest_row.get('bear_alert', False)
-                if bull_alert or bear_alert:
-                    self.logger.info(f"🎯 {log_prefix}Alert detected! Bull: {bull_alert}, Bear: {bear_alert}")
+                self.logger.info(f"🔍 {log_prefix}Debug: Bull alert: {bull_alert}, Bear alert: {bear_alert}")
 
-            signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df), df_with_signals)
-            if signal:
-                return signal
+                signal = self._check_immediate_signal(latest_row, epic, timeframe, spread_pips, len(df), df_with_signals)
+                if signal:
+                    return signal
 
             return None
 
@@ -444,20 +528,23 @@ class EMAStrategy(BaseStrategy):
             # Format log prefix
             log_prefix = self._format_log_prefix(epic)
 
-            # Check for bull alert with Two-Pole Oscillator color validation
-            if latest_row.get('bull_alert', False):
+            # Check for bull alert with RSI zone validation
+            if latest_row.get('bull_alert', False) or latest_row.get('bull_bounce_signal', False):
                 self.logger.info(f"🎯 {log_prefix}BULL alert detected at bar {bar_count}")
 
-                # CRITICAL: Reject BULL signals if Two-Pole Oscillator is PURPLE (wrong color)
-                if not self.trend_validator.validate_two_pole_color(latest_row, 'BULL', self.backtest_mode):
-                    self.logger.info(f"❌ {log_prefix}BULL signal REJECTED by Two-Pole Oscillator validation")
+                # RSI ZONE VALIDATION (replaces Two-Pole color check)
+                rsi_valid, rsi_boost = self.trend_validator.validate_rsi_zone(latest_row, 'BULL')
+                if not rsi_valid:
+                    self.logger.info(f"❌ {log_prefix}BULL signal REJECTED by RSI zone validation")
                     return None
 
-                # ✅ RE-ENABLED: 1H Two-Pole color validation for both live and backtest modes
-                if getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
+                # 4H TREND AND RSI VALIDATION (replaces 1H Two-Pole MTF check)
+                from configdata.strategies.config_ema_strategy import EMA_4H_TREND_FILTER_ENABLED
+                if EMA_4H_TREND_FILTER_ENABLED:
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
-                    if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BULL'):
-                        self.logger.info(f"❌ {log_prefix}BULL signal REJECTED by 1H Two-Pole validation")
+                    mtf_valid, mtf_boost = self.mtf_analyzer.validate_4h_trend_and_momentum(epic, current_time, 'BULL')
+                    if not mtf_valid:
+                        self.logger.info(f"❌ {log_prefix}BULL signal REJECTED by 4H trend/RSI validation")
                         return None
 
 
@@ -472,13 +559,16 @@ class EMAStrategy(BaseStrategy):
                     self.logger.warning(f"❌ {log_prefix}BULL signal REJECTED: Price below EMA 200 (against major trend)")
                     return None
 
-                # ADX TREND STRENGTH VALIDATION
-                adx_value = latest_row.get('adx', 0)
-                if adx_value < self.min_adx:
-                    self.logger.warning(f"❌ {log_prefix}BULL signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
-                    return None
+                # ADX TREND STRENGTH VALIDATION (EMA mode only - Supertrend has built-in trend confirmation)
+                if not self.use_supertrend:
+                    adx_value = latest_row.get('adx', 0)
+                    if adx_value < self.min_adx:
+                        self.logger.warning(f"❌ {log_prefix}BULL signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
+                        return None
+                    else:
+                        self.logger.info(f"✅ {log_prefix}ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
                 else:
-                    self.logger.info(f"✅ {log_prefix}ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
+                    self.logger.info(f"✅ {log_prefix}Supertrend mode - using Supertrend confluence for trend strength (ADX check skipped)")
 
                 # SWING PROXIMITY VALIDATION
                 current_price = latest_row.get('close', 0)
@@ -496,7 +586,8 @@ class EMAStrategy(BaseStrategy):
 
                 # CRITICAL FIX #4: S/R PROXIMITY VALIDATION (long-term zones)
                 # Checks S/R data captured by scanner (100-500 bar zones)
-                if hasattr(latest_row, 'index') and 'nearest_resistance' in latest_row.index:
+                # ⚠️ OPTIMIZATION: Skip S/R check in Supertrend mode - Supertrend bands act as dynamic S/R
+                if not self.use_supertrend and hasattr(latest_row, 'index') and 'nearest_resistance' in latest_row.index:
                     sr_resistance = latest_row.get('nearest_resistance')
                     MIN_SR_DISTANCE = 10  # pips minimum for S/R zones (stricter than swings)
 
@@ -509,6 +600,8 @@ class EMAStrategy(BaseStrategy):
                             )
                             return None
                         self.logger.info(f"✅ {log_prefix}S/R resistance check passed ({dist_pips:.1f} pips)")
+                elif self.use_supertrend:
+                    self.logger.info(f"✅ {log_prefix}Supertrend mode - S/R check skipped (Supertrend bands act as dynamic S/R)")
 
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:
@@ -536,19 +629,23 @@ class EMAStrategy(BaseStrategy):
                 else:
                     self.logger.info(f"❌ {log_prefix}BULL signal creation failed")
             
-            # Check for bear alert with Two-Pole Oscillator color validation
-            if latest_row.get('bear_alert', False):
+            # Check for bear alert with RSI zone validation
+            if latest_row.get('bear_alert', False) or latest_row.get('bear_bounce_signal', False):
                 self.logger.info(f"🎯 {log_prefix}BEAR alert detected at bar {bar_count}")
 
-                # CRITICAL: Reject BEAR signals if Two-Pole Oscillator is GREEN (wrong color)
-                if not self.trend_validator.validate_two_pole_color(latest_row, 'BEAR', self.backtest_mode):
+                # RSI ZONE VALIDATION (replaces Two-Pole color check)
+                rsi_valid, rsi_boost = self.trend_validator.validate_rsi_zone(latest_row, 'BEAR')
+                if not rsi_valid:
+                    self.logger.info(f"❌ {log_prefix}BEAR signal REJECTED by RSI zone validation")
                     return None
 
-                # ✅ RE-ENABLED: 1H Two-Pole color validation for both live and backtest modes
-                if getattr(config, 'TWO_POLE_MTF_VALIDATION', True):
+                # 4H TREND AND RSI VALIDATION (replaces 1H Two-Pole MTF check)
+                from configdata.strategies.config_ema_strategy import EMA_4H_TREND_FILTER_ENABLED
+                if EMA_4H_TREND_FILTER_ENABLED:
                     current_time = latest_row.get('start_time', pd.Timestamp.now())
-                    if not self.mtf_analyzer.validate_1h_two_pole(epic, current_time, 'BEAR'):
-                        self.logger.info(f"❌ {log_prefix}BEAR signal REJECTED by 1H Two-Pole validation")
+                    mtf_valid, mtf_boost = self.mtf_analyzer.validate_4h_trend_and_momentum(epic, current_time, 'BEAR')
+                    if not mtf_valid:
+                        self.logger.info(f"❌ {log_prefix}BEAR signal REJECTED by 4H trend/RSI validation")
                         return None
 
 
@@ -563,13 +660,16 @@ class EMAStrategy(BaseStrategy):
                     self.logger.warning(f"❌ {log_prefix}BEAR signal REJECTED: Price above EMA 200 (against major trend)")
                     return None
 
-                # ADX TREND STRENGTH VALIDATION
-                adx_value = latest_row.get('adx', 0)
-                if adx_value < self.min_adx:
-                    self.logger.warning(f"❌ {log_prefix}BEAR signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
-                    return None
+                # ADX TREND STRENGTH VALIDATION (EMA mode only - Supertrend has built-in trend confirmation)
+                if not self.use_supertrend:
+                    adx_value = latest_row.get('adx', 0)
+                    if adx_value < self.min_adx:
+                        self.logger.warning(f"❌ {log_prefix}BEAR signal REJECTED: ADX {adx_value:.1f} below minimum {self.min_adx} (weak trend)")
+                        return None
+                    else:
+                        self.logger.info(f"✅ {log_prefix}ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
                 else:
-                    self.logger.info(f"✅ {log_prefix}ADX validation passed: {adx_value:.1f} >= {self.min_adx}")
+                    self.logger.info(f"✅ {log_prefix}Supertrend mode - using Supertrend confluence for trend strength (ADX check skipped)")
 
                 # SWING PROXIMITY VALIDATION
                 current_price = latest_row.get('close', 0)
@@ -587,7 +687,8 @@ class EMAStrategy(BaseStrategy):
 
                 # CRITICAL FIX #4: S/R PROXIMITY VALIDATION (long-term zones)
                 # Checks S/R data captured by scanner (100-500 bar zones)
-                if hasattr(latest_row, 'index') and 'nearest_support' in latest_row.index:
+                # ⚠️ OPTIMIZATION: Skip S/R check in Supertrend mode - Supertrend bands act as dynamic S/R
+                if not self.use_supertrend and hasattr(latest_row, 'index') and 'nearest_support' in latest_row.index:
                     sr_support = latest_row.get('nearest_support')
                     MIN_SR_DISTANCE = 10  # pips minimum for S/R zones (stricter than swings)
 
@@ -600,6 +701,8 @@ class EMAStrategy(BaseStrategy):
                             )
                             return None
                         self.logger.info(f"✅ {log_prefix}S/R support check passed ({dist_pips:.1f} pips)")
+                elif self.use_supertrend:
+                    self.logger.info(f"✅ {log_prefix}Supertrend mode - S/R check skipped (Supertrend bands act as dynamic S/R)")
 
                 # ENHANCED VALIDATION: Multi-factor breakout confirmation
                 if self.enhanced_validation and self.breakout_validator:
@@ -646,10 +749,6 @@ class EMAStrategy(BaseStrategy):
         """SIMPLE CONFIDENCE CALCULATION: Based on EMA alignment and crossover strength (delegated to helper)"""
         return self.signal_calculator.calculate_simple_confidence(latest_row, signal_type)
     
-    def _validate_two_pole_oscillator(self, latest_row: pd.Series, signal_type: str) -> float:
-        """TWO-POLE OSCILLATOR VALIDATION: Validate EMA signals with momentum oscillator (delegated to helper)"""
-        return self.trend_validator.validate_two_pole_oscillator(latest_row, signal_type)
-
     def _apply_overextension_filters(self, latest_row: pd.Series, signal_type: str, base_confidence: float) -> float:
         """
         Apply overextension filters to adjust signal confidence
@@ -761,23 +860,56 @@ class EMAStrategy(BaseStrategy):
 
             # Create base signal using parent method
             signal = self.create_base_signal(signal_type, epic, timeframe, latest_row)
-            
-            # Add EMA-specific data
-            signal.update({
-                'ema_short': latest_row.get('ema_short', 0),
-                'ema_long': latest_row.get('ema_long', 0), 
-                'ema_trend': latest_row.get('ema_trend', 0),
-                'bull_cross': latest_row.get('bull_cross', False),
-                'bear_cross': latest_row.get('bear_cross', False),
-                'bull_condition': latest_row.get('bull_condition', False),
-                'bear_condition': latest_row.get('bear_condition', False)
-            })
-            
-            # Calculate simple confidence based on EMA alignment and crossover strength
-            confidence = self._calculate_simple_confidence(latest_row, signal_type)
 
-            # Apply overextension filters if enabled
-            confidence = self._apply_overextension_filters(latest_row, signal_type, confidence)
+            # Add mode-specific data
+            if self.use_supertrend:
+                # Add Supertrend-specific data
+                signal.update({
+                    'st_fast': latest_row.get('st_fast', 0),
+                    'st_medium': latest_row.get('st_medium', 0),
+                    'st_slow': latest_row.get('st_slow', 0),
+                    'st_fast_trend': latest_row.get('st_fast_trend', 0),
+                    'st_medium_trend': latest_row.get('st_medium_trend', 0),
+                    'st_slow_trend': latest_row.get('st_slow_trend', 0),
+                    'st_confluence_pct': latest_row.get('st_confluence_pct', 0),
+                    'atr': latest_row.get('atr', 0),
+                    'strategy_mode': 'supertrend'
+                })
+            else:
+                # Add EMA-specific data
+                signal.update({
+                    'ema_short': latest_row.get('ema_short', 0),
+                    'ema_long': latest_row.get('ema_long', 0),
+                    'ema_trend': latest_row.get('ema_trend', 0),
+                    'bull_cross': latest_row.get('bull_cross', False),
+                    'bear_cross': latest_row.get('bear_cross', False),
+                    'bull_condition': latest_row.get('bull_condition', False),
+                    'bear_condition': latest_row.get('bear_condition', False),
+                    'strategy_mode': 'ema'
+                })
+            
+            # Calculate confidence based on mode
+            if self.use_supertrend:
+                # Get 4H Supertrend alignment
+                current_time = latest_row.get('start_time', pd.Timestamp.now())
+                mtf_4h = self.mtf_analyzer.get_4h_supertrend_alignment(epic, current_time)
+                mtf_4h_aligned = (
+                    (signal_type == 'BULL' and mtf_4h == 'bullish') or
+                    (signal_type == 'BEAR' and mtf_4h == 'bearish')
+                )
+
+                # Calculate Supertrend confidence
+                confidence = self.signal_calculator.calculate_supertrend_confidence(
+                    latest_row,
+                    signal_type,
+                    mtf_4h_aligned=mtf_4h_aligned
+                )
+            else:
+                # Calculate EMA confidence
+                confidence = self._calculate_simple_confidence(latest_row, signal_type)
+
+                # Apply overextension filters if enabled (EMA mode only)
+                confidence = self._apply_overextension_filters(latest_row, signal_type, confidence)
 
             # Add confidence and execution prices
             signal['confidence'] = confidence

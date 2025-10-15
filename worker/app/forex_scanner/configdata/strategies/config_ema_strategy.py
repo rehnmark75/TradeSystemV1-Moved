@@ -1,27 +1,144 @@
 # configdata/strategies/config_ema_strategy.py
 """
-EMA Strategy Configuration
-Configuration module for EMA strategy settings including dynamic configurations,
-distance validation, and integrated momentum indicators
+Multi-Supertrend Strategy Configuration (EMA Replacement)
+Configuration module for Multi-Supertrend trend-following strategy.
+Uses 3 Supertrend indicators with different parameters for confluence-based signals.
+
+NOTE: File kept as 'config_ema_strategy.py' for backward compatibility with existing references.
+Internal logic completely replaced with Supertrend-based trend following.
 """
 
 # =============================================================================
-# EMA STRATEGY CORE CONFIGURATION SETTINGS  
+# MULTI-SUPERTREND STRATEGY CORE CONFIGURATION
 # =============================================================================
 
-# Core Strategy Settings
-SIMPLE_EMA_STRATEGY = True                # True = basic EMA rules only, False = full filters
-STRICT_EMA_ALIGNMENT = True               # Not used in simple mode
-REQUIRE_EMA_SEPARATION = False            # Disabled in simple mode
-STRATEGY_WEIGHT_EMA = 0.5                 # EMA strategy weight
-STRATEGY_WEIGHT_ZERO_LAG = 0.0            # Zero Lag EMA weight (if enabled)
+# Strategy Mode Selection
+USE_SUPERTREND_MODE = True                 # True = Multi-Supertrend, False = Legacy EMA (for A/B testing)
+SIMPLE_EMA_STRATEGY = True                 # Kept for compatibility - ignored when USE_SUPERTREND_MODE = True
+STRICT_EMA_ALIGNMENT = True                # Legacy - not used
+REQUIRE_EMA_SEPARATION = False             # Legacy - not used
+STRATEGY_WEIGHT_EMA = 0.5                  # Strategy weight in combined mode
+STRATEGY_WEIGHT_ZERO_LAG = 0.0             # Legacy - not used
 
 # =============================================================================
-# DYNAMIC EMA CONFIGURATION SYSTEM
+# MULTI-SUPERTREND CONFIGURATION SYSTEM
 # =============================================================================
 
-# Enable/disable dynamic EMA configuration
-ENABLE_DYNAMIC_EMA_CONFIG = False         # Disabled - use stable 9/21/200 EMAs
+# Enable/disable dynamic Supertrend configuration (replaces ENABLE_DYNAMIC_EMA_CONFIG)
+ENABLE_DYNAMIC_SUPERTREND_CONFIG = False   # Use fixed 'default' config for now
+
+# Multi-Supertrend Strategy Configurations
+# Each config has 3 Supertrend indicators: Fast, Medium, Slow
+SUPERTREND_STRATEGY_CONFIG = {
+    'default': {
+        # Fast Supertrend - Quick trend detection, early signals
+        'fast_period': 7,
+        'fast_multiplier': 1.5,
+        # Medium Supertrend - Balanced confirmation
+        'medium_period': 14,
+        'medium_multiplier': 2.0,
+        # Slow Supertrend - Major trend filter
+        'slow_period': 21,
+        'slow_multiplier': 3.0,
+        # ATR settings
+        'atr_period': 14,
+        # Description
+        'description': 'Balanced multi-Supertrend for trending markets',
+        'best_for': ['trending', 'medium_volatility'],
+        'best_market_regime': 'trending',
+        'best_session': ['london', 'new_york'],
+        'min_pip_volatility': 8.0,
+        'max_pip_volatility': 50.0
+    },
+    'conservative': {
+        'fast_period': 10,
+        'fast_multiplier': 2.0,
+        'medium_period': 14,
+        'medium_multiplier': 2.5,
+        'slow_period': 21,
+        'slow_multiplier': 3.5,
+        'atr_period': 14,
+        'description': 'Conservative - wider Supertrends, fewer false signals',
+        'best_for': ['strong_trends', 'low_volatility'],
+        'best_market_regime': 'trending',
+        'min_pip_volatility': 3.0,
+        'max_pip_volatility': 25.0
+    },
+    'aggressive': {
+        'fast_period': 5,
+        'fast_multiplier': 1.0,
+        'medium_period': 10,
+        'medium_multiplier': 1.5,
+        'slow_period': 14,
+        'slow_multiplier': 2.0,
+        'atr_period': 10,
+        'description': 'Aggressive - tight Supertrends, more signals',
+        'best_for': ['breakouts', 'high_volatility'],
+        'best_market_regime': 'breakout',
+        'min_pip_volatility': 20.0,
+        'max_pip_volatility': 100.0
+    },
+    'scalping': {
+        'fast_period': 3,
+        'fast_multiplier': 0.8,
+        'medium_period': 7,
+        'medium_multiplier': 1.2,
+        'slow_period': 10,
+        'slow_multiplier': 1.5,
+        'atr_period': 7,
+        'description': 'Ultra-fast Supertrends for scalping',
+        'best_for': ['ranging_markets', 'high_frequency'],
+        'best_market_regime': 'ranging',
+        'min_pip_volatility': 15.0,
+        'max_pip_volatility': 80.0
+    },
+    'swing': {
+        'fast_period': 14,
+        'fast_multiplier': 2.0,
+        'medium_period': 21,
+        'medium_multiplier': 2.5,
+        'slow_period': 28,
+        'slow_multiplier': 3.5,
+        'atr_period': 21,
+        'description': 'Slow Supertrends for swing trading',
+        'best_for': ['strong_trends', 'position_trading'],
+        'best_market_regime': 'trending',
+        'min_pip_volatility': 5.0,
+        'max_pip_volatility': 30.0
+    }
+}
+
+# Active Supertrend configuration when not using dynamic mode
+# Testing different configs to find optimal performance
+ACTIVE_SUPERTREND_CONFIG = 'default'  # Using default balanced config
+
+# Supertrend Signal Requirements
+# ✅ OPTIMIZED: 2/3 confluence selected after A/B testing
+# Tested both 2/3 and 3/3 - results showed 3/3 only improved P/L ratio by 0.9% (1.09:1 vs 1.08:1)
+# while reducing signals by 7.3%. Not worth the trade-off.
+# 2 = At least 2/3 must agree (66% confluence - optimal balance of quality vs quantity)
+# 3 = All Supertrends must agree (100% confluence - only 0.9% better, 7.3% fewer signals)
+SUPERTREND_MIN_CONFLUENCE = 2              # Require 2/3 Supertrends to agree (optimal setting)
+SUPERTREND_ALLOW_PARTIAL = False           # If True, allow 2/3 confluence with reduced confidence
+
+# Multi-Timeframe Supertrend Confirmation (4H Filter)
+SUPERTREND_4H_FILTER_ENABLED = True        # Enable 4H Supertrend trend filter
+SUPERTREND_4H_USE_MEDIUM = True            # Use Medium Supertrend on 4H (more reliable than fast)
+SUPERTREND_4H_CONFLUENCE_BONUS = 0.10      # Bonus when 4H trend aligns with 15m
+
+# Confidence Scoring for Supertrend Signals
+SUPERTREND_CONFIDENCE_BASE = 0.60          # Base confidence when all 3 agree
+SUPERTREND_CONFIDENCE_FULL_CONFLUENCE = 0.35  # Bonus for 100% confluence (3/3)
+SUPERTREND_CONFIDENCE_PARTIAL_CONFLUENCE = 0.15  # Bonus for partial (2/3) if allowed
+SUPERTREND_CONFIDENCE_VOLUME = 0.05        # Bonus for volume confirmation
+SUPERTREND_CONFIDENCE_4H_ALIGNMENT = 0.10  # Bonus for 4H trend alignment
+
+# =============================================================================
+# DYNAMIC EMA CONFIGURATION SYSTEM (LEGACY - KEPT FOR COMPATIBILITY)
+# =============================================================================
+
+# Enable/disable dynamic EMA configuration (legacy)
+ENABLE_DYNAMIC_EMA_CONFIG = False         # Disabled - using Supertrend mode
 
 # Enhanced Dynamic EMA Strategy Configurations with market conditions
 EMA_STRATEGY_CONFIG = {
@@ -112,7 +229,7 @@ EMA_STRATEGY_CONFIG = {
 }
 
 # Active configuration when not using dynamic mode
-ACTIVE_EMA_CONFIG = 'aggressive'
+ACTIVE_EMA_CONFIG = 'default'
 
 # Scanner and backtest dynamic EMA usage
 SCANNER_USE_DYNAMIC_EMA = True            # Use dynamic EMA in scanner
@@ -149,26 +266,73 @@ EMA200_MIN_DISTANCE_PIPS = {
 EMA200_DISTANCE_MOMENTUM_MULTIPLIER = 0.8
 
 # =============================================================================
-# TWO-POLE OSCILLATOR (EMA INTEGRATION)
+# TWO-POLE OSCILLATOR - DISABLED (REPLACED WITH RSI)
 # =============================================================================
 
-# Two-Pole Oscillator Configuration (momentum confirmation for EMA signals)
-TWO_POLE_OSCILLATOR_ENABLED = True      # TEMPORARILY DISABLE to test enhanced validation effectiveness
-TWO_POLE_FILTER_LENGTH = 20              # Filter length (default: 20)
-TWO_POLE_SMA_LENGTH = 25                 # SMA length for normalization (default: 25)  
-TWO_POLE_SIGNAL_DELAY = 4                # Signal delay in bars (default: 4)
-TWO_POLE_VALIDATION_ENABLED = True        # ✅ RE-ENABLED: Use oscillator for signal validation
-TWO_POLE_MIN_STRENGTH = 0.1              # Minimum oscillator strength for signals
-TWO_POLE_ZONE_FILTER_ENABLED = True      # Require proper zone for signals (oversold/overbought)
+# Two-Pole Oscillator Configuration - DISABLED in favor of standard RSI
+TWO_POLE_OSCILLATOR_ENABLED = False      # ❌ DISABLED: Replaced with RSI filters
+TWO_POLE_FILTER_LENGTH = 20              # (Legacy - not used)
+TWO_POLE_SMA_LENGTH = 25                 # (Legacy - not used)
+TWO_POLE_SIGNAL_DELAY = 4                # (Legacy - not used)
+TWO_POLE_VALIDATION_ENABLED = False      # ❌ DISABLED: Using RSI validation instead
+TWO_POLE_MIN_STRENGTH = 0.1              # (Legacy - not used)
+TWO_POLE_ZONE_FILTER_ENABLED = False     # ❌ DISABLED
 
-# Two-Pole Oscillator Confidence Scoring
-TWO_POLE_CONFIDENCE_WEIGHT = 0.2         # Weight in overall confidence calculation
-TWO_POLE_ZONE_BONUS = 0.1                # Confidence bonus for proper zone alignment
-TWO_POLE_STRENGTH_MULTIPLIER = 0.5       # Multiplier for oscillator strength
+# Two-Pole Oscillator Confidence Scoring - LEGACY
+TWO_POLE_CONFIDENCE_WEIGHT = 0.0         # Set to 0 (replaced by EMA_RSI_CONFIDENCE_WEIGHT)
+TWO_POLE_ZONE_BONUS = 0.0                # (Legacy - not used)
+TWO_POLE_STRENGTH_MULTIPLIER = 0.0       # (Legacy - not used)
 
-# Two-Pole Multi-Timeframe Validation
-TWO_POLE_MTF_VALIDATION = True           # ✅ RE-ENABLED: 1H timeframe Two-Pole validation
-TWO_POLE_MTF_TIMEFRAME = '1h'            # Higher timeframe for confirmation (1h, 4h, etc.)
+# Two-Pole Multi-Timeframe Validation - DISABLED
+TWO_POLE_MTF_VALIDATION = False          # ❌ DISABLED: Using 4H EMA + RSI validation instead
+TWO_POLE_MTF_TIMEFRAME = '1h'            # (Legacy - not used)
+
+# =============================================================================
+# EMA STRATEGY TRIGGER MODE (TRADINGVIEW PROFESSIONAL)
+# =============================================================================
+
+# Primary trigger selection
+EMA_TRIGGER_MODE = 'crossover'           # Options: 'bounce', 'crossover', 'hybrid'
+
+# Bounce strategy settings (from TradingView "EMA Bounce Scalping" - 180+ likes)
+EMA_BOUNCE_ENABLED = True
+EMA_BOUNCE_DISTANCE_PCT = 0.1            # Within 0.1% of EMA (~10 pips EURUSD)
+EMA_BOUNCE_REQUIRE_REJECTION = True      # Require rejection candle pattern
+EMA_BOUNCE_WICK_RATIO = 1.5              # Rejection wick must be 1.5x opposite wick
+EMA_BOUNCE_MIN_CANDLE_BODY = 0.3         # Minimum body ratio (avoid dojis)
+EMA_BOUNCE_MIN_ADX = 15                  # Lower ADX for bounces (pullbacks in medium trends)
+
+# Crossover strategy (kept as fallback option)
+EMA_CROSSOVER_ENABLED = True             # Keep for comparison/hybrid mode
+EMA_CROSSOVER_REQUIRE_STRONG_TREND = True
+
+# =============================================================================
+# RSI MOMENTUM FILTER (REPLACES TWO-POLE)
+# =============================================================================
+
+# Enable RSI-based momentum filtering (TradingView standard)
+EMA_USE_RSI_FILTER = True
+
+# 15m RSI settings (CORRECTED: Trend confirmation with buffer zone)
+EMA_RSI_LENGTH = 14                      # Standard RSI period
+EMA_RSI_BULL_MIN = 40                    # RSI > 40 confirms bullish momentum (10-point buffer)
+EMA_RSI_BULL_MAX = 100                   # No upper limit (not using as overbought)
+EMA_RSI_BEAR_MIN = 0                     # No lower limit (not using as oversold)
+EMA_RSI_BEAR_MAX = 60                    # RSI < 60 confirms bearish momentum (10-point buffer)
+
+# 4H Multi-Timeframe Filters (replaces 1H Two-Pole)
+EMA_4H_TREND_FILTER_ENABLED = True       # 4H EMA alignment check
+EMA_4H_RSI_FILTER_ENABLED = True         # 4H RSI momentum check
+EMA_4H_RSI_BULL_MIN = 50                 # 4H RSI > 50 for bullish bias
+EMA_4H_RSI_BEAR_MAX = 50                 # 4H RSI < 50 for bearish bias
+
+# RSI confidence scoring (replaces Two-Pole confidence weight)
+EMA_RSI_CONFIDENCE_WEIGHT = 0.15         # Weight in confidence calculation
+EMA_4H_RSI_BONUS = 0.10                  # Bonus when 4H RSI + trend aligned
+
+# Confidence calculation adjustments
+EMA_BOUNCE_CONFIDENCE_BASE = 0.60        # Higher base for quality bounce signals
+EMA_CROSSOVER_CONFIDENCE_BASE = 0.50     # Lower base for crossover signals
 
 
 # =============================================================================
@@ -839,6 +1003,10 @@ USE_ADAPTIVE_SL_TP = False               # 🧠 Enable adaptive volatility calcu
 EMA_STOP_LOSS_ATR_MULTIPLIER = 2.0       # Tighter stops for trend-following
 EMA_TAKE_PROFIT_ATR_MULTIPLIER = 4.0     # Larger targets (ride trends) (2.0:4.0 = 1:2 R:R)
 
+# SUPERTREND-SPECIFIC: Wider stops for trend-following (overrides EMA settings when in Supertrend mode)
+SUPERTREND_STOP_LOSS_ATR_MULTIPLIER = 2.5    # Wider stops - let trends breathe
+SUPERTREND_TAKE_PROFIT_ATR_MULTIPLIER = 5.0  # Larger targets - ride trends (2.5:5.0 = 1:2 R:R)
+
 # Pair-Specific Parameters
 EMA_PAIR_SPECIFIC_PARAMS = {
     'EURUSD': {
@@ -878,9 +1046,14 @@ EMA_PAIR_SPECIFIC_PARAMS = {
 # Structure-Based Stop Placement
 EMA_USE_STRUCTURE_STOPS = True           # Place stops beyond recent swing points
 EMA_STRUCTURE_LOOKBACK_BARS = 30         # Longer lookback for trend-following
-EMA_MIN_STOP_DISTANCE_PIPS = 12.0        # Minimum stop distance (increased from 10.0)
-EMA_MAX_STOP_DISTANCE_PIPS = 45.0        # Maximum stop distance (increased from 25.0 to allow ATR-based calculation)
+EMA_MIN_STOP_DISTANCE_PIPS = 12.0        # Minimum stop distance (EMA mode)
+EMA_MAX_STOP_DISTANCE_PIPS = 45.0        # Maximum stop distance (EMA mode)
 EMA_STRUCTURE_BUFFER_PIPS = 2.0          # Buffer beyond swing point
+
+# SUPERTREND-SPECIFIC: Wider minimums for trend-following
+SUPERTREND_MIN_STOP_DISTANCE_PIPS = 20.0    # Wider minimum - let trends develop
+SUPERTREND_MAX_STOP_DISTANCE_PIPS = 80.0    # Higher maximum - catch big moves
+SUPERTREND_MIN_LIMIT_DISTANCE_PIPS = 40.0   # Minimum take profit - aim for 2:1
 
 # Enhanced Confidence Calculation Factors
 EMA_CONFIDENCE_BASE = 0.55               # Start slightly higher for trend clarity

@@ -95,157 +95,149 @@ class EMATrendValidator:
             self.logger.error(f"Error validating EMA 200 trend: {e}")
             return True  # Allow signal on error
     
-    def validate_two_pole_oscillator(self, latest_row: pd.Series, signal_type: str) -> float:
+    def validate_rsi_zone(self, latest_row: pd.Series, signal_type: str) -> tuple:
         """
-        TWO-POLE OSCILLATOR VALIDATION: Validate EMA signals with momentum oscillator
-        
-        Based on BigBeluga's Two-Pole Oscillator logic:
-        - Bull signals: Oscillator crossover while in oversold zone (< 0)
-        - Bear signals: Oscillator crossunder while in overbought zone (> 0)
-        - Strength and zone alignment provide confidence boost
-        
-        Returns:
-            Confidence boost value (0.0 to max_boost)
-        """
-        try:
-            if not getattr(config, 'TWO_POLE_VALIDATION_ENABLED', True):
-                return 0.0
-            
-            # Get Two-Pole Oscillator data
-            two_pole_osc = latest_row.get('two_pole_osc', 0)
-            two_pole_strength = latest_row.get('two_pole_strength', 0)
-            two_pole_zone = latest_row.get('two_pole_zone', 'neutral')
-            two_pole_buy_signal = latest_row.get('two_pole_buy_signal', False)
-            two_pole_sell_signal = latest_row.get('two_pole_sell_signal', False)
-            two_pole_is_green = latest_row.get('two_pole_is_green', False)  # Rising/Green
-            two_pole_is_purple = latest_row.get('two_pole_is_purple', False)  # Falling/Purple
-            
-            confidence_boost = 0.0
-            max_boost = getattr(config, 'TWO_POLE_CONFIDENCE_WEIGHT', 0.15)  # 15% max boost
-            
-            # Check if oscillator data is available
-            if two_pole_osc == 0 and two_pole_strength == 0:
-                self.logger.debug("Two-Pole Oscillator data not available")
-                return 0.0
-            
-            # 1. COLOR-BASED SIGNAL VALIDATION (60% of boost) 
-            signal_alignment = 0.0
-            if signal_type == 'BULL':
-                if two_pole_buy_signal:
-                    # Perfect: Buy signal + crossover + oversold + green oscillator
-                    signal_alignment = 0.6  # Perfect alignment
-                    self.logger.debug(f"✅ Two-Pole BULL signal confirmed (osc: {two_pole_osc:.3f}, green: {two_pole_is_green})")
-                elif two_pole_is_green and two_pole_osc < 0:
-                    # Good: Green oscillator in oversold zone (allows buy signals)
-                    signal_alignment = 0.3  # Partial alignment - green oscillator allows buys
-                    self.logger.debug(f"🔶 Two-Pole GREEN in oversold zone for BULL (osc: {two_pole_osc:.3f})")
-                elif two_pole_is_green:
-                    # Neutral: Green oscillator but wrong zone
-                    signal_alignment = 0.1  # Small boost - at least oscillator allows buys
-                    self.logger.debug(f"🔶 Two-Pole GREEN but wrong zone for BULL (osc: {two_pole_osc:.3f})")
-                    
-            elif signal_type == 'BEAR':
-                if two_pole_sell_signal:
-                    # Perfect: Sell signal + crossunder + overbought + purple oscillator
-                    signal_alignment = 0.6  # Perfect alignment
-                    self.logger.debug(f"✅ Two-Pole BEAR signal confirmed (osc: {two_pole_osc:.3f}, purple: {two_pole_is_purple})")
-                elif two_pole_is_purple and two_pole_osc > 0:
-                    # Good: Purple oscillator in overbought zone (allows sell signals)
-                    signal_alignment = 0.3  # Partial alignment - purple oscillator allows sells
-                    self.logger.debug(f"🔶 Two-Pole PURPLE in overbought zone for BEAR (osc: {two_pole_osc:.3f})")
-                elif two_pole_is_purple:
-                    # Neutral: Purple oscillator but wrong zone
-                    signal_alignment = 0.1  # Small boost - at least oscillator allows sells
-                    self.logger.debug(f"🔶 Two-Pole PURPLE but wrong zone for BEAR (osc: {two_pole_osc:.3f})")
-            
-            # 2. OSCILLATOR STRENGTH CHECK (30% of boost)
-            strength_boost = 0.0
-            min_strength = getattr(config, 'TWO_POLE_MIN_STRENGTH', 0.1)
-            if two_pole_strength >= min_strength:
-                strength_multiplier = getattr(config, 'TWO_POLE_STRENGTH_MULTIPLIER', 0.5)
-                strength_boost = min(0.3, two_pole_strength * strength_multiplier)
-                self.logger.debug(f"Two-Pole strength boost: {strength_boost:.1%} (strength: {two_pole_strength:.3f})")
-            
-            # 3. ZONE CLASSIFICATION BONUS (10% of boost)
-            zone_bonus = 0.0
-            if getattr(config, 'TWO_POLE_ZONE_FILTER_ENABLED', True):
-                zone_bonus_value = getattr(config, 'TWO_POLE_ZONE_BONUS', 0.1)
-                if ((signal_type == 'BULL' and two_pole_zone == 'oversold') or 
-                    (signal_type == 'BEAR' and two_pole_zone == 'overbought')):
-                    zone_bonus = zone_bonus_value
-                    self.logger.debug(f"Two-Pole zone bonus: +{zone_bonus:.1%} ({two_pole_zone})")
-            
-            # Calculate total confidence boost
-            total_alignment = signal_alignment + (strength_boost / max_boost * 0.3) + (zone_bonus / 0.1 * 0.1)
-            confidence_boost = max_boost * total_alignment
-            
-            return max(0.0, min(max_boost, confidence_boost))
-            
-        except Exception as e:
-            self.logger.error(f"Error validating Two-Pole Oscillator: {e}")
-            return 0.0  # Safe fallback
-    
-    
-    def validate_two_pole_color(self, latest_row: pd.Series, signal_type: str, backtest_mode: bool = False) -> bool:
-        """
-        Validate that Two-Pole Oscillator color matches signal direction
+        RSI TREND CONFIRMATION: Use RSI to confirm trend direction
+
+        CORRECTED LOGIC: RSI > 50 = bullish, RSI < 50 = bearish
+        Not using RSI for overbought/oversold - only for trend confirmation
 
         Args:
-            latest_row: DataFrame row with indicator data
+            latest_row: DataFrame row with RSI data
             signal_type: 'BULL' or 'BEAR'
-            backtest_mode: If True, disable strict validation for historical analysis
 
         Returns:
-            True if color matches signal, False otherwise
+            (is_valid, confidence_boost): Tuple of validation result and boost value
         """
-        if not getattr(config, 'TWO_POLE_OSCILLATOR_ENABLED', False):
-            return True
+        try:
+            from configdata.strategies.config_ema_strategy import (
+                EMA_USE_RSI_FILTER,
+                EMA_RSI_BULL_MIN,
+                EMA_RSI_BEAR_MAX,
+                EMA_RSI_CONFIDENCE_WEIGHT
+            )
 
-        # ✅ RE-ENABLED: Two-Pole color validation now works in both live and backtest modes
-        # Removed backtest mode bypass to ensure full validation pipeline integrity
-        
-        # Get both color indicators
-        two_pole_is_green = latest_row.get('two_pole_is_green', False)
-        two_pole_is_purple = latest_row.get('two_pole_is_purple', False)
-        
-        # CRITICAL SAFETY CHECK: If both colors are False, the Two-Pole data is missing
-        if not two_pole_is_green and not two_pole_is_purple:
-            # Check if we have the oscillator value itself
-            two_pole_osc = latest_row.get('two_pole_osc', None)
-            if two_pole_osc is None:
-                self.logger.warning(f"⚠️ Two-Pole Oscillator data MISSING - allowing {signal_type} signal to pass through")
-                return True  # Allow signal when indicators are missing (graceful degradation)
-        
-        if signal_type == 'BULL':
-            # Check 15m Two-Pole color
-            if two_pole_is_purple:
-                self.logger.warning(f"❌ EMA BULL signal REJECTED: 15m Two-Pole Oscillator is PURPLE (falling)")
-                return False
-            
-            if two_pole_is_green:
-                self.logger.debug(f"✅ 15m Two-Pole Oscillator is GREEN")
-                return True
-            
-            # Neither green nor purple but oscillator exists - allow signal (graceful degradation)
-            self.logger.warning(f"⚠️ Two-Pole Oscillator has undefined color state for BULL signal - allowing signal")
-            return True  # Allow signal with graceful degradation
-        
-        elif signal_type == 'BEAR':
-            # Check 15m Two-Pole color
-            if two_pole_is_green:
-                self.logger.warning(f"❌ EMA BEAR signal REJECTED: 15m Two-Pole Oscillator is GREEN (rising)")
-                return False
-            
-            if two_pole_is_purple:
-                self.logger.debug(f"✅ 15m Two-Pole Oscillator is PURPLE")
-                return True
-            
-            # Neither green nor purple but oscillator exists - allow signal (graceful degradation)
-            self.logger.warning(f"⚠️ Two-Pole Oscillator has undefined color state for BEAR signal - allowing signal")
-            return True  # Allow signal with graceful degradation
-        
-        # Unknown signal type or other edge case - block for safety
-        return False
+            if not EMA_USE_RSI_FILTER:
+                return True, 0.0
+
+            rsi = latest_row.get('rsi', 50)
+
+            if signal_type == 'BULL':
+                # RSI must be > 50 to confirm bullish momentum
+                is_valid = rsi >= EMA_RSI_BULL_MIN
+
+                if not is_valid:
+                    self.logger.warning(f"❌ BULL signal REJECTED: RSI confirms bearish trend ({rsi:.1f} < {EMA_RSI_BULL_MIN})")
+                    return False, 0.0
+
+                # Calculate confidence boost: Higher RSI = stronger bullish momentum
+                # RSI 50 = minimal boost, RSI 70+ = max boost
+                if rsi >= 70:
+                    boost_factor = 1.0  # Maximum boost
+                elif rsi >= 60:
+                    boost_factor = 0.75
+                else:  # 50-60 range
+                    boost_factor = 0.5
+
+                confidence_boost = EMA_RSI_CONFIDENCE_WEIGHT * boost_factor
+
+                self.logger.info(f"✅ RSI confirms BULL trend: {rsi:.1f} (boost: +{confidence_boost:.1%})")
+                return True, confidence_boost
+
+            elif signal_type == 'BEAR':
+                # RSI must be < 50 to confirm bearish momentum
+                is_valid = rsi <= EMA_RSI_BEAR_MAX
+
+                if not is_valid:
+                    self.logger.warning(f"❌ BEAR signal REJECTED: RSI confirms bullish trend ({rsi:.1f} > {EMA_RSI_BEAR_MAX})")
+                    return False, 0.0
+
+                # Calculate confidence boost: Lower RSI = stronger bearish momentum
+                # RSI 50 = minimal boost, RSI 30- = max boost
+                if rsi <= 30:
+                    boost_factor = 1.0  # Maximum boost
+                elif rsi <= 40:
+                    boost_factor = 0.75
+                else:  # 40-50 range
+                    boost_factor = 0.5
+
+                confidence_boost = EMA_RSI_CONFIDENCE_WEIGHT * boost_factor
+
+                self.logger.info(f"✅ RSI confirms BEAR trend: {rsi:.1f} (boost: +{confidence_boost:.1%})")
+                return True, confidence_boost
+
+            return False, 0.0
+
+        except Exception as e:
+            self.logger.error(f"Error validating RSI zone: {e}")
+            return True, 0.0  # Graceful degradation
+
+    def calculate_rejection_candle_quality(self, latest_row: pd.Series, signal_type: str) -> float:
+        """
+        Calculate quality score for rejection candle pattern
+
+        Higher score for:
+        - Strong rejection wick (2x+ opposite wick)
+        - Decent candle body (not doji)
+        - Close near EMA (perfect bounce)
+
+        Returns:
+            Confidence boost (0.0 to 0.10)
+        """
+        try:
+            ema21 = latest_row.get('ema_21', 0)
+            close = latest_row.get('close', 0)
+            open_price = latest_row.get('open', close)
+            high = latest_row.get('high', close)
+            low = latest_row.get('low', close)
+
+            # Calculate wick and body metrics
+            body = abs(close - open_price)
+            candle_range = high - low
+            upper_wick = high - max(close, open_price)
+            lower_wick = min(close, open_price) - low
+
+            if candle_range < 1e-8:
+                return 0.0
+
+            body_ratio = body / candle_range
+
+            if signal_type == 'BULL':
+                # Check lower wick (rejection from below)
+                if lower_wick < 1e-8:
+                    return 0.0
+                wick_ratio = lower_wick / (upper_wick + 1e-8)
+
+                # Bonus for perfect bounce (close near EMA)
+                distance_to_ema = abs(close - ema21) / (ema21 + 1e-8)
+                proximity_bonus = max(0, 1 - (distance_to_ema * 100))  # 0-1 scale
+
+            elif signal_type == 'BEAR':
+                # Check upper wick (rejection from above)
+                if upper_wick < 1e-8:
+                    return 0.0
+                wick_ratio = upper_wick / (lower_wick + 1e-8)
+
+                # Bonus for perfect bounce
+                distance_to_ema = abs(close - ema21) / (ema21 + 1e-8)
+                proximity_bonus = max(0, 1 - (distance_to_ema * 100))
+            else:
+                return 0.0
+
+            # Quality score components
+            wick_score = min(1.0, wick_ratio / 2.0)  # Normalize (2x+ wick = 1.0)
+            body_score = min(1.0, body_ratio / 0.5)   # Normalize (50%+ body = 1.0)
+
+            # Combined quality score
+            quality = (wick_score * 0.5 + body_score * 0.3 + proximity_bonus * 0.2)
+            confidence_boost = 0.10 * quality  # Max 10% boost
+
+            self.logger.debug(f"Rejection quality: {quality:.2f} (wick:{wick_score:.2f}, body:{body_score:.2f}, prox:{proximity_bonus:.2f})")
+            return confidence_boost
+
+        except Exception as e:
+            self.logger.error(f"Error calculating rejection quality: {e}")
+            return 0.0
     
     def detect_macd_histogram_trend(self, df: pd.DataFrame, lookback: int = 3) -> str:
         """

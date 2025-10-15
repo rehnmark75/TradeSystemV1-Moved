@@ -89,7 +89,14 @@
       "Bash(tee:*)",
       "Read(///**)",
       "Bash(do echo \"=== Line $line ===\")",
-      "Bash(git -C /home/hr/Projects/TradeSystemV1/dev-app diff trailing_class.py)"
+      "Bash(git -C /home/hr/Projects/TradeSystemV1/dev-app diff trailing_class.py)",
+      "Bash(test:*)",
+      "Bash(while [ ! -f /tmp/backtest_complete_marker ])",
+      "Bash(do sleep:*)",
+      "Bash(if tail -5 /tmp/backtest_3of3.log)",
+      "Bash(then touch /tmp/backtest_complete_marker)",
+      "Bash(break)",
+      "Bash(fi)"
     ],
     "deny": [],
     "ask": []

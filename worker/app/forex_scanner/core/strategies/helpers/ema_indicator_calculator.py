@@ -1,22 +1,108 @@
 # core/strategies/helpers/ema_indicator_calculator.py
 """
-EMA Indicator Calculator Module
-Handles EMA calculation and signal detection logic
+Multi-Indicator Calculator Module (EMA/Supertrend)
+Handles both EMA and Supertrend calculation depending on strategy mode.
+
+When USE_SUPERTREND_MODE = True: Uses Supertrend indicators
+When USE_SUPERTREND_MODE = False: Uses legacy EMA indicators
 """
 
 import pandas as pd
 import numpy as np
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
+
+try:
+    from configdata.strategies import config_ema_strategy
+except ImportError:
+    from forex_scanner.configdata.strategies import config_ema_strategy
+
+from .supertrend_calculator import SupertrendCalculator
 
 
 class EMAIndicatorCalculator:
-    """Calculates EMA indicators and detects crossover signals"""
-    
-    def __init__(self, logger: logging.Logger = None, eps: float = 1e-8):
+    """Calculates indicators (EMA or Supertrend) and detects signals"""
+
+    def __init__(self, logger: logging.Logger = None, eps: float = 1e-8, use_supertrend: Optional[bool] = None):
         self.logger = logger or logging.getLogger(__name__)
         self.eps = eps  # Epsilon for stability
-    
+
+        # Determine which mode to use
+        if use_supertrend is None:
+            self.use_supertrend = getattr(config_ema_strategy, 'USE_SUPERTREND_MODE', False)
+        else:
+            self.use_supertrend = use_supertrend
+
+        # Initialize Supertrend calculator if needed
+        if self.use_supertrend:
+            self.supertrend_calc = SupertrendCalculator(logger=self.logger)
+            self.logger.info("📊 Indicator Calculator initialized in SUPERTREND mode")
+        else:
+            self.supertrend_calc = None
+            self.logger.info("📊 Indicator Calculator initialized in EMA mode (legacy)")
+
+    def ensure_supertrends(self, df: pd.DataFrame, supertrend_config: Dict[str, float]) -> pd.DataFrame:
+        """
+        Calculate multi-Supertrend indicators for trend confluence
+
+        Args:
+            df: DataFrame with OHLC data
+            supertrend_config: Dictionary with Supertrend parameters
+
+        Returns:
+            DataFrame with Supertrend columns added
+        """
+        try:
+            # Extract parameters
+            fast_period = int(supertrend_config.get('fast_period', 7))
+            fast_multiplier = float(supertrend_config.get('fast_multiplier', 1.5))
+            medium_period = int(supertrend_config.get('medium_period', 14))
+            medium_multiplier = float(supertrend_config.get('medium_multiplier', 2.0))
+            slow_period = int(supertrend_config.get('slow_period', 21))
+            slow_multiplier = float(supertrend_config.get('slow_multiplier', 3.0))
+            atr_period = int(supertrend_config.get('atr_period', 14))
+
+            self.logger.debug(
+                f"Calculating Supertrends: Fast({fast_period},{fast_multiplier}), "
+                f"Medium({medium_period},{medium_multiplier}), Slow({slow_period},{slow_multiplier})"
+            )
+
+            # Calculate multi-Supertrend
+            supertrends = self.supertrend_calc.calculate_multi_supertrend(
+                df,
+                fast_period=fast_period,
+                fast_multiplier=fast_multiplier,
+                medium_period=medium_period,
+                medium_multiplier=medium_multiplier,
+                slow_period=slow_period,
+                slow_multiplier=slow_multiplier,
+                atr_period=atr_period
+            )
+
+            # Add to DataFrame with clear column names
+            df['st_fast'] = supertrends['fast']['supertrend']
+            df['st_fast_trend'] = supertrends['fast']['trend']
+            df['st_medium'] = supertrends['medium']['supertrend']
+            df['st_medium_trend'] = supertrends['medium']['trend']
+            df['st_slow'] = supertrends['slow']['supertrend']
+            df['st_slow_trend'] = supertrends['slow']['trend']
+            df['atr'] = supertrends['fast']['atr']  # Use ATR from any Supertrend
+
+            # Log for verification
+            if len(df) > 0:
+                fast_trend = int(df['st_fast_trend'].iloc[-1])
+                medium_trend = int(df['st_medium_trend'].iloc[-1])
+                slow_trend = int(df['st_slow_trend'].iloc[-1])
+                self.logger.debug(
+                    f"Supertrends calculated: Fast={fast_trend}, Medium={medium_trend}, Slow={slow_trend}"
+                )
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error calculating Supertrends: {e}", exc_info=True)
+            return df
+
     def ensure_emas(self, df: pd.DataFrame, ema_config: Dict[str, int]) -> pd.DataFrame:
         """
         Calculate EMAs using specified periods, regardless of what's in the data
@@ -148,65 +234,191 @@ class EMAIndicatorCalculator:
                 self.logger.debug(f"🎯 BEAR ALERTS at rows: {bear_alert_rows}, timestamps: {bear_timestamps}")
 
             return df
-            
+
         except Exception as e:
             self.logger.error(f"Error in EMA alert detection: {e}")
             return df
-    
+
+    def detect_ema_bounce_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        EMA BOUNCE DETECTION: TradingView professional methodology
+
+        Based on "EMA Bounce Scalping" strategy (180+ likes)
+        Entry on pullback to EMA with rejection candle confirmation
+
+        Logic:
+        1. Price near EMA21 (within 0.1% = ~10 pips)
+        2. Rejection candle (wick shows bounce)
+        3. EMA alignment intact (trend not broken)
+
+        Returns:
+            DataFrame with bounce signal columns added
+        """
+        try:
+            from configdata.strategies.config_ema_strategy import (
+                EMA_BOUNCE_DISTANCE_PCT,
+                EMA_BOUNCE_WICK_RATIO,
+                EMA_BOUNCE_MIN_CANDLE_BODY
+            )
+
+            # Calculate distance from EMA21
+            df['ema21_distance_pct'] = abs((df['close'] - df['ema_21']) / (df['ema_21'] + self.eps) * 100)
+
+            # Price near EMA condition
+            df['price_near_ema21'] = df['ema21_distance_pct'] < EMA_BOUNCE_DISTANCE_PCT
+
+            # Candle body and wick calculations
+            df['candle_body'] = abs(df['close'] - df['open'])
+            df['candle_range'] = df['high'] - df['low']
+            df['upper_wick'] = df['high'] - df[['close', 'open']].max(axis=1)
+            df['lower_wick'] = df[['close', 'open']].min(axis=1) - df['low']
+
+            # Candle body ratio (avoid doji/small candles)
+            df['body_ratio'] = df['candle_body'] / (df['candle_range'] + self.eps)
+
+            # BULLISH BOUNCE DETECTION
+            df['bullish_bounce'] = (
+                (df['close'] < df['ema_21']) &                    # Below EMA (pullback)
+                (df['close'] > df['low']) &                       # Closed off lows (rejection)
+                (df['close'] > df['open']) &                      # Green candle
+                (df['lower_wick'] > df['upper_wick'] * EMA_BOUNCE_WICK_RATIO) &  # Strong lower wick
+                (df['body_ratio'] > EMA_BOUNCE_MIN_CANDLE_BODY)   # Decent body size
+            )
+
+            # BEARISH BOUNCE DETECTION
+            df['bearish_bounce'] = (
+                (df['close'] > df['ema_21']) &                    # Above EMA (pullback)
+                (df['close'] < df['high']) &                      # Closed off highs (rejection)
+                (df['close'] < df['open']) &                      # Red candle
+                (df['upper_wick'] > df['lower_wick'] * EMA_BOUNCE_WICK_RATIO) &  # Strong upper wick
+                (df['body_ratio'] > EMA_BOUNCE_MIN_CANDLE_BODY)   # Decent body size
+            )
+
+            # Get EMA values
+            ema_short = df['ema_short']
+            ema_long = df['ema_long']
+            ema_trend = df['ema_trend']
+
+            # Generate bounce signals (with EMA alignment check)
+            df['bull_bounce_signal'] = (
+                df['price_near_ema21'] &
+                df['bullish_bounce'] &
+                (ema_short > ema_long + self.eps) &       # Trend still intact
+                (ema_long > ema_trend + self.eps)
+            )
+
+            df['bear_bounce_signal'] = (
+                df['price_near_ema21'] &
+                df['bearish_bounce'] &
+                (ema_short < ema_long - self.eps) &       # Trend still intact
+                (ema_long < ema_trend - self.eps)
+            )
+
+            # Debug logging with timestamps
+            bounce_bulls = df['bull_bounce_signal'].sum()
+            bounce_bears = df['bear_bounce_signal'].sum()
+            self.logger.info(f"🎯 EMA Bounce Detection: Bulls: {bounce_bulls}, Bears: {bounce_bears}")
+
+            # Log WHERE the bounces occurred
+            if bounce_bulls > 0 or bounce_bears > 0:
+                bull_timestamps = df[df['bull_bounce_signal']]['start_time'].tolist() if 'start_time' in df.columns else []
+                bear_timestamps = df[df['bear_bounce_signal']]['start_time'].tolist() if 'start_time' in df.columns else []
+                if bull_timestamps:
+                    self.logger.info(f"   📍 BULL bounces at: {bull_timestamps[:3]}")  # Show first 3
+                if bear_timestamps:
+                    self.logger.info(f"   📍 BEAR bounces at: {bear_timestamps[:3]}")  # Show first 3
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error in bounce detection: {e}")
+            return df
+
+    def detect_ema_signals(self, df: pd.DataFrame, trigger_mode: str = 'bounce') -> pd.DataFrame:
+        """
+        UNIFIED SIGNAL DETECTION: Route to appropriate detection method
+
+        Args:
+            df: DataFrame with EMA columns
+            trigger_mode: 'bounce', 'crossover', or 'hybrid'
+
+        Returns:
+            DataFrame with signal columns (always includes bull_alert and bear_alert)
+        """
+        if trigger_mode == 'bounce':
+            df = self.detect_ema_bounce_signals(df)
+            # Map bounce signals to standard alert columns
+            df['bull_alert'] = df.get('bull_bounce_signal', False)
+            df['bear_alert'] = df.get('bear_bounce_signal', False)
+            return df
+        elif trigger_mode == 'crossover':
+            return self.detect_ema_alerts(df)  # Existing crossover logic
+        elif trigger_mode == 'hybrid':
+            # Both methods, merge results
+            df = self.detect_ema_alerts(df)
+            df = self.detect_ema_bounce_signals(df)
+            # Combine: bounce OR crossover
+            df['bull_alert'] = df.get('bull_alert', False) | df.get('bull_bounce_signal', False)
+            df['bear_alert'] = df.get('bear_alert', False) | df.get('bear_bounce_signal', False)
+            return df
+        else:
+            self.logger.warning(f"Unknown trigger mode: {trigger_mode}, defaulting to bounce")
+            df = self.detect_ema_bounce_signals(df)
+            df['bull_alert'] = df.get('bull_bounce_signal', False)
+            df['bear_alert'] = df.get('bear_bounce_signal', False)
+            return df
+
     def get_required_indicators(self, ema_config: Dict[str, int]) -> List[str]:
         """
-        Get list of required indicators for EMA strategy
-        
+        Get list of required indicators for EMA strategy (UPDATED: No Two-Pole)
+
         Args:
             ema_config: Dictionary with EMA periods
-            
+
         Returns:
             List of required indicator column names
         """
         base_indicators = [
             f'ema_{ema_config.get("short", 12)}',
-            f'ema_{ema_config.get("long", 50)}', 
+            f'ema_{ema_config.get("long", 50)}',
             f'ema_{ema_config.get("trend", 200)}',
             'close',
             'open',
             'high',
             'low',
-            'start_time'
+            'start_time',
+            'atr'  # Always needed for stops
         ]
-        
-        # Add Two-Pole Oscillator indicators if enabled
+
+        # Add RSI (replaces Two-Pole)
         try:
             from configdata import config
         except ImportError:
             from forex_scanner.configdata import config
-        if getattr(config, 'TWO_POLE_OSCILLATOR_ENABLED', False):
-            base_indicators.extend([
-                'two_pole_osc',
-                'two_pole_osc_delayed',
-                'two_pole_is_green',
-                'two_pole_is_purple',
-                'two_pole_buy_signal', 
-                'two_pole_sell_signal',
-                'two_pole_strength',
-                'two_pole_zone'
-            ])
-        
 
-        # Add overextension indicators if enabled
         from configdata.strategies.config_ema_strategy import (
+            EMA_USE_RSI_FILTER,
             STOCHASTIC_OVEREXTENSION_ENABLED,
             WILLIAMS_R_OVEREXTENSION_ENABLED,
             RSI_EXTREME_OVEREXTENSION_ENABLED
         )
 
+        if EMA_USE_RSI_FILTER or RSI_EXTREME_OVEREXTENSION_ENABLED:
+            base_indicators.append('rsi')
+
+        # Add MACD if enabled
+        if getattr(config, 'MACD_MOMENTUM_FILTER_ENABLED', True):
+            base_indicators.extend(['macd_line', 'macd_signal', 'macd_histogram'])
+
+        # Add ADX (always needed for trend strength)
+        base_indicators.append('adx')
+
+        # Add overextension indicators if enabled
         if STOCHASTIC_OVEREXTENSION_ENABLED:
             base_indicators.extend(['stoch_k', 'stoch_d'])
 
         if WILLIAMS_R_OVEREXTENSION_ENABLED:
-            base_indicators.extend(['williams_r'])
-
-        if RSI_EXTREME_OVEREXTENSION_ENABLED:
-            base_indicators.extend(['rsi'])
+            base_indicators.append('williams_r')
 
         return base_indicators
 
