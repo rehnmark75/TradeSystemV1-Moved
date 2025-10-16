@@ -374,20 +374,179 @@ class EMASignalCalculator:
             PERFORMANCE_THRESHOLD = getattr(config_ema_strategy, 'SUPERTREND_PERFORMANCE_THRESHOLD', 0.0)
 
             if ENABLE_PERFORMANCE_FILTER:
-                # Calculate rolling performance of fast SuperTrend
-                st_trend = fast_trend.shift(1)  # Previous candle's trend
-                price_change = df['close'].diff()  # Price movement
-                raw_performance = st_trend * price_change  # Positive if trend correct
+                try:
+                    # Validate required columns
+                    if 'close' not in df.columns:
+                        raise KeyError("Missing 'close' column for performance filter")
 
-                # Apply exponential smoothing with 20-bar lookback
-                PERFORMANCE_ALPHA = getattr(config_ema_strategy, 'SUPERTREND_PERFORMANCE_ALPHA', 0.1)
-                df['st_performance'] = raw_performance.ewm(alpha=PERFORMANCE_ALPHA, min_periods=1).mean()
+                    # Validate data sufficiency
+                    if len(df) < 20:
+                        self.logger.warning(
+                            f"⚠️ Insufficient data for performance filter: {len(df)} bars (need 20+). "
+                            "Skipping performance filter."
+                        )
+                    else:
+                        # Calculate rolling performance of fast SuperTrend
+                        st_trend = fast_trend.shift(1)  # Previous candle's trend
+                        price_change = df['close'].diff()  # Price movement
+                        raw_performance = st_trend * price_change  # Positive if trend correct
 
-                # Filter signals with poor performance
-                entering_bull_confluence = entering_bull_confluence & (df['st_performance'] > PERFORMANCE_THRESHOLD)
-                entering_bear_confluence = entering_bear_confluence & (df['st_performance'] > PERFORMANCE_THRESHOLD)
+                        # Validate calculation
+                        if raw_performance.isna().all():
+                            raise ValueError("Performance calculation produced all NaN values")
 
-                self.logger.debug(f"📊 Performance filter applied (threshold: {PERFORMANCE_THRESHOLD})")
+                        # Apply exponential smoothing with 20-bar lookback
+                        PERFORMANCE_ALPHA = getattr(config_ema_strategy, 'SUPERTREND_PERFORMANCE_ALPHA', 0.1)
+
+                        # Validate alpha parameter
+                        if not 0 < PERFORMANCE_ALPHA <= 1:
+                            self.logger.warning(
+                                f"⚠️ Invalid PERFORMANCE_ALPHA: {PERFORMANCE_ALPHA}. "
+                                f"Using default 0.15"
+                            )
+                            PERFORMANCE_ALPHA = 0.15
+
+                        df['st_performance'] = raw_performance.ewm(alpha=PERFORMANCE_ALPHA, min_periods=1).mean()
+
+                        # ✅ FIX: Separate performance checks for BULL and BEAR
+                        # BULL signals: Check performance when SuperTrend was bullish
+                        # BEAR signals: Check performance when SuperTrend was bearish
+                        #
+                        # WHY: Global performance metric becomes biased toward prevailing trend.
+                        # In uptrends, global performance is positive, incorrectly allowing bear signals.
+                        # Separate tracking ensures bull signals check bull-period performance only,
+                        # and bear signals check bear-period performance only.
+                        #
+                        # See DIRECTIONAL_BIAS_FIX.md for detailed analysis.
+
+                        # Calculate separate performance for bullish and bearish periods
+                        # Optimize: compute shift(1) once and reuse
+                        trend_prev = fast_trend.shift(1)
+                        bull_mask = (trend_prev == 1)
+                        bear_mask = (trend_prev == -1)
+
+                        # Isolate performance by direction (mask zeros out irrelevant periods)
+                        bull_performance = bull_mask * raw_performance
+                        bear_performance = bear_mask * raw_performance
+
+                        # Handle NaN from shift() at index 0
+                        bull_performance = bull_performance.fillna(0)
+                        bear_performance = bear_performance.fillna(0)
+
+                        # Apply exponential smoothing separately
+                        df['st_bull_performance'] = bull_performance.ewm(
+                            alpha=PERFORMANCE_ALPHA,
+                            min_periods=1,
+                            adjust=False  # Use recursive formula for consistency
+                        ).mean()
+                        df['st_bear_performance'] = bear_performance.ewm(
+                            alpha=PERFORMANCE_ALPHA,
+                            min_periods=1,
+                            adjust=False
+                        ).mean()
+
+                        # Validate performance metrics
+                        bull_perf_last = df['st_bull_performance'].iloc[-1]
+                        bear_perf_last = df['st_bear_performance'].iloc[-1]
+
+                        # Check for all NaN (calculation failure)
+                        if df['st_bull_performance'].isna().all() and df['st_bear_performance'].isna().all():
+                            raise ValueError("Both bull and bear performance metrics are all NaN")
+
+                        # Apply filter with NaN handling (treat NaN as failing threshold)
+                        bull_perf_valid = df['st_bull_performance'].fillna(PERFORMANCE_THRESHOLD - 1)
+                        bear_perf_valid = df['st_bear_performance'].fillna(PERFORMANCE_THRESHOLD - 1)
+
+                        # Filter signals based on their respective performance
+                        bull_before = entering_bull_confluence.sum()
+                        bear_before = entering_bear_confluence.sum()
+
+                        entering_bull_confluence = entering_bull_confluence & (bull_perf_valid > PERFORMANCE_THRESHOLD)
+                        entering_bear_confluence = entering_bear_confluence & (bear_perf_valid > PERFORMANCE_THRESHOLD)
+
+                        bull_after = entering_bull_confluence.sum()
+                        bear_after = entering_bear_confluence.sum()
+
+                        # 📊 MONITORING: Log performance metrics and signal balance
+                        self.logger.info(
+                            f"📊 Directional Performance: "
+                            f"Bull={bull_perf_last:.6f}, Bear={bear_perf_last:.6f}, "
+                            f"Threshold={PERFORMANCE_THRESHOLD:.6f}"
+                        )
+
+                        # Track sample sizes for each direction
+                        bull_samples = bull_mask.sum()
+                        bear_samples = bear_mask.sum()
+                        self.logger.debug(
+                            f"📊 Directional Samples: Bull={bull_samples}, Bear={bear_samples} "
+                            f"(total={len(df)} bars)"
+                        )
+
+                        # Log filter effectiveness
+                        bull_filtered = bull_before - bull_after
+                        bear_filtered = bear_before - bear_after
+                        self.logger.info(
+                            f"🔍 Performance Filter Impact: "
+                            f"Bull: {bull_before}→{bull_after} (-{bull_filtered}), "
+                            f"Bear: {bear_before}→{bear_after} (-{bear_filtered})"
+                        )
+
+                        # 🚨 ALERT: Check for directional bias
+                        total_signals = bull_after + bear_after
+                        if total_signals > 0:
+                            bull_pct = (bull_after / total_signals) * 100
+                            bear_pct = (bear_after / total_signals) * 100
+
+                            self.logger.info(
+                                f"📈 Signal Balance: {bull_pct:.1f}% BULL, {bear_pct:.1f}% BEAR "
+                                f"({bull_after} BULL, {bear_after} BEAR)"
+                            )
+
+                            # Alert on extreme imbalance
+                            if bull_pct > 80 or bull_pct < 20:
+                                self.logger.warning(
+                                    f"⚠️ DIRECTIONAL BIAS DETECTED: {bull_pct:.1f}% bull signals! "
+                                    f"Expected: 40-60%. Possible filter bias or strong trend."
+                                )
+
+                        # Track NaN occurrences (data quality issue)
+                        nan_bull = df['st_bull_performance'].isna().sum()
+                        nan_bear = df['st_bear_performance'].isna().sum()
+                        if nan_bull > 0 or nan_bear > 0:
+                            self.logger.warning(
+                                f"⚠️ Performance NaN values detected: "
+                                f"Bull={nan_bull}/{len(df)}, Bear={nan_bear}/{len(df)}"
+                            )
+
+                        self.logger.debug(
+                            f"📊 Performance filter applied successfully "
+                            f"(alpha={PERFORMANCE_ALPHA}, threshold={PERFORMANCE_THRESHOLD})"
+                        )
+
+                except KeyError as e:
+                    self.logger.error(
+                        f"❌ Performance filter failed - missing data: {e}. "
+                        "Continuing without performance filter (signals pass through)."
+                    )
+                    # Graceful degradation: signals pass through unfiltered
+
+                except ValueError as e:
+                    self.logger.error(
+                        f"❌ Performance filter calculation failed: {e}. "
+                        "Continuing without performance filter (signals pass through)."
+                    )
+                    # Graceful degradation: signals pass through unfiltered
+
+                except Exception as e:
+                    self.logger.error(
+                        f"❌ Unexpected error in performance filter: {e}",
+                        exc_info=True
+                    )
+                    # Graceful degradation: signals pass through unfiltered
+                    self.logger.warning(
+                        "⚠️ Performance filter disabled due to error. "
+                        "Signals will be generated without performance validation."
+                    )
 
             # ✅ OPTION 5: TREND STRENGTH FILTER
             # Filter out signals in choppy markets (when SuperTrends are too close)
