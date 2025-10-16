@@ -528,17 +528,19 @@ class OrderExecutor:
                 try:
                     detail = response.json().get("detail", {})
                     msg = detail.get("message", "Position already open")
+                    reason = detail.get("reason", "duplicate_position")
                 except:
                     msg = "Position already open"
+                    reason = "duplicate_position"
 
-                self.logger.info(f"ℹ️ {external_epic}: {msg}")
+                self.logger.info(f"ℹ️ {external_epic}: {msg} (this is expected behavior)")
                 result = {
                     "status": "skipped",
                     "message": msg,
                     "alert_id": alert_id,
                     "status_code": 409,
                     "response_time": response_time,
-                    "reason": "duplicate_position"
+                    "reason": reason
                 }
                 return result
 
@@ -577,6 +579,24 @@ class OrderExecutor:
                 try:
                     error_detail = response.json()
                     error_msg = f"Order failed: HTTP {response.status_code} - {error_detail}"
+
+                    # Special handling for 500 errors to provide more context
+                    if response.status_code == 500:
+                        detail_obj = error_detail if isinstance(error_detail, dict) else {}
+                        error_desc = detail_obj.get("detail", str(error_detail))
+
+                        # Check if this is actually a "position exists" error that was incorrectly returned as 500
+                        if "already open" in str(error_desc).lower() or "duplicate" in str(error_desc).lower():
+                            self.logger.warning(f"⚠️ Server returned 500 for duplicate position (should be 409): {error_desc}")
+                            self.logger.info(f"ℹ️ Treating as skipped order for {external_epic}")
+                            return {
+                                "status": "skipped",
+                                "message": f"Position already open (server error 500 converted)",
+                                "alert_id": alert_id,
+                                "status_code": 500,
+                                "response_time": response_time,
+                                "reason": "duplicate_position_500"
+                            }
                 except:
                     error_msg = f"Order failed: HTTP {response.status_code} - {response.text[:500]}"
 

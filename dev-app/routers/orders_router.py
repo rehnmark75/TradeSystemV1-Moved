@@ -346,21 +346,32 @@ async def ig_place_order(
         logger.info(f"✅ Cooldown check passed: {cooldown_result['message']}")
 
     try:
-        # Check for existing position
-        if await has_open_position(symbol, trading_headers):
-            msg = f"Position already open for {symbol}, skipping order."
-            logger.info(f"ℹ️ Position already open for {symbol}")
-            # Return HTTP 409 (Conflict) - semantically correct for duplicate position
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "status": "skipped",
-                    "message": msg,
-                    "epic": symbol,
-                    "alert_id": alert_id,
-                    "reason": "duplicate_position"
-                }
-            )
+        # Check for existing position with error handling
+        try:
+            has_position = await has_open_position(symbol, trading_headers)
+            if has_position:
+                msg = f"Position already open for {symbol}, skipping order."
+                logger.info(f"ℹ️ Position already open for {symbol}")
+                # Return HTTP 409 (Conflict) - semantically correct for duplicate position
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "status": "skipped",
+                        "message": msg,
+                        "epic": symbol,
+                        "alert_id": alert_id,
+                        "reason": "duplicate_position"
+                    }
+                )
+        except HTTPException:
+            # Re-raise HTTP exceptions (these are expected)
+            raise
+        except Exception as pos_check_error:
+            # Log position check failure but continue with order placement
+            # This ensures we don't block orders if the position check fails
+            logger.warning(f"⚠️ Position check failed for {symbol}: {str(pos_check_error)}")
+            logger.warning("   Proceeding with order placement (fail-open for safety)")
+            # Continue to order placement below
 
         logger.info(json.dumps(f"No open position for {symbol}, placing order."))
 
