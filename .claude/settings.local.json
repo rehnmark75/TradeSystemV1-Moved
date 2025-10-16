@@ -96,7 +96,13 @@
       "Bash(if tail -5 /tmp/backtest_3of3.log)",
       "Bash(then touch /tmp/backtest_complete_marker)",
       "Bash(break)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(node --version:*)",
+      "Bash(npm:*)",
+      "Bash(claude mcp add --transport stdio --scope user youtube-transcript -- npx -y @kimtaeyoon83/mcp-server-youtube-transcript)",
+      "Bash(claude mcp list:*)",
+      "Bash(claude mcp get:*)",
+      "Bash(npx -y @kimtaeyoon83/mcp-server-youtube-transcript)"
     ],
     "deny": [],
     "ask": []

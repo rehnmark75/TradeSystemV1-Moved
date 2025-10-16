@@ -105,21 +105,86 @@ SUPERTREND_STRATEGY_CONFIG = {
         'best_market_regime': 'trending',
         'min_pip_volatility': 5.0,
         'max_pip_volatility': 30.0
+    },
+    'youtube_triple_st': {
+        # Based on YouTube strategy: https://www.youtube.com/watch?v=hy9Nce__k78
+        # SuperTrend 1: ATR 12, Multiplier 3 (Slow - long-term trend)
+        'slow_period': 12,
+        'slow_multiplier': 3.0,
+        # SuperTrend 2: ATR 10, Multiplier 1 (Fast - quick signals)
+        'fast_period': 10,
+        'fast_multiplier': 1.0,
+        # SuperTrend 3: ATR 11, Multiplier 2 (Medium - balanced)
+        'medium_period': 11,
+        'medium_multiplier': 2.0,
+        # ATR settings
+        'atr_period': 12,  # Use longest ATR period for stability
+        # Description
+        'description': 'YouTube Triple SuperTrend + EMA 200 Strategy',
+        'best_for': ['trending', 'all_volatility'],
+        'best_market_regime': 'trending',
+        'best_session': ['london', 'new_york'],  # Avoid first 30-60min after market open
+        'min_pip_volatility': 5.0,
+        'max_pip_volatility': 100.0,
+        # Strategy notes
+        'entry_rules': 'LONG: Price > EMA200 + All 3 SuperTrends green | SHORT: Price < EMA200 + All 3 SuperTrends red',
+        'stop_loss': 'Closest SuperTrend dot',
+        'take_profit': '1:1 to 1.5:1 risk/reward',
+        'timeframe': '15m',
+        'avoid_first_30min': True  # No trading first 30-60min after market open
     }
 }
 
 # Active Supertrend configuration when not using dynamic mode
 # Testing different configs to find optimal performance
-ACTIVE_SUPERTREND_CONFIG = 'default'  # Using default balanced config
+ACTIVE_SUPERTREND_CONFIG = 'youtube_triple_st'  # Using YouTube triple SuperTrend strategy
 
 # Supertrend Signal Requirements
-# ✅ OPTIMIZED: 2/3 confluence selected after A/B testing
-# Tested both 2/3 and 3/3 - results showed 3/3 only improved P/L ratio by 0.9% (1.09:1 vs 1.08:1)
-# while reducing signals by 7.3%. Not worth the trade-off.
-# 2 = At least 2/3 must agree (66% confluence - optimal balance of quality vs quantity)
-# 3 = All Supertrends must agree (100% confluence - only 0.9% better, 7.3% fewer signals)
-SUPERTREND_MIN_CONFLUENCE = 2              # Require 2/3 Supertrends to agree (optimal setting)
+# ✅ YOUTUBE STRATEGY: Requires ALL 3 SuperTrends to agree (100% confluence)
+# YouTube video strategy requires full alignment of all 3 SuperTrends + EMA 200
+# This is more conservative but provides higher quality signals
+# 2 = At least 2/3 must agree (66% confluence - previous optimal)
+# 3 = All Supertrends must agree (100% confluence - YouTube strategy requirement)
+SUPERTREND_MIN_CONFLUENCE = 3              # Require ALL 3 SuperTrends to agree (YouTube strategy)
 SUPERTREND_ALLOW_PARTIAL = False           # If True, allow 2/3 confluence with reduced confidence
+
+# =============================================================================
+# LUXALGO-INSPIRED ENHANCEMENTS (Signal Reduction & Quality Improvement)
+# =============================================================================
+
+# ✅ OPTION 2: Enhanced Slow SuperTrend Stability Filter
+# Increases requirement from 5 bars to 12+ bars of stability
+# Prevents signals in markets that are starting to chop
+SUPERTREND_STABILITY_BARS = 8              # Minimum bars of slow ST stability (BALANCED: 8 bars)
+                                           # Higher = fewer signals in choppy markets
+                                           # Recommended: 8-10 for balanced, 12-15 for conservative
+
+# ✅ OPTION 3: Performance-Based Filter (LuxAlgo inspired)
+# Only signals when recent SuperTrend performance is positive
+# Performance = Did price move with SuperTrend direction?
+SUPERTREND_PERFORMANCE_FILTER = True       # Enable performance-based filtering
+SUPERTREND_PERFORMANCE_THRESHOLD = -0.00005  # Minimum performance (RELAXED: allow slight negative)
+SUPERTREND_PERFORMANCE_ALPHA = 0.15        # Smoothing factor (INCREASED: more reactive)
+                                           # Higher alpha = more reactive to recent performance
+                                           # Lower alpha = more stable, considers longer history
+
+# ✅ OPTION 5: Trend Strength Filter
+# Filters out signals when SuperTrends are too close (choppy market)
+# Wide separation = strong trend, Narrow separation = ranging/choppy
+SUPERTREND_TREND_STRENGTH_FILTER = True    # Enable trend strength filtering
+SUPERTREND_MIN_TREND_STRENGTH = 0.15       # Minimum separation as % of price (RELAXED: 0.15%)
+                                           # EUR/USD @ 1.1000: 0.15% = 16.5 pips separation
+                                           # Recommended: 0.15-0.25% for balanced signals
+
+# ✅ OPTION 4: Adaptive Factor Optimization (Advanced - Future Enhancement)
+# K-means clustering to find optimal ATR multipliers (LuxAlgo full implementation)
+# Currently disabled - requires significant computational resources
+SUPERTREND_ADAPTIVE_CLUSTERING = False     # Enable adaptive factor optimization (experimental)
+SUPERTREND_CLUSTER_MIN_FACTOR = 1.0        # Minimum ATR multiplier to test
+SUPERTREND_CLUSTER_MAX_FACTOR = 5.0        # Maximum ATR multiplier to test
+SUPERTREND_CLUSTER_STEP = 0.5              # Step size between factors
+SUPERTREND_CLUSTER_LOOKBACK = 500          # Bars for performance evaluation
+SUPERTREND_CLUSTER_CHOICE = 'best'         # Which cluster to use (best/average/worst)
 
 # Multi-Timeframe Supertrend Confirmation (4H Filter)
 SUPERTREND_4H_FILTER_ENABLED = True        # Enable 4H Supertrend trend filter
@@ -132,6 +197,14 @@ SUPERTREND_CONFIDENCE_FULL_CONFLUENCE = 0.35  # Bonus for 100% confluence (3/3)
 SUPERTREND_CONFIDENCE_PARTIAL_CONFLUENCE = 0.15  # Bonus for partial (2/3) if allowed
 SUPERTREND_CONFIDENCE_VOLUME = 0.05        # Bonus for volume confirmation
 SUPERTREND_CONFIDENCE_4H_ALIGNMENT = 0.10  # Bonus for 4H trend alignment
+
+# ✅ YOUTUBE STRATEGY: Risk/Reward Settings
+# YouTube video recommends 1:1 to 1.5:1 risk/reward ratio
+# Stop loss: Closest SuperTrend dot
+# Take profit: 1x to 1.5x the risk distance
+YOUTUBE_STRATEGY_MIN_RR = 1.0              # Minimum risk/reward ratio (1:1)
+YOUTUBE_STRATEGY_MAX_RR = 1.5              # Maximum risk/reward ratio (1:1.5)
+YOUTUBE_STRATEGY_DEFAULT_RR = 1.5          # Default to 1.5:1 for optimal results
 
 # =============================================================================
 # DYNAMIC EMA CONFIGURATION SYSTEM (LEGACY - KEPT FOR COMPATIBILITY)

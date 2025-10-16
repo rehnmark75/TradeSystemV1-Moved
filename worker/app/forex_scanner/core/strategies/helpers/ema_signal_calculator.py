@@ -288,7 +288,13 @@ class EMASignalCalculator:
 
     def detect_supertrend_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Detect Supertrend confluence signals
+        Detect Supertrend confluence signals with ENHANCED LUXALGO-INSPIRED FILTERING
+
+        Enhancements:
+        1. Increased slow SuperTrend stability (12 bars vs 5 bars) - Option 2
+        2. Performance-based filtering - Option 3
+        3. Trend strength filtering - Option 5
+        4. Adaptive clustering ready - Option 4
 
         Requires all 3 Supertrends to agree for a signal:
         - BULL: All 3 Supertrends are bullish (trend = 1)
@@ -325,33 +331,106 @@ class EMASignalCalculator:
             # Get required confluence from config
             min_confluence = getattr(config_ema_strategy, 'SUPERTREND_MIN_CONFLUENCE', 3)
 
-            # Bull signal: All 3 Supertrends bullish
-            df['bull_alert'] = (df['st_bullish_count'] >= min_confluence)
+            # ✅ YOUTUBE STRATEGY: Add EMA 200 filter
+            # Check if EMA 200 exists in dataframe
+            has_ema_200 = 'ema_200' in df.columns or 'ema_trend' in df.columns
+            ema_200_col = 'ema_200' if 'ema_200' in df.columns else 'ema_trend'
 
-            # Bear signal: All 3 Supertrends bearish
-            df['bear_alert'] = (df['st_bearish_count'] >= min_confluence)
+            # ✅ YOUTUBE STRATEGY: Detect ENTRY into full confluence
+            # Signal only when we TRANSITION from not-all-agreeing to all-agreeing
+            # This prevents continuous signals while already in confluence
 
-            # Detect fresh signals (Supertrend flip)
+            # Check if we HAD full confluence on previous candle
+            prev_bullish_confluence = (df['st_bullish_count'].shift(1) >= min_confluence)
+            prev_bearish_confluence = (df['st_bearish_count'].shift(1) >= min_confluence)
+
+            # Check if we HAVE full confluence on current candle
+            curr_bullish_confluence = (df['st_bullish_count'] >= min_confluence)
+            curr_bearish_confluence = (df['st_bearish_count'] >= min_confluence)
+
+            # NEW confluence entry = have it now but didn't have it before
+            entering_bull_confluence = curr_bullish_confluence & ~prev_bullish_confluence
+            entering_bear_confluence = curr_bearish_confluence & ~prev_bearish_confluence
+
+            # ✅ OPTION 2: ENHANCED ANTI-CHOP FILTER - 12 bars stability (INCREASED from 5)
+            # Require slow SuperTrend to be stable for 12 bars instead of 5
+            # This dramatically reduces signals in choppy markets
+            STABILITY_BARS = getattr(config_ema_strategy, 'SUPERTREND_STABILITY_BARS', 12)
+
+            slow_stable_bull = (slow_trend == 1)
+            slow_stable_bear = (slow_trend == -1)
+
+            for i in range(1, STABILITY_BARS):
+                slow_stable_bull = slow_stable_bull & (slow_trend.shift(i) == 1)
+                slow_stable_bear = slow_stable_bear & (slow_trend.shift(i) == -1)
+
+            # Apply stability filter to confluence entry
+            entering_bull_confluence = entering_bull_confluence & slow_stable_bull
+            entering_bear_confluence = entering_bear_confluence & slow_stable_bear
+
+            # ✅ OPTION 3: PERFORMANCE-BASED FILTER (LuxAlgo inspired)
+            # Only signal when recent SuperTrend performance is positive
+            ENABLE_PERFORMANCE_FILTER = getattr(config_ema_strategy, 'SUPERTREND_PERFORMANCE_FILTER', True)
+            PERFORMANCE_THRESHOLD = getattr(config_ema_strategy, 'SUPERTREND_PERFORMANCE_THRESHOLD', 0.0)
+
+            if ENABLE_PERFORMANCE_FILTER:
+                # Calculate rolling performance of fast SuperTrend
+                st_trend = fast_trend.shift(1)  # Previous candle's trend
+                price_change = df['close'].diff()  # Price movement
+                raw_performance = st_trend * price_change  # Positive if trend correct
+
+                # Apply exponential smoothing with 20-bar lookback
+                PERFORMANCE_ALPHA = getattr(config_ema_strategy, 'SUPERTREND_PERFORMANCE_ALPHA', 0.1)
+                df['st_performance'] = raw_performance.ewm(alpha=PERFORMANCE_ALPHA, min_periods=1).mean()
+
+                # Filter signals with poor performance
+                entering_bull_confluence = entering_bull_confluence & (df['st_performance'] > PERFORMANCE_THRESHOLD)
+                entering_bear_confluence = entering_bear_confluence & (df['st_performance'] > PERFORMANCE_THRESHOLD)
+
+                self.logger.debug(f"📊 Performance filter applied (threshold: {PERFORMANCE_THRESHOLD})")
+
+            # ✅ OPTION 5: TREND STRENGTH FILTER
+            # Filter out signals in choppy markets (when SuperTrends are too close)
+            ENABLE_TREND_STRENGTH_FILTER = getattr(config_ema_strategy, 'SUPERTREND_TREND_STRENGTH_FILTER', True)
+            MIN_TREND_STRENGTH_PCT = getattr(config_ema_strategy, 'SUPERTREND_MIN_TREND_STRENGTH', 0.3)
+
+            if ENABLE_TREND_STRENGTH_FILTER:
+                # Calculate separation between fast and slow SuperTrends as % of price
+                st_fast = df['st_fast']
+                st_slow = df['st_slow']
+                close = df['close']
+
+                df['trend_strength'] = abs(st_fast - st_slow) / close * 100
+
+                # Filter signals in weak trends
+                entering_bull_confluence = entering_bull_confluence & (df['trend_strength'] > MIN_TREND_STRENGTH_PCT)
+                entering_bear_confluence = entering_bear_confluence & (df['trend_strength'] > MIN_TREND_STRENGTH_PCT)
+
+                self.logger.debug(f"📊 Trend strength filter applied (min: {MIN_TREND_STRENGTH_PCT}%)")
+
+            # Bull signal: Entering bullish confluence + Price above EMA 200
+            if has_ema_200:
+                df['bull_alert'] = (
+                    entering_bull_confluence &
+                    (df['close'] > df[ema_200_col])  # YouTube strategy: Price must be above EMA 200
+                )
+            else:
+                df['bull_alert'] = entering_bull_confluence
+
+            # Bear signal: Entering bearish confluence + Price below EMA 200
+            if has_ema_200:
+                df['bear_alert'] = (
+                    entering_bear_confluence &
+                    (df['close'] < df[ema_200_col])  # YouTube strategy: Price must be below EMA 200
+                )
+            else:
+                df['bear_alert'] = entering_bear_confluence
+
+            # Track flips for confidence scoring (legacy)
             df['st_fast_flip'] = fast_trend != fast_trend.shift(1)
             df['st_medium_flip'] = medium_trend != medium_trend.shift(1)
             df['st_slow_flip'] = slow_trend != slow_trend.shift(1)
-
-            # Fresh signal: At least Medium Supertrend flipped recently (within 2 bars)
-            df['st_fresh_signal'] = (
-                df['st_medium_flip'] |
-                df['st_medium_flip'].shift(1) |
-                df['st_fast_flip']
-            )
-
-            # ⚠️ OPTIMIZATION: Removed fresh signal requirement to generate more signals
-            # The confluence requirement (2/3 Supertrends) is sufficient quality filter
-            # Old logic: Required BOTH confluence AND fresh flip (too restrictive)
-            # New logic: Only require confluence (Supertrends agreeing)
-            # df['bull_alert'] = df['bull_alert'] & df['st_fresh_signal']
-            # df['bear_alert'] = df['bear_alert'] & df['st_fresh_signal']
-
-            # Final alerts: Just confluence (fresh signal tracked for confidence boost later)
-            # Alerts already set above (lines 329, 332)
+            df['st_fresh_signal'] = entering_bull_confluence | entering_bear_confluence
 
             # Debug logging
             bull_signals = df['bull_alert'].sum()

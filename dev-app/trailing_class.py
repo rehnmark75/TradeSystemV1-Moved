@@ -1419,124 +1419,23 @@ class EnhancedTradeProcessor:
                         self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
                         raise
                 else:
-                    # ✅ CRITICAL FIX: Enhanced validation for break-even stops
-                    is_valid_stop = self.validate_stop_level(trade, current_price, break_even_stop)
+                    # ✅ FIXED: Simple validation - stop just needs to be on correct side of current price
+                    # Break-even = entry + lock_points is ALWAYS valid as long as:
+                    # - For BUY: break_even_stop < current_price (stop below current)
+                    # - For SELL: break_even_stop > current_price (stop above current)
 
-                    # Additional validation: For SELL trades, stop cannot be below current price
-                    if trade.direction.upper() == "SELL" and break_even_stop <= current_price:
-                        self.logger.warning(f"⚠️ [BREAK-EVEN INVALID] Trade {trade.id}: Break-even stop {break_even_stop:.5f} <= current price {current_price:.5f}")
-                        self.logger.info(f"🚀 [IMMEDIATE TRAILING] Trade {trade.id}: Implementing immediate trailing since break-even is invalid")
+                    is_valid_stop = True
+                    current_stop = trade.sl_price or 0.0
 
-                        # Calculate immediate trailing stop level using safe distance
-                        safe_distance_price = safe_trail_distance_price
-                        immediate_stop = current_price + safe_distance_price  # For SELL: stop above current
-
-                        # Ensure this is better than current stop
-                        current_stop = trade.sl_price or 0.0
-                        if immediate_stop < current_stop:  # For SELL: lower stop is better
-                            adjustment_distance = current_stop - immediate_stop
-                            adjustment_points = int(adjustment_distance / point_value)
-
-                            if adjustment_points > 0:
-                                self.logger.info(f"📤 [IMMEDIATE TRAIL] Trade {trade.id}: Moving stop from {current_stop:.5f} to {immediate_stop:.5f} ({adjustment_points}pts)")
-                                api_result = self._send_stop_adjustment(trade, adjustment_points, "decrease", 0)
-
-                                if isinstance(api_result, dict) and api_result.get("status") == "updated":
-                                    sent_payload = api_result.get("sentPayload", {})
-                                    ig_actual_stop = sent_payload.get("stopLevel")
-
-                                    old_sl = trade.sl_price
-                                    trade.sl_price = float(ig_actual_stop) if ig_actual_stop else immediate_stop
-                                    trade.moved_to_breakeven = True
-                                    trade.status = "trailing"
-                                    trade.last_trigger_price = current_price
-                                    trade.trigger_time = datetime.utcnow()
-                                    trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
-
-                                    self.logger.info(f"💾 [DB PREPARE SELL-IMMEDIATE] Trade {trade.id}: sl_price {old_sl} → {trade.sl_price}, changes: {trade.stop_limit_changes_count}")
-                                    try:
-                                        db.commit()
-                                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Immediate SELL trail persisted")
-                                        self.logger.info(f"✅ [IMMEDIATE TRAIL SUCCESS] Trade {trade.id}: Stop moved to {trade.sl_price:.5f}")
-                                        return True
-                                    except Exception as commit_error:
-                                        db.rollback()
-                                        self.logger.error(f"❌ [DB COMMIT FAILED SELL-IMMEDIATE] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
-                                        raise
-
-                        # Set the flag even if we couldn't trail
-                        old_status = trade.status
-                        trade.moved_to_breakeven = True
-                        if trade.status != "profit_protected":
-                            trade.status = "break_even"
-
-                        self.logger.info(f"💾 [DB PREPARE SELL-FALLBACK] Trade {trade.id}: status {old_status} → {trade.status}")
-                        try:
-                            db.commit()
-                            self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: SELL fallback flags updated")
-                        except Exception as commit_error:
-                            db.rollback()
-                            self.logger.error(f"❌ [DB COMMIT FAILED SELL-FALLBACK] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
-                            raise
-                        is_valid_stop = False  # Skip the API call
-
-                    # For BUY trades, stop cannot be below current price
-                    elif trade.direction.upper() == "BUY" and break_even_stop <= current_price:
-                        self.logger.warning(f"⚠️ [BREAK-EVEN INVALID] Trade {trade.id}: Break-even stop {break_even_stop:.5f} <= current price {current_price:.5f}")
-                        self.logger.info(f"🚀 [IMMEDIATE TRAILING] Trade {trade.id}: Implementing immediate trailing since break-even is invalid")
-
-                        # Calculate immediate trailing stop level using safe distance
-                        safe_distance_price = safe_trail_distance_price
-                        immediate_stop = current_price - safe_distance_price  # For BUY: stop below current
-
-                        # Ensure this is better than current stop
-                        current_stop = trade.sl_price or 0.0
-                        if immediate_stop > current_stop:  # For BUY: higher stop is better
-                            adjustment_distance = immediate_stop - current_stop
-                            adjustment_points = int(adjustment_distance / point_value)
-
-                            if adjustment_points > 0:
-                                self.logger.info(f"📤 [IMMEDIATE TRAIL] Trade {trade.id}: Moving stop from {current_stop:.5f} to {immediate_stop:.5f} ({adjustment_points}pts)")
-                                api_result = self._send_stop_adjustment(trade, adjustment_points, "increase", 0)
-
-                                if isinstance(api_result, dict) and api_result.get("status") == "updated":
-                                    sent_payload = api_result.get("sentPayload", {})
-                                    ig_actual_stop = sent_payload.get("stopLevel")
-
-                                    old_sl = trade.sl_price
-                                    trade.sl_price = float(ig_actual_stop) if ig_actual_stop else immediate_stop
-                                    trade.moved_to_breakeven = True
-                                    trade.status = "trailing"
-                                    trade.last_trigger_price = current_price
-                                    trade.trigger_time = datetime.utcnow()
-                                    trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
-
-                                    self.logger.info(f"💾 [DB PREPARE BUY-IMMEDIATE] Trade {trade.id}: sl_price {old_sl} → {trade.sl_price}, changes: {trade.stop_limit_changes_count}")
-                                    try:
-                                        db.commit()
-                                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Immediate BUY trail persisted")
-                                        self.logger.info(f"✅ [IMMEDIATE TRAIL SUCCESS] Trade {trade.id}: Stop moved to {trade.sl_price:.5f}")
-                                        return True
-                                    except Exception as commit_error:
-                                        db.rollback()
-                                        self.logger.error(f"❌ [DB COMMIT FAILED BUY-IMMEDIATE] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
-                                        raise
-
-                        # Set the flag even if we couldn't trail
-                        old_status = trade.status
-                        trade.moved_to_breakeven = True
-                        if trade.status != "profit_protected":
-                            trade.status = "break_even"
-
-                        self.logger.info(f"💾 [DB PREPARE BUY-FALLBACK] Trade {trade.id}: status {old_status} → {trade.status}")
-                        try:
-                            db.commit()
-                            self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: BUY fallback flags updated")
-                        except Exception as commit_error:
-                            db.rollback()
-                            self.logger.error(f"❌ [DB COMMIT FAILED BUY-FALLBACK] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
-                            raise
-                        is_valid_stop = False  # Skip the API call
+                    # Basic sanity check: ensure stop is on correct side of current price
+                    if trade.direction.upper() == "BUY":
+                        if break_even_stop >= current_price:
+                            self.logger.error(f"❌ [BREAK-EVEN ERROR] Trade {trade.id}: BUY stop {break_even_stop:.5f} >= current {current_price:.5f}")
+                            is_valid_stop = False
+                    else:  # SELL
+                        if break_even_stop <= current_price:
+                            self.logger.error(f"❌ [BREAK-EVEN ERROR] Trade {trade.id}: SELL stop {break_even_stop:.5f} <= current {current_price:.5f}")
+                            is_valid_stop = False
 
                     if is_valid_stop:
                         # Calculate adjustment needed
@@ -1562,7 +1461,7 @@ class EnhancedTradeProcessor:
                             direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
                             
                             self.logger.info(f"📤 [BREAK-EVEN SEND] Trade {trade.id}: "
-                                        f"Moving stop to break-even (+1pt), adjustment={adjustment_points}pts")
+                                        f"Moving stop to break-even (entry+{lock_points}pts), adjustment={adjustment_points}pts")
                             
                             api_result = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
 

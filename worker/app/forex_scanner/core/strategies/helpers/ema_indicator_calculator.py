@@ -88,6 +88,12 @@ class EMAIndicatorCalculator:
             df['st_slow_trend'] = supertrends['slow']['trend']
             df['atr'] = supertrends['fast']['atr']  # Use ATR from any Supertrend
 
+            # ✅ YOUTUBE STRATEGY: Add EMA 200 for price position filter
+            # Calculate EMA 200 if not already present
+            if 'ema_200' not in df.columns and 'ema_trend' not in df.columns:
+                df['ema_200'] = df['close'].ewm(span=200, adjust=False).mean()
+                self.logger.debug("Added EMA 200 for YouTube SuperTrend strategy")
+
             # Log for verification
             if len(df) > 0:
                 fast_trend = int(df['st_fast_trend'].iloc[-1])
