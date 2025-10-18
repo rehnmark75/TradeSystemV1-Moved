@@ -187,9 +187,12 @@ SUPERTREND_CLUSTER_LOOKBACK = 500          # Bars for performance evaluation
 SUPERTREND_CLUSTER_CHOICE = 'best'         # Which cluster to use (best/average/worst)
 
 # Multi-Timeframe Supertrend Confirmation (4H Filter)
-SUPERTREND_4H_FILTER_ENABLED = True        # Enable 4H Supertrend trend filter
+# ⚠️ IMPORTANT: Re-enabled as trend filter for higher quality signals
+# RSI filter remains disabled to allow counter-trend signals
+SUPERTREND_4H_FILTER_ENABLED = True        # ✅ ENABLED: 4H trend alignment check
 SUPERTREND_4H_USE_MEDIUM = True            # Use Medium Supertrend on 4H (more reliable than fast)
 SUPERTREND_4H_CONFLUENCE_BONUS = 0.10      # Bonus when 4H trend aligns with 15m
+SUPERTREND_4H_PENALTY = 0.15               # Penalty when 4H trend opposes (advisory, not blocking)
 
 # Confidence Scoring for Supertrend Signals
 SUPERTREND_CONFIDENCE_BASE = 0.60          # Base confidence when all 3 agree
@@ -394,10 +397,12 @@ EMA_RSI_BEAR_MIN = 0                     # No lower limit (not using as oversold
 EMA_RSI_BEAR_MAX = 60                    # RSI < 60 confirms bearish momentum (10-point buffer)
 
 # 4H Multi-Timeframe Filters (replaces 1H Two-Pole)
-EMA_4H_TREND_FILTER_ENABLED = True       # 4H EMA alignment check
-EMA_4H_RSI_FILTER_ENABLED = True         # 4H RSI momentum check
-EMA_4H_RSI_BULL_MIN = 50                 # 4H RSI > 50 for bullish bias
-EMA_4H_RSI_BEAR_MAX = 50                 # 4H RSI < 50 for bearish bias
+# ⚠️ BALANCED APPROACH: Trend filter enabled, RSI filter disabled
+# Trend filter helps with direction, RSI filter was too restrictive
+EMA_4H_TREND_FILTER_ENABLED = True       # ✅ ENABLED: 4H EMA trend alignment check
+EMA_4H_RSI_FILTER_ENABLED = False        # ❌ DISABLED: Too restrictive, blocks valid counter-trend signals
+EMA_4H_RSI_BULL_MIN = 50                 # 4H RSI > 50 for bullish bias (not used when filter disabled)
+EMA_4H_RSI_BEAR_MAX = 50                 # 4H RSI < 50 for bearish bias (not used when filter disabled)
 
 # RSI confidence scoring (replaces Two-Pole confidence weight)
 EMA_RSI_CONFIDENCE_WEIGHT = 0.15         # Weight in confidence calculation

@@ -536,28 +536,54 @@ class OrderManager:
     
     def _is_market_open(self, epic: str) -> bool:
         """
-        Basic market hours check (can be enhanced)
-        
+        ENHANCED: Market hours check using centralized timezone utils
+
+        Now uses the comprehensive UTC-based market hours logic from timezone_utils.py
+        which properly handles:
+        - Forex 24/5 schedule (Friday 22:00 UTC - Sunday 22:00 UTC closed)
+        - Configurable trading hours (RESPECT_MARKET_HOURS, WEEKEND_SCANNING)
+        - Proper timezone conversion and session detection
+
         Args:
             epic: Instrument epic
-            
+
         Returns:
-            True if market is likely open
+            True if market is open, False if closed or check fails
         """
-        # Basic implementation - can be enhanced with actual market hours API
-        from datetime import datetime, time
-        
-        now = datetime.now()
-        weekday = now.weekday()  # 0 = Monday, 6 = Sunday
-        current_time = now.time()
-        
-        # Forex markets are generally closed on weekends
-        if weekday >= 5:  # Saturday (5) or Sunday (6)
+        try:
+            # Use centralized market hours checking from timezone_utils
+            from utils.timezone_utils import is_market_hours
+
+            market_open = is_market_hours()
+
+            if not market_open:
+                self.logger.info(f"🚫 Market closed for {epic} - order execution blocked")
+
+            return market_open
+
+        except ImportError:
+            # Fallback to forex_scanner import path
+            try:
+                from forex_scanner.utils.timezone_utils import is_market_hours
+
+                market_open = is_market_hours()
+
+                if not market_open:
+                    self.logger.info(f"🚫 Market closed for {epic} - order execution blocked")
+
+                return market_open
+
+            except Exception as e:
+                self.logger.error(f"❌ Market hours check failed (import error): {e}")
+                # FAIL SAFE: If we can't check market hours, don't allow trading
+                self.logger.warning(f"⚠️ Blocking order for {epic} - unable to verify market status")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"❌ Market hours check failed: {e}")
+            # FAIL SAFE: If we can't check market hours, don't allow trading
+            self.logger.warning(f"⚠️ Blocking order for {epic} - unable to verify market status")
             return False
-        
-        # Very basic check - forex is generally 24h on weekdays
-        # This is a simplified check and should be enhanced with proper market hours
-        return True
     
     def handle_execution_error(self, error: Exception, signal: Dict) -> Dict:
         """
