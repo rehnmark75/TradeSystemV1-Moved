@@ -62,6 +62,10 @@ class SMCMultiTimeframeAnalyzer:
         self.mtf_cache = {}
         self.cache_timestamps = {}
 
+        # HTF structure bias cache (for strict HTF-LTF alignment)
+        self.htf_structure_bias_cache = {}  # Stores current 4h structure direction
+        self.htf_structure_cache_time = {}
+
         self.logger.info(f"🔄 SMC MTF Analyzer initialized: {self.check_timeframes}")
 
     def is_mtf_enabled(self) -> bool:
@@ -790,7 +794,386 @@ class SMCMultiTimeframeAnalyzer:
         """Clear MTF cache (useful for testing or manual refresh)"""
         self.mtf_cache.clear()
         self.cache_timestamps.clear()
+        self.htf_structure_bias_cache.clear()
+        self.htf_structure_cache_time.clear()
         self.logger.debug("SMC MTF cache cleared")
+
+    def get_htf_structure_bias(
+        self,
+        epic: str,
+        current_time: pd.Timestamp,
+        timeframe: str = '4h'
+    ) -> Optional[Dict]:
+        """
+        Get Higher Timeframe structure bias for directional filtering
+
+        This is the core of the enhanced MTF strategy:
+        - Analyzes 4h for BOS/ChoCH to establish directional bias
+        - Returns current market structure direction
+        - Caches result for performance
+
+        Args:
+            epic: Trading pair epic
+            current_time: Current timestamp
+            timeframe: Higher timeframe to check (default '4h')
+
+        Returns:
+            Dictionary with HTF structure bias:
+            {
+                'bias_direction': 'bullish' | 'bearish' | 'neutral',
+                'structure_type': 'BOS' | 'ChoCH' | None,
+                'significance': float (0-1),
+                'last_break_price': float,
+                'order_blocks_present': bool,
+                'fvg_zones': List[Dict],  # FVG zones for confluence
+                'premium_discount_zone': str  # 'premium', 'discount', 'equilibrium'
+            }
+        """
+        if not self.is_mtf_enabled():
+            return None
+
+        try:
+            # Check cache first
+            cache_key = f"{epic}_{timeframe}_bias"
+            if self._is_cache_valid(cache_key, current_time):
+                cached_bias = self.htf_structure_bias_cache.get(cache_key)
+                if cached_bias:
+                    self.logger.debug(f"Using cached HTF structure bias for {epic} {timeframe}")
+                    return cached_bias
+
+            # Fetch HTF data
+            htf_data = self._fetch_and_cache_htf_data(epic, timeframe, current_time)
+
+            if htf_data is None or len(htf_data) < 30:
+                return None
+
+            # Analyze HTF structure for bias
+            bias_result = self._analyze_htf_structure_bias(htf_data, epic, timeframe)
+
+            # Cache the result
+            self.htf_structure_bias_cache[cache_key] = bias_result
+            self.htf_structure_cache_time[cache_key] = current_time
+
+            if bias_result and bias_result.get('bias_direction') != 'neutral':
+                self.logger.info(
+                    f"📊 HTF Structure Bias ({timeframe}): {bias_result['bias_direction'].upper()} "
+                    f"({bias_result.get('structure_type', 'N/A')}, "
+                    f"significance: {bias_result.get('significance', 0):.2f})"
+                )
+
+            return bias_result
+
+        except Exception as e:
+            self.logger.error(f"Error getting HTF structure bias: {e}")
+            return None
+
+    def _analyze_htf_structure_bias(
+        self,
+        df: pd.DataFrame,
+        epic: str,
+        timeframe: str
+    ) -> Dict:
+        """
+        Analyze HTF data to determine current structure bias
+
+        Looks for recent BOS/ChoCH patterns to establish directional bias
+        """
+        try:
+            if len(df) < 20:
+                return {'bias_direction': 'neutral'}
+
+            # Use rolling window to detect swing points
+            window = 5 if timeframe == '4h' else 3
+            df_copy = df.copy()
+
+            # Detect swing highs
+            df_copy['swing_high'] = (
+                (df_copy['high'] > df_copy['high'].shift(1)) &
+                (df_copy['high'] > df_copy['high'].shift(-1)) &
+                (df_copy['high'] == df_copy['high'].rolling(window*2+1, center=True).max())
+            )
+
+            # Detect swing lows
+            df_copy['swing_low'] = (
+                (df_copy['low'] < df_copy['low'].shift(1)) &
+                (df_copy['low'] < df_copy['low'].shift(-1)) &
+                (df_copy['low'] == df_copy['low'].rolling(window*2+1, center=True).min())
+            )
+
+            # Get recent swing highs and lows
+            swing_highs = df_copy[df_copy['swing_high']]['high'].tail(5).tolist()
+            swing_lows = df_copy[df_copy['swing_low']]['low'].tail(5).tolist()
+
+            # Determine structure bias
+            bias_direction = 'neutral'
+            structure_type = None
+            significance = 0.0
+            last_break_price = None
+
+            # Check for bullish structure (Higher Highs + Higher Lows)
+            if len(swing_highs) >= 2 and len(swing_lows) >= 2:
+                # Recent structure analysis
+                higher_highs = swing_highs[-1] > swing_highs[-2]
+                higher_lows = swing_lows[-1] > swing_lows[-2]
+                lower_highs = swing_highs[-1] < swing_highs[-2]
+                lower_lows = swing_lows[-1] < swing_lows[-2]
+
+                # Bullish BOS: Both HH and HL
+                if higher_highs and higher_lows:
+                    bias_direction = 'bullish'
+                    structure_type = 'BOS'
+                    significance = 0.8
+                    last_break_price = swing_highs[-1]
+
+                # Bullish ChoCH: HL after previous downtrend
+                elif higher_lows and not higher_highs:
+                    # Check if previous structure was bearish
+                    if len(swing_highs) >= 3 and swing_highs[-2] < swing_highs[-3]:
+                        bias_direction = 'bullish'
+                        structure_type = 'ChoCH'
+                        significance = 0.7
+                        last_break_price = swing_lows[-1]
+
+                # Bearish BOS: Both LH and LL
+                elif lower_highs and lower_lows:
+                    bias_direction = 'bearish'
+                    structure_type = 'BOS'
+                    significance = 0.8
+                    last_break_price = swing_lows[-1]
+
+                # Bearish ChoCH: LH after previous uptrend
+                elif lower_highs and not lower_lows:
+                    # Check if previous structure was bullish
+                    if len(swing_lows) >= 3 and swing_lows[-2] > swing_lows[-3]:
+                        bias_direction = 'bearish'
+                        structure_type = 'ChoCH'
+                        significance = 0.7
+                        last_break_price = swing_highs[-1]
+
+            # Detect order blocks on HTF
+            order_blocks_present = self._detect_htf_order_blocks(df_copy, bias_direction).get('supporting_ob_present', False)
+
+            # Detect FVG zones
+            fvg_zones = self._detect_htf_fvg_zones(df_copy, bias_direction)
+
+            # Get premium/discount context
+            pd_context = self._check_premium_discount_context(df_copy, bias_direction)
+
+            return {
+                'bias_direction': bias_direction,
+                'structure_type': structure_type,
+                'significance': significance,
+                'last_break_price': last_break_price,
+                'order_blocks_present': order_blocks_present,
+                'fvg_zones': fvg_zones,
+                'premium_discount_zone': pd_context.get('zone', 'equilibrium'),
+                'premium_discount_favorable': pd_context.get('favorable', False),
+                'swing_highs': swing_highs,
+                'swing_lows': swing_lows
+            }
+
+        except Exception as e:
+            self.logger.error(f"HTF structure bias analysis failed: {e}")
+            return {'bias_direction': 'neutral'}
+
+    def _detect_htf_fvg_zones(self, df: pd.DataFrame, bias_direction: str) -> List[Dict]:
+        """
+        Detect Fair Value Gap zones on higher timeframe
+
+        Returns list of FVG zones that align with bias direction
+        """
+        try:
+            if len(df) < 5:
+                return []
+
+            fvg_zones = []
+
+            # Detect bullish FVGs (current low > 2 candles ago high)
+            if bias_direction == 'bullish':
+                for i in range(2, len(df)):
+                    current_low = df.iloc[i]['low']
+                    prev_high = df.iloc[i-2]['high']
+
+                    if current_low > prev_high:
+                        gap_size = current_low - prev_high
+                        if gap_size / prev_high > 0.001:  # 0.1% minimum gap
+                            fvg_zones.append({
+                                'type': 'bullish',
+                                'high': current_low,
+                                'low': prev_high,
+                                'size': gap_size,
+                                'index': i
+                            })
+
+            # Detect bearish FVGs (current high < 2 candles ago low)
+            elif bias_direction == 'bearish':
+                for i in range(2, len(df)):
+                    current_high = df.iloc[i]['high']
+                    prev_low = df.iloc[i-2]['low']
+
+                    if current_high < prev_low:
+                        gap_size = prev_low - current_high
+                        if gap_size / current_high > 0.001:  # 0.1% minimum gap
+                            fvg_zones.append({
+                                'type': 'bearish',
+                                'high': prev_low,
+                                'low': current_high,
+                                'size': gap_size,
+                                'index': i
+                            })
+
+            # Return only recent FVGs (last 10 bars)
+            recent_fvgs = [fvg for fvg in fvg_zones if fvg['index'] >= len(df) - 10]
+
+            return recent_fvgs
+
+        except Exception as e:
+            self.logger.error(f"HTF FVG zone detection failed: {e}")
+            return []
+
+    def validate_ltf_entry_against_htf(
+        self,
+        epic: str,
+        current_time: pd.Timestamp,
+        ltf_signal_type: str,
+        ltf_structure_info: Dict,
+        htf_timeframe: str = '4h'
+    ) -> Dict:
+        """
+        Validate LTF (15m) entry signal against HTF (4h) structure bias
+
+        This implements the core enhancement:
+        - Check if 4h has bullish/bearish structure
+        - Validate that 15m signal aligns with 4h bias
+        - Reject signals that go against HTF structure
+
+        Args:
+            epic: Trading pair epic
+            current_time: Current timestamp
+            ltf_signal_type: 'BULL' or 'BEAR' from 15m
+            ltf_structure_info: Structure break info from 15m
+            htf_timeframe: Higher timeframe to validate against (default '4h')
+
+        Returns:
+            Dictionary with validation results:
+            {
+                'htf_ltf_aligned': bool,
+                'htf_bias': str,
+                'alignment_quality': str,  # 'strong', 'moderate', 'weak', 'conflicting'
+                'confluence_factors': List[str],
+                'additional_boost': float  # Extra confidence boost for alignment
+            }
+        """
+        try:
+            # Get HTF structure bias
+            htf_bias_result = self.get_htf_structure_bias(epic, current_time, htf_timeframe)
+
+            if not htf_bias_result:
+                # No HTF data available - allow signal but no boost
+                return {
+                    'htf_ltf_aligned': True,
+                    'htf_bias': 'unknown',
+                    'alignment_quality': 'weak',
+                    'confluence_factors': [],
+                    'additional_boost': 0.0,
+                    'reason': 'HTF data unavailable'
+                }
+
+            htf_bias = htf_bias_result['bias_direction']
+            htf_significance = htf_bias_result.get('significance', 0.5)
+
+            # Determine LTF direction
+            ltf_direction = 'bullish' if ltf_signal_type == 'BULL' else 'bearish'
+
+            # Check alignment
+            aligned = False
+            alignment_quality = 'conflicting'
+            additional_boost = 0.0
+            confluence_factors = []
+
+            if htf_bias == ltf_direction:
+                # Perfect alignment!
+                aligned = True
+                alignment_quality = 'strong' if htf_significance >= 0.7 else 'moderate'
+
+                # Base boost for alignment
+                additional_boost = 0.10 if htf_significance >= 0.7 else 0.05
+                confluence_factors.append(f'{htf_timeframe}_structure_aligned')
+
+                # Check additional confluence factors
+
+                # 1. Order blocks present on HTF
+                if htf_bias_result.get('order_blocks_present', False):
+                    additional_boost += 0.05
+                    confluence_factors.append(f'{htf_timeframe}_order_block')
+
+                # 2. FVG zones present
+                if htf_bias_result.get('fvg_zones', []):
+                    additional_boost += 0.04
+                    confluence_factors.append(f'{htf_timeframe}_fvg')
+
+                # 3. Premium/Discount favorable
+                if htf_bias_result.get('premium_discount_favorable', False):
+                    additional_boost += 0.06
+                    confluence_factors.append(f'{htf_timeframe}_premium_discount_zone')
+
+                # 4. Strong HTF structure (BOS vs ChoCH)
+                if htf_bias_result.get('structure_type') == 'BOS':
+                    additional_boost += 0.03
+                    confluence_factors.append(f'{htf_timeframe}_bos_continuation')
+                elif htf_bias_result.get('structure_type') == 'ChoCH':
+                    additional_boost += 0.02
+                    confluence_factors.append(f'{htf_timeframe}_choch_reversal')
+
+            elif htf_bias == 'neutral':
+                # Neutral HTF - allow but no boost
+                aligned = True
+                alignment_quality = 'weak'
+                additional_boost = 0.0
+                confluence_factors.append('htf_neutral')
+
+            else:
+                # Conflicting direction - REJECT
+                aligned = False
+                alignment_quality = 'conflicting'
+                additional_boost = -0.15  # Penalty for going against HTF
+                confluence_factors.append('htf_conflicting')
+
+            result = {
+                'htf_ltf_aligned': aligned,
+                'htf_bias': htf_bias,
+                'htf_structure_type': htf_bias_result.get('structure_type'),
+                'htf_significance': htf_significance,
+                'alignment_quality': alignment_quality,
+                'confluence_factors': confluence_factors,
+                'additional_boost': additional_boost,
+                'reason': f'{htf_timeframe} {htf_bias} vs {ltf_direction} signal'
+            }
+
+            # Log the validation result
+            if aligned and alignment_quality == 'strong':
+                self.logger.info(
+                    f"✅ HTF-LTF ALIGNED: {htf_timeframe} {htf_bias} + 15m {ltf_direction} "
+                    f"(boost: {additional_boost:+.2f}, factors: {len(confluence_factors)})"
+                )
+            elif not aligned:
+                self.logger.warning(
+                    f"❌ HTF-LTF CONFLICT: {htf_timeframe} {htf_bias} vs 15m {ltf_direction} "
+                    f"(penalty: {additional_boost:+.2f})"
+                )
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Error validating LTF against HTF: {e}")
+            return {
+                'htf_ltf_aligned': True,
+                'htf_bias': 'error',
+                'alignment_quality': 'weak',
+                'confluence_factors': [],
+                'additional_boost': 0.0,
+                'reason': f'Validation error: {str(e)}'
+            }
 
     def get_mtf_summary(self, validation_result: Dict) -> str:
         """

@@ -189,6 +189,7 @@ class SMCStrategyFast(BaseStrategy):
             # Multi-Timeframe Validation (if enabled)
             mtf_result = None
             mtf_confidence_boost = 0.0
+            htf_ltf_validation = None
 
             if self.mtf_enabled and self.mtf_analyzer and self.mtf_analyzer.is_mtf_enabled():
                 try:
@@ -202,7 +203,29 @@ class SMCStrategyFast(BaseStrategy):
                     # Get evaluation time (use df index if evaluation_time not provided)
                     eval_time = pd.Timestamp(evaluation_time) if evaluation_time else df.index[-1]
 
-                    # Validate against higher timeframes
+                    # ENHANCED: Validate LTF signal against HTF structure bias (4h)
+                    htf_ltf_validation = self.mtf_analyzer.validate_ltf_entry_against_htf(
+                        epic=epic,
+                        current_time=eval_time,
+                        ltf_signal_type=signal_type,
+                        ltf_structure_info=structure_info,
+                        htf_timeframe='4h'
+                    )
+
+                    # Check if HTF-LTF alignment is valid
+                    if not htf_ltf_validation.get('htf_ltf_aligned', True):
+                        # REJECT signal if HTF and LTF are conflicting
+                        self.logger.warning(
+                            f"❌ SIGNAL REJECTED: HTF-LTF conflict detected - "
+                            f"4h {htf_ltf_validation.get('htf_bias', 'unknown')} vs {signal_type} signal"
+                        )
+                        return None
+
+                    # Get additional confidence boost from HTF-LTF alignment
+                    htf_ltf_boost = htf_ltf_validation.get('additional_boost', 0.0)
+                    alignment_quality = htf_ltf_validation.get('alignment_quality', 'weak')
+
+                    # Legacy MTF validation (15m + 4h alignment check)
                     mtf_result = self.mtf_analyzer.validate_higher_timeframe_smc(
                         epic=epic,
                         current_time=eval_time,
@@ -210,15 +233,16 @@ class SMCStrategyFast(BaseStrategy):
                         structure_info=structure_info
                     )
 
-                    # Get confidence boost from MTF alignment
-                    mtf_confidence_boost = mtf_result.get('confidence_boost', 0.0)
+                    # Combine both MTF boosts
+                    legacy_mtf_boost = mtf_result.get('confidence_boost', 0.0)
+                    mtf_confidence_boost = max(htf_ltf_boost, legacy_mtf_boost)  # Take best boost
 
                     # Log MTF results
-                    if mtf_result.get('validation_passed', False):
-                        aligned_tfs = mtf_result.get('timeframes_aligned', [])
+                    if htf_ltf_validation.get('htf_ltf_aligned'):
+                        confluence_factors = htf_ltf_validation.get('confluence_factors', [])
                         self.logger.info(
-                            f"✅ MTF Validation PASSED: {aligned_tfs} aligned "
-                            f"(boost: {mtf_confidence_boost:+.3f})"
+                            f"✅ HTF-LTF Validation PASSED: {alignment_quality.upper()} alignment "
+                            f"(boost: {mtf_confidence_boost:+.3f}, factors: {len(confluence_factors)})"
                         )
                     else:
                         self.logger.debug(f"⚠️ MTF Validation WEAK: Limited HTF alignment")
@@ -226,6 +250,7 @@ class SMCStrategyFast(BaseStrategy):
                 except Exception as e:
                     self.logger.warning(f"MTF validation failed: {e}, continuing without MTF")
                     mtf_confidence_boost = 0.0
+                    htf_ltf_validation = None
 
             # Calculate confidence with MTF boost
             base_confidence = self._calculate_fast_confidence(latest_row, confluence_score)
@@ -263,7 +288,8 @@ class SMCStrategyFast(BaseStrategy):
                 spread_pips=spread_pips,
                 confluence_score=confluence_score,
                 confidence=confidence,
-                mtf_result=mtf_result
+                mtf_result=mtf_result,
+                htf_ltf_validation=htf_ltf_validation
             )
 
             if signal:
@@ -500,47 +526,121 @@ class SMCStrategyFast(BaseStrategy):
                         confluence_score += 0.7  # Increased from 0.5
                         ema_aligned = True
 
-            # 6. Premium/Discount Zone Analysis (NEW)
+            # 6. Premium/Discount Zone Analysis (ENHANCED)
             # Check if price is in favorable zone for the signal direction
             recent_window = df.iloc[max(0, current_index-50):current_index+1]
             swing_high = recent_window['high'].max()
             swing_low = recent_window['low'].min()
             price = current_row.get('close', 0)
 
+            in_favorable_zone = False
+            pd_zone_type = 'equilibrium'
+
             if swing_high > swing_low:
                 price_position = (price - swing_low) / (swing_high - swing_low)
 
-                # Bullish signal from discount zone (lower 40%)
-                if break_direction == 'bullish' and price_position < 0.4:
-                    confluence_score += 0.6
-                # Bearish signal from premium zone (upper 40%)
-                elif break_direction == 'bearish' and price_position > 0.6:
-                    confluence_score += 0.6
+                # Premium zone: upper 30% (70-100%)
+                if price_position >= 0.7:
+                    pd_zone_type = 'premium'
+                    # Bearish signal from premium zone gets bonus
+                    if break_direction == 'bearish':
+                        confluence_score += 0.8  # Increased from 0.6
+                        in_favorable_zone = True
+                    # Bullish signal from premium zone gets penalty
+                    elif break_direction == 'bullish':
+                        confluence_score -= 0.5  # NEW: Penalty for buying high
 
-            # 7. Liquidity Sweep Detection (NEW)
+                # Discount zone: lower 30% (0-30%)
+                elif price_position <= 0.3:
+                    pd_zone_type = 'discount'
+                    # Bullish signal from discount zone gets bonus
+                    if break_direction == 'bullish':
+                        confluence_score += 0.8  # Increased from 0.6
+                        in_favorable_zone = True
+                    # Bearish signal from discount zone gets penalty
+                    elif break_direction == 'bearish':
+                        confluence_score -= 0.5  # NEW: Penalty for selling low
+
+                # Equilibrium zone: 30-70%
+                else:
+                    pd_zone_type = 'equilibrium'
+                    # Neutral zone - small bonus for any direction
+                    confluence_score += 0.2
+
+            # Log premium/discount zone for debugging
+            if self.logger and pd_zone_type != 'equilibrium':
+                self.logger.debug(
+                    f"P/D Zone: {pd_zone_type}, favorable={in_favorable_zone}, "
+                    f"direction={break_direction}, position={price_position:.1%}"
+                )
+
+            # 7. Liquidity Sweep Detection (ENHANCED)
             # Check if recent price action shows liquidity grab before reversal
-            if current_index >= 3:
-                recent_bars = df.iloc[max(0, current_index-3):current_index+1]
+            liquidity_sweep_detected = False
+            if current_index >= 5:
+                # Extended lookback for better liquidity sweep detection
+                recent_bars = df.iloc[max(0, current_index-5):current_index+1]
 
                 # Bullish: Look for sweep below recent lows then recovery
                 if break_direction == 'bullish':
-                    prev_low = recent_bars['low'].iloc[:-1].min()
+                    # Get recent lows (excluding current bar)
+                    prev_lows = recent_bars['low'].iloc[:-1]
                     current_low = current_row.get('low', 0)
                     current_close = current_row.get('close', 0)
+                    current_high = current_row.get('high', 0)
 
-                    # Swept below then closed back above
-                    if current_low < prev_low and current_close > prev_low:
-                        confluence_score += 0.7
+                    if len(prev_lows) > 0:
+                        prev_low = prev_lows.min()
+
+                        # Classic liquidity sweep: swept below then closed back above
+                        if current_low < prev_low and current_close > prev_low:
+                            # Strong sweep with good recovery (closed in upper 50% of range)
+                            range_size = current_high - current_low
+                            close_position = (current_close - current_low) / range_size if range_size > 0 else 0
+
+                            if close_position >= 0.5:
+                                confluence_score += 0.9  # Strong liquidity grab
+                                liquidity_sweep_detected = True
+                            else:
+                                confluence_score += 0.6  # Weak recovery
+                                liquidity_sweep_detected = True
+
+                        # Equal lows liquidity sweep: current low near previous low
+                        elif abs(current_low - prev_low) / prev_low < 0.0002:  # Within 2 pips
+                            confluence_score += 0.4  # Equal lows = liquidity
+                            liquidity_sweep_detected = True
 
                 # Bearish: Look for sweep above recent highs then rejection
                 elif break_direction == 'bearish':
-                    prev_high = recent_bars['high'].iloc[:-1].max()
+                    # Get recent highs (excluding current bar)
+                    prev_highs = recent_bars['high'].iloc[:-1]
                     current_high = current_row.get('high', 0)
                     current_close = current_row.get('close', 0)
+                    current_low = current_row.get('low', 0)
 
-                    # Swept above then closed back below
-                    if current_high > prev_high and current_close < prev_high:
-                        confluence_score += 0.7
+                    if len(prev_highs) > 0:
+                        prev_high = prev_highs.max()
+
+                        # Classic liquidity sweep: swept above then closed back below
+                        if current_high > prev_high and current_close < prev_high:
+                            # Strong sweep with good rejection (closed in lower 50% of range)
+                            range_size = current_high - current_low
+                            close_position = (current_close - current_low) / range_size if range_size > 0 else 0
+
+                            if close_position <= 0.5:
+                                confluence_score += 0.9  # Strong liquidity grab
+                                liquidity_sweep_detected = True
+                            else:
+                                confluence_score += 0.6  # Weak rejection
+                                liquidity_sweep_detected = True
+
+                        # Equal highs liquidity sweep: current high near previous high
+                        elif abs(current_high - prev_high) / prev_high < 0.0002:  # Within 2 pips
+                            confluence_score += 0.4  # Equal highs = liquidity
+                            liquidity_sweep_detected = True
+
+            if liquidity_sweep_detected:
+                self.logger.debug(f"💧 Liquidity sweep detected: {break_direction} direction")
 
             # 8. Strong Candle Pattern (NEW)
             # Reward strong directional candles that show conviction
@@ -605,7 +705,8 @@ class SMCStrategyFast(BaseStrategy):
         spread_pips: float,
         confluence_score: float,
         confidence: float,
-        mtf_result: Optional[Dict] = None
+        mtf_result: Optional[Dict] = None,
+        htf_ltf_validation: Optional[Dict] = None
     ) -> Optional[Dict]:
         """Create SMC signal with fast risk management"""
         try:
@@ -641,6 +742,28 @@ class SMCStrategyFast(BaseStrategy):
                     signal['entry_reason'] += f"_MTF_{'_'.join(aligned_tfs)}"
             else:
                 signal['mtf_validation'] = {'enabled': False}
+
+            # Add HTF-LTF validation details (enhanced MTF strategy)
+            if htf_ltf_validation:
+                signal['htf_ltf_validation'] = {
+                    'enabled': True,
+                    'htf_bias': htf_ltf_validation.get('htf_bias', 'unknown'),
+                    'htf_structure_type': htf_ltf_validation.get('htf_structure_type'),
+                    'htf_significance': htf_ltf_validation.get('htf_significance', 0.0),
+                    'alignment_quality': htf_ltf_validation.get('alignment_quality', 'weak'),
+                    'aligned': htf_ltf_validation.get('htf_ltf_aligned', False),
+                    'confluence_factors': htf_ltf_validation.get('confluence_factors', []),
+                    'additional_boost': htf_ltf_validation.get('additional_boost', 0.0),
+                    'reason': htf_ltf_validation.get('reason', '')
+                }
+
+                # Update entry reason to include HTF-LTF status
+                if htf_ltf_validation.get('htf_ltf_aligned'):
+                    htf_bias = htf_ltf_validation.get('htf_bias', 'unknown')
+                    alignment_quality = htf_ltf_validation.get('alignment_quality', 'weak')
+                    signal['entry_reason'] += f"_HTF_{htf_bias.upper()}_{alignment_quality.upper()}"
+            else:
+                signal['htf_ltf_validation'] = {'enabled': False}
 
             # Fast risk management levels
             signal = self._add_fast_risk_management(signal, latest_row, signal_type)

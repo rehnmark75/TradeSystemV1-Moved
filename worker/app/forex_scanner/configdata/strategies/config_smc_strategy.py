@@ -13,7 +13,7 @@ Features:
 """
 
 # Strategy enable/disable
-SMC_STRATEGY = True
+SMC_STRATEGY = False
 
 # Main configuration dictionary with multiple presets
 SMC_STRATEGY_CONFIG = {
@@ -43,18 +43,24 @@ SMC_STRATEGY_CONFIG = {
         'zone_max_age': 50,         # Maximum bars to keep zone active
         'zone_strength_factor': 1.4, # Volume factor for strong zones - Increased
         
-        # Liquidity Analysis (NEW)
+        # Liquidity Analysis (ENHANCED)
         'liquidity_sweep_enabled': True,      # Enable liquidity sweep detection
         'equal_levels_tolerance': 0.5,        # Tolerance for equal highs/lows (pips)
         'min_liquidity_volume': 1.3,          # Min volume for liquidity events
         'liquidity_confirmation_bars': 2,     # Bars to confirm liquidity sweep
+        'strong_sweep_confluence': 0.9,       # NEW: Confluence for strong sweep (good recovery/rejection)
+        'weak_sweep_confluence': 0.6,         # NEW: Confluence for weak sweep
+        'equal_levels_confluence': 0.4,       # NEW: Confluence for equal highs/lows
         
-        # Premium/Discount Analysis (NEW)
+        # Premium/Discount Analysis (ENHANCED)
         'premium_discount_enabled': True,     # Enable market maker model
         'daily_range_multiplier': 0.618,     # Golden ratio for optimal entry
         'weekly_range_multiplier': 0.382,    # Weekly range analysis
-        'premium_threshold': 0.7,            # Threshold for premium zone
-        'discount_threshold': 0.3,           # Threshold for discount zone
+        'premium_threshold': 0.7,            # Threshold for premium zone (70%)
+        'discount_threshold': 0.3,           # Threshold for discount zone (30%)
+        'strict_premium_discount': True,     # NEW: Penalize buying premium/selling discount
+        'pd_confluence_boost': 0.8,          # NEW: Bonus for correct zone entry
+        'pd_wrong_zone_penalty': -0.5,       # NEW: Penalty for wrong zone entry
         
         # Signal Generation
         'confluence_required': 2.5, # Minimum confluence factors needed - Increased
@@ -72,6 +78,15 @@ SMC_STRATEGY_CONFIG = {
         'mtf_min_alignment_ratio': 0.5,         # Minimum 50% alignment (1 of 2)
         'mtf_require_both_for_high_conf': True, # Both needed for >80% confidence
         'mtf_cache_minutes': 5,                 # Cache HTF data for 5 min
+
+        # HTF-LTF Structure Alignment (NEW ENHANCEMENT)
+        'require_htf_structure_confirmation': True,  # STRICT: Require 4h structure confirmation
+        'min_htf_structure_significance': 0.5,       # Minimum 4h structure significance
+        'htf_primary_timeframe': '4h',               # Primary HTF for bias
+        'ltf_entry_timeframe': '15m',                # LTF for entry signals
+        'reject_conflicting_htf': True,              # Reject if HTF opposes LTF signal
+        'htf_fvg_confluence': True,                  # Use 4h FVG zones for confluence
+        'htf_order_block_confluence': True,          # Use 4h order blocks for confluence
 
         # MTF Confidence Adjustments
         'mtf_both_aligned_boost': 0.15,         # Both 15m + 4h aligned
@@ -135,18 +150,24 @@ SMC_STRATEGY_CONFIG = {
         'zone_max_age': 40,         # Longer validity
         'zone_strength_factor': 1.2, # Relaxed strength requirement
         
-        # Liquidity Analysis - Keep enabled but relaxed
+        # Liquidity Analysis (ENHANCED) - Keep enabled but relaxed
         'liquidity_sweep_enabled': True,
         'equal_levels_tolerance': 1.0,        # More tolerance for equal levels
         'min_liquidity_volume': 1.2,          # Lower volume requirement
         'liquidity_confirmation_bars': 1,     # Faster confirmation
+        'strong_sweep_confluence': 0.7,       # NEW: Lower than default
+        'weak_sweep_confluence': 0.5,         # NEW: Lower than default
+        'equal_levels_confluence': 0.3,       # NEW: Lower than default
         
-        # Premium/Discount Analysis - Keep but relaxed
+        # Premium/Discount Analysis (ENHANCED) - Keep but relaxed
         'premium_discount_enabled': True,
         'daily_range_multiplier': 0.618,     # Keep golden ratio
         'weekly_range_multiplier': 0.382,    # Keep weekly analysis
         'premium_threshold': 0.75,           # Slightly higher premium threshold
         'discount_threshold': 0.25,          # Slightly lower discount threshold
+        'strict_premium_discount': False,    # NEW: Don't penalize for moderate preset
+        'pd_confluence_boost': 0.6,          # NEW: Lower bonus than default
+        'pd_wrong_zone_penalty': 0.0,        # NEW: No penalty for moderate
         
         # Signal Generation - CRITICAL ADJUSTMENTS
         'confluence_required': 1.0,    # REDUCED to match scalping success
@@ -164,6 +185,15 @@ SMC_STRATEGY_CONFIG = {
         'mtf_min_alignment_ratio': 0.5,         # At least 1 of 2 must align
         'mtf_require_both_for_high_conf': False, # Don't require both (relaxed)
         'mtf_cache_minutes': 5,
+
+        # HTF-LTF Structure Alignment (NEW) - More lenient for moderate
+        'require_htf_structure_confirmation': True,  # Still check HTF structure
+        'min_htf_structure_significance': 0.3,       # Lower threshold
+        'htf_primary_timeframe': '4h',
+        'ltf_entry_timeframe': '15m',
+        'reject_conflicting_htf': False,             # Allow conflicting (relaxed)
+        'htf_fvg_confluence': True,
+        'htf_order_block_confluence': True,
 
         # MTF Confidence Adjustments - Smaller boosts
         'mtf_both_aligned_boost': 0.10,         # Smaller boost for moderate preset
