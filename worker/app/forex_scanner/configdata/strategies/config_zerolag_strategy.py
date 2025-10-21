@@ -5,7 +5,7 @@ Modular configuration following the new architectural pattern
 """
 
 # Strategy enable/disable
-ZERO_LAG_STRATEGY = True
+ZERO_LAG_STRATEGY = False
 
 # =============================================================================
 # PAIR BLACKLIST CONFIGURATION
