@@ -1320,16 +1320,16 @@ COMPRESS_OLD_LOGS = True
 
 # Smart Money Configuration moved to configdata/strategies/config_smc_strategy.py
 
-ZERO_LAG_STRATEGY = True
+ZERO_LAG_STRATEGY = False
 # MOMENTUM_BIAS_STRATEGY removed - legacy strategy replaced by MOMENTUM_STRATEGY
-MOMENTUM_STRATEGY = True
+MOMENTUM_STRATEGY = False
 
-ZERO_LAG_STRATEGY_ENABLED = True
+ZERO_LAG_STRATEGY_ENABLED = False
 # MOMENTUM_BIAS_STRATEGY_ENABLED removed - legacy strategy replaced by MOMENTUM_STRATEGY
-MOMENTUM_STRATEGY_ENABLED = True
-USE_ZERO_LAG_STRATEGY = True
+MOMENTUM_STRATEGY_ENABLED = False
+USE_ZERO_LAG_STRATEGY = False
 # USE_MOMENTUM_BIAS_STRATEGY removed - legacy strategy replaced by MOMENTUM_STRATEGY
-USE_MOMENTUM_STRATEGY = True
+USE_MOMENTUM_STRATEGY = False
 
 
 # Strategy indicator requirements mapping

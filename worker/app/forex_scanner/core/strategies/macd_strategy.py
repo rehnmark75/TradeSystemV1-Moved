@@ -530,14 +530,43 @@ class MACDStrategy(BaseStrategy):
             bull_window = bull_window | df['bull_cross_initial'].shift(i).fillna(False)
             bear_window = bear_window | df['bear_cross_initial'].shift(i).fillna(False)
 
+        # CRITICAL FIX #2: MUTUAL EXCLUSION - Cancel opposite window when new crossover occurs
+        # This prevents simultaneous bull and bear expansion tracking
+        # When a bull crossover happens, cancel any active bear window from that point forward
+        bull_cross_count = 0
+        for idx in df[df['bull_cross_initial']].index:
+            idx_loc = df.index.get_loc(idx)
+            # Check if we're canceling an active bear window
+            if bear_window.iloc[idx_loc:].any():
+                bull_cross_count += 1
+            # Cancel bear window from this crossover point onward
+            bear_window.iloc[idx_loc:] = False
+
+        # When a bear crossover happens, cancel any active bull window from that point forward
+        bear_cross_count = 0
+        for idx in df[df['bear_cross_initial']].index:
+            idx_loc = df.index.get_loc(idx)
+            # Check if we're canceling an active bull window
+            if bull_window.iloc[idx_loc:].any():
+                bear_cross_count += 1
+            # Cancel bull window from this crossover point onward
+            bull_window.iloc[idx_loc:] = False
+
+        # Log mutual exclusion activity
+        if bull_cross_count > 0 or bear_cross_count > 0:
+            epic_display = f"[{epic}] " if epic else ""
+            self.logger.debug(f"🔄 {epic_display}Mutual exclusion applied: {bull_cross_count} bull crosses canceled bear windows, {bear_cross_count} bear crosses canceled bull windows")
+
         df['bull_window'] = bull_window
         df['bear_window'] = bear_window
 
-        # BULL EXPANSION: In window AND histogram >= threshold (MACD requirement - must be met first)
-        df['bull_expansion_met'] = df['bull_window'] & (df['macd_histogram'] >= min_histogram)
+        # BULL EXPANSION: In window AND histogram >= threshold AND histogram is positive
+        # CRITICAL FIX: Ensure histogram is actually bullish (> 0) to prevent false expansion after reversal
+        df['bull_expansion_met'] = df['bull_window'] & (df['macd_histogram'] > 0) & (df['macd_histogram'] >= min_histogram)
 
-        # BEAR EXPANSION: In window AND |histogram| >= threshold (MACD requirement - must be met first)
-        df['bear_expansion_met'] = df['bear_window'] & (abs(df['macd_histogram']) >= min_histogram)
+        # BEAR EXPANSION: In window AND |histogram| >= threshold AND histogram is negative
+        # CRITICAL FIX: Ensure histogram is actually bearish (< 0) to prevent false expansion after reversal
+        df['bear_expansion_met'] = df['bear_window'] & (df['macd_histogram'] < 0) & (abs(df['macd_histogram']) >= min_histogram)
 
         # ADX CATCH-UP WINDOW: Check if ADX reaches threshold within window AFTER MACD threshold is met
         # CRITICAL: MACD expansion_met must be True first, then we check for ADX within the same window

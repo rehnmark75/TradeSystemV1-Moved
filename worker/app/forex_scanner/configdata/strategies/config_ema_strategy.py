@@ -13,8 +13,8 @@ Internal logic completely replaced with Supertrend-based trend following.
 # =============================================================================
 
 # Strategy Mode Selection
-USE_SUPERTREND_MODE = True                 # True = Multi-Supertrend, False = Legacy EMA (for A/B testing)
-SIMPLE_EMA_STRATEGY = True                 # Kept for compatibility - ignored when USE_SUPERTREND_MODE = True
+USE_SUPERTREND_MODE = False                 # True = Multi-Supertrend, False = Legacy EMA (for A/B testing)
+SIMPLE_EMA_STRATEGY = False                 # Kept for compatibility - ignored when USE_SUPERTREND_MODE = True
 STRICT_EMA_ALIGNMENT = True                # Legacy - not used
 REQUIRE_EMA_SEPARATION = False             # Legacy - not used
 STRATEGY_WEIGHT_EMA = 0.5                  # Strategy weight in combined mode

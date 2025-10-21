@@ -694,21 +694,12 @@ class ZeroLagIndicatorCalculator:
                             return False, reason, details
 
             else:  # BEAR
-                # SELL signals: Check BOTH resistance above AND support below
-                # 1. Check if too close to resistance ABOVE (price might bounce back up)
-                for resistance in sr_levels['resistance']:
-                    if resistance > current_price:
-                        distance_pips = (resistance - current_price) / pip_size
-                        if distance_pips < min_distance_pips:
-                            reason = f"Too close to resistance above: {distance_pips:.1f} pips (min: {min_distance_pips:.1f})"
-                            details = {
-                                'resistance_level': resistance,
-                                'distance_pips': distance_pips,
-                                'min_required': min_distance_pips
-                            }
-                            return False, reason, details
+                # SELL signals: Check support BELOW current price
+                # CRITICAL FIX: Removed resistance above check - being near resistance is actually
+                # favorable for SELL signals (price likely to bounce down from resistance).
+                # Only check support below which could block downward movement.
 
-                # 2. Check if too close to support BELOW (might block downward movement)
+                # Check if too close to support BELOW (might block downward movement)
                 for support in sr_levels['support']:
                     if support < current_price:
                         distance_pips = (current_price - support) / pip_size

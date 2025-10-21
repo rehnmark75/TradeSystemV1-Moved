@@ -416,8 +416,11 @@ class EMAStrategy(BaseStrategy):
                 df_with_signals = self.indicator_calculator.detect_ema_signals(df_enhanced, trigger_mode=trigger_mode)
                 self.logger.debug(f"🎯 {log_prefix}Using EMA trigger mode: {trigger_mode}")
 
-            # BACKTEST MODE: Scan entire DataFrame for ANY alerts
+            # BACKTEST MODE: Check if there's a NEW alert at the current evaluation time
             if self.backtest_mode:
+                # Get the current timestamp we're evaluating (last row in the DataFrame)
+                current_timestamp = df_with_signals.iloc[-1].get('start_time')
+
                 # Find ALL rows with alerts
                 alert_rows = df_with_signals[
                     (df_with_signals['bull_alert'] == True) |
@@ -429,12 +432,19 @@ class EMAStrategy(BaseStrategy):
                     latest_alert_row = alert_rows.iloc[-1]
                     alert_timestamp = latest_alert_row.get('start_time')
 
-                    self.logger.info(f"🔍 {log_prefix}BACKTEST: Found alert at {alert_timestamp}")
-                    self.logger.info(f"🔍 {log_prefix}Debug: Bull alert: {latest_alert_row.get('bull_alert')}, Bear alert: {latest_alert_row.get('bear_alert')}")
+                    # CRITICAL FIX: Only process if the alert is at the CURRENT timestamp
+                    # This prevents re-processing the same alert on every subsequent bar
+                    if alert_timestamp == current_timestamp:
+                        self.logger.info(f"🔍 {log_prefix}BACKTEST: NEW alert at {alert_timestamp}")
+                        self.logger.info(f"🔍 {log_prefix}Debug: Bull alert: {latest_alert_row.get('bull_alert')}, Bear alert: {latest_alert_row.get('bear_alert')}")
 
-                    signal = self._check_immediate_signal(latest_alert_row, epic, timeframe, spread_pips, len(df), df_with_signals)
-                    if signal:
-                        return signal
+                        signal = self._check_immediate_signal(latest_alert_row, epic, timeframe, spread_pips, len(df), df_with_signals)
+                        if signal:
+                            return signal
+                    else:
+                        # Old alert, not current - don't generate signal
+                        self.logger.debug(f"🔍 {log_prefix}BACKTEST: Alert found at {alert_timestamp}, but current time is {current_timestamp} (skipping)")
+                        return None
                 else:
                     self.logger.debug(f"🔍 {log_prefix}No alerts found in DataFrame")
                     return None
