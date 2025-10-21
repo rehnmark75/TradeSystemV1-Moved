@@ -367,11 +367,29 @@ async def ig_place_order(
             # Re-raise HTTP exceptions (these are expected)
             raise
         except Exception as pos_check_error:
-            # Log position check failure but continue with order placement
-            # This ensures we don't block orders if the position check fails
-            logger.warning(f"⚠️ Position check failed for {symbol}: {str(pos_check_error)}")
-            logger.warning("   Proceeding with order placement (fail-open for safety)")
-            # Continue to order placement below
+            # FIXED: More selective error handling - only fail-open for network issues
+            error_msg = str(pos_check_error).lower()
+
+            # Only fail-open for network/timeout errors
+            if 'timeout' in error_msg or 'connection' in error_msg or 'network' in error_msg:
+                logger.warning(f"⚠️ Position check failed due to network issue for {symbol}: {str(pos_check_error)}")
+                logger.warning("   Proceeding with order placement (fail-open for network safety)")
+                # Continue to order placement
+            else:
+                # For other errors, fail-safe (don't place order)
+                logger.error(f"❌ Position check failed for {symbol}: {str(pos_check_error)}")
+                logger.error(f"   Error type: {type(pos_check_error).__name__}")
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "Position check failed",
+                        "message": f"Unable to verify existing positions for {symbol}",
+                        "epic": symbol,
+                        "alert_id": alert_id,
+                        "reason": "position_check_failed",
+                        "error_type": type(pos_check_error).__name__
+                    }
+                )
 
         logger.info(json.dumps(f"No open position for {symbol}, placing order."))
 
@@ -458,7 +476,44 @@ async def ig_place_order(
 
         # Place the market order with calculated SL and TP
         logger.info(f"📤 Placing market order: {symbol} {direction} with SL: {sl_limit}, TP: {limit_distance}")
-        result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance)
+
+        # FIXED: Catch broker duplicate position rejection and convert to HTTP 409
+        try:
+            result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance)
+        except httpx.HTTPStatusError as broker_error:
+            # Check if IG rejected due to existing position
+            error_text = ""
+            try:
+                if hasattr(broker_error.response, 'text'):
+                    error_text = broker_error.response.text.lower()
+                elif hasattr(broker_error.response, 'json'):
+                    error_json = broker_error.response.json()
+                    error_text = str(error_json).lower()
+                else:
+                    error_text = str(broker_error).lower()
+            except:
+                error_text = str(broker_error).lower()
+
+            # Check for duplicate position indicators in error message
+            duplicate_indicators = ['already open', 'position exists', 'duplicate', 'existing position']
+            if any(indicator in error_text for indicator in duplicate_indicators):
+                logger.info(f"ℹ️ IG broker rejected order - position already open for {symbol}")
+                logger.debug(f"   Broker error details: {error_text[:200]}")
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "status": "skipped",
+                        "message": f"Position already open for {symbol} (detected from broker rejection)",
+                        "epic": symbol,
+                        "alert_id": alert_id,
+                        "reason": "duplicate_position_broker"
+                    }
+                )
+            else:
+                # Re-raise other broker errors (will be caught by outer exception handler)
+                logger.error(f"❌ Broker rejected order for {symbol}: HTTP {broker_error.response.status_code}")
+                logger.error(f"   Error details: {error_text[:500]}")
+                raise
         
         # BUGFIX: Add validation that result was actually returned
         if result is None:

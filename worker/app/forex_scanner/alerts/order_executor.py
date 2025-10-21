@@ -56,6 +56,7 @@ class RetryConfig:
             # 429 = Rate limit (retry with backoff)
             # 500 = Internal server error (could be transient)
             # 502/503/504 = Gateway/Service unavailable (transient)
+            # 503 also used for position check failures (should retry)
             self.retry_on_status_codes = [429, 500, 502, 503, 504]
 
 
@@ -573,6 +574,21 @@ class OrderExecutor:
                     "reason": "blacklisted"
                 }
                 return result
+
+            elif response.status_code == 503:
+                # FIXED: Service unavailable (position check failed) - log as warning, allow retry
+                try:
+                    detail = response.json().get("detail", {})
+                    msg = detail.get("message", "Position verification service temporarily unavailable")
+                    reason = detail.get("reason", "position_check_failed")
+                except:
+                    msg = "Position verification service temporarily unavailable"
+                    reason = "service_unavailable"
+
+                self.logger.warning(f"⚠️ {external_epic}: {msg} (will retry)")
+                self.logger.debug(f"   Reason: {reason}")
+                # Raise exception to trigger retry logic
+                raise requests.exceptions.RequestException(f"Service unavailable (503): {msg}")
 
             else:
                 # Other errors - log appropriately with full details
