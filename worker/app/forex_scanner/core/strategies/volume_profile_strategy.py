@@ -403,16 +403,29 @@ class VolumeProfileStrategy(BaseStrategy):
         if not is_at_hvn or not nearest_hvn:
             return None
 
-        # Determine signal direction based on price position
-        # If price is below POC and at HVN = potential bounce UP (BUY)
-        # If price is above POC and at HVN = potential bounce DOWN (SELL)
+        # Determine signal direction based on trend (EMA200) and HVN position
+        # In uptrend: HVN acts as support (BUY on pullback to HVN)
+        # In downtrend: HVN acts as resistance (SELL on rally to HVN)
 
-        if position_analysis['distance_to_poc_pips'] < 0:
-            # Price below POC - potential BUY at HVN support
-            signal_type = 'BUY'
+        # Get EMA200 for trend determination
+        ema200 = df['ema_200'].iloc[-1] if 'ema_200' in df.columns else None
+
+        if ema200 is not None:
+            # Use trend-based logic
+            if current_price > ema200:
+                # Uptrend: HVN is support, buy on bounce
+                signal_type = 'BUY'
+            else:
+                # Downtrend: HVN is resistance, sell on rejection
+                signal_type = 'SELL'
         else:
-            # Price above POC - potential SELL at HVN resistance
-            signal_type = 'SELL'
+            # Fallback: Use HVN position relative to current price
+            if current_price > nearest_hvn.price_center:
+                # Price above HVN - HVN acts as support below = BUY signal
+                signal_type = 'BUY'
+            else:
+                # Price below HVN - HVN acts as resistance above = SELL signal
+                signal_type = 'SELL'
 
         # Calculate confidence
         confidence = self.vp_analyzer.get_signal_confidence(current_price, profile, signal_type)
