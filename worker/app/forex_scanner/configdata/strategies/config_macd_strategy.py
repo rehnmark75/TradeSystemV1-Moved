@@ -52,28 +52,28 @@ MACD_MIN_HISTOGRAM_THRESHOLDS = {
     # Strategy: Target median histogram of WINNING trades, not just any signals
     # Key insight: Early entries with moderate expansion often outperform large expansions
 
-    'default': {'histogram': 0.00005, 'min_adx': 18},  # Default for unlisted pairs
+    'default': {'histogram': 0.00005, 'min_adx': 15},  # Default for unlisted pairs
 
     # Major pairs - Based on median histogram of WINNING trades
-    'GBPUSD': {'histogram': 0.000055, 'min_adx': 18},  # Median of 11 winners, 73.3% WR, +£810
-    'EURUSD': {'histogram': 0.000045, 'min_adx': 18},  # Below median of 2 winners, 66.7% WR, +£79
-    'AUDUSD': {'histogram': 0.000052, 'min_adx': 18},  # Median of 7 winners, 100% WR, +£521 (optimal!)
-    'USDCHF': {'histogram': 0.000035, 'min_adx': 18},  # Median of 6 winners, 66.7% WR, +£275
-    'USDCAD': {'histogram': 0.000040, 'min_adx': 18},  # Median of 4 winners, 80% WR, +£107
-    'NZDUSD': {'histogram': 0.000050, 'min_adx': 18},  # Median of 3 winners, 42.9% WR, -£323 (needs work)
+    'GBPUSD': {'histogram': 0.000055, 'min_adx': 15},  # Median of 11 winners, 73.3% WR, +£810
+    'EURUSD': {'histogram': 0.000045, 'min_adx': 15},  # Below median of 2 winners, 66.7% WR, +£79
+    'AUDUSD': {'histogram': 0.000052, 'min_adx': 15},  # Median of 7 winners, 100% WR, +£521 (optimal!)
+    'USDCHF': {'histogram': 0.000035, 'min_adx': 15},  # Median of 6 winners, 66.7% WR, +£275
+    'USDCAD': {'histogram': 0.000040, 'min_adx': 15},  # Median of 4 winners, 80% WR, +£107
+    'NZDUSD': {'histogram': 0.000050, 'min_adx': 15},  # Median of 3 winners, 42.9% WR, -£323 (needs work)
 
     # JPY pairs - Based on median/avg of WINNING trades
-    'USDJPY': {'histogram': 0.012, 'min_adx': 18},     # Below avg of 8 winners, 57.1% WR, +¥487
-    'EURJPY': {'histogram': 0.020, 'min_adx': 18},     # Below median of 3 winners, 37.5% WR, -£200
-    'AUDJPY': {'histogram': 0.015, 'min_adx': 18},     # Below median of 5 winners, 45.5% WR, -£359
-    'GBPJPY': {'histogram': 0.020, 'min_adx': 18},     # Conservative (insufficient trade data)
-    'NZDJPY': {'histogram': 0.010, 'min_adx': 18},     # Conservative (insufficient trade data)
-    'CADJPY': {'histogram': 0.012, 'min_adx': 18},     # Conservative (insufficient trade data)
-    'CHFJPY': {'histogram': 0.015, 'min_adx': 18},     # Conservative (insufficient trade data)
+    'USDJPY': {'histogram': 0.012, 'min_adx': 15},     # Below avg of 8 winners, 57.1% WR, +¥487
+    'EURJPY': {'histogram': 0.020, 'min_adx': 15},     # Below median of 3 winners, 37.5% WR, -£200
+    'AUDJPY': {'histogram': 0.015, 'min_adx': 15},     # Below median of 5 winners, 45.5% WR, -£359
+    'GBPJPY': {'histogram': 0.020, 'min_adx': 15},     # Conservative (insufficient trade data)
+    'NZDJPY': {'histogram': 0.010, 'min_adx': 15},     # Conservative (insufficient trade data)
+    'CADJPY': {'histogram': 0.012, 'min_adx': 15},     # Conservative (insufficient trade data)
+    'CHFJPY': {'histogram': 0.015, 'min_adx': 15},     # Conservative (insufficient trade data)
 
     # Crosses (higher volatility) - Keep conservative
-    'GBPAUD': {'histogram': 0.00010, 'min_adx': 20},   # High volatility cross
-    'GBPNZD': {'histogram': 0.00010, 'min_adx': 20},   # High volatility cross
+    'GBPAUD': {'histogram': 0.00010, 'min_adx': 15},   # High volatility cross
+    'GBPNZD': {'histogram': 0.00010, 'min_adx': 15},   # High volatility cross
 }
 
 # Technical Validation Thresholds (Enhanced MACD Detection)
