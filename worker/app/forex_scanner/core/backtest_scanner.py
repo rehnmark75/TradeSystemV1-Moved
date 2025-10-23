@@ -95,15 +95,35 @@ class BacktestScanner(IntelligentForexScanner):
         static_stop_pips = getattr(config_momentum_strategy, 'MOMENTUM_STATIC_STOP_PIPS', 40.0) if use_static_stops else 10.0
         static_target_pips = getattr(config_momentum_strategy, 'MOMENTUM_STATIC_TARGET_PIPS', 80.0) if use_static_stops else 15.0
 
+        # 🔥 SCALPING-SPECIFIC CONFIGURATION: Optimized for Linda Raschke MACD 3-10-16
+        if 'SCALPING' in self.strategy_name.upper():
+            # Scalping needs MUCH faster exits than other strategies
+            scalping_target_pips = 8.0       # Reduced from 15 (Linda Raschke: quick 8-12 pip targets)
+            scalping_stop_pips = 6.0         # Reduced from 10 (tight stops for scalping)
+            scalping_max_bars = 24           # 2 hours on 5min chart (was 96 = 24 hours)
+            scalping_breakeven_trigger = 4.0 # Move to BE at +4 pips (50% of target)
+            scalping_time_exit_hours = 2.0   # Close at breakeven after 2 hours if no clear direction
+
+            self.logger.info(f"📊 Scalping Exit Rules: Target={scalping_target_pips} pips, Stop={scalping_stop_pips} pips, "
+                           f"Timeout={scalping_max_bars} bars ({scalping_max_bars * 5 / 60:.1f} hours), "
+                           f"Time Exit={scalping_time_exit_hours} hours")
+        else:
+            scalping_target_pips = static_target_pips
+            scalping_stop_pips = static_stop_pips
+            scalping_max_bars = 96  # Default 24 hours for other strategies
+            scalping_breakeven_trigger = static_stop_pips * 0.8
+            scalping_time_exit_hours = None  # No time-based exit for non-scalping
+
         self.trailing_stop_simulator = TrailingStopSimulator(
-            target_pips=trailing_stop_config.get('target_pips', static_target_pips),
-            initial_stop_pips=trailing_stop_config.get('initial_stop_pips', static_stop_pips),
-            breakeven_trigger=trailing_stop_config.get('breakeven_trigger', static_stop_pips * 0.8),
-            stop_to_profit_trigger=trailing_stop_config.get('stop_to_profit_trigger', static_target_pips),
-            stop_to_profit_level=trailing_stop_config.get('stop_to_profit_level', static_stop_pips),
-            trailing_start=trailing_stop_config.get('trailing_start', static_target_pips),
+            target_pips=trailing_stop_config.get('target_pips', scalping_target_pips),
+            initial_stop_pips=trailing_stop_config.get('initial_stop_pips', scalping_stop_pips),
+            breakeven_trigger=trailing_stop_config.get('breakeven_trigger', scalping_breakeven_trigger),
+            stop_to_profit_trigger=trailing_stop_config.get('stop_to_profit_trigger', scalping_target_pips),
+            stop_to_profit_level=trailing_stop_config.get('stop_to_profit_level', scalping_stop_pips),
+            trailing_start=trailing_stop_config.get('trailing_start', scalping_target_pips),
             trailing_ratio=trailing_stop_config.get('trailing_ratio', 0.5),
-            max_bars=trailing_stop_config.get('max_bars', 96),
+            max_bars=trailing_stop_config.get('max_bars', scalping_max_bars),
+            time_exit_hours=scalping_time_exit_hours,  # New parameter for time-based exits
             use_atr=trailing_stop_config.get('use_atr', not use_static_stops),  # Disable ATR if using static stops
             # Phase 1: Use momentum strategy config ATR multipliers (2.5x stop, 2.0x target)
             atr_multiplier=trailing_stop_config.get('atr_multiplier',

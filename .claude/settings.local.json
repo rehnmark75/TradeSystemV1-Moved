@@ -103,7 +103,8 @@
       "Bash(claude mcp list:*)",
       "Bash(claude mcp get:*)",
       "Bash(npx -y @kimtaeyoon83/mcp-server-youtube-transcript)",
-      "Bash(alembic revision:*)"
+      "Bash(alembic revision:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

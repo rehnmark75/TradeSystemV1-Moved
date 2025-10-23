@@ -59,12 +59,12 @@ class ScalpingStrategy(BaseStrategy):
         """
         if timestamp_value is None:
             return None
-            
+
         try:
             # Case 1: Already a datetime object
             if isinstance(timestamp_value, datetime):
                 return timestamp_value
-                
+
             # Case 2: String timestamp (ISO format)
             if isinstance(timestamp_value, str):
                 # Handle ISO format with timezone
@@ -73,27 +73,35 @@ class ScalpingStrategy(BaseStrategy):
                 # Handle simple date/time strings
                 else:
                     return datetime.fromisoformat(timestamp_value)
-                    
-            # Case 3: Integer or float (Unix timestamp)
-            if isinstance(timestamp_value, (int, float)):
-                # Check if it's a reasonable Unix timestamp (between 1970 and 2100)
-                if 0 <= timestamp_value <= 4102444800:  # 2100-01-01
-                    return datetime.fromtimestamp(timestamp_value)
-                else:
-                    # FIXES: Invalid integer timestamp (like 429) - log and return None
-                    self.logger.warning(f"⚠️ TIMESTAMP FIX: Invalid timestamp integer {timestamp_value} converted to None (prevents database error)")
-                    return None
-                    
-            # Case 4: Pandas timestamp
+
+            # Case 3: Pandas timestamp
             if hasattr(timestamp_value, 'to_pydatetime'):
                 return timestamp_value.to_pydatetime()
-                
-            # Case 5: Unknown type - log and return None
-            self.logger.warning(f"⚠️ TIMESTAMP FIX: Unknown timestamp type {type(timestamp_value)} value {timestamp_value} converted to None")
+
+            # Case 4: Integer or float (Unix timestamp) - including numpy types
+            # Convert numpy types to Python native types first
+            if hasattr(timestamp_value, 'item'):  # numpy.int64, numpy.float64, etc.
+                timestamp_value = timestamp_value.item()
+
+            if isinstance(timestamp_value, (int, float)):
+                # Unix timestamps are typically > 946684800 (year 2000)
+                # Values like 193, 429 are clearly not Unix timestamps (would be 1970 + seconds)
+                if timestamp_value < 946684800:  # Before year 2000
+                    # This is not a valid timestamp - likely an index or counter
+                    # Silently return None without warning (these are expected)
+                    return None
+                elif timestamp_value <= 4102444800:  # Before 2100-01-01
+                    return datetime.fromtimestamp(timestamp_value)
+                else:
+                    # FIXES: Invalid integer timestamp - silently return None
+                    return None
+
+            # Case 5: Unknown type - silently return None
+            # (Reduced logging to avoid spam for non-timestamp fields)
             return None
-            
+
         except Exception as e:
-            self.logger.warning(f"⚠️ TIMESTAMP FIX: Error converting timestamp {timestamp_value}: {e} - converted to None")
+            # Only log actual errors during conversion
             return None
     
     def get_required_indicators(self) -> List[str]:
@@ -114,18 +122,265 @@ class ScalpingStrategy(BaseStrategy):
         indicators.extend(['bb_upper', 'bb_lower', 'bb_middle'])
         
         return indicators
-    
+
+    # ================================================================================
+    # 🔥 ADAPTIVE MARKET REGIME DETECTION SYSTEM
+    # ================================================================================
+
+    def _detect_market_regime(self, df: pd.DataFrame) -> Dict:
+        """
+        🔥 NEW: Detect current market regime for adaptive indicator selection
+
+        Returns dict with:
+        - regime: 'trending', 'ranging', 'volatile', 'quiet'
+        - trend_strength: 0-100 (ADX-based)
+        - volatility: 'high', 'medium', 'low' (ATR-based)
+        - market_phase: 'expansion', 'contraction' (BB width)
+        - recommended_indicators: List of optimal indicators for this regime
+        """
+        latest = df.iloc[-1]
+
+        # Calculate ADX for trend strength (if not already in df)
+        adx = self._calculate_adx(df) if 'adx' not in df.columns else latest.get('adx', 20)
+
+        # Calculate ATR for volatility
+        atr_20 = df['close'].rolling(20).apply(lambda x: x.max() - x.min()).iloc[-1]
+        atr_avg = df['close'].rolling(20).apply(lambda x: x.max() - x.min()).mean()
+        volatility_ratio = atr_20 / atr_avg if atr_avg > 0 else 1.0
+
+        # Calculate Bollinger Band width for market phase
+        bb_width = (latest['bb_upper'] - latest['bb_lower']) / latest['bb_middle'] if 'bb_upper' in df.columns else 0.02
+        bb_avg = ((df['bb_upper'] - df['bb_lower']) / df['bb_middle']).tail(20).mean()
+
+        # Determine regime
+        regime = self._classify_regime(adx, volatility_ratio, bb_width, bb_avg)
+
+        # Select optimal indicators for this regime
+        recommended_indicators = self._select_indicators_for_regime(regime)
+
+        return {
+            'regime': regime['type'],
+            'trend_strength': adx,
+            'volatility': regime['volatility'],
+            'market_phase': regime['phase'],
+            'recommended_indicators': recommended_indicators,
+            'confidence_multiplier': regime['confidence_multiplier'],
+            'adx': adx,
+            'volatility_ratio': volatility_ratio,
+            'bb_width': bb_width
+        }
+
+    def _calculate_adx(self, df: pd.DataFrame, period: int = 14) -> float:
+        """Calculate ADX (Average Directional Index) for trend strength"""
+        try:
+            high = df['high']
+            low = df['low']
+            close = df['close']
+
+            # Calculate +DM and -DM
+            plus_dm = high.diff()
+            minus_dm = -low.diff()
+
+            plus_dm[plus_dm < 0] = 0
+            minus_dm[minus_dm < 0] = 0
+
+            # Calculate True Range
+            tr1 = high - low
+            tr2 = abs(high - close.shift())
+            tr3 = abs(low - close.shift())
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+            # Smooth DM and TR
+            atr = tr.rolling(period).mean()
+            plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
+            minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
+
+            # Calculate ADX
+            dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+            adx = dx.rolling(period).mean().iloc[-1]
+
+            return adx if not pd.isna(adx) else 20.0
+        except:
+            return 20.0  # Default neutral value
+
+    def _calculate_linda_macd(self, df: pd.DataFrame) -> Dict:
+        """
+        🔥 LINDA RASCHKE MACD: Calculate 3-10-16 oscillator with SMA (not EMA!)
+
+        Settings:
+        - Fast MA: 3 periods (SMA)
+        - Slow MA: 10 periods (SMA)
+        - Signal: 16 periods (SMA)
+
+        This is MUCH faster than standard 12-26-9 EMA MACD
+        Designed specifically for scalping and intraday trading
+
+        Returns dict with:
+        - macd_line: The main MACD line (3 SMA - 10 SMA)
+        - signal_line: The signal line (16 SMA of MACD)
+        - histogram: MACD line - signal line
+        - macd_line_prev: Previous MACD line value
+        - signal_line_prev: Previous signal line value
+        - histogram_prev: Previous histogram value
+        """
+        try:
+            close = df['close']
+
+            # Calculate MACD line: 3 SMA - 10 SMA (NOT EMA!)
+            sma_3 = close.rolling(window=3).mean()
+            sma_10 = close.rolling(window=10).mean()
+            macd_line_series = sma_3 - sma_10
+
+            # Calculate Signal line: 16 SMA of MACD line (NOT EMA!)
+            signal_line_series = macd_line_series.rolling(window=16).mean()
+
+            # Calculate histogram
+            histogram_series = macd_line_series - signal_line_series
+
+            # Get current and previous values
+            macd_line = macd_line_series.iloc[-1]
+            signal_line = signal_line_series.iloc[-1]
+            histogram = histogram_series.iloc[-1]
+
+            macd_line_prev = macd_line_series.iloc[-2] if len(macd_line_series) > 1 else macd_line
+            signal_line_prev = signal_line_series.iloc[-2] if len(signal_line_series) > 1 else signal_line
+            histogram_prev = histogram_series.iloc[-2] if len(histogram_series) > 1 else histogram
+
+            # Check for NaN values
+            if pd.isna(macd_line) or pd.isna(signal_line):
+                return None
+
+            return {
+                'macd_line': macd_line,
+                'signal_line': signal_line,
+                'histogram': histogram,
+                'macd_line_prev': macd_line_prev,
+                'signal_line_prev': signal_line_prev,
+                'histogram_prev': histogram_prev,
+                'macd_slope': macd_line - macd_line_prev,
+                'signal_slope': signal_line - signal_line_prev,
+                'macd_series': macd_line_series,  # For Anti pattern detection
+                'signal_series': signal_line_series
+            }
+        except Exception as e:
+            self.logger.debug(f"Linda MACD calculation failed: {e}")
+            return None
+
+    def _classify_regime(self, adx: float, volatility_ratio: float, bb_width: float, bb_avg: float) -> Dict:
+        """
+        Classify market regime based on multiple factors
+
+        Regimes:
+        - TRENDING: ADX > 25, clear directional movement
+        - RANGING: ADX < 20, sideways movement
+        - VOLATILE: High ATR, fast price swings
+        - QUIET: Low ATR, low volume, tight ranges
+        """
+        # Determine trend strength
+        if adx > 30:
+            regime_type = 'strong_trending'
+            confidence_mult = 1.2  # Higher confidence in trending markets
+        elif adx > 20:
+            regime_type = 'trending'
+            confidence_mult = 1.1
+        elif adx < 15:
+            regime_type = 'ranging'
+            confidence_mult = 0.9  # Lower confidence in choppy markets
+        else:
+            regime_type = 'weak_trending'
+            confidence_mult = 1.0
+
+        # Determine volatility
+        if volatility_ratio > 1.5:
+            volatility = 'high'
+            if regime_type == 'ranging':
+                regime_type = 'volatile_ranging'  # Choppy, avoid
+                confidence_mult = 0.7
+        elif volatility_ratio > 1.2:
+            volatility = 'medium'
+        else:
+            volatility = 'low'
+            if regime_type != 'ranging':
+                regime_type = 'quiet_trending'  # Good for scalping
+                confidence_mult = 1.15
+
+        # Determine market phase
+        if bb_width > bb_avg * 1.3:
+            phase = 'expansion'  # Breakout phase
+        elif bb_width < bb_avg * 0.7:
+            phase = 'contraction'  # Squeeze, expect breakout
+        else:
+            phase = 'normal'
+
+        return {
+            'type': regime_type,
+            'volatility': volatility,
+            'phase': phase,
+            'confidence_multiplier': confidence_mult
+        }
+
+    def _select_indicators_for_regime(self, regime: Dict) -> List[str]:
+        """
+        Select optimal indicators based on market regime
+
+        Returns list of indicator groups to use:
+        - 'macd': MACD for momentum in trending markets
+        - 'ema': EMA crossovers for trend following
+        - 'rsi': RSI for overbought/oversold in ranging
+        - 'bb': Bollinger Bands for mean reversion
+        - 'volume': Volume confirmation
+        """
+        regime_type = regime['type']
+        indicators = []
+
+        if 'trending' in regime_type:
+            # Trending markets: Use momentum indicators
+            indicators.extend(['macd', 'ema'])
+            if regime['volatility'] == 'high':
+                indicators.append('volume')  # Confirm with volume
+
+        elif regime_type == 'ranging':
+            # Ranging markets: Use mean reversion
+            indicators.extend(['rsi', 'bb'])
+            indicators.append('volume')  # Volume spikes for reversals
+
+        elif regime_type == 'volatile_ranging':
+            # Choppy market: Avoid or use very conservative signals
+            indicators.extend(['rsi', 'bb', 'volume'])  # Require strong confluence
+
+        else:  # quiet_trending or weak_trending
+            # Balanced approach
+            indicators.extend(['ema', 'rsi'])
+
+        return indicators
+
     def detect_signal(
-        self, 
-        df: pd.DataFrame, 
-        epic: str, 
+        self,
+        df: pd.DataFrame,
+        epic: str,
         spread_pips: float = 1.5,
         timeframe: str = '1m'
     ) -> Optional[Dict]:
         """
-        Detect scalping signals with ultra-fast responsiveness and comprehensive enhancement
-        🔥 UPDATED: Now uses enhanced confidence validation
+        🔥 ADAPTIVE: Detect scalping signals with dynamic indicator selection
+
+        Now intelligently adapts to market conditions:
+        - Detects market regime (trending/ranging/volatile)
+        - Selects optimal indicators for current conditions
+        - Adjusts confidence based on regime suitability
         """
+        # 🔥 NEW: Detect market regime first
+        regime_info = self._detect_market_regime(df)
+
+        self.logger.info(f"[ADAPTIVE] {epic} Regime: {regime_info['regime']} | "
+                        f"ADX: {regime_info['trend_strength']:.1f} | "
+                        f"Vol: {regime_info['volatility']} | "
+                        f"Indicators: {regime_info['recommended_indicators']}")
+
+        # Skip if market is too choppy
+        if regime_info['regime'] == 'volatile_ranging':
+            self.logger.debug(f"🚫 {epic} Skipping volatile ranging market (choppy conditions)")
+            return None
         # Check spread - crucial for scalping profitability
         if spread_pips > self.max_spread_pips:
             self.logger.debug(f"🚫 Spread too wide for scalping: {spread_pips} > {self.max_spread_pips}")
@@ -153,13 +408,25 @@ class ScalpingStrategy(BaseStrategy):
         fast_ema_prev = previous[f'ema_{self.config["fast"]}']
         slow_ema_prev = previous[f'ema_{self.config["slow"]}']
         
-        # Apply scalping mode logic
-        if self.scalping_mode == 'ultra_fast':
-            signal = self._detect_ultra_fast_signal(latest, previous, epic, timeframe)
-        elif self.scalping_mode == 'dual_ma':
-            signal = self._detect_dual_ma_signal(latest, previous, epic, timeframe)
+        # 🔥 ADAPTIVE: Use regime-appropriate detection method
+        recommended_indicators = regime_info['recommended_indicators']
+
+        if 'macd' in recommended_indicators:
+            # 🔥 LINDA RASCHKE: Trending market uses MACD 3-10-16 signals (NOT EMA crossovers!)
+            # This generates WAY more signals: zero crosses, signal crosses, momentum, Anti pattern
+            signal = self._detect_linda_macd_signals(latest, previous, df_adjusted, epic, timeframe)
+        elif 'rsi' in recommended_indicators and 'bb' in recommended_indicators:
+            # Ranging market: Use RSI + BB mean reversion strategy
+            signal = self._detect_ranging_signal(latest, previous, df_adjusted, epic, timeframe)
         else:
+            # Balanced/weak trending: Use standard EMA crossover
             signal = self._detect_standard_scalping_signal(latest, previous, epic, timeframe)
+
+        # Apply regime-based confidence adjustment
+        if signal:
+            signal['regime'] = regime_info['regime']
+            signal['regime_confidence_mult'] = regime_info['confidence_multiplier']
+            signal['original_confidence'] = signal.get('confidence_score', 0.5)
         
         # 🔥 ENHANCED CONFIDENCE VALIDATION: Apply enhanced validation instead of old method
         if signal:
@@ -1475,7 +1742,450 @@ class ScalpingStrategy(BaseStrategy):
                 return signal
         
         return None
-    
+
+    # ================================================================================
+    # 🔥 ADAPTIVE REGIME-SPECIFIC SIGNAL DETECTION METHODS
+    # ================================================================================
+
+    def _detect_trending_signal(
+        self,
+        latest: pd.Series,
+        previous: pd.Series,
+        df: pd.DataFrame,
+        epic: str,
+        timeframe: str
+    ) -> Optional[Dict]:
+        """
+        🔥 NEW: Detect signals in TRENDING markets using MACD + EMA momentum
+
+        Optimized for strong directional moves (ADX > 20)
+        Uses MACD histogram expansion + EMA alignment
+        """
+        current_price = latest['close']
+        fast_ema = latest[f'ema_{self.config["fast"]}']
+        slow_ema = latest[f'ema_{self.config["slow"]}']
+        fast_ema_prev = previous[f'ema_{self.config["fast"]}']
+        slow_ema_prev = previous[f'ema_{self.config["slow"]}']
+
+        # Check for EMA crossover
+        bullish_cross = (fast_ema_prev <= slow_ema_prev) and (fast_ema > slow_ema)
+        bearish_cross = (fast_ema_prev >= slow_ema_prev) and (fast_ema < slow_ema)
+
+        if not bullish_cross and not bearish_cross:
+            return None
+
+        # Calculate MACD manually if not present
+        if 'macd_line' in df.columns:
+            macd_line = latest['macd_line']
+            macd_signal = latest['macd_signal']
+            macd_hist = latest['macd_histogram']
+            macd_hist_prev = previous.get('macd_histogram', 0)
+        else:
+            # Quick MACD calculation (12-26-9)
+            exp1 = df['close'].ewm(span=12, adjust=False).mean()
+            exp2 = df['close'].ewm(span=26, adjust=False).mean()
+            macd_line_series = exp1 - exp2
+            macd_signal_series = macd_line_series.ewm(span=9, adjust=False).mean()
+            macd_hist_series = macd_line_series - macd_signal_series
+
+            macd_line = macd_line_series.iloc[-1]
+            macd_signal = macd_signal_series.iloc[-1]
+            macd_hist = macd_hist_series.iloc[-1]
+            macd_hist_prev = macd_hist_series.iloc[-2]
+
+        # Check for MACD momentum expansion
+        macd_expanding = abs(macd_hist) > abs(macd_hist_prev)
+
+        # Volume confirmation
+        volume = latest.get('ltv', latest.get('volume', 0))
+        volume_avg = latest.get('volume_avg_10', 1.0)
+        volume_ok = volume > (volume_avg * self.volume_threshold) if volume_avg > 0 else True
+
+        if bullish_cross:
+            # BULL signal: EMA crossover detected, MACD used for confidence only
+            macd_aligned = macd_hist > 0  # MACD agreeing gives bonus confidence
+
+            signal = self.create_base_signal('BULL', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'trending_adaptive',
+                'entry_reason': 'trending_ema_crossover_adaptive',
+                'macd_line': macd_line,
+                'macd_signal': macd_signal,
+                'macd_histogram': macd_hist,
+                'macd_aligned': macd_aligned,
+                'macd_expanding': macd_expanding,
+                'fast_ema': fast_ema,
+                'slow_ema': slow_ema,
+                'volume_confirmed': volume_ok,
+                'confidence_score': self._calculate_trending_confidence(
+                    latest, macd_hist, macd_expanding, volume_ok, macd_aligned
+                )
+            })
+            return signal
+
+        elif bearish_cross:
+            # BEAR signal: EMA crossover detected, MACD used for confidence only
+            macd_aligned = macd_hist < 0  # MACD agreeing gives bonus confidence
+
+            signal = self.create_base_signal('BEAR', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'trending_adaptive',
+                'entry_reason': 'trending_ema_crossover_adaptive',
+                'macd_line': macd_line,
+                'macd_signal': macd_signal,
+                'macd_histogram': macd_hist,
+                'macd_aligned': macd_aligned,
+                'macd_expanding': macd_expanding,
+                'fast_ema': fast_ema,
+                'slow_ema': slow_ema,
+                'volume_confirmed': volume_ok,
+                'confidence_score': self._calculate_trending_confidence(
+                    latest, macd_hist, macd_expanding, volume_ok, macd_aligned
+                )
+            })
+            return signal
+
+        return None
+
+    def _detect_ranging_signal(
+        self,
+        latest: pd.Series,
+        previous: pd.Series,
+        df: pd.DataFrame,
+        epic: str,
+        timeframe: str
+    ) -> Optional[Dict]:
+        """
+        🔥 NEW: Detect signals in RANGING markets using RSI + BB mean reversion
+
+        Optimized for sideways markets (ADX < 20)
+        Looks for oversold/overbought with BB touches for reversals
+        """
+        current_price = latest['close']
+
+        # Get RSI
+        rsi_14 = latest.get('rsi_14', 50)
+        rsi_2 = latest.get('rsi_2', 50)
+
+        # Get Bollinger Bands
+        bb_upper = latest.get('bb_upper', current_price * 1.02)
+        bb_lower = latest.get('bb_lower', current_price * 0.98)
+        bb_middle = latest.get('bb_middle', current_price)
+
+        # Calculate BB position (0 = lower band, 1 = upper band)
+        bb_range = bb_upper - bb_lower
+        bb_position = (current_price - bb_lower) / bb_range if bb_range > 0 else 0.5
+
+        # Volume spike confirmation (important for reversals)
+        volume = latest.get('ltv', latest.get('volume', 0))
+        volume_avg = latest.get('volume_avg_10', 1.0)
+        volume_spike = volume > (volume_avg * 1.5) if volume_avg > 0 else False
+
+        # Look for mean reversion opportunities
+        # BUY: Oversold RSI + near lower BB + volume spike
+        if rsi_14 < 35 and bb_position < 0.3 and volume_spike:
+            signal = self.create_base_signal('BULL', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'ranging_adaptive',
+                'entry_reason': 'ranging_mean_reversion_buy',
+                'rsi_14': rsi_14,
+                'rsi_2': rsi_2,
+                'bb_position': bb_position,
+                'bb_upper': bb_upper,
+                'bb_lower': bb_lower,
+                'bb_middle': bb_middle,
+                'volume_spike': volume_spike,
+                'confidence_score': self._calculate_ranging_confidence(
+                    rsi_14, bb_position, volume_spike, 'BULL'
+                )
+            })
+            return signal
+
+        # SELL: Overbought RSI + near upper BB + volume spike
+        elif rsi_14 > 65 and bb_position > 0.7 and volume_spike:
+            signal = self.create_base_signal('BEAR', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'ranging_adaptive',
+                'entry_reason': 'ranging_mean_reversion_sell',
+                'rsi_14': rsi_14,
+                'rsi_2': rsi_2,
+                'bb_position': bb_position,
+                'bb_upper': bb_upper,
+                'bb_lower': bb_lower,
+                'bb_middle': bb_middle,
+                'volume_spike': volume_spike,
+                'confidence_score': self._calculate_ranging_confidence(
+                    rsi_14, bb_position, volume_spike, 'BEAR'
+                )
+            })
+            return signal
+
+        return None
+
+    def _calculate_trending_confidence(
+        self,
+        latest: pd.Series,
+        macd_hist: float,
+        macd_expanding: bool,
+        volume_ok: bool,
+        macd_aligned: bool = False
+    ) -> float:
+        """Calculate confidence for trending market signals"""
+        confidence = 0.5
+
+        # MACD alignment (agrees with EMA signal direction)
+        if macd_aligned:
+            confidence += 0.2  # Big bonus for MACD confirming the crossover direction
+
+        # MACD histogram strength
+        if abs(macd_hist) > 0.0001:
+            confidence += 0.1
+        if abs(macd_hist) > 0.0002:
+            confidence += 0.05
+
+        # MACD expansion (momentum building)
+        if macd_expanding:
+            confidence += 0.1
+
+        # Volume confirmation
+        if volume_ok:
+            confidence += 0.05
+
+        return min(confidence, 1.0)
+
+    def _calculate_ranging_confidence(
+        self,
+        rsi_14: float,
+        bb_position: float,
+        volume_spike: bool,
+        signal_type: str
+    ) -> float:
+        """Calculate confidence for ranging market signals"""
+        confidence = 0.5
+
+        # RSI extremity
+        if signal_type == 'BULL':
+            if rsi_14 < 30:
+                confidence += 0.2
+            elif rsi_14 < 35:
+                confidence += 0.1
+        else:  # BEAR
+            if rsi_14 > 70:
+                confidence += 0.2
+            elif rsi_14 > 65:
+                confidence += 0.1
+
+        # BB position extremity
+        if signal_type == 'BULL' and bb_position < 0.2:
+            confidence += 0.15
+        elif signal_type == 'BEAR' and bb_position > 0.8:
+            confidence += 0.15
+
+        # Volume spike (crucial for reversals)
+        if volume_spike:
+            confidence += 0.15
+
+        return min(confidence, 1.0)
+
+    def _detect_linda_macd_signals(
+        self,
+        latest: pd.Series,
+        previous: pd.Series,
+        df: pd.DataFrame,
+        epic: str,
+        timeframe: str
+    ) -> Optional[Dict]:
+        """
+        🔥 LINDA RASCHKE MACD SIGNALS: Detect signals using 3-10-16 MACD
+
+        Multiple signal types:
+        1. MACD Zero Cross - MACD line crosses above/below zero
+        2. MACD Signal Cross - MACD crosses signal line
+        3. MACD Momentum - Histogram expanding strongly
+        4. MACD Pullback - First pullback to signal line (Anti pattern setup)
+
+        These generate MORE signals than EMA crossovers!
+        """
+        # Calculate Linda Raschke MACD 3-10-16
+        linda_macd = self._calculate_linda_macd(df)
+        if not linda_macd:
+            return None
+
+        macd_line = linda_macd['macd_line']
+        signal_line = linda_macd['signal_line']
+        histogram = linda_macd['histogram']
+        macd_line_prev = linda_macd['macd_line_prev']
+        signal_line_prev = linda_macd['signal_line_prev']
+        histogram_prev = linda_macd['histogram_prev']
+        macd_slope = linda_macd['macd_slope']
+        signal_slope = linda_macd['signal_slope']
+
+        current_price = latest['close']
+
+        # Volume confirmation
+        volume = latest.get('ltv', latest.get('volume', 0))
+        volume_avg = latest.get('volume_avg_10', 1.0)
+        volume_ok = volume > (volume_avg * 1.2) if volume_avg > 0 else True
+
+        # Signal Type 1: MACD ZERO CROSS (Strong trend initiation)
+        macd_zero_cross_bull = (macd_line_prev <= 0) and (macd_line > 0)
+        macd_zero_cross_bear = (macd_line_prev >= 0) and (macd_line < 0)
+
+        if macd_zero_cross_bull:
+            signal = self.create_base_signal('BULL', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'linda_macd_zero_cross',
+                'entry_reason': 'macd_310_zero_cross_bullish',
+                'macd_line': macd_line,
+                'signal_line': signal_line,
+                'histogram': histogram,
+                'macd_slope': macd_slope,
+                'signal_slope': signal_slope,
+                'volume_confirmed': volume_ok,
+                'confidence_score': 0.75  # High confidence for zero cross
+            })
+            return signal
+
+        if macd_zero_cross_bear:
+            signal = self.create_base_signal('BEAR', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'linda_macd_zero_cross',
+                'entry_reason': 'macd_310_zero_cross_bearish',
+                'macd_line': macd_line,
+                'signal_line': signal_line,
+                'histogram': histogram,
+                'macd_slope': macd_slope,
+                'signal_slope': signal_slope,
+                'volume_confirmed': volume_ok,
+                'confidence_score': 0.75
+            })
+            return signal
+
+        # Signal Type 2: MACD SIGNAL LINE CROSS (Standard Linda Raschke)
+        macd_signal_cross_bull = (macd_line_prev <= signal_line_prev) and (macd_line > signal_line)
+        macd_signal_cross_bear = (macd_line_prev >= signal_line_prev) and (macd_line < signal_line)
+
+        if macd_signal_cross_bull and histogram > 0:
+            signal = self.create_base_signal('BULL', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'linda_macd_cross',
+                'entry_reason': 'macd_310_signal_cross_bullish',
+                'macd_line': macd_line,
+                'signal_line': signal_line,
+                'histogram': histogram,
+                'macd_slope': macd_slope,
+                'signal_slope': signal_slope,
+                'volume_confirmed': volume_ok,
+                'confidence_score': 0.65
+            })
+            return signal
+
+        if macd_signal_cross_bear and histogram < 0:
+            signal = self.create_base_signal('BEAR', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'linda_macd_cross',
+                'entry_reason': 'macd_310_signal_cross_bearish',
+                'macd_line': macd_line,
+                'signal_line': signal_line,
+                'histogram': histogram,
+                'macd_slope': macd_slope,
+                'signal_slope': signal_slope,
+                'volume_confirmed': volume_ok,
+                'confidence_score': 0.65
+            })
+            return signal
+
+        # Signal Type 3: MACD MOMENTUM CONTINUATION (Histogram expanding)
+        histogram_expanding = abs(histogram) > abs(histogram_prev)
+        histogram_strong = abs(histogram) > 0.0001  # Threshold for meaningful histogram
+
+        if histogram > 0 and histogram_expanding and histogram_strong and macd_slope > 0:
+            # Bullish momentum continuation
+            signal = self.create_base_signal('BULL', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'linda_macd_momentum',
+                'entry_reason': 'macd_310_bullish_momentum',
+                'macd_line': macd_line,
+                'signal_line': signal_line,
+                'histogram': histogram,
+                'macd_slope': macd_slope,
+                'signal_slope': signal_slope,
+                'histogram_expanding': True,
+                'volume_confirmed': volume_ok,
+                'confidence_score': 0.60
+            })
+            return signal
+
+        if histogram < 0 and histogram_expanding and histogram_strong and macd_slope < 0:
+            # Bearish momentum continuation
+            signal = self.create_base_signal('BEAR', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'linda_macd_momentum',
+                'entry_reason': 'macd_310_bearish_momentum',
+                'macd_line': macd_line,
+                'signal_line': signal_line,
+                'histogram': histogram,
+                'macd_slope': macd_slope,
+                'signal_slope': signal_slope,
+                'histogram_expanding': True,
+                'volume_confirmed': volume_ok,
+                'confidence_score': 0.60
+            })
+            return signal
+
+        # Signal Type 4: ANTI PATTERN (First pullback - more complex, needs trend context)
+        # This looks for MACD line pulling back toward signal line after establishing trend
+        # We'll check if MACD has made a new high/low and is now pulling back
+        macd_series = linda_macd['macd_series']
+
+        # Check for recent MACD extreme (within last 5 periods)
+        recent_macd = macd_series.tail(10)
+        if len(recent_macd) >= 5:
+            # Bullish Anti: MACD made new high, now pulling back toward signal but still positive
+            macd_recent_high = recent_macd.max()
+            is_pullback_from_high = (macd_line < macd_recent_high * 0.9) and (macd_line > signal_line) and (macd_line > 0)
+            signal_sloping_up = signal_slope > 0
+            macd_approaching_signal = abs(macd_line - signal_line) < abs(macd_line_prev - signal_line_prev)
+
+            if is_pullback_from_high and signal_sloping_up and macd_approaching_signal:
+                signal = self.create_base_signal('BULL', epic, timeframe, latest)
+                signal.update({
+                    'scalping_mode': 'linda_anti_pattern',
+                    'entry_reason': 'macd_310_anti_bullish_pullback',
+                    'macd_line': macd_line,
+                    'signal_line': signal_line,
+                    'histogram': histogram,
+                    'macd_recent_high': macd_recent_high,
+                    'pullback_pct': (macd_recent_high - macd_line) / macd_recent_high if macd_recent_high != 0 else 0,
+                    'signal_slope': signal_slope,
+                    'volume_confirmed': volume_ok,
+                    'confidence_score': 0.70  # High confidence for Anti pattern
+                })
+                return signal
+
+            # Bearish Anti: MACD made new low, now pulling back toward signal but still negative
+            macd_recent_low = recent_macd.min()
+            is_pullback_from_low = (macd_line > macd_recent_low * 0.9) and (macd_line < signal_line) and (macd_line < 0)
+            signal_sloping_down = signal_slope < 0
+
+            if is_pullback_from_low and signal_sloping_down and macd_approaching_signal:
+                signal = self.create_base_signal('BEAR', epic, timeframe, latest)
+                signal.update({
+                    'scalping_mode': 'linda_anti_pattern',
+                    'entry_reason': 'macd_310_anti_bearish_pullback',
+                    'macd_line': macd_line,
+                    'signal_line': signal_line,
+                    'histogram': histogram,
+                    'macd_recent_low': macd_recent_low,
+                    'pullback_pct': (macd_line - macd_recent_low) / abs(macd_recent_low) if macd_recent_low != 0 else 0,
+                    'signal_slope': signal_slope,
+                    'volume_confirmed': volume_ok,
+                    'confidence_score': 0.70
+                })
+                return signal
+
+        return None
+
     def _ensure_scalping_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Ensure all scalping indicators are present"""
         df_enhanced = df.copy()

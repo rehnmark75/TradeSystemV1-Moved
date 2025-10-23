@@ -46,6 +46,7 @@ class TrailingStopSimulator:
                  trailing_start: float = None,
                  trailing_ratio: float = None,
                  max_bars: int = 96,
+                 time_exit_hours: float = None,  # 🔥 NEW: Time-based exit for scalping
                  use_atr: bool = False,
                  atr_multiplier: float = 2.0,
                  target_atr_multiplier: float = 3.0,
@@ -136,6 +137,7 @@ class TrailingStopSimulator:
         self.target_pips = target_pips
         self.initial_stop_pips = initial_stop_pips
         self.max_bars = max_bars
+        self.time_exit_hours = time_exit_hours  # 🔥 NEW: Time-based exit (None = disabled)
         self.use_atr = use_atr
         self.atr_multiplier = atr_multiplier
         self.target_atr_multiplier = target_atr_multiplier
@@ -383,9 +385,51 @@ class TrailingStopSimulator:
             pip_multiplier = 10000  # Standard pairs: 1 pip = 0.0001
 
         # Simulate trade bar by bar
+        self.logger.debug(f"Simulating {len(future_data)} bars, time_exit_hours={self.time_exit_hours}")
+
         for bar_idx, (_, bar) in enumerate(future_data.iterrows()):
             if trade_closed:
                 break
+
+            # 🔥 TIME-BASED EXIT: For scalping, close at breakeven after specified hours
+            if self.time_exit_hours is not None:
+                # Calculate time elapsed (assuming 5-minute bars for scalping)
+                time_elapsed_hours = (bar_idx + 1) * 5 / 60  # bars * 5 minutes / 60 = hours
+
+                if time_elapsed_hours >= self.time_exit_hours:
+                    # Time exit: close at current price
+                    close_price = bar['close']
+                    if is_long:
+                        time_exit_pnl = (close_price - entry_price) * pip_multiplier
+                    else:
+                        time_exit_pnl = (entry_price - close_price) * pip_multiplier
+
+                    self.logger.debug(f"⏰ Time exit triggered at bar {bar_idx} ({time_elapsed_hours:.2f}h): P&L={time_exit_pnl:.1f} pips")
+
+                    # If small P&L, force breakeven
+                    if abs(time_exit_pnl) < 2.0:  # Less than 2 pips either way
+                        trade_closed = True
+                        exit_pnl = 0.0  # Force breakeven
+                        exit_reason = "TIME_EXIT_BREAKEVEN"
+                        exit_bar = bar_idx
+                        self.logger.debug(f"⏰ Closing at breakeven (P&L < 2 pips)")
+                        break
+                    elif time_exit_pnl > 2.0:
+                        # Small profit, take it
+                        trade_closed = True
+                        exit_pnl = time_exit_pnl
+                        exit_reason = "TIME_EXIT_PROFIT"
+                        exit_bar = bar_idx
+                        self.logger.debug(f"⏰ Closing with profit: {time_exit_pnl:.1f} pips")
+                        break
+                    elif time_exit_pnl < -2.0:
+                        # Small loss, accept it
+                        trade_closed = True
+                        exit_pnl = time_exit_pnl
+                        exit_reason = "TIME_EXIT_LOSS"
+                        exit_bar = bar_idx
+                        self.logger.debug(f"⏰ Closing with loss: {time_exit_pnl:.1f} pips")
+                        break
 
             high_price = bar['high']
             low_price = bar['low']
@@ -478,6 +522,26 @@ class TrailingStopSimulator:
                 is_loser = False
                 final_profit = exit_pnl
                 final_loss = 0
+            elif exit_reason in ["TIME_EXIT_PROFIT", "TIME_EXIT_BREAKEVEN", "TIME_EXIT_LOSS"]:
+                # 🔥 TIME-BASED EXIT: Classify based on P&L
+                if exit_reason == "TIME_EXIT_BREAKEVEN" or abs(exit_pnl) < 1.0:
+                    trade_outcome = "BREAKEVEN_TIME_EXIT"
+                    is_winner = False
+                    is_loser = False
+                    final_profit = max(exit_pnl, 0)
+                    final_loss = max(-exit_pnl, 0)
+                elif exit_pnl > 0:
+                    trade_outcome = "WIN_TIME_EXIT"
+                    is_winner = True
+                    is_loser = False
+                    final_profit = exit_pnl
+                    final_loss = 0
+                else:
+                    trade_outcome = "LOSE_TIME_EXIT"
+                    is_winner = False
+                    is_loser = True
+                    final_profit = 0
+                    final_loss = abs(exit_pnl)
             elif exit_reason in ["STOP_LOSS", "TRAILING_STOP"]:
                 if exit_pnl > 0:
                     trade_outcome = "WIN"
