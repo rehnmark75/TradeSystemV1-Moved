@@ -16,8 +16,8 @@ Key Features:
 """
 
 # Strategy enable/disable
-SCALPING_STRATEGY_ENABLED = False   # Currently disabled - enable when ready for testing
-SCALPING_MODE = 'aggressive'        # Active scalping mode
+SCALPING_STRATEGY_ENABLED = True    # 🔥 ENABLED: Linda Raschke MACD 3-10-16 adaptive scalping
+SCALPING_MODE = 'linda_raschke'     # Active scalping mode: Linda Raschke MACD 3-10-16
 
 # Scalping Strategy Configurations
 SCALPING_STRATEGY_CONFIG = {
@@ -38,6 +38,33 @@ SCALPING_STRATEGY_CONFIG = {
         'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP'],
         'min_pip_volatility': 10.0,
         'max_pip_volatility': 40.0
+    },
+    'linda_raschke': {
+        # 🔥 LINDA RASCHKE MACD 3-10-16 OSCILLATOR
+        'macd_fast': 3,         # 3 SMA (NOT EMA!) - Ultra responsive
+        'macd_slow': 10,        # 10 SMA (NOT EMA!) - Quick confirmation
+        'macd_signal': 16,      # 16 SMA (NOT EMA!) - Smoothing
+        'fast_ema': 5,          # EMA for fallback/standard mode
+        'slow_ema': 13,         # EMA for fallback/standard mode
+        'filter_ema': None,     # No filter - adaptive regime detection
+        'timeframes': ['5m'],   # 5-minute optimal for Linda Raschke scalping
+        'target_pips': 8,       # Linda Raschke: Quick 8-12 pip targets
+        'stop_loss_pips': 6,    # Tight stops for scalping
+        'max_spread_pips': 2.0, # Moderate spread tolerance
+        'max_bars': 24,         # 2 hours timeout (24 bars * 5min)
+        'time_exit_hours': 2.0, # Force exit after 2 hours if no direction
+        'breakeven_trigger': 4.0, # Move to BE at 4 pips (50% of target)
+        'description': 'Linda Raschke MACD 3-10-16 adaptive scalping with regime detection',
+        'signal_types': ['macd_zero_cross', 'macd_signal_cross', 'macd_momentum', 'anti_pattern'],
+        'best_for': ['adaptive_trending', 'momentum_continuation', 'pullback_entries'],
+        'best_volatility_regime': 'medium',
+        'best_trend_strength': 'any',  # Adaptive to all regimes
+        'best_market_regime': 'adaptive',  # Detects trending/ranging dynamically
+        'best_session': ['london', 'new_york', 'tokyo'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP',
+                           'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP'],
+        'min_pip_volatility': 5.0,
+        'max_pip_volatility': 80.0
     },
     'aggressive': {
         'fast_ema': 5,          # Fast but not too noisy

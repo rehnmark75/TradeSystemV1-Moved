@@ -375,6 +375,9 @@ EMA_STRATEGY = True  # Core EMA strategy
 # Enable MACD Strategy
 MACD_STRATEGY = True  # Core MACD strategy
 
+# Enable Scalping Strategy (Linda Raschke MACD 3-10-16)
+SCALPING_STRATEGY_ENABLED = True  # 🔥 Linda Raschke MACD 3-10-16 adaptive scalping
+
 # Enable KAMA Strategy
 KAMA_STRATEGY = False  # ENABLED - Phase 1 optimization complete, ready for testing
 

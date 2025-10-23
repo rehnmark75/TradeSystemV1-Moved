@@ -835,8 +835,9 @@ class SignalDetector:
             # 6. Scalping Strategy (if enabled)
             if getattr(config, 'SCALPING_STRATEGY_ENABLED', False):
                 try:
-                    self.logger.debug(f"🔍 [SCALPING] Starting detection for {epic}")
-                    scalping_timeframe = '1m' if timeframe in ['1m', '5m'] else timeframe
+                    self.logger.info(f"🔍 [SCALPING] Starting detection for {epic}")
+                    # 🔥 ALWAYS use 5m for Linda Raschke MACD 3-10-16 scalping, regardless of scanner timeframe
+                    scalping_timeframe = '5m'
                     scalping_signal = self.detect_scalping_signals(epic, pair, spread_pips, scalping_timeframe)
                     
                     # 🔧 NEW: Store result for combined strategy
