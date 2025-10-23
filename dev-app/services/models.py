@@ -45,6 +45,11 @@ class TradeLog(Base):
     closed_at = Column(DateTime, nullable=True)
     alert_id = Column(Integer, nullable=True, index=True)  # Links to forex scanner alert_history.id
 
+    # Partial close tracking columns
+    current_size = Column(Float, nullable=True, default=1.0)  # Tracks remaining position size (1.0 → 0.5 after partial close)
+    partial_close_executed = Column(Boolean, nullable=False, default=False)  # True if partial close was executed
+    partial_close_time = Column(DateTime, nullable=True)  # Timestamp when partial close occurred
+
     # 🔥 NEW: P&L tracking columns (added for deal correlation)
     profit_loss = Column(Numeric(12, 2), nullable=True)
     pnl_currency = Column(String(10), nullable=True, default='SEK')  # Currency (SEK, USD, etc.)

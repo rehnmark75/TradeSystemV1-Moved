@@ -1347,198 +1347,277 @@ class EnhancedTradeProcessor:
             elif not getattr(trade, 'moved_to_breakeven', False) and is_profitable_for_breakeven:
                 self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
                             f"Profit {profit_points}pts >= trigger {break_even_trigger_points}pts")
-                
-                # Calculate break-even stop level using IG's minimum distance if available
-                # ✅ ENHANCEMENT: Use IG's minimum stop distance for better trade evolution
-                ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
-                if ig_min_distance:
-                    lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
-                    self.logger.info(f"🎯 [USING IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts")
-                else:
-                    # ✅ NEW: Use pair-specific configuration
-                    lock_points = trailing_config['stage1_lock_points']
-                    self.logger.info(f"⚠️ [FALLBACK CONFIG] Trade {trade.id}: No IG minimum distance, using pair config {lock_points}pts")
-                if trade.direction.upper() == "BUY":
-                    break_even_stop = trade.entry_price + (lock_points * point_value)  # Entry + lock_points
-                else:
-                    break_even_stop = trade.entry_price - (lock_points * point_value)  # Entry - lock_points
 
-                
-                # Enhanced logging: Track exact values used
-                self.logger.info(f"💰 [BREAK-EVEN DETAILED] Trade {trade.id}:")
-                self.logger.info(f"   → IG minimum: {ig_min_distance} points")
-                self.logger.info(f"   → Trigger points: {break_even_trigger_points} points")
-                self.logger.info(f"   → Using lock_points: {lock_points} points")
-                self.logger.info(f"   → Entry: {trade.entry_price:.5f}")
-                self.logger.info(f"   → Break-even stop: {break_even_stop:.5f}")
-                self.logger.info(f"   → Distance from entry: {((break_even_stop - trade.entry_price) / point_value):.1f} points")
-# Calculate actual currency amount for JPY pairs
-                if "JPY" in trade.symbol:
-                    currency_amount = int(lock_points * 100)  # 2 points = 200 JPY
-                    self.logger.info(f"💰 [BREAK-EVEN CALC] Trade {trade.id}: entry={trade.entry_price:.5f}, "
-                                   f"lock_points={lock_points} ({currency_amount} JPY), break_even_stop={break_even_stop:.5f}")
-                else:
-                    self.logger.info(f"💰 [BREAK-EVEN CALC] Trade {trade.id}: entry={trade.entry_price:.5f}, "
-                                   f"lock_points={lock_points}, break_even_stop={break_even_stop:.5f}")
-                
-                # ✅ CRITICAL FIX: For profit_protected trades, check if break-even would worsen the position
-                # ✅ FIX: Re-query trade from current session to get fresh data
-                try:
-                    fresh_trade = db.query(TradeLog).filter(TradeLog.id == trade.id).first()
-                    if fresh_trade:
-                        current_stop = fresh_trade.sl_price or 0.0
-                    else:
-                        self.logger.warning(f"[TRADE NOT FOUND] Trade {trade.id}: Using cached sl_price")
-                        current_stop = trade.sl_price or 0.0
-                except Exception as e:
-                    self.logger.warning(f"[DB QUERY WARNING] Trade {trade.id}: Could not query fresh data, using current value: {e}")
-                    current_stop = trade.sl_price or 0.0
-                
-                # Check if break-even move would worsen protection
-                if trade.direction.upper() == "BUY":
-                    would_worsen = break_even_stop < current_stop  # Moving stop down is worse for BUY
-                else:  # SELL
-                    would_worsen = break_even_stop > current_stop  # Moving stop up is worse for SELL
-                
-                if would_worsen:
-                    self.logger.info(f"🛡️ [SKIP BREAK-EVEN] Trade {trade.id}: Current stop ({current_stop:.5f}) is better than break-even ({break_even_stop:.5f})")
-                    # Set flag to allow trailing without actually moving stop
-                    old_status = trade.status
-                    trade.moved_to_breakeven = True
-                    # Don't change status if already profit_protected
-                    if trade.status != "profit_protected":
-                        trade.status = "break_even"
+                # ========== NEW: TRY PARTIAL CLOSE FIRST ==========
+                # Check if partial close feature is enabled
+                enable_partial_close = trailing_config.get('enable_partial_close', True)
+                partial_close_size = trailing_config.get('partial_close_size', 0.5)
+                partial_close_succeeded = False  # Track if partial close succeeded to skip BE stop move
 
-                    # ✅ ROBUST: Wrap commit in try-except
-                    self.logger.info(f"💾 [DB PREPARE] Trade {trade.id}: status {old_status} → {trade.status}, moved_to_breakeven=True")
+                if enable_partial_close and not getattr(trade, 'partial_close_executed', False):
+                    self.logger.info(f"💡 [PARTIAL CLOSE] Trade {trade.id}: Attempting to close {partial_close_size} position")
+
+                    # Import partial close function
+                    import asyncio
+                    from services.ig_orders import partial_close_position
+                    from dependencies import get_ig_auth_headers
+
                     try:
-                        db.commit()
-                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Break-even flags updated (skip scenario)")
-                    except Exception as commit_error:
-                        db.rollback()
-                        self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
-                        raise
-                else:
-                    # ✅ FIXED: Simple validation - stop just needs to be on correct side of current price
-                    # Break-even = entry + lock_points is ALWAYS valid as long as:
-                    # - For BUY: break_even_stop < current_price (stop below current)
-                    # - For SELL: break_even_stop > current_price (stop above current)
+                        # Get auth headers synchronously using asyncio
+                        auth_headers = asyncio.run(get_ig_auth_headers())
 
-                    is_valid_stop = True
-                    current_stop = trade.sl_price or 0.0
+                        # Execute partial close synchronously
+                        partial_result = asyncio.run(partial_close_position(
+                            deal_id=trade.deal_id,
+                            epic=trade.symbol,
+                            direction=trade.direction,
+                            size_to_close=partial_close_size,
+                            auth_headers=auth_headers
+                        ))
 
-                    # Basic sanity check: ensure stop is on correct side of current price
-                    if trade.direction.upper() == "BUY":
-                        if break_even_stop >= current_price:
-                            self.logger.error(f"❌ [BREAK-EVEN ERROR] Trade {trade.id}: BUY stop {break_even_stop:.5f} >= current {current_price:.5f}")
-                            is_valid_stop = False
-                    else:  # SELL
-                        if break_even_stop <= current_price:
-                            self.logger.error(f"❌ [BREAK-EVEN ERROR] Trade {trade.id}: SELL stop {break_even_stop:.5f} <= current {current_price:.5f}")
-                            is_valid_stop = False
+                        if partial_result.get("success"):
+                            # ✅ Partial close succeeded!
+                            self.logger.info(f"✅ [PARTIAL CLOSE SUCCESS] Trade {trade.id} {trade.symbol}: "
+                                           f"Closed {partial_close_size}, keeping {1.0 - partial_close_size} with original SL")
 
-                    if is_valid_stop:
-                        # Calculate adjustment needed
-                        if trade.direction.upper() == "BUY":
-                            adjustment_distance = break_even_stop - current_stop
+                            # Update trade tracking
+                            trade.current_size = 1.0 - partial_close_size  # e.g., 0.5 remaining
+                            trade.partial_close_executed = True
+                            trade.partial_close_time = datetime.utcnow()
+                            trade.status = "partial_closed"
+                            trade.moved_to_breakeven = True  # Enable Stage 2/3 progression
+
+                            # Commit changes
+                            try:
+                                db.commit()
+                                self.logger.info(f"✅ [PARTIAL CLOSE DB] Trade {trade.id}: Database updated, "
+                                               f"current_size={trade.current_size}, continuing to Stage 2/3")
+
+                                # ✅ SUCCESS: Set flag to skip break-even stop move
+                                partial_close_succeeded = True
+                                self.logger.info(f"🎉 [PARTIAL CLOSE COMPLETE] Trade {trade.id}: Will skip BE stop move, "
+                                               f"continuing to Stage 2/3 with remaining {trade.current_size} position")
+
+                            except Exception as commit_error:
+                                db.rollback()
+                                self.logger.error(f"❌ [PARTIAL CLOSE DB FAIL] Trade {trade.id}: {commit_error}")
+                                # Fall through to try break-even stop move as fallback
+                                raise
                         else:
-                            adjustment_distance = current_stop - break_even_stop
+                            # ❌ Partial close failed
+                            error_msg = partial_result.get("error", "Unknown error")
+                            self.logger.warning(f"⚠️ [PARTIAL CLOSE FAILED] Trade {trade.id}: {error_msg}")
+                            self.logger.info(f"🔄 [FALLBACK] Trade {trade.id}: Will try moving stop to break-even instead")
+                            # Fall through to execute break-even stop move logic below
 
-                        # ✅ FIX: Use proper rounding instead of truncation to avoid 0-point adjustments
-                        adjustment_points = round(abs(adjustment_distance) / point_value)
+                    except Exception as partial_error:
+                        # ❌ Exception during partial close attempt
+                        self.logger.error(f"❌ [PARTIAL CLOSE ERROR] Trade {trade.id}: {str(partial_error)}")
+                        self.logger.info(f"🔄 [FALLBACK] Trade {trade.id}: Exception occurred, trying break-even stop move")
+                        # Fall through to execute break-even stop move logic below
+                else:
+                    if not enable_partial_close:
+                        self.logger.info(f"ℹ️ [PARTIAL CLOSE DISABLED] Trade {trade.id}: Feature disabled in config")
+                    elif getattr(trade, 'partial_close_executed', False):
+                        self.logger.info(f"ℹ️ [PARTIAL CLOSE SKIP] Trade {trade.id}: Already executed")
+                # ========== END PARTIAL CLOSE ATTEMPT ==========
 
-                        # ✅ FIX: Handle edge case where adjustment is very small but not zero
-                        if adjustment_points == 0 and abs(adjustment_distance) > 0.00001:
-                            adjustment_points = 1  # Minimum 1-point adjustment for non-zero distances
-                            self.logger.debug(f"[BREAK-EVEN CALC] Trade {trade.id}: Small adjustment rounded up from {abs(adjustment_distance):.6f} to 1pt")
+                # Only execute break-even stop move if partial close didn't succeed
+                if partial_close_succeeded:
+                    # Skip break-even stop move entirely - partial close already executed
+                    self.logger.info(f"⏭️ [SKIP BE STOP] Trade {trade.id}: Partial close succeeded, skipping break-even stop move")
+                else:
+                    # Calculate break-even stop level using IG's minimum distance if available
+                    # ✅ ENHANCEMENT: Use IG's minimum stop distance for better trade evolution
+                    ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+                    if ig_min_distance:
+                        lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
+                        self.logger.info(f"🎯 [USING IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts")
+                    else:
+                        # ✅ NEW: Use pair-specific configuration
+                        lock_points = trailing_config['stage1_lock_points']
+                        self.logger.info(f"⚠️ [FALLBACK CONFIG] Trade {trade.id}: No IG minimum distance, using pair config {lock_points}pts")
+                    if trade.direction.upper() == "BUY":
+                        break_even_stop = trade.entry_price + (lock_points * point_value)  # Entry + lock_points
+                    else:
+                        break_even_stop = trade.entry_price - (lock_points * point_value)  # Entry - lock_points
 
-                        # Diagnostic logging for troubleshooting
-                        self.logger.debug(f"[BREAK-EVEN CALC] Trade {trade.id}: current_stop={current_stop:.5f}, "
-                                        f"break_even_stop={break_even_stop:.5f}, adjustment_distance={adjustment_distance:.6f}, "
-                                        f"adjustment_points={adjustment_points}")
+                
+                    # Enhanced logging: Track exact values used
+                    self.logger.info(f"💰 [BREAK-EVEN DETAILED] Trade {trade.id}:")
+                    self.logger.info(f"   → IG minimum: {ig_min_distance} points")
+                    self.logger.info(f"   → Trigger points: {break_even_trigger_points} points")
+                    self.logger.info(f"   → Using lock_points: {lock_points} points")
+                    self.logger.info(f"   → Entry: {trade.entry_price:.5f}")
+                    self.logger.info(f"   → Break-even stop: {break_even_stop:.5f}")
+                    self.logger.info(f"   → Distance from entry: {((break_even_stop - trade.entry_price) / point_value):.1f} points")
+    # Calculate actual currency amount for JPY pairs
+                    if "JPY" in trade.symbol:
+                        currency_amount = int(lock_points * 100)  # 2 points = 200 JPY
+                        self.logger.info(f"💰 [BREAK-EVEN CALC] Trade {trade.id}: entry={trade.entry_price:.5f}, "
+                                       f"lock_points={lock_points} ({currency_amount} JPY), break_even_stop={break_even_stop:.5f}")
+                    else:
+                        self.logger.info(f"💰 [BREAK-EVEN CALC] Trade {trade.id}: entry={trade.entry_price:.5f}, "
+                                       f"lock_points={lock_points}, break_even_stop={break_even_stop:.5f}")
+                
+                    # ✅ CRITICAL FIX: For profit_protected trades, check if break-even would worsen the position
+                    # ✅ FIX: Re-query trade from current session to get fresh data
+                    try:
+                        fresh_trade = db.query(TradeLog).filter(TradeLog.id == trade.id).first()
+                        if fresh_trade:
+                            current_stop = fresh_trade.sl_price or 0.0
+                        else:
+                            self.logger.warning(f"[TRADE NOT FOUND] Trade {trade.id}: Using cached sl_price")
+                            current_stop = trade.sl_price or 0.0
+                    except Exception as e:
+                        self.logger.warning(f"[DB QUERY WARNING] Trade {trade.id}: Could not query fresh data, using current value: {e}")
+                        current_stop = trade.sl_price or 0.0
+                
+                    # Check if break-even move would worsen protection
+                    if trade.direction.upper() == "BUY":
+                        would_worsen = break_even_stop < current_stop  # Moving stop down is worse for BUY
+                    else:  # SELL
+                        would_worsen = break_even_stop > current_stop  # Moving stop up is worse for SELL
+                
+                    if would_worsen:
+                        self.logger.info(f"🛡️ [SKIP BREAK-EVEN] Trade {trade.id}: Current stop ({current_stop:.5f}) is better than break-even ({break_even_stop:.5f})")
+                        # Set flag to allow trailing without actually moving stop
+                        old_status = trade.status
+                        trade.moved_to_breakeven = True
+                        # Don't change status if already profit_protected
+                        if trade.status != "profit_protected":
+                            trade.status = "break_even"
+
+                        # ✅ ROBUST: Wrap commit in try-except
+                        self.logger.info(f"💾 [DB PREPARE] Trade {trade.id}: status {old_status} → {trade.status}, moved_to_breakeven=True")
+                        try:
+                            db.commit()
+                            self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Break-even flags updated (skip scenario)")
+                        except Exception as commit_error:
+                            db.rollback()
+                            self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
+                            raise
+                    else:
+                        # ✅ FIXED: Simple validation - stop just needs to be on correct side of current price
+                        # Break-even = entry + lock_points is ALWAYS valid as long as:
+                        # - For BUY: break_even_stop < current_price (stop below current)
+                        # - For SELL: break_even_stop > current_price (stop above current)
+
+                        is_valid_stop = True
+                        current_stop = trade.sl_price or 0.0
+
+                        # Basic sanity check: ensure stop is on correct side of current price
+                        if trade.direction.upper() == "BUY":
+                            if break_even_stop >= current_price:
+                                self.logger.error(f"❌ [BREAK-EVEN ERROR] Trade {trade.id}: BUY stop {break_even_stop:.5f} >= current {current_price:.5f}")
+                                is_valid_stop = False
+                        else:  # SELL
+                            if break_even_stop <= current_price:
+                                self.logger.error(f"❌ [BREAK-EVEN ERROR] Trade {trade.id}: SELL stop {break_even_stop:.5f} <= current {current_price:.5f}")
+                                is_valid_stop = False
+
+                        if is_valid_stop:
+                            # Calculate adjustment needed
+                            if trade.direction.upper() == "BUY":
+                                adjustment_distance = break_even_stop - current_stop
+                            else:
+                                adjustment_distance = current_stop - break_even_stop
+
+                            # ✅ FIX: Use proper rounding instead of truncation to avoid 0-point adjustments
+                            adjustment_points = round(abs(adjustment_distance) / point_value)
+
+                            # ✅ FIX: Handle edge case where adjustment is very small but not zero
+                            if adjustment_points == 0 and abs(adjustment_distance) > 0.00001:
+                                adjustment_points = 1  # Minimum 1-point adjustment for non-zero distances
+                                self.logger.debug(f"[BREAK-EVEN CALC] Trade {trade.id}: Small adjustment rounded up from {abs(adjustment_distance):.6f} to 1pt")
+
+                            # Diagnostic logging for troubleshooting
+                            self.logger.debug(f"[BREAK-EVEN CALC] Trade {trade.id}: current_stop={current_stop:.5f}, "
+                                            f"break_even_stop={break_even_stop:.5f}, adjustment_distance={adjustment_distance:.6f}, "
+                                            f"adjustment_points={adjustment_points}")
                         
-                        if adjustment_points > 0:
-                            direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
+                            if adjustment_points > 0:
+                                direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
                             
-                            self.logger.info(f"📤 [BREAK-EVEN SEND] Trade {trade.id}: "
-                                        f"Moving stop to break-even (entry+{lock_points}pts), adjustment={adjustment_points}pts")
+                                self.logger.info(f"📤 [BREAK-EVEN SEND] Trade {trade.id}: "
+                                            f"Moving stop to break-even (entry+{lock_points}pts), adjustment={adjustment_points}pts")
                             
-                            api_result = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                                api_result = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
 
-                            if isinstance(api_result, dict) and api_result.get("status") == "updated":
-                                # Extract IG's actual stop level for break-even
-                                sent_payload = api_result.get("sentPayload", {})
-                                ig_actual_stop = sent_payload.get("stopLevel")
+                                if isinstance(api_result, dict) and api_result.get("status") == "updated":
+                                    # Extract IG's actual stop level for break-even
+                                    sent_payload = api_result.get("sentPayload", {})
+                                    ig_actual_stop = sent_payload.get("stopLevel")
 
-                                # Store old values for logging
-                                old_sl = trade.sl_price
+                                    # Store old values for logging
+                                    old_sl = trade.sl_price
+                                    old_status = trade.status
+                                    old_moved_to_breakeven = getattr(trade, 'moved_to_breakeven', False)
+
+                                    # Update trade object fields
+                                    trade.moved_to_breakeven = True
+                                    # ✅ IMPORTANT: Don't change status if already profit_protected
+                                    if trade.status != "profit_protected":
+                                        trade.status = "break_even"
+
+                                    # Use IG's actual stop level
+                                    if ig_actual_stop:
+                                        trade.sl_price = float(ig_actual_stop)
+                                        self.logger.info(f"📍 [IG ACTUAL BE] Trade {trade.id}: IG set break-even to {ig_actual_stop:.5f}")
+                                    else:
+                                        trade.sl_price = break_even_stop
+                                        self.logger.warning(f"⚠️ [FALLBACK BE] Trade {trade.id}: Using calculated BE {break_even_stop:.5f}")
+
+                                    trade.last_trigger_price = current_price
+                                    trade.trigger_time = datetime.utcnow()
+
+                                    # ✅ FIX: Increment stop_limit_changes_count
+                                    trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+
+                                    # Log changes before commit
+                                    self.logger.info(f"💾 [DB PREPARE] Trade {trade.id}: Preparing database commit")
+                                    self.logger.info(f"   → sl_price: {old_sl} → {trade.sl_price}")
+                                    self.logger.info(f"   → status: {old_status} → {trade.status}")
+                                    self.logger.info(f"   → moved_to_breakeven: {old_moved_to_breakeven} → {trade.moved_to_breakeven}")
+                                    self.logger.info(f"   → stop_limit_changes_count: {(trade.stop_limit_changes_count or 1) - 1} → {trade.stop_limit_changes_count}")
+
+                                    # ✅ ROBUST: Wrap commit in try-except with detailed logging
+                                    try:
+                                        db.commit()
+                                        self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: All changes persisted to database")
+                                        self.logger.info(f"🎉 [BREAK-EVEN] Trade {trade.id} {trade.symbol} "
+                                                    f"moved to break-even: {trade.sl_price:.5f}")
+                                    except Exception as commit_error:
+                                        db.rollback()
+                                        self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: Database commit failed!")
+                                        self.logger.error(f"   → Error type: {type(commit_error).__name__}")
+                                        self.logger.error(f"   → Error message: {str(commit_error)}")
+                                        self.logger.error(f"   → IG Markets was updated successfully but database sync failed")
+                                        self.logger.error(f"   → This will cause database/broker mismatch!")
+                                        # Re-raise to ensure error is visible
+                                        raise
+                                    # Don't return early - continue to Stage 2/3 progression check
+                                else:
+                                    error_msg = api_result.get("message", "Unknown error") if isinstance(api_result, dict) else "API call failed"
+                                    self.logger.error(f"❌ [BREAK-EVEN FAILED] Trade {trade.id}: {error_msg}")
+                            else:
+                                self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Adjustment points = 0")
+                                # Set flag anyway to prevent repeated attempts
                                 old_status = trade.status
-                                old_moved_to_breakeven = getattr(trade, 'moved_to_breakeven', False)
-
-                                # Update trade object fields
                                 trade.moved_to_breakeven = True
-                                # ✅ IMPORTANT: Don't change status if already profit_protected
                                 if trade.status != "profit_protected":
                                     trade.status = "break_even"
 
-                                # Use IG's actual stop level
-                                if ig_actual_stop:
-                                    trade.sl_price = float(ig_actual_stop)
-                                    self.logger.info(f"📍 [IG ACTUAL BE] Trade {trade.id}: IG set break-even to {ig_actual_stop:.5f}")
-                                else:
-                                    trade.sl_price = break_even_stop
-                                    self.logger.warning(f"⚠️ [FALLBACK BE] Trade {trade.id}: Using calculated BE {break_even_stop:.5f}")
-
-                                trade.last_trigger_price = current_price
-                                trade.trigger_time = datetime.utcnow()
-
-                                # ✅ FIX: Increment stop_limit_changes_count
-                                trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
-
-                                # Log changes before commit
-                                self.logger.info(f"💾 [DB PREPARE] Trade {trade.id}: Preparing database commit")
-                                self.logger.info(f"   → sl_price: {old_sl} → {trade.sl_price}")
-                                self.logger.info(f"   → status: {old_status} → {trade.status}")
-                                self.logger.info(f"   → moved_to_breakeven: {old_moved_to_breakeven} → {trade.moved_to_breakeven}")
-                                self.logger.info(f"   → stop_limit_changes_count: {(trade.stop_limit_changes_count or 1) - 1} → {trade.stop_limit_changes_count}")
-
-                                # ✅ ROBUST: Wrap commit in try-except with detailed logging
+                                self.logger.info(f"💾 [DB PREPARE BE-ZERO] Trade {trade.id}: status {old_status} → {trade.status}")
                                 try:
                                     db.commit()
-                                    self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: All changes persisted to database")
-                                    self.logger.info(f"🎉 [BREAK-EVEN] Trade {trade.id} {trade.symbol} "
-                                                f"moved to break-even: {trade.sl_price:.5f}")
+                                    self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Break-even zero adjustment flags persisted")
                                 except Exception as commit_error:
                                     db.rollback()
-                                    self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: Database commit failed!")
-                                    self.logger.error(f"   → Error type: {type(commit_error).__name__}")
-                                    self.logger.error(f"   → Error message: {str(commit_error)}")
-                                    self.logger.error(f"   → IG Markets was updated successfully but database sync failed")
-                                    self.logger.error(f"   → This will cause database/broker mismatch!")
-                                    # Re-raise to ensure error is visible
+                                    self.logger.error(f"❌ [DB COMMIT FAILED BE-ZERO] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
                                     raise
-                                # Don't return early - continue to Stage 2/3 progression check
-                            else:
-                                error_msg = api_result.get("message", "Unknown error") if isinstance(api_result, dict) else "API call failed"
-                                self.logger.error(f"❌ [BREAK-EVEN FAILED] Trade {trade.id}: {error_msg}")
                         else:
-                            self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Adjustment points = 0")
-                            # Set flag anyway to prevent repeated attempts
-                            old_status = trade.status
-                            trade.moved_to_breakeven = True
-                            if trade.status != "profit_protected":
-                                trade.status = "break_even"
-
-                            self.logger.info(f"💾 [DB PREPARE BE-ZERO] Trade {trade.id}: status {old_status} → {trade.status}")
-                            try:
-                                db.commit()
-                                self.logger.info(f"✅ [DB COMMIT SUCCESS] Trade {trade.id}: Break-even zero adjustment flags persisted")
-                            except Exception as commit_error:
-                                db.rollback()
-                                self.logger.error(f"❌ [DB COMMIT FAILED BE-ZERO] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
-                                raise
-                    else:
-                        self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Break-even level validation failed")
+                            self.logger.warning(f"⏸️ [BREAK-EVEN SKIP] Trade {trade.id}: Break-even level validation failed")
 
             # --- STEP 1.5: Standard Stage Check ---
             # Check for Stage 1, Stage 2 and Stage 3 progression after break-even

@@ -182,6 +182,85 @@ async def update_stop_loss(deal_id: str, stop_distance: int, auth_headers: dict)
         return response.json()
 
 
+async def partial_close_position(
+    deal_id: str,
+    epic: str,
+    direction: str,  # Original position direction (BUY/SELL)
+    size_to_close: float,  # e.g., 0.5 for 50%
+    auth_headers: dict
+) -> dict:
+    """
+    Close part of a position using IG API DELETE method with POST workaround.
+
+    Args:
+        deal_id: Position deal ID
+        epic: Market epic (for logging)
+        direction: ORIGINAL position direction (BUY/SELL)
+        size_to_close: Amount to close (0.5 for 50%)
+        auth_headers: IG API auth headers
+
+    Returns:
+        dict: {"success": bool, "response": dict, "error": str, "size_closed": float}
+
+    Note: Uses POST with _method:DELETE header due to IG API DELETE body limitation
+    """
+    try:
+        # Opposite direction for closing (SELL closes BUY, BUY closes SELL)
+        close_direction = "SELL" if direction.upper() == "BUY" else "BUY"
+
+        # IG API DELETE /positions/otc payload for partial close
+        # WORKING METHOD: POST with _method:DELETE header + orderType
+        payload = {
+            "dealId": deal_id,
+            "direction": close_direction,
+            "size": size_to_close,
+            "orderType": "MARKET"  # Required field for DELETE
+        }
+
+        # Add _method:DELETE header (IG API workaround for DELETE with body)
+        headers = {
+            **auth_headers,
+            "_method": "DELETE",
+            "Version": "1"
+        }
+
+        logger.info(f"📤 [PARTIAL CLOSE] Closing {size_to_close} of {epic} {direction} position")
+        logger.info(f"   Deal ID: {deal_id}")
+        logger.info(f"   Payload: {payload}")
+        logger.info(f"   Using POST with _method:DELETE header")
+
+        async with httpx.AsyncClient() as client:
+            # Use POST with _method:DELETE header (IG API requirement)
+            response = await client.post(
+                f"{API_BASE_URL}/positions/otc",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ [PARTIAL CLOSE SUCCESS] {epic}: Closed {size_to_close} position")
+                return {
+                    "success": True,
+                    "response": response.json(),
+                    "size_closed": size_to_close
+                }
+            else:
+                error_msg = response.text
+                logger.error(f"❌ [PARTIAL CLOSE FAILED] {epic}: HTTP {response.status_code} - {error_msg}")
+                return {
+                    "success": False,
+                    "error": f"HTTP {response.status_code}: {error_msg}"
+                }
+
+    except Exception as e:
+        logger.error(f"❌ [PARTIAL CLOSE ERROR] {epic}: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
 def get_point_value(epic: str) -> float:
     """Get point value for the instrument"""
     if "JPY" in epic:

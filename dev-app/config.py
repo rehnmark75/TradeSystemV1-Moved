@@ -114,6 +114,11 @@ STAGE3_ATR_MULTIPLIER = 0.8  # MUCH TIGHTER: 0.8x ATR (was 1.5x)
 STAGE3_MIN_DISTANCE = 2      # Small minimum trailing distance from current price (was 3)
 STAGE3_MIN_ADJUSTMENT = 5    # Minimum points to move stop (prevents too-frequent tiny adjustments)
 
+# ================== PARTIAL CLOSE CONFIGURATION ==================
+# Partial close feature: Close part of position at break-even trigger instead of moving stop
+ENABLE_PARTIAL_CLOSE_AT_BREAKEVEN = True  # Master toggle for partial close feature
+PARTIAL_CLOSE_SIZE = 0.5  # Size to close (0.5 = 50% of position)
+
 # ================== PAIR-SPECIFIC TRAILING CONFIGURATIONS ==================
 # Per-pair trailing stop configurations (overrides default values above)
 # Note: IG's min_stop_distance_points from trade_log ALWAYS takes priority when available
@@ -132,6 +137,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15,   # Move to BE after 6 pts
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.AUDUSD.MINI.IP': {
@@ -144,6 +151,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15, 
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.NZDUSD.MINI.IP': {
@@ -156,6 +165,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15,  
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.USDCAD.MINI.IP': {
@@ -168,6 +179,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.USDCHF.MINI.IP': {
@@ -180,6 +193,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15, 
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     # ========== GBP PAIRS - High Volatility ==========
@@ -194,6 +209,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15,   # Later BE
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.GBPJPY.MINI.IP': {
@@ -206,6 +223,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 3,
         'min_trail_distance': 18,
         'break_even_trigger_points': 8,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.GBPAUD.MINI.IP': {
@@ -218,6 +237,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 3,
         'min_trail_distance': 18,
         'break_even_trigger_points': 8,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.GBPNZD.MINI.IP': {
@@ -230,6 +251,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 3,
         'min_trail_distance': 18,
         'break_even_trigger_points': 8,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     # ========== JPY PAIRS - Different Pip Scale ==========
@@ -244,6 +267,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.EURJPY.MINI.IP': {
@@ -256,6 +281,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.AUDJPY.MINI.IP': {
@@ -268,6 +295,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15, 
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.CADJPY.MINI.IP': {
@@ -280,6 +309,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 2,
         'min_trail_distance': 15,
         'break_even_trigger_points': 7,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.CHFJPY.MINI.IP': {
@@ -292,6 +323,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 2,
         'min_trail_distance': 15,
         'break_even_trigger_points': 7,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.NZDJPY.MINI.IP': {
@@ -304,6 +337,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 2,
         'min_trail_distance': 15,
         'break_even_trigger_points': 7,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     # ========== CROSS PAIRS - Medium-High Volatility ==========
@@ -318,6 +353,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 2,
         'min_trail_distance': 16,
         'break_even_trigger_points': 7,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.EURNZD.MINI.IP': {
@@ -330,6 +367,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 2,
         'min_trail_distance': 16,
         'break_even_trigger_points': 7,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.AUDNZD.MINI.IP': {
@@ -342,6 +381,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 2,
         'min_trail_distance': 15,
         'break_even_trigger_points': 7,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 
     'CS.D.EURGBP.MINI.IP': {
@@ -354,6 +395,8 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 2,
         'min_trail_distance': 14,
         'break_even_trigger_points': 12,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
     },
 }
 
@@ -368,6 +411,8 @@ DEFAULT_TRAILING_CONFIG = {
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
         'break_even_trigger_points': 15,
+        'enable_partial_close': True,     # Enable partial close at break-even
+        'partial_close_size': 0.5,        # Close 50% of position
 }
 
 
