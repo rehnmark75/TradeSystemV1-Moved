@@ -238,8 +238,9 @@ SCALPING_MARKET_CONDITIONS = {
 }
 
 # Scalping Signal Quality Settings
+SCALPING_MIN_CONFIDENCE = 0.45          # 🔥 Scalping-specific minimum confidence (45%)
 SCALPING_SIGNAL_QUALITY = {
-    'min_confidence': 0.4,              # Lower confidence for scalping (40%)
+    'min_confidence': 0.45,             # Lower confidence for scalping (45%)
     'require_volume_confirmation': True, # Require volume confirmation
     'min_volume_spike': 1.3,            # Minimum volume spike (130% of average)
     'require_momentum_alignment': True,  # Require momentum indicators to align

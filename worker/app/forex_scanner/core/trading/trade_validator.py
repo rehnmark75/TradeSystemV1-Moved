@@ -1505,21 +1505,34 @@ class TradeValidator:
             if self.backtest_mode and raw_confidence != confidence:
                 self.logger.debug(f"🔧 BACKTEST: Normalized signal confidence {raw_confidence} → {confidence:.3f}")
 
-            # Check minimum confidence (both values now in decimal format)
-            if confidence < self.min_confidence:
-                return False, f"Confidence {confidence:.1%} below minimum {self.min_confidence:.1%}"
-            
             # Additional confidence checks
             if confidence > 1.0:
                 return False, f"Invalid confidence score: {confidence:.1%} (max: 100%)"
-            
-            # Strategy-specific confidence checks
+
+            # 🔥 STRATEGY-SPECIFIC CONFIDENCE THRESHOLDS (bypass general threshold)
             strategy = signal.get('strategy', '')
-            if strategy == 'scalping' and confidence < 0.85:
-                return False, f"Scalping strategy requires min 85% confidence, got {confidence:.1%}"
+            scalping_mode = signal.get('scalping_mode', '')
+
+            # Check if this is a scalping signal (by strategy name or scalping_mode)
+            is_scalping = ('scalping' in strategy.lower() or
+                          scalping_mode in ['linda_raschke', 'ranging_momentum', 'linda_macd_zero_cross',
+                                           'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern'])
+
+            if is_scalping:
+                # Scalping uses lower threshold (45%) - high frequency, tight risk management
+                scalping_min_confidence = getattr(config, 'SCALPING_MIN_CONFIDENCE', 0.45)
+                if confidence < scalping_min_confidence:
+                    return False, f"Scalping confidence {confidence:.1%} below scalping minimum {scalping_min_confidence:.1%}"
+                return True, f"Scalping confidence {confidence:.1%} meets requirements (min: {scalping_min_confidence:.1%})"
+
+            # Other strategy-specific thresholds
             elif strategy == 'swing' and confidence < 0.70:
                 return False, f"Swing strategy requires min 70% confidence, got {confidence:.1%}"
-            
+
+            # General confidence check for non-scalping strategies
+            if confidence < self.min_confidence:
+                return False, f"Confidence {confidence:.1%} below minimum {self.min_confidence:.1%}"
+
             return True, f"Confidence {confidence:.1%} meets requirements"
             
         except Exception as e:

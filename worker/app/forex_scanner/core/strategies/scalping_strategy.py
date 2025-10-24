@@ -324,33 +324,33 @@ class ScalpingStrategy(BaseStrategy):
         Select optimal indicators based on market regime
 
         Returns list of indicator groups to use:
-        - 'macd': MACD for momentum in trending markets
+        - 'macd': Linda Raschke MACD 3-10-16 for trending markets (ADX > 15)
         - 'ema': EMA crossovers for trend following
-        - 'rsi': RSI for overbought/oversold in ranging
-        - 'bb': Bollinger Bands for mean reversion
+        - 'rsi': RSI directional (momentum) for ranging
+        - 'bb': Bollinger Bands for support/resistance
         - 'volume': Volume confirmation
         """
         regime_type = regime['type']
         indicators = []
 
         if 'trending' in regime_type:
-            # Trending markets: Use momentum indicators
+            # Trending markets (ADX > 20): Use Linda Raschke MACD 3-10-16
             indicators.extend(['macd', 'ema'])
             if regime['volatility'] == 'high':
                 indicators.append('volume')  # Confirm with volume
 
         elif regime_type == 'ranging':
-            # Ranging markets: Use mean reversion
+            # Ranging markets (ADX < 15): Use RSI momentum + BB support/resistance
             indicators.extend(['rsi', 'bb'])
-            indicators.append('volume')  # Volume spikes for reversals
+            indicators.append('volume')  # Volume confirmation
 
         elif regime_type == 'volatile_ranging':
             # Choppy market: Avoid or use very conservative signals
             indicators.extend(['rsi', 'bb', 'volume'])  # Require strong confluence
 
-        else:  # quiet_trending or weak_trending
-            # Balanced approach
-            indicators.extend(['ema', 'rsi'])
+        else:  # quiet_trending or weak_trending (ADX 15-20)
+            # 🔥 NEW: Weak trending still has directional bias, use Linda Raschke MACD
+            indicators.extend(['macd', 'ema'])
 
         return indicators
 
@@ -437,10 +437,11 @@ class ScalpingStrategy(BaseStrategy):
             # Update signal with enhanced confidence
             signal['confidence_score'] = enhanced_confidence
             
-            # Apply minimum confidence filter with enhanced validation
-            min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
+            # Apply minimum confidence filter with SCALPING-SPECIFIC threshold
+            # Scalping uses lower threshold (45%) vs general signals (60%)
+            min_confidence = getattr(config, 'SCALPING_MIN_CONFIDENCE', 0.45)
             if enhanced_confidence < min_confidence:
-                self.logger.debug(f"🚫 [SCALPING CONFIDENCE FIX] Signal confidence {enhanced_confidence:.1%} below threshold {min_confidence:.1%}")
+                self.logger.debug(f"🚫 [SCALPING] Signal confidence {enhanced_confidence:.1%} below scalping threshold {min_confidence:.1%}")
                 return None
             
             # 🔧 COMPREHENSIVE ENHANCEMENT WITH TIMESTAMP SAFETY
@@ -1856,15 +1857,20 @@ class ScalpingStrategy(BaseStrategy):
         timeframe: str
     ) -> Optional[Dict]:
         """
-        🔥 NEW: Detect signals in RANGING markets using RSI + BB mean reversion
+        🔥 UPDATED: Detect signals in RANGING markets using RSI momentum + BB support/resistance
 
         Optimized for sideways markets (ADX < 20)
-        Looks for oversold/overbought with BB touches for reversals
+        Uses RSI DIRECTIONALLY (momentum confirmation) instead of overbought/oversold
+        - RSI > 50 = bullish momentum building
+        - RSI < 50 = bearish momentum building
+
+        Looks for BB bounces with RSI momentum confirmation
         """
         current_price = latest['close']
 
-        # Get RSI
+        # Get RSI (using it directionally for momentum)
         rsi_14 = latest.get('rsi_14', 50)
+        rsi_14_prev = previous.get('rsi_14', 50)
         rsi_2 = latest.get('rsi_2', 50)
 
         # Get Bollinger Bands
@@ -1876,46 +1882,55 @@ class ScalpingStrategy(BaseStrategy):
         bb_range = bb_upper - bb_lower
         bb_position = (current_price - bb_lower) / bb_range if bb_range > 0 else 0.5
 
-        # Volume spike confirmation (important for reversals)
+        # Volume confirmation (reduced requirement from 1.5x to 1.2x)
         volume = latest.get('ltv', latest.get('volume', 0))
         volume_avg = latest.get('volume_avg_10', 1.0)
-        volume_spike = volume > (volume_avg * 1.5) if volume_avg > 0 else False
+        volume_ok = volume > (volume_avg * 1.2) if volume_avg > 0 else True
 
-        # Look for mean reversion opportunities
-        # BUY: Oversold RSI + near lower BB + volume spike
-        if rsi_14 < 35 and bb_position < 0.3 and volume_spike:
+        # RSI momentum checks
+        rsi_crossing_above_50 = (rsi_14_prev <= 50) and (rsi_14 > 50)
+        rsi_crossing_below_50 = (rsi_14_prev >= 50) and (rsi_14 < 50)
+        rsi_bullish_momentum = rsi_14 > 50  # Above midpoint = bullish
+        rsi_bearish_momentum = rsi_14 < 50  # Below midpoint = bearish
+
+        # BUY: Price near lower BB + RSI showing bullish momentum (above 50 or crossing above)
+        if bb_position < 0.4 and (rsi_crossing_above_50 or (rsi_bullish_momentum and bb_position < 0.3)) and volume_ok:
             signal = self.create_base_signal('BULL', epic, timeframe, latest)
             signal.update({
-                'scalping_mode': 'ranging_adaptive',
-                'entry_reason': 'ranging_mean_reversion_buy',
+                'scalping_mode': 'ranging_momentum',
+                'entry_reason': 'ranging_bb_support_rsi_bullish',
                 'rsi_14': rsi_14,
                 'rsi_2': rsi_2,
+                'rsi_momentum': 'bullish',
+                'rsi_crossing_50': rsi_crossing_above_50,
                 'bb_position': bb_position,
                 'bb_upper': bb_upper,
                 'bb_lower': bb_lower,
                 'bb_middle': bb_middle,
-                'volume_spike': volume_spike,
+                'volume_ok': volume_ok,
                 'confidence_score': self._calculate_ranging_confidence(
-                    rsi_14, bb_position, volume_spike, 'BULL'
+                    rsi_14, bb_position, volume_ok, 'BULL'
                 )
             })
             return signal
 
-        # SELL: Overbought RSI + near upper BB + volume spike
-        elif rsi_14 > 65 and bb_position > 0.7 and volume_spike:
+        # SELL: Price near upper BB + RSI showing bearish momentum (below 50 or crossing below)
+        elif bb_position > 0.6 and (rsi_crossing_below_50 or (rsi_bearish_momentum and bb_position > 0.7)) and volume_ok:
             signal = self.create_base_signal('BEAR', epic, timeframe, latest)
             signal.update({
-                'scalping_mode': 'ranging_adaptive',
-                'entry_reason': 'ranging_mean_reversion_sell',
+                'scalping_mode': 'ranging_momentum',
+                'entry_reason': 'ranging_bb_resistance_rsi_bearish',
                 'rsi_14': rsi_14,
                 'rsi_2': rsi_2,
+                'rsi_momentum': 'bearish',
+                'rsi_crossing_50': rsi_crossing_below_50,
                 'bb_position': bb_position,
                 'bb_upper': bb_upper,
                 'bb_lower': bb_lower,
                 'bb_middle': bb_middle,
-                'volume_spike': volume_spike,
+                'volume_ok': volume_ok,
                 'confidence_score': self._calculate_ranging_confidence(
-                    rsi_14, bb_position, volume_spike, 'BEAR'
+                    rsi_14, bb_position, volume_ok, 'BEAR'
                 )
             })
             return signal
@@ -1957,33 +1972,45 @@ class ScalpingStrategy(BaseStrategy):
         self,
         rsi_14: float,
         bb_position: float,
-        volume_spike: bool,
+        volume_ok: bool,
         signal_type: str
     ) -> float:
-        """Calculate confidence for ranging market signals"""
+        """Calculate confidence for ranging market signals using RSI momentum"""
         confidence = 0.5
 
-        # RSI extremity
+        # RSI momentum strength (directional, not overbought/oversold)
         if signal_type == 'BULL':
-            if rsi_14 < 30:
-                confidence += 0.2
-            elif rsi_14 < 35:
-                confidence += 0.1
+            # Stronger bullish momentum (RSI further above 50) = higher confidence
+            if rsi_14 > 55:
+                confidence += 0.15
+            elif rsi_14 > 50:
+                confidence += 0.10
+            # Even if RSI just crossed 50, give some confidence
+            elif rsi_14 > 45:
+                confidence += 0.05
         else:  # BEAR
-            if rsi_14 > 70:
-                confidence += 0.2
-            elif rsi_14 > 65:
-                confidence += 0.1
+            # Stronger bearish momentum (RSI further below 50) = higher confidence
+            if rsi_14 < 45:
+                confidence += 0.15
+            elif rsi_14 < 50:
+                confidence += 0.10
+            # Even if RSI just crossed 50, give some confidence
+            elif rsi_14 < 55:
+                confidence += 0.05
 
-        # BB position extremity
+        # BB position (closer to edge = better entry)
         if signal_type == 'BULL' and bb_position < 0.2:
             confidence += 0.15
+        elif signal_type == 'BULL' and bb_position < 0.3:
+            confidence += 0.10
         elif signal_type == 'BEAR' and bb_position > 0.8:
             confidence += 0.15
+        elif signal_type == 'BEAR' and bb_position > 0.7:
+            confidence += 0.10
 
-        # Volume spike (crucial for reversals)
-        if volume_spike:
-            confidence += 0.15
+        # Volume confirmation
+        if volume_ok:
+            confidence += 0.10
 
         return min(confidence, 1.0)
 
