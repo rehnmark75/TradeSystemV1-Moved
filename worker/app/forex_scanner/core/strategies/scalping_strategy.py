@@ -16,10 +16,27 @@ import json
 
 from .base_strategy import BaseStrategy
 from ..detection.price_adjuster import PriceAdjuster
+from .helpers.swing_proximity_validator import SwingProximityValidator
 try:
     import config
 except ImportError:
     from forex_scanner import config
+
+# Import Scalping Strategy Config
+try:
+    from configdata.strategies.config_scalping_strategy import SCALPING_STRATEGY_CONFIG
+except ImportError:
+    try:
+        from forex_scanner.configdata.strategies.config_scalping_strategy import SCALPING_STRATEGY_CONFIG
+    except ImportError:
+        # Fallback: Define config inline if import fails
+        SCALPING_STRATEGY_CONFIG = {
+            'linda_raschke': {
+                'macd_fast': 3, 'macd_slow': 10, 'macd_signal': 16,
+                'fast_ema': 5, 'slow_ema': 13, 'filter_ema': 34, 'session_ema': 50,
+                'target_pips': 8, 'stop_loss_pips': 6
+            }
+        }
 
 
 class ScalpingStrategy(BaseStrategy):
@@ -29,28 +46,45 @@ class ScalpingStrategy(BaseStrategy):
         super().__init__(f'scalping_{scalping_mode}')
         self.price_adjuster = PriceAdjuster()
         self.scalping_mode = scalping_mode
-        
-        # Scalping-specific EMA configurations
-        self.scalping_configs = {
-            'ultra_fast': {'fast': 3, 'slow': 8, 'filter': 21},      # 1m timeframe
-            'aggressive': {'fast': 5, 'slow': 13, 'filter': 50},    # 1-5m timeframe  
-            'conservative': {'fast': 8, 'slow': 20, 'filter': 50},  # 5m timeframe
-            'dual_ma': {'fast': 7, 'slow': 14, 'filter': None}      # Simple dual MA
-        }
-        
-        self.config = self.scalping_configs.get(scalping_mode, self.scalping_configs['aggressive'])
-        
+
+        # 🔥 USE FULL CONFIG FROM config_scalping_strategy.py (includes target_pips, stop_loss_pips)
+        # This ensures we get ALL settings including SL/TP values
+        self.config = SCALPING_STRATEGY_CONFIG.get(scalping_mode, SCALPING_STRATEGY_CONFIG.get('linda_raschke', {}))
+
+        # 🔥 Handle different key names for EMA periods (linda_raschke uses 'fast_ema', others use 'fast')
+        # Create normalized access to these values
+        self._fast_ema_period = self.config.get('fast_ema') or self.config.get('fast', 5)
+        self._slow_ema_period = self.config.get('slow_ema') or self.config.get('slow', 13)
+        self._filter_ema_period = self.config.get('filter_ema') or self.config.get('filter')
+
         # Scalping-specific settings
         self.min_separation_pips = 0.5  # Minimum EMA separation
         self.volume_threshold = 1.2     # Minimum volume multiplier
         self.max_spread_pips = 2.0      # Maximum allowed spread
         self.quick_exit_enabled = True  # Enable rapid exit signals
-        
+
+        # 🎯 Swing Proximity Validator - STRICT MODE for scalping
+        swing_proximity_config = {
+            'enabled': True,
+            'strict_mode': True,  # REJECT signals that are too close (no penalties, just reject)
+            'min_distance_pips': 10,  # Slightly higher than default (8) for scalping safety
+            'lookback_swings': 5,  # Last 5 swing points
+            'resistance_buffer': 1.2,  # 20% extra caution for BUYs near resistance (requires 12 pips)
+            'support_buffer': 1.2,  # 20% extra caution for SELLs near support (requires 12 pips)
+            'equal_level_multiplier': 2.0,  # 2x distance for Equal Highs/Lows (20 pips)
+        }
+        self.swing_validator = SwingProximityValidator(
+            config=swing_proximity_config,
+            logger=self.logger
+        )
+
         self.logger.info(f"🏃 Scalping strategy initialized: {scalping_mode} with comprehensive enhancement and enhanced confidence validation")
-        self.logger.info(f"   EMAs: {self.config['fast']}/{self.config['slow']}/{self.config.get('filter', 'None')}")
+        self.logger.info(f"   EMAs: {self._fast_ema_period}/{self._slow_ema_period}/{self._filter_ema_period or 'None'}")
+        self.logger.info(f"   💰 Target: {self.config.get('target_pips', 8)} pips | Stop: {self.config.get('stop_loss_pips', 6)} pips")
         self.logger.info(f"   ✅ Timestamp safety: enabled")
         self.logger.info(f"   ✅ Comprehensive enhancement: enabled")
         self.logger.info(f"   🔥 Enhanced confidence validation: enabled")
+        self.logger.info(f"   🎯 Swing proximity validator: STRICT MODE - Min: 10 pips, Buffer: 1.2x, EQH/EQL: 2.0x")
 
     def _convert_market_timestamp_safe(self, timestamp_value) -> Optional[datetime]:
         """
@@ -107,13 +141,13 @@ class ScalpingStrategy(BaseStrategy):
     def get_required_indicators(self) -> List[str]:
         """Required indicators for scalping strategy"""
         indicators = [
-            f'ema_{self.config["fast"]}',
-            f'ema_{self.config["slow"]}',
+            f'ema_{self._fast_ema_period}',
+            f'ema_{self._slow_ema_period}',
             'close', 'high', 'low', 'ltv'
         ]
         
-        if self.config.get('filter'):
-            indicators.append(f'ema_{self.config["filter"]}')
+        if self._filter_ema_period:
+            indicators.append(f'ema_{self._filter_ema_period}')
         
         # Add RSI for overbought/oversold confirmation
         indicators.extend(['rsi_2', 'rsi_14'])
@@ -369,6 +403,12 @@ class ScalpingStrategy(BaseStrategy):
         - Selects optimal indicators for current conditions
         - Adjusts confidence based on regime suitability
         """
+        # 🛡️ PAIR FILTER: Check if epic is in preferred_pairs list
+        preferred_pairs = self.config.get('preferred_pairs', [])
+        if preferred_pairs and epic not in preferred_pairs:
+            self.logger.debug(f"🚫 {epic} not in scalping preferred pairs (excluded)")
+            return None
+
         # 🔥 NEW: Detect market regime first
         regime_info = self._detect_market_regime(df)
 
@@ -403,10 +443,10 @@ class ScalpingStrategy(BaseStrategy):
         previous = df_adjusted.iloc[-2]
         
         current_price = latest['close']
-        fast_ema = latest[f'ema_{self.config["fast"]}']
-        slow_ema = latest[f'ema_{self.config["slow"]}']
-        fast_ema_prev = previous[f'ema_{self.config["fast"]}']
-        slow_ema_prev = previous[f'ema_{self.config["slow"]}']
+        fast_ema = latest[f'ema_{self._fast_ema_period}']
+        slow_ema = latest[f'ema_{self._slow_ema_period}']
+        fast_ema_prev = previous[f'ema_{self._fast_ema_period}']
+        slow_ema_prev = previous[f'ema_{self._slow_ema_period}']
         
         # 🔥 ADAPTIVE: Use regime-appropriate detection method
         recommended_indicators = regime_info['recommended_indicators']
@@ -427,7 +467,35 @@ class ScalpingStrategy(BaseStrategy):
             signal['regime'] = regime_info['regime']
             signal['regime_confidence_mult'] = regime_info['confidence_multiplier']
             signal['original_confidence'] = signal.get('confidence_score', 0.5)
-        
+
+        # 🎯 SWING PROXIMITY VALIDATION - STRICT MODE
+        if signal:
+            signal_direction = signal.get('signal_type', 'UNKNOWN')
+            # Determine if BUY or SELL
+            if 'BULL' in signal_direction.upper() or 'BUY' in signal_direction.upper():
+                direction = 'BUY'
+            elif 'BEAR' in signal_direction.upper() or 'SELL' in signal_direction.upper():
+                direction = 'SELL'
+            else:
+                direction = 'BUY'  # Default to BUY for unknown types
+
+            swing_result = self.swing_validator.validate_entry_proximity(
+                df_adjusted, current_price, direction, epic, timeframe, signal
+            )
+
+            if not swing_result['valid']:
+                # In STRICT MODE, reject the signal completely
+                self.logger.warning(f"❌ {epic} {direction} signal REJECTED: {swing_result['rejection_reason']}")
+                return None
+            else:
+                # Log successful validation
+                distance = swing_result.get('distance_to_swing')
+                swing_type = swing_result.get('swing_type')
+                if distance is not None and swing_type:
+                    self.logger.info(f"✅ {epic} {direction} swing proximity passed - Distance to {swing_type}: {distance:.1f} pips")
+                else:
+                    self.logger.debug(f"✅ {epic} {direction} swing proximity passed - No nearby swings")
+
         # 🔥 ENHANCED CONFIDENCE VALIDATION: Apply enhanced validation instead of old method
         if signal:
             # Create enhanced signal data for proper confidence calculation
@@ -469,8 +537,8 @@ class ScalpingStrategy(BaseStrategy):
             volume_ratio = volume / volume_avg if volume_avg > 0 else 1.0
             
             # Calculate EMA data
-            ema_fast = latest.get(f'ema_{self.config["fast"]}', 0)
-            ema_slow = latest.get(f'ema_{self.config["slow"]}', 0)
+            ema_fast = latest.get(f'ema_{self._fast_ema_period}', 0)
+            ema_slow = latest.get(f'ema_{self._slow_ema_period}', 0)
             ema_filter = latest.get(f'ema_{self.config.get("filter", 50)}', ema_slow)
             
             # Calculate efficiency ratio for scalping
@@ -1013,8 +1081,8 @@ class ScalpingStrategy(BaseStrategy):
             
             # Scalping-specific EMA data
             signal.update({
-                'ema_short': float(signal.get('fast_ema', latest.get(f'ema_{self.config["fast"]}', 0))),
-                'ema_long': float(signal.get('slow_ema', latest.get(f'ema_{self.config["slow"]}', 0))),
+                'ema_short': float(signal.get('fast_ema', latest.get(f'ema_{self._fast_ema_period}', 0))),
+                'ema_long': float(signal.get('slow_ema', latest.get(f'ema_{self._slow_ema_period}', 0))),
                 'ema_trend': float(signal.get('filter_ema', latest.get(f'ema_{self.config.get("filter", 50)}', signal.get('ema_long', 0)))),
                 'ema_9': float(latest.get('ema_9', signal.get('ema_short', 0))),
                 'ema_21': float(latest.get('ema_21', signal.get('ema_long', 0))),
@@ -1048,9 +1116,9 @@ class ScalpingStrategy(BaseStrategy):
                 'strategy_type': 'scalping_strategy',
                 'strategy_family': 'high_frequency',
                 'scalping_mode': self.scalping_mode,
-                'ema_fast_period': self.config['fast'],
-                'ema_slow_period': self.config['slow'],
-                'ema_filter_period': self.config.get('filter'),
+                'ema_fast_period': self._fast_ema_period,
+                'ema_slow_period': self._slow_ema_period,
+                'ema_filter_period': self._filter_ema_period,
                 'min_separation_pips': self.min_separation_pips,
                 'volume_threshold': self.volume_threshold,
                 'max_spread_pips': self.max_spread_pips,
@@ -1098,9 +1166,9 @@ class ScalpingStrategy(BaseStrategy):
                     'entry_reason': signal.get('entry_reason', 'ema_crossover'),
                     'mode_specifics': {
                         'mode': self.scalping_mode,
-                        'fast_ema_period': self.config['fast'],
-                        'slow_ema_period': self.config['slow'],
-                        'filter_active': self.config.get('filter') is not None
+                        'fast_ema_period': self._fast_ema_period,
+                        'slow_ema_period': self._slow_ema_period,
+                        'filter_active': self._filter_ema_period is not None
                     },
                     'market_timing': self._assess_scalping_timing(),
                     'volatility_suitability': self._assess_scalping_volatility(latest)
@@ -1167,7 +1235,15 @@ class ScalpingStrategy(BaseStrategy):
             else:
                 signal['stop_loss'] = current_price - stop_distance_price
                 signal['take_profit'] = current_price + target_distance_price
-            
+
+            # 🔥 CRITICAL: Add distance fields for order executor
+            # Order executor expects 'stop_distance' and 'limit_distance' in PIPS, not price levels
+            signal['stop_distance'] = scalping_stop_distance  # Distance in pips
+            signal['limit_distance'] = scalping_target_distance  # Distance in pips
+
+            # 🔥 DEBUG: Log SL/TP values
+            self.logger.info(f"💰 SL/TP SET: {epic} {signal_type} - SL: {signal.get('stop_loss'):.5f}, TP: {signal.get('take_profit'):.5f} | Distances: {scalping_stop_distance}pips/{scalping_target_distance}pips")
+
             # Support/Resistance levels (if available)
             if 'support' in latest and latest['support'] is not None:
                 signal['nearest_support'] = float(latest['support'])
@@ -1233,7 +1309,7 @@ class ScalpingStrategy(BaseStrategy):
                 'primary_signal': f"Scalping {signal_type if signal_type else 'UNKNOWN'} ({self.scalping_mode})",
                 'execution_urgency': 'IMMEDIATE' if confidence > 0.8 else 'HIGH' if confidence > 0.7 else 'MEDIUM',
                 'entry_quality': 'Excellent' if confidence > 0.85 else 'Good' if confidence > 0.75 else 'Fair',
-                'scalping_setup': f"EMA {self.config['fast']}/{self.config['slow']} crossover",
+                'scalping_setup': f"EMA {self._fast_ema_period}/{self._slow_ema_period} crossover",
                 'volume_support': 'Strong' if signal['volume_confirmation'] else 'Weak',
                 'timeframe_optimization': timeframe,
                 'signal_reliability': 'High' if confidence > 0.8 and signal['volume_confirmation'] else 'Medium',
@@ -1309,6 +1385,10 @@ class ScalpingStrategy(BaseStrategy):
 
     def _get_scalping_stop_distance(self, mode: str) -> float:
         """Get stop loss distance in pips for scalping mode"""
+        # 🔥 LINDA RASCHKE: Use config value for linda_raschke mode
+        if mode == 'linda_raschke':
+            return self.config.get('stop_loss_pips', 6)
+
         distances = {
             'ultra_fast': 2.0,
             'aggressive': 3.0,
@@ -1319,6 +1399,10 @@ class ScalpingStrategy(BaseStrategy):
 
     def _get_scalping_target_distance(self, mode: str) -> float:
         """Get take profit distance in pips for scalping mode"""
+        # 🔥 LINDA RASCHKE: Use config value for linda_raschke mode
+        if mode == 'linda_raschke':
+            return self.config.get('target_pips', 8)
+
         distances = {
             'ultra_fast': 3.0,
             'aggressive': 5.0,
@@ -1547,12 +1631,12 @@ class ScalpingStrategy(BaseStrategy):
         """Ultra-fast 3/8 EMA crossover for 1-minute scalping"""
         
         current_price = latest['close']
-        fast_ema = latest[f'ema_{self.config["fast"]}']
-        slow_ema = latest[f'ema_{self.config["slow"]}']
-        filter_ema = latest[f'ema_{self.config["filter"]}'] if self.config.get('filter') else None
+        fast_ema = latest[f'ema_{self._fast_ema_period}']
+        slow_ema = latest[f'ema_{self._slow_ema_period}']
+        filter_ema = latest[f'ema_{self._filter_ema_period}'] if self._filter_ema_period else None
         
-        fast_ema_prev = previous[f'ema_{self.config["fast"]}']
-        slow_ema_prev = previous[f'ema_{self.config["slow"]}']
+        fast_ema_prev = previous[f'ema_{self._fast_ema_period}']
+        slow_ema_prev = previous[f'ema_{self._slow_ema_period}']
         
         # Ultra-fast crossover detection
         bullish_cross = (fast_ema_prev <= slow_ema_prev) and (fast_ema > slow_ema)
@@ -1613,10 +1697,10 @@ class ScalpingStrategy(BaseStrategy):
         """Simple dual MA crossover (7/14 EMAs) with price action confirmation"""
         
         current_price = latest['close']
-        fast_ema = latest[f'ema_{self.config["fast"]}']
-        slow_ema = latest[f'ema_{self.config["slow"]}']
-        fast_ema_prev = previous[f'ema_{self.config["fast"]}']
-        slow_ema_prev = previous[f'ema_{self.config["slow"]}']
+        fast_ema = latest[f'ema_{self._fast_ema_period}']
+        slow_ema = latest[f'ema_{self._slow_ema_period}']
+        fast_ema_prev = previous[f'ema_{self._fast_ema_period}']
+        slow_ema_prev = previous[f'ema_{self._slow_ema_period}']
         
         # Crossover detection
         bullish_cross = (fast_ema_prev <= slow_ema_prev) and (fast_ema > slow_ema)
@@ -1670,12 +1754,12 @@ class ScalpingStrategy(BaseStrategy):
         """Standard scalping with 5/13 or 8/20 EMAs plus RSI confirmation"""
         
         current_price = latest['close']
-        fast_ema = latest[f'ema_{self.config["fast"]}']
-        slow_ema = latest[f'ema_{self.config["slow"]}']
-        filter_ema = latest[f'ema_{self.config["filter"]}'] if self.config.get('filter') else None
+        fast_ema = latest[f'ema_{self._fast_ema_period}']
+        slow_ema = latest[f'ema_{self._slow_ema_period}']
+        filter_ema = latest[f'ema_{self._filter_ema_period}'] if self._filter_ema_period else None
         
-        fast_ema_prev = previous[f'ema_{self.config["fast"]}']
-        slow_ema_prev = previous[f'ema_{self.config["slow"]}']
+        fast_ema_prev = previous[f'ema_{self._fast_ema_period}']
+        slow_ema_prev = previous[f'ema_{self._slow_ema_period}']
         
         # Check EMA separation (avoid choppy markets)
         ema_separation_pips = abs(fast_ema - slow_ema) * 10000
@@ -1763,10 +1847,10 @@ class ScalpingStrategy(BaseStrategy):
         Uses MACD histogram expansion + EMA alignment
         """
         current_price = latest['close']
-        fast_ema = latest[f'ema_{self.config["fast"]}']
-        slow_ema = latest[f'ema_{self.config["slow"]}']
-        fast_ema_prev = previous[f'ema_{self.config["fast"]}']
-        slow_ema_prev = previous[f'ema_{self.config["slow"]}']
+        fast_ema = latest[f'ema_{self._fast_ema_period}']
+        slow_ema = latest[f'ema_{self._slow_ema_period}']
+        fast_ema_prev = previous[f'ema_{self._fast_ema_period}']
+        slow_ema_prev = previous[f'ema_{self._slow_ema_period}']
 
         # Check for EMA crossover
         bullish_cross = (fast_ema_prev <= slow_ema_prev) and (fast_ema > slow_ema)
@@ -1865,8 +1949,18 @@ class ScalpingStrategy(BaseStrategy):
         - RSI < 50 = bearish momentum building
 
         Looks for BB bounces with RSI momentum confirmation
+
+        🔥 EMA 50 SESSION FILTER: Only trade in direction of session trend
+        - Bullish signals only when price > EMA 50 (bullish session)
+        - Bearish signals only when price < EMA 50 (bearish session)
         """
         current_price = latest['close']
+
+        # 🔥 EMA 50 SESSION FILTER: Check session direction (~4.2 hours on 5m)
+        ema_50 = latest.get(f'ema_{self.config.get("session_ema", 50)}', None)
+        if ema_50 is None:
+            self.logger.debug(f"⚠️ No EMA 50 data for {epic}, skipping ranging signals")
+            return None
 
         # Get RSI (using it directionally for momentum)
         rsi_14 = latest.get('rsi_14', 50)
@@ -1894,7 +1988,8 @@ class ScalpingStrategy(BaseStrategy):
         rsi_bearish_momentum = rsi_14 < 50  # Below midpoint = bearish
 
         # BUY: Price near lower BB + RSI showing bullish momentum (above 50 or crossing above)
-        if bb_position < 0.4 and (rsi_crossing_above_50 or (rsi_bullish_momentum and bb_position < 0.3)) and volume_ok:
+        # 🔥 WITH EMA 50 FILTER: Only buy signals when price > EMA 50 (bullish session)
+        if bb_position < 0.4 and (rsi_crossing_above_50 or (rsi_bullish_momentum and bb_position < 0.3)) and volume_ok and current_price > ema_50:
             signal = self.create_base_signal('BULL', epic, timeframe, latest)
             signal.update({
                 'scalping_mode': 'ranging_momentum',
@@ -1907,6 +2002,7 @@ class ScalpingStrategy(BaseStrategy):
                 'bb_upper': bb_upper,
                 'bb_lower': bb_lower,
                 'bb_middle': bb_middle,
+                'ema_50': ema_50,  # 🔥 Session direction filter
                 'volume_ok': volume_ok,
                 'confidence_score': self._calculate_ranging_confidence(
                     rsi_14, bb_position, volume_ok, 'BULL'
@@ -1915,7 +2011,8 @@ class ScalpingStrategy(BaseStrategy):
             return signal
 
         # SELL: Price near upper BB + RSI showing bearish momentum (below 50 or crossing below)
-        elif bb_position > 0.6 and (rsi_crossing_below_50 or (rsi_bearish_momentum and bb_position > 0.7)) and volume_ok:
+        # 🔥 WITH EMA 50 FILTER: Only sell signals when price < EMA 50 (bearish session)
+        elif bb_position > 0.6 and (rsi_crossing_below_50 or (rsi_bearish_momentum and bb_position > 0.7)) and volume_ok and current_price < ema_50:
             signal = self.create_base_signal('BEAR', epic, timeframe, latest)
             signal.update({
                 'scalping_mode': 'ranging_momentum',
@@ -1928,6 +2025,7 @@ class ScalpingStrategy(BaseStrategy):
                 'bb_upper': bb_upper,
                 'bb_lower': bb_lower,
                 'bb_middle': bb_middle,
+                'ema_50': ema_50,  # 🔥 Session direction filter
                 'volume_ok': volume_ok,
                 'confidence_score': self._calculate_ranging_confidence(
                     rsi_14, bb_position, volume_ok, 'BEAR'
@@ -2049,14 +2147,22 @@ class ScalpingStrategy(BaseStrategy):
 
         current_price = latest['close']
 
+        # 🔥 EMA 34 TREND FILTER: Only trade in direction of intraday trend
+        # Use filter_ema (Linda Raschke) or filter (other modes) - fallback to 34
+        filter_ema = self.config.get("filter_ema") or self.config.get("filter") or 34
+        ema_34 = latest.get(f'ema_{filter_ema}', None)
+        if ema_34 is None:
+            self.logger.debug(f"⚠️ No EMA {filter_ema} data for {epic}, skipping Linda Raschke MACD signals")
+            return None
+
         # Volume confirmation
         volume = latest.get('ltv', latest.get('volume', 0))
         volume_avg = latest.get('volume_avg_10', 1.0)
         volume_ok = volume > (volume_avg * 1.2) if volume_avg > 0 else True
 
         # Signal Type 1: MACD ZERO CROSS (Strong trend initiation)
-        macd_zero_cross_bull = (macd_line_prev <= 0) and (macd_line > 0)
-        macd_zero_cross_bear = (macd_line_prev >= 0) and (macd_line < 0)
+        macd_zero_cross_bull = (macd_line_prev <= 0) and (macd_line > 0) and (current_price > ema_34)
+        macd_zero_cross_bear = (macd_line_prev >= 0) and (macd_line < 0) and (current_price < ema_34)
 
         if macd_zero_cross_bull:
             signal = self.create_base_signal('BULL', epic, timeframe, latest)
@@ -2068,6 +2174,7 @@ class ScalpingStrategy(BaseStrategy):
                 'histogram': histogram,
                 'macd_slope': macd_slope,
                 'signal_slope': signal_slope,
+                'ema_34': ema_34,  # 🔥 Intraday trend filter
                 'volume_confirmed': volume_ok,
                 'confidence_score': 0.75  # High confidence for zero cross
             })
@@ -2083,14 +2190,16 @@ class ScalpingStrategy(BaseStrategy):
                 'histogram': histogram,
                 'macd_slope': macd_slope,
                 'signal_slope': signal_slope,
+                'ema_34': ema_34,  # 🔥 Intraday trend filter
                 'volume_confirmed': volume_ok,
                 'confidence_score': 0.75
             })
             return signal
 
         # Signal Type 2: MACD SIGNAL LINE CROSS (Standard Linda Raschke)
-        macd_signal_cross_bull = (macd_line_prev <= signal_line_prev) and (macd_line > signal_line)
-        macd_signal_cross_bear = (macd_line_prev >= signal_line_prev) and (macd_line < signal_line)
+        # 🔥 WITH EMA 34 TREND FILTER: Only trade bullish signals above EMA 34
+        macd_signal_cross_bull = (macd_line_prev <= signal_line_prev) and (macd_line > signal_line) and (current_price > ema_34)
+        macd_signal_cross_bear = (macd_line_prev >= signal_line_prev) and (macd_line < signal_line) and (current_price < ema_34)
 
         if macd_signal_cross_bull and histogram > 0:
             signal = self.create_base_signal('BULL', epic, timeframe, latest)
@@ -2102,6 +2211,7 @@ class ScalpingStrategy(BaseStrategy):
                 'histogram': histogram,
                 'macd_slope': macd_slope,
                 'signal_slope': signal_slope,
+                'ema_34': ema_34,  # 🔥 Intraday trend filter
                 'volume_confirmed': volume_ok,
                 'confidence_score': 0.65
             })
@@ -2117,16 +2227,18 @@ class ScalpingStrategy(BaseStrategy):
                 'histogram': histogram,
                 'macd_slope': macd_slope,
                 'signal_slope': signal_slope,
+                'ema_34': ema_34,  # 🔥 Intraday trend filter
                 'volume_confirmed': volume_ok,
                 'confidence_score': 0.65
             })
             return signal
 
         # Signal Type 3: MACD MOMENTUM CONTINUATION (Histogram expanding)
+        # 🔥 WITH EMA 34 TREND FILTER: Only trade in direction of intraday trend
         histogram_expanding = abs(histogram) > abs(histogram_prev)
         histogram_strong = abs(histogram) > 0.0001  # Threshold for meaningful histogram
 
-        if histogram > 0 and histogram_expanding and histogram_strong and macd_slope > 0:
+        if histogram > 0 and histogram_expanding and histogram_strong and macd_slope > 0 and current_price > ema_34:
             # Bullish momentum continuation
             signal = self.create_base_signal('BULL', epic, timeframe, latest)
             signal.update({
@@ -2137,13 +2249,14 @@ class ScalpingStrategy(BaseStrategy):
                 'histogram': histogram,
                 'macd_slope': macd_slope,
                 'signal_slope': signal_slope,
+                'ema_34': ema_34,  # 🔥 Intraday trend filter
                 'histogram_expanding': True,
                 'volume_confirmed': volume_ok,
                 'confidence_score': 0.60
             })
             return signal
 
-        if histogram < 0 and histogram_expanding and histogram_strong and macd_slope < 0:
+        if histogram < 0 and histogram_expanding and histogram_strong and macd_slope < 0 and current_price < ema_34:
             # Bearish momentum continuation
             signal = self.create_base_signal('BEAR', epic, timeframe, latest)
             signal.update({
@@ -2154,6 +2267,7 @@ class ScalpingStrategy(BaseStrategy):
                 'histogram': histogram,
                 'macd_slope': macd_slope,
                 'signal_slope': signal_slope,
+                'ema_34': ema_34,  # 🔥 Intraday trend filter
                 'histogram_expanding': True,
                 'volume_confirmed': volume_ok,
                 'confidence_score': 0.60
@@ -2169,12 +2283,13 @@ class ScalpingStrategy(BaseStrategy):
         recent_macd = macd_series.tail(10)
         if len(recent_macd) >= 5:
             # Bullish Anti: MACD made new high, now pulling back toward signal but still positive
+            # 🔥 WITH EMA 34 TREND FILTER: Only trade bullish anti-pattern above EMA 34
             macd_recent_high = recent_macd.max()
             is_pullback_from_high = (macd_line < macd_recent_high * 0.9) and (macd_line > signal_line) and (macd_line > 0)
             signal_sloping_up = signal_slope > 0
             macd_approaching_signal = abs(macd_line - signal_line) < abs(macd_line_prev - signal_line_prev)
 
-            if is_pullback_from_high and signal_sloping_up and macd_approaching_signal:
+            if is_pullback_from_high and signal_sloping_up and macd_approaching_signal and current_price > ema_34:
                 signal = self.create_base_signal('BULL', epic, timeframe, latest)
                 signal.update({
                     'scalping_mode': 'linda_anti_pattern',
@@ -2185,17 +2300,19 @@ class ScalpingStrategy(BaseStrategy):
                     'macd_recent_high': macd_recent_high,
                     'pullback_pct': (macd_recent_high - macd_line) / macd_recent_high if macd_recent_high != 0 else 0,
                     'signal_slope': signal_slope,
+                    'ema_34': ema_34,  # 🔥 Intraday trend filter
                     'volume_confirmed': volume_ok,
                     'confidence_score': 0.70  # High confidence for Anti pattern
                 })
                 return signal
 
             # Bearish Anti: MACD made new low, now pulling back toward signal but still negative
+            # 🔥 WITH EMA 34 TREND FILTER: Only trade bearish anti-pattern below EMA 34
             macd_recent_low = recent_macd.min()
             is_pullback_from_low = (macd_line > macd_recent_low * 0.9) and (macd_line < signal_line) and (macd_line < 0)
             signal_sloping_down = signal_slope < 0
 
-            if is_pullback_from_low and signal_sloping_down and macd_approaching_signal:
+            if is_pullback_from_low and signal_sloping_down and macd_approaching_signal and current_price < ema_34:
                 signal = self.create_base_signal('BEAR', epic, timeframe, latest)
                 signal.update({
                     'scalping_mode': 'linda_anti_pattern',
@@ -2206,6 +2323,7 @@ class ScalpingStrategy(BaseStrategy):
                     'macd_recent_low': macd_recent_low,
                     'pullback_pct': (macd_line - macd_recent_low) / abs(macd_recent_low) if macd_recent_low != 0 else 0,
                     'signal_slope': signal_slope,
+                    'ema_34': ema_34,  # 🔥 Intraday trend filter
                     'volume_confirmed': volume_ok,
                     'confidence_score': 0.70
                 })
@@ -2218,17 +2336,25 @@ class ScalpingStrategy(BaseStrategy):
         df_enhanced = df.copy()
         
         # Add fast EMAs
-        for period in [self.config['fast'], self.config['slow']]:
+        for period in [self._fast_ema_period, self._slow_ema_period]:
             col_name = f'ema_{period}'
             if col_name not in df_enhanced.columns:
                 df_enhanced[col_name] = df_enhanced['close'].ewm(span=period).mean()
         
-        # Add filter EMA if specified
-        if self.config.get('filter'):
-            filter_col = f'ema_{self.config["filter"]}'
+        # Add filter EMA if specified (EMA 34 for intraday trend)
+        # Support both 'filter' (old modes) and 'filter_ema' (Linda Raschke)
+        filter_ema = self._filter_ema_period
+        if filter_ema:
+            filter_col = f'ema_{filter_ema}'
             if filter_col not in df_enhanced.columns:
-                df_enhanced[filter_col] = df_enhanced['close'].ewm(span=self.config['filter']).mean()
-        
+                df_enhanced[filter_col] = df_enhanced['close'].ewm(span=filter_ema).mean()
+
+        # 🔥 Add session EMA if specified (EMA 50 for session direction)
+        if self.config.get('session_ema'):
+            session_col = f'ema_{self.config["session_ema"]}'
+            if session_col not in df_enhanced.columns:
+                df_enhanced[session_col] = df_enhanced['close'].ewm(span=self.config['session_ema']).mean()
+
         # Add RSI indicators
         if 'rsi_2' not in df_enhanced.columns:
             df_enhanced = self._add_rsi(df_enhanced, 2)

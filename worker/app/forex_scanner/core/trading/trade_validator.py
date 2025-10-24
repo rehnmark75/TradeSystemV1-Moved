@@ -1035,6 +1035,18 @@ class TradeValidator:
                 self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: Invalid price values - price: {current_price}, ema200: {ema_200}")
                 return False, "EMA200 filter: Invalid price values - REJECTED"
 
+            # 🔥 SCALPING BYPASS: Scalping uses faster EMAs (34/50) instead of EMA 200
+            # EMA 200 (~16.5 hours on 5m) is too slow for 2-hour scalping trades
+            scalping_mode = signal.get('scalping_mode', '')
+            is_scalping = ('scalping' in strategy.lower() or
+                          scalping_mode in ['linda_raschke', 'ranging_momentum', 'linda_macd_zero_cross',
+                                           'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern',
+                                           'trending_adaptive', 'ultra_fast', 'dual_ma'])
+
+            if is_scalping:
+                self.logger.info(f"✅ SCALPING BYPASS: {epic} {signal_type} uses EMA 34/50, skipping EMA 200 filter")
+                return True, f"Scalping strategy uses EMA 34/50 instead of EMA 200"
+
             # STRATEGY-AWARE FILTERING: Some strategies exempt from EMA200 trend filter
             # - MACD: Can trade counter-trend (momentum reversals)
             # - ranging_market: Specifically designed for ranging/non-trending conditions

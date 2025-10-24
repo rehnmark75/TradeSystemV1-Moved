@@ -46,14 +46,15 @@ SCALPING_STRATEGY_CONFIG = {
         'macd_signal': 16,      # 16 SMA (NOT EMA!) - Smoothing
         'fast_ema': 5,          # EMA for fallback/standard mode
         'slow_ema': 13,         # EMA for fallback/standard mode
-        'filter_ema': None,     # No filter - adaptive regime detection
+        'filter_ema': 34,       # 🔥 EMA 34 intraday trend filter (~2.8 hours on 5m)
+        'session_ema': 50,      # 🔥 EMA 50 session direction filter (~4.2 hours on 5m)
         'timeframes': ['5m'],   # 5-minute optimal for Linda Raschke scalping
-        'target_pips': 8,       # Linda Raschke: Quick 8-12 pip targets
-        'stop_loss_pips': 6,    # Tight stops for scalping
+        'target_pips': 8,       # ✅ 8 points TP (in IG terms: 1 pt = $1 for majors, 1 pt = 100 yen for JPY)
+        'stop_loss_pips': 6,    # ✅ 6 points SL (in IG terms: 1 pt = $1 for majors, 1 pt = 100 yen for JPY)
         'max_spread_pips': 2.0, # Moderate spread tolerance
         'max_bars': 24,         # 2 hours timeout (24 bars * 5min)
         'time_exit_hours': 2.0, # Force exit after 2 hours if no direction
-        'breakeven_trigger': 4.0, # Move to BE at 4 pips (50% of target)
+        'breakeven_trigger': 4.0, # Move to BE at 4 points (50% of 8 point target)
         'description': 'Linda Raschke MACD 3-10-16 adaptive scalping with regime detection',
         'signal_types': ['macd_zero_cross', 'macd_signal_cross', 'macd_momentum', 'anti_pattern'],
         'best_for': ['adaptive_trending', 'momentum_continuation', 'pullback_entries'],
@@ -61,8 +62,7 @@ SCALPING_STRATEGY_CONFIG = {
         'best_trend_strength': 'any',  # Adaptive to all regimes
         'best_market_regime': 'adaptive',  # Detects trending/ranging dynamically
         'best_session': ['london', 'new_york', 'tokyo'],
-        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP',
-                           'CS.D.EURJPY.MINI.IP', 'CS.D.AUDJPY.MINI.IP'],
+        'preferred_pairs': ['CS.D.EURUSD.CEEM.IP', 'CS.D.USDJPY.MINI.IP'],  # EXCLUDED: GBPUSD, EURJPY, AUDJPY (wide broker minimums)
         'min_pip_volatility': 5.0,
         'max_pip_volatility': 80.0
     },

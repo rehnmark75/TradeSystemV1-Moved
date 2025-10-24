@@ -299,7 +299,19 @@ class SignalProcessor:
             else:
                 # Use standard threshold for non-MTF signals
                 effective_threshold = self.min_confidence
-            
+
+            # 🔥 SCALPING BYPASS: Use lower threshold for scalping strategies (45%)
+            strategy = signal.get('strategy', '')
+            scalping_mode = signal.get('scalping_mode', '')
+            is_scalping = ('scalping' in strategy.lower() or
+                          scalping_mode in ['linda_raschke', 'ranging_momentum', 'linda_macd_zero_cross',
+                                           'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern'])
+
+            if is_scalping:
+                scalping_threshold = getattr(config, 'SCALPING_MIN_CONFIDENCE', 0.45)
+                effective_threshold = scalping_threshold
+                self.logger.info(f"🔥 SCALPING: Using scalping threshold {scalping_threshold:.1%} instead of {self.min_confidence:.1%}")
+
             # Apply confidence filtering with appropriate threshold
             if confidence < effective_threshold:
                 if is_mtf_enhanced:

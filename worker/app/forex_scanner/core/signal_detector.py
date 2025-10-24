@@ -72,7 +72,8 @@ class SignalDetector:
         self.macd_strategy = None  # Will be created when needed with epic parameter
         self.macd_strategies_cache = {}  # Cache epic-specific strategies
         # self.combined_strategy = CombinedStrategy(data_fetcher=self.data_fetcher)  # Removed - strategy was disabled
-        self.scalping_strategy = ScalpingStrategy()
+        # 🔥 Initialize Linda Raschke MACD scalping strategy
+        self.scalping_strategy = ScalpingStrategy(scalping_mode='linda_raschke')
         self.large_candle_filter = LargeCandleFilter()
         self.logger.info("✅ Large candle filter initialized")
         

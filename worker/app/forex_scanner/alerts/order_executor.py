@@ -355,14 +355,22 @@ class OrderExecutor:
                     risk_reward=self.default_risk_reward,
                     alert_id=alert_id
                 )
-                
-                if result and result.get('status') != 'error':
-                    if attempt > 0:
+
+                # Check if order was successful or skipped (both are valid outcomes)
+                status = result.get('status') if result else None
+
+                if status in ['success', 'skipped', 'blocked']:
+                    # Success, duplicate position, or blacklisted - all valid non-error outcomes
+                    if attempt > 0 and status == 'success':
                         self.logger.info(f"✅ Order succeeded on retry attempt {attempt} for {external_epic}")
                     return result
+                elif status == 'error':
+                    # API-level error - retry
+                    error_msg = result.get('message', 'Unknown API error')
+                    raise requests.exceptions.RequestException(f"API Error: {error_msg}")
                 else:
-                    # Handle API-level errors
-                    error_msg = result.get('message', 'Unknown API error') if result else 'No response'
+                    # No result or unknown status
+                    error_msg = result.get('message', 'Unknown error') if result else 'No response'
                     raise requests.exceptions.RequestException(f"API Error: {error_msg}")
                     
             except (requests.exceptions.Timeout, 
@@ -525,7 +533,7 @@ class OrderExecutor:
                 return result
 
             elif response.status_code == 409:
-                # Position already open - not an error, just skip
+                # Position already open - not an error, just skip (no retry)
                 try:
                     detail = response.json().get("detail", {})
                     msg = detail.get("message", "Position already open")
@@ -534,7 +542,7 @@ class OrderExecutor:
                     msg = "Position already open"
                     reason = "duplicate_position"
 
-                self.logger.info(f"ℹ️ {external_epic}: {msg} (this is expected behavior)")
+                self.logger.info(f"ℹ️ {external_epic}: {msg}")
                 result = {
                     "status": "skipped",
                     "message": msg,
@@ -543,6 +551,7 @@ class OrderExecutor:
                     "response_time": response_time,
                     "reason": reason
                 }
+                # Don't raise exception - return immediately to prevent retries
                 return result
 
             elif response.status_code == 429:
@@ -602,16 +611,19 @@ class OrderExecutor:
                         error_desc = detail_obj.get("detail", str(error_detail))
 
                         # Check if this is actually a "position exists" error that was incorrectly returned as 500
-                        if "already open" in str(error_desc).lower() or "duplicate" in str(error_desc).lower():
-                            self.logger.warning(f"⚠️ Server returned 500 for duplicate position (should be 409): {error_desc}")
-                            self.logger.info(f"ℹ️ Treating as skipped order for {external_epic}")
+                        duplicate_indicators = ["already open", "duplicate", "position exists", "existing position"]
+                        error_text_lower = str(error_desc).lower()
+
+                        if any(indicator in error_text_lower for indicator in duplicate_indicators):
+                            self.logger.info(f"ℹ️ Position already open for {external_epic} (HTTP 500 converted to skip)")
+                            # Return immediately to prevent retries
                             return {
                                 "status": "skipped",
-                                "message": f"Position already open (server error 500 converted)",
+                                "message": f"Position already open",
                                 "alert_id": alert_id,
                                 "status_code": 500,
                                 "response_time": response_time,
-                                "reason": "duplicate_position_500"
+                                "reason": "duplicate_position"
                             }
                 except:
                     error_msg = f"Order failed: HTTP {response.status_code} - {response.text[:500]}"
