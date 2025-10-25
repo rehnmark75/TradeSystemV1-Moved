@@ -144,11 +144,12 @@ class MACDMultiTimeframeFilter:
                 # Backtest data fetcher
                 # Extract pair name from epic (e.g., CS.D.EURUSD.MINI.IP -> EURUSD)
                 pair = epic.split('.')[2] if '.' in epic else epic
+                # Get approximately 100 bars of H4 data = 400 hours
                 h4_data = self.data_fetcher.get_enhanced_data(
                     epic=epic,
                     pair=pair,
                     timeframe='4h',
-                    bars=100
+                    lookback_hours=400  # 100 bars * 4 hours
                 )
             else:
                 self.logger.error("Data fetcher has no compatible method")
@@ -235,11 +236,12 @@ class MACDMultiTimeframeFilter:
             elif hasattr(self.data_fetcher, 'get_enhanced_data'):
                 # Backtest data fetcher
                 pair = epic.split('.')[2] if '.' in epic else epic
+                # Get approximately 100 bars of H1 data = 100 hours
                 h1_data = self.data_fetcher.get_enhanced_data(
                     epic=epic,
                     pair=pair,
                     timeframe='1h',
-                    bars=100
+                    lookback_hours=100  # 100 bars * 1 hour
                 )
             else:
                 self.logger.error("Data fetcher has no compatible method")
