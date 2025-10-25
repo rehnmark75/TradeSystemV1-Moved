@@ -548,18 +548,54 @@ class BacktestOrderLogger:
         self.logger.info(f"   📈 Bull Signals: {self.bull_signals}")
         self.logger.info(f"   📉 Bear Signals: {self.bear_signals}")
 
-        # Calculate basic performance metrics
-        total_profit = sum(s.get('profit', 0) for s in self.all_signals)
-        total_loss = sum(s.get('loss', 0) for s in self.all_signals)
+        # Calculate basic performance metrics - FIXED: Calculate separately for winners/losers
+        winners = [s for s in self.all_signals if s.get('profit', 0) > 0 and s.get('loss', 0) == 0]
+        losers = [s for s in self.all_signals if s.get('loss', 0) > 0 and s.get('profit', 0) == 0]
+        breakevens = [s for s in self.all_signals if s.get('profit', 0) == 0 and s.get('loss', 0) == 0]
         validated_signals = sum(1 for s in self.all_signals if s.get('validation_passed', False))
 
         if self.all_signals:
-            avg_profit = total_profit / len(self.all_signals)
-            avg_loss = total_loss / len(self.all_signals)
             validation_rate = validated_signals / len(self.all_signals)
 
-            self.logger.info(f"   💰 Average Profit: {avg_profit:.1f} pips")
-            self.logger.info(f"   📉 Average Loss: {avg_loss:.1f} pips")
+            # Calculate average profit PER WINNER (not across all signals)
+            if winners:
+                total_profit_winners = sum(s.get('profit', 0) for s in winners)
+                avg_profit_per_winner = total_profit_winners / len(winners)
+                self.logger.info(f"   💰 Average Profit per Winner: {avg_profit_per_winner:.1f} pips")
+                self.logger.info(f"   ✅ Winners: {len(winners)}")
+            else:
+                self.logger.info(f"   💰 No winning trades")
+
+            # Calculate average loss PER LOSER (not across all signals)
+            if losers:
+                total_loss_losers = sum(s.get('loss', 0) for s in losers)
+                avg_loss_per_loser = total_loss_losers / len(losers)
+                self.logger.info(f"   📉 Average Loss per Loser: {avg_loss_per_loser:.1f} pips")
+                self.logger.info(f"   ❌ Losers: {len(losers)}")
+            else:
+                self.logger.info(f"   📉 No losing trades")
+
+            if breakevens:
+                self.logger.info(f"   ➖ Breakeven: {len(breakevens)}")
+
+            # Calculate win rate
+            total_closed = len(winners) + len(losers) + len(breakevens)
+            if total_closed > 0:
+                win_rate = len(winners) / total_closed
+                self.logger.info(f"   🎯 Win Rate: {win_rate:.1%}")
+
+            # Calculate profit factor
+            if losers and winners:
+                total_profit = sum(s.get('profit', 0) for s in winners)
+                total_loss = sum(s.get('loss', 0) for s in losers)
+                if total_loss > 0:
+                    profit_factor = total_profit / total_loss
+                    self.logger.info(f"   📊 Profit Factor: {profit_factor:.2f}")
+
+                # Expectancy (average profit per trade)
+                expectancy = (total_profit - total_loss) / total_closed
+                self.logger.info(f"   💵 Expectancy: {expectancy:.1f} pips per trade")
+
             self.logger.info(f"   🏆 Validation Rate: {validation_rate:.1%}")
             self.logger.info(f"   📊 Signal Breakdown:")
             self.logger.info(f"      ✅ Validated: {validated_signals} signals")

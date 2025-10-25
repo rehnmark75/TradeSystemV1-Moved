@@ -104,7 +104,8 @@
       "Bash(claude mcp get:*)",
       "Bash(npx -y @kimtaeyoon83/mcp-server-youtube-transcript)",
       "Bash(alembic revision:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(/tmp/run_sltp_tests.sh:*)"
     ],
     "deny": [],
     "ask": []

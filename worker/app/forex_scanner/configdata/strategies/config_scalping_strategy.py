@@ -16,8 +16,8 @@ Key Features:
 """
 
 # Strategy enable/disable
-SCALPING_STRATEGY_ENABLED = True    # 🔥 ENABLED: Linda Raschke MACD 3-10-16 adaptive scalping
-SCALPING_MODE = 'linda_raschke'     # Active scalping mode: Linda Raschke MACD 3-10-16
+SCALPING_STRATEGY_ENABLED = True    # 🔥 ENABLED: Bollinger Band bounce mean reversion scalping
+SCALPING_MODE = 'bb_bounce'         # Active scalping mode: Bollinger Band bounce (mean reversion)
 
 # Scalping Strategy Configurations
 SCALPING_STRATEGY_CONFIG = {
@@ -26,8 +26,8 @@ SCALPING_STRATEGY_CONFIG = {
         'slow_ema': 8,          # Quick confirmation
         'filter_ema': 21,       # Trend filter
         'timeframes': ['1m'],   # 1-minute scalping only
-        'target_pips': 3,       # Small profit targets
-        'stop_loss_pips': 2,    # Tight stops
+        'target_pips': 12,       # ✅ TIGHTER: 12 points TP
+        'stop_loss_pips': 8,    # ✅ TIGHTER: 8 points SL
         'max_spread_pips': 1.5, # Maximum allowed spread
         'description': 'Ultra-fast 1-minute scalping with 3/8 EMA crossover',
         'best_for': ['high_liquidity', 'tight_spreads', 'trending_intraday'],
@@ -39,26 +39,31 @@ SCALPING_STRATEGY_CONFIG = {
         'min_pip_volatility': 10.0,
         'max_pip_volatility': 40.0
     },
-    'linda_raschke': {
-        # 🔥 LINDA RASCHKE MACD 3-10-16 OSCILLATOR
-        'macd_fast': 3,         # 3 SMA (NOT EMA!) - Ultra responsive
-        'macd_slow': 10,        # 10 SMA (NOT EMA!) - Quick confirmation
-        'macd_signal': 16,      # 16 SMA (NOT EMA!) - Smoothing
-        'fast_ema': 5,          # EMA for fallback/standard mode
-        'slow_ema': 13,         # EMA for fallback/standard mode
-        'filter_ema': 34,       # 🔥 EMA 34 intraday trend filter (~2.8 hours on 5m)
-        'session_ema': 50,      # 🔥 EMA 50 session direction filter (~4.2 hours on 5m)
-        'timeframes': ['5m'],   # 5-minute optimal for Linda Raschke scalping
-        'target_pips': 8,       # ✅ 8 points TP (in IG terms: 1 pt = $1 for majors, 1 pt = 100 yen for JPY)
-        'stop_loss_pips': 6,    # ✅ 6 points SL (in IG terms: 1 pt = $1 for majors, 1 pt = 100 yen for JPY)
+    'bb_bounce': {
+        # 🔥 BOLLINGER BAND BOUNCE - Mean Reversion Scalping
+        'bb_period': 20,        # BB period (20 is standard)
+        'bb_std': 2.0,          # BB standard deviations (2.0 is standard)
+        'rsi_period': 14,       # RSI period for confirmation
+        'rsi_oversold': 45,     # ✅ WORKING CONFIG: RSI < 45 (was 30 - too strict!)
+        'rsi_overbought': 55,   # ✅ WORKING CONFIG: RSI > 55 (was 70 - too strict!)
+        'ema_trend': 50,        # EMA 50 for overall trend filter
+        'timeframes': ['5m'],   # 5-minute for scalping
+        'target_pips': 10,       # ✅ OPTIMIZED: 10 points TP (90% WR, 48x PF, 7.6 pips expectancy!)
+        'stop_loss_pips': 8,    # ✅ OPTIMIZED: 8 points SL (gives strategy breathing room)
         'max_spread_pips': 2.0, # Moderate spread tolerance
-        'max_bars': 24,         # 2 hours timeout (24 bars * 5min)
-        'time_exit_hours': 2.0, # Force exit after 2 hours if no direction
-        'breakeven_trigger': 4.0, # Move to BE at 4 points (50% of 8 point target)
-        'description': 'Linda Raschke MACD 3-10-16 adaptive scalping with regime detection',
-        'signal_types': ['macd_zero_cross', 'macd_signal_cross', 'macd_momentum', 'anti_pattern'],
-        'best_for': ['adaptive_trending', 'momentum_continuation', 'pullback_entries'],
-        'best_volatility_regime': 'medium',
+        'max_bars': 36,         # 3 hours timeout (36 bars * 5min)
+        'time_exit_hours': None, # No time exit - let it hit SL/TP
+        'breakeven_trigger': 5.0, # Move to BE at 5 points (50% of 10 point target)
+        # FILTERS:
+        'min_bb_touch': 0.85,   # ✅ WORKING CONFIG: Within 15% of BB (was 5% - too strict!)
+        'require_rsi_confirm': True,  # ✅ ENABLED: Require RSI confirmation
+        'use_ema_trend_filter': False, # Disable trend filter (all sessions)
+        'session_filter_enabled': False,  # All sessions allowed
+        'preferred_sessions': ['london', 'new_york', 'asian', 'overlap'],
+        'description': 'Bollinger Band bounce mean reversion scalping with RSI confirmation',
+        'signal_types': ['bb_lower_bounce', 'bb_upper_bounce'],
+        'best_for': ['ranging_markets', 'mean_reversion', 'oversold_bounces', 'overbought_reversals'],
+        'best_volatility_regime': 'low_to_medium',
         'best_trend_strength': 'any',  # Adaptive to all regimes
         'best_market_regime': 'adaptive',  # Detects trending/ranging dynamically
         'best_session': ['london', 'new_york', 'tokyo'],
@@ -71,8 +76,8 @@ SCALPING_STRATEGY_CONFIG = {
         'slow_ema': 13,         # Fibonacci number
         'filter_ema': 50,       # Medium-term trend filter
         'timeframes': ['1m', '5m'],  # Multi-timeframe
-        'target_pips': 5,       # Reasonable profit targets
-        'stop_loss_pips': 3,    # Conservative stops
+        'target_pips': 12,       # ✅ TIGHTER: 12 points TP
+        'stop_loss_pips': 8,    # ✅ TIGHTER: 8 points SL
         'max_spread_pips': 2.0, # Moderate spread tolerance
         'description': 'Aggressive scalping with 5/13 EMA crossover',
         'best_for': ['breakouts', 'news_events', 'volatility_spikes'],
@@ -89,8 +94,8 @@ SCALPING_STRATEGY_CONFIG = {
         'slow_ema': 20,         # Classic combination
         'filter_ema': 50,       # Trend filter
         'timeframes': ['5m'],   # 5-minute focus
-        'target_pips': 8,       # Larger profit targets
-        'stop_loss_pips': 5,    # Wider stops
+        'target_pips': 12,       # ✅ TIGHTER: 12 points TP
+        'stop_loss_pips': 8,    # ✅ TIGHTER: 8 points SL
         'max_spread_pips': 2.5, # More spread tolerance
         'description': 'Conservative scalping with 8/20 EMA crossover',
         'best_for': ['stable_trends', 'lower_volatility', 'risk_averse'],
@@ -107,8 +112,8 @@ SCALPING_STRATEGY_CONFIG = {
         'slow_ema': 14,         # Research-based optimal
         'filter_ema': None,     # No filter for simplicity
         'timeframes': ['1m', '5m'],  # Multi-timeframe
-        'target_pips': 5,       # Standard profit targets
-        'stop_loss_pips': 3,    # Standard stops
+        'target_pips': 12,       # ✅ TIGHTER: 12 points TP
+        'stop_loss_pips': 8,    # ✅ TIGHTER: 8 points SL
         'max_spread_pips': 2.0, # Standard spread tolerance
         'description': 'Simple dual MA crossover scalping (7/14)',
         'best_for': ['simple_execution', 'clear_trends', 'automation'],
@@ -121,8 +126,8 @@ SCALPING_STRATEGY_CONFIG = {
         'slow_ema': 9,          # Quick confirmation
         'filter_ema': 20,       # Short-term trend filter
         'timeframes': ['1m'],   # 1-minute for news events
-        'target_pips': 8,       # Larger targets for volatility
-        'stop_loss_pips': 4,    # Wider stops for volatility
+        'target_pips': 12,       # ✅ TIGHTER: 12 points TP
+        'stop_loss_pips': 8,    # ✅ TIGHTER: 8 points SL
         'max_spread_pips': 3.0, # Higher spread tolerance during news
         'description': 'News event scalping with volatility expansion',
         'best_for': ['news_events', 'high_volatility', 'breakouts'],
@@ -133,8 +138,8 @@ SCALPING_STRATEGY_CONFIG = {
         'slow_ema': 26,         # Wider separation
         'filter_ema': 100,      # Long-term trend filter
         'timeframes': ['5m', '15m'],  # Longer timeframes
-        'target_pips': 6,       # Moderate targets
-        'stop_loss_pips': 4,    # Moderate stops
+        'target_pips': 12,       # ✅ TIGHTER: 12 points TP
+        'stop_loss_pips': 8,    # ✅ TIGHTER: 8 points SL
         'max_spread_pips': 2.0, # Standard spread tolerance
         'description': 'Range-bound market scalping with wider EMAs',
         'best_for': ['ranging_markets', 'support_resistance', 'consolidation']
@@ -158,9 +163,9 @@ SCALPING_RISK_MANAGEMENT = {
     'position_size_percent': 0.5,      # Smaller positions for scalping (0.5% of account)
     'enable_quick_exit': True,          # Enable rapid exit signals
     'max_position_hold_minutes': 15,    # Maximum position hold time
-    'break_even_after_pips': 3,         # Move stop to breakeven after 3 pips profit
-    'trailing_stop_enabled': True,      # Enable trailing stops
-    'trailing_stop_distance': 2,        # 2 pip trailing stop distance
+    'break_even_after_pips': 5,         # Move stop to breakeven after 5 pips profit (50% of 10 pip target)
+    'trailing_stop_enabled': False,     # ❌ DISABLED - 2 pip trailing was stopping winners at 1.6 avg
+    'trailing_stop_distance': 2,        # 2 pip trailing stop distance (DISABLED)
 
     # Session-based limits
     'session_limits': {

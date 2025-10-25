@@ -63,15 +63,17 @@ class ScalpingStrategy(BaseStrategy):
         self.max_spread_pips = 2.0      # Maximum allowed spread
         self.quick_exit_enabled = True  # Enable rapid exit signals
 
-        # 🎯 Swing Proximity Validator - STRICT MODE for scalping
+        # 🎯 Swing Proximity Validator - DISABLED for scalping (scalping trades NEAR S/R levels)
+        # BACKTEST SHOWED: 49/151 (32%) signals rejected, causing poor performance
+        # Scalping strategy WANTS to trade near S/R (bounces/breakouts), not avoid them
         swing_proximity_config = {
-            'enabled': True,
-            'strict_mode': True,  # REJECT signals that are too close (no penalties, just reject)
-            'min_distance_pips': 10,  # Slightly higher than default (8) for scalping safety
-            'lookback_swings': 5,  # Last 5 swing points
-            'resistance_buffer': 1.2,  # 20% extra caution for BUYs near resistance (requires 12 pips)
-            'support_buffer': 1.2,  # 20% extra caution for SELLs near support (requires 12 pips)
-            'equal_level_multiplier': 2.0,  # 2x distance for Equal Highs/Lows (20 pips)
+            'enabled': False,  # ❌ DISABLED - scalping needs to trade near levels
+            'strict_mode': False,
+            'min_distance_pips': 10,
+            'lookback_swings': 5,
+            'resistance_buffer': 1.2,
+            'support_buffer': 1.2,
+            'equal_level_multiplier': 2.0,
         }
         self.swing_validator = SwingProximityValidator(
             config=swing_proximity_config,
@@ -300,6 +302,92 @@ class ScalpingStrategy(BaseStrategy):
             self.logger.debug(f"Linda MACD calculation failed: {e}")
             return None
 
+    def _check_15m_trend_alignment(self, epic: str, current_price: float) -> Optional[Dict]:
+        """
+        🎯 MULTI-TIMEFRAME FILTER: Check 15m trend before entering 5m scalp
+
+        Returns trend direction and strength for filtering 5m entries
+        Only enter 5m scalps in direction of 15m trend (proven edge)
+
+        Returns:
+            Dict with 'direction' (BULLISH/BEARISH/NEUTRAL) and 'strength' (0.0-1.0)
+            None if data unavailable
+        """
+        try:
+            # Check if we have data_fetcher for MTF analysis
+            if not hasattr(self, 'data_fetcher') or not self.data_fetcher:
+                self.logger.debug(f"⚠️ No data_fetcher available for MTF check, allowing signal")
+                return {'direction': 'NEUTRAL', 'strength': 0.5}  # Don't filter if no data
+
+            # Fetch 15m data (try multiple methods for compatibility)
+            df_15m = None
+            try:
+                # Try backtest-specific method first
+                if hasattr(self.data_fetcher, 'get_enhanced_data'):
+                    df_15m = self.data_fetcher.get_enhanced_data(epic, epic.replace('CS.D.', '').replace('.MINI.IP', ''), '15m')
+                # Fallback to standard method
+                elif hasattr(self.data_fetcher, 'get_historical_data'):
+                    df_15m = self.data_fetcher.get_historical_data(epic, '15m', lookback_bars=50)
+            except Exception as e:
+                self.logger.debug(f"⚠️ Could not fetch 15m data for {epic}: {e}")
+
+            if df_15m is None or len(df_15m) < 20:
+                self.logger.debug(f"⚠️ Insufficient 15m data for {epic}, allowing signal")
+                return {'direction': 'NEUTRAL', 'strength': 0.5}
+
+            # Calculate 15m MACD 3-10-16 (same as 5m for consistency)
+            linda_macd_15m = self._calculate_linda_macd(df_15m)
+            if not linda_macd_15m:
+                self.logger.debug(f"⚠️ Could not calculate 15m MACD for {epic}")
+                return {'direction': 'NEUTRAL', 'strength': 0.5}
+
+            # Get 15m EMA 34 for trend
+            latest_15m = df_15m.iloc[-1]
+            ema_34_15m = latest_15m.get('ema_34', None)
+            if ema_34_15m is None:
+                # Fallback: calculate EMA 34
+                df_15m['ema_34'] = df_15m['close'].ewm(span=34, adjust=False).mean()
+                ema_34_15m = df_15m['ema_34'].iloc[-1]
+
+            # Determine 15m trend
+            macd_line_15m = linda_macd_15m['macd_line']
+            histogram_15m = linda_macd_15m['histogram']
+            price_15m = latest_15m['close']
+
+            # Bullish if: MACD > 0 AND price > EMA 34 AND histogram > 0
+            is_bullish = (macd_line_15m > 0) and (price_15m > ema_34_15m) and (histogram_15m > 0)
+            # Bearish if: MACD < 0 AND price < EMA 34 AND histogram < 0
+            is_bearish = (macd_line_15m < 0) and (price_15m < ema_34_15m) and (histogram_15m < 0)
+
+            # Calculate trend strength (0.0-1.0)
+            histogram_strength = min(abs(histogram_15m) / 0.0005, 1.0)  # Normalize
+            price_distance_from_ema = abs(price_15m - ema_34_15m) / ema_34_15m
+            trend_strength = (histogram_strength + min(price_distance_from_ema * 100, 1.0)) / 2.0
+
+            if is_bullish:
+                direction = 'BULLISH'
+                self.logger.debug(f"✅ {epic} 15m BULLISH - MACD: {macd_line_15m:.6f}, Hist: {histogram_15m:.6f}, Price vs EMA: {price_distance_from_ema*10000:.1f}pips")
+            elif is_bearish:
+                direction = 'BEARISH'
+                self.logger.debug(f"✅ {epic} 15m BEARISH - MACD: {macd_line_15m:.6f}, Hist: {histogram_15m:.6f}, Price vs EMA: {price_distance_from_ema*10000:.1f}pips")
+            else:
+                direction = 'NEUTRAL'
+                self.logger.debug(f"⚠️ {epic} 15m NEUTRAL - skipping 5m signal")
+                return None  # Reject signal if 15m is not clear trend
+
+            return {
+                'direction': direction,
+                'strength': trend_strength,
+                'macd_line_15m': macd_line_15m,
+                'histogram_15m': histogram_15m,
+                'ema_34_15m': ema_34_15m,
+                'price_15m': price_15m
+            }
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ MTF check failed for {epic}: {e}, allowing signal")
+            return {'direction': 'NEUTRAL', 'strength': 0.5}  # Don't filter on error
+
     def _classify_regime(self, adx: float, volatility_ratio: float, bb_width: float, bb_avg: float) -> Dict:
         """
         Classify market regime based on multiple factors
@@ -448,19 +536,26 @@ class ScalpingStrategy(BaseStrategy):
         fast_ema_prev = previous[f'ema_{self._fast_ema_period}']
         slow_ema_prev = previous[f'ema_{self._slow_ema_period}']
         
-        # 🔥 ADAPTIVE: Use regime-appropriate detection method
-        recommended_indicators = regime_info['recommended_indicators']
-
-        if 'macd' in recommended_indicators:
-            # 🔥 LINDA RASCHKE: Trending market uses MACD 3-10-16 signals (NOT EMA crossovers!)
-            # This generates WAY more signals: zero crosses, signal crosses, momentum, Anti pattern
+        # 🔥 MODE-SPECIFIC: Use configured scalping mode
+        if self.scalping_mode == 'bb_bounce':
+            # 🔥 BB BOUNCE MODE: Always use RSI + BB mean reversion (ignore regime)
+            signal = self._detect_bb_bounce_signals(latest, previous, df_adjusted, epic, timeframe)
+        elif self.scalping_mode == 'linda_raschke':
+            # 🔥 LINDA RASCHKE: Use MACD 3-10-16 signals
             signal = self._detect_linda_macd_signals(latest, previous, df_adjusted, epic, timeframe)
-        elif 'rsi' in recommended_indicators and 'bb' in recommended_indicators:
-            # Ranging market: Use RSI + BB mean reversion strategy
-            signal = self._detect_ranging_signal(latest, previous, df_adjusted, epic, timeframe)
         else:
-            # Balanced/weak trending: Use standard EMA crossover
-            signal = self._detect_standard_scalping_signal(latest, previous, epic, timeframe)
+            # 🔥 ADAPTIVE: Use regime-appropriate detection method
+            recommended_indicators = regime_info['recommended_indicators']
+
+            if 'macd' in recommended_indicators:
+                # Trending market uses MACD 3-10-16 signals
+                signal = self._detect_linda_macd_signals(latest, previous, df_adjusted, epic, timeframe)
+            elif 'rsi' in recommended_indicators and 'bb' in recommended_indicators:
+                # Ranging market: Use RSI + BB mean reversion strategy
+                signal = self._detect_ranging_signal(latest, previous, df_adjusted, epic, timeframe)
+            else:
+                # Balanced/weak trending: Use standard EMA crossover
+                signal = self._detect_standard_scalping_signal(latest, previous, epic, timeframe)
 
         # Apply regime-based confidence adjustment
         if signal:
@@ -1274,7 +1369,8 @@ class ScalpingStrategy(BaseStrategy):
                 'signal_hash': self._generate_signal_hash(epic, signal_type, timeframe, current_price),
                 'market_timestamp': datetime.now(),
                 'data_source': 'live_scanner',
-                'cooldown_key': f"{epic}_{signal_type}_{timeframe}_{datetime.now().strftime('%Y%m%d%H%M')}"  # More granular for scalping
+                'cooldown_key': f"{epic}_{signal_type}_{timeframe}_{datetime.now().strftime('%Y%m%d%H%M')}",  # More granular for scalping
+                'skip_sr_validation': True  # 🎯 SCALPING: Skip S/R validation (we WANT to trade near levels)
             })
             
             # ========== MARKET CONTEXT ==========
@@ -1385,8 +1481,11 @@ class ScalpingStrategy(BaseStrategy):
 
     def _get_scalping_stop_distance(self, mode: str) -> float:
         """Get stop loss distance in pips for scalping mode"""
+        # 🔥 BB BOUNCE: Use config value for bb_bounce mode
+        if mode == 'bb_bounce':
+            return self.config.get('stop_loss_pips', 8)
         # 🔥 LINDA RASCHKE: Use config value for linda_raschke mode
-        if mode == 'linda_raschke':
+        elif mode == 'linda_raschke':
             return self.config.get('stop_loss_pips', 6)
 
         distances = {
@@ -1399,8 +1498,11 @@ class ScalpingStrategy(BaseStrategy):
 
     def _get_scalping_target_distance(self, mode: str) -> float:
         """Get take profit distance in pips for scalping mode"""
+        # 🔥 BB BOUNCE: Use config value for bb_bounce mode
+        if mode == 'bb_bounce':
+            return self.config.get('target_pips', 12)
         # 🔥 LINDA RASCHKE: Use config value for linda_raschke mode
-        if mode == 'linda_raschke':
+        elif mode == 'linda_raschke':
             return self.config.get('target_pips', 8)
 
         distances = {
@@ -1932,6 +2034,119 @@ class ScalpingStrategy(BaseStrategy):
 
         return None
 
+    def _detect_bb_bounce_signals(
+        self,
+        latest: pd.Series,
+        previous: pd.Series,
+        df: pd.DataFrame,
+        epic: str,
+        timeframe: str
+    ) -> Optional[Dict]:
+        """
+        🔥 BB BOUNCE MODE: Mean reversion scalping using Bollinger Band bounces + RSI
+
+        Entry Logic:
+        - BUY when price touches lower BB AND RSI < 30 (oversold)
+        - SELL when price touches upper BB AND RSI > 70 (overbought)
+
+        Target: 12 pips, Stop: 8 pips (1.5:1 R:R)
+        All sessions allowed (no trend filter)
+        """
+        current_price = latest['close']
+
+        # Get RSI for oversold/overbought confirmation
+        rsi_14 = latest.get('rsi_14', 50)
+        rsi_oversold = self.config.get('rsi_oversold', 30)
+        rsi_overbought = self.config.get('rsi_overbought', 70)
+
+        # Get Bollinger Bands
+        bb_upper = latest.get('bb_upper', current_price * 1.02)
+        bb_lower = latest.get('bb_lower', current_price * 0.98)
+        bb_middle = latest.get('bb_middle', current_price)
+
+        # Calculate BB position (0 = lower band, 1 = upper band)
+        bb_range = bb_upper - bb_lower
+        bb_position = (current_price - bb_lower) / bb_range if bb_range > 0 else 0.5
+
+        # Minimum BB touch threshold (must be within 5% of band)
+        min_bb_touch = self.config.get('min_bb_touch', 0.95)
+
+        # BUY: Price near lower BB + RSI below midpoint (mean reversion opportunity)
+        # RELAXED: bb_position < 0.15 (within 15% of lower BB) and RSI < 45
+        if bb_position < (1 - min_bb_touch) and rsi_14 < rsi_oversold:
+            signal = self.create_base_signal('BULL', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'bb_bounce',
+                'entry_reason': 'bb_lower_bounce_rsi_oversold',
+                'rsi_14': rsi_14,
+                'bb_position': bb_position,
+                'bb_upper': bb_upper,
+                'bb_lower': bb_lower,
+                'bb_middle': bb_middle,
+                'confidence_score': self._calculate_bb_bounce_confidence(
+                    rsi_14, bb_position, 'BULL', rsi_oversold, rsi_overbought
+                )
+            })
+            return signal
+
+        # SELL: Price near upper BB + RSI overbought
+        elif bb_position > min_bb_touch and rsi_14 > rsi_overbought:
+            signal = self.create_base_signal('BEAR', epic, timeframe, latest)
+            signal.update({
+                'scalping_mode': 'bb_bounce',
+                'entry_reason': 'bb_upper_bounce_rsi_overbought',
+                'rsi_14': rsi_14,
+                'bb_position': bb_position,
+                'bb_upper': bb_upper,
+                'bb_lower': bb_lower,
+                'bb_middle': bb_middle,
+                'confidence_score': self._calculate_bb_bounce_confidence(
+                    rsi_14, bb_position, 'BEAR', rsi_oversold, rsi_overbought
+                )
+            })
+            return signal
+
+        return None
+
+    def _calculate_bb_bounce_confidence(
+        self,
+        rsi_14: float,
+        bb_position: float,
+        signal_type: str,
+        rsi_oversold: float,
+        rsi_overbought: float
+    ) -> float:
+        """Calculate confidence for BB bounce signals"""
+        confidence = 0.5
+
+        if signal_type == 'BULL':
+            # More oversold = higher confidence
+            if rsi_14 < 25:
+                confidence += 0.20
+            elif rsi_14 < 30:
+                confidence += 0.15
+
+            # Closer to BB = higher confidence
+            if bb_position < 0.05:
+                confidence += 0.15
+            elif bb_position < 0.10:
+                confidence += 0.10
+
+        else:  # BEAR
+            # More overbought = higher confidence
+            if rsi_14 > 75:
+                confidence += 0.20
+            elif rsi_14 > 70:
+                confidence += 0.15
+
+            # Closer to BB = higher confidence
+            if bb_position > 0.95:
+                confidence += 0.15
+            elif bb_position > 0.90:
+                confidence += 0.10
+
+        return min(confidence, 1.0)
+
     def _detect_ranging_signal(
         self,
         latest: pd.Series,
@@ -2160,9 +2375,65 @@ class ScalpingStrategy(BaseStrategy):
         volume_avg = latest.get('volume_avg_10', 1.0)
         volume_ok = volume > (volume_avg * 1.2) if volume_avg > 0 else True
 
+        # 🎯 MULTI-TIMEFRAME FILTER: DISABLED FOR BASELINE TESTING
+        # Only enter 5m scalps in direction of 15m trend (proven edge)
+        # mtf_trend = self._check_15m_trend_alignment(epic, current_price)
+        # if not mtf_trend:
+        #     self.logger.debug(f"⚠️ {epic} MTF trend check failed, skipping 5m signal")
+        #     return None
+
+        # mtf_bullish = mtf_trend['direction'] == 'BULLISH'
+        # mtf_bearish = mtf_trend['direction'] == 'BEARISH'
+        # mtf_strength = mtf_trend.get('strength', 0.5)
+
+        # Baseline: Allow all signals without MTF filter
+        mtf_bullish = True
+        mtf_bearish = True
+        mtf_strength = 0.5
+
+        # ✅ OPTION 3 FILTERS: Improve entry quality
+        # Filter 1: ADX > 20 (trending markets only)
+        min_adx = self.config.get('min_adx', 0)
+        if min_adx > 0:
+            adx_14 = latest.get('adx_14', 0)
+            if adx_14 < min_adx:
+                self.logger.debug(f"⚠️ {epic} ADX={adx_14:.1f} < {min_adx} (ranging market), skipping signal")
+                return None
+
+        # Filter 2: MACD Histogram threshold (strong momentum only)
+        min_histogram = self.config.get('min_histogram_threshold', 0)
+        if min_histogram > 0:
+            if abs(histogram) < min_histogram:
+                self.logger.debug(f"⚠️ {epic} Histogram={histogram:.2f} < {min_histogram} (weak momentum), skipping signal")
+                return None
+
+        # Filter 3: Session filter (London/NY only)
+        session_filter_enabled = self.config.get('session_filter_enabled', False)
+        if session_filter_enabled:
+            from datetime import datetime
+            import pytz
+            now = datetime.now(pytz.UTC)
+            current_hour = now.hour
+
+            # London: 8-17 UTC, NY: 13-22 UTC, Overlap: 13-17 UTC
+            preferred_sessions = self.config.get('preferred_sessions', [])
+            in_session = False
+
+            if 'london' in preferred_sessions and 8 <= current_hour <= 17:
+                in_session = True
+            if 'new_york' in preferred_sessions and 13 <= current_hour <= 22:
+                in_session = True
+            if 'overlap' in preferred_sessions and 13 <= current_hour <= 17:
+                in_session = True
+
+            if not in_session:
+                self.logger.debug(f"⚠️ {epic} Outside preferred sessions (hour={current_hour} UTC), skipping signal")
+                return None
+
         # Signal Type 1: MACD ZERO CROSS (Strong trend initiation)
-        macd_zero_cross_bull = (macd_line_prev <= 0) and (macd_line > 0) and (current_price > ema_34)
-        macd_zero_cross_bear = (macd_line_prev >= 0) and (macd_line < 0) and (current_price < ema_34)
+        # 🎯 WITH MTF FILTER: Only if 15m trend agrees
+        macd_zero_cross_bull = (macd_line_prev <= 0) and (macd_line > 0) and (current_price > ema_34) and mtf_bullish
+        macd_zero_cross_bear = (macd_line_prev >= 0) and (macd_line < 0) and (current_price < ema_34) and mtf_bearish
 
         if macd_zero_cross_bull:
             signal = self.create_base_signal('BULL', epic, timeframe, latest)
@@ -2197,9 +2468,9 @@ class ScalpingStrategy(BaseStrategy):
             return signal
 
         # Signal Type 2: MACD SIGNAL LINE CROSS (Standard Linda Raschke)
-        # 🔥 WITH EMA 34 TREND FILTER: Only trade bullish signals above EMA 34
-        macd_signal_cross_bull = (macd_line_prev <= signal_line_prev) and (macd_line > signal_line) and (current_price > ema_34)
-        macd_signal_cross_bear = (macd_line_prev >= signal_line_prev) and (macd_line < signal_line) and (current_price < ema_34)
+        # 🎯 WITH EMA 34 + MTF FILTER: Only trade with both 5m EMA and 15m trend agreement
+        macd_signal_cross_bull = (macd_line_prev <= signal_line_prev) and (macd_line > signal_line) and (current_price > ema_34) and mtf_bullish
+        macd_signal_cross_bear = (macd_line_prev >= signal_line_prev) and (macd_line < signal_line) and (current_price < ema_34) and mtf_bearish
 
         if macd_signal_cross_bull and histogram > 0:
             signal = self.create_base_signal('BULL', epic, timeframe, latest)
@@ -2234,11 +2505,11 @@ class ScalpingStrategy(BaseStrategy):
             return signal
 
         # Signal Type 3: MACD MOMENTUM CONTINUATION (Histogram expanding)
-        # 🔥 WITH EMA 34 TREND FILTER: Only trade in direction of intraday trend
+        # 🎯 WITH EMA 34 + MTF FILTER: Strong momentum with trend alignment
         histogram_expanding = abs(histogram) > abs(histogram_prev)
         histogram_strong = abs(histogram) > 0.0001  # Threshold for meaningful histogram
 
-        if histogram > 0 and histogram_expanding and histogram_strong and macd_slope > 0 and current_price > ema_34:
+        if histogram > 0 and histogram_expanding and histogram_strong and macd_slope > 0 and current_price > ema_34 and mtf_bullish:
             # Bullish momentum continuation
             signal = self.create_base_signal('BULL', epic, timeframe, latest)
             signal.update({
@@ -2256,7 +2527,7 @@ class ScalpingStrategy(BaseStrategy):
             })
             return signal
 
-        if histogram < 0 and histogram_expanding and histogram_strong and macd_slope < 0 and current_price < ema_34:
+        if histogram < 0 and histogram_expanding and histogram_strong and macd_slope < 0 and current_price < ema_34 and mtf_bearish:
             # Bearish momentum continuation
             signal = self.create_base_signal('BEAR', epic, timeframe, latest)
             signal.update({

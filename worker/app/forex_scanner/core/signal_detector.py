@@ -72,8 +72,19 @@ class SignalDetector:
         self.macd_strategy = None  # Will be created when needed with epic parameter
         self.macd_strategies_cache = {}  # Cache epic-specific strategies
         # self.combined_strategy = CombinedStrategy(data_fetcher=self.data_fetcher)  # Removed - strategy was disabled
-        # 🔥 Initialize Linda Raschke MACD scalping strategy
-        self.scalping_strategy = ScalpingStrategy(scalping_mode='linda_raschke')
+        # 🔥 Initialize Scalping strategy with mode from config
+        try:
+            from configdata.strategies.config_scalping_strategy import SCALPING_MODE
+            scalping_mode = SCALPING_MODE
+        except ImportError:
+            try:
+                from forex_scanner.configdata.strategies.config_scalping_strategy import SCALPING_MODE
+                scalping_mode = SCALPING_MODE
+            except ImportError:
+                scalping_mode = 'linda_raschke'  # Fallback
+
+        self.scalping_strategy = ScalpingStrategy(scalping_mode=scalping_mode)
+        self.logger.info(f"✅ Scalping strategy initialized with mode: {scalping_mode}")
         self.large_candle_filter = LargeCandleFilter()
         self.logger.info("✅ Large candle filter initialized")
         

@@ -47,6 +47,7 @@ class TrailingStopSimulator:
                  trailing_ratio: float = None,
                  max_bars: int = 96,
                  time_exit_hours: float = None,  # 🔥 NEW: Time-based exit for scalping
+                 use_fixed_sl_tp: bool = False,  # 🎯 NEW: Use FIXED SL/TP only (no trailing, for scalping)
                  use_atr: bool = False,
                  atr_multiplier: float = 2.0,
                  target_atr_multiplier: float = 3.0,
@@ -138,6 +139,7 @@ class TrailingStopSimulator:
         self.initial_stop_pips = initial_stop_pips
         self.max_bars = max_bars
         self.time_exit_hours = time_exit_hours  # 🔥 NEW: Time-based exit (None = disabled)
+        self.use_fixed_sl_tp = use_fixed_sl_tp  # 🎯 NEW: Fixed SL/TP mode (no trailing)
         self.use_atr = use_atr
         self.atr_multiplier = atr_multiplier
         self.target_atr_multiplier = target_atr_multiplier
@@ -423,12 +425,17 @@ class TrailingStopSimulator:
                         self.logger.debug(f"⏰ Closing with profit: {time_exit_pnl:.1f} pips")
                         break
                     elif time_exit_pnl < -2.0:
-                        # Small loss, accept it
+                        # Small loss, accept it BUT cap at configured stop loss
                         trade_closed = True
-                        exit_pnl = time_exit_pnl
+                        # 🛑 CRITICAL FIX: Cap time exit losses at configured stop loss
+                        capped_loss = min(abs(time_exit_pnl), current_stop_pips)
+                        exit_pnl = -capped_loss
                         exit_reason = "TIME_EXIT_LOSS"
                         exit_bar = bar_idx
-                        self.logger.debug(f"⏰ Closing with loss: {time_exit_pnl:.1f} pips")
+                        if abs(time_exit_pnl) > current_stop_pips:
+                            self.logger.debug(f"⏰ Closing with CAPPED loss: Market={time_exit_pnl:.1f} pips, capped at SL={current_stop_pips:.1f} pips")
+                        else:
+                            self.logger.debug(f"⏰ Closing with loss: {time_exit_pnl:.1f} pips")
                         break
 
             high_price = bar['high']
@@ -447,21 +454,23 @@ class TrailingStopSimulator:
                 if current_profit_pips > best_profit_pips:
                     best_profit_pips = current_profit_pips
 
-                    # Apply Progressive 3-Stage trailing stop logic
-                    current_stop_pips, stage_info = self._update_progressive_trailing_stop(
-                        best_profit_pips,
-                        breakeven_triggered,
-                        stage1_triggered,
-                        stage2_triggered,
-                        stage3_triggered
-                    )
+                    # 🎯 FIXED SL/TP MODE: Skip trailing for scalping (keep original SL/TP)
+                    if not self.use_fixed_sl_tp:
+                        # Apply Progressive 3-Stage trailing stop logic
+                        current_stop_pips, stage_info = self._update_progressive_trailing_stop(
+                            best_profit_pips,
+                            breakeven_triggered,
+                            stage1_triggered,
+                            stage2_triggered,
+                            stage3_triggered
+                        )
 
-                    # Update stage flags
-                    breakeven_triggered = stage_info['breakeven_triggered']
-                    stage1_triggered = stage_info['stage1_triggered']
-                    stage2_triggered = stage_info['stage2_triggered']
-                    stage3_triggered = stage_info['stage3_triggered']
-                    stage_reached = max(stage_reached, stage_info['stage_reached'])
+                        # Update stage flags
+                        breakeven_triggered = stage_info['breakeven_triggered']
+                        stage1_triggered = stage_info['stage1_triggered']
+                        stage2_triggered = stage_info['stage2_triggered']
+                        stage3_triggered = stage_info['stage3_triggered']
+                        stage_reached = max(stage_reached, stage_info['stage_reached'])
 
                 # Check exit conditions
                 trade_closed, exit_pnl, exit_reason = self._check_exit_conditions(
@@ -487,21 +496,23 @@ class TrailingStopSimulator:
                 if current_profit_pips > best_profit_pips:
                     best_profit_pips = current_profit_pips
 
-                    # Apply Progressive 3-Stage trailing stop logic
-                    current_stop_pips, stage_info = self._update_progressive_trailing_stop(
-                        best_profit_pips,
-                        breakeven_triggered,
-                        stage1_triggered,
-                        stage2_triggered,
-                        stage3_triggered
-                    )
+                    # 🎯 FIXED SL/TP MODE: Skip trailing for scalping (keep original SL/TP)
+                    if not self.use_fixed_sl_tp:
+                        # Apply Progressive 3-Stage trailing stop logic
+                        current_stop_pips, stage_info = self._update_progressive_trailing_stop(
+                            best_profit_pips,
+                            breakeven_triggered,
+                            stage1_triggered,
+                            stage2_triggered,
+                            stage3_triggered
+                        )
 
-                    # Update stage flags
-                    breakeven_triggered = stage_info['breakeven_triggered']
-                    stage1_triggered = stage_info['stage1_triggered']
-                    stage2_triggered = stage_info['stage2_triggered']
-                    stage3_triggered = stage_info['stage3_triggered']
-                    stage_reached = max(stage_reached, stage_info['stage_reached'])
+                        # Update stage flags
+                        breakeven_triggered = stage_info['breakeven_triggered']
+                        stage1_triggered = stage_info['stage1_triggered']
+                        stage2_triggered = stage_info['stage2_triggered']
+                        stage3_triggered = stage_info['stage3_triggered']
+                        stage_reached = max(stage_reached, stage_info['stage_reached'])
 
                 # Check exit conditions
                 trade_closed, exit_pnl, exit_reason = self._check_exit_conditions(
@@ -565,8 +576,19 @@ class TrailingStopSimulator:
                 else:
                     final_exit_pnl = (entry_price - final_price) * pip_multiplier
 
-                # Classify timeout outcome
-                if final_exit_pnl > 5.0:
+                # CRITICAL FIX: If loss exceeds stop loss, classify as STOP_LOSS not TIMEOUT
+                # This prevents unlimited losses when trades time out beyond configured SL
+                if final_exit_pnl < 0 and abs(final_exit_pnl) >= current_stop_pips:
+                    trade_outcome = "LOSE"
+                    exit_reason = "STOP_LOSS_TIMEOUT"  # Hit SL level during timeout period
+                    is_loser = True
+                    is_winner = False
+                    final_loss = current_stop_pips  # Cap at configured stop loss
+                    final_profit = 0
+                    exit_pnl = -current_stop_pips
+                    self.logger.debug(f"🛑 TIMEOUT with SL hit: {self.epic} Timeout P&L={final_exit_pnl:.1f} pips >= SL={current_stop_pips:.1f} pips, capping at SL")
+                # Classify normal timeout outcome
+                elif final_exit_pnl > 5.0:
                     trade_outcome = "WIN_TIMEOUT"
                     is_winner = True
                     is_loser = False
@@ -574,10 +596,16 @@ class TrailingStopSimulator:
                     final_loss = 0
                 elif final_exit_pnl < -3.0:
                     trade_outcome = "LOSE_TIMEOUT"
-                    is_winner = False
                     is_loser = True
+                    is_winner = False
+                    # CRITICAL FIX: Cap timeout losses at configured stop loss level
+                    # Prevents 16.5 pip average losses when SL is configured at 6.0 pips
+                    capped_loss = min(abs(final_exit_pnl), current_stop_pips)
+                    final_loss = round(capped_loss, 1)
                     final_profit = 0
-                    final_loss = round(abs(final_exit_pnl), 1)
+                    exit_pnl = -final_loss
+                    if abs(final_exit_pnl) > current_stop_pips:
+                        self.logger.debug(f"🛑 TIMEOUT loss capped: {self.epic} Market loss={abs(final_exit_pnl):.1f} pips, capped at SL={current_stop_pips:.1f} pips")
                 else:
                     trade_outcome = "BREAKEVEN_TIMEOUT"
                     is_winner = False
@@ -705,12 +733,14 @@ class TrailingStopSimulator:
         """
         # Check profit target first
         if current_profit_pips >= target_pips:
+            self.logger.debug(f"✅ PROFIT_TARGET: {self.epic} Profit={current_profit_pips:.2f} pips >= Target={target_pips:.2f} pips")
             return True, target_pips, "PROFIT_TARGET"
 
         # Check stop loss
         if current_stop_pips > 0:
             # Traditional stop loss (risk)
             if current_loss_pips >= current_stop_pips:
+                self.logger.debug(f"🛑 STOP_LOSS: {self.epic} Loss={current_loss_pips:.2f} pips >= SL={current_stop_pips:.2f} pips")
                 return True, -current_stop_pips, "STOP_LOSS"
         else:
             # Profit protection stop (trailing/breakeven)
@@ -724,6 +754,7 @@ class TrailingStopSimulator:
                 else:
                     exit_pnl = -current_loss_pips if current_loss_pips > 0 else current_profit_pips
 
+                self.logger.debug(f"🔄 TRAILING_STOP: {self.epic} Profit={current_profit_pips:.2f}, Loss={current_loss_pips:.2f}, Protection={profit_protection_level:.2f}, Exit_PnL={exit_pnl:.2f} pips")
                 return True, exit_pnl, "TRAILING_STOP"
 
         # No exit condition met

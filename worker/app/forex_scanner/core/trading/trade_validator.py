@@ -759,21 +759,26 @@ class TradeValidator:
     def _safe_validate_support_resistance(self, signal: Dict, provided_market_data: Optional[object] = None) -> Tuple[bool, str]:
         """
         NEW: Safe S/R validation with automatic market data fetching and comprehensive fallbacks
-        
+
         SAFETY FEATURES:
         - Uses provided market_data if available
         - Automatically fetches market data if needed and data fetcher available
         - Caches market data for performance
         - Graceful degradation on any errors
         - Comprehensive error handling and logging
-        
+        - Per-signal skip flag support (for scalping strategies)
+
         Args:
             signal: Trading signal to validate
             provided_market_data: Optional pre-fetched market data
-            
+
         Returns:
             Tuple of (is_valid, reason)
         """
+        # 🎯 SCALPING BYPASS: Check if signal requests to skip S/R validation
+        if signal.get('skip_sr_validation', False):
+            return True, "S/R validation skipped (strategy request - scalping)"
+
         if not self.sr_validator:
             return True, "S/R validation disabled - allowing trade"
         

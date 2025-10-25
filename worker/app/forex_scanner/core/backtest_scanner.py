@@ -95,18 +95,28 @@ class BacktestScanner(IntelligentForexScanner):
         static_stop_pips = getattr(config_momentum_strategy, 'MOMENTUM_STATIC_STOP_PIPS', 40.0) if use_static_stops else 10.0
         static_target_pips = getattr(config_momentum_strategy, 'MOMENTUM_STATIC_TARGET_PIPS', 80.0) if use_static_stops else 15.0
 
-        # 🔥 SCALPING-SPECIFIC CONFIGURATION: Optimized for Linda Raschke MACD 3-10-16
+        # 🔥 SCALPING-SPECIFIC CONFIGURATION: Read from config_scalping_strategy.py
         if 'SCALPING' in self.strategy_name.upper():
-            # Scalping needs MUCH faster exits than other strategies
-            scalping_target_pips = 8.0       # Reduced from 15 (Linda Raschke: quick 8-12 pip targets)
-            scalping_stop_pips = 6.0         # Reduced from 10 (tight stops for scalping)
-            scalping_max_bars = 24           # 2 hours on 5min chart (was 96 = 24 hours)
-            scalping_breakeven_trigger = 4.0 # Move to BE at +4 pips (50% of target)
-            scalping_time_exit_hours = 2.0   # Close at breakeven after 2 hours if no clear direction
+            # Read scalping config from config_scalping_strategy.py
+            try:
+                from configdata.strategies.config_scalping_strategy import SCALPING_MODE, SCALPING_STRATEGY_CONFIG
+                scalping_config = SCALPING_STRATEGY_CONFIG.get(SCALPING_MODE, {})
+                scalping_target_pips = scalping_config.get('target_pips', 8.0)
+                scalping_stop_pips = scalping_config.get('stop_loss_pips', 4.0)
+                scalping_max_bars = scalping_config.get('max_bars', 10000)
+                scalping_breakeven_trigger = 999.0  # DISABLED for pure fixed SL/TP
+                scalping_time_exit_hours = None  # DISABLED - no time exits
+                self.logger.info(f"📊 Scalping Exit Rules: PURE FIXED SL/TP - Target={scalping_target_pips} pips, Stop={scalping_stop_pips} pips (from config)")
+            except ImportError:
+                # Fallback to hardcoded values if config not available
+                scalping_target_pips = 8.0
+                scalping_stop_pips = 6.0
+                scalping_max_bars = 10000
+                scalping_breakeven_trigger = 999.0
+                scalping_time_exit_hours = None
+                self.logger.warning(f"⚠️ Could not load scalping config, using fallback: Target={scalping_target_pips} pips, Stop={scalping_stop_pips} pips")
 
-            self.logger.info(f"📊 Scalping Exit Rules: Target={scalping_target_pips} pips, Stop={scalping_stop_pips} pips, "
-                           f"Timeout={scalping_max_bars} bars ({scalping_max_bars * 5 / 60:.1f} hours), "
-                           f"Time Exit={scalping_time_exit_hours} hours")
+            self.logger.info(f"   ⚠️ NO trailing, NO breakeven, NO time exits - trades MUST hit SL or TP")
         else:
             scalping_target_pips = static_target_pips
             scalping_stop_pips = static_stop_pips
@@ -124,7 +134,8 @@ class BacktestScanner(IntelligentForexScanner):
             trailing_ratio=trailing_stop_config.get('trailing_ratio', 0.5),
             max_bars=trailing_stop_config.get('max_bars', scalping_max_bars),
             time_exit_hours=scalping_time_exit_hours,  # New parameter for time-based exits
-            use_atr=trailing_stop_config.get('use_atr', not use_static_stops),  # Disable ATR if using static stops
+            use_fixed_sl_tp='SCALPING' in self.strategy_name.upper(),  # 🎯 SCALPING: Use fixed SL/TP only (no trailing)
+            use_atr=trailing_stop_config.get('use_atr', False if 'SCALPING' in self.strategy_name.upper() else not use_static_stops),  # 🔥 FIXED: DISABLE ATR for scalping!
             # Phase 1: Use momentum strategy config ATR multipliers (2.5x stop, 2.0x target)
             atr_multiplier=trailing_stop_config.get('atr_multiplier',
                 getattr(config_momentum_strategy, 'MOMENTUM_STOP_LOSS_ATR_MULTIPLIER', 2.5) if config_momentum_strategy and self.strategy_name == 'MOMENTUM' else 2.0),
@@ -751,8 +762,8 @@ class BacktestScanner(IntelligentForexScanner):
                 self.logger.warning("Signal missing epic, skipping trade simulation")
                 return signal
 
-            # Fetch future price data for simulation (up to 96 bars = 24 hours on 15m)
-            future_df = self._fetch_future_price_data(epic, signal_timestamp, max_bars=96)
+            # Fetch future price data for simulation (use configured max_bars from trailing stop simulator)
+            future_df = self._fetch_future_price_data(epic, signal_timestamp, max_bars=self.trailing_stop_simulator.max_bars)
 
             if future_df is None or len(future_df) == 0:
                 self.logger.debug(f"No future data available for {epic} at {signal_timestamp}, skipping simulation")
