@@ -67,7 +67,7 @@ class MACDStrategy(BaseStrategy):
             timeframe: Primary timeframe for entries (default: 15m)
         """
         # Basic initialization
-        self.name = 'macd_confluence'
+        self.name = 'macd'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
         self.logger.setLevel(logging.INFO)
 
