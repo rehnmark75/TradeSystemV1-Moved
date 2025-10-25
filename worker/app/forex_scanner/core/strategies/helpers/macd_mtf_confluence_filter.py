@@ -131,13 +131,28 @@ class MACDMultiTimeframeFilter:
             return None
 
         try:
-            # Fetch H4 data
-            h4_data = self.data_fetcher.fetch_data(
-                epic=epic,
-                timeframe='4h',
-                bars=100,  # Enough for MACD calculation
-                current_time=current_time
-            )
+            # Fetch H4 data - handle different data fetcher interfaces
+            if hasattr(self.data_fetcher, 'fetch_data'):
+                # Standard data fetcher
+                h4_data = self.data_fetcher.fetch_data(
+                    epic=epic,
+                    timeframe='4h',
+                    bars=100,
+                    current_time=current_time
+                )
+            elif hasattr(self.data_fetcher, 'get_enhanced_data'):
+                # Backtest data fetcher
+                # Extract pair name from epic (e.g., CS.D.EURUSD.MINI.IP -> EURUSD)
+                pair = epic.split('.')[2] if '.' in epic else epic
+                h4_data = self.data_fetcher.get_enhanced_data(
+                    epic=epic,
+                    pair=pair,
+                    timeframe='4h',
+                    bars=100
+                )
+            else:
+                self.logger.error("Data fetcher has no compatible method")
+                return None
 
             if h4_data is None or len(h4_data) < self.slow_period + self.signal_period:
                 self.logger.warning(f"Insufficient H4 data for {epic}")
@@ -208,13 +223,27 @@ class MACDMultiTimeframeFilter:
             return None
 
         try:
-            # Fetch H1 data
-            h1_data = self.data_fetcher.fetch_data(
-                epic=epic,
-                timeframe='1h',
-                bars=100,  # Enough for swing detection
-                current_time=current_time
-            )
+            # Fetch H1 data - handle different data fetcher interfaces
+            if hasattr(self.data_fetcher, 'fetch_data'):
+                # Standard data fetcher
+                h1_data = self.data_fetcher.fetch_data(
+                    epic=epic,
+                    timeframe='1h',
+                    bars=100,
+                    current_time=current_time
+                )
+            elif hasattr(self.data_fetcher, 'get_enhanced_data'):
+                # Backtest data fetcher
+                pair = epic.split('.')[2] if '.' in epic else epic
+                h1_data = self.data_fetcher.get_enhanced_data(
+                    epic=epic,
+                    pair=pair,
+                    timeframe='1h',
+                    bars=100
+                )
+            else:
+                self.logger.error("Data fetcher has no compatible method")
+                return None
 
             if h1_data is None or len(h1_data) < 50:
                 self.logger.warning(f"Insufficient H1 data for {epic}")
