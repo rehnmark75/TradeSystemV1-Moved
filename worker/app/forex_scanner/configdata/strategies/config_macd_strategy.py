@@ -5,7 +5,100 @@ Configuration module for MACD strategy settings
 """
 
 # =============================================================================
-# MACD STRATEGY CONFIGURATION SETTINGS  
+# STRATEGY MODE SELECTION (NEW - Confluence vs Legacy)
+# =============================================================================
+
+# Choose strategy mode
+MACD_USE_CONFLUENCE_MODE = True  # True = NEW Confluence strategy, False = Legacy MACD crossover
+
+# =============================================================================
+# CONFLUENCE STRATEGY CONFIGURATION (NEW)
+# =============================================================================
+# Multi-timeframe confluence system:
+# - H4 MACD: Trend direction filter
+# - H1: Fibonacci + swing level calculation
+# - 15M: Price action pattern entry triggers
+
+# Fibonacci Settings
+MACD_CONFLUENCE_FIB_LEVELS = [0.382, 0.5, 0.618, 0.786]  # Retracement levels to calculate
+MACD_CONFLUENCE_FIB_LOOKBACK = 50  # H1 bars to look back for swing detection
+MACD_CONFLUENCE_FIB_SWING_STRENGTH = 5  # Bars left/right for valid swing (5 = 11-bar swing)
+MACD_CONFLUENCE_MIN_SWING_PIPS = 15.0  # Minimum swing size to consider (filters noise)
+MACD_CONFLUENCE_FIB_TOLERANCE_PIPS = 5.0  # How close price must be to Fib level
+
+# Confluence Zone Settings
+MACD_CONFLUENCE_MODE = 'moderate'  # 'strict', 'moderate', or 'loose'
+# - strict: Requires 3+ factors (Fib + swing + 1 other)
+# - moderate: Requires 2+ factors (Fib + swing OR Fib + EMA/round number)
+# - loose: Fib level only
+
+MACD_CONFLUENCE_MIN_SCORE = 2.0  # Minimum confluence score to enter trade
+MACD_CONFLUENCE_PROXIMITY_PIPS = 5.0  # How close factors must be to count as aligned
+
+# Entry Pattern Settings (15M candlestick patterns)
+MACD_CONFLUENCE_ENTRY_PATTERNS = ['engulfing', 'pin_bar', 'inside_bar']
+MACD_CONFLUENCE_MIN_PATTERN_QUALITY = 60  # Minimum pattern quality score (0-100)
+MACD_CONFLUENCE_REQUIRE_PATTERN = True  # Require candlestick pattern at confluence zone
+
+# Pattern detector parameters
+MACD_PATTERN_MIN_BODY_RATIO = 0.6  # Engulfing: min body size as ratio of range
+MACD_PATTERN_MIN_ENGULF_RATIO = 1.1  # Engulfing: current body must be 1.1x previous
+MACD_PATTERN_MAX_PIN_BODY_RATIO = 0.3  # Pin bar: max body size (30% of range)
+MACD_PATTERN_MIN_PIN_WICK_RATIO = 2.0  # Pin bar: wick must be 2x body size
+
+# Multi-Timeframe H4 Filter
+MACD_CONFLUENCE_H4_FILTER_ENABLED = True  # Require H4 MACD trend alignment
+MACD_CONFLUENCE_H4_REQUIRE_EXPANSION = True  # Require H4 histogram expanding
+MACD_CONFLUENCE_H4_MIN_HISTOGRAM = 0.00001  # Minimum H4 histogram magnitude
+MACD_CONFLUENCE_H4_ALLOW_NEUTRAL = False  # Allow entries when H4 is neutral
+
+# Stop Loss & Take Profit (Confluence Mode)
+MACD_CONFLUENCE_USE_15M_STOPS = True  # Use tighter 15M swing-based stops
+MACD_CONFLUENCE_STOP_ATR_MULTIPLIER = 1.5  # ATR multiplier for stop loss (tighter)
+MACD_CONFLUENCE_TP_ATR_MULTIPLIER = 3.0  # ATR multiplier for take profit
+MACD_CONFLUENCE_MIN_STOP_PIPS = 10.0  # Minimum stop distance (spread + slippage)
+MACD_CONFLUENCE_MAX_STOP_PIPS = 30.0  # Maximum stop distance (risk control)
+MACD_CONFLUENCE_MIN_RR_RATIO = 2.0  # Minimum risk:reward ratio
+MACD_CONFLUENCE_USE_STRUCTURE_TARGETS = True  # Target next swing level instead of fixed ATR
+
+# Pair-Specific Fibonacci Sensitivity (optional overrides)
+MACD_CONFLUENCE_PAIR_SETTINGS = {
+    'EURUSD': {
+        'fib_lookback': 50,
+        'min_swing_pips': 15.0,
+        'confluence_mode': 'moderate'
+    },
+    'GBPUSD': {
+        'fib_lookback': 45,
+        'min_swing_pips': 20.0,  # GBP more volatile
+        'confluence_mode': 'moderate'
+    },
+    'USDJPY': {
+        'fib_lookback': 50,
+        'min_swing_pips': 15.0,
+        'confluence_mode': 'moderate'
+    },
+    # JPY pairs
+    'EURJPY': {
+        'fib_lookback': 50,
+        'min_swing_pips': 20.0,
+        'confluence_mode': 'moderate'
+    },
+    'AUDJPY': {
+        'fib_lookback': 50,
+        'min_swing_pips': 18.0,
+        'confluence_mode': 'moderate'
+    }
+}
+
+# Debug/Logging Settings
+MACD_CONFLUENCE_DEBUG_LOGGING = True  # Enable detailed confluence analysis logs
+MACD_CONFLUENCE_LOG_FIB_LEVELS = True  # Log all Fibonacci levels calculated
+MACD_CONFLUENCE_LOG_PATTERNS = True  # Log candlestick pattern detection
+MACD_CONFLUENCE_LOG_H4_VALIDATION = True  # Log H4 trend validation
+
+# =============================================================================
+# LEGACY MACD STRATEGY CONFIGURATION SETTINGS (Used when MACD_USE_CONFLUENCE_MODE = False)
 # =============================================================================
 
 # Core Strategy Settings
