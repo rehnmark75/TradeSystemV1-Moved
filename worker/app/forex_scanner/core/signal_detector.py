@@ -72,7 +72,19 @@ class SignalDetector:
         self.macd_strategy = None  # Will be created when needed with epic parameter
         self.macd_strategies_cache = {}  # Cache epic-specific strategies
         # self.combined_strategy = CombinedStrategy(data_fetcher=self.data_fetcher)  # Removed - strategy was disabled
-        self.scalping_strategy = ScalpingStrategy()
+        # 🔥 Initialize Scalping strategy with mode from config
+        try:
+            from configdata.strategies.config_scalping_strategy import SCALPING_MODE
+            scalping_mode = SCALPING_MODE
+        except ImportError:
+            try:
+                from forex_scanner.configdata.strategies.config_scalping_strategy import SCALPING_MODE
+                scalping_mode = SCALPING_MODE
+            except ImportError:
+                scalping_mode = 'linda_raschke'  # Fallback
+
+        self.scalping_strategy = ScalpingStrategy(scalping_mode=scalping_mode)
+        self.logger.info(f"✅ Scalping strategy initialized with mode: {scalping_mode}")
         self.large_candle_filter = LargeCandleFilter()
         self.logger.info("✅ Large candle filter initialized")
         
@@ -835,8 +847,9 @@ class SignalDetector:
             # 6. Scalping Strategy (if enabled)
             if getattr(config, 'SCALPING_STRATEGY_ENABLED', False):
                 try:
-                    self.logger.debug(f"🔍 [SCALPING] Starting detection for {epic}")
-                    scalping_timeframe = '1m' if timeframe in ['1m', '5m'] else timeframe
+                    self.logger.info(f"🔍 [SCALPING] Starting detection for {epic}")
+                    # 🔥 ALWAYS use 5m for Linda Raschke MACD 3-10-16 scalping, regardless of scanner timeframe
+                    scalping_timeframe = '5m'
                     scalping_signal = self.detect_scalping_signals(epic, pair, spread_pips, scalping_timeframe)
                     
                     # 🔧 NEW: Store result for combined strategy

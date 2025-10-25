@@ -402,7 +402,18 @@ class OrderManager:
                 return False, f"Missing required field: {field}"
         
         # Check confidence threshold
-        min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
+        # 🔥 SCALPING BYPASS: Use lower threshold for scalping strategies (45%)
+        strategy = signal.get('strategy', '')
+        scalping_mode = signal.get('scalping_mode', '')
+        is_scalping = ('scalping' in strategy.lower() or
+                      scalping_mode in ['linda_raschke', 'ranging_momentum', 'linda_macd_zero_cross',
+                                       'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern'])
+
+        if is_scalping:
+            min_confidence = getattr(config, 'SCALPING_MIN_CONFIDENCE', 0.45)
+        else:
+            min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
+
         if signal.get('confidence_score', 0) < min_confidence:
             return False, f"Confidence {signal['confidence_score']:.1%} below threshold {min_confidence:.1%}"
         

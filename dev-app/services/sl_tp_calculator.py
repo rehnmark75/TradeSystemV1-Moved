@@ -93,22 +93,17 @@ def validate_sl_tp_levels(stop_distance: int, limit_distance: int,
     """
     adjustments = []
 
-    # Ensure minimum distance requirements
+    # Ensure minimum distance requirements (respect broker minimum exactly)
     if min_distance and stop_distance < min_distance:
         old_stop = stop_distance
-        stop_distance = min_distance + 5  # Add small buffer
-        adjustments.append(f"Stop distance increased from {old_stop} to {stop_distance} (min required: {min_distance})")
+        stop_distance = int(min_distance)  # Use broker minimum exactly, no buffer
+        adjustments.append(f"Stop distance increased from {old_stop} to {stop_distance} (broker min: {min_distance})")
 
-    # Ensure reasonable minimum levels
-    if stop_distance < 10:
-        old_stop = stop_distance
-        stop_distance = 10
-        adjustments.append(f"Stop distance increased from {old_stop} to {stop_distance} (safety minimum)")
-
-    if limit_distance < 10:
+    # Ensure minimum distance requirements for limit
+    if min_distance and limit_distance < min_distance:
         old_limit = limit_distance
-        limit_distance = 10
-        adjustments.append(f"Limit distance increased from {old_limit} to {limit_distance} (safety minimum)")
+        limit_distance = int(min_distance)  # Use broker minimum exactly, no buffer
+        adjustments.append(f"Limit distance increased from {old_limit} to {limit_distance} (broker min: {min_distance})")
 
     return {
         "stopDistance": stop_distance,

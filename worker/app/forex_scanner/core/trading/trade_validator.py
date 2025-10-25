@@ -759,21 +759,26 @@ class TradeValidator:
     def _safe_validate_support_resistance(self, signal: Dict, provided_market_data: Optional[object] = None) -> Tuple[bool, str]:
         """
         NEW: Safe S/R validation with automatic market data fetching and comprehensive fallbacks
-        
+
         SAFETY FEATURES:
         - Uses provided market_data if available
         - Automatically fetches market data if needed and data fetcher available
         - Caches market data for performance
         - Graceful degradation on any errors
         - Comprehensive error handling and logging
-        
+        - Per-signal skip flag support (for scalping strategies)
+
         Args:
             signal: Trading signal to validate
             provided_market_data: Optional pre-fetched market data
-            
+
         Returns:
             Tuple of (is_valid, reason)
         """
+        # 🎯 SCALPING BYPASS: Check if signal requests to skip S/R validation
+        if signal.get('skip_sr_validation', False):
+            return True, "S/R validation skipped (strategy request - scalping)"
+
         if not self.sr_validator:
             return True, "S/R validation disabled - allowing trade"
         
@@ -1034,6 +1039,18 @@ class TradeValidator:
             if current_price <= 0 or ema_200 <= 0:
                 self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: Invalid price values - price: {current_price}, ema200: {ema_200}")
                 return False, "EMA200 filter: Invalid price values - REJECTED"
+
+            # 🔥 SCALPING BYPASS: Scalping uses faster EMAs (34/50) instead of EMA 200
+            # EMA 200 (~16.5 hours on 5m) is too slow for 2-hour scalping trades
+            scalping_mode = signal.get('scalping_mode', '')
+            is_scalping = ('scalping' in strategy.lower() or
+                          scalping_mode in ['linda_raschke', 'ranging_momentum', 'linda_macd_zero_cross',
+                                           'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern',
+                                           'trending_adaptive', 'ultra_fast', 'dual_ma'])
+
+            if is_scalping:
+                self.logger.info(f"✅ SCALPING BYPASS: {epic} {signal_type} uses EMA 34/50, skipping EMA 200 filter")
+                return True, f"Scalping strategy uses EMA 34/50 instead of EMA 200"
 
             # STRATEGY-AWARE FILTERING: Some strategies exempt from EMA200 trend filter
             # - MACD: Can trade counter-trend (momentum reversals)
@@ -1505,21 +1522,34 @@ class TradeValidator:
             if self.backtest_mode and raw_confidence != confidence:
                 self.logger.debug(f"🔧 BACKTEST: Normalized signal confidence {raw_confidence} → {confidence:.3f}")
 
-            # Check minimum confidence (both values now in decimal format)
-            if confidence < self.min_confidence:
-                return False, f"Confidence {confidence:.1%} below minimum {self.min_confidence:.1%}"
-            
             # Additional confidence checks
             if confidence > 1.0:
                 return False, f"Invalid confidence score: {confidence:.1%} (max: 100%)"
-            
-            # Strategy-specific confidence checks
+
+            # 🔥 STRATEGY-SPECIFIC CONFIDENCE THRESHOLDS (bypass general threshold)
             strategy = signal.get('strategy', '')
-            if strategy == 'scalping' and confidence < 0.85:
-                return False, f"Scalping strategy requires min 85% confidence, got {confidence:.1%}"
+            scalping_mode = signal.get('scalping_mode', '')
+
+            # Check if this is a scalping signal (by strategy name or scalping_mode)
+            is_scalping = ('scalping' in strategy.lower() or
+                          scalping_mode in ['linda_raschke', 'ranging_momentum', 'linda_macd_zero_cross',
+                                           'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern'])
+
+            if is_scalping:
+                # Scalping uses lower threshold (45%) - high frequency, tight risk management
+                scalping_min_confidence = getattr(config, 'SCALPING_MIN_CONFIDENCE', 0.45)
+                if confidence < scalping_min_confidence:
+                    return False, f"Scalping confidence {confidence:.1%} below scalping minimum {scalping_min_confidence:.1%}"
+                return True, f"Scalping confidence {confidence:.1%} meets requirements (min: {scalping_min_confidence:.1%})"
+
+            # Other strategy-specific thresholds
             elif strategy == 'swing' and confidence < 0.70:
                 return False, f"Swing strategy requires min 70% confidence, got {confidence:.1%}"
-            
+
+            # General confidence check for non-scalping strategies
+            if confidence < self.min_confidence:
+                return False, f"Confidence {confidence:.1%} below minimum {self.min_confidence:.1%}"
+
             return True, f"Confidence {confidence:.1%} meets requirements"
             
         except Exception as e:

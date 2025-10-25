@@ -405,7 +405,31 @@ async def ig_place_order(
             # Use strategy-calculated values
             sl_limit = body.stop_distance
             limit_distance = body.limit_distance
+            strategy_requested_sl = sl_limit  # Save original for validation
             logger.info(f"✅ Using strategy-provided SL/TP: {sl_limit}/{limit_distance} for {symbol}")
+
+            # 🛡️ SCALPING PROTECTION: Check if broker's min_distance is too large for tight scalping
+            # Reject orders where broker requires 3x or more than strategy wants (indicates poor conditions)
+            if min_distance and sl_limit < 10:  # Only for scalping strategies (< 10pt stops)
+                if min_distance > (sl_limit * 2.5):  # Broker wants 2.5x+ what strategy wants
+                    logger.warning(
+                        f"🚫 SCALPING REJECTED: {symbol} broker min_distance={min_distance}pt is too large "
+                        f"for scalping strategy ({sl_limit}pt requested). "
+                        f"Market conditions unfavorable (wide spreads/low liquidity)."
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": "Broker minimum too large for scalping",
+                            "message": f"Broker requires {min_distance}pt minimum, strategy wants {sl_limit}pt. "
+                                     f"Market conditions not suitable for tight scalping stops.",
+                            "broker_min_distance": min_distance,
+                            "strategy_requested": sl_limit,
+                            "epic": symbol,
+                            "alert_id": alert_id,
+                            "reason": "scalping_conditions_unfavorable"
+                        }
+                    )
 
             # Validate and adjust levels based on broker requirements
             validated_levels = validate_sl_tp_levels(sl_limit, limit_distance, min_distance)
@@ -478,11 +502,14 @@ async def ig_place_order(
         logger.info(f"📤 Placing market order: {symbol} {direction} with SL: {sl_limit}, TP: {limit_distance}")
 
         # FIXED: Catch broker duplicate position rejection and convert to HTTP 409
+        # 🛡️ SCALPING FAILSAFE: If broker rejects tight SL/TP, retry with 10pt minimum
         try:
             result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance)
         except httpx.HTTPStatusError as broker_error:
-            # Check if IG rejected due to existing position
+            # Check if IG rejected due to existing position or SL/TP issue
             error_text = ""
+            error_status = broker_error.response.status_code if hasattr(broker_error, 'response') else 500
+
             try:
                 if hasattr(broker_error.response, 'text'):
                     error_text = broker_error.response.text.lower()
@@ -494,26 +521,64 @@ async def ig_place_order(
             except:
                 error_text = str(broker_error).lower()
 
-            # Check for duplicate position indicators in error message
-            duplicate_indicators = ['already open', 'position exists', 'duplicate', 'existing position']
-            if any(indicator in error_text for indicator in duplicate_indicators):
-                logger.info(f"ℹ️ IG broker rejected order - position already open for {symbol}")
-                logger.debug(f"   Broker error details: {error_text[:200]}")
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "status": "skipped",
-                        "message": f"Position already open for {symbol} (detected from broker rejection)",
-                        "epic": symbol,
-                        "alert_id": alert_id,
-                        "reason": "duplicate_position_broker"
-                    }
-                )
-            else:
-                # Re-raise other broker errors (will be caught by outer exception handler)
-                logger.error(f"❌ Broker rejected order for {symbol}: HTTP {broker_error.response.status_code}")
-                logger.error(f"   Error details: {error_text[:500]}")
-                raise
+            # 🛡️ SCALPING FAILSAFE: Check if rejection is due to tight SL/TP
+            sl_tp_rejection_indicators = [
+                'stop', 'limit', 'distance', 'minimum', 'too close', 'invalid level',
+                'working order', 'stop level', 'limit level'
+            ]
+            is_sl_tp_issue = any(indicator in error_text for indicator in sl_tp_rejection_indicators)
+            failsafe_succeeded = False
+
+            # If it's an SL/TP rejection and we're using scalping values (< 10), retry with 10pt
+            if is_sl_tp_issue and (sl_limit < 10 or limit_distance < 10):
+                original_sl = sl_limit
+                original_tp = limit_distance
+
+                # Apply failsafe: use 10pt minimum
+                sl_limit = max(10, sl_limit)
+                limit_distance = max(10, limit_distance)
+
+                # Maintain risk/reward ratio if both were adjusted
+                if original_sl < 10 and original_tp < 10:
+                    limit_distance = max(10, int(sl_limit * 1.5))
+
+                logger.warning(f"⚠️ Broker rejected tight SL/TP: {error_text[:200]}")
+                logger.warning(f"🛡️ SCALPING FAILSAFE ACTIVATED: Retrying with SL {original_sl}pt→{sl_limit}pt, TP {original_tp}pt→{limit_distance}pt")
+
+                # Retry the order with adjusted levels
+                try:
+                    result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance)
+                    logger.info(f"✅ Order placed successfully with failsafe levels: SL={sl_limit}, TP={limit_distance}")
+                    failsafe_succeeded = True
+                except Exception as retry_error:
+                    logger.error(f"❌ Failsafe retry also failed: {str(retry_error)}")
+                    raise
+
+            # Only process duplicate/error handling if failsafe didn't succeed
+            if not failsafe_succeeded:
+                # Check for duplicate position indicators in error message
+                duplicate_indicators = ['already open', 'position exists', 'duplicate', 'existing position']
+                is_duplicate = any(indicator in error_text for indicator in duplicate_indicators)
+
+                # Convert HTTP 500 with duplicate indicators OR HTTP 409 to consistent HTTP 409
+                if is_duplicate or error_status == 409:
+                    logger.info(f"ℹ️ Position already open for {symbol} (HTTP {error_status})")
+                    logger.debug(f"   Broker response: {error_text[:200]}")
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "status": "skipped",
+                            "message": f"Position already open for {symbol}",
+                            "epic": symbol,
+                            "alert_id": alert_id,
+                            "reason": "duplicate_position"
+                        }
+                    )
+                else:
+                    # Re-raise other broker errors (will be caught by outer exception handler)
+                    logger.error(f"❌ Broker rejected order for {symbol}: HTTP {error_status}")
+                    logger.error(f"   Error details: {error_text[:500]}")
+                    raise
         
         # BUGFIX: Add validation that result was actually returned
         if result is None:
