@@ -590,6 +590,22 @@ class MACDStrategy(BaseStrategy):
 
         return true_range.rolling(window=period).mean()
 
+    def get_required_indicators(self) -> List[str]:
+        """
+        Get list of required indicators for MACD Confluence Strategy.
+
+        Returns:
+            List of indicator names
+        """
+        return [
+            'macd_line',
+            'macd_signal',
+            'macd_histogram',
+            'atr',
+            'ema_21',
+            'ema_50'
+        ]
+
 
 # Quick test
 if __name__ == '__main__':
