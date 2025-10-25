@@ -400,29 +400,37 @@ class MACDStrategy(BaseStrategy):
                 self.logger.info(f"   R:R too low: {rr_ratio:.2f} < {self.min_rr_ratio}")
                 return None
 
-            # BUILD SIGNAL
+            # BUILD SIGNAL (with correct field names for validator)
             signal = {
-                'signal': signal_direction,
-                'confidence': round(confidence, 2),
-                'entry_price': current_price,
+                # Core fields (validator expects these exact names)
+                'signal_type': signal_direction,  # BULL or BEAR
+                'confidence_score': round(confidence, 2),  # 0.0 to 1.0
+                'price': current_price,  # Entry price
+                'epic': epic,
+
+                # Trading levels
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
-                'risk_reward_ratio': round(rr_ratio, 2),
-                'strategy': 'macd_confluence',
-                'timeframe': self.timeframe,
+                'entry_price': current_price,  # Also keep for compatibility
 
-                # Additional context
+                # Strategy metadata
+                'strategy': 'macd_confluence',
+                'strategy_name': 'MACD Confluence',
+                'timeframe': self.timeframe,
+                'risk_reward_ratio': round(rr_ratio, 2),
+
+                # Confluence analysis context
                 'h4_trend': h4_trend,
                 'h4_histogram': h4_data['histogram'],
                 'fib_level': at_zone['fib_level'],
                 'confluence_score': at_zone['confluence_score'],
-                'confluence_factors': at_zone['factors'],
+                'confluence_factors': ', '.join(at_zone['factors']),  # Join for display
                 'pattern': pattern['pattern'] if pattern else None,
                 'pattern_quality': pattern['quality_score'] if pattern else None,
 
                 # Metadata
                 'timestamp': datetime.now().isoformat(),
-                'epic': epic
+                'signal': signal_direction  # Also keep for backward compatibility
             }
 
             self.logger.info(f"\n{'='*60}")
