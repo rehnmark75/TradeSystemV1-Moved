@@ -106,7 +106,8 @@
       "Bash(alembic revision:*)",
       "Bash(git checkout:*)",
       "Bash(/tmp/run_sltp_tests.sh:*)",
-      "Bash(git branch:*)"
+      "Bash(git branch:*)",
+      "Bash(to S/R\" when the strategy intentionally enters AT S/R confluence zones.\n\nThis change skips S/R validation for strategies with \"confluence\" in their\nname, since they have built-in S/R analysis.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
