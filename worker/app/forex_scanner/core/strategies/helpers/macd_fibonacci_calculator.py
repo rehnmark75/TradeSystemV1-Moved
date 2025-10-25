@@ -289,8 +289,10 @@ class FibonacciCalculator:
             'key_zones': key_zones
         }
 
+        # Format key zones for logging
+        key_levels_str = ', '.join([f"{k}:{v['price']:.5f}" for k, v in key_zones.items()])
         self.logger.info(f"📊 Fibonacci zones calculated - Swing: {swing_data['swing_size_pips']:.1f} pips, "
-                        f"Key levels: {', '.join([f'{k}:{v['price']:.5f}' for k,v in key_zones.items()])}")
+                        f"Key levels: {key_levels_str}")
 
         return result
 
