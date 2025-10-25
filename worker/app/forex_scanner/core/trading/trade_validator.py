@@ -645,13 +645,20 @@ class TradeValidator:
                 self.logger.info(f"✅ BACKTEST STEP 7 PASSED - EMA200 filter validation")
             
             # 8. ENHANCED: Support/Resistance validation with safe market data handling
-            if self.enable_sr_validation:
+            # Skip S/R validation for strategies with built-in confluence analysis
+            strategy = signal.get('strategy', '').lower()
+            strategy_name = signal.get('strategy_name', '').lower()
+            skip_sr_for_strategy = 'confluence' in strategy or 'confluence' in strategy_name
+
+            if self.enable_sr_validation and not skip_sr_for_strategy:
                 valid, msg = self._safe_validate_support_resistance(signal, market_data)
                 if not valid:
                     self.validation_stats['failed_sr_validation'] += 1
                     if self.backtest_mode:
                         self.logger.warning(f"🚫 BACKTEST STEP 8 FAILED - S/R Level: {msg}")
                     return False, f"S/R Level: {msg}"
+            elif skip_sr_for_strategy and self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 8 PASSED - S/R validation (skipped for {strategy} - has built-in confluence)")
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 8 PASSED - S/R validation (disabled)")
             
