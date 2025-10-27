@@ -156,8 +156,18 @@ class MACDMultiTimeframeFilter:
                 self.logger.error("Data fetcher has no compatible method")
                 return None
 
-            if h4_data is None or len(h4_data) < self.slow_period + self.signal_period:
-                self.logger.warning(f"Insufficient H4 data for {epic}")
+            # Check if we have enough data for MACD calculation
+            min_bars_needed = self.slow_period + self.signal_period  # 26 + 9 = 35 bars
+
+            if h4_data is None:
+                self.logger.warning(f"Insufficient H4 data for {epic}: No data returned")
+                return None
+
+            if len(h4_data) < min_bars_needed:
+                self.logger.debug(
+                    f"Insufficient H4 data for {epic}: {len(h4_data)} bars available, "
+                    f"{min_bars_needed} required. This is normal at the start of backtests."
+                )
                 return None
 
             # Calculate MACD
