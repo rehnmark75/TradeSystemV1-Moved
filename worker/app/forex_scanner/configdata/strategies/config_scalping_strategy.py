@@ -16,7 +16,7 @@ Key Features:
 """
 
 # Strategy enable/disable
-SCALPING_STRATEGY_ENABLED = True    # 🔥 ENABLED: Bollinger Band bounce mean reversion scalping
+SCALPING_STRATEGY_ENABLED = False    # 🔥 ENABLED: Bollinger Band bounce mean reversion scalping
 SCALPING_MODE = 'bb_bounce'         # Active scalping mode: Bollinger Band bounce (mean reversion)
 
 # Scalping Strategy Configurations
