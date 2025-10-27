@@ -144,12 +144,13 @@ class MACDMultiTimeframeFilter:
                 # Backtest data fetcher
                 # Extract pair name from epic (e.g., CS.D.EURUSD.MINI.IP -> EURUSD)
                 pair = epic.split('.')[2] if '.' in epic else epic
-                # Get approximately 100 bars of H4 data = 400 hours
+                # Get 50 bars of H4 data = 200 hours (enough for MACD calculation)
+                # MACD needs slow_period(26) + signal_period(9) = 35 bars minimum
                 h4_data = self.data_fetcher.get_enhanced_data(
                     epic=epic,
                     pair=pair,
                     timeframe='4h',
-                    lookback_hours=400  # 100 bars * 4 hours
+                    lookback_hours=200  # 50 bars * 4 hours (conservative buffer)
                 )
             else:
                 self.logger.error("Data fetcher has no compatible method")
