@@ -64,12 +64,16 @@ class MACDStrategy(BaseStrategy):
             data_fetcher: Data fetcher for multi-timeframe analysis
             backtest_mode: Whether running in backtest mode
             epic: Currency pair epic code
-            timeframe: Primary timeframe for entries (default: 15m)
+            timeframe: Primary timeframe for entries (IGNORED - always uses 1h)
         """
         # Basic initialization
         self.name = 'macd'
         self.logger = logging.getLogger(f"{__name__}.{self.name}")
         self.logger.setLevel(logging.INFO)
+
+        # 🔒 HARD-CODED: MACD strategy ALWAYS uses 1H timeframe
+        # This overrides whatever the scanner is configured to use
+        timeframe = '1h'
 
         # Store parameters
         self.backtest_mode = backtest_mode
@@ -77,6 +81,8 @@ class MACDStrategy(BaseStrategy):
         self.timeframe = timeframe
         self.data_fetcher = data_fetcher
         self.price_adjuster = PriceAdjuster()
+
+        self.logger.info(f"🔒 MACD strategy locked to 1H timeframe (ignoring scanner config)")
 
         # MACD parameters (standard 12, 26, 9)
         self.fast_period = 12
@@ -252,20 +258,24 @@ class MACDStrategy(BaseStrategy):
         Auto signal detection wrapper for compatibility with backtest signal detector.
         Delegates to detect_signal method.
 
+        🔒 HARD-CODED: Always forces 1H timeframe regardless of input.
+
         Args:
             df: OHLC DataFrame with indicators
             epic: Currency pair epic
             spread_pips: Current spread in pips
-            timeframe: Timeframe (unused, for compatibility)
+            timeframe: Timeframe (IGNORED - always uses 1h)
             **kwargs: Additional args (intelligence_data, regime_data, etc.)
 
         Returns:
             Signal dict or None
         """
+        # 🔒 Force 1H timeframe - ignore whatever the scanner passed
         return self.detect_signal(
             df=df,
             epic=epic,
             spread_pips=spread_pips,
+            timeframe='1h',  # Hard-coded 1H
             intelligence_data=kwargs.get('intelligence_data'),
             regime_data=kwargs.get('regime_data')
         )

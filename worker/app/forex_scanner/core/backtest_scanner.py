@@ -613,7 +613,9 @@ class BacktestScanner(IntelligentForexScanner):
                     if method_name in ['detect_signals_mid_prices']:
                         signals = method(epic, pair_name, self.timeframe)
                     else:
-                        signals = method(epic, pair_name, self.spread_pips, self.timeframe)
+                        # 🔒 HARD-CODED: MACD strategy always uses 1H timeframe
+                        strategy_timeframe = '1h' if strategy_name in ['MACD', 'MACD_EMA'] else self.timeframe
+                        signals = method(epic, pair_name, self.spread_pips, strategy_timeframe)
 
                     # Some methods return a single signal dict, others return lists
                     if signals and not isinstance(signals, list):
