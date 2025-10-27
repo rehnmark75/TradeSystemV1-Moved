@@ -539,6 +539,12 @@ class BacktestScanner(IntelligentForexScanner):
         """Scan all epics at a specific historical timestamp"""
         signals = []
 
+        # 🔧 CRITICAL FIX: Set backtest time BEFORE fetching data
+        # This ensures BacktestDataFetcher only returns data UP TO this timestamp
+        if hasattr(self.signal_detector, 'data_fetcher') and hasattr(self.signal_detector.data_fetcher, 'set_backtest_time'):
+            self.signal_detector.data_fetcher.set_backtest_time(timestamp)
+            self.logger.debug(f"⏰ Backtest time set to: {timestamp}")
+
         for epic in self.epic_list:
             try:
                 epic_signals = self._detect_signals_for_epic_at_time(epic, timestamp)
