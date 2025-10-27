@@ -244,10 +244,15 @@ class MACDStrategy(BaseStrategy):
                      intelligence_data: Dict = None,
                      regime_data: Dict = None) -> Optional[Dict]:
         """
-        Detect MACD confluence trading signals.
+        Detect MACD crossover signals with H4 trend filter.
+
+        SIMPLE STRATEGY:
+        1. Check H4 MACD trend (bullish/bearish)
+        2. Detect MACD crossover on strategy timeframe
+        3. Only take signals in direction of H4 trend
 
         Args:
-            df: 15M OHLC DataFrame
+            df: Strategy timeframe OHLC DataFrame with MACD indicators
             epic: Currency pair epic
             spread_pips: Current spread in pips
             intelligence_data: Optional market intelligence data
@@ -257,134 +262,87 @@ class MACDStrategy(BaseStrategy):
             Signal dict or None
         """
         try:
-            if len(df) < 100:
-                self.logger.debug(f"Insufficient data: {len(df)} bars (need 100+)")
+            if len(df) < 50:
+                self.logger.debug(f"Insufficient data: {len(df)} bars (need 50+)")
                 return None
 
             current_price = df['close'].iloc[-1]
             current_time = df.index[-1] if hasattr(df.index[-1], 'strftime') else None
 
             self.logger.info(f"\n{'='*60}")
-            self.logger.info(f"🔍 MACD Confluence Analysis - {epic} @ {current_price:.5f}")
+            self.logger.info(f"🔍 MACD Simple Crossover - {epic} @ {current_price:.5f}")
             self.logger.info(f"{'='*60}")
 
             # STEP 1: H4 MACD Trend Filter
-            if self.h4_filter_enabled:
-                self.logger.info("📊 Step 1: Checking H4 MACD trend...")
+            self.logger.info("📊 Step 1: Checking H4 MACD trend filter...")
 
-                # Try both BULL and BEAR to see which trend we have
-                h4_data = self.mtf_filter.get_h4_trend_direction(epic, current_time)
+            h4_data = self.mtf_filter.get_h4_trend_direction(epic, current_time)
 
-                if not h4_data:
-                    self.logger.debug("No H4 data available - normal at start of backtests")
-                    return None
+            if not h4_data:
+                self.logger.debug("No H4 data available - normal at start of backtests")
+                return None
 
-                h4_trend = h4_data['trend']
-                self.logger.info(f"   H4 Trend: {h4_trend.upper()} (histogram: {h4_data['histogram']:.6f})")
+            h4_trend = h4_data['trend']
+            self.logger.info(f"   H4 Trend: {h4_trend.upper()}")
 
-                if h4_trend == 'neutral':
-                    self.logger.info("⚠️  H4 trend is neutral - no clear direction")
-                    return None
+            if h4_trend == 'neutral':
+                self.logger.info("   H4 neutral - waiting for clear trend")
+                return None
 
-                # Determine signal direction from H4
-                signal_direction = 'BULL' if h4_trend == 'bullish' else 'BEAR'
+            # STEP 2: Detect MACD Crossover on Strategy Timeframe
+            self.logger.info("📊 Step 2: Detecting MACD crossover...")
 
+            # Check if MACD data exists in DataFrame
+            if 'macd_line' not in df.columns or 'macd_signal' not in df.columns:
+                self.logger.error("MACD indicators not found in DataFrame")
+                return None
+
+            # Get current and previous MACD values
+            macd_current = df['macd_line'].iloc[-1]
+            signal_current = df['macd_signal'].iloc[-1]
+            macd_prev = df['macd_line'].iloc[-2]
+            signal_prev = df['macd_signal'].iloc[-2]
+
+            # Detect crossover
+            bullish_cross = (macd_prev <= signal_prev) and (macd_current > signal_current)
+            bearish_cross = (macd_prev >= signal_prev) and (macd_current < signal_current)
+
+            if not bullish_cross and not bearish_cross:
+                self.logger.info("   No MACD crossover detected")
+                return None
+
+            # Determine signal direction
+            if bullish_cross:
+                signal_direction = 'BULL'
+                self.logger.info("   ✅ Bullish MACD crossover detected")
             else:
-                # Without H4 filter, we'd need another way to determine direction
-                # For now, require H4 filter
-                self.logger.warning("H4 filter disabled - cannot determine signal direction")
+                signal_direction = 'BEAR'
+                self.logger.info("   ✅ Bearish MACD crossover detected")
+
+            # STEP 3: Validate Against H4 Trend
+            self.logger.info("📊 Step 3: Validating against H4 trend...")
+
+            h4_allows_bull = h4_trend == 'bullish'
+            h4_allows_bear = h4_trend == 'bearish'
+
+            if signal_direction == 'BULL' and not h4_allows_bull:
+                self.logger.info(f"   ❌ Bullish signal rejected - H4 trend is {h4_trend}")
                 return None
 
-            # STEP 2: Get H1 Fibonacci Zones
-            self.logger.info("📐 Step 2: Calculating H1 Fibonacci levels...")
-
-            h1_data = self.mtf_filter.get_h1_swing_data(epic, current_time)
-            if h1_data is None or len(h1_data) < self.fib_lookback:
-                self.logger.warning("❌ Insufficient H1 data for Fibonacci calculation")
+            if signal_direction == 'BEAR' and not h4_allows_bear:
+                self.logger.info(f"   ❌ Bearish signal rejected - H4 trend is {h4_trend}")
                 return None
 
-            fib_zones = self.fib_calculator.get_fibonacci_zones(
-                df=h1_data,
-                epic=epic,
-                current_trend=h4_trend
-            )
+            self.logger.info(f"   ✅ {signal_direction} signal aligns with H4 {h4_trend} trend")
 
-            if not fib_zones:
-                self.logger.info("   No valid Fibonacci zones found")
-                return None
+            # STEP 4: Calculate Stop Loss and Take Profit
+            self.logger.info("💰 Step 4: Calculating SL/TP...")
 
-            # STEP 3: Analyze Confluence Zones
-            self.logger.info("🎯 Step 3: Analyzing confluence zones...")
-
-            # Get swing levels and EMAs from 15M for confluence
-            swing_highs, swing_lows = self._find_swing_levels(df, lookback=50)
-            ema_values = self._get_current_emas(df)
-
-            confluence_zones = self.confluence_analyzer.find_all_confluence_zones(
-                fib_data=fib_zones,
-                current_price=current_price,
-                swing_highs=swing_highs,
-                swing_lows=swing_lows,
-                ema_values=ema_values,
-                epic=epic
-            )
-
-            if not confluence_zones:
-                self.logger.info("   No valid confluence zones")
-                return None
-
-            # STEP 4: Check if Price at Confluence Zone
-            self.logger.info("📍 Step 4: Checking if price at confluence zone...")
-
-            at_zone = self.confluence_analyzer.is_price_at_confluence_zone(
-                current_price=current_price,
-                confluence_zones=confluence_zones,
-                epic=epic,
-                min_quality='low'  # Accept any valid zone
-            )
-
-            if not at_zone:
-                self.logger.info(f"   Price not at confluence zone (nearest: {confluence_zones[0]['distance_from_price_pips']:.1f} pips away)")
-                return None
-
-            self.logger.info(f"   ✅ Price at {at_zone['fib_level']}% Fib level - {at_zone['quality']} quality zone")
-
-            # STEP 5: Detect Candlestick Pattern
-            self.logger.info("🕯️  Step 5: Detecting candlestick pattern...")
-
-            pattern = self.pattern_detector.get_best_pattern(df, signal_direction)
-
-            if self.require_pattern and not pattern:
-                self.logger.info(f"   No valid {signal_direction} pattern found")
-                return None
-
-            if pattern:
-                if pattern['quality_score'] < self.min_pattern_quality:
-                    self.logger.info(f"   Pattern quality too low: {pattern['quality_score']} < {self.min_pattern_quality}")
-                    return None
-
-                self.logger.info(f"   ✅ {pattern['pattern']} detected (quality: {pattern['quality_score']}/100)")
-
-            # STEP 6: Calculate Confidence
-            confidence = self._calculate_confidence(
-                h4_data=h4_data,
-                confluence_zone=at_zone,
-                pattern=pattern,
-                signal_direction=signal_direction
-            )
-
-            if confidence < self.min_confidence:
-                self.logger.info(f"   Confidence too low: {confidence:.0%} < {self.min_confidence:.0%}")
-                return None
-
-            # STEP 7: Calculate Stop Loss and Take Profit
-            stop_loss, take_profit = self._calculate_sl_tp(
+            stop_loss, take_profit = self._calculate_simple_sl_tp(
                 df=df,
                 epic=epic,
                 signal_direction=signal_direction,
-                entry_price=current_price,
-                fib_zones=fib_zones,
-                pattern=pattern
+                entry_price=current_price
             )
 
             if not stop_loss or not take_profit:
@@ -400,6 +358,29 @@ class MACDStrategy(BaseStrategy):
                 self.logger.info(f"   R:R too low: {rr_ratio:.2f} < {self.min_rr_ratio}")
                 return None
 
+            self.logger.info(f"   ✅ SL: {stop_loss:.5f} | TP: {take_profit:.5f} | R:R: 1:{rr_ratio:.2f}")
+
+            # STEP 5: Calculate Simple Confidence
+            self.logger.info("📊 Step 5: Calculating confidence...")
+
+            # Base confidence: 60% (simpler strategy = higher base)
+            confidence = 0.60
+
+            # H4 trend alignment bonus
+            if h4_data.get('histogram_expanding', False):
+                confidence += 0.10  # +10% for expanding H4 momentum
+                self.logger.info("   +10% for expanding H4 histogram")
+
+            # Strong H4 histogram bonus
+            histogram_abs = abs(h4_data.get('histogram', 0))
+            if histogram_abs > 0.0001:
+                confidence += 0.10  # +10% for strong H4 trend
+                self.logger.info("   +10% for strong H4 histogram")
+
+            # Cap at 90%
+            confidence = min(confidence, 0.90)
+            self.logger.info(f"   Final confidence: {confidence:.0%}")
+
             # BUILD SIGNAL (with correct field names for validator)
             signal = {
                 # Core fields (validator expects these exact names)
@@ -414,19 +395,17 @@ class MACDStrategy(BaseStrategy):
                 'entry_price': current_price,  # Also keep for compatibility
 
                 # Strategy metadata
-                'strategy': 'macd_confluence',
-                'strategy_name': 'MACD Confluence',
+                'strategy': 'macd_confluence',  # Keep name for validator compatibility
+                'strategy_name': 'MACD Simple Crossover',  # Updated name
                 'timeframe': self.timeframe,
                 'risk_reward_ratio': round(rr_ratio, 2),
 
-                # Confluence analysis context
+                # Strategy context (simplified)
                 'h4_trend': h4_trend,
-                'h4_histogram': h4_data['histogram'],
-                'fib_level': at_zone['fib_level'],
-                'confluence_score': at_zone['confluence_score'],
-                'confluence_factors': ', '.join(at_zone['factors']),  # Join for display
-                'pattern': pattern['pattern'] if pattern else None,
-                'pattern_quality': pattern['quality_score'] if pattern else None,
+                'h4_histogram': round(h4_data['histogram'], 6),
+                'h4_histogram_expanding': h4_data.get('histogram_expanding', False),
+                'macd_line': round(macd_current, 6),
+                'macd_signal': round(signal_current, 6),
 
                 # Metadata
                 'timestamp': datetime.now().isoformat(),
@@ -438,9 +417,8 @@ class MACDStrategy(BaseStrategy):
             self.logger.info(f"   Entry: {current_price:.5f}")
             self.logger.info(f"   SL: {stop_loss:.5f} | TP: {take_profit:.5f}")
             self.logger.info(f"   R:R: 1:{rr_ratio:.2f} | Confidence: {confidence:.0%}")
-            self.logger.info(f"   Confluence: {at_zone['fib_level']}% ({', '.join(at_zone['factors'])})")
-            if pattern:
-                self.logger.info(f"   Pattern: {pattern['pattern']} ({pattern['quality_score']}/100)")
+            self.logger.info(f"   H4 Trend: {h4_trend} (histogram: {h4_data['histogram']:.6f})")
+            self.logger.info(f"   MACD Crossover: {macd_current:.6f} > {signal_current:.6f}")
             self.logger.info(f"{'='*60}\n")
 
             return signal
@@ -448,6 +426,70 @@ class MACDStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error(f"Error in detect_signal: {e}", exc_info=True)
             return None
+
+    def _calculate_simple_sl_tp(self,
+                               df: pd.DataFrame,
+                               epic: str,
+                               signal_direction: str,
+                               entry_price: float) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Calculate simple ATR-based stop loss and take profit.
+
+        Args:
+            df: Strategy timeframe OHLC DataFrame
+            epic: Currency pair epic
+            signal_direction: 'BULL' or 'BEAR'
+            entry_price: Entry price
+
+        Returns:
+            Tuple of (stop_loss, take_profit)
+        """
+        try:
+            # Calculate ATR if not in DataFrame
+            if 'atr' not in df.columns:
+                atr_series = self._calculate_atr(df, period=14)
+                atr = atr_series.iloc[-1]
+            else:
+                atr = df['atr'].iloc[-1]
+
+            # Get pip value for this pair
+            pip_value = 0.01 if 'JPY' in epic else 0.0001
+            pip_multiplier = 100 if 'JPY' in epic else 10000
+
+            # ATR-based stop loss (1.5x ATR)
+            stop_distance = atr * 1.5
+            if signal_direction == 'BULL':
+                stop_loss = entry_price - stop_distance
+            else:
+                stop_loss = entry_price + stop_distance
+
+            # Validate stop distance is within bounds
+            stop_distance_pips = abs(entry_price - stop_loss) * pip_multiplier
+
+            # Apply min/max constraints
+            if stop_distance_pips < self.min_stop_pips:
+                # Widen to minimum
+                stop_loss = entry_price - (self.min_stop_pips * pip_value) if signal_direction == 'BULL' \
+                           else entry_price + (self.min_stop_pips * pip_value)
+            elif stop_distance_pips > self.max_stop_pips:
+                # Tighten to maximum
+                stop_loss = entry_price - (self.max_stop_pips * pip_value) if signal_direction == 'BULL' \
+                           else entry_price + (self.max_stop_pips * pip_value)
+
+            # ATR-based take profit (3.0x ATR for 2:1 R:R)
+            tp_distance = atr * 3.0
+            if signal_direction == 'BULL':
+                take_profit = entry_price + tp_distance
+            else:
+                take_profit = entry_price - tp_distance
+
+            self.logger.debug(f"Simple SL/TP: ATR={atr:.6f}, SL distance={stop_distance_pips:.1f} pips")
+
+            return stop_loss, take_profit
+
+        except Exception as e:
+            self.logger.error(f"Error calculating simple SL/TP: {e}", exc_info=True)
+            return None, None
 
     def _calculate_confidence(self,
                              h4_data: Dict,
