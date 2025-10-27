@@ -276,7 +276,7 @@ class MACDStrategy(BaseStrategy):
                 h4_data = self.mtf_filter.get_h4_trend_direction(epic, current_time)
 
                 if not h4_data:
-                    self.logger.warning("❌ No H4 data available - cannot validate trend")
+                    self.logger.debug("No H4 data available - normal at start of backtests")
                     return None
 
                 h4_trend = h4_data['trend']
