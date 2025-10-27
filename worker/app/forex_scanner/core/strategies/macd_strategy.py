@@ -186,6 +186,11 @@ class MACDStrategy(BaseStrategy):
         self.min_rr_ratio = getattr(config_macd_strategy, 'MACD_CONFLUENCE_MIN_RR_RATIO', 2.0) if config_macd_strategy else 2.0
         self.use_structure_targets = getattr(config_macd_strategy, 'MACD_CONFLUENCE_USE_STRUCTURE_TARGETS', True) if config_macd_strategy else True
 
+        # Load histogram thresholds for signal quality filtering
+        self.histogram_thresholds = getattr(config_macd_strategy, 'MACD_MIN_HISTOGRAM_THRESHOLDS', {
+            'default': {'histogram': 0.00005, 'min_adx': 15}
+        }) if config_macd_strategy else {'default': {'histogram': 0.00005, 'min_adx': 15}}
+
         self.logger.info(f"💰 Risk: {self.stop_atr_multiplier}x ATR SL, {self.tp_atr_multiplier}x ATR TP, "
                         f"Min {self.min_stop_pips}-{self.max_stop_pips} pips, Min R:R {self.min_rr_ratio}:1")
 
@@ -365,6 +370,32 @@ class MACDStrategy(BaseStrategy):
             else:
                 signal_direction = 'BEAR'
                 self.logger.info("   ✅ Bearish MACD crossover detected")
+
+            # STEP 2.5: Validate Histogram Size
+            self.logger.info("📊 Step 2.5: Checking histogram strength...")
+
+            # Get histogram value
+            histogram = df['macd_histogram'].iloc[-1] if 'macd_histogram' in df.columns else (macd_current - signal_current)
+            histogram_abs = abs(histogram)
+
+            # Get pair-specific threshold from config
+            pair = epic.split('.')[2] if '.' in epic else epic
+            threshold_config = self.histogram_thresholds.get(pair, self.histogram_thresholds.get('default', {'histogram': 0.00005}))
+
+            # Handle both dict and float formats
+            if isinstance(threshold_config, dict):
+                min_histogram = threshold_config.get('histogram', 0.00005)
+            else:
+                min_histogram = threshold_config
+
+            self.logger.info(f"   Histogram: {histogram:.6f} (abs: {histogram_abs:.6f})")
+            self.logger.info(f"   Min threshold for {pair}: {min_histogram:.6f}")
+
+            if histogram_abs < min_histogram:
+                self.logger.info(f"   ❌ Histogram too weak: {histogram_abs:.6f} < {min_histogram:.6f}")
+                return None
+
+            self.logger.info(f"   ✅ Histogram strength validated")
 
             # STEP 3: Validate Against H4 Trend
             self.logger.info("📊 Step 3: Validating against H4 trend...")
