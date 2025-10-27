@@ -269,6 +269,7 @@ class MACDStrategy(BaseStrategy):
                      df: pd.DataFrame,
                      epic: str,
                      spread_pips: float = 1.5,
+                     timeframe: str = None,
                      intelligence_data: Dict = None,
                      regime_data: Dict = None) -> Optional[Dict]:
         """
