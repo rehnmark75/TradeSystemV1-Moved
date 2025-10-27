@@ -237,6 +237,34 @@ class MACDStrategy(BaseStrategy):
 
         return swing_highs, swing_lows
 
+    def detect_signal_auto(self,
+                          df: pd.DataFrame,
+                          epic: str = None,
+                          spread_pips: float = 1.5,
+                          timeframe: str = '1h',
+                          **kwargs) -> Optional[Dict]:
+        """
+        Auto signal detection wrapper for compatibility with backtest signal detector.
+        Delegates to detect_signal method.
+
+        Args:
+            df: OHLC DataFrame with indicators
+            epic: Currency pair epic
+            spread_pips: Current spread in pips
+            timeframe: Timeframe (unused, for compatibility)
+            **kwargs: Additional args (intelligence_data, regime_data, etc.)
+
+        Returns:
+            Signal dict or None
+        """
+        return self.detect_signal(
+            df=df,
+            epic=epic,
+            spread_pips=spread_pips,
+            intelligence_data=kwargs.get('intelligence_data'),
+            regime_data=kwargs.get('regime_data')
+        )
+
     def detect_signal(self,
                      df: pd.DataFrame,
                      epic: str,
