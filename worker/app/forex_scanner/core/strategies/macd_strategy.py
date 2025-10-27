@@ -297,6 +297,24 @@ class MACDStrategy(BaseStrategy):
             current_price = df['close'].iloc[-1]
             current_time = df.index[-1] if hasattr(df.index[-1], 'strftime') else None
 
+            # DEBUG: Show data range being analyzed
+            if len(df) > 0:
+                # Try to get timestamps from index or columns
+                first_time = 'unknown'
+                last_time = 'unknown'
+
+                if hasattr(df.index[0], 'strftime'):
+                    first_time = df.index[0]
+                    last_time = df.index[-1]
+                elif 'start_time' in df.columns:
+                    first_time = df['start_time'].iloc[0]
+                    last_time = df['start_time'].iloc[-1]
+                elif 'timestamp' in df.columns:
+                    first_time = df['timestamp'].iloc[0]
+                    last_time = df['timestamp'].iloc[-1]
+
+                self.logger.info(f"📅 Data range: {first_time} to {last_time} ({len(df)} bars)")
+
             self.logger.info(f"\n{'='*60}")
             self.logger.info(f"🔍 MACD Simple Crossover - {epic} @ {current_price:.5f}")
             self.logger.info(f"{'='*60}")
