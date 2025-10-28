@@ -791,10 +791,10 @@ class TradeMonitor:
                     )
                 elif hasattr(self.trade_processor, 'process_trade_enhanced'):
                     # Use enhanced processor without validation
-                    success = self.trade_processor.process_trade_enhanced(trade, current_price, db)
+                    success = await self.trade_processor.process_trade_enhanced(trade, current_price, db)
                 elif hasattr(self.trade_processor, 'process_trade_with_advanced_trailing'):
                     # Use basic trailing processor
-                    success = self.trade_processor.process_trade_with_advanced_trailing(trade, current_price, db)
+                    success = await self.trade_processor.process_trade_with_advanced_trailing(trade, current_price, db)
                 else:
                     self.logger.error(f"❌ No suitable processing method found for trade {trade.id}")
                     return False

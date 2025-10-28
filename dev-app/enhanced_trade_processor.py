@@ -234,7 +234,7 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
             self.logger.error(f"❌ [PROFIT PROTECTION ERROR] Trade {trade.id}: {e}")
             return False
     
-    def process_trade_enhanced(self, trade: TradeLog, current_price: float, db: Session) -> bool:
+    async def process_trade_enhanced(self, trade: TradeLog, current_price: float, db: Session) -> bool:
         """
         MAIN PROCESSING METHOD with PROFIT PROTECTION RULE
         Order of operations:
@@ -267,7 +267,7 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                     return success  # Exit early, don't continue with trailing logic
             
             # ✅ STEP 3: Continue with enhanced trailing logic
-            return self.process_trade_with_advanced_trailing(trade, current_price, db)
+            return await self.process_trade_with_advanced_trailing(trade, current_price, db)
             
         except Exception as e:
             self.logger.error(f"❌ [ENHANCED PROCESSING ERROR] Trade {trade.id}: {e}")
@@ -446,7 +446,7 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
         if not headers:
             self.logger.error(f"❌ [NO HEADERS] Trade {trade.id}: No trading headers available for validation")
             # Fallback to enhanced processing without validation
-            return self.process_trade_enhanced(trade, current_price, db)
+            return await self.process_trade_enhanced(trade, current_price, db)
         
         # Update headers in status manager if needed
         if headers != self.trading_headers:
@@ -478,13 +478,13 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                 self.logger.warning(f"⚠️ [SYNC WARNING] Trade {trade.id}: Could not sync with IG")
             
             # ✅ STEP 3: Apply enhanced processing with profit protection
-            return self.process_trade_enhanced(trade, current_price, db)
+            return await self.process_trade_enhanced(trade, current_price, db)
             
         except Exception as e:
             self.logger.error(f"❌ [COMBINED+ ENHANCED ERROR] Trade {trade.id}: {e}")
             return False
 
-    def process_trade_with_advanced_trailing(self, trade: TradeLog, current_price: float, db: Session) -> bool:
+    async def process_trade_with_advanced_trailing(self, trade: TradeLog, current_price: float, db: Session) -> bool:
         """Enhanced processing with EMA exit check followed by trailing logic - 🔧 FIXED METHOD"""
         
         # Diagnostic log
@@ -502,7 +502,7 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
             
             # --- Continue with existing break-even and trailing logic ---
             # ✅ CRITICAL FIX: Call the parent class method using super()
-            return super().process_trade_with_advanced_trailing(trade, current_price, db)
+            return await super().process_trade_with_advanced_trailing(trade, current_price, db)
             
         except Exception as e:
             self.logger.error(f"❌ [COMBINED ERROR] Trade {trade.id}: {e}")

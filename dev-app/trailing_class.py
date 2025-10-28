@@ -1275,7 +1275,7 @@ class EnhancedTradeProcessor:
             else:
                 return current_price + fallback_distance
 
-    def process_trade_with_advanced_trailing(self, trade: TradeLog, current_price: float, db: Session) -> bool:
+    async def process_trade_with_advanced_trailing(self, trade: TradeLog, current_price: float, db: Session) -> bool:
         """Process trade with break-even logic and then advanced trailing - CRITICALLY FIXED"""
 
         # Diagnostic log
@@ -1363,17 +1363,17 @@ class EnhancedTradeProcessor:
                     from dependencies import get_ig_auth_headers
 
                     try:
-                        # Get auth headers synchronously using asyncio
-                        auth_headers = asyncio.run(get_ig_auth_headers())
+                        # Get auth headers asynchronously
+                        auth_headers = await get_ig_auth_headers()
 
-                        # Execute partial close synchronously
-                        partial_result = asyncio.run(partial_close_position(
+                        # Execute partial close asynchronously
+                        partial_result = await partial_close_position(
                             deal_id=trade.deal_id,
                             epic=trade.symbol,
                             direction=trade.direction,
                             size_to_close=partial_close_size,
                             auth_headers=auth_headers
-                        ))
+                        )
 
                         if partial_result.get("success"):
                             # ✅ Partial close succeeded!
@@ -1393,10 +1393,44 @@ class EnhancedTradeProcessor:
                                 self.logger.info(f"✅ [PARTIAL CLOSE DB] Trade {trade.id}: Database updated, "
                                                f"current_size={trade.current_size}, continuing to Stage 2/3")
 
+                                # ✅ ENHANCEMENT: Move SL to entry + min_distance to guarantee profit
+                                # Calculate profit protection stop level
+                                ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
+                                if ig_min_distance:
+                                    lock_points = max(1, round(ig_min_distance))
+                                else:
+                                    lock_points = trailing_config['stage1_lock_points']
+
+                                if trade.direction.upper() == "BUY":
+                                    profit_protection_stop = trade.entry_price + (lock_points * point_value)
+                                else:  # SELL
+                                    profit_protection_stop = trade.entry_price - (lock_points * point_value)
+
+                                self.logger.info(f"💰 [PARTIAL CLOSE PROTECTION] Trade {trade.id}: Moving SL to entry +/- {lock_points}pts "
+                                               f"to guarantee profit on remaining {trade.current_size} position")
+
+                                # Move the stop loss
+                                try:
+                                    adjustment_result = await self.send_stop_adjustment(
+                                        trade=trade,
+                                        new_stop=profit_protection_stop,
+                                        reason=f"partial_close_protection_{lock_points}pts"
+                                    )
+
+                                    if adjustment_result:
+                                        self.logger.info(f"✅ [SL MOVED] Trade {trade.id}: Stop moved to {profit_protection_stop:.5f} "
+                                                       f"(entry +/- {lock_points}pts) after partial close")
+                                        trade.sl_price = profit_protection_stop
+                                        db.commit()
+                                    else:
+                                        self.logger.warning(f"⚠️ [SL MOVE FAILED] Trade {trade.id}: Could not move stop after partial close")
+                                except Exception as sl_error:
+                                    self.logger.error(f"❌ [SL MOVE ERROR] Trade {trade.id}: {sl_error}")
+
                                 # ✅ SUCCESS: Set flag to skip break-even stop move
                                 partial_close_succeeded = True
-                                self.logger.info(f"🎉 [PARTIAL CLOSE COMPLETE] Trade {trade.id}: Will skip BE stop move, "
-                                               f"continuing to Stage 2/3 with remaining {trade.current_size} position")
+                                self.logger.info(f"🎉 [PARTIAL CLOSE COMPLETE] Trade {trade.id}: Banked 50% at +{profit_points}pts, "
+                                               f"remaining 50% protected at entry +/- {lock_points}pts")
 
                             except Exception as commit_error:
                                 db.rollback()
