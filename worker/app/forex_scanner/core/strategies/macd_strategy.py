@@ -373,13 +373,28 @@ class MACDStrategy(BaseStrategy):
                 self.logger.info("   No MACD crossover detected")
                 return None
 
-            # Determine signal direction
+            # 🔥 CRITICAL FIX: Check histogram direction to avoid false signals
+            # Bullish crossover in negative territory = still bearish (bearish bounce)
+            # Bearish crossover in positive territory = still bullish (bullish pullback)
+            histogram_current = macd_current - signal_current
+
+            # Determine signal direction based on crossover AND histogram direction
             if bullish_cross:
-                signal_direction = 'BULL'
-                self.logger.info("   ✅ Bullish MACD crossover detected")
-            else:
-                signal_direction = 'BEAR'
-                self.logger.info("   ✅ Bearish MACD crossover detected")
+                if histogram_current > 0:
+                    signal_direction = 'BULL'
+                    self.logger.info("   ✅ Bullish MACD crossover detected (histogram positive)")
+                else:
+                    # Bullish cross but histogram still negative = bearish bounce, not bullish signal
+                    self.logger.info(f"   ❌ Bullish crossover rejected - histogram still negative ({histogram_current:.6f})")
+                    return None
+            else:  # bearish_cross
+                if histogram_current < 0:
+                    signal_direction = 'BEAR'
+                    self.logger.info("   ✅ Bearish MACD crossover detected (histogram negative)")
+                else:
+                    # Bearish cross but histogram still positive = bullish pullback, not bearish signal
+                    self.logger.info(f"   ❌ Bearish crossover rejected - histogram still positive ({histogram_current:.6f})")
+                    return None
 
             # STEP 2.5: Validate Histogram Size (with 3-bar expansion window)
             self.logger.info("📊 Step 2.5: Checking histogram strength...")
