@@ -359,41 +359,53 @@ class MACDStrategy(BaseStrategy):
                 self.logger.error("MACD indicators not found in DataFrame")
                 return None
 
-            # Get current and previous MACD values
-            macd_current = df['macd_line'].iloc[-1]
-            signal_current = df['macd_signal'].iloc[-1]
-            macd_prev = df['macd_line'].iloc[-2]
-            signal_prev = df['macd_signal'].iloc[-2]
+            # 🔒 LIVE TRADING FIX: Check crossover on CLOSED bars only
+            # In live mode, iloc[-1] is the INCOMPLETE current bar (can change mid-bar)
+            # We check crossover between iloc[-2] (last closed) and iloc[-3] (previous closed)
+            # Then validate the crossover is still valid on the current bar
 
-            # Detect crossover
-            bullish_cross = (macd_prev <= signal_prev) and (macd_current > signal_current)
-            bearish_cross = (macd_prev >= signal_prev) and (macd_current < signal_current)
+            # Get values from last 3 bars
+            macd_current = df['macd_line'].iloc[-1]      # Current incomplete bar (live) or last bar (backtest)
+            signal_current = df['macd_signal'].iloc[-1]
+            macd_closed = df['macd_line'].iloc[-2]       # Last CLOSED bar
+            signal_closed = df['macd_signal'].iloc[-2]
+            macd_prev = df['macd_line'].iloc[-3]         # Previous closed bar
+            signal_prev = df['macd_signal'].iloc[-3]
+
+            # Detect crossover on CLOSED bars (iloc[-3] to iloc[-2])
+            bullish_cross = (macd_prev <= signal_prev) and (macd_closed > signal_closed)
+            bearish_cross = (macd_prev >= signal_prev) and (macd_closed < signal_closed)
 
             if not bullish_cross and not bearish_cross:
-                self.logger.info("   No MACD crossover detected")
+                self.logger.info("   No MACD crossover detected on closed bars")
                 return None
 
+            self.logger.info(f"   Crossover detected between bars: iloc[-3] to iloc[-2]")
+            self.logger.info(f"   MACD closed: {macd_closed:.6f}, Signal closed: {signal_closed:.6f}")
+
             # 🔥 CRITICAL FIX: Check histogram direction to avoid false signals
+            # We use the CLOSED bar's histogram, not the current incomplete bar
             # Bullish crossover in negative territory = still bearish (bearish bounce)
             # Bearish crossover in positive territory = still bullish (bullish pullback)
+            histogram_closed = macd_closed - signal_closed
             histogram_current = macd_current - signal_current
 
             # Determine signal direction based on crossover AND histogram direction
             if bullish_cross:
-                if histogram_current > 0:
+                if histogram_closed > 0:
                     signal_direction = 'BULL'
-                    self.logger.info("   ✅ Bullish MACD crossover detected (histogram positive)")
+                    self.logger.info(f"   ✅ Bullish MACD crossover detected (histogram closed: {histogram_closed:.6f} > 0)")
                 else:
                     # Bullish cross but histogram still negative = bearish bounce, not bullish signal
-                    self.logger.info(f"   ❌ Bullish crossover rejected - histogram still negative ({histogram_current:.6f})")
+                    self.logger.info(f"   ❌ Bullish crossover rejected - histogram closed still negative ({histogram_closed:.6f})")
                     return None
             else:  # bearish_cross
-                if histogram_current < 0:
+                if histogram_closed < 0:
                     signal_direction = 'BEAR'
-                    self.logger.info("   ✅ Bearish MACD crossover detected (histogram negative)")
+                    self.logger.info(f"   ✅ Bearish MACD crossover detected (histogram closed: {histogram_closed:.6f} < 0)")
                 else:
                     # Bearish cross but histogram still positive = bullish pullback, not bearish signal
-                    self.logger.info(f"   ❌ Bearish crossover rejected - histogram still positive ({histogram_current:.6f})")
+                    self.logger.info(f"   ❌ Bearish crossover rejected - histogram closed still positive ({histogram_closed:.6f})")
                     return None
 
             # STEP 2.5: Validate Histogram Size (with 3-bar expansion window)
