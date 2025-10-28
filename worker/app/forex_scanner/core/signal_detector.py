@@ -360,18 +360,23 @@ class SignalDetector:
             return None
 
     def detect_macd_ema_signals(
-        self, 
-        epic: str, 
-        pair: str, 
+        self,
+        epic: str,
+        pair: str,
         spread_pips: float = 1.5,
         timeframe: str = None
     ) -> Optional[Dict]:
         """
         Detect MACD + EMA 200 signals with Multi-Timeframe Analysis
+
+        🔒 HARD-CODED: MACD strategy ALWAYS uses 1H timeframe
         """
-        # Use default timeframe if not specified
-        timeframe = self._get_default_timeframe(timeframe)
-        
+        # 🔒 CRITICAL FIX: Force 1H timeframe for MACD strategy (ignore scanner default)
+        # The MACD strategy's internal timeframe lock at macd_strategy.py:76 was ineffective
+        # because data was already fetched at the wrong timeframe. This is the correct place to fix it.
+        timeframe = '1h'
+        self.logger.info(f"🔒 [MACD] Forcing 1H timeframe for {epic} (overriding scanner default)")
+
         try:
             # Get enhanced data with MACD indicators pre-calculated
             df = self.data_fetcher.get_enhanced_data(

@@ -45,11 +45,11 @@ class DataFetcher:
         self.behavior_analyzer = BehaviorAnalyzer()
         self.timezone_manager = TimezoneManager(user_timezone)
         
-        # Performance optimizations
-        self.cache_enabled = getattr(config, 'ENABLE_DATA_CACHE', True)
-        self.reduced_lookback = getattr(config, 'REDUCED_LOOKBACK_HOURS', True)
-        self.lazy_indicators = getattr(config, 'LAZY_INDICATOR_LOADING', True)
-        self.batch_size = getattr(config, 'DATA_BATCH_SIZE', 2000)
+        # Performance optimizations (use system_config for performance settings)
+        self.cache_enabled = getattr(system_config, 'ENABLE_DATA_CACHE', True)
+        self.reduced_lookback = getattr(system_config, 'REDUCED_LOOKBACK_HOURS', True)
+        self.lazy_indicators = getattr(system_config, 'LAZY_INDICATOR_LOADING', True)
+        self.batch_size = getattr(system_config, 'DATA_BATCH_SIZE', 2000)
         
         # Cache for recently fetched data
         self._data_cache = {}
@@ -63,6 +63,7 @@ class DataFetcher:
         self.logger.info(f"   Cache enabled: {self.cache_enabled}")
         self.logger.info(f"   Reduced lookback: {self.reduced_lookback}")
         self.logger.info(f"   Lazy indicators: {self.lazy_indicators}")
+        self.logger.info(f"   Batch size: {self.batch_size}")
         self.logger.info(f"   KAMA support: {'✅' if getattr(config, 'KAMA_STRATEGY', False) else '❌'}")
         
         # FIXED: Log strategy enablement status at startup

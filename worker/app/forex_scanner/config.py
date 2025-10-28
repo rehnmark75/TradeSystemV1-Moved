@@ -107,7 +107,7 @@ MIN_CONFIDENCE = 0.60  # 60% confidence (only generate signals that meet executi
 ENABLE_DATA_CACHE = False          # 5-minute data caching (DISABLED for fresh data)
 REDUCED_LOOKBACK_HOURS = True      # Use smart lookback times
 LAZY_INDICATOR_LOADING = True      # Load indicators on demand
-DATA_BATCH_SIZE = 2000            # Limit query results
+DATA_BATCH_SIZE = 10000           # Batch size for query results (increased for 1H resampling from 5m data)
 
 # Conditional indicators (disable unused ones)
 ENABLE_SUPPORT_RESISTANCE = True
