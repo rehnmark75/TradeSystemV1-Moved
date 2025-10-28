@@ -762,6 +762,7 @@ class SimpleLogParser:
                         current_match = re.search(r'current=([0-9.]+)', line)
                         profit_match = re.search(r'profit=([+-]?\d+)pts', line)
                         trigger_match = re.search(r'trigger=(\d+)pts', line)
+                        # Updated to handle full epic format (not just the pair code)
                         epic_match = re.search(r'CS\.D\.([A-Z]{6})\.(?:MINI|CEEM)\.IP', line)
 
                         # Calculate additional metrics

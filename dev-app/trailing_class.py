@@ -1313,7 +1313,7 @@ class EnhancedTradeProcessor:
                 profit_points = int(abs(moved_in_favor) / point_value)
                 is_profitable_for_breakeven = moved_in_favor >= break_even_trigger
                 
-                self.logger.info(f"📊 [PROFIT] Trade {trade.id} BUY: "
+                self.logger.info(f"📊 [PROFIT] Trade {trade.id} {trade.symbol} BUY: "
                             f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
                             f"profit={profit_points}pts, trigger={break_even_trigger_points}pts")
                 
@@ -1322,7 +1322,7 @@ class EnhancedTradeProcessor:
                 profit_points = int(abs(moved_in_favor) / point_value)
                 is_profitable_for_breakeven = moved_in_favor >= break_even_trigger
                 
-                self.logger.info(f"📊 [PROFIT] Trade {trade.id} SELL: "
+                self.logger.info(f"📊 [PROFIT] Trade {trade.id} {trade.symbol} SELL: "
                             f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
                             f"profit={profit_points}pts, trigger={break_even_trigger_points}pts")
 
