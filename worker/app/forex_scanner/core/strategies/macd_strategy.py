@@ -381,12 +381,8 @@ class MACDStrategy(BaseStrategy):
                 signal_direction = 'BEAR'
                 self.logger.info("   ✅ Bearish MACD crossover detected")
 
-            # STEP 2.5: Validate Histogram Size
+            # STEP 2.5: Validate Histogram Size (with 3-bar expansion window)
             self.logger.info("📊 Step 2.5: Checking histogram strength...")
-
-            # Get histogram value
-            histogram = df['macd_histogram'].iloc[-1] if 'macd_histogram' in df.columns else (macd_current - signal_current)
-            histogram_abs = abs(histogram)
 
             # Get pair-specific threshold from config
             pair = epic.split('.')[2] if '.' in epic else epic
@@ -398,14 +394,34 @@ class MACDStrategy(BaseStrategy):
             else:
                 min_histogram = threshold_config
 
-            self.logger.info(f"   Histogram: {histogram:.6f} (abs: {histogram_abs:.6f})")
+            # 🔥 EXPANSION WINDOW: Check histogram over last 3 bars (current + 2 previous)
+            # This allows the histogram to "catch up" after crossover
+            expansion_window = 3
+            histogram_column = 'macd_histogram' if 'macd_histogram' in df.columns else None
+
+            if histogram_column:
+                # Get last N histogram values
+                recent_histograms = df[histogram_column].iloc[-expansion_window:].values
+            else:
+                # Calculate from MACD line and signal
+                recent_histograms = []
+                for i in range(-expansion_window, 0):
+                    hist = df['macd_line'].iloc[i] - df['macd_signal'].iloc[i]
+                    recent_histograms.append(hist)
+
+            # Find the maximum absolute histogram value in the window
+            max_histogram_abs = max([abs(h) for h in recent_histograms])
+            current_histogram = recent_histograms[-1]
+
+            self.logger.info(f"   Current histogram: {current_histogram:.6f} (abs: {abs(current_histogram):.6f})")
+            self.logger.info(f"   Max histogram in last {expansion_window} bars: {max_histogram_abs:.6f}")
             self.logger.info(f"   Min threshold for {pair}: {min_histogram:.6f}")
 
-            if histogram_abs < min_histogram:
-                self.logger.info(f"   ❌ Histogram too weak: {histogram_abs:.6f} < {min_histogram:.6f}")
+            if max_histogram_abs < min_histogram:
+                self.logger.info(f"   ❌ Histogram too weak: max {max_histogram_abs:.6f} < {min_histogram:.6f} (checked {expansion_window} bars)")
                 return None
 
-            self.logger.info(f"   ✅ Histogram strength validated")
+            self.logger.info(f"   ✅ Histogram strength validated (max in {expansion_window}-bar window)")
 
             # STEP 3: Validate Against H4 Trend
             self.logger.info("📊 Step 3: Validating against H4 trend...")
