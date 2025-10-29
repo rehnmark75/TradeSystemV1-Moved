@@ -636,3 +636,68 @@ MACD_STRONG_CONSENSUS_PENALTY = -0.15  # -15% confidence penalty
 # Market bias conflict (bearish market): -10%
 # Swing proximity (1.45 pips from resistance): -15% (from swing validator)
 # Final confidence: 37% → Would be REJECTED (below 60% minimum)
+
+# =============================================================================
+# MULTI-TIMEFRAME MACD ALIGNMENT & MARKET STRUCTURE TRACKING
+# =============================================================================
+# Two-part confluence validation:
+#
+# 1. MACD Alignment Check (Affects Confidence):
+#    - Verify 1H MACD and 4H MACD both align with signal direction
+#    - Both must be bullish for BULL signals (or bearish for BEAR signals)
+#    - Provides confidence boost when both timeframes agree
+#
+# 2. Market Structure Tracking (Metadata Only):
+#    - Track the last BOS/CHOCH direction on H4 (bullish or bearish)
+#    - Type (BOS vs CHOCH) doesn't matter - only the direction
+#    - Historical tracking - doesn't need to happen at signal time
+#    - Stored as metadata for analysis, doesn't affect confidence
+#
+# Example Flow:
+# 1H MACD BULL crossover detected
+#   ↓
+# Check 1H MACD direction → Bullish (histogram > 0) ✓
+#   ↓
+# Check 4H MACD direction → Bullish (histogram > 0) ✓
+#   ↓
+# Confidence boost: +10% (both timeframes aligned)
+#   ↓
+# Track last H4 structure break → Bullish BOS (metadata only)
+#   ↓
+# Generate BULL signal with enhanced confidence
+#
+# =============================================================================
+
+# Enable multi-timeframe MACD alignment check
+MACD_MTF_MACD_ALIGNMENT_ENABLED = True       # Check 1H and 4H MACD alignment
+MACD_MTF_ALIGNMENT_CONFIDENCE_BOOST = 0.10   # +10% when both MACD timeframes align
+MACD_MTF_REQUIRE_ALIGNMENT = True            # BLOCK signals if MACD timeframes don't align
+
+# Enable H4 market structure alignment requirement
+MACD_H4_STRUCTURE_ALIGNMENT_ENABLED = True   # Track and REQUIRE structure alignment
+MACD_H4_REQUIRE_STRUCTURE_ALIGNMENT = True   # Block signals if structure doesn't align
+
+# Structure analysis configuration
+MACD_H4_STRUCTURE_CONFIG = {
+    'swing_length': 5,              # Bars for swing point detection (5 = looks 5 bars left/right)
+    'structure_confirmation': 3,     # Bars to confirm structure break (prevents false breaks)
+    'min_structure_significance': 0.5,  # Minimum significance score (0-1 scale, 0.5 = moderate significance)
+}
+
+# Lookback period for structure tracking (doesn't need to be recent)
+MACD_H4_STRUCTURE_LOOKBACK_BARS = 50         # Check last 50 H4 bars (~200 hours) for structure breaks
+
+# Logging configuration
+MACD_H4_LOG_STRUCTURE_ANALYSIS = True        # Log structure break details for debugging
+MACD_LOG_MTF_ALIGNMENT = True                 # Log multi-timeframe MACD alignment checks
+
+# Notes:
+# - BOS (Break of Structure): Price breaks previous swing in trend direction (continuation)
+# - CHOCH (Change of Character): Price breaks previous swing counter-trend (reversal)
+# - We only care about direction (bullish/bearish), not type (BOS/CHOCH)
+# - Structure direction MUST align with signal direction - we don't trade against market structure
+# - BULL signals require bullish structure (last BOS/CHOCH was bullish)
+# - BEAR signals require bearish structure (last BOS/CHOCH was bearish)
+# - Signals are BLOCKED if structure doesn't align
+# - 1H MACD = current signal timeframe
+# - 4H MACD = higher timeframe trend filter

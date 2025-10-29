@@ -31,6 +31,7 @@ from .helpers.macd_fibonacci_calculator import FibonacciCalculator
 from .helpers.macd_pattern_detector import CandlestickPatternDetector
 from .helpers.macd_confluence_analyzer import ConfluenceZoneAnalyzer
 from .helpers.macd_mtf_confluence_filter import MACDMultiTimeframeFilter
+from .helpers.smc_market_structure import SMCMarketStructure
 
 try:
     from configdata import config
@@ -178,6 +179,45 @@ class MACDStrategy(BaseStrategy):
         self.h4_filter_enabled = getattr(config_macd_strategy, 'MACD_CONFLUENCE_H4_FILTER_ENABLED', True) if config_macd_strategy else True
         self.require_pattern = getattr(config_macd_strategy, 'MACD_CONFLUENCE_REQUIRE_PATTERN', True) if config_macd_strategy else True
         self.min_pattern_quality = getattr(config_macd_strategy, 'MACD_CONFLUENCE_MIN_PATTERN_QUALITY', 60) if config_macd_strategy else 60
+
+        # Multi-Timeframe MACD Alignment & Market Structure Tracking
+        self.mtf_macd_alignment_enabled = getattr(config_macd_strategy, 'MACD_MTF_MACD_ALIGNMENT_ENABLED', True) if config_macd_strategy else True
+        self.mtf_alignment_boost = getattr(config_macd_strategy, 'MACD_MTF_ALIGNMENT_CONFIDENCE_BOOST', 0.10) if config_macd_strategy else 0.10
+        self.mtf_require_alignment = getattr(config_macd_strategy, 'MACD_MTF_REQUIRE_ALIGNMENT', False) if config_macd_strategy else False
+        self.log_mtf_alignment = getattr(config_macd_strategy, 'MACD_LOG_MTF_ALIGNMENT', True) if config_macd_strategy else True
+
+        # H4 Market Structure Alignment (REQUIRED - we don't trade against market structure)
+        self.h4_structure_alignment_enabled = getattr(config_macd_strategy, 'MACD_H4_STRUCTURE_ALIGNMENT_ENABLED', True) if config_macd_strategy else True
+        self.h4_require_structure_alignment = getattr(config_macd_strategy, 'MACD_H4_REQUIRE_STRUCTURE_ALIGNMENT', True) if config_macd_strategy else True
+
+        if self.h4_structure_alignment_enabled:
+            self.structure_analyzer = SMCMarketStructure(
+                logger=self.logger,
+                data_fetcher=self.data_fetcher
+            )
+
+            # Load structure configuration
+            self.h4_structure_config = getattr(config_macd_strategy, 'MACD_H4_STRUCTURE_CONFIG', {
+                'swing_length': 5,
+                'structure_confirmation': 3,
+                'min_structure_significance': 0.5
+            }) if config_macd_strategy else {
+                'swing_length': 5,
+                'structure_confirmation': 3,
+                'min_structure_significance': 0.5
+            }
+
+            self.h4_structure_lookback = getattr(config_macd_strategy, 'MACD_H4_STRUCTURE_LOOKBACK_BARS', 50) if config_macd_strategy else 50
+            self.h4_log_structure = getattr(config_macd_strategy, 'MACD_H4_LOG_STRUCTURE_ANALYSIS', True) if config_macd_strategy else True
+
+            alignment_mode = "BLOCKING" if self.h4_require_structure_alignment else "ADVISORY"
+            self.logger.info(f"🏗️  H4 Structure alignment enabled ({alignment_mode} mode)")
+        else:
+            self.structure_analyzer = None
+            self.logger.info(f"🏗️  H4 Structure alignment disabled")
+
+        if self.mtf_macd_alignment_enabled:
+            self.logger.info(f"📊 Multi-timeframe MACD alignment check enabled (+{self.mtf_alignment_boost*100:.0f}% boost)")
 
         self.logger.info(f"🔧 Confluence components: H4 filter={self.h4_filter_enabled}, "
                         f"Require pattern={self.require_pattern}, Min quality={self.min_pattern_quality}")
@@ -468,6 +508,42 @@ class MACDStrategy(BaseStrategy):
 
             self.logger.info(f"   ✅ {signal_direction} signal aligns with H4 {h4_trend} trend")
 
+            # STEP 3.5: Multi-Timeframe MACD Alignment Check (NEW)
+            mtf_alignment_data = None
+            structure_data = None
+
+            if self.mtf_macd_alignment_enabled:
+                self.logger.info("📊 Step 3.5: Checking 1H & 4H MACD alignment...")
+
+                mtf_alignment_data = self._check_mtf_macd_alignment(
+                    df_1h=df,
+                    h4_data=h4_data,
+                    signal_direction=signal_direction
+                )
+
+                # Optional: Reject if not aligned (if hard filter enabled)
+                if self.mtf_require_alignment and not mtf_alignment_data['aligned']:
+                    self.logger.info(f"   🚫 Signal rejected - MACD timeframes not aligned (hard filter enabled)")
+                    return None
+
+            # STEP 3.6: Validate H4 Market Structure Alignment
+            if self.h4_structure_alignment_enabled:
+                self.logger.info("🏗️  Step 3.6: Validating H4 market structure alignment...")
+
+                structure_data = self._track_h4_market_structure(
+                    epic=epic,
+                    current_time=current_time,
+                    signal_direction=signal_direction
+                )
+
+                # Block signal if structure doesn't align (we don't trade against market structure)
+                if self.h4_require_structure_alignment and structure_data.get('break_type'):
+                    if not structure_data.get('aligned', False):
+                        self.logger.info(f"   🚫 Signal REJECTED - Market structure misaligned")
+                        self.logger.info(f"      Signal: {signal_direction}, Structure: {structure_data['direction']}")
+                        self.logger.info(f"      We don't trade against market structure trend!")
+                        return None
+
             # STEP 4: Calculate Stop Loss and Take Profit
             self.logger.info("💰 Step 4: Calculating SL/TP...")
 
@@ -482,13 +558,15 @@ class MACDStrategy(BaseStrategy):
                 self.logger.warning("Could not calculate valid SL/TP")
                 return None
 
-            # Validate R:R ratio
+            # Validate R:R ratio (risk management filter)
             risk = abs(current_price - stop_loss)
             reward = abs(take_profit - current_price)
             rr_ratio = reward / risk if risk > 0 else 0
 
             if rr_ratio < self.min_rr_ratio:
-                self.logger.info(f"   R:R too low: {rr_ratio:.2f} < {self.min_rr_ratio}")
+                self.logger.info(f"   🚫 Signal REJECTED - R:R ratio too low")
+                self.logger.info(f"      Current R:R: 1:{rr_ratio:.2f} | Required: 1:{self.min_rr_ratio:.2f}")
+                self.logger.info(f"      Risk: {risk:.5f} | Reward: {reward:.5f}")
                 return None
 
             self.logger.info(f"   ✅ SL: {stop_loss:.5f} | TP: {take_profit:.5f} | R:R: 1:{rr_ratio:.2f}")
@@ -509,6 +587,11 @@ class MACDStrategy(BaseStrategy):
             if histogram_abs > 0.0001:
                 confidence += 0.10  # +10% for strong H4 trend
                 self.logger.info("   +10% for strong H4 histogram")
+
+            # Multi-Timeframe MACD Alignment bonus
+            if mtf_alignment_data and mtf_alignment_data['aligned']:
+                confidence += mtf_alignment_data['confidence_adjustment']
+                self.logger.info(f"   +{mtf_alignment_data['confidence_adjustment']*100:.0f}% for 1H & 4H MACD alignment")
 
             # Cap at 90%
             confidence = min(confidence, 0.90)
@@ -545,12 +628,31 @@ class MACDStrategy(BaseStrategy):
                 'signal': signal_direction  # Also keep for backward compatibility
             }
 
+            # Add MTF MACD alignment metadata if available
+            if mtf_alignment_data:
+                signal['mtf_macd_aligned'] = mtf_alignment_data['aligned']
+                signal['1h_macd_histogram'] = round(mtf_alignment_data['1h_histogram'], 6)
+                signal['1h_macd_direction'] = mtf_alignment_data['1h_direction']
+                signal['4h_macd_direction'] = mtf_alignment_data['4h_direction']
+
+            # Add H4 market structure metadata if available (metadata only)
+            if structure_data and structure_data['break_type'] is not None:
+                signal['h4_structure_break_type'] = structure_data['break_type']
+                signal['h4_structure_direction'] = structure_data['direction']
+                signal['h4_structure_significance'] = round(structure_data['significance'], 2)
+                signal['h4_structure_bars_ago'] = structure_data['bars_ago']
+
             self.logger.info(f"\n{'='*60}")
             self.logger.info(f"🎯 SIGNAL GENERATED: {signal_direction}")
             self.logger.info(f"   Entry: {current_price:.5f}")
             self.logger.info(f"   SL: {stop_loss:.5f} | TP: {take_profit:.5f}")
             self.logger.info(f"   R:R: 1:{rr_ratio:.2f} | Confidence: {confidence:.0%}")
             self.logger.info(f"   H4 Trend: {h4_trend} (histogram: {h4_data['histogram']:.6f})")
+            if mtf_alignment_data:
+                alignment_status = "✅ ALIGNED" if mtf_alignment_data['aligned'] else "❌ NOT ALIGNED"
+                self.logger.info(f"   MTF MACD: {alignment_status} (1H: {mtf_alignment_data['1h_direction']}, 4H: {mtf_alignment_data['4h_direction']})")
+            if structure_data and structure_data['break_type']:
+                self.logger.info(f"   H4 Structure: {structure_data['break_type']} {structure_data['direction']} ({structure_data['bars_ago']} bars ago)")
             self.logger.info(f"   MACD Crossover: {macd_current:.6f} > {signal_current:.6f}")
             self.logger.info(f"{'='*60}\n")
 
@@ -559,6 +661,198 @@ class MACDStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error(f"Error in detect_signal: {e}", exc_info=True)
             return None
+
+    def _check_mtf_macd_alignment(self,
+                                  df_1h: pd.DataFrame,
+                                  h4_data: Dict,
+                                  signal_direction: str) -> Dict:
+        """
+        Check if 1H and 4H MACD both align with signal direction.
+        This is a key confluence check that affects confidence.
+
+        Args:
+            df_1h: 1H DataFrame with MACD indicators
+            h4_data: H4 MACD data from mtf_filter
+            signal_direction: 'BULL' or 'BEAR'
+
+        Returns:
+            Dict with alignment data:
+            {
+                'aligned': bool,              # Both timeframes align
+                'confidence_adjustment': float,  # +0.10 if aligned, 0 if not
+                '1h_histogram': float,
+                '4h_histogram': float,
+                '1h_direction': str,          # 'bullish', 'bearish', 'neutral'
+                '4h_direction': str
+            }
+        """
+        result = {
+            'aligned': False,
+            'confidence_adjustment': 0.0,
+            '1h_histogram': 0.0,
+            '4h_histogram': 0.0,
+            '1h_direction': 'neutral',
+            '4h_direction': 'neutral'
+        }
+
+        try:
+            # Get 1H MACD histogram
+            if 'macd_histogram' in df_1h.columns:
+                h1_histogram = df_1h['macd_histogram'].iloc[-1]
+            else:
+                h1_histogram = df_1h['macd_line'].iloc[-1] - df_1h['macd_signal'].iloc[-1]
+
+            result['1h_histogram'] = h1_histogram
+
+            # Determine 1H direction
+            if h1_histogram > 0.00001:
+                result['1h_direction'] = 'bullish'
+            elif h1_histogram < -0.00001:
+                result['1h_direction'] = 'bearish'
+            else:
+                result['1h_direction'] = 'neutral'
+
+            # Get 4H MACD histogram
+            h4_histogram = h4_data.get('histogram', 0.0)
+            result['4h_histogram'] = h4_histogram
+
+            # Determine 4H direction
+            if h4_histogram > 0.00001:
+                result['4h_direction'] = 'bullish'
+            elif h4_histogram < -0.00001:
+                result['4h_direction'] = 'bearish'
+            else:
+                result['4h_direction'] = 'neutral'
+
+            # Check alignment
+            if signal_direction == 'BULL':
+                # For BULL signals, both must be bullish
+                result['aligned'] = (result['1h_direction'] == 'bullish' and result['4h_direction'] == 'bullish')
+            else:  # BEAR
+                # For BEAR signals, both must be bearish
+                result['aligned'] = (result['1h_direction'] == 'bearish' and result['4h_direction'] == 'bearish')
+
+            # Apply confidence boost if aligned
+            if result['aligned']:
+                result['confidence_adjustment'] = self.mtf_alignment_boost
+
+            if self.log_mtf_alignment:
+                self.logger.info(f"   1H MACD: {result['1h_direction']} (histogram: {h1_histogram:.6f})")
+                self.logger.info(f"   4H MACD: {result['4h_direction']} (histogram: {h4_histogram:.6f})")
+                self.logger.info(f"   Alignment: {'✅ ALIGNED' if result['aligned'] else '❌ NOT ALIGNED'}")
+                if result['aligned']:
+                    self.logger.info(f"   Confidence boost: +{result['confidence_adjustment']*100:.0f}%")
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Error checking MTF MACD alignment: {e}", exc_info=True)
+            return result
+
+    def _track_h4_market_structure(self,
+                                   epic: str,
+                                   current_time,
+                                   signal_direction: str) -> Dict:
+        """
+        Track the last H4 market structure break (BOS/CHOCH) and validate alignment.
+
+        IMPORTANT: We don't trade against market structure!
+        - BULL signals require bullish structure (last BOS/CHOCH was bullish)
+        - BEAR signals require bearish structure (last BOS/CHOCH was bearish)
+
+        Args:
+            epic: Currency pair epic
+            current_time: Current timestamp
+            signal_direction: 'BULL' or 'BEAR'
+
+        Returns:
+            Dict with structure data:
+            {
+                'break_type': str,               # 'BOS', 'CHOCH', or None
+                'direction': str,                # 'bullish', 'bearish', or 'neutral'
+                'significance': float,           # 0-1 score
+                'bars_ago': int,                 # How many bars ago the break occurred
+                'aligned': bool                  # Whether structure aligns with signal direction
+            }
+        """
+        result = {
+            'break_type': None,
+            'direction': 'neutral',
+            'significance': 0.0,
+            'bars_ago': None,
+            'aligned': False
+        }
+
+        try:
+            if not self.structure_analyzer or not self.data_fetcher:
+                return result
+
+            # Fetch H4 data for structure analysis
+            bars_needed = max(100, self.h4_structure_lookback + 20)
+
+            # Extract pair from epic (e.g., CS.D.EURUSD.MINI.IP -> EURUSD)
+            pair = epic.split('.')[2] if '.' in epic else epic
+
+            # Calculate hours needed (bars * 4 hours per bar)
+            lookback_hours = bars_needed * 4
+
+            h4_df = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='4h',
+                lookback_hours=lookback_hours
+            )
+
+            if h4_df is None or len(h4_df) < 20:
+                return result
+
+            # Run SMC structure analysis
+            h4_with_structure = self.structure_analyzer.analyze_market_structure(
+                df=h4_df,
+                config=self.h4_structure_config,
+                epic=epic,
+                timeframe='4h'
+            )
+
+            if h4_with_structure is None or len(h4_with_structure) == 0:
+                return result
+
+            # Look for structure breaks in lookback window
+            recent_data = h4_with_structure.tail(self.h4_structure_lookback)
+
+            # Find structure breaks
+            if 'structure_break' in recent_data.columns:
+                structure_breaks = recent_data[recent_data['structure_break'] == True]
+
+                if len(structure_breaks) > 0:
+                    # Get most recent structure break
+                    last_break = structure_breaks.iloc[-1]
+
+                    result['break_type'] = last_break.get('break_type', None)  # 'BOS' or 'CHOCH'
+                    result['direction'] = last_break.get('break_direction', 'neutral')  # 'bullish' or 'bearish'
+                    result['significance'] = last_break.get('structure_significance', 0.0)
+
+                    # Calculate how many bars ago
+                    break_index = structure_breaks.index[-1]
+                    current_index = h4_with_structure.index[-1]
+                    result['bars_ago'] = len(h4_with_structure.loc[break_index:current_index]) - 1
+
+                    # Check alignment with signal direction
+                    signal_wants_bullish = (signal_direction == 'BULL')
+                    structure_is_bullish = (result['direction'] == 'bullish')
+                    result['aligned'] = (signal_wants_bullish == structure_is_bullish)
+
+                    if self.h4_log_structure:
+                        self.logger.info(f"   Last H4 structure: {result['break_type']} {result['direction']} "
+                                        f"({result['bars_ago']} bars ago, sig: {result['significance']:.2f})")
+                        alignment_status = "✅ ALIGNED" if result['aligned'] else "❌ MISALIGNED"
+                        self.logger.info(f"   Structure vs Signal: {alignment_status} (signal: {signal_direction})")
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Error tracking H4 market structure: {e}", exc_info=True)
+            return result
 
     def _calculate_simple_sl_tp(self,
                                df: pd.DataFrame,
