@@ -597,6 +597,13 @@ class MACDStrategy(BaseStrategy):
             confidence = min(confidence, 0.90)
             self.logger.info(f"   Final confidence: {confidence:.0%}")
 
+            # Calculate stop and limit distances in points (for API order placement)
+            pip_multiplier = 100 if 'JPY' in epic else 10000
+            stop_distance_points = int(abs(current_price - stop_loss) * pip_multiplier)
+            limit_distance_points = int(abs(take_profit - current_price) * pip_multiplier)
+
+            self.logger.info(f"   SL/TP distances: {stop_distance_points} / {limit_distance_points} points")
+
             # BUILD SIGNAL (with correct field names for validator)
             signal = {
                 # Core fields (validator expects these exact names)
@@ -605,10 +612,15 @@ class MACDStrategy(BaseStrategy):
                 'price': current_price,  # Entry price
                 'epic': epic,
 
-                # Trading levels
+                # Trading levels (prices)
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
                 'entry_price': current_price,  # Also keep for compatibility
+
+                # Trading levels (distances in points - for API order placement)
+                'stop_distance': stop_distance_points,
+                'limit_distance': limit_distance_points,
+                'use_provided_sl_tp': True,  # Tell API to use these values instead of calculating ATR
 
                 # Strategy metadata
                 'strategy': 'macd_confluence',  # Keep name for validator compatibility
@@ -645,7 +657,7 @@ class MACDStrategy(BaseStrategy):
             self.logger.info(f"\n{'='*60}")
             self.logger.info(f"🎯 SIGNAL GENERATED: {signal_direction}")
             self.logger.info(f"   Entry: {current_price:.5f}")
-            self.logger.info(f"   SL: {stop_loss:.5f} | TP: {take_profit:.5f}")
+            self.logger.info(f"   SL: {stop_loss:.5f} ({stop_distance_points}pt) | TP: {take_profit:.5f} ({limit_distance_points}pt)")
             self.logger.info(f"   R:R: 1:{rr_ratio:.2f} | Confidence: {confidence:.0%}")
             self.logger.info(f"   H4 Trend: {h4_trend} (histogram: {h4_data['histogram']:.6f})")
             if mtf_alignment_data:
