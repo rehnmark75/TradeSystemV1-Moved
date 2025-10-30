@@ -221,6 +221,19 @@ class SMCStructureStrategy:
             entry_price = rejection_pattern['entry_price']
             risk_pips = abs(entry_price - stop_loss) / pip_value
 
+            # Validate entry vs stop loss relationship (catch logic errors)
+            if trend_analysis['trend'] == 'BULL':
+                if entry_price <= stop_loss:
+                    self.logger.error(f"❌ Invalid BULL entry: entry {entry_price:.5f} <= stop {stop_loss:.5f}")
+                    self.logger.error(f"   This indicates a bug in pattern entry logic!")
+                    return None
+            else:  # BEAR
+                if entry_price >= stop_loss:
+                    self.logger.error(f"❌ Invalid BEAR entry: entry {entry_price:.5f} >= stop {stop_loss:.5f}")
+                    self.logger.error(f"   This indicates a bug in pattern entry logic!")
+                    return None
+
+            self.logger.info(f"   ✅ Entry price validation passed")
             self.logger.info(f"   Structure Invalidation: {structure_invalidation:.5f}")
             self.logger.info(f"   Stop Loss: {stop_loss:.5f}")
             self.logger.info(f"   Risk: {risk_pips:.1f} pips")

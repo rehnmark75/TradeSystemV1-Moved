@@ -122,8 +122,9 @@ SMC_HAMMER_MAX_OPPOSITE_WICK = 0.15  # Opposite wick 15% or less
 
 # Stop loss buffer (pips)
 # Additional pips beyond structure invalidation point
-# 5 pips provides cushion for spread and minor wicks
-SMC_SL_BUFFER_PIPS = 5
+# 15 pips provides realistic cushion for 1H structure + spread + noise
+# (Increased from 5 pips - was too tight for structure-based stops)
+SMC_SL_BUFFER_PIPS = 15
 
 # Minimum Risk:Reward ratio
 # Trade must offer at least this R:R to be valid
@@ -156,6 +157,39 @@ SMC_PARTIAL_PROFIT_RR = 1.5
 
 # Move stop to breakeven after partial?
 SMC_MOVE_SL_TO_BE_AFTER_PARTIAL = True
+
+# ============================================================================
+# TRAILING STOP SYSTEM (Progressive 3-Stage)
+# ============================================================================
+
+# Enable trailing stop
+# False = use fixed TP only (safer for structure-based strategy)
+# True = enable R:R-based progressive trailing stop
+SMC_TRAILING_ENABLED = False
+
+# Trailing stop mode (if enabled)
+# 'structure_priority' = Only trail on exceptional moves (>3R), preserve structure targets
+# 'aggressive' = Trail all profitable trades
+# 'conservative' = Trail only after 2R achieved
+SMC_TRAILING_MODE = 'structure_priority'
+
+# Minimum R:R before trailing starts (for structure_priority mode)
+# 3.0 = only enable trailing if trade reaches 3R (exceptional move beyond structure target)
+# This preserves structure-based TP for most trades
+SMC_TRAILING_MIN_RR = 3.0
+
+# Progressive trailing stages (R:R thresholds)
+# Stage 1: Lock in small profit
+SMC_TRAILING_STAGE1_RR = 1.5  # At 1.5R, lock in 4 pips profit
+SMC_TRAILING_STAGE1_LOCK_PIPS = 4
+
+# Stage 2: Lock in meaningful profit
+SMC_TRAILING_STAGE2_RR = 2.5  # At 2.5R, lock in 12 pips profit
+SMC_TRAILING_STAGE2_LOCK_PIPS = 12
+
+# Stage 3: Dynamic trailing (after structure target exceeded)
+SMC_TRAILING_STAGE3_RR = 3.0  # At 3R, switch to dynamic trailing
+SMC_TRAILING_STAGE3_DISTANCE_PIPS = 20  # Trail 20 pips behind peak
 
 # ============================================================================
 # FILTERS AND CONFLUENCE

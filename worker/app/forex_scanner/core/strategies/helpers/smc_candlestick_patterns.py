@@ -118,7 +118,7 @@ class SMCCandlestickPatterns:
                 return {
                     'pattern_type': 'bullish_pin_bar',
                     'strength': strength,
-                    'entry_price': candle['high'],  # Enter above pin bar high
+                    'entry_price': candle['close'],  # Enter at close (conservative entry)
                     'rejection_level': candle['low'],
                     'description': f"Bullish pin bar: {lower_wick_ratio*100:.0f}% lower wick, body {body_ratio*100:.0f}%"
                 }
@@ -134,7 +134,7 @@ class SMCCandlestickPatterns:
                 return {
                     'pattern_type': 'bearish_pin_bar',
                     'strength': strength,
-                    'entry_price': candle['low'],  # Enter below pin bar low
+                    'entry_price': candle['close'],  # Enter at close (conservative entry)
                     'rejection_level': candle['high'],
                     'description': f"Bearish pin bar: {upper_wick_ratio*100:.0f}% upper wick, body {body_ratio*100:.0f}%"
                 }
@@ -246,7 +246,7 @@ class SMCCandlestickPatterns:
                 return {
                     'pattern_type': 'hammer',
                     'strength': strength,
-                    'entry_price': candle['high'],
+                    'entry_price': candle['close'],  # Enter at close (conservative entry)
                     'rejection_level': candle['low'],
                     'description': f"Hammer: {lower_wick_ratio*100:.0f}% lower wick"
                 }
@@ -265,7 +265,7 @@ class SMCCandlestickPatterns:
                 return {
                     'pattern_type': 'shooting_star',
                     'strength': strength,
-                    'entry_price': candle['low'],
+                    'entry_price': candle['close'],  # Enter at close (conservative entry)
                     'rejection_level': candle['high'],
                     'description': f"Shooting star: {upper_wick_ratio*100:.0f}% upper wick"
                 }
