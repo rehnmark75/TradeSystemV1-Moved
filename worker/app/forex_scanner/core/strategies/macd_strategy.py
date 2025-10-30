@@ -186,6 +186,22 @@ class MACDStrategy(BaseStrategy):
         self.mtf_require_alignment = getattr(config_macd_strategy, 'MACD_MTF_REQUIRE_ALIGNMENT', False) if config_macd_strategy else False
         self.log_mtf_alignment = getattr(config_macd_strategy, 'MACD_LOG_MTF_ALIGNMENT', True) if config_macd_strategy else True
 
+        # 34 EMA Trend Filter (1H)
+        self.ema_filter_enabled = getattr(config_macd_strategy, 'MACD_EMA_FILTER_ENABLED', True) if config_macd_strategy else True
+        self.ema_filter_period = getattr(config_macd_strategy, 'MACD_EMA_FILTER_PERIOD', 34) if config_macd_strategy else 34
+        self.ema_require_alignment = getattr(config_macd_strategy, 'MACD_EMA_REQUIRE_ALIGNMENT', True) if config_macd_strategy else True
+
+        # Price Extreme Filter (Prevent buying tops / selling bottoms)
+        self.price_extreme_filter_enabled = getattr(config_macd_strategy, 'MACD_PRICE_EXTREME_FILTER_ENABLED', False) if config_macd_strategy else False
+        self.price_extreme_lookback = getattr(config_macd_strategy, 'MACD_PRICE_EXTREME_LOOKBACK', 200) if config_macd_strategy else 200
+        self.price_extreme_threshold = getattr(config_macd_strategy, 'MACD_PRICE_EXTREME_THRESHOLD', 90) if config_macd_strategy else 90
+
+        # Price Structure Validation (Hybrid Approach - MACD + Structure)
+        self.structure_validation_enabled = getattr(config_macd_strategy, 'MACD_PRICE_STRUCTURE_VALIDATION_ENABLED', True) if config_macd_strategy else True
+        self.structure_lookback = getattr(config_macd_strategy, 'MACD_STRUCTURE_LOOKBACK', 30) if config_macd_strategy else 30
+        self.structure_swing_strength = getattr(config_macd_strategy, 'MACD_STRUCTURE_SWING_STRENGTH', 3) if config_macd_strategy else 3
+        self.structure_min_swings = getattr(config_macd_strategy, 'MACD_STRUCTURE_MIN_SWINGS', 2) if config_macd_strategy else 2
+
         # H4 Market Structure Alignment (REQUIRED - we don't trade against market structure)
         self.h4_structure_alignment_enabled = getattr(config_macd_strategy, 'MACD_H4_STRUCTURE_ALIGNMENT_ENABLED', True) if config_macd_strategy else True
         self.h4_require_structure_alignment = getattr(config_macd_strategy, 'MACD_H4_REQUIRE_STRUCTURE_ALIGNMENT', True) if config_macd_strategy else True
@@ -287,6 +303,104 @@ class MACDStrategy(BaseStrategy):
                 swing_lows.append(recent_data['low'].iloc[i])
 
         return swing_highs, swing_lows
+
+    def _validate_price_structure(self, df: pd.DataFrame, signal_direction: str, epic: str) -> bool:
+        """
+        Validate that price structure confirms the signal direction.
+
+        For BULL signals: Requires higher lows (uptrend structure)
+        For BEAR signals: Requires lower highs (downtrend structure)
+
+        Args:
+            df: DataFrame with OHLC data
+            signal_direction: 'BULL' or 'BEAR'
+            epic: Currency pair epic
+
+        Returns:
+            True if structure confirms signal, False otherwise
+        """
+        try:
+            # Get lookback data
+            lookback_bars = min(self.structure_lookback, len(df))
+            if lookback_bars < self.structure_swing_strength * 2 + 5:
+                self.logger.info(f"   ⚠️ Insufficient data for structure check ({lookback_bars} bars) - skipping")
+                return True  # Don't reject if not enough data
+
+            recent_data = df.tail(lookback_bars).copy()
+            recent_data.reset_index(drop=True, inplace=True)
+
+            # Find swing highs and lows
+            swing_highs = []
+            swing_lows = []
+            swing_high_indices = []
+            swing_low_indices = []
+
+            for i in range(self.structure_swing_strength, len(recent_data) - self.structure_swing_strength):
+                # Check for swing high
+                window_high = recent_data['high'].iloc[i - self.structure_swing_strength:i + self.structure_swing_strength + 1]
+                if recent_data['high'].iloc[i] == window_high.max():
+                    swing_highs.append(recent_data['high'].iloc[i])
+                    swing_high_indices.append(i)
+
+                # Check for swing low
+                window_low = recent_data['low'].iloc[i - self.structure_swing_strength:i + self.structure_swing_strength + 1]
+                if recent_data['low'].iloc[i] == window_low.min():
+                    swing_lows.append(recent_data['low'].iloc[i])
+                    swing_low_indices.append(i)
+
+            # Get pip value for logging
+            pair = epic.split('.')[2] if '.' in epic else epic
+            pip_value = 0.01 if 'JPY' in pair else 0.0001
+
+            if signal_direction == 'BULL':
+                # For BULL signals, need higher lows (uptrend)
+                if len(swing_lows) < self.structure_min_swings:
+                    self.logger.info(f"   ⚠️ Not enough swing lows found ({len(swing_lows)} < {self.structure_min_swings}) - allowing signal")
+                    return True
+
+                # Check if recent swing lows are making higher lows
+                last_two_lows = swing_lows[-2:]
+                last_two_low_indices = swing_low_indices[-2:]
+
+                if last_two_lows[-1] > last_two_lows[-2]:
+                    # Higher low confirmed
+                    diff_pips = (last_two_lows[-1] - last_two_lows[-2]) / pip_value
+                    bars_apart = last_two_low_indices[-1] - last_two_low_indices[-2]
+                    self.logger.info(f"   ✅ Higher low detected: {last_two_lows[-2]:.5f} → {last_two_lows[-1]:.5f} (+{diff_pips:.1f} pips, {bars_apart} bars apart)")
+                    return True
+                else:
+                    # Lower low - bearish structure
+                    diff_pips = (last_two_lows[-2] - last_two_lows[-1]) / pip_value
+                    self.logger.info(f"   ❌ Lower low detected: {last_two_lows[-2]:.5f} → {last_two_lows[-1]:.5f} (-{diff_pips:.1f} pips)")
+                    self.logger.info(f"   🚫 Bearish structure conflicts with BULL signal")
+                    return False
+
+            else:  # BEAR
+                # For BEAR signals, need lower highs (downtrend)
+                if len(swing_highs) < self.structure_min_swings:
+                    self.logger.info(f"   ⚠️ Not enough swing highs found ({len(swing_highs)} < {self.structure_min_swings}) - allowing signal")
+                    return True
+
+                # Check if recent swing highs are making lower highs
+                last_two_highs = swing_highs[-2:]
+                last_two_high_indices = swing_high_indices[-2:]
+
+                if last_two_highs[-1] < last_two_highs[-2]:
+                    # Lower high confirmed
+                    diff_pips = (last_two_highs[-2] - last_two_highs[-1]) / pip_value
+                    bars_apart = last_two_high_indices[-1] - last_two_high_indices[-2]
+                    self.logger.info(f"   ✅ Lower high detected: {last_two_highs[-2]:.5f} → {last_two_highs[-1]:.5f} (-{diff_pips:.1f} pips, {bars_apart} bars apart)")
+                    return True
+                else:
+                    # Higher high - bullish structure
+                    diff_pips = (last_two_highs[-1] - last_two_highs[-2]) / pip_value
+                    self.logger.info(f"   ❌ Higher high detected: {last_two_highs[-2]:.5f} → {last_two_highs[-1]:.5f} (+{diff_pips:.1f} pips)")
+                    self.logger.info(f"   🚫 Bullish structure conflicts with BEAR signal")
+                    return False
+
+        except Exception as e:
+            self.logger.error(f"Error validating price structure: {e}", exc_info=True)
+            return True  # Don't reject on error
 
     def detect_signal_auto(self,
                           df: pd.DataFrame,
@@ -461,36 +575,116 @@ class MACDStrategy(BaseStrategy):
             else:
                 min_histogram = threshold_config
 
-            # 🔥 EXPANSION WINDOW: Check histogram over last 3 bars (current + 2 previous)
-            # This captures the initial momentum surge after crossover
-            # Tested alternatives (bars 2-4, 4-bar window, 5-bar window) all underperformed
-            # Empirical data: 3-bar window = ONLY profitable configuration
-            expansion_window = 3
+            # 🔥 IMPROVED: Check CURRENT histogram strength (not just 3-bar MAX)
+            # Previous logic allowed weak entries when MAX was strong but current is weak
+            # New logic: Current histogram must meet threshold AND show momentum expansion
             histogram_column = 'macd_histogram' if 'macd_histogram' in df.columns else None
 
             if histogram_column:
-                # Get last N histogram values
-                recent_histograms = df[histogram_column].iloc[-expansion_window:].values
+                # Get last 3 histogram values
+                recent_histograms = df[histogram_column].iloc[-3:].values
             else:
                 # Calculate from MACD line and signal
                 recent_histograms = []
-                for i in range(-expansion_window, 0):
+                for i in range(-3, 0):
                     hist = df['macd_line'].iloc[i] - df['macd_signal'].iloc[i]
                     recent_histograms.append(hist)
 
-            # Find the maximum absolute histogram value in the window
-            max_histogram_abs = max([abs(h) for h in recent_histograms])
             current_histogram = recent_histograms[-1]
+            previous_histogram = recent_histograms[-2] if len(recent_histograms) >= 2 else 0
 
             self.logger.info(f"   Current histogram: {current_histogram:.6f} (abs: {abs(current_histogram):.6f})")
-            self.logger.info(f"   Max histogram in last {expansion_window} bars: {max_histogram_abs:.6f}")
+            self.logger.info(f"   Previous histogram: {previous_histogram:.6f} (abs: {abs(previous_histogram):.6f})")
             self.logger.info(f"   Min threshold for {pair}: {min_histogram:.6f}")
 
-            if max_histogram_abs < min_histogram:
-                self.logger.info(f"   ❌ Histogram too weak: max {max_histogram_abs:.6f} < {min_histogram:.6f} (checked {expansion_window} bars)")
+            # Check 1: Current histogram must meet minimum threshold
+            current_histogram_abs = abs(current_histogram)
+            if current_histogram_abs < min_histogram:
+                self.logger.info(f"   ❌ Current histogram too weak: {current_histogram_abs:.6f} < {min_histogram:.6f}")
                 return None
 
-            self.logger.info(f"   ✅ Histogram strength validated (max in {expansion_window}-bar window)")
+            # Check 2: Momentum must be expanding (current > previous)
+            previous_histogram_abs = abs(previous_histogram)
+            momentum_expanding = current_histogram_abs > previous_histogram_abs
+
+            if not momentum_expanding:
+                self.logger.info(f"   ❌ Momentum fading: current {current_histogram_abs:.6f} <= previous {previous_histogram_abs:.6f}")
+                return None
+
+            self.logger.info(f"   ✅ Histogram strength validated (current: {current_histogram_abs:.6f}, expanding: +{(current_histogram_abs - previous_histogram_abs):.6f})")
+
+            # STEP 2.6: Price Extreme Filter (Prevent buying tops / selling bottoms)
+            if self.price_extreme_filter_enabled:
+                self.logger.info("📍 Step 2.6: Checking price extreme (prevent buying tops/selling bottoms)...")
+
+                # Get lookback data (ensure we have enough bars)
+                lookback_bars = min(self.price_extreme_lookback, len(df))
+                if lookback_bars < 50:
+                    self.logger.info(f"   ⚠️ Insufficient data for extreme check ({lookback_bars} bars available, need 50+) - skipping")
+                else:
+                    # Get price data for lookback period
+                    lookback_data = df.tail(lookback_bars)
+                    current_price = df['close'].iloc[-1]
+
+                    # Calculate price percentile
+                    # For BULL: percentile tells us what % of prices are BELOW current price
+                    # For BEAR: we need to invert (100 - percentile) to get % of prices ABOVE current price
+                    all_prices = lookback_data['close'].values
+                    prices_below = (all_prices < current_price).sum()
+                    percentile = (prices_below / len(all_prices)) * 100
+
+                    # Get pip value for distance calculations
+                    pair = epic.split('.')[2] if '.' in epic else epic
+                    pip_value = 0.01 if 'JPY' in pair else 0.0001
+
+                    # Get min/max prices in lookback for context
+                    period_low = lookback_data['low'].min()
+                    period_high = lookback_data['high'].max()
+                    price_range = period_high - period_low
+                    distance_from_high = period_high - current_price
+                    distance_from_low = current_price - period_low
+
+                    self.logger.info(f"   Lookback: {lookback_bars} bars (~{lookback_bars//24:.1f} days)")
+                    self.logger.info(f"   Period range: {period_low:.5f} to {period_high:.5f} ({price_range/pip_value:.1f} pips)")
+                    self.logger.info(f"   Current price: {current_price:.5f}")
+                    self.logger.info(f"   Distance from high: {distance_from_high/pip_value:.1f} pips")
+                    self.logger.info(f"   Distance from low: {distance_from_low/pip_value:.1f} pips")
+                    self.logger.info(f"   Price percentile: {percentile:.1f}% (higher than {percentile:.1f}% of prices in period)")
+
+                    # Check for BULL signals at extreme highs
+                    if signal_direction == 'BULL':
+                        if percentile >= self.price_extreme_threshold:
+                            self.logger.info(f"   ❌ BULL signal REJECTED: Buying at extreme high")
+                            self.logger.info(f"   🚫 Price is in top {100-self.price_extreme_threshold}% of {lookback_bars}-bar range")
+                            self.logger.info(f"   🚫 Only {distance_from_high/pip_value:.1f} pips from period high ({period_high:.5f})")
+                            self.logger.info(f"   🚫 This indicates potential exhaustion/reversal point")
+                            return None
+                        else:
+                            self.logger.info(f"   ✅ BULL signal: Price not at extreme (percentile {percentile:.1f}% < threshold {self.price_extreme_threshold}%)")
+
+                    # Check for BEAR signals at extreme lows
+                    elif signal_direction == 'BEAR':
+                        inverted_percentile = 100 - percentile
+                        if inverted_percentile >= self.price_extreme_threshold:
+                            self.logger.info(f"   ❌ BEAR signal REJECTED: Selling at extreme low")
+                            self.logger.info(f"   🚫 Price is in bottom {100-self.price_extreme_threshold}% of {lookback_bars}-bar range")
+                            self.logger.info(f"   🚫 Only {distance_from_low/pip_value:.1f} pips from period low ({period_low:.5f})")
+                            self.logger.info(f"   🚫 This indicates potential exhaustion/reversal point")
+                            return None
+                        else:
+                            self.logger.info(f"   ✅ BEAR signal: Price not at extreme (inverted percentile {inverted_percentile:.1f}% < threshold {self.price_extreme_threshold}%)")
+
+            # STEP 2.7: Price Structure Validation (Hybrid Approach)
+            if self.structure_validation_enabled:
+                self.logger.info("🏗️  Step 2.7: Validating price structure (higher highs/lows)...")
+
+                structure_valid = self._validate_price_structure(df, signal_direction, epic)
+
+                if not structure_valid:
+                    self.logger.info(f"   🚫 Signal REJECTED - Price structure does not confirm {signal_direction} direction")
+                    return None
+
+                self.logger.info(f"   ✅ Price structure confirms {signal_direction} signal")
 
             # STEP 3: Validate Against H4 Trend
             self.logger.info("📊 Step 3: Validating against H4 trend...")
@@ -508,12 +702,41 @@ class MACDStrategy(BaseStrategy):
 
             self.logger.info(f"   ✅ {signal_direction} signal aligns with H4 {h4_trend} trend")
 
-            # STEP 3.5: Multi-Timeframe MACD Alignment Check (NEW)
+            # STEP 3.5: 34 EMA Trend Filter (1H)
+            if self.ema_filter_enabled:
+                self.logger.info("📈 Step 3.5: Checking 34 EMA trend filter...")
+
+                # Calculate 34 EMA on 1H data
+                ema_34 = df['close'].ewm(span=self.ema_filter_period, adjust=False).mean()
+                current_ema = ema_34.iloc[-1]
+                current_price = df['close'].iloc[-1]
+
+                # Check alignment
+                if signal_direction == 'BULL':
+                    ema_aligned = current_price > current_ema
+                    if ema_aligned:
+                        self.logger.info(f"   ✅ BULL signal: Price ({current_price:.5f}) > EMA34 ({current_ema:.5f})")
+                    else:
+                        self.logger.info(f"   ❌ BULL signal: Price ({current_price:.5f}) < EMA34 ({current_ema:.5f})")
+                        if self.ema_require_alignment:
+                            self.logger.info(f"   🚫 Signal REJECTED - Price below EMA (BULL signals require price > EMA)")
+                            return None
+                else:  # BEAR
+                    ema_aligned = current_price < current_ema
+                    if ema_aligned:
+                        self.logger.info(f"   ✅ BEAR signal: Price ({current_price:.5f}) < EMA34 ({current_ema:.5f})")
+                    else:
+                        self.logger.info(f"   ❌ BEAR signal: Price ({current_price:.5f}) > EMA34 ({current_ema:.5f})")
+                        if self.ema_require_alignment:
+                            self.logger.info(f"   🚫 Signal REJECTED - Price above EMA (BEAR signals require price < EMA)")
+                            return None
+
+            # STEP 3.6: Multi-Timeframe MACD Alignment Check
             mtf_alignment_data = None
             structure_data = None
 
             if self.mtf_macd_alignment_enabled:
-                self.logger.info("📊 Step 3.5: Checking 1H & 4H MACD alignment...")
+                self.logger.info("📊 Step 3.6: Checking 1H & 4H MACD alignment...")
 
                 mtf_alignment_data = self._check_mtf_macd_alignment(
                     df_1h=df,
