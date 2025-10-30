@@ -52,6 +52,9 @@ class SMCStructureStrategy:
         self.last_global_signal_time = None
         self.active_signals_count = 0
 
+        # Signal deduplication tracking
+        self.recent_signals = {}  # {pair: [(timestamp, price), ...]}
+
         # Load configuration
         self._load_config()
 
@@ -132,6 +135,51 @@ class SMCStructureStrategy:
         self.pair_cooldowns[pair] = current_time
         self.last_global_signal_time = current_time
         self.active_signals_count += 1
+
+    def _is_duplicate_signal(self, pair: str, entry_price: float, current_time: datetime) -> tuple[bool, str]:
+        """
+        Check if signal is duplicate of recent signal
+
+        Args:
+            pair: Currency pair
+            entry_price: Proposed entry price
+            current_time: Current timestamp
+
+        Returns:
+            (is_duplicate, reason)
+        """
+        # Deduplication window: 4 hours and 5 pips
+        time_window = timedelta(hours=4)
+        price_threshold_pips = 5
+        pip_value = 0.01 if 'JPY' in pair else 0.0001
+        price_threshold = price_threshold_pips * pip_value
+
+        # Initialize pair tracking if needed
+        if pair not in self.recent_signals:
+            self.recent_signals[pair] = []
+
+        # Clean old signals (older than 4 hours)
+        self.recent_signals[pair] = [
+            (ts, price) for ts, price in self.recent_signals[pair]
+            if current_time - ts < time_window
+        ]
+
+        # Check for duplicates
+        for signal_time, signal_price in self.recent_signals[pair]:
+            price_diff = abs(entry_price - signal_price)
+            time_diff = current_time - signal_time
+
+            if price_diff < price_threshold:
+                hours_ago = time_diff.total_seconds() / 3600
+                return True, f"Duplicate signal (same price {price_diff/pip_value:.1f} pips, {hours_ago:.1f}h ago)"
+
+        return False, ""
+
+    def _record_signal(self, pair: str, entry_price: float, current_time: datetime):
+        """Record signal for deduplication"""
+        if pair not in self.recent_signals:
+            self.recent_signals[pair] = []
+        self.recent_signals[pair].append((current_time, entry_price))
 
     def detect_signal(
         self,
@@ -226,12 +274,13 @@ class SMCStructureStrategy:
             # Calculate where current price is in the range (0 = bottom, 1 = top)
             price_position = (current_price - lowest_low) / price_range if price_range > 0 else 0.5
 
-            # Reject if too close to extremes (within 5% of top/bottom)
-            if trend_analysis['trend'] == 'BULL' and price_position > 0.95:
+            # Reject if too close to extremes (within 25% of top/bottom)
+            # Agent analysis: 5% was too tight, increased to 25% for meaningful filter
+            if trend_analysis['trend'] == 'BULL' and price_position > 0.75:
                 self.logger.info(f"   ❌ Price too close to recent high ({price_position*100:.1f}% of range) - SIGNAL REJECTED")
                 self.logger.info(f"      Avoid buying at tops (bad R:R)")
                 return None
-            elif trend_analysis['trend'] == 'BEAR' and price_position < 0.05:
+            elif trend_analysis['trend'] == 'BEAR' and price_position < 0.25:
                 self.logger.info(f"   ❌ Price too close to recent low ({price_position*100:.1f}% of range) - SIGNAL REJECTED")
                 self.logger.info(f"      Avoid selling at bottoms (bad R:R)")
                 return None
@@ -326,6 +375,12 @@ class SMCStructureStrategy:
                     return None
 
             self.logger.info(f"   ✅ Entry price validation passed")
+
+            # Check for duplicate signals (same price within 4 hours)
+            is_duplicate, dup_reason = self._is_duplicate_signal(pair, entry_price, current_time)
+            if is_duplicate:
+                self.logger.info(f"   ⚠️  {dup_reason} - SKIPPING")
+                return None
             self.logger.info(f"   Structure Invalidation: {structure_invalidation:.5f}")
             self.logger.info(f"   Stop Loss: {stop_loss:.5f}")
             self.logger.info(f"   Risk: {risk_pips:.1f} pips")
@@ -459,6 +514,9 @@ class SMCStructureStrategy:
             self.logger.info(f"   R:R Ratio: {signal['rr_ratio']:.2f}")
             self.logger.info(f"\n   {signal['description']}")
             self.logger.info(f"{'='*70}\n")
+
+            # Record signal for deduplication
+            self._record_signal(pair, entry_price, current_time)
 
             # Update cooldown state after successful signal generation
             self._update_cooldown(pair, current_time)

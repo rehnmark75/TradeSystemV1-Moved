@@ -97,10 +97,9 @@ SMC_SUPPLY_DEMAND_MIN_STRENGTH = 0.70
 
 # Minimum pattern strength required (0-1)
 # How strong the rejection pattern must be to trigger entry
-# 0.60 = moderate-strong patterns (60%+ quality score)
-# OPTIMIZED: Reduced from 0.70 to allow more valid structure-based entries
-# Note: Structure confluence compensates for slightly lower pattern strength
-SMC_MIN_PATTERN_STRENGTH = 0.60
+# 0.70 = strong patterns only (70%+ quality score)
+# REVERTED: 0.60 degraded win rate, back to 0.70 for quality
+SMC_MIN_PATTERN_STRENGTH = 0.70
 
 # Pattern lookback (bars)
 # How many recent bars to check for rejection patterns
@@ -125,9 +124,9 @@ SMC_HAMMER_MAX_OPPOSITE_WICK = 0.15  # Opposite wick 15% or less
 
 # Stop loss buffer (pips)
 # Additional pips beyond structure invalidation point
-# 15 pips provides realistic cushion for 1H structure + spread + noise
-# (Increased from 5 pips - was too tight for structure-based stops)
-SMC_SL_BUFFER_PIPS = 15
+# 8 pips = tighter stop for better R:R (avg bar range analysis)
+# OPTIMIZED: Reduced from 15 to minimize losses
+SMC_SL_BUFFER_PIPS = 8
 
 # Minimum Risk:Reward ratio
 # Trade must offer at least this R:R to be valid
@@ -234,15 +233,15 @@ SMC_REQUIRE_PULLBACK = True
 
 # Pullback minimum depth (Fibonacci ratio)
 # How much price must retrace to qualify as pullback
-# 0.236 = 23.6% Fibonacci level (shallow pullback in strong trends)
-# OPTIMIZED: Reduced from 0.382 to capture shallower institutional pullbacks
-SMC_MIN_PULLBACK_DEPTH = 0.236
+# 0.382 = 38.2% Fibonacci level (standard pullback in trends)
+# REVERTED: 0.236-0.786 too wide (agent analysis), back to sweet spot
+SMC_MIN_PULLBACK_DEPTH = 0.382
 
 # Maximum pullback depth
 # Reject pullbacks deeper than this (may indicate reversal)
-# 0.786 = 78.6% Fibonacci (captures deeper "last chance" retests)
-# OPTIMIZED: Increased from 0.618 to include deeper retest entries
-SMC_MAX_PULLBACK_DEPTH = 0.786
+# 0.618 = 61.8% Fibonacci (deep pullback before reversal risk)
+# REVERTED: Back to classic Fibonacci sweet spot (38.2-61.8%)
+SMC_MAX_PULLBACK_DEPTH = 0.618
 
 # ============================================================================
 # POSITION SIZING (Optional - can be overridden by portfolio manager)
