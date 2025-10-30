@@ -395,18 +395,30 @@ def create_smc_structure_strategy(config=None, **kwargs) -> SMCStructureStrategy
     Factory function to create SMC Structure strategy instance
 
     Args:
-        config: Configuration module (defaults to config_smc_structure)
+        config: Configuration module (if None, imports config_smc_structure)
         **kwargs: Additional arguments passed to strategy
 
     Returns:
         SMCStructureStrategy instance
     """
     if config is None:
-        try:
-            # Try app path first (inside docker)
-            from app.forex_scanner.configdata.strategies import config_smc_structure as config
-        except ImportError:
-            # Fall back to forex_scanner path
-            from forex_scanner.configdata.strategies import config_smc_structure as config
+        # Import at runtime to avoid module path issues
+        import sys
+        import importlib
+
+        # Try different import paths
+        config_module = None
+        for module_path in ['app.forex_scanner.configdata.strategies.config_smc_structure',
+                           'forex_scanner.configdata.strategies.config_smc_structure']:
+            try:
+                config_module = importlib.import_module(module_path)
+                break
+            except (ImportError, ModuleNotFoundError):
+                continue
+
+        if config_module is None:
+            raise ImportError("Could not import config_smc_structure from any known path")
+
+        config = config_module
 
     return SMCStructureStrategy(config=config, **kwargs)
