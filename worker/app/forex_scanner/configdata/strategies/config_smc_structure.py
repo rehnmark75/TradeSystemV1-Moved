@@ -201,7 +201,7 @@ SMC_TRAILING_STAGE3_DISTANCE_PIPS = 20  # Trail 20 pips behind peak
 # Enable cooldown system
 # True = prevent signal clustering (recommended for live trading)
 # False = disable cooldown (useful for backtesting to see all potential signals)
-SMC_COOLDOWN_ENABLED = True
+SMC_COOLDOWN_ENABLED = False  # Disabled for backtesting to see all signals
 
 # Signal cooldown per pair (hours)
 # Prevents multiple signals on same pair in short timeframe
