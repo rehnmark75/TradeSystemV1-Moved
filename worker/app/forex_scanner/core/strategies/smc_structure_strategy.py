@@ -402,6 +402,11 @@ def create_smc_structure_strategy(config=None, **kwargs) -> SMCStructureStrategy
         SMCStructureStrategy instance
     """
     if config is None:
-        from forex_scanner.configdata.strategies import config_smc_structure as config
+        try:
+            # Try app path first (inside docker)
+            from app.forex_scanner.configdata.strategies import config_smc_structure as config
+        except ImportError:
+            # Fall back to forex_scanner path
+            from forex_scanner.configdata.strategies import config_smc_structure as config
 
     return SMCStructureStrategy(config=config, **kwargs)

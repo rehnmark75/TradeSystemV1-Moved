@@ -644,7 +644,11 @@ class SignalDetector:
         try:
             # Initialize strategy if not already done
             if not hasattr(self, 'smc_structure_strategy') or self.smc_structure_strategy is None:
-                from forex_scanner.core.strategies import create_smc_structure_strategy
+                try:
+                    from app.forex_scanner.core.strategies import create_smc_structure_strategy
+                except ImportError:
+                    from forex_scanner.core.strategies import create_smc_structure_strategy
+
                 self.smc_structure_strategy = create_smc_structure_strategy(logger=self.logger)
                 self.logger.info("✅ SMC Structure strategy initialized")
 

@@ -54,12 +54,14 @@ def main():
                 # Don't add --epic, let it default to all
 
             # Handle strategy shortcuts (based on actual strategies in core/strategies/)
-            elif arg.upper() in ["EMA", "MACD", "BB", "SMC", "MOMENTUM", "ICHIMOKU", "KAMA", "ZEROLAG", "MEANREV", "RANGING", "SCALPING", "VP", "VOLUME_PROFILE"]:
+            elif arg.upper() in ["EMA", "MACD", "BB", "SMC", "SMC_STRUCTURE", "SMC_PURE", "MOMENTUM", "ICHIMOKU", "KAMA", "ZEROLAG", "MEANREV", "RANGING", "SCALPING", "VP", "VOLUME_PROFILE"]:
                 strategy_mapping = {
                     "EMA": "EMA",
                     "MACD": "MACD",
                     "BB": "BOLLINGER_SUPERTREND",
                     "SMC": "SMC_FAST",
+                    "SMC_STRUCTURE": "SMC_STRUCTURE",
+                    "SMC_PURE": "SMC_STRUCTURE",
                     "MOMENTUM": "MOMENTUM",
                     "ICHIMOKU": "ICHIMOKU",
                     "KAMA": "KAMA",
@@ -142,13 +144,14 @@ Strategy Shortcuts:
   python bt.py EURUSD 7 MACD --show-signals        # MACD Strategy
   python bt.py EURUSD 7 BB --show-signals          # Bollinger + Supertrend
   python bt.py EURUSD 7 SMC --show-signals         # Smart Money Concepts (Fast)
+  python bt.py EURUSD 7 SMC_STRUCTURE --show-signals  # SMC Pure Structure (Price Action)
   python bt.py EURUSD 7 MOMENTUM --show-signals    # Momentum Strategy
 
 Supported Pairs:
   EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY, GBPJPY
 
 Supported Strategies:
-  EMA, MACD, BB, SMC, MOMENTUM, ICHIMOKU, KAMA, ZEROLAG, MEANREV, RANGING, SCALPING, VP (VOLUME_PROFILE)
+  EMA, MACD, BB, SMC, SMC_STRUCTURE, MOMENTUM, ICHIMOKU, KAMA, ZEROLAG, MEANREV, RANGING, SCALPING, VP (VOLUME_PROFILE)
 
 Additional Options:
   --show-signals     Show detailed signal breakdown
