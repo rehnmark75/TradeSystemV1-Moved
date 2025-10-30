@@ -199,7 +199,7 @@ class SMCStructureStrategy:
 
             self.logger.info(f"   ✅ HTF Trend confirmed: {trend_analysis['trend']}")
 
-            # STEP 2: Detect S/R levels and check proximity
+            # STEP 2: Detect S/R levels (optional - for confidence boost)
             self.logger.info(f"\n🎯 STEP 2: Detecting Support/Resistance Levels")
 
             levels = self.sr_detector.detect_levels(
@@ -216,7 +216,29 @@ class SMCStructureStrategy:
             # Get current price
             current_price = df_1h['close'].iloc[-1]
 
-            # Check which levels we're near based on trend direction
+            # Check price extremes (avoid entering at tops/bottoms)
+            lookback_bars = 50  # Look back 50 bars (~2 days on 1H)
+            recent_data = df_1h.tail(lookback_bars)
+            highest_high = recent_data['high'].max()
+            lowest_low = recent_data['low'].min()
+            price_range = highest_high - lowest_low
+
+            # Calculate where current price is in the range (0 = bottom, 1 = top)
+            price_position = (current_price - lowest_low) / price_range if price_range > 0 else 0.5
+
+            # Reject if too close to extremes (within 5% of top/bottom)
+            if trend_analysis['trend'] == 'BULL' and price_position > 0.95:
+                self.logger.info(f"   ❌ Price too close to recent high ({price_position*100:.1f}% of range) - SIGNAL REJECTED")
+                self.logger.info(f"      Avoid buying at tops (bad R:R)")
+                return None
+            elif trend_analysis['trend'] == 'BEAR' and price_position < 0.05:
+                self.logger.info(f"   ❌ Price too close to recent low ({price_position*100:.1f}% of range) - SIGNAL REJECTED")
+                self.logger.info(f"      Avoid selling at bottoms (bad R:R)")
+                return None
+
+            self.logger.info(f"   ✅ Price position: {price_position*100:.1f}% of recent range (safe zone)")
+
+            # Check which levels we're near (OPTIONAL - for confidence boost)
             if trend_analysis['trend'] == 'BULL':
                 # For bullish trend, look for pullback to support/demand zones
                 relevant_levels = levels['support'] + levels['demand_zones']
@@ -233,15 +255,24 @@ class SMCStructureStrategy:
                 pip_value=pip_value
             )
 
-            if not nearest_level:
-                self.logger.info(f"   ❌ Not near any {level_type} level (within {self.sr_proximity_pips} pips) - SIGNAL REJECTED")
-                return None
-
-            self.logger.info(f"   ✅ Near {level_type} level:")
-            self.logger.info(f"      Price: {nearest_level['price']:.5f}")
-            self.logger.info(f"      Distance: {nearest_level['distance_pips']:.1f} pips")
-            self.logger.info(f"      Strength: {nearest_level['strength']*100:.0f}%")
-            self.logger.info(f"      Touches: {nearest_level['touch_count']}")
+            sr_confluence_boost = 0.0  # Default: no S/R boost
+            if nearest_level:
+                sr_confluence_boost = 0.15 * nearest_level['strength']  # Up to +15% confidence
+                self.logger.info(f"   ✅ Near {level_type} level (BONUS):")
+                self.logger.info(f"      Price: {nearest_level['price']:.5f}")
+                self.logger.info(f"      Distance: {nearest_level['distance_pips']:.1f} pips")
+                self.logger.info(f"      Strength: {nearest_level['strength']*100:.0f}%")
+                self.logger.info(f"      Confidence Boost: +{sr_confluence_boost*100:.1f}%")
+            else:
+                self.logger.info(f"   ℹ️  No nearby {level_type} level (no S/R boost)")
+                # Create a minimal level dict for later use
+                nearest_level = {
+                    'price': current_price,
+                    'type': level_type,
+                    'strength': 0.0,
+                    'distance_pips': 999.0,
+                    'touch_count': 0
+                }
 
             # STEP 3: Confirm rejection pattern
             self.logger.info(f"\n📍 STEP 3: Detecting Rejection Pattern")
