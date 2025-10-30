@@ -13,6 +13,7 @@ from .zero_lag_strategy import ZeroLagStrategy
 from .momentum_strategy import MomentumStrategy
 # from .smc_strategy import SMCStrategy, create_smc_strategy  # Removed - legacy strategy, SMCStrategyFast is in production
 from .smc_strategy_fast import SMCStrategyFast, create_smc_strategy_fast
+from .smc_structure_strategy import SMCStructureStrategy, create_smc_structure_strategy
 from .mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
 from .ichimoku_strategy import IchimokuStrategy
 from .ranging_market_strategy import RangingMarketStrategy
@@ -30,6 +31,8 @@ __all__ = [
     # 'SMCStrategy', 'create_smc_strategy',  # Removed - legacy strategy
     'SMCStrategyFast',
     'create_smc_strategy_fast',
+    'SMCStructureStrategy',
+    'create_smc_structure_strategy',
     'MeanReversionStrategy',
     'create_mean_reversion_strategy',
     'IchimokuStrategy',
