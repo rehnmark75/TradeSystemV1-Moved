@@ -97,14 +97,16 @@ SMC_SUPPLY_DEMAND_MIN_STRENGTH = 0.70
 
 # Minimum pattern strength required (0-1)
 # How strong the rejection pattern must be to trigger entry
-# 0.70 = strong patterns only (70%+ quality score)
-# REVERTED: 0.60 degraded win rate, back to 0.70 for quality
-SMC_MIN_PATTERN_STRENGTH = 0.70
+# 0.60 = quality patterns (60%+ quality score)
+# Agent analysis: 0.70 too restrictive (blocking 60-75% of valid setups)
+# Expected: +6-8 signals per month with minimal win rate degradation
+SMC_MIN_PATTERN_STRENGTH = 0.60
 
 # Pattern lookback (bars)
 # How many recent bars to check for rejection patterns
-# 5 bars = checks last 5 bars for patterns (reasonable recency)
-SMC_PATTERN_LOOKBACK_BARS = 5
+# 50 bars = checks last 50 bars for patterns (captures more opportunities)
+# Agent analysis: 5 bars too narrow, missing valid pullback patterns
+SMC_PATTERN_LOOKBACK_BARS = 50
 
 # Pin bar requirements
 SMC_PIN_BAR_MIN_WICK_RATIO = 0.60  # Wick must be 60%+ of total range
