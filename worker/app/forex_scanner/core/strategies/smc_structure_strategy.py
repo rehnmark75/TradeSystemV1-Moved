@@ -303,6 +303,15 @@ class SMCStructureStrategy:
                 self.logger.info(f"   Partial R:R: {self.partial_profit_rr}")
                 self.logger.info(f"   Close Percent: {self.partial_profit_percent}%")
 
+            # Calculate confidence score (0.0 to 1.0)
+            # Based on: HTF strength (40%), pattern strength (30%), SR strength (20%), R:R ratio (10%)
+            htf_score = trend_analysis['strength'] * 0.4
+            pattern_score = rejection_pattern['strength'] * 0.3
+            sr_score = nearest_level['strength'] * 0.2
+            rr_score = min(rr_ratio / 4.0, 1.0) * 0.1  # Normalize R:R (4:1 = perfect)
+
+            confidence = htf_score + pattern_score + sr_score + rr_score
+
             # BUILD SIGNAL
             self.logger.info(f"\n{'='*70}")
             self.logger.info(f"✅ VALID SMC STRUCTURE SIGNAL DETECTED")
@@ -310,7 +319,9 @@ class SMCStructureStrategy:
 
             signal = {
                 'strategy': 'SMC_STRUCTURE',
-                'signal': trend_analysis['trend'],
+                'signal_type': trend_analysis['trend'],  # For validator/reporting (BULL or BEAR)
+                'signal': trend_analysis['trend'],  # For backward compatibility
+                'confidence_score': round(confidence, 2),  # 0.0 to 1.0
                 'epic': epic,
                 'pair': pair,
                 'timeframe': '1h',
