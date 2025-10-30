@@ -402,23 +402,8 @@ def create_smc_structure_strategy(config=None, **kwargs) -> SMCStructureStrategy
         SMCStructureStrategy instance
     """
     if config is None:
-        # Import at runtime to avoid module path issues
-        import sys
-        import importlib
-
-        # Try different import paths
-        config_module = None
-        for module_path in ['app.forex_scanner.configdata.strategies.config_smc_structure',
-                           'forex_scanner.configdata.strategies.config_smc_structure']:
-            try:
-                config_module = importlib.import_module(module_path)
-                break
-            except (ImportError, ModuleNotFoundError):
-                continue
-
-        if config_module is None:
-            raise ImportError("Could not import config_smc_structure from any known path")
-
-        config = config_module
+        # Import config using absolute import from configdata
+        # (backtest_cli adds /app/forex_scanner to path, so 'configdata' is accessible)
+        from configdata.strategies import config_smc_structure as config
 
     return SMCStructureStrategy(config=config, **kwargs)
