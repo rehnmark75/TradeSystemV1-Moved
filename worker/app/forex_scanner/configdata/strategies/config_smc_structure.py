@@ -132,8 +132,9 @@ SMC_SL_BUFFER_PIPS = 8
 
 # Minimum Risk:Reward ratio
 # Trade must offer at least this R:R to be valid
-# 2.0 = minimum 2:1 reward:risk (conservative)
-SMC_MIN_RR_RATIO = 2.0
+# 1.5 = minimum 1.5:1 reward:risk (relaxed for more signals)
+# REDUCED: 2.0 → 1.5 (R:R was primary blocker, rejecting 40% of valid setups)
+SMC_MIN_RR_RATIO = 1.5
 
 # Maximum risk per trade (pips)
 # Reject trades with stop loss larger than this
@@ -156,8 +157,9 @@ SMC_PARTIAL_PROFIT_PERCENT = 50
 
 # Partial profit R:R ratio
 # Close partial at this R:R
-# 1.5 = take partial profit at 1.5R, let rest run to full TP (2R+)
-SMC_PARTIAL_PROFIT_RR = 1.5
+# 1.2 = take partial profit at 1.2R, let rest run to full TP (1.5R+)
+# REDUCED: Must be less than SMC_MIN_RR_RATIO (1.5)
+SMC_PARTIAL_PROFIT_RR = 1.2
 
 # Move stop to breakeven after partial?
 SMC_MOVE_SL_TO_BE_AFTER_PARTIAL = True
