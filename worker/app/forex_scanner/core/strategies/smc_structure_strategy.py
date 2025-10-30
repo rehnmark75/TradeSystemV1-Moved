@@ -264,28 +264,10 @@ class SMCStructureStrategy:
             # Get current price
             current_price = df_1h['close'].iloc[-1]
 
-            # Check price extremes (avoid entering at tops/bottoms)
-            lookback_bars = 50  # Look back 50 bars (~2 days on 1H)
-            recent_data = df_1h.tail(lookback_bars)
-            highest_high = recent_data['high'].max()
-            lowest_low = recent_data['low'].min()
-            price_range = highest_high - lowest_low
-
-            # Calculate where current price is in the range (0 = bottom, 1 = top)
-            price_position = (current_price - lowest_low) / price_range if price_range > 0 else 0.5
-
-            # Reject if too close to extremes (within 25% of top/bottom)
-            # Agent analysis: 5% was too tight, increased to 25% for meaningful filter
-            if trend_analysis['trend'] == 'BULL' and price_position > 0.75:
-                self.logger.info(f"   ❌ Price too close to recent high ({price_position*100:.1f}% of range) - SIGNAL REJECTED")
-                self.logger.info(f"      Avoid buying at tops (bad R:R)")
-                return None
-            elif trend_analysis['trend'] == 'BEAR' and price_position < 0.25:
-                self.logger.info(f"   ❌ Price too close to recent low ({price_position*100:.1f}% of range) - SIGNAL REJECTED")
-                self.logger.info(f"      Avoid selling at bottoms (bad R:R)")
-                return None
-
-            self.logger.info(f"   ✅ Price position: {price_position*100:.1f}% of recent range (safe zone)")
+            # NOTE: Price extreme filter removed (Phase 1 fix)
+            # Filter had conceptual flaw: confused "high in trend range" with "at swing extreme"
+            # Protection now provided by R:R ratio (2:1 minimum) and stop loss placement
+            # Agent analysis: R:R filter is economically-driven (better than geometric range checks)
 
             # Check which levels we're near (OPTIONAL - for confidence boost)
             if trend_analysis['trend'] == 'BULL':
