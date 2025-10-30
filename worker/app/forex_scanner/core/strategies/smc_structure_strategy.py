@@ -16,7 +16,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Import helper modules
 from .helpers.smc_trend_structure import SMCTrendStructure
@@ -47,6 +47,11 @@ class SMCStructureStrategy:
         self.sr_detector = SMCSupportResistance(logger=self.logger)
         self.pattern_detector = SMCCandlestickPatterns(logger=self.logger)
 
+        # Initialize cooldown state tracking
+        self.pair_cooldowns = {}  # {pair: last_signal_time}
+        self.last_global_signal_time = None
+        self.active_signals_count = 0
+
         # Load configuration
         self._load_config()
 
@@ -55,6 +60,8 @@ class SMCStructureStrategy:
         self.logger.info(f"   Min Pattern Strength: {self.min_pattern_strength}")
         self.logger.info(f"   Min R:R Ratio: {self.min_rr_ratio}")
         self.logger.info(f"   SR Proximity: {self.sr_proximity_pips} pips")
+        if self.cooldown_enabled:
+            self.logger.info(f"   Cooldown: {self.signal_cooldown_hours}h per-pair, {self.global_cooldown_minutes}m global")
 
     def _load_config(self):
         """Load strategy configuration"""
@@ -78,6 +85,53 @@ class SMCStructureStrategy:
         self.partial_profit_enabled = getattr(self.config, 'SMC_PARTIAL_PROFIT_ENABLED', True)
         self.partial_profit_percent = getattr(self.config, 'SMC_PARTIAL_PROFIT_PERCENT', 50)
         self.partial_profit_rr = getattr(self.config, 'SMC_PARTIAL_PROFIT_RR', 1.5)
+
+        # Cooldown system (anti-clustering)
+        self.cooldown_enabled = getattr(self.config, 'SMC_COOLDOWN_ENABLED', True)
+        self.signal_cooldown_hours = getattr(self.config, 'SMC_SIGNAL_COOLDOWN_HOURS', 4)
+        self.global_cooldown_minutes = getattr(self.config, 'SMC_GLOBAL_COOLDOWN_MINUTES', 30)
+        self.max_concurrent_signals = getattr(self.config, 'SMC_MAX_CONCURRENT_SIGNALS', 3)
+        self.cooldown_enforcement = getattr(self.config, 'SMC_COOLDOWN_ENFORCEMENT', 'strict')
+
+    def _check_cooldown(self, pair: str, current_time: datetime) -> tuple[bool, str]:
+        """
+        Check if pair is in cooldown period
+
+        Returns:
+            (can_trade, reason) - True if can trade, False if in cooldown
+        """
+        if not self.cooldown_enabled:
+            return True, ""
+
+        # Check max concurrent signals
+        if self.active_signals_count >= self.max_concurrent_signals:
+            return False, f"Max concurrent signals reached ({self.active_signals_count}/{self.max_concurrent_signals})"
+
+        # Check per-pair cooldown
+        if pair in self.pair_cooldowns:
+            last_signal_time = self.pair_cooldowns[pair]
+            cooldown_expires = last_signal_time + timedelta(hours=self.signal_cooldown_hours)
+            if current_time < cooldown_expires:
+                hours_remaining = (cooldown_expires - current_time).total_seconds() / 3600
+                return False, f"Pair cooldown active ({hours_remaining:.1f}h remaining)"
+
+        # Check global cooldown
+        if self.last_global_signal_time:
+            cooldown_expires = self.last_global_signal_time + timedelta(minutes=self.global_cooldown_minutes)
+            if current_time < cooldown_expires:
+                minutes_remaining = (cooldown_expires - current_time).total_seconds() / 60
+                return False, f"Global cooldown active ({minutes_remaining:.0f}m remaining)"
+
+        return True, ""
+
+    def _update_cooldown(self, pair: str, current_time: datetime):
+        """Update cooldown state after signal generated"""
+        if not self.cooldown_enabled:
+            return
+
+        self.pair_cooldowns[pair] = current_time
+        self.last_global_signal_time = current_time
+        self.active_signals_count += 1
 
     def detect_signal(
         self,
@@ -103,6 +157,13 @@ class SMCStructureStrategy:
         self.logger.info(f"   Pair: {pair} ({epic})")
         self.logger.info(f"   Entry TF: 1H | HTF: {self.htf_timeframe}")
         self.logger.info(f"{'='*70}")
+
+        # Check cooldown before processing
+        current_time = datetime.now()
+        can_trade, cooldown_reason = self._check_cooldown(pair, current_time)
+        if not can_trade:
+            self.logger.info(f"   ⏱️  {cooldown_reason} - SKIPPING")
+            return None
 
         # Get pip value
         pip_value = 0.01 if 'JPY' in pair else 0.0001
@@ -367,6 +428,9 @@ class SMCStructureStrategy:
             self.logger.info(f"   R:R Ratio: {signal['rr_ratio']:.2f}")
             self.logger.info(f"\n   {signal['description']}")
             self.logger.info(f"{'='*70}\n")
+
+            # Update cooldown state after successful signal generation
+            self._update_cooldown(pair, current_time)
 
             return signal
 

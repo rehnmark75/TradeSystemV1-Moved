@@ -82,8 +82,9 @@ SMC_MAX_LEVEL_AGE = 200
 
 # Proximity requirement (pips)
 # How close price must be to a level to trigger consideration
-# 20 pips = reasonable proximity without being overly restrictive
-SMC_SR_PROXIMITY_PIPS = 20
+# 30 pips = accommodates volatile pairs while maintaining relevance
+# OPTIMIZED: Increased from 20 to capture valid setups near structure
+SMC_SR_PROXIMITY_PIPS = 30
 
 # Minimum level strength for supply/demand zones (0-1)
 # Only levels with this strength qualify as strong zones
@@ -96,8 +97,10 @@ SMC_SUPPLY_DEMAND_MIN_STRENGTH = 0.70
 
 # Minimum pattern strength required (0-1)
 # How strong the rejection pattern must be to trigger entry
-# 0.70 = strong patterns only (70%+ quality score)
-SMC_MIN_PATTERN_STRENGTH = 0.70
+# 0.60 = moderate-strong patterns (60%+ quality score)
+# OPTIMIZED: Reduced from 0.70 to allow more valid structure-based entries
+# Note: Structure confluence compensates for slightly lower pattern strength
+SMC_MIN_PATTERN_STRENGTH = 0.60
 
 # Pattern lookback (bars)
 # How many recent bars to check for rejection patterns
@@ -192,6 +195,35 @@ SMC_TRAILING_STAGE3_RR = 3.0  # At 3R, switch to dynamic trailing
 SMC_TRAILING_STAGE3_DISTANCE_PIPS = 20  # Trail 20 pips behind peak
 
 # ============================================================================
+# SIGNAL COOLDOWN AND CLUSTERING PREVENTION
+# ============================================================================
+
+# Enable cooldown system
+# True = prevent signal clustering (recommended for live trading)
+# False = disable cooldown (useful for backtesting to see all potential signals)
+SMC_COOLDOWN_ENABLED = True
+
+# Signal cooldown per pair (hours)
+# Prevents multiple signals on same pair in short timeframe
+# 4 hours = prevents clustering while allowing valid re-entries
+SMC_SIGNAL_COOLDOWN_HOURS = 4
+
+# Global signal cooldown across all pairs (minutes)
+# Prevents simultaneous signals on multiple pairs
+# 30 minutes = staggers entries for better risk distribution
+SMC_GLOBAL_COOLDOWN_MINUTES = 30
+
+# Maximum concurrent signals allowed
+# Caps total exposure across all pairs
+# 3 = maximum 3 open positions at once (diversification + risk control)
+SMC_MAX_CONCURRENT_SIGNALS = 3
+
+# Cooldown enforcement level
+# 'strict' = hard block on signals within cooldown
+# 'warning' = log warning but allow signal (for analysis)
+SMC_COOLDOWN_ENFORCEMENT = 'strict'
+
+# ============================================================================
 # FILTERS AND CONFLUENCE
 # ============================================================================
 
@@ -202,13 +234,15 @@ SMC_REQUIRE_PULLBACK = True
 
 # Pullback minimum depth (Fibonacci ratio)
 # How much price must retrace to qualify as pullback
-# 0.382 = 38.2% Fibonacci level (common institutional pullback)
-SMC_MIN_PULLBACK_DEPTH = 0.382
+# 0.236 = 23.6% Fibonacci level (shallow pullback in strong trends)
+# OPTIMIZED: Reduced from 0.382 to capture shallower institutional pullbacks
+SMC_MIN_PULLBACK_DEPTH = 0.236
 
 # Maximum pullback depth
 # Reject pullbacks deeper than this (may indicate reversal)
-# 0.618 = 61.8% Fibonacci (deeper suggests trend weakness)
-SMC_MAX_PULLBACK_DEPTH = 0.618
+# 0.786 = 78.6% Fibonacci (captures deeper "last chance" retests)
+# OPTIMIZED: Increased from 0.618 to include deeper retest entries
+SMC_MAX_PULLBACK_DEPTH = 0.786
 
 # ============================================================================
 # POSITION SIZING (Optional - can be overridden by portfolio manager)
