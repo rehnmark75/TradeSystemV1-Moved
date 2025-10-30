@@ -623,6 +623,78 @@ class SignalDetector:
             self.logger.error(f"Error detecting SMC signals for {epic}: {e}")
             return None
 
+    def detect_smc_structure_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None
+    ) -> Optional[Dict]:
+        """
+        Detect SMC Pure Structure signals (price action only)
+
+        Uses multi-timeframe analysis:
+        - Entry timeframe: 1H (pattern detection, S/R levels)
+        - HTF timeframe: 4H (trend structure analysis)
+        """
+        # SMC Structure strategy always uses 1H for entry, 4H for trend
+        entry_tf = '1h'
+        htf_tf = '4h'
+
+        try:
+            # Initialize strategy if not already done
+            if not hasattr(self, 'smc_structure_strategy') or self.smc_structure_strategy is None:
+                from forex_scanner.core.strategies import create_smc_structure_strategy
+                self.smc_structure_strategy = create_smc_structure_strategy(logger=self.logger)
+                self.logger.info("✅ SMC Structure strategy initialized")
+
+            # Get 1H data (entry timeframe)
+            df_1h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=entry_tf,
+                lookback_hours=200
+            )
+
+            if df_1h is None or len(df_1h) < 50:
+                self.logger.debug(f"Insufficient 1H data for {epic} (got {len(df_1h) if df_1h is not None else 0} bars)")
+                return None
+
+            # Get 4H data (HTF for trend)
+            df_4h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=htf_tf,
+                lookback_hours=400  # 100 bars * 4 hours
+            )
+
+            if df_4h is None or len(df_4h) < 20:
+                self.logger.debug(f"Insufficient 4H data for {epic} (got {len(df_4h) if df_4h is not None else 0} bars)")
+                return None
+
+            self.logger.debug(f"🔍 [SMC_STRUCTURE] Analyzing {epic}: 1H bars={len(df_1h)}, 4H bars={len(df_4h)}")
+
+            # Detect signal
+            signal = self.smc_structure_strategy.detect_signal(
+                df_1h=df_1h,
+                df_4h=df_4h,
+                epic=epic,
+                pair=pair
+            )
+
+            if signal:
+                self.logger.info(f"✅ [SMC_STRUCTURE] Signal detected for {epic}: {signal['signal']} @ {signal['entry_price']:.5f}")
+                # Add market context if available
+                signal = self._add_market_context(signal, df_1h)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ [SMC_STRUCTURE] Error detecting signals for {epic}: {e}")
+            import traceback
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
+
     def detect_ichimoku_signals(
         self,
         epic: str,

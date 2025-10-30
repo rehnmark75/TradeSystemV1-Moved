@@ -589,6 +589,8 @@ class BacktestScanner(IntelligentForexScanner):
                 'MOMENTUM': 'detect_momentum_signals',
                 'SMC_FAST': 'detect_smc_signals',
                 'SMC': 'detect_smc_signals',
+                'SMC_STRUCTURE': 'detect_smc_structure_signals',
+                'SMC_PURE': 'detect_smc_structure_signals',
                 'ICHIMOKU': 'detect_ichimoku_signals',
                 'ICHIMOKU_CLOUD': 'detect_ichimoku_signals',
                 'MEAN_REVERSION': 'detect_mean_reversion_signals',
@@ -613,8 +615,8 @@ class BacktestScanner(IntelligentForexScanner):
                     if method_name in ['detect_signals_mid_prices']:
                         signals = method(epic, pair_name, self.timeframe)
                     else:
-                        # 🔒 HARD-CODED: MACD strategy always uses 1H timeframe
-                        strategy_timeframe = '1h' if strategy_name in ['MACD', 'MACD_EMA'] else self.timeframe
+                        # 🔒 HARD-CODED: MACD and SMC_STRUCTURE strategies always use 1H timeframe
+                        strategy_timeframe = '1h' if strategy_name in ['MACD', 'MACD_EMA', 'SMC_STRUCTURE', 'SMC_PURE'] else self.timeframe
                         signals = method(epic, pair_name, self.spread_pips, strategy_timeframe)
 
                     # Some methods return a single signal dict, others return lists
