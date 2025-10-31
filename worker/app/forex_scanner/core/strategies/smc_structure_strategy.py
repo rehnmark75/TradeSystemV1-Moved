@@ -23,6 +23,7 @@ from .helpers.smc_trend_structure import SMCTrendStructure
 from .helpers.smc_support_resistance import SMCSupportResistance
 from .helpers.smc_candlestick_patterns import SMCCandlestickPatterns
 from .helpers.smc_market_structure import SMCMarketStructure
+from .helpers.zero_lag_liquidity import ZeroLagLiquidity
 
 
 class SMCStructureStrategy:
@@ -48,6 +49,7 @@ class SMCStructureStrategy:
         self.sr_detector = SMCSupportResistance(logger=self.logger)
         self.pattern_detector = SMCCandlestickPatterns(logger=self.logger)
         self.market_structure = SMCMarketStructure(logger=self.logger)
+        self.zero_lag = ZeroLagLiquidity(logger=self.logger)
 
         # Initialize cooldown state tracking
         self.pair_cooldowns = {}  # {pair: last_signal_time}
@@ -109,6 +111,11 @@ class SMCStructureStrategy:
         self.min_bos_significance = getattr(self.config, 'SMC_MIN_BOS_SIGNIFICANCE', 0.6)
         self.bos_stop_pips = getattr(self.config, 'SMC_BOS_STOP_PIPS', 10)
         self.patterns_optional = getattr(self.config, 'SMC_PATTERNS_OPTIONAL', True)
+
+        # Zero Lag Liquidity parameters
+        self.use_zero_lag_entry = getattr(self.config, 'SMC_USE_ZERO_LAG_ENTRY', True)
+        self.zero_lag_wick_threshold = getattr(self.config, 'SMC_ZERO_LAG_WICK_THRESHOLD', 0.6)
+        self.zero_lag_lookback = getattr(self.config, 'SMC_ZERO_LAG_LOOKBACK', 20)
 
     def _check_cooldown(self, pair: str, current_time: datetime) -> tuple[bool, str]:
         """
@@ -339,21 +346,56 @@ class SMCStructureStrategy:
                     if trend_analysis['trend'] == 'BULL':
                         # For bullish, use recent low as rejection level
                         rejection_level = df_1h['low'].tail(10).min()
+                        direction_str = 'bullish'
                     else:
                         # For bearish, use recent high as rejection level
                         rejection_level = df_1h['high'].tail(10).max()
+                        direction_str = 'bearish'
 
-                    rejection_pattern = {
-                        'pattern_type': 'structure_only',
-                        'strength': 0.5,  # Moderate strength for structure-only
-                        'entry_price': current_price,
-                        'rejection_level': rejection_level,
-                        'description': 'Structure-based entry (no specific pattern)'
-                    }
+                    # STEP 3B: Use Zero Lag Liquidity for precise entry timing (if enabled)
+                    if self.use_zero_lag_entry:
+                        self.logger.info(f"\n💧 STEP 3B: Checking Zero Lag Liquidity Entry Trigger")
 
-                    self.logger.info(f"   ✅ Structure-based entry (no pattern required):")
-                    self.logger.info(f"      Entry: {rejection_pattern['entry_price']:.5f}")
-                    self.logger.info(f"      Rejection Level: {rejection_pattern['rejection_level']:.5f}")
+                        zero_lag_signal = self.zero_lag.get_entry_signal(
+                            df=df_1h,
+                            structure_level=rejection_level,
+                            direction=direction_str,
+                            pip_value=pip_value
+                        )
+
+                        if zero_lag_signal:
+                            self.logger.info(f"   ✅ Zero Lag entry trigger detected:")
+                            self.logger.info(f"      Type: {zero_lag_signal['type']}")
+                            self.logger.info(f"      Signal: {zero_lag_signal['signal']}")
+                            self.logger.info(f"      Entry: {zero_lag_signal['entry_price']:.5f}")
+                            self.logger.info(f"      Confidence: {zero_lag_signal['confidence']*100:.0f}%")
+                            self.logger.info(f"      Description: {zero_lag_signal['description']}")
+
+                            # Use Zero Lag entry
+                            rejection_pattern = {
+                                'pattern_type': f"zero_lag_{zero_lag_signal['type']}",
+                                'strength': zero_lag_signal['confidence'],
+                                'entry_price': zero_lag_signal['entry_price'],
+                                'rejection_level': rejection_level,
+                                'description': zero_lag_signal['description']
+                            }
+                        else:
+                            # No Zero Lag trigger yet, wait for better entry
+                            self.logger.info(f"   ⏳ No Zero Lag entry trigger at structure level - waiting for better entry")
+                            return None
+                    else:
+                        # Zero Lag disabled, use immediate entry
+                        rejection_pattern = {
+                            'pattern_type': 'structure_only',
+                            'strength': 0.5,  # Moderate strength for structure-only
+                            'entry_price': current_price,
+                            'rejection_level': rejection_level,
+                            'description': 'Structure-based entry (no specific pattern)'
+                        }
+
+                        self.logger.info(f"   ✅ Structure-based entry (no pattern required):")
+                        self.logger.info(f"      Entry: {rejection_pattern['entry_price']:.5f}")
+                        self.logger.info(f"      Rejection Level: {rejection_pattern['rejection_level']:.5f}")
                 else:
                     self.logger.info(f"   ❌ No strong rejection pattern (min strength {self.min_pattern_strength*100:.0f}%) - SIGNAL REJECTED")
                     return None

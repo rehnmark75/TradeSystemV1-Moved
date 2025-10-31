@@ -363,6 +363,25 @@ SMC_BOS_STOP_PIPS = 10
 SMC_PATTERNS_OPTIONAL = True
 
 # ============================================================================
+# ZERO LAG LIQUIDITY ENTRY TRIGGER
+# ============================================================================
+
+# Enable Zero Lag Liquidity as entry trigger
+# True = use liquidity breaks/rejections for precise entry timing
+# False = use immediate entry at structure level
+SMC_USE_ZERO_LAG_ENTRY = True
+
+# Wick threshold for liquidity detection (0-1)
+# Minimum wick-to-body ratio to detect liquidity event
+# 0.6 = wick must be 60%+ of total candle range
+SMC_ZERO_LAG_WICK_THRESHOLD = 0.6
+
+# Lookback bars for liquidity tracking
+# How many bars to track liquidity levels
+# 20 bars = good balance for 1H timeframe
+SMC_ZERO_LAG_LOOKBACK = 20
+
+# ============================================================================
 # EPIC-SPECIFIC OVERRIDES (Optional)
 # ============================================================================
 
