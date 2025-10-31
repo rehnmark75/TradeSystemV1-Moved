@@ -313,6 +313,56 @@ SMC_ENTRY_TIMEFRAME = '1h'
 SMC_ENTRY_LOOKBACK_HOURS = 200
 
 # ============================================================================
+# BOS/CHoCH RE-ENTRY STRATEGY (New Approach)
+# ============================================================================
+
+# Enable BOS/CHoCH re-entry strategy
+# True = detect BOS/CHoCH on 15m, validate HTF, wait for pullback
+# False = use legacy pattern-based entry
+SMC_BOS_CHOCH_REENTRY_ENABLED = True
+
+# Detection timeframe for BOS/CHoCH
+# '15m' = detect structure breaks on 15-minute timeframe
+SMC_BOS_CHOCH_TIMEFRAME = '15m'
+
+# Require 1H timeframe alignment
+# True = 1H structure must align with BOS/CHoCH direction
+SMC_REQUIRE_1H_ALIGNMENT = True
+
+# Require 4H timeframe alignment
+# True = 4H structure must align with BOS/CHoCH direction
+SMC_REQUIRE_4H_ALIGNMENT = True
+
+# Lookback for HTF structure validation (bars)
+# How many bars to analyze for HTF structure alignment
+SMC_HTF_ALIGNMENT_LOOKBACK = 50
+
+# Re-entry zone tolerance (pips)
+# ± pips from BOS/CHoCH level to trigger re-entry
+# 10 pips = reasonable zone for re-entry
+SMC_REENTRY_ZONE_PIPS = 10
+
+# Maximum wait time for pullback (bars)
+# Maximum bars to wait for price to return to BOS/CHoCH level
+# 20 bars = 5 hours on 15m timeframe
+SMC_MAX_WAIT_BARS = 20
+
+# Minimum BOS/CHoCH significance (0-1)
+# How significant the structure break must be
+# 0.6 = moderate significance requirement
+SMC_MIN_BOS_SIGNIFICANCE = 0.6
+
+# Stop loss distance from structure level (pips)
+# For BOS/CHoCH re-entry, stop goes beyond structure level
+# 10 pips = tight stop at logical invalidation
+SMC_BOS_STOP_PIPS = 10
+
+# Make rejection patterns optional (for BOS/CHoCH mode)
+# True = patterns boost confidence but don't block signals
+# False = patterns required (legacy behavior)
+SMC_PATTERNS_OPTIONAL = True
+
+# ============================================================================
 # EPIC-SPECIFIC OVERRIDES (Optional)
 # ============================================================================
 

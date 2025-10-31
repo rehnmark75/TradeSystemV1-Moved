@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from .helpers.smc_trend_structure import SMCTrendStructure
 from .helpers.smc_support_resistance import SMCSupportResistance
 from .helpers.smc_candlestick_patterns import SMCCandlestickPatterns
+from .helpers.smc_market_structure import SMCMarketStructure
 
 
 class SMCStructureStrategy:
@@ -46,6 +47,7 @@ class SMCStructureStrategy:
         self.trend_analyzer = SMCTrendStructure(logger=self.logger)
         self.sr_detector = SMCSupportResistance(logger=self.logger)
         self.pattern_detector = SMCCandlestickPatterns(logger=self.logger)
+        self.market_structure = SMCMarketStructure(logger=self.logger)
 
         # Initialize cooldown state tracking
         self.pair_cooldowns = {}  # {pair: last_signal_time}
@@ -95,6 +97,18 @@ class SMCStructureStrategy:
         self.global_cooldown_minutes = getattr(self.config, 'SMC_GLOBAL_COOLDOWN_MINUTES', 30)
         self.max_concurrent_signals = getattr(self.config, 'SMC_MAX_CONCURRENT_SIGNALS', 3)
         self.cooldown_enforcement = getattr(self.config, 'SMC_COOLDOWN_ENFORCEMENT', 'strict')
+
+        # BOS/CHoCH re-entry parameters
+        self.bos_choch_enabled = getattr(self.config, 'SMC_BOS_CHOCH_REENTRY_ENABLED', True)
+        self.bos_choch_timeframe = getattr(self.config, 'SMC_BOS_CHOCH_TIMEFRAME', '15m')
+        self.require_1h_alignment = getattr(self.config, 'SMC_REQUIRE_1H_ALIGNMENT', True)
+        self.require_4h_alignment = getattr(self.config, 'SMC_REQUIRE_4H_ALIGNMENT', True)
+        self.htf_alignment_lookback = getattr(self.config, 'SMC_HTF_ALIGNMENT_LOOKBACK', 50)
+        self.reentry_zone_pips = getattr(self.config, 'SMC_REENTRY_ZONE_PIPS', 10)
+        self.max_wait_bars = getattr(self.config, 'SMC_MAX_WAIT_BARS', 20)
+        self.min_bos_significance = getattr(self.config, 'SMC_MIN_BOS_SIGNIFICANCE', 0.6)
+        self.bos_stop_pips = getattr(self.config, 'SMC_BOS_STOP_PIPS', 10)
+        self.patterns_optional = getattr(self.config, 'SMC_PATTERNS_OPTIONAL', True)
 
     def _check_cooldown(self, pair: str, current_time: datetime) -> tuple[bool, str]:
         """
@@ -305,7 +319,7 @@ class SMCStructureStrategy:
                     'touch_count': 0
                 }
 
-            # STEP 3: Confirm rejection pattern
+            # STEP 3: Confirm rejection pattern (optional if BOS/CHoCH mode enabled)
             self.logger.info(f"\n📍 STEP 3: Detecting Rejection Pattern")
 
             # Get recent bars for pattern detection
@@ -318,15 +332,38 @@ class SMCStructureStrategy:
             )
 
             if not rejection_pattern:
-                self.logger.info(f"   ❌ No strong rejection pattern (min strength {self.min_pattern_strength*100:.0f}%) - SIGNAL REJECTED")
-                return None
+                # If patterns are optional (BOS/CHoCH mode), create minimal pattern
+                if self.patterns_optional:
+                    self.logger.info(f"   ℹ️  No rejection pattern found, but patterns are optional (structure-only mode)")
+                    # Create structure-based entry using current price and recent swing
+                    if trend_analysis['trend'] == 'BULL':
+                        # For bullish, use recent low as rejection level
+                        rejection_level = df_1h['low'].tail(10).min()
+                    else:
+                        # For bearish, use recent high as rejection level
+                        rejection_level = df_1h['high'].tail(10).max()
 
-            self.logger.info(f"   ✅ Rejection pattern detected:")
-            self.logger.info(f"      Type: {rejection_pattern['pattern_type']}")
-            self.logger.info(f"      Strength: {rejection_pattern['strength']*100:.0f}%")
-            self.logger.info(f"      Entry: {rejection_pattern['entry_price']:.5f}")
-            self.logger.info(f"      Rejection Level: {rejection_pattern['rejection_level']:.5f}")
-            self.logger.info(f"      Description: {rejection_pattern['description']}")
+                    rejection_pattern = {
+                        'pattern_type': 'structure_only',
+                        'strength': 0.5,  # Moderate strength for structure-only
+                        'entry_price': current_price,
+                        'rejection_level': rejection_level,
+                        'description': 'Structure-based entry (no specific pattern)'
+                    }
+
+                    self.logger.info(f"   ✅ Structure-based entry (no pattern required):")
+                    self.logger.info(f"      Entry: {rejection_pattern['entry_price']:.5f}")
+                    self.logger.info(f"      Rejection Level: {rejection_pattern['rejection_level']:.5f}")
+                else:
+                    self.logger.info(f"   ❌ No strong rejection pattern (min strength {self.min_pattern_strength*100:.0f}%) - SIGNAL REJECTED")
+                    return None
+            else:
+                self.logger.info(f"   ✅ Rejection pattern detected:")
+                self.logger.info(f"      Type: {rejection_pattern['pattern_type']}")
+                self.logger.info(f"      Strength: {rejection_pattern['strength']*100:.0f}%")
+                self.logger.info(f"      Entry: {rejection_pattern['entry_price']:.5f}")
+                self.logger.info(f"      Rejection Level: {rejection_pattern['rejection_level']:.5f}")
+                self.logger.info(f"      Description: {rejection_pattern['description']}")
 
             # STEP 4: Calculate structure-based stop loss
             self.logger.info(f"\n🛑 STEP 4: Calculating Structure-Based Stop Loss")
@@ -539,6 +576,136 @@ class SMCStructureStrategy:
         desc_parts.append(f"({rr_ratio:.1f}R)")
 
         return ", ".join(desc_parts).capitalize()
+
+    def _validate_htf_alignment(self, bos_direction: str, df_1h: pd.DataFrame, df_4h: pd.DataFrame, epic: str) -> bool:
+        """
+        Validate that 1H and 4H timeframes align with BOS/CHoCH direction
+
+        Args:
+            bos_direction: 'bullish' or 'bearish' from BOS/CHoCH
+            df_1h: 1H DataFrame
+            df_4h: 4H DataFrame
+            epic: Currency pair
+
+        Returns:
+            True if HTF alignment confirmed, False otherwise
+        """
+        self.logger.info(f"\n🔍 Validating HTF Alignment ({bos_direction} BOS/CHoCH)")
+
+        # Check 1H alignment (if required)
+        if self.require_1h_alignment:
+            trend_1h = self.trend_analyzer.analyze_trend(
+                df=df_1h,
+                epic=epic,
+                lookback=self.htf_alignment_lookback
+            )
+
+            self.logger.info(f"   1H Trend: {trend_1h['trend']} ({trend_1h['strength']*100:.0f}%)")
+
+            # Convert BOS direction to trend type
+            expected_trend_1h = 'BULL' if bos_direction == 'bullish' else 'BEAR'
+
+            if trend_1h['trend'] != expected_trend_1h:
+                self.logger.info(f"   ❌ 1H trend mismatch (expected {expected_trend_1h}) - SIGNAL REJECTED")
+                return False
+
+            self.logger.info(f"   ✅ 1H aligned with {bos_direction} direction")
+
+        # Check 4H alignment (if required)
+        if self.require_4h_alignment:
+            trend_4h = self.trend_analyzer.analyze_trend(
+                df=df_4h,
+                epic=epic,
+                lookback=self.htf_alignment_lookback
+            )
+
+            self.logger.info(f"   4H Trend: {trend_4h['trend']} ({trend_4h['strength']*100:.0f}%)")
+
+            expected_trend_4h = 'BULL' if bos_direction == 'bullish' else 'BEAR'
+
+            if trend_4h['trend'] != expected_trend_4h:
+                self.logger.info(f"   ❌ 4H trend mismatch (expected {expected_trend_4h}) - SIGNAL REJECTED")
+                return False
+
+            self.logger.info(f"   ✅ 4H aligned with {bos_direction} direction")
+
+        self.logger.info(f"   ✅ HTF Alignment Confirmed")
+        return True
+
+    def _check_reentry_zone(self, current_price: float, structure_level: float, pip_value: float) -> bool:
+        """
+        Check if current price is in re-entry zone around structure level
+
+        Args:
+            current_price: Current market price
+            structure_level: BOS/CHoCH level price
+            pip_value: Pip value for pair
+
+        Returns:
+            True if in re-entry zone, False otherwise
+        """
+        zone_tolerance = self.reentry_zone_pips * pip_value
+        distance_from_level = abs(current_price - structure_level)
+
+        in_zone = distance_from_level <= zone_tolerance
+
+        if in_zone:
+            distance_pips = distance_from_level / pip_value
+            self.logger.info(f"   ✅ Price in re-entry zone ({distance_pips:.1f} pips from structure level)")
+
+        return in_zone
+
+    def _detect_bos_choch_15m(self, df_15m: pd.DataFrame, epic: str) -> Optional[Dict]:
+        """
+        Detect BOS/CHoCH on 15m timeframe
+
+        Args:
+            df_15m: 15m DataFrame
+            epic: Currency pair
+
+        Returns:
+            Dict with BOS/CHoCH info or None if no break detected
+        """
+        self.logger.info(f"\n📊 Detecting BOS/CHoCH on 15m timeframe")
+
+        # Analyze market structure on 15m
+        structure_analysis = self.market_structure.analyze_market_structure(
+            df=df_15m,
+            epic=epic,
+            timeframe='15m'
+        )
+
+        # Get recent structure breaks
+        recent_breaks = structure_analysis.get('structure_breaks', [])
+
+        if not recent_breaks:
+            self.logger.info(f"   ℹ️  No recent BOS/CHoCH detected")
+            return None
+
+        # Get most recent break
+        latest_break = recent_breaks[-1]
+
+        # Check significance
+        if latest_break.get('significance', 0) < self.min_bos_significance:
+            self.logger.info(f"   ❌ BOS/CHoCH significance too low ({latest_break.get('significance', 0)*100:.0f}% < {self.min_bos_significance*100:.0f}%)")
+            return None
+
+        break_type = latest_break.get('break_type', 'Unknown')
+        direction = latest_break.get('direction', 'unknown')
+        break_price = latest_break.get('price', df_15m['close'].iloc[-1])
+
+        self.logger.info(f"   ✅ {break_type} detected:")
+        self.logger.info(f"      Direction: {direction}")
+        self.logger.info(f"      Level: {break_price:.5f}")
+        self.logger.info(f"      Significance: {latest_break.get('significance', 0)*100:.0f}%")
+
+        return {
+            'type': break_type,
+            'direction': direction,
+            'level': break_price,
+            'significance': latest_break.get('significance', 0),
+            'timestamp': latest_break.get('timestamp')
+        }
 
     def get_strategy_name(self) -> str:
         """Get strategy name"""
