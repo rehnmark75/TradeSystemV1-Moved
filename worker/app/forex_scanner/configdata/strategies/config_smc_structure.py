@@ -97,10 +97,9 @@ SMC_SUPPLY_DEMAND_MIN_STRENGTH = 0.70
 
 # Minimum pattern strength required (0-1)
 # How strong the rejection pattern must be to trigger entry
-# 0.60 = quality patterns (60%+ quality score)
-# Agent analysis: 0.70 too restrictive (blocking 60-75% of valid setups)
-# Expected: +6-8 signals per month with minimal win rate degradation
-SMC_MIN_PATTERN_STRENGTH = 0.60
+# 0.50 = moderate patterns (50%+ quality score)
+# Lowered from 0.60 to allow more signals
+SMC_MIN_PATTERN_STRENGTH = 0.50
 
 # Pattern lookback (bars)
 # How many recent bars to check for rejection patterns
@@ -132,9 +131,9 @@ SMC_SL_BUFFER_PIPS = 8
 
 # Minimum Risk:Reward ratio
 # Trade must offer at least this R:R to be valid
-# 1.5 = minimum 1.5:1 reward:risk (relaxed for more signals)
-# REDUCED: 2.0 → 1.5 (R:R was primary blocker, rejecting 40% of valid setups)
-SMC_MIN_RR_RATIO = 1.5
+# 1.2 = minimum 1.2:1 reward:risk (very relaxed for more signals)
+# REDUCED: 1.5 → 1.2 to allow more trades
+SMC_MIN_RR_RATIO = 1.2
 
 # Maximum risk per trade (pips)
 # Reject trades with stop loss larger than this
@@ -157,9 +156,9 @@ SMC_PARTIAL_PROFIT_PERCENT = 50
 
 # Partial profit R:R ratio
 # Close partial at this R:R
-# 1.2 = take partial profit at 1.2R, let rest run to full TP (1.5R+)
-# REDUCED: Must be less than SMC_MIN_RR_RATIO (1.5)
-SMC_PARTIAL_PROFIT_RR = 1.2
+# 1.0 = take partial profit at 1.0R (breakeven), let rest run to full TP (1.2R+)
+# REDUCED: Must be less than SMC_MIN_RR_RATIO (1.2)
+SMC_PARTIAL_PROFIT_RR = 1.0
 
 # Move stop to breakeven after partial?
 SMC_MOVE_SL_TO_BE_AFTER_PARTIAL = True
@@ -319,7 +318,7 @@ SMC_ENTRY_LOOKBACK_HOURS = 200
 # Enable BOS/CHoCH re-entry strategy
 # True = detect BOS/CHoCH on 15m, validate HTF, wait for pullback
 # False = use legacy pattern-based entry
-SMC_BOS_CHOCH_REENTRY_ENABLED = True
+SMC_BOS_CHOCH_REENTRY_ENABLED = False  # Disabled - market structure module needs more work
 
 # Detection timeframe for BOS/CHoCH
 # '15m' = detect structure breaks on 15-minute timeframe
@@ -369,7 +368,7 @@ SMC_PATTERNS_OPTIONAL = True
 # Enable Zero Lag Liquidity as entry trigger
 # True = use liquidity breaks/rejections for precise entry timing
 # False = use immediate entry at structure level
-SMC_USE_ZERO_LAG_ENTRY = True
+SMC_USE_ZERO_LAG_ENTRY = False  # Disabled - too restrictive, blocking most signals
 
 # Wick threshold for liquidity detection (0-1)
 # Minimum wick-to-body ratio to detect liquidity event
