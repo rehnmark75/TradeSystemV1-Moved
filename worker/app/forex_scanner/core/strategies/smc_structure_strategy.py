@@ -207,7 +207,8 @@ class SMCStructureStrategy:
         df_1h: pd.DataFrame,
         df_4h: pd.DataFrame,
         epic: str,
-        pair: str
+        pair: str,
+        df_15m: Optional[pd.DataFrame] = None
     ) -> Optional[Dict]:
         """
         Detect SMC structure-based trading signal
@@ -217,6 +218,7 @@ class SMCStructureStrategy:
             df_4h: 4H timeframe OHLCV data (higher timeframe for trend)
             epic: IG Markets epic code
             pair: Currency pair name
+            df_15m: Optional 15m timeframe for BOS/CHoCH detection
 
         Returns:
             Signal dict or None if no valid signal
@@ -224,7 +226,7 @@ class SMCStructureStrategy:
         self.logger.info(f"\n{'='*70}")
         self.logger.info(f"🔍 SMC Structure Strategy - Signal Detection")
         self.logger.info(f"   Pair: {pair} ({epic})")
-        self.logger.info(f"   Entry TF: 1H | HTF: {self.htf_timeframe}")
+        self.logger.info(f"   Entry TF: 1H | HTF: {self.htf_timeframe} | BOS/CHoCH TF: 15m")
         self.logger.info(f"{'='*70}")
 
         # Check cooldown before processing
@@ -342,15 +344,66 @@ class SMCStructureStrategy:
                 # If patterns are optional (BOS/CHoCH mode), create minimal pattern
                 if self.patterns_optional:
                     self.logger.info(f"   ℹ️  No rejection pattern found, but patterns are optional (structure-only mode)")
-                    # Create structure-based entry using current price and recent swing
-                    if trend_analysis['trend'] == 'BULL':
-                        # For bullish, use recent low as rejection level
-                        rejection_level = df_1h['low'].tail(10).min()
-                        direction_str = 'bullish'
+
+                    # STEP 3A: Detect BOS/CHoCH on 15m (if available and enabled)
+                    bos_choch_info = None
+                    if self.bos_choch_enabled and df_15m is not None and len(df_15m) > 0:
+                        self.logger.info(f"\n🔄 STEP 3A: Detecting BOS/CHoCH on 15m Timeframe")
+
+                        bos_choch_info = self._detect_bos_choch_15m(df_15m, epic)
+
+                        if bos_choch_info:
+                            # Validate HTF alignment
+                            htf_aligned = self._validate_htf_alignment(
+                                bos_direction=bos_choch_info['direction'],
+                                df_1h=df_1h,
+                                df_4h=df_4h,
+                                epic=epic
+                            )
+
+                            if not htf_aligned:
+                                self.logger.info(f"   ❌ BOS/CHoCH detected but HTF not aligned - SIGNAL REJECTED")
+                                return None
+
+                            # Check if price is in re-entry zone
+                            in_reentry_zone = self._check_reentry_zone(
+                                current_price=current_price,
+                                structure_level=bos_choch_info['level'],
+                                pip_value=pip_value
+                            )
+
+                            if not in_reentry_zone:
+                                distance_pips = abs(current_price - bos_choch_info['level']) / pip_value
+                                self.logger.info(f"   ⏳ Price not in re-entry zone ({distance_pips:.1f} pips from BOS level) - waiting for pullback")
+                                return None
+
+                            # Use BOS/CHoCH level as structure
+                            rejection_level = bos_choch_info['level']
+                            direction_str = bos_choch_info['direction']
+
+                            self.logger.info(f"   ✅ BOS/CHoCH confirmed with HTF alignment and re-entry:")
+                            self.logger.info(f"      Type: {bos_choch_info['type']}")
+                            self.logger.info(f"      Direction: {direction_str}")
+                            self.logger.info(f"      Level: {rejection_level:.5f}")
+                            self.logger.info(f"      Significance: {bos_choch_info['significance']*100:.0f}%")
+                        else:
+                            self.logger.info(f"   ℹ️  No BOS/CHoCH detected on 15m, using fallback structure")
+                            # Fallback to recent swing
+                            if trend_analysis['trend'] == 'BULL':
+                                rejection_level = df_1h['low'].tail(10).min()
+                                direction_str = 'bullish'
+                            else:
+                                rejection_level = df_1h['high'].tail(10).max()
+                                direction_str = 'bearish'
                     else:
-                        # For bearish, use recent high as rejection level
-                        rejection_level = df_1h['high'].tail(10).max()
-                        direction_str = 'bearish'
+                        # No 15m data or BOS/CHoCH disabled, use recent swing
+                        self.logger.info(f"   ℹ️  BOS/CHoCH detection disabled or no 15m data, using recent swing")
+                        if trend_analysis['trend'] == 'BULL':
+                            rejection_level = df_1h['low'].tail(10).min()
+                            direction_str = 'bullish'
+                        else:
+                            rejection_level = df_1h['high'].tail(10).max()
+                            direction_str = 'bearish'
 
                     # STEP 3B: Use Zero Lag Liquidity for precise entry timing (if enabled)
                     if self.use_zero_lag_entry:

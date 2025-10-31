@@ -674,14 +674,30 @@ class SignalDetector:
                 self.logger.debug(f"Insufficient 4H data for {epic} (got {len(df_4h) if df_4h is not None else 0} bars)")
                 return None
 
-            self.logger.debug(f"🔍 [SMC_STRUCTURE] Analyzing {epic}: 1H bars={len(df_1h)}, 4H bars={len(df_4h)}")
+            # Get 15m data for BOS/CHoCH detection (optional)
+            df_15m = None
+            try:
+                df_15m = self.data_fetcher.get_enhanced_data(
+                    epic=epic,
+                    pair=pair,
+                    timeframe='15m',
+                    lookback_hours=100  # ~400 bars of 15m data
+                )
+                if df_15m is not None:
+                    self.logger.debug(f"🔍 [SMC_STRUCTURE] Got 15m data for BOS/CHoCH detection: {len(df_15m)} bars")
+            except Exception as e:
+                self.logger.debug(f"⚠️ [SMC_STRUCTURE] Could not fetch 15m data (non-critical): {e}")
+                df_15m = None
+
+            self.logger.debug(f"🔍 [SMC_STRUCTURE] Analyzing {epic}: 15m bars={len(df_15m) if df_15m is not None else 0}, 1H bars={len(df_1h)}, 4H bars={len(df_4h)}")
 
             # Detect signal
             signal = self.smc_structure_strategy.detect_signal(
                 df_1h=df_1h,
                 df_4h=df_4h,
                 epic=epic,
-                pair=pair
+                pair=pair,
+                df_15m=df_15m
             )
 
             if signal:
