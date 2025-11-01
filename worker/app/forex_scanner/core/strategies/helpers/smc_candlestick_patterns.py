@@ -58,8 +58,10 @@ class SMCCandlestickPatterns:
         if len(df) < 3:
             return None
 
-        # Check last 3 candles for patterns (most recent first)
-        for i in range(1, min(4, len(df))):
+        # Check last 10 candles for patterns (most recent first)
+        # OPTIMIZED: Expanded from 3 to 10 to capture pullback patterns
+        lookback = min(10, len(df))
+        for i in range(1, lookback + 1):
             idx = -i
             candle = df.iloc[idx]
             prev_candle = df.iloc[idx - 1] if idx - 1 >= -len(df) else None

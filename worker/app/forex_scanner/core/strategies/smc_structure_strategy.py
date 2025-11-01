@@ -116,6 +116,33 @@ class SMCStructureStrategy:
         self.use_zero_lag_entry = getattr(self.config, 'SMC_USE_ZERO_LAG_ENTRY', True)
         self.zero_lag_wick_threshold = getattr(self.config, 'SMC_ZERO_LAG_WICK_THRESHOLD', 0.6)
         self.zero_lag_lookback = getattr(self.config, 'SMC_ZERO_LAG_LOOKBACK', 20)
+        self.zero_lag_optional = getattr(self.config, 'SMC_ZERO_LAG_OPTIONAL', True)
+        self.zero_lag_confidence_boost = getattr(self.config, 'SMC_ZERO_LAG_CONFIDENCE_BOOST', 0.20)
+
+        # Fair Value Gap (FVG) parameters
+        self.fvg_entry_enabled = getattr(self.config, 'SMC_FVG_ENTRY_ENABLED', True)
+        self.fvg_priority = getattr(self.config, 'SMC_FVG_PRIORITY', 1)
+        self.fvg_entry_zone_percent = getattr(self.config, 'SMC_FVG_ENTRY_ZONE_PERCENT', 0.50)
+        self.fvg_max_age_bars = getattr(self.config, 'SMC_FVG_MAX_AGE_BARS', 50)
+        self.fvg_min_size_pips = getattr(self.config, 'SMC_FVG_MIN_SIZE_PIPS', 5)
+
+        # Tiered entry logic parameters
+        self.use_tiered_entry_logic = getattr(self.config, 'SMC_USE_TIERED_ENTRY_LOGIC', True)
+        self.min_tier_for_entry = getattr(self.config, 'SMC_MIN_TIER_FOR_ENTRY', 2)
+        self.tier1_confidence_boost = getattr(self.config, 'SMC_TIER1_CONFIDENCE_BOOST', 0.25)
+        self.tier2_confidence_boost = getattr(self.config, 'SMC_TIER2_CONFIDENCE_BOOST', 0.15)
+        self.tier3_confidence_boost = getattr(self.config, 'SMC_TIER3_CONFIDENCE_BOOST', 0.10)
+        self.tier4_confidence_boost = getattr(self.config, 'SMC_TIER4_CONFIDENCE_BOOST', 0.00)
+
+        # Multi-timeframe entry refinement
+        self.use_15m_entry_refinement = getattr(self.config, 'SMC_USE_15M_ENTRY_REFINEMENT', True)
+        self.entry_refinement_timeframe = getattr(self.config, 'SMC_ENTRY_REFINEMENT_TIMEFRAME', '15m')
+        self.require_15m_sweep_tier1 = getattr(self.config, 'SMC_REQUIRE_15M_SWEEP_TIER1', False)
+
+        # Order Block validation (for Tier 3)
+        self.ob_min_timeframe = getattr(self.config, 'SMC_OB_MIN_TIMEFRAME', '4h')
+        self.ob_max_age_bars = getattr(self.config, 'SMC_OB_MAX_AGE_BARS', 30)
+        self.ob_min_retest_count = getattr(self.config, 'SMC_OB_MIN_RETEST_COUNT', 0)
 
     def _check_cooldown(self, pair: str, current_time: datetime) -> tuple[bool, str]:
         """
@@ -258,23 +285,68 @@ class SMCStructureStrategy:
             if trend_analysis['in_pullback']:
                 self.logger.info(f"   ✅ In Pullback: {trend_analysis['pullback_depth']*100:.0f}% retracement")
 
-            # Must have clear trend
-            if trend_analysis['trend'] not in ['BULL', 'BEAR']:
-                self.logger.info(f"   ❌ No clear trend - SIGNAL REJECTED")
+            # OPTIMIZED: Check last BOS/CHoCH direction on HTF
+            # Only requirement: Last HTF BOS/CHoCH must align with trade direction
+            # This allows trading in ranging markets as long as structure is aligned
+
+            self.logger.info(f"\n📊 Checking HTF BOS/CHoCH Direction...")
+
+            # Analyze market structure on HTF to detect BOS/CHoCH
+            # PHASE 1 OPTIMIZATION: Increased thresholds to filter weak/noisy structure breaks
+            config_dict = {
+                'swing_length': 7,          # OPTIMIZED: Increased from 5 for stronger swing detection
+                'bos_threshold': 0.0005,    # OPTIMIZED: Increased from 0.00001 (~5 pips, not 0.1 pips)
+                'min_structure_significance': 0.6,  # OPTIMIZED: Increased from 0.1 to require clear breaks
+                'structure_confirmation': 3  # OPTIMIZED: Increased from 2 for more confirmation
+            }
+            df_4h_with_structure = self.market_structure.analyze_market_structure(
+                df=df_4h,
+                config=config_dict,
+                epic=epic,
+                timeframe='4h'
+            )
+
+            # Get the most recent BOS/CHoCH direction
+            last_htf_direction = self.market_structure.get_last_bos_choch_direction(df_4h_with_structure)
+
+            if not last_htf_direction:
+                self.logger.info(f"   ❌ No BOS/CHoCH detected on HTF - SIGNAL REJECTED")
+                self.logger.info(f"   ℹ️  HTF Trend: {trend_analysis['trend']} (Strength: {trend_analysis['strength']*100:.0f}%)")
                 return None
 
-            # Must have minimum strength
-            if trend_analysis['strength'] < 0.50:
-                self.logger.info(f"   ❌ Trend too weak ({trend_analysis['strength']*100:.0f}% < 50%) - SIGNAL REJECTED")
-                return None
+            # Check if HTF structure aligns with intended trade direction
+            if trend_analysis['trend'] == 'BULL':
+                if last_htf_direction == 'bullish':
+                    self.logger.info(f"   ✅ Last HTF BOS/CHoCH is bullish - BUY trade allowed")
+                else:
+                    self.logger.info(f"   ❌ Last HTF BOS/CHoCH is bearish (conflicts with BULL trend) - SIGNAL REJECTED")
+                    return None
+            elif trend_analysis['trend'] == 'BEAR':
+                if last_htf_direction == 'bearish':
+                    self.logger.info(f"   ✅ Last HTF BOS/CHoCH is bearish - SELL trade allowed")
+                else:
+                    self.logger.info(f"   ❌ Last HTF BOS/CHoCH is bullish (conflicts with BEAR trend) - SIGNAL REJECTED")
+                    return None
+            else:
+                # RANGING/UNKNOWN - use HTF BOS/CHoCH to determine trade direction
+                if last_htf_direction == 'bullish':
+                    trend_analysis['trend'] = 'BULL'
+                    self.logger.info(f"   ✅ Ranging market - using bullish HTF BOS/CHoCH for BUY trades")
+                else:
+                    trend_analysis['trend'] = 'BEAR'
+                    self.logger.info(f"   ✅ Ranging market - using bearish HTF BOS/CHoCH for SELL trades")
 
-            self.logger.info(f"   ✅ HTF Trend confirmed: {trend_analysis['trend']}")
+            self.logger.info(f"   ✅ HTF Structure confirmed for {trend_analysis['trend']} trades")
 
             # STEP 2: Detect S/R levels (optional - for confidence boost)
             self.logger.info(f"\n🎯 STEP 2: Detecting Support/Resistance Levels")
 
+            # Use 15m data if available, otherwise fall back to 1h
+            # OPTIMIZED: Prefer 15m for more precise entry S/R levels
+            sr_df = df_15m if (df_15m is not None and len(df_15m) > 0) else df_1h
+
             levels = self.sr_detector.detect_levels(
-                df=df_1h,
+                df=sr_df,
                 epic=epic,
                 lookback=self.sr_lookback
             )
@@ -284,8 +356,8 @@ class SMCStructureStrategy:
             self.logger.info(f"   Demand zones: {len(levels['demand_zones'])}")
             self.logger.info(f"   Supply zones: {len(levels['supply_zones'])}")
 
-            # Get current price
-            current_price = df_1h['close'].iloc[-1]
+            # Get current price from same dataframe used for S/R
+            current_price = sr_df['close'].iloc[-1]
 
             # NOTE: Price extreme filter removed (Phase 1 fix)
             # Filter had conceptual flaw: confused "high in trend range" with "at swing extreme"
@@ -390,19 +462,19 @@ class SMCStructureStrategy:
                             self.logger.info(f"   ℹ️  No BOS/CHoCH detected on 15m, using fallback structure")
                             # Fallback to recent swing
                             if trend_analysis['trend'] == 'BULL':
-                                rejection_level = df_1h['low'].tail(10).min()
+                                rejection_level = df_15m['low'].tail(10).min()  # OPTIMIZED: Use 15m swing
                                 direction_str = 'bullish'
                             else:
-                                rejection_level = df_1h['high'].tail(10).max()
+                                rejection_level = df_15m['high'].tail(10).max()  # OPTIMIZED: Use 15m swing
                                 direction_str = 'bearish'
                     else:
                         # No 15m data or BOS/CHoCH disabled, use recent swing
                         self.logger.info(f"   ℹ️  BOS/CHoCH detection disabled or no 15m data, using recent swing")
                         if trend_analysis['trend'] == 'BULL':
-                            rejection_level = df_1h['low'].tail(10).min()
+                            rejection_level = df_15m['low'].tail(10).min()  # OPTIMIZED: Use 15m swing
                             direction_str = 'bullish'
                         else:
-                            rejection_level = df_1h['high'].tail(10).max()
+                            rejection_level = df_15m['high'].tail(10).max()  # OPTIMIZED: Use 15m swing
                             direction_str = 'bearish'
 
                     # STEP 3B: Use Zero Lag Liquidity for precise entry timing (if enabled)
@@ -410,7 +482,7 @@ class SMCStructureStrategy:
                         self.logger.info(f"\n💧 STEP 3B: Checking Zero Lag Liquidity Entry Trigger")
 
                         zero_lag_signal = self.zero_lag.get_entry_signal(
-                            df=df_1h,
+                            df=df_15m,  # OPTIMIZED: Use 15m data for entry timing
                             structure_level=rejection_level,
                             direction=direction_str,
                             pip_value=pip_value
@@ -433,9 +505,21 @@ class SMCStructureStrategy:
                                 'description': zero_lag_signal['description']
                             }
                         else:
-                            # No Zero Lag trigger yet, wait for better entry
-                            self.logger.info(f"   ⏳ No Zero Lag entry trigger at structure level - waiting for better entry")
-                            return None
+                            # No Zero Lag trigger detected
+                            if self.zero_lag_optional:
+                                # Zero Lag is optional, proceed without it
+                                self.logger.info(f"   ℹ️  No Zero Lag trigger (optional) - proceeding with structure-only entry")
+                                rejection_pattern = {
+                                    'pattern_type': 'structure_only',
+                                    'strength': 0.5,  # Moderate strength
+                                    'entry_price': current_price,
+                                    'rejection_level': rejection_level,
+                                    'description': 'Structure-based entry (no Zero Lag trigger)'
+                                }
+                            else:
+                                # Zero Lag is required, wait for trigger
+                                self.logger.info(f"   ⏳ No Zero Lag entry trigger at structure level - waiting for better entry")
+                                return None
                     else:
                         # Zero Lag disabled, use immediate entry
                         rejection_pattern = {

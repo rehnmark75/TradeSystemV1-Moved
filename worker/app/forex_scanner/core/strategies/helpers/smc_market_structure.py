@@ -87,6 +87,14 @@ class SMCMarketStructure:
             Enhanced DataFrame with structure analysis
         """
         try:
+            # CRITICAL FIX: Reset instance state to prevent contamination across scans
+            # Without this, bearish/bullish bias from previous analyses propagates to new scans
+            # Issue: Shared instance was maintaining state across multiple time periods in backtests
+            # Result: First bearish detection would contaminate ALL subsequent analyses
+            self.swing_points = []
+            self.structure_breaks = []
+            self.current_structure = StructureType.NEUTRAL
+
             df_enhanced = df.copy()
             
             # Detect swing points
@@ -354,29 +362,31 @@ class SMCMarketStructure:
         try:
             confirmation_bars = config.get('structure_confirmation', 3)
             bos_threshold = config.get('bos_threshold', 0.0001)
-            
+            min_structure_significance = config.get('min_structure_significance', 0.3)
+
             # Initialize structure columns
             df['structure_break'] = False
             df['break_type'] = ''
             df['break_direction'] = ''
             df['structure_significance'] = 0.0
-            
+
             if len(self.swing_points) < 2:
                 return df
-            
+
             # Analyze each swing point for structure breaks
             for i, swing_point in enumerate(self.swing_points[1:], 1):
                 previous_swing = self.swing_points[i-1]
-                
+
                 # Determine if this creates a structure break
                 break_info = self._detect_structure_break(
-                    previous_swing, 
-                    swing_point, 
-                    df, 
+                    previous_swing,
+                    swing_point,
+                    df,
                     bos_threshold,
                     confirmation_bars,
                     epic,
-                    timeframe
+                    timeframe,
+                    min_structure_significance
                 )
                 
                 if break_info:
@@ -401,99 +411,86 @@ class SMCMarketStructure:
             return df
     
     def _detect_structure_break(
-        self, 
-        previous_swing: SwingPoint, 
+        self,
+        previous_swing: SwingPoint,
         current_swing: SwingPoint,
         df: pd.DataFrame,
         threshold: float,
         confirmation_bars: int,
         epic: str = None,
-        timeframe: str = None
+        timeframe: str = None,
+        min_structure_significance: float = 0.3
     ) -> Optional[StructureBreak]:
-        """Detect if current swing creates a structure break with institutional validation"""
+        """Detect if current swing creates a structure break - SIMPLIFIED VERSION"""
         try:
-            # Enhanced structure break classification with institutional context
+            # SIMPLIFIED: Focus on basic BOS/CHoCH detection without overly strict filters
             break_type = None
             direction = None
             new_structure = None
-            
-            # Get recent swing context (last 3-5 swings for pattern recognition)
-            recent_swings = [sp for sp in self.swing_points[-5:] if sp.index <= current_swing.index]
-            
-            # Determine break type based on institutional logic
+
+            # Determine break type based on swing patterns
             if (previous_swing.swing_type in [SwingType.HIGHER_HIGH, SwingType.EQUAL_HIGH] and
                 current_swing.swing_type == SwingType.LOWER_HIGH and
                 self.current_structure in [StructureType.BULLISH, StructureType.NEUTRAL]):
-                # Potential bearish ChoCH (Change of Character) - Trend reversal
+                # Bearish ChoCH (Change of Character) - Trend reversal
                 break_type = "ChoCH"
-                direction = "bearish" 
+                direction = "bearish"
                 new_structure = StructureType.BEARISH
-                
+
             elif (previous_swing.swing_type in [SwingType.LOWER_LOW, SwingType.EQUAL_LOW] and
                   current_swing.swing_type == SwingType.HIGHER_LOW and
                   self.current_structure in [StructureType.BEARISH, StructureType.NEUTRAL]):
-                # Potential bullish ChoCH - Trend reversal
+                # Bullish ChoCH - Trend reversal
                 break_type = "ChoCH"
                 direction = "bullish"
                 new_structure = StructureType.BULLISH
-                
-            elif (current_swing.swing_type == SwingType.HIGHER_HIGH and 
+
+            elif (current_swing.swing_type == SwingType.HIGHER_HIGH and
                   self.current_structure == StructureType.BULLISH):
                 # Bullish BOS (Break of Structure) - Trend continuation
                 break_type = "BOS"
                 direction = "bullish"
                 new_structure = StructureType.BULLISH
-                
-            elif (current_swing.swing_type == SwingType.LOWER_LOW and 
+
+            elif (current_swing.swing_type == SwingType.LOWER_LOW and
                   self.current_structure == StructureType.BEARISH):
-                # Bearish BOS - Trend continuation  
+                # Bearish BOS - Trend continuation
                 break_type = "BOS"
                 direction = "bearish"
                 new_structure = StructureType.BEARISH
-                
-            # Enhanced equal levels detection for liquidity sweeps
-            elif (previous_swing.swing_type == SwingType.EQUAL_HIGH and
-                  current_swing.swing_type in [SwingType.HIGHER_HIGH, SwingType.LOWER_HIGH]):
-                # Liquidity sweep above equal highs
-                if self._validate_liquidity_sweep(df, current_swing, "high"):
-                    break_type = "BOS_LiquiditySweep" if current_swing.swing_type == SwingType.HIGHER_HIGH else "ChoCH_LiquiditySweep"
-                    direction = "bullish" if current_swing.swing_type == SwingType.HIGHER_HIGH else "bearish"
-                    new_structure = StructureType.BULLISH if direction == "bullish" else StructureType.BEARISH
-                    
-            elif (previous_swing.swing_type == SwingType.EQUAL_LOW and
-                  current_swing.swing_type in [SwingType.LOWER_LOW, SwingType.HIGHER_LOW]):
-                # Liquidity sweep below equal lows
-                if self._validate_liquidity_sweep(df, current_swing, "low"):
-                    break_type = "BOS_LiquiditySweep" if current_swing.swing_type == SwingType.LOWER_LOW else "ChoCH_LiquiditySweep"
-                    direction = "bearish" if current_swing.swing_type == SwingType.LOWER_LOW else "bullish"
-                    new_structure = StructureType.BEARISH if direction == "bearish" else StructureType.BULLISH
-            
+
+            # SIMPLIFIED: Also detect from NEUTRAL state
+            elif (current_swing.swing_type == SwingType.HIGHER_HIGH and
+                  self.current_structure == StructureType.NEUTRAL):
+                # First bullish break from neutral
+                break_type = "BOS"
+                direction = "bullish"
+                new_structure = StructureType.BULLISH
+
+            elif (current_swing.swing_type == SwingType.LOWER_LOW and
+                  self.current_structure == StructureType.NEUTRAL):
+                # First bearish break from neutral
+                break_type = "BOS"
+                direction = "bearish"
+                new_structure = StructureType.BEARISH
+
             if not break_type:
                 return None
-            
-            # Enhanced price movement validation
+
+            # Basic price movement validation (very lenient threshold)
             price_difference = abs(current_swing.price - previous_swing.price)
             if price_difference < threshold:
                 return None
-            
-            # Institutional validation filters
-            if not self._validate_institutional_context(df, current_swing, previous_swing, direction):
-                return None
-            
-            # Calculate enhanced significance with institutional factors
-            significance = self._calculate_enhanced_break_significance(
-                previous_swing, current_swing, df, break_type, recent_swings
+
+            # Calculate basic significance
+            significance = self._calculate_break_significance(
+                previous_swing, current_swing, df
             )
-            
-            # Apply stricter minimum significance from config
-            min_significance = getattr(self, 'min_structure_significance', 0.5)
-            if significance < min_significance:
+
+            # Apply minimum significance from config (now properly passed as parameter)
+            if significance < min_structure_significance:
                 return None
-            
-            # Multi-timeframe structure validation (if enabled in config)
-            if not self._validate_multi_timeframe_alignment(direction, significance, epic, timeframe):
-                return None
-            
+
             return StructureBreak(
                 index=current_swing.index,
                 break_type=break_type,
@@ -1305,4 +1302,33 @@ class SMCMarketStructure:
 
         except Exception as e:
             self.logger.error(f"Failed to get nearest swing levels: {e}")
+            return None
+
+    def get_last_bos_choch_direction(self, df: pd.DataFrame) -> Optional[str]:
+        """
+        Get the direction of the most recent BOS/CHoCH
+
+        Args:
+            df: DataFrame with structure analysis (must have 'structure_break', 'break_direction' columns)
+
+        Returns:
+            'bullish', 'bearish', or None if no BOS/CHoCH found
+        """
+        try:
+            if df.empty or 'structure_break' not in df.columns:
+                return None
+
+            # Find rows with structure breaks
+            breaks = df[df['structure_break'] == True]
+
+            if breaks.empty:
+                return None
+
+            # Get the most recent break
+            last_break = breaks.iloc[-1]
+
+            return last_break.get('break_direction', None)
+
+        except Exception as e:
+            self.logger.error(f"Failed to get last BOS/CHoCH direction: {e}")
             return None

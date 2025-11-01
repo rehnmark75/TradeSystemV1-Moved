@@ -82,9 +82,8 @@ SMC_MAX_LEVEL_AGE = 200
 
 # Proximity requirement (pips)
 # How close price must be to a level to trigger consideration
-# 30 pips = accommodates volatile pairs while maintaining relevance
-# OPTIMIZED: Increased from 20 to capture valid setups near structure
-SMC_SR_PROXIMITY_PIPS = 30
+# 15 pips = reasonable proximity for 15m timeframe (baseline)
+SMC_SR_PROXIMITY_PIPS = 15
 
 # Minimum level strength for supply/demand zones (0-1)
 # Only levels with this strength qualify as strong zones
@@ -97,15 +96,15 @@ SMC_SUPPLY_DEMAND_MIN_STRENGTH = 0.70
 
 # Minimum pattern strength required (0-1)
 # How strong the rejection pattern must be to trigger entry
-# 0.50 = moderate patterns (50%+ quality score)
-# Lowered from 0.60 to allow more signals
-SMC_MIN_PATTERN_STRENGTH = 0.50
+# 0.55 = moderate-good quality patterns (balanced for FVG-first approach)
+# OPTIMIZED: Slightly reduced since FVGs are now primary trigger
+SMC_MIN_PATTERN_STRENGTH = 0.55
 
 # Pattern lookback (bars)
 # How many recent bars to check for rejection patterns
-# 50 bars = checks last 50 bars for patterns (captures more opportunities)
-# Agent analysis: 5 bars too narrow, missing valid pullback patterns
-SMC_PATTERN_LOOKBACK_BARS = 50
+# 10 bars = checks last 10 hours for recent patterns (balanced)
+# OPTIMIZED: Reduced from 50 (too stale) to capture fresh pullback patterns
+SMC_PATTERN_LOOKBACK_BARS = 10
 
 # Pin bar requirements
 SMC_PIN_BAR_MIN_WICK_RATIO = 0.60  # Wick must be 60%+ of total range
@@ -125,15 +124,14 @@ SMC_HAMMER_MAX_OPPOSITE_WICK = 0.15  # Opposite wick 15% or less
 
 # Stop loss buffer (pips)
 # Additional pips beyond structure invalidation point
-# 8 pips = tighter stop for better R:R (avg bar range analysis)
-# OPTIMIZED: Reduced from 15 to minimize losses
-SMC_SL_BUFFER_PIPS = 8
+# 10 pips = tight stop at structure invalidation (baseline)
+SMC_SL_BUFFER_PIPS = 10
 
 # Minimum Risk:Reward ratio
 # Trade must offer at least this R:R to be valid
-# 1.2 = minimum 1.2:1 reward:risk (very relaxed for more signals)
-# REDUCED: 1.5 → 1.2 to allow more trades
-SMC_MIN_RR_RATIO = 1.2
+# 2.0 = minimum 2:1 reward:risk (industry standard for profitable trading)
+# OPTIMIZED: Increased to 2.0 to filter low-quality trades
+SMC_MIN_RR_RATIO = 2.0
 
 # Maximum risk per trade (pips)
 # Reject trades with stop loss larger than this
@@ -156,9 +154,9 @@ SMC_PARTIAL_PROFIT_PERCENT = 50
 
 # Partial profit R:R ratio
 # Close partial at this R:R
-# 1.0 = take partial profit at 1.0R (breakeven), let rest run to full TP (1.2R+)
-# REDUCED: Must be less than SMC_MIN_RR_RATIO (1.2)
-SMC_PARTIAL_PROFIT_RR = 1.0
+# 0.8 = take partial profit at 0.8R, let rest run to full TP (1.2R+)
+# OPTIMIZED: Set to 0.8 to work with min R:R of 1.2
+SMC_PARTIAL_PROFIT_RR = 0.8
 
 # Move stop to breakeven after partial?
 SMC_MOVE_SL_TO_BE_AFTER_PARTIAL = True
@@ -303,13 +301,14 @@ SMC_BACKTEST_COMMISSION_PER_LOT = 7.0
 
 # Entry timeframe
 # The timeframe used for signal generation and pattern detection
-# '1h' provides good balance for structure-based entries
-SMC_ENTRY_TIMEFRAME = '1h'
+# '15m' provides more precise entries with tighter stops
+# OPTIMIZED: Changed from 1h to 15m for better entry timing
+SMC_ENTRY_TIMEFRAME = '15m'
 
 # Lookback for entry timeframe analysis (hours)
 # How much entry TF data to fetch
-# 200 hours = ~8 days of 1H data
-SMC_ENTRY_LOOKBACK_HOURS = 200
+# 100 hours = ~400 bars of 15m data (~17 days)
+SMC_ENTRY_LOOKBACK_HOURS = 100
 
 # ============================================================================
 # BOS/CHoCH RE-ENTRY STRATEGY (New Approach)
@@ -318,7 +317,8 @@ SMC_ENTRY_LOOKBACK_HOURS = 200
 # Enable BOS/CHoCH re-entry strategy
 # True = detect BOS/CHoCH on 15m, validate HTF, wait for pullback
 # False = use legacy pattern-based entry
-SMC_BOS_CHOCH_REENTRY_ENABLED = False  # Disabled - market structure module needs more work
+# TEMP: Disabled - causing 0 signals, needs debugging
+SMC_BOS_CHOCH_REENTRY_ENABLED = False
 
 # Detection timeframe for BOS/CHoCH
 # '15m' = detect structure breaks on 15-minute timeframe
@@ -326,7 +326,8 @@ SMC_BOS_CHOCH_TIMEFRAME = '15m'
 
 # Require 1H timeframe alignment
 # True = 1H structure must align with BOS/CHoCH direction
-SMC_REQUIRE_1H_ALIGNMENT = True
+# OPTIMIZED: Disabled to reduce over-filtering (agent recommendation)
+SMC_REQUIRE_1H_ALIGNMENT = False
 
 # Require 4H timeframe alignment
 # True = 4H structure must align with BOS/CHoCH direction
@@ -338,8 +339,9 @@ SMC_HTF_ALIGNMENT_LOOKBACK = 50
 
 # Re-entry zone tolerance (pips)
 # ± pips from BOS/CHoCH level to trigger re-entry
-# 10 pips = reasonable zone for re-entry
-SMC_REENTRY_ZONE_PIPS = 10
+# 20 pips = widened zone for more re-entry opportunities
+# OPTIMIZED: Increased from 10 to 20 pips (balanced profile)
+SMC_REENTRY_ZONE_PIPS = 20
 
 # Maximum wait time for pullback (bars)
 # Maximum bars to wait for price to return to BOS/CHoCH level
@@ -348,8 +350,8 @@ SMC_MAX_WAIT_BARS = 20
 
 # Minimum BOS/CHoCH significance (0-1)
 # How significant the structure break must be
-# 0.6 = moderate significance requirement
-SMC_MIN_BOS_SIGNIFICANCE = 0.6
+# 0.60 = balanced threshold (halfway between 0.50 baseline and 0.70 strict)
+SMC_MIN_BOS_SIGNIFICANCE = 0.60
 
 # Stop loss distance from structure level (pips)
 # For BOS/CHoCH re-entry, stop goes beyond structure level
@@ -362,23 +364,127 @@ SMC_BOS_STOP_PIPS = 10
 SMC_PATTERNS_OPTIONAL = True
 
 # ============================================================================
+# FAIR VALUE GAP (FVG) PRIORITY ENTRY
+# ============================================================================
+
+# Enable Fair Value Gap as PRIMARY entry trigger
+# FVGs have 70-80% fill rate (highest statistical edge in SMC)
+# True = prioritize FVG entries over pattern-based entries
+SMC_FVG_ENTRY_ENABLED = True
+
+# FVG entry priority level (1 = highest, 4 = lowest)
+# Tier 1: FVG + Liquidity Sweep (80%+ edge)
+# Tier 2: FVG + Rejection Pattern (70%+ edge)
+# Tier 3: Order Block + Pattern (60%+ edge)
+# Tier 4: S/R + Pattern (50%+ edge)
+SMC_FVG_PRIORITY = 1
+
+# FVG entry zone percentage
+# Enter at what % fill of the FVG
+# 0.50 = enter at 50% fill of gap (sweet spot per research)
+SMC_FVG_ENTRY_ZONE_PERCENT = 0.50
+
+# Maximum FVG age (bars)
+# Reject FVGs older than this
+# 50 bars on 4H = ~8 days (recent institutional activity)
+SMC_FVG_MAX_AGE_BARS = 50
+
+# Minimum FVG size (pips)
+# Gap must be at least this many pips to be valid
+# 5 pips = filters noise while capturing real imbalances
+SMC_FVG_MIN_SIZE_PIPS = 5
+
+# ============================================================================
+# TIERED ENTRY LOGIC SYSTEM
+# ============================================================================
+
+# Enable tiered entry system
+# True = use priority-based entry logic (FVG > OB > S/R)
+# False = use legacy single-method entry
+SMC_USE_TIERED_ENTRY_LOGIC = True
+
+# Minimum tier level for entry acceptance
+# 1 = only Tier 1 entries (FVG + Liquidity)
+# 2 = Tier 1-2 entries (FVG-based)
+# 3 = Tier 1-3 entries (includes Order Blocks)
+# 4 = All tiers (includes S/R patterns)
+SMC_MIN_TIER_FOR_ENTRY = 2
+
+# Confidence boost per tier
+# Tier 1 signals get higher base confidence
+SMC_TIER1_CONFIDENCE_BOOST = 0.25  # +25% for FVG + Liquidity
+SMC_TIER2_CONFIDENCE_BOOST = 0.15  # +15% for FVG + Pattern
+SMC_TIER3_CONFIDENCE_BOOST = 0.10  # +10% for OB + Pattern
+SMC_TIER4_CONFIDENCE_BOOST = 0.00  # No boost for S/R only
+
+# ============================================================================
+# MULTI-TIMEFRAME ENTRY REFINEMENT
+# ============================================================================
+
+# Enable 15M timeframe for entry refinement
+# True = use 15M for precise liquidity sweep detection
+# False = use only 1H for entry timing
+SMC_USE_15M_ENTRY_REFINEMENT = True
+
+# Entry refinement timeframe
+# Timeframe for precise entry trigger detection
+SMC_ENTRY_REFINEMENT_TIMEFRAME = '15m'
+
+# Require 15M liquidity sweep for Tier 1 entries
+# True = Tier 1 requires 15M sweep confirmation
+# False = Tier 1 can use 1H sweeps
+SMC_REQUIRE_15M_SWEEP_TIER1 = False  # Optional for more signals
+
+# ============================================================================
+# ORDER BLOCK VALIDATION (For Tier 3 Entries)
+# ============================================================================
+
+# Minimum order block timeframe
+# Only use order blocks from this timeframe or higher
+# '4h' = only 4H+ order blocks (more reliable)
+SMC_OB_MIN_TIMEFRAME = '4h'
+
+# Maximum order block age (bars)
+# Only trade recent order blocks
+# 30 bars on 4H = ~5 days (fresh institutional interest)
+SMC_OB_MAX_AGE_BARS = 30
+
+# Minimum order block retest count
+# How many times OB must be tested
+# 0 = fresh untested OBs okay (first retest)
+# 1 = require at least one previous retest
+SMC_OB_MIN_RETEST_COUNT = 0
+
+# ============================================================================
 # ZERO LAG LIQUIDITY ENTRY TRIGGER
 # ============================================================================
 
 # Enable Zero Lag Liquidity as entry trigger
 # True = use liquidity breaks/rejections for precise entry timing
 # False = use immediate entry at structure level
-SMC_USE_ZERO_LAG_ENTRY = False  # Disabled - too restrictive, blocking most signals
+# OPTIMIZED: Enabled for better entry timing on 15m timeframe
+SMC_USE_ZERO_LAG_ENTRY = True
 
 # Wick threshold for liquidity detection (0-1)
 # Minimum wick-to-body ratio to detect liquidity event
-# 0.6 = wick must be 60%+ of total candle range
+# 0.6 = wick must be 60%+ of total candle range (baseline)
 SMC_ZERO_LAG_WICK_THRESHOLD = 0.6
 
 # Lookback bars for liquidity tracking
 # How many bars to track liquidity levels
-# 20 bars = good balance for 1H timeframe
+# 20 bars = balanced lookback (baseline)
 SMC_ZERO_LAG_LOOKBACK = 20
+
+# Make Zero Lag Liquidity optional (not required blocker)
+# True = Zero Lag is bonus confirmation (+confidence), not mandatory
+# False = Zero Lag required (blocks signals if not present)
+# REVERTED: Making it optional to allow structure-based entries without Zero Lag
+SMC_ZERO_LAG_OPTIONAL = True
+
+# Confidence boost when Zero Lag liquidity detected
+# Bonus confidence added to signal when liquidity sweep confirmed
+# 0.20 = +20% confidence bonus (agent research recommendation)
+SMC_ZERO_LAG_CONFIDENCE_BOOST = 0.20
 
 # ============================================================================
 # EPIC-SPECIFIC OVERRIDES (Optional)
