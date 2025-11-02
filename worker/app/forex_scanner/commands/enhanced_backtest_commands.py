@@ -43,7 +43,8 @@ class EnhancedBacktestCommands:
         timeframe: str = '15m',
         strategy: str = 'EMA_CROSSOVER',
         max_signals_display: int = 20,
-        pipeline: bool = False
+        pipeline: bool = False,
+        csv_export: str = None
     ) -> bool:
         """
         Run enhanced backtest using the new integrated pipeline
@@ -55,6 +56,8 @@ class EnhancedBacktestCommands:
             timeframe: Trading timeframe
             strategy: Strategy name to use
             max_signals_display: Maximum signals to display in detail
+            pipeline: Use full pipeline with validation
+            csv_export: Path to CSV file for exporting all signals
         """
 
         self.logger.info("🚀 Starting Enhanced Backtest Pipeline")
@@ -125,7 +128,8 @@ class EnhancedBacktestCommands:
                     results,
                     epic_list,
                     show_signals,
-                    max_signals_display
+                    max_signals_display,
+                    csv_export
                 )
 
             self.logger.info("✅ Enhanced backtest completed successfully")
@@ -144,7 +148,8 @@ class EnhancedBacktestCommands:
         results: Dict,
         epic_list: List[str],
         show_signals: bool = False,
-        max_signals_display: int = 20
+        max_signals_display: int = 20,
+        csv_export: str = None
     ):
         """Display comprehensive backtest results with signal breakdown"""
 
@@ -161,6 +166,10 @@ class EnhancedBacktestCommands:
 
             signals_df = self.db_manager.execute_query(signals_query, {'execution_id': int(execution_id)})
             signals_result = signals_df.to_dict('records')
+
+            # Export to CSV if requested
+            if csv_export and len(signals_df) > 0:
+                self._export_signals_to_csv(signals_df, csv_export, execution_id)
 
             if not signals_result:
                 self.logger.warning("❌ No signals found in backtest results")
@@ -316,6 +325,60 @@ class EnhancedBacktestCommands:
             error_msg = f"❌ Error displaying detailed signals: {e}"
             self.logger.error(self._sanitize_unicode(error_msg))
             self.logger.info("❌ Signal display failed - continuing with summary")
+
+    def _export_signals_to_csv(self, signals_df, csv_path: str, execution_id: int):
+        """
+        Export all backtest signals to CSV file for detailed analysis
+
+        Args:
+            signals_df: DataFrame with signal data from database
+            csv_path: Path to output CSV file
+            execution_id: Backtest execution ID
+        """
+        try:
+            import os
+            from datetime import datetime
+
+            # Ensure directory exists
+            csv_dir = os.path.dirname(csv_path)
+            if csv_dir and not os.path.exists(csv_dir):
+                os.makedirs(csv_dir, exist_ok=True)
+
+            # Export to CSV
+            signals_df.to_csv(csv_path, index=False)
+
+            # Count signals and calculate basic stats
+            total_signals = len(signals_df)
+            completed_trades = signals_df[signals_df['trade_result'].notna()]
+            winners = len(completed_trades[completed_trades['trade_result'] == 'win'])
+            losers = len(completed_trades[completed_trades['trade_result'] == 'loss'])
+            win_rate = (winners / max(winners + losers, 1)) * 100 if (winners + losers) > 0 else 0
+
+            self.logger.info(f"\n📁 CSV EXPORT SUCCESSFUL:")
+            self.logger.info("=" * 60)
+            self.logger.info(f"   📂 File: {csv_path}")
+            self.logger.info(f"   📊 Signals Exported: {total_signals}")
+            self.logger.info(f"   ✅ Winners: {winners}")
+            self.logger.info(f"   ❌ Losers: {losers}")
+            self.logger.info(f"   🎯 Win Rate: {win_rate:.1f}%")
+            self.logger.info(f"   🔍 Execution ID: {execution_id}")
+            self.logger.info("=" * 60)
+
+            # Show columns available for analysis
+            self.logger.info(f"\n📋 Available Columns for Analysis:")
+            for col in signals_df.columns:
+                self.logger.info(f"   • {col}")
+
+            self.logger.info(f"\n💡 You can now analyze signals with:")
+            self.logger.info(f"   import pandas as pd")
+            self.logger.info(f"   df = pd.read_csv('{csv_path}')")
+            self.logger.info(f"   df.describe()  # Statistical summary")
+            self.logger.info(f"   df[df['trade_result'] == 'loss']  # Analyze losing trades")
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to export CSV: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
 
     def _display_performance_summary(self, execution_id: int, signals: List[Dict]):
         """Display performance summary statistics"""

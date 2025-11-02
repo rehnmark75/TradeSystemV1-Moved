@@ -16,7 +16,9 @@
       "Bash(docker compose:*)",
       "Bash(awk:*)",
       "Bash(tee:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(jobs:*)",
+      "Read(//tmp/**)"
     ],
     "deny": [],
     "ask": []

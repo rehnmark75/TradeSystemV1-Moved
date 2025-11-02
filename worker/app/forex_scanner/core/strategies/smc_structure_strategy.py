@@ -544,6 +544,50 @@ class SMCStructureStrategy:
                 self.logger.info(f"      Rejection Level: {rejection_pattern['rejection_level']:.5f}")
                 self.logger.info(f"      Description: {rejection_pattern['description']}")
 
+            # LOOKBACK-BASED ENTRY VALIDATION (Core Fix for Entry Timing)
+            # Instead of checking if current_price is near structure (which misses entries
+            # between scans), search recent bars for actual structure interactions
+            rejection_level = rejection_pattern['rejection_level']
+            direction_str = 'bullish' if trend_analysis['trend'] == 'BULL' else 'bearish'
+
+            self.logger.info(f"\n📏 Lookback-Based Entry Detection:")
+            self.logger.info(f"   Structure Level: {rejection_level:.5f}")
+            self.logger.info(f"   Direction: {direction_str}")
+            self.logger.info(f"   Searching last 5 bars (75 minutes) for structure interaction...")
+
+            # Search last 5 bars for entry (catches entries that happened between scans)
+            recent_entry = self._find_recent_structure_entry(
+                df=df_15m if (df_15m is not None and len(df_15m) > 0) else df_1h,
+                structure_level=rejection_level,
+                direction=direction_str,
+                pip_value=pip_value,
+                lookback_bars=5
+            )
+
+            if not recent_entry:
+                self.logger.info(f"   ❌ No structure interaction found in last 5 bars")
+                self.logger.info(f"   ⏳ WAITING for price to reach structure level")
+                return None
+
+            # Use the entry from the historical bar (not current_price)
+            entry_price = recent_entry['entry_price']
+            bars_ago = recent_entry['bars_ago']
+            confidence_boost = recent_entry['confidence_boost']
+
+            # Validate entry freshness (don't use entries >8 bars old = 2 hours)
+            max_age_bars = 8
+            if bars_ago > max_age_bars:
+                self.logger.info(f"   ❌ Entry too old ({bars_ago} bars ago > {max_age_bars} bars maximum)")
+                self.logger.info(f"   ⏳ Waiting for fresher entry opportunity")
+                return None
+
+            self.logger.info(f"   ✅ Valid entry found {bars_ago} bars ago (within {max_age_bars} bar limit)")
+
+            # Update rejection_pattern with the lookback entry price
+            rejection_pattern['entry_price'] = entry_price
+            rejection_pattern['confidence_boost'] = confidence_boost
+            rejection_pattern['bars_ago'] = bars_ago
+
             # STEP 4: Calculate structure-based stop loss
             self.logger.info(f"\n🛑 STEP 4: Calculating Structure-Based Stop Loss")
 
@@ -833,6 +877,107 @@ class SMCStructureStrategy:
             self.logger.info(f"   ✅ Price in re-entry zone ({distance_pips:.1f} pips from structure level)")
 
         return in_zone
+
+    def _find_recent_structure_entry(
+        self,
+        df: pd.DataFrame,
+        structure_level: float,
+        direction: str,
+        pip_value: float,
+        lookback_bars: int = 5
+    ) -> Optional[Dict]:
+        """
+        Search recent bars for structure interaction (lookback-based entry detection).
+
+        This is the core fix for entry timing issues. Instead of checking if current_price
+        is near structure (which misses entries between scans), we search the last N bars
+        to find where price actually interacted with the structure level.
+
+        Args:
+            df: DataFrame with OHLC data
+            structure_level: Price level of structure (swing high/low)
+            direction: 'bullish' or 'bearish'
+            pip_value: Pip value for the pair
+            lookback_bars: Number of recent bars to search (default 5 = 75 minutes on 15m)
+
+        Returns:
+            Dict with entry details if interaction found, None otherwise
+            {
+                'entry_price': float,        # Close price of interaction bar
+                'bar_index': int,            # Relative index of bar (negative)
+                'interaction_type': str,     # 'bullish_rejection' or 'bearish_rejection'
+                'bars_ago': int,             # How many bars ago (absolute value)
+                'confidence_boost': float    # Confidence adjustment based on recency
+            }
+        """
+        if len(df) < lookback_bars + 1:
+            return None
+
+        tolerance = 15 * pip_value  # 15 pips tolerance for structure touch
+
+        # Search last N bars (most recent to oldest)
+        for i in range(-1, -lookback_bars - 1, -1):
+            bar = df.iloc[i]
+
+            # Check if bar touched structure level
+            bar_touched_structure = (
+                bar['low'] <= structure_level + tolerance and
+                bar['high'] >= structure_level - tolerance
+            )
+
+            if not bar_touched_structure:
+                continue
+
+            # Validate direction-specific criteria
+            if direction == 'bullish':
+                # For bullish: need wick down to/through structure + close above it
+                # This indicates rejection/bounce from support
+                if bar['low'] <= structure_level + tolerance and bar['close'] > structure_level:
+                    bars_ago = abs(i)
+
+                    # Confidence boost: fresher entries = higher confidence
+                    # Bars 0-2: +15% boost (within 30 minutes)
+                    # Bars 3-5: +5% boost (30-75 minutes)
+                    confidence_boost = 0.15 if bars_ago <= 2 else 0.05
+
+                    self.logger.info(f"   ✅ Found bullish entry {bars_ago} bars ago:")
+                    self.logger.info(f"      Entry Price: {bar['close']:.5f}")
+                    self.logger.info(f"      Structure Level: {structure_level:.5f}")
+                    self.logger.info(f"      Bar Low: {bar['low']:.5f} (touched structure)")
+                    self.logger.info(f"      Confidence Boost: +{confidence_boost*100:.0f}%")
+
+                    return {
+                        'entry_price': bar['close'],
+                        'bar_index': i,
+                        'interaction_type': 'bullish_rejection',
+                        'bars_ago': bars_ago,
+                        'confidence_boost': confidence_boost
+                    }
+
+            elif direction == 'bearish':
+                # For bearish: need wick up to/through structure + close below it
+                # This indicates rejection/bounce from resistance
+                if bar['high'] >= structure_level - tolerance and bar['close'] < structure_level:
+                    bars_ago = abs(i)
+
+                    confidence_boost = 0.15 if bars_ago <= 2 else 0.05
+
+                    self.logger.info(f"   ✅ Found bearish entry {bars_ago} bars ago:")
+                    self.logger.info(f"      Entry Price: {bar['close']:.5f}")
+                    self.logger.info(f"      Structure Level: {structure_level:.5f}")
+                    self.logger.info(f"      Bar High: {bar['high']:.5f} (touched structure)")
+                    self.logger.info(f"      Confidence Boost: +{confidence_boost*100:.0f}%")
+
+                    return {
+                        'entry_price': bar['close'],
+                        'bar_index': i,
+                        'interaction_type': 'bearish_rejection',
+                        'bars_ago': bars_ago,
+                        'confidence_boost': confidence_boost
+                    }
+
+        # No valid interaction found in lookback period
+        return None
 
     def _detect_bos_choch_15m(self, df_15m: pd.DataFrame, epic: str) -> Optional[Dict]:
         """

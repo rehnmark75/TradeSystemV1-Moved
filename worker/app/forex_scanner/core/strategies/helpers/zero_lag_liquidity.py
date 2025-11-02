@@ -182,104 +182,134 @@ class ZeroLagLiquidity:
         structure_level: float,
         direction: str,
         pip_value: float,
-        tolerance_pips: float = 10
+        tolerance_pips: float = 15,
+        lookback_bars: int = 5
     ) -> Optional[Dict]:
         """
-        Detect liquidity reaction at structure level
+        Detect liquidity reaction at structure level (ENHANCED with 5-bar lookback)
+
+        Instead of only checking the last bar, this searches the last N bars for
+        liquidity reactions. This catches entries that happened between scans.
 
         Args:
             df: DataFrame with OHLCV data
             structure_level: BOS/CHoCH level to monitor
             direction: 'bullish' or 'bearish'
             pip_value: Pip value for pair
-            tolerance_pips: Tolerance around structure level
+            tolerance_pips: Tolerance around structure level (increased from 10 to 15 pips)
+            lookback_bars: Number of recent bars to search (default 5 = 75 minutes on 15m)
 
         Returns:
             Dict with reaction info or None
         """
-        if len(df) < 3:
+        if len(df) < lookback_bars + 1:
             return None
-
-        current_bar = df.iloc[-1]
-        prev_bar = df.iloc[-2]
-
-        current_close = current_bar['close']
-        current_high = current_bar['high']
-        current_low = current_bar['low']
 
         tolerance = tolerance_pips * pip_value
 
-        # Check if price is near structure level
-        distance_from_structure = abs(current_close - structure_level)
+        # Update liquidity levels for the entire lookback range
+        for i in range(-lookback_bars, 0):
+            bar_index = len(df) + i
+            if bar_index >= 0:
+                self.update_liquidity_levels(df, bar_index)
 
-        if distance_from_structure > tolerance:
-            return None  # Not near structure level
+        # Search last N bars for liquidity reactions (most recent first)
+        for i in range(-1, -lookback_bars - 1, -1):
+            bar = df.iloc[i]
+            prev_bar = df.iloc[i - 1] if i > -len(df) else None
 
-        # Update liquidity levels
-        self.update_liquidity_levels(df, len(df) - 1)
+            bar_close = bar['close']
+            bar_high = bar['high']
+            bar_low = bar['low']
 
-        # Detect reaction type
-        if direction == 'bullish':
-            # Looking for bullish entry
-            # Best: Price wicks down to structure and rejects (bullish rejection)
-            if current_low <= structure_level and current_close > structure_level:
-                # Check if we have bullish liquidity near this level
-                nearby_liquidity = [
-                    liq for liq in self.bullish_liquidity_levels
-                    if abs(liq['price'] - structure_level) < tolerance
-                ]
+            bars_ago = abs(i)
 
-                if nearby_liquidity:
-                    return {
-                        'type': 'bullish_rejection',
-                        'signal': 'STRONG_BUY',
-                        'entry_price': current_close,
-                        'rejection_level': structure_level,
-                        'confidence': 0.85,  # High confidence on rejection
-                        'description': f'Bullish rejection at structure level {structure_level:.5f}'
-                    }
+            # Detect reaction type
+            if direction == 'bullish':
+                # Looking for bullish entry
+                # Best: Price wicks down to structure and rejects (bullish rejection)
+                if bar_low <= structure_level + tolerance and bar_close > structure_level:
+                    # Check if we have bullish liquidity near this level
+                    nearby_liquidity = [
+                        liq for liq in self.bullish_liquidity_levels
+                        if abs(liq['price'] - structure_level) < tolerance
+                    ]
 
-            # Alternative: Price breaks above mini resistance near structure
-            if current_close > structure_level and prev_bar['close'] <= structure_level:
-                return {
-                    'type': 'bullish_break',
-                    'signal': 'BUY',
-                    'entry_price': current_close,
-                    'break_level': structure_level,
-                    'confidence': 0.70,  # Good confidence on break
-                    'description': f'Bullish break above structure level {structure_level:.5f}'
-                }
+                    if nearby_liquidity or bars_ago <= 2:  # Accept recent bars even without liquidity
+                        # Confidence based on recency and liquidity presence
+                        confidence = 0.85 if nearby_liquidity else 0.75
+                        confidence -= (bars_ago * 0.02)  # Slight penalty for older bars
 
-        else:  # bearish
-            # Looking for bearish entry
-            # Best: Price wicks up to structure and rejects (bearish rejection)
-            if current_high >= structure_level and current_close < structure_level:
-                # Check if we have bearish liquidity near this level
-                nearby_liquidity = [
-                    liq for liq in self.bearish_liquidity_levels
-                    if abs(liq['price'] - structure_level) < tolerance
-                ]
+                        return {
+                            'type': 'bullish_rejection',
+                            'signal': 'STRONG_BUY',
+                            'entry_price': bar_close,
+                            'rejection_level': structure_level,
+                            'confidence': max(confidence, 0.65),
+                            'bars_ago': bars_ago,
+                            'description': f'Bullish rejection at structure level {structure_level:.5f} ({bars_ago} bars ago)'
+                        }
 
-                if nearby_liquidity:
-                    return {
-                        'type': 'bearish_rejection',
-                        'signal': 'STRONG_SELL',
-                        'entry_price': current_close,
-                        'rejection_level': structure_level,
-                        'confidence': 0.85,  # High confidence on rejection
-                        'description': f'Bearish rejection at structure level {structure_level:.5f}'
-                    }
+                # Alternative: Price breaks above mini resistance near structure
+                if prev_bar is not None:
+                    if bar_close > structure_level and prev_bar['close'] <= structure_level:
+                        # Check distance from structure
+                        distance_pips = abs(bar_close - structure_level) / pip_value
 
-            # Alternative: Price breaks below mini support near structure
-            if current_close < structure_level and prev_bar['close'] >= structure_level:
-                return {
-                    'type': 'bearish_break',
-                    'signal': 'SELL',
-                    'entry_price': current_close,
-                    'break_level': structure_level,
-                    'confidence': 0.70,  # Good confidence on break
-                    'description': f'Bearish break below structure level {structure_level:.5f}'
-                }
+                        if distance_pips <= tolerance_pips:
+                            confidence = 0.70 - (bars_ago * 0.02)
+
+                            return {
+                                'type': 'bullish_break',
+                                'signal': 'BUY',
+                                'entry_price': bar_close,
+                                'break_level': structure_level,
+                                'confidence': max(confidence, 0.60),
+                                'bars_ago': bars_ago,
+                                'description': f'Bullish break above structure level {structure_level:.5f} ({bars_ago} bars ago)'
+                            }
+
+            else:  # bearish
+                # Looking for bearish entry
+                # Best: Price wicks up to structure and rejects (bearish rejection)
+                if bar_high >= structure_level - tolerance and bar_close < structure_level:
+                    # Check if we have bearish liquidity near this level
+                    nearby_liquidity = [
+                        liq for liq in self.bearish_liquidity_levels
+                        if abs(liq['price'] - structure_level) < tolerance
+                    ]
+
+                    if nearby_liquidity or bars_ago <= 2:
+                        confidence = 0.85 if nearby_liquidity else 0.75
+                        confidence -= (bars_ago * 0.02)
+
+                        return {
+                            'type': 'bearish_rejection',
+                            'signal': 'STRONG_SELL',
+                            'entry_price': bar_close,
+                            'rejection_level': structure_level,
+                            'confidence': max(confidence, 0.65),
+                            'bars_ago': bars_ago,
+                            'description': f'Bearish rejection at structure level {structure_level:.5f} ({bars_ago} bars ago)'
+                        }
+
+                # Alternative: Price breaks below mini support near structure
+                if prev_bar is not None:
+                    if bar_close < structure_level and prev_bar['close'] >= structure_level:
+                        distance_pips = abs(bar_close - structure_level) / pip_value
+
+                        if distance_pips <= tolerance_pips:
+                            confidence = 0.70 - (bars_ago * 0.02)
+
+                            return {
+                                'type': 'bearish_break',
+                                'signal': 'SELL',
+                                'entry_price': bar_close,
+                                'break_level': structure_level,
+                                'confidence': max(confidence, 0.60),
+                                'bars_ago': bars_ago,
+                                'description': f'Bearish break below structure level {structure_level:.5f} ({bars_ago} bars ago)'
+                            }
 
         return None
 

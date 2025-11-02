@@ -472,19 +472,54 @@ SMC_ZERO_LAG_WICK_THRESHOLD = 0.6
 
 # Lookback bars for liquidity tracking
 # How many bars to track liquidity levels
-# 20 bars = balanced lookback (baseline)
-SMC_ZERO_LAG_LOOKBACK = 20
+# ENHANCED: Changed from 20 to 5 bars for liquidity reaction detection (lookback mechanism)
+# Note: Internal liquidity level tracking still uses 20 bars, but reaction detection uses 5
+SMC_ZERO_LAG_LOOKBACK = 5
+
+# Tolerance for liquidity detection at structure level
+# How many pips away from structure to still detect interaction
+# ENHANCED: Widened from 10 to 15 pips for better detection (agent recommendation)
+SMC_ZERO_LAG_TOLERANCE_PIPS = 15
 
 # Make Zero Lag Liquidity optional (not required blocker)
 # True = Zero Lag is bonus confirmation (+confidence), not mandatory
 # False = Zero Lag required (blocks signals if not present)
-# REVERTED: Making it optional to allow structure-based entries without Zero Lag
+# KEEP TRUE: Allows structure-only fallback when Zero Lag not detected
 SMC_ZERO_LAG_OPTIONAL = True
+
+# Enable fallback to structure-only entry when Zero Lag not detected
+# True = Use lookback-based structure entry as fallback
+# False = Strict Zero Lag requirement (may miss valid entries)
+# NEW PARAMETER: Recommended TRUE for automated systems
+SMC_ZERO_LAG_FALLBACK_ENABLED = True
 
 # Confidence boost when Zero Lag liquidity detected
 # Bonus confidence added to signal when liquidity sweep confirmed
 # 0.20 = +20% confidence bonus (agent research recommendation)
 SMC_ZERO_LAG_CONFIDENCE_BOOST = 0.20
+
+# ============================================================================
+# LOOKBACK-BASED ENTRY PARAMETERS (Phase 1 Enhancement)
+# ============================================================================
+
+# Lookback bars for structure entry detection
+# How many recent bars to search for structure interaction
+# 5 bars = 75 minutes on 15m timeframe (captures entries between scans)
+# NEW PARAMETER: Core fix for entry timing issues
+SMC_ENTRY_LOOKBACK_BARS = 5
+
+# Maximum age for entry validity (bars)
+# Entries older than this are rejected as "stale"
+# 8 bars = 2 hours on 15m timeframe
+# Prevents using outdated entries that may no longer be valid
+# NEW PARAMETER: Entry freshness validation
+SMC_ENTRY_MAX_AGE_BARS = 8
+
+# Tolerance for structure interaction (pips)
+# Distance from structure level to consider as "touched"
+# 15 pips = reasonable tolerance for 15m timeframe
+# NEW PARAMETER: Structure touch detection
+SMC_ENTRY_STRUCTURE_TOLERANCE_PIPS = 15
 
 # ============================================================================
 # EPIC-SPECIFIC OVERRIDES (Optional)

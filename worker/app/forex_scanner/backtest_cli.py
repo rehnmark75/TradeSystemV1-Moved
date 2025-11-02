@@ -126,6 +126,13 @@ Signal Display Format:
             help='Maximum number of signals to display in detail (default: 20)'
         )
 
+        parser.add_argument(
+            '--csv-export',
+            type=str,
+            metavar='FILEPATH',
+            help='Export all signals to CSV file for detailed analysis (e.g., /tmp/signals.csv)'
+        )
+
         # Quick test options
         parser.add_argument(
             '--quick-test',
@@ -187,7 +194,8 @@ Signal Display Format:
                 timeframe=args.timeframe,
                 strategy=args.strategy,
                 max_signals_display=args.max_signals,
-                pipeline=args.pipeline
+                pipeline=args.pipeline,
+                csv_export=args.csv_export if hasattr(args, 'csv_export') else None
             )
 
         except KeyboardInterrupt:
