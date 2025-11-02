@@ -171,6 +171,18 @@ class BacktestOrderLogger:
             if stop_distance > 0 or limit_distance > 0:
                 self.logger.info(f"   🎯 Configured SL/TP: {stop_distance:.0f} / {limit_distance:.0f} pips")
 
+            # ✅ FIX: Save signal to database for CSV export functionality
+            try:
+                db_saved = self._log_backtest_signal(signal)
+                if db_saved:
+                    self.logger.info(f"   💾 Signal saved to database (ID: {self.execution_id})")
+                else:
+                    self.logger.warning(f"   ⚠️ Signal DB save returned False")
+            except Exception as e:
+                self.logger.error(f"   ❌ DB save exception: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+
             # Return success with mock order data
             mock_order = {
                 'order_id': f"backtest_{self.execution_id}_{self.signals_logged}",
@@ -184,7 +196,7 @@ class BacktestOrderLogger:
                 'logged_at': datetime.now(timezone.utc).isoformat()
             }
 
-            return True, "Signal logged to console", mock_order
+            return True, "Signal logged to database and console", mock_order
 
         except Exception as e:
             self.logger.error(f"Error logging backtest signal: {e}")
@@ -226,6 +238,14 @@ class BacktestOrderLogger:
             exit_reason = signal.get('exit_reason')
             pips_gained = self._to_decimal(signal.get('pips_gained'))
             trade_result = signal.get('trade_result')
+
+            # Normalize trade_result to lowercase for database constraint (win/loss/breakeven)
+            if trade_result:
+                trade_result = trade_result.lower()
+
+            # Truncate exit_reason if too long for VARCHAR(10)
+            if exit_reason and len(exit_reason) > 10:
+                exit_reason = exit_reason[:10]
 
             # Performance metrics
             holding_time_minutes = signal.get('holding_time_minutes')
@@ -278,27 +298,33 @@ class BacktestOrderLogger:
             """
 
             params = (
-                self.execution_id, epic, timeframe, signal_timestamp, signal_type, strategy_name,
+                int(self.execution_id), epic, timeframe, signal_timestamp, signal_type, strategy_name,
                 open_price, high_price, low_price, close_price, volume,
                 confidence_score, signal_strength, json.dumps(indicator_values),
                 entry_price, stop_loss_price, take_profit_price, risk_reward_ratio,
                 exit_price, exit_timestamp, exit_reason, pips_gained, trade_result,
                 holding_time_minutes, max_favorable_excursion_pips, max_adverse_excursion_pips,
-                data_completeness, validation_flags if isinstance(validation_flags, list) else [],
-                validation_passed, validation_reasons if isinstance(validation_reasons, list) else [], trade_validator_version,
+                data_completeness, json.dumps(validation_flags if isinstance(validation_flags, list) else []),
+                validation_passed, json.dumps(validation_reasons if isinstance(validation_reasons, list) else []), trade_validator_version,
                 json.dumps(market_intelligence), smart_money_score, smart_money_validated
             )
 
-            self.db_manager.execute_query(query, params)
+            # Use raw psycopg2 connection for INSERT with positional parameters (%s placeholders)
+            raw_conn = self.db_manager.engine.raw_connection()
+            try:
+                cursor = raw_conn.cursor()
+                cursor.execute(query, params)
+                raw_conn.commit()
+                cursor.close()
+            finally:
+                raw_conn.close()
             return True
 
         except Exception as e:
             self.logger.error(f"Error inserting backtest signal: {e}")
-            # Debug: Check parameter types
-            for i, param in enumerate(params):
-                if isinstance(param, list) and param:
-                    self.logger.error(f"List parameter at index {i}: {param} (type: {type(param)})")
-            self.logger.error(f"Signal data: {signal}")
+            self.logger.error(f"  trade_result={trade_result!r}, exit_reason={exit_reason!r}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return False
 
     def _normalize_signal_type(self, signal_type: str) -> str:
@@ -741,3 +767,72 @@ def create_backtest_order_logger(db_manager: DatabaseManager,
                                 **kwargs) -> BacktestOrderLogger:
     """Create BacktestOrderLogger instance"""
     return BacktestOrderLogger(db_manager, execution_id, **kwargs)
+    def export_signals_to_csv(self, csv_path: str) -> bool:
+        """
+        Export all signals collected during backtest to CSV file
+        This bypasses database storage and exports directly from memory
+        
+        Args:
+            csv_path: Full path where CSV file should be created
+            
+        Returns:
+            True if export successful, False otherwise
+        """
+        try:
+            import pandas as pd
+            import os
+            from datetime import datetime
+            
+            if not self.all_signals:
+                self.logger.warning(f"⚠️ No signals to export - all_signals list is empty")
+                return False
+            
+            # Ensure directory exists
+            csv_dir = os.path.dirname(csv_path)
+            if csv_dir and not os.path.exists(csv_dir):
+                os.makedirs(csv_dir, exist_ok=True)
+                self.logger.info(f"   📁 Created directory: {csv_dir}")
+            
+            # Convert signals to DataFrame
+            df = pd.DataFrame(self.all_signals)
+            
+            # Export to CSV
+            df.to_csv(csv_path, index=False)
+            
+            # Calculate statistics
+            total_signals = len(df)
+            completed_trades = df[df['trade_result'].notna()]
+            winners = len(completed_trades[completed_trades['trade_result'] == 'win'])
+            losers = len(completed_trades[completed_trades['trade_result'] == 'loss'])
+            breakeven = len(completed_trades[completed_trades['trade_result'] == 'breakeven'])
+            win_rate = (winners / max(winners + losers, 1)) * 100 if (winners + losers) > 0 else 0
+            
+            self.logger.info(f"\n📁 CSV EXPORT SUCCESSFUL:")
+            self.logger.info("=" * 60)
+            self.logger.info(f"   📂 File: {csv_path}")
+            self.logger.info(f"   📊 Total Signals: {total_signals}")
+            self.logger.info(f"   ✅ Winners: {winners}")
+            self.logger.info(f"   ❌ Losers: {losers}")
+            self.logger.info(f"   ⚖️  Breakeven: {breakeven}")
+            self.logger.info(f"   🎯 Win Rate: {win_rate:.1f}%")
+            self.logger.info(f"   🔍 Execution ID: {self.execution_id}")
+            self.logger.info("=" * 60)
+            
+            # Show columns
+            self.logger.info(f"\n📋 Available Columns ({len(df.columns)}):")
+            for col in df.columns:
+                self.logger.info(f"   • {col}")
+            
+            self.logger.info(f"\n💡 Analysis Tips:")
+            self.logger.info(f"   import pandas as pd")
+            self.logger.info(f"   df = pd.read_csv('{csv_path}')")
+            self.logger.info(f"   df[df['trade_result'] == 'loss']  # Analyze losers")
+            self.logger.info(f"   df[df['trade_result'] == 'win']   # Analyze winners")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to export signals to CSV: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return False

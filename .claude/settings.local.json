@@ -18,7 +18,10 @@
       "Bash(tee:*)",
       "Bash(git log:*)",
       "Bash(jobs:*)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(docker cp:*)",
+      "Bash(python3:*)",
+      "Bash(paste - -)"
     ],
     "deny": [],
     "ask": []

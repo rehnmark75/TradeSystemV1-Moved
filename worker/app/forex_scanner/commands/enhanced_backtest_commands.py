@@ -154,7 +154,18 @@ class EnhancedBacktestCommands:
         """Display comprehensive backtest results with signal breakdown"""
 
         try:
-            # Get signals from database
+            # Export to CSV directly from order_logger if requested (NEW APPROACH - bypasses database)
+            if csv_export and results.get('order_logger'):
+                self.logger.info(f"\n📤 Direct CSV Export (from memory):")
+                self.logger.info(f"   Target file: {csv_export}")
+                order_logger = results['order_logger']
+                export_success = order_logger.export_signals_to_csv(csv_export)
+                if not export_success:
+                    self.logger.warning(f"   ⚠️ CSV export failed or no signals to export")
+            elif csv_export:
+                self.logger.warning(f"⚠️ CSV export requested but order_logger not available in results")
+
+            # Get signals from database for display
             signals_query = """
             SELECT epic, timeframe, signal_timestamp, signal_type, strategy_name,
                    confidence_score, entry_price, stop_loss_price, take_profit_price,
@@ -166,10 +177,6 @@ class EnhancedBacktestCommands:
 
             signals_df = self.db_manager.execute_query(signals_query, {'execution_id': int(execution_id)})
             signals_result = signals_df.to_dict('records')
-
-            # Export to CSV if requested
-            if csv_export and len(signals_df) > 0:
-                self._export_signals_to_csv(signals_df, csv_export, execution_id)
 
             if not signals_result:
                 self.logger.warning("❌ No signals found in backtest results")

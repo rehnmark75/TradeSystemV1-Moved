@@ -390,7 +390,8 @@ class BacktestTradingOrchestrator:
             'quality_assurance': {
                 'pipeline_integrity': self._verify_pipeline_integrity(),
                 'data_consistency': self._verify_data_consistency()
-            }
+            },
+            'order_logger': self.order_logger  # Include order_logger for direct CSV export
         }
 
         # Log comprehensive summary
@@ -486,6 +487,7 @@ class BacktestTradingOrchestrator:
             'orchestrator_stats': self.orchestrator_stats.copy(),
             'trade_validator_stats': self.trade_validator.get_validation_statistics() if self.trade_validator else {'status': 'disabled_basic_mode'},
             'order_logger_stats': self.order_logger.get_statistics(),
+            'order_logger': self.order_logger,  # Include order_logger for CSV export
             'execution_id': self.execution_id
         }
 

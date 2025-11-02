@@ -86,7 +86,7 @@ def main():
                 processed_args.append(arg)
 
                 # If it's a flag that takes a value, include the next argument
-                if arg in ["--strategy", "--timeframe", "--max-signals", "--hours"] and i + 1 < len(args):
+                if arg in ["--strategy", "--timeframe", "--max-signals", "--hours", "--csv-export"] and i + 1 < len(args):
                     i += 1
                     processed_args.append(args[i])
             else:
