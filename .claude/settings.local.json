@@ -21,7 +21,9 @@
       "Read(//tmp/**)",
       "Bash(docker cp:*)",
       "Bash(python3:*)",
-      "Bash(paste - -)"
+      "Bash(paste - -)",
+      "Bash(cat:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

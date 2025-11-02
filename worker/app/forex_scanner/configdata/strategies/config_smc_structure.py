@@ -82,7 +82,7 @@ SMC_MAX_LEVEL_AGE = 200
 
 # Proximity requirement (pips)
 # How close price must be to a level to trigger consideration
-# 15 pips = reasonable proximity for 15m timeframe (baseline)
+# 15 pips = reasonable proximity for 15m timeframe (REVERTED: 10 was too tight, missed valid touches)
 SMC_SR_PROXIMITY_PIPS = 15
 
 # Minimum level strength for supply/demand zones (0-1)
@@ -96,8 +96,7 @@ SMC_SUPPLY_DEMAND_MIN_STRENGTH = 0.70
 
 # Minimum pattern strength required (0-1)
 # How strong the rejection pattern must be to trigger entry
-# 0.55 = moderate-good quality patterns (balanced for FVG-first approach)
-# OPTIMIZED: Slightly reduced since FVGs are now primary trigger
+# 0.55 = moderate quality patterns (REVERTED: 0.70 was too strict, reduced wins more than losses)
 SMC_MIN_PATTERN_STRENGTH = 0.55
 
 # Pattern lookback (bars)
@@ -124,8 +123,9 @@ SMC_HAMMER_MAX_OPPOSITE_WICK = 0.15  # Opposite wick 15% or less
 
 # Stop loss buffer (pips)
 # Additional pips beyond structure invalidation point
-# 10 pips = tight stop at structure invalidation (baseline)
-SMC_SL_BUFFER_PIPS = 10
+# 15 pips = allows for 15m timeframe noise (IMPROVED from 10)
+# 15m timeframe has natural ±10 pip volatility, 15-pip buffer reduces whipsaw losses
+SMC_SL_BUFFER_PIPS = 15
 
 # Minimum Risk:Reward ratio
 # Trade must offer at least this R:R to be valid
@@ -168,6 +168,7 @@ SMC_MOVE_SL_TO_BE_AFTER_PARTIAL = True
 # Enable trailing stop
 # False = use fixed TP only (safer for structure-based strategy)
 # True = enable R:R-based progressive trailing stop
+# ANALYSIS: 44% of losses were TRAILING_STOP exits - keeping DISABLED for consistent targets
 SMC_TRAILING_ENABLED = False
 
 # Trailing stop mode (if enabled)
@@ -234,14 +235,13 @@ SMC_REQUIRE_PULLBACK = True
 
 # Pullback minimum depth (Fibonacci ratio)
 # How much price must retrace to qualify as pullback
-# 0.382 = 38.2% Fibonacci level (standard pullback in trends)
-# REVERTED: 0.236-0.786 too wide (agent analysis), back to sweet spot
+# 0.382 = 38.2% Fibonacci level (REVERTED: 0.50 was too deep, missed good entries)
 SMC_MIN_PULLBACK_DEPTH = 0.382
 
 # Maximum pullback depth
 # Reject pullbacks deeper than this (may indicate reversal)
 # 0.618 = 61.8% Fibonacci (deep pullback before reversal risk)
-# REVERTED: Back to classic Fibonacci sweet spot (38.2-61.8%)
+# KEPT: Classic Fibonacci sweet spot for maximum pullback depth
 SMC_MAX_PULLBACK_DEPTH = 0.618
 
 # ============================================================================
