@@ -871,6 +871,28 @@ class SMCStructureStrategy:
             else:
                 self.logger.info(f"   ⚠️  Could not calculate premium/discount zones - proceeding without zone filter")
 
+            # STEP 3E: Equilibrium Zone Confidence Filter (Phase 2.3)
+            # Neutral zones require higher confidence due to lack of zone edge
+            if zone_info and zone_info['zone'] == 'equilibrium':
+                # Calculate preliminary confidence to check threshold
+                htf_score = trend_analysis['strength'] * 0.4
+                pattern_score = rejection_pattern['strength'] * 0.3
+                sr_score = nearest_level['strength'] * 0.2
+                rr_score = min(rr_ratio / 4.0, 1.0) * 0.1
+                preliminary_confidence = htf_score + pattern_score + sr_score + rr_score
+
+                MIN_EQUILIBRIUM_CONFIDENCE = 0.50  # 50% minimum for neutral zones
+
+                if preliminary_confidence < MIN_EQUILIBRIUM_CONFIDENCE:
+                    self.logger.info(f"\n🎯 STEP 3E: Equilibrium Zone Confidence Filter")
+                    self.logger.info(f"   ❌ EQUILIBRIUM entry with insufficient confidence")
+                    self.logger.info(f"   📊 Confidence: {preliminary_confidence*100:.0f}% < {MIN_EQUILIBRIUM_CONFIDENCE*100:.0f}% (minimum for neutral zones)")
+                    self.logger.info(f"   💡 Neutral zone = no edge → requires stronger confluences")
+                    return None
+                else:
+                    self.logger.info(f"\n🎯 STEP 3E: Equilibrium Zone Confidence Filter")
+                    self.logger.info(f"   ✅ Sufficient confidence for equilibrium entry: {preliminary_confidence*100:.0f}%")
+
             # STEP 4: Calculate structure-based stop loss
             self.logger.info(f"\n🛑 STEP 4: Calculating Structure-Based Stop Loss")
 
@@ -983,6 +1005,17 @@ class SMCStructureStrategy:
             rr_score = min(rr_ratio / 4.0, 1.0) * 0.1  # Normalize R:R (4:1 = perfect)
 
             confidence = htf_score + pattern_score + sr_score + rr_score
+
+            # STEP 6: Universal Confidence Floor (Phase 2.4)
+            # Reject low-confidence signals regardless of other factors
+            MIN_CONFIDENCE = 0.45  # 45% minimum confidence for all entries
+
+            if confidence < MIN_CONFIDENCE:
+                self.logger.info(f"\n🎯 STEP 6: Universal Confidence Filter")
+                self.logger.info(f"   ❌ Signal confidence too low: {confidence*100:.0f}% < {MIN_CONFIDENCE*100:.0f}%")
+                self.logger.info(f"   💡 Minimum confidence required for entry quality")
+                self.logger.info(f"   📊 Breakdown: HTF={htf_score*100:.0f}% Pattern={pattern_score*100:.0f}% SR={sr_score*100:.0f}% RR={rr_score*100:.0f}%")
+                return None
 
             # BUILD SIGNAL
             self.logger.info(f"\n{'='*70}")
@@ -1362,6 +1395,89 @@ class SMCStructureStrategy:
 
         return None  # No rejection detected
 
+    def _calculate_bos_quality(self, df_15m: pd.DataFrame, direction: str) -> float:
+        """
+        Calculate BOS/CHoCH quality score based on candle characteristics.
+
+        Quality factors:
+        - Body size (decisive move)
+        - Clean break (minimal wick on break side)
+        - Volume confirmation (if available)
+
+        Args:
+            df_15m: 15m DataFrame
+            direction: 'bullish' or 'bearish'
+
+        Returns:
+            Quality score 0.0 to 1.0
+        """
+        current = df_15m.iloc[-1]
+
+        # Calculate candle metrics
+        body_size = abs(current['close'] - current['open'])
+        total_range = current['high'] - current['low']
+
+        if total_range == 0:
+            return 0.0
+
+        # Calculate average candle size for comparison
+        recent_candles = df_15m.iloc[-20:]
+        avg_body_size = abs(recent_candles['close'] - recent_candles['open']).mean()
+        avg_range = (recent_candles['high'] - recent_candles['low']).mean()
+
+        quality_score = 0.0
+
+        # Factor 1: Large decisive body (0.0 to 0.4)
+        if avg_body_size > 0:
+            body_ratio = body_size / avg_body_size
+            if body_ratio >= 1.5:  # 50% larger than average
+                quality_score += 0.4
+            elif body_ratio >= 1.2:  # 20% larger
+                quality_score += 0.25
+            elif body_ratio >= 1.0:  # Average or above
+                quality_score += 0.15
+
+        # Factor 2: Clean break - minimal wick on break side (0.0 to 0.3)
+        if direction == 'bullish':
+            # For bullish break, want small upper wick (clean breakout up)
+            upper_wick = current['high'] - max(current['open'], current['close'])
+            wick_ratio = upper_wick / total_range if total_range > 0 else 1.0
+
+            if wick_ratio <= 0.15:  # Very clean (<15% wick)
+                quality_score += 0.3
+            elif wick_ratio <= 0.25:  # Decent (<25% wick)
+                quality_score += 0.2
+            elif wick_ratio <= 0.35:  # Acceptable (<35% wick)
+                quality_score += 0.1
+        else:  # bearish
+            # For bearish break, want small lower wick (clean breakdown)
+            lower_wick = min(current['open'], current['close']) - current['low']
+            wick_ratio = lower_wick / total_range if total_range > 0 else 1.0
+
+            if wick_ratio <= 0.15:
+                quality_score += 0.3
+            elif wick_ratio <= 0.25:
+                quality_score += 0.2
+            elif wick_ratio <= 0.35:
+                quality_score += 0.1
+
+        # Factor 3: Volume confirmation (0.0 to 0.3) - if volume data available
+        if 'volume' in df_15m.columns:
+            current_volume = current['volume']
+            avg_volume = recent_candles['volume'].mean()
+
+            if avg_volume > 0 and current_volume > 0:
+                volume_ratio = current_volume / avg_volume
+
+                if volume_ratio >= 1.5:  # 50% above average
+                    quality_score += 0.3
+                elif volume_ratio >= 1.2:  # 20% above average
+                    quality_score += 0.2
+                elif volume_ratio >= 1.0:  # Average or above
+                    quality_score += 0.1
+
+        return min(quality_score, 1.0)  # Cap at 1.0
+
     def _detect_bos_choch_15m(self, df_15m: pd.DataFrame, epic: str) -> Optional[Dict]:
         """
         Detect BOS/CHoCH on 15m timeframe using fractal-based detection
@@ -1390,6 +1506,21 @@ class SMCStructureStrategy:
             self.logger.info(f"   ℹ️  No recent BOS/CHoCH detected")
             return None
 
+        # Calculate BOS/CHoCH quality score
+        quality_score = self._calculate_bos_quality(df_15m, bos_choch_direction)
+
+        # Require minimum quality threshold
+        # OPTIMIZED: Increased from 0.60 to 0.65 based on Test 26 analysis
+        # Test 26 had 63 signals (above target) - need more selectivity
+        MIN_BOS_QUALITY = 0.65  # 65% minimum quality
+
+        if quality_score < MIN_BOS_QUALITY:
+            self.logger.info(f"   ❌ Weak BOS/CHoCH detected - quality too low")
+            self.logger.info(f"      Quality: {quality_score*100:.0f}% < {MIN_BOS_QUALITY*100:.0f}% (minimum)")
+            self.logger.info(f"      Direction: {bos_choch_direction}")
+            self.logger.info(f"      💡 Weak/indecisive structure break - avoiding entry")
+            return None
+
         # Get current price for level
         current_price = float(df_15m['close'].iloc[-1])
 
@@ -1399,13 +1530,15 @@ class SMCStructureStrategy:
         self.logger.info(f"   ✅ {break_type} detected:")
         self.logger.info(f"      Direction: {bos_choch_direction}")
         self.logger.info(f"      Level: {current_price:.5f}")
-        self.logger.info(f"      Detection: Fractal-based")
+        self.logger.info(f"      Quality: {quality_score*100:.0f}% (strong)")
+        self.logger.info(f"      Detection: Fractal-based with quality filter")
 
         return {
             'type': break_type,
             'direction': bos_choch_direction,
             'level': current_price,
-            'significance': 0.70,  # Default significance for fractal-detected breaks
+            'significance': 0.70 + (quality_score * 0.30),  # 0.70 to 1.00 based on quality
+            'quality': quality_score,
             'timestamp': df_15m.index[-1] if hasattr(df_15m.index[-1], 'to_pydatetime') else None
         }
 

@@ -25,11 +25,21 @@ Design Philosophy:
 
 STRATEGY_NAME = "SMC_STRUCTURE"
 STRATEGY_DESCRIPTION = "Pure structure-based strategy using Smart Money Concepts (price action only)"
-STRATEGY_VERSION = "2.2.0"
+STRATEGY_VERSION = "2.4.0"
 STRATEGY_DATE = "2025-11-05"
-STRATEGY_STATUS = "Production Baseline - Optimized Entry Timing"
+STRATEGY_STATUS = "Testing - Dual Tightening for Profitability"
 
 # Version History:
+# v2.4.0 (2025-11-05): Dual quality tightening - targeting first profitable configuration
+#                      BOS Quality: 60% → 65% (more selective on structure breaks)
+#                      Universal Confidence Floor: 45% minimum (all entries)
+#                      Test 26: 63 signals, 28.6% WR, 0.88 PF (WR target achieved!)
+#                      Target: 40-45 signals, 32-35% WR, 1.1-1.3 PF (PROFITABLE)
+# v2.3.0 (2025-11-05): Quality-based filtering for ranging market protection
+#                      Equilibrium Confidence Filter: 50% minimum for neutral zones
+#                      BOS/CHoCH Quality Score: Body size + clean break + volume
+#                      Minimum 60% BOS quality required (filters weak/indecisive breaks)
+#                      Target: 28-32% WR, 1.0-1.2 PF (first profitable config)
 # v2.2.0 (2025-11-05): BASELINE - Optimized entry timing with 75% HTF strength threshold
 #                      Test 24: 39 signals, 25.6% WR, 0.86 PF (BEST PF achieved)
 #                      Premium/Discount zone context-aware filtering (75% threshold)
