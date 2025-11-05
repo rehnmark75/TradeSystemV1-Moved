@@ -381,8 +381,12 @@ SCALPING_STRATEGY_ENABLED = False  # 🔥 Linda Raschke MACD 3-10-16 adaptive sc
 # Enable KAMA Strategy
 KAMA_STRATEGY = False  # ENABLED - Phase 1 optimization complete, ready for testing
 
-# Enable SMC Strategy
-SMC_STRATEGY =True  # Smart Money Concepts strategy
+# Enable SMC Strategies
+# NOTE: There are 2 SMC strategies:
+#   - SMC_STRATEGY (old): smc_strategy_fast.py - LEGACY, deprecated
+#   - SMC_STRUCTURE_STRATEGY (new): smc_structure_strategy.py - v2.4.0 PROFITABLE
+SMC_STRATEGY = False  # OLD SMC strategy (deprecated - use SMC_STRUCTURE_STRATEGY instead)
+SMC_STRUCTURE_STRATEGY = True  # NEW SMC Structure strategy v2.4.0 (PROFITABLE - 1.55 PF, 40.6% WR)
 
 # Enable Ichimoku Cloud Strategy
 ICHIMOKU_CLOUD_STRATEGY = False  # Ichimoku Kinko Hyo strategy
