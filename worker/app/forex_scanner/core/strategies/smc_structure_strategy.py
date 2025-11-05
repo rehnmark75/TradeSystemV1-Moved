@@ -626,6 +626,57 @@ class SMCStructureStrategy:
                                 self.logger.info(f"      Type: {rejection_signal['type']}")
                                 self.logger.info(f"      Strength: {rejection_signal['strength']*100:.0f}%")
 
+                                # STEP 3C: Premium/Discount Zone Validation for Entry Timing
+                                self.logger.info(f"\n💎 STEP 3C: Premium/Discount Zone Entry Timing")
+
+                                zone_info = self.market_structure.get_premium_discount_zone(
+                                    df=df_15m,
+                                    current_price=current_price,
+                                    lookback_bars=50
+                                )
+
+                                if zone_info:
+                                    zone = zone_info['zone']
+                                    direction = bos_choch_info['direction']
+
+                                    # Convert range size to pips
+                                    range_pips = zone_info['range_size_pips'] / pip_value
+
+                                    self.logger.info(f"   📊 15m Range: {range_pips:.1f} pips")
+                                    self.logger.info(f"      High: {zone_info['range_high']:.5f}")
+                                    self.logger.info(f"      Mid: {zone_info['range_mid']:.5f}")
+                                    self.logger.info(f"      Low: {zone_info['range_low']:.5f}")
+                                    self.logger.info(f"   📍 Current Zone: {zone.upper()}")
+                                    self.logger.info(f"   📈 Price Position: {zone_info['price_position']*100:.1f}%")
+
+                                    # Validate entry timing: BUY in discount, SELL in premium
+                                    if direction == 'bullish':
+                                        entry_quality = zone_info['entry_quality_buy']
+                                        if zone == 'premium':
+                                            self.logger.info(f"   ⚠️  BULLISH entry in PREMIUM zone - poor timing")
+                                            self.logger.info(f"   💡 Wait for pullback to discount zone for better entry")
+                                            return None
+                                        elif zone == 'equilibrium':
+                                            self.logger.info(f"   ⚠️  BULLISH entry in EQUILIBRIUM zone - neutral timing")
+                                            self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}% (reduced confidence)")
+                                        else:
+                                            self.logger.info(f"   ✅ BULLISH entry in DISCOUNT zone - excellent timing!")
+                                            self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}%")
+                                    else:  # bearish
+                                        entry_quality = zone_info['entry_quality_sell']
+                                        if zone == 'discount':
+                                            self.logger.info(f"   ⚠️  BEARISH entry in DISCOUNT zone - poor timing")
+                                            self.logger.info(f"   💡 Wait for rally to premium zone for better entry")
+                                            return None
+                                        elif zone == 'equilibrium':
+                                            self.logger.info(f"   ⚠️  BEARISH entry in EQUILIBRIUM zone - neutral timing")
+                                            self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}% (reduced confidence)")
+                                        else:
+                                            self.logger.info(f"   ✅ BEARISH entry in PREMIUM zone - excellent timing!")
+                                            self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}%")
+                                else:
+                                    self.logger.info(f"   ⚠️  Could not calculate premium/discount zones")
+
                                 # Use OB level for entry, not BOS level
                                 rejection_level = last_ob['mid']
                                 direction_str = bos_choch_info['direction']
@@ -732,6 +783,79 @@ class SMCStructureStrategy:
                 self.logger.info(f"      Entry: {rejection_pattern['entry_price']:.5f}")
                 self.logger.info(f"      Rejection Level: {rejection_pattern['rejection_level']:.5f}")
                 self.logger.info(f"      Description: {rejection_pattern['description']}")
+
+            # STEP 3D: Premium/Discount Zone Entry Timing (UNIVERSAL CHECK FOR ALL ENTRIES)
+            self.logger.info(f"\n💎 STEP 3D: Premium/Discount Zone Entry Timing Validation")
+
+            zone_info = self.market_structure.get_premium_discount_zone(
+                df=df_15m if df_15m is not None and len(df_15m) > 0 else df_1h,
+                current_price=current_price,
+                lookback_bars=50
+            )
+
+            if zone_info:
+                zone = zone_info['zone']
+
+                # Convert range size to pips
+                range_pips = zone_info['range_size_pips'] / pip_value
+
+                self.logger.info(f"   📊 Range Analysis (last 50 bars): {range_pips:.1f} pips")
+                self.logger.info(f"      High: {zone_info['range_high']:.5f}")
+                self.logger.info(f"      Mid: {zone_info['range_mid']:.5f}")
+                self.logger.info(f"      Low: {zone_info['range_low']:.5f}")
+                self.logger.info(f"   📍 Current Zone: {zone.upper()}")
+                self.logger.info(f"   📈 Price Position: {zone_info['price_position']*100:.1f}% of range")
+
+                # CONTEXT-AWARE validation: Consider HTF trend for premium/discount logic
+                # In TRENDING markets: Allow continuation entries even in "wrong" zones
+                # In RANGING markets: Strict premium/discount rules apply
+
+                self.logger.info(f"   🎯 HTF Trend Context: {final_trend} (strength: {final_strength*100:.0f}%)")
+
+                # Determine if we're in a strong trending or ranging market
+                is_strong_trend = final_strength >= 0.60  # Strong trend if strength >= 60%
+
+                if direction_str == 'bullish':
+                    entry_quality = zone_info['entry_quality_buy']
+
+                    if zone == 'premium':
+                        if is_strong_trend and final_trend == 'BULL':
+                            # ALLOW: Bullish continuation in strong uptrend, even at premium
+                            self.logger.info(f"   ✅ BULLISH entry in PREMIUM zone - TREND CONTINUATION")
+                            self.logger.info(f"   🎯 Strong uptrend context allows premium entries (momentum)")
+                        else:
+                            # REJECT: Counter-trend or weak trend
+                            self.logger.info(f"   ❌ BULLISH entry in PREMIUM zone - poor timing")
+                            self.logger.info(f"   💡 Not in strong uptrend - wait for pullback to discount")
+                            return None
+                    elif zone == 'equilibrium':
+                        self.logger.info(f"   ⚠️  BULLISH entry in EQUILIBRIUM zone - neutral timing")
+                        self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}% (acceptable)")
+                    else:  # discount
+                        self.logger.info(f"   ✅ BULLISH entry in DISCOUNT zone - excellent timing!")
+                        self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}% (buying at discount)")
+
+                else:  # bearish
+                    entry_quality = zone_info['entry_quality_sell']
+
+                    if zone == 'discount':
+                        if is_strong_trend and final_trend == 'BEAR':
+                            # ALLOW: Bearish continuation in strong downtrend, even at discount
+                            self.logger.info(f"   ✅ BEARISH entry in DISCOUNT zone - TREND CONTINUATION")
+                            self.logger.info(f"   🎯 Strong downtrend context allows discount entries (momentum)")
+                        else:
+                            # REJECT: Counter-trend or weak trend
+                            self.logger.info(f"   ❌ BEARISH entry in DISCOUNT zone - poor timing")
+                            self.logger.info(f"   💡 Not in strong downtrend - wait for rally to premium")
+                            return None
+                    elif zone == 'equilibrium':
+                        self.logger.info(f"   ⚠️  BEARISH entry in EQUILIBRIUM zone - neutral timing")
+                        self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}% (acceptable)")
+                    else:  # premium
+                        self.logger.info(f"   ✅ BEARISH entry in PREMIUM zone - excellent timing!")
+                        self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}% (selling at premium)")
+            else:
+                self.logger.info(f"   ⚠️  Could not calculate premium/discount zones - proceeding without zone filter")
 
             # STEP 4: Calculate structure-based stop loss
             self.logger.info(f"\n🛑 STEP 4: Calculating Structure-Based Stop Loss")
@@ -1226,7 +1350,7 @@ class SMCStructureStrategy:
 
     def _detect_bos_choch_15m(self, df_15m: pd.DataFrame, epic: str) -> Optional[Dict]:
         """
-        Detect BOS/CHoCH on 15m timeframe
+        Detect BOS/CHoCH on 15m timeframe using fractal-based detection
 
         Args:
             df_15m: 15m DataFrame
@@ -1237,44 +1361,38 @@ class SMCStructureStrategy:
         """
         self.logger.info(f"\n📊 Detecting BOS/CHoCH on 15m timeframe")
 
-        # Analyze market structure on 15m
-        structure_analysis = self.market_structure.analyze_market_structure(
+        # Use the same approach as HTF: analyze market structure then use fractal fallback
+        df_15m_with_structure = self.market_structure.analyze_market_structure(
             df=df_15m,
             config=vars(self.config) if hasattr(self.config, '__dict__') else {},
             epic=epic,
             timeframe='15m'
         )
 
-        # Get recent structure breaks
-        recent_breaks = structure_analysis.get('structure_breaks', [])
+        # Use fractal-based detection (same as HTF)
+        bos_choch_direction = self.market_structure.get_last_bos_choch_direction(df_15m_with_structure)
 
-        if not recent_breaks:
+        if not bos_choch_direction:
             self.logger.info(f"   ℹ️  No recent BOS/CHoCH detected")
             return None
 
-        # Get most recent break
-        latest_break = recent_breaks[-1]
+        # Get current price for level
+        current_price = float(df_15m['close'].iloc[-1])
 
-        # Check significance
-        if latest_break.get('significance', 0) < self.min_bos_significance:
-            self.logger.info(f"   ❌ BOS/CHoCH significance too low ({latest_break.get('significance', 0)*100:.0f}% < {self.min_bos_significance*100:.0f}%)")
-            return None
-
-        break_type = latest_break.get('break_type', 'Unknown')
-        direction = latest_break.get('direction', 'unknown')
-        break_price = latest_break.get('price', df_15m['close'].iloc[-1])
+        # Determine break type based on direction (simplified - we don't distinguish BOS vs ChoCH here)
+        break_type = "BOS"  # Can be refined later to distinguish BOS from ChoCH
 
         self.logger.info(f"   ✅ {break_type} detected:")
-        self.logger.info(f"      Direction: {direction}")
-        self.logger.info(f"      Level: {break_price:.5f}")
-        self.logger.info(f"      Significance: {latest_break.get('significance', 0)*100:.0f}%")
+        self.logger.info(f"      Direction: {bos_choch_direction}")
+        self.logger.info(f"      Level: {current_price:.5f}")
+        self.logger.info(f"      Detection: Fractal-based")
 
         return {
             'type': break_type,
-            'direction': direction,
-            'level': break_price,
-            'significance': latest_break.get('significance', 0),
-            'timestamp': latest_break.get('timestamp')
+            'direction': bos_choch_direction,
+            'level': current_price,
+            'significance': 0.70,  # Default significance for fractal-detected breaks
+            'timestamp': df_15m.index[-1] if hasattr(df_15m.index[-1], 'to_pydatetime') else None
         }
 
     def get_strategy_name(self) -> str:

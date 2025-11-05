@@ -1367,33 +1367,147 @@ class SMCMarketStructure:
             if len(recent_swings) < 2:
                 return None
 
-            # Determine structure based on last swing
-            last_swing = recent_swings[-1]
-            prev_swing = recent_swings[-2]
+            # Determine structure based on BOTH last swings (highs AND lows)
+            # This provides better balance between bullish and bearish detection
 
-            # Simple logic: If last swing is a higher high/low, bullish; if lower high/low, bearish
-            if last_swing['type'] == 'high':
-                # Look for previous high
-                prev_highs = [s for s in recent_swings[:-1] if s['type'] == 'high']
-                if prev_highs:
-                    prev_high = prev_highs[-1]
-                    if last_swing['price'] > prev_high['price']:
-                        return 'bullish'  # Higher High = BOS bullish
-                    else:
-                        return 'bearish'  # Lower High = CHoCH bearish
+            # Get most recent highs and lows separately
+            recent_highs = [s for s in recent_swings if s['type'] == 'high']
+            recent_lows = [s for s in recent_swings if s['type'] == 'low']
 
-            elif last_swing['type'] == 'low':
-                # Look for previous low
-                prev_lows = [s for s in recent_swings[:-1] if s['type'] == 'low']
-                if prev_lows:
-                    prev_low = prev_lows[-1]
-                    if last_swing['price'] > prev_low['price']:
-                        return 'bullish'  # Higher Low = CHoCH bullish or BOS continuation
+            bullish_signals = 0
+            bearish_signals = 0
+
+            # Check highs trend
+            if len(recent_highs) >= 2:
+                last_high = recent_highs[-1]
+                prev_high = recent_highs[-2]
+                if last_high['price'] > prev_high['price']:
+                    bullish_signals += 1  # Higher High
+                else:
+                    bearish_signals += 1  # Lower High
+
+            # Check lows trend
+            if len(recent_lows) >= 2:
+                last_low = recent_lows[-1]
+                prev_low = recent_lows[-2]
+                if last_low['price'] > prev_low['price']:
+                    bullish_signals += 1  # Higher Low
+                else:
+                    bearish_signals += 1  # Lower Low
+
+            # Determine overall direction based on both signals
+            if bullish_signals > bearish_signals:
+                return 'bullish'
+            elif bearish_signals > bullish_signals:
+                return 'bearish'
+            else:
+                # Tie-breaker: use the most recent swing
+                if len(recent_swings) >= 1:
+                    last_swing = recent_swings[-1]
+                    if last_swing['type'] == 'high':
+                        prev_highs = [s for s in recent_highs[:-1]]
+                        if prev_highs and last_swing['price'] > prev_highs[-1]['price']:
+                            return 'bullish'
+                        else:
+                            return 'bearish'
                     else:
-                        return 'bearish'  # Lower Low = BOS bearish
+                        prev_lows = [s for s in recent_lows[:-1]]
+                        if prev_lows and last_swing['price'] > prev_lows[-1]['price']:
+                            return 'bullish'
+                        else:
+                            return 'bearish'
 
             return None
 
         except Exception as e:
             self.logger.error(f"Failed to get last BOS/CHoCH direction: {e}")
+            return None
+
+    def get_premium_discount_zone(
+        self,
+        df: pd.DataFrame,
+        current_price: float,
+        lookback_bars: int = 50
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Determine if current price is in premium or discount zone for entry timing
+
+        Premium/Discount zones are based on recent range:
+        - Premium zone: Upper 50% of range (good for SELL entries)
+        - Equilibrium: Middle 50% (neutral - avoid entries)
+        - Discount zone: Lower 50% of range (good for BUY entries)
+
+        This helps time entries - buy in discount, sell in premium
+
+        Args:
+            df: OHLC DataFrame
+            current_price: Current market price
+            lookback_bars: Number of bars to determine range (default: 50)
+
+        Returns:
+            Dict with zone information:
+            {
+                'zone': 'premium' | 'discount' | 'equilibrium',
+                'range_high': float,
+                'range_low': float,
+                'range_mid': float,
+                'price_position': float,  # 0.0 (low) to 1.0 (high)
+                'entry_quality': float    # 0.0 (poor) to 1.0 (excellent)
+            }
+        """
+        try:
+            if df.empty or len(df) < 10:
+                return None
+
+            # Get recent data
+            recent_data = df.tail(min(lookback_bars, len(df)))
+
+            # Calculate range
+            range_high = float(recent_data['high'].max())
+            range_low = float(recent_data['low'].min())
+            range_mid = (range_high + range_low) / 2
+
+            # Calculate range size
+            range_size = range_high - range_low
+            if range_size == 0:
+                return None
+
+            # Calculate price position (0.0 = at low, 1.0 = at high)
+            price_position = (current_price - range_low) / range_size
+            price_position = max(0.0, min(1.0, price_position))  # Clamp to [0, 1]
+
+            # Determine zone
+            # Premium: 0.67-1.00 (upper 33%)
+            # Equilibrium: 0.33-0.67 (middle 34%)
+            # Discount: 0.00-0.33 (lower 33%)
+            if price_position >= 0.67:
+                zone = 'premium'
+                # Entry quality for SELL: 1.0 at top, 0.0 at equilibrium
+                entry_quality_sell = (price_position - 0.67) / 0.33
+                entry_quality_buy = 0.0
+            elif price_position <= 0.33:
+                zone = 'discount'
+                # Entry quality for BUY: 1.0 at bottom, 0.0 at equilibrium
+                entry_quality_buy = (0.33 - price_position) / 0.33
+                entry_quality_sell = 0.0
+            else:
+                zone = 'equilibrium'
+                # Poor entry quality in equilibrium zone
+                entry_quality_buy = 0.0
+                entry_quality_sell = 0.0
+
+            return {
+                'zone': zone,
+                'range_high': range_high,
+                'range_low': range_low,
+                'range_mid': range_mid,
+                'range_size_pips': range_size,  # Will be converted to pips by caller
+                'price_position': price_position,
+                'entry_quality_buy': entry_quality_buy,
+                'entry_quality_sell': entry_quality_sell,
+                'lookback_bars': len(recent_data)
+            }
+
+        except Exception as e:
+            self.logger.error(f"Failed to calculate premium/discount zone: {e}")
             return None
