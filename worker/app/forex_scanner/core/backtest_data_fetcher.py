@@ -328,6 +328,11 @@ class BacktestDataFetcher(DataFetcher):
         self.current_backtest_time = None
         self.data_validator = BacktestDataValidator(db_manager)
 
+        # CRITICAL FIX: Disable reduced_lookback for backtesting
+        # In backtest mode, we need full historical data access, not recent data only
+        self.reduced_lookback = False
+        self.logger.info("✅ BacktestDataFetcher: reduced_lookback DISABLED for full historical access")
+
         # Enhanced caching for backtest
         self._backtest_cache = {}
         self._validation_cache = {}

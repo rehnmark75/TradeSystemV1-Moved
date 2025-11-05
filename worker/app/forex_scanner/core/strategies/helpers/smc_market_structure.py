@@ -1306,28 +1306,93 @@ class SMCMarketStructure:
 
     def get_last_bos_choch_direction(self, df: pd.DataFrame) -> Optional[str]:
         """
-        Get the direction of the most recent BOS/CHoCH
+        Get the direction of the most recent BOS/CHoCH using simplified crossover detection
+
+        This implements a Pine Script-style approach:
+        - Detect fractals using simple 3-bar comparison
+        - Track swing highs/lows
+        - Detect BOS when price crosses previous swing level in trend direction
+        - Detect CHoCH when price crosses previous swing level against trend
 
         Args:
-            df: DataFrame with structure analysis (must have 'structure_break', 'break_direction' columns)
+            df: DataFrame with OHLC data
 
         Returns:
             'bullish', 'bearish', or None if no BOS/CHoCH found
         """
         try:
-            if df.empty or 'structure_break' not in df.columns:
+            if df.empty or len(df) < 10:
                 return None
 
-            # Find rows with structure breaks
-            breaks = df[df['structure_break'] == True]
+            # Use existing structure_break detection if available
+            if 'structure_break' in df.columns and 'break_direction' in df.columns:
+                breaks = df[df['structure_break'] == True]
+                if not breaks.empty:
+                    last_break = breaks.iloc[-1]
+                    direction = last_break.get('break_direction', None)
+                    if direction:
+                        return direction
 
-            if breaks.empty:
+            # FALLBACK: Simple fractal-based detection (Pine Script style)
+            # Detect fractals: 3 consecutive rising highs = bullish fractal, 3 falling lows = bearish fractal
+            swing_highs = []
+            swing_lows = []
+
+            for i in range(2, len(df)):
+                # Bullish fractal: 3 consecutive rising highs
+                if (i >= 2 and
+                    df.iloc[i]['high'] > df.iloc[i-1]['high'] and
+                    df.iloc[i-1]['high'] > df.iloc[i-2]['high']):
+                    swing_highs.append({'index': i, 'price': df.iloc[i]['high']})
+
+                # Bearish fractal: 3 consecutive falling lows
+                if (i >= 2 and
+                    df.iloc[i]['low'] < df.iloc[i-1]['low'] and
+                    df.iloc[i-1]['low'] < df.iloc[i-2]['low']):
+                    swing_lows.append({'index': i, 'price': df.iloc[i]['low']})
+
+            if not swing_highs and not swing_lows:
                 return None
 
-            # Get the most recent break
-            last_break = breaks.iloc[-1]
+            # Track structure: Look at most recent swings
+            recent_swings = []
+            if swing_highs:
+                recent_swings.extend([{'type': 'high', 'index': s['index'], 'price': s['price']} for s in swing_highs[-5:]])
+            if swing_lows:
+                recent_swings.extend([{'type': 'low', 'index': s['index'], 'price': s['price']} for s in swing_lows[-5:]])
 
-            return last_break.get('break_direction', None)
+            # Sort by index
+            recent_swings.sort(key=lambda x: x['index'])
+
+            if len(recent_swings) < 2:
+                return None
+
+            # Determine structure based on last swing
+            last_swing = recent_swings[-1]
+            prev_swing = recent_swings[-2]
+
+            # Simple logic: If last swing is a higher high/low, bullish; if lower high/low, bearish
+            if last_swing['type'] == 'high':
+                # Look for previous high
+                prev_highs = [s for s in recent_swings[:-1] if s['type'] == 'high']
+                if prev_highs:
+                    prev_high = prev_highs[-1]
+                    if last_swing['price'] > prev_high['price']:
+                        return 'bullish'  # Higher High = BOS bullish
+                    else:
+                        return 'bearish'  # Lower High = CHoCH bearish
+
+            elif last_swing['type'] == 'low':
+                # Look for previous low
+                prev_lows = [s for s in recent_swings[:-1] if s['type'] == 'low']
+                if prev_lows:
+                    prev_low = prev_lows[-1]
+                    if last_swing['price'] > prev_low['price']:
+                        return 'bullish'  # Higher Low = CHoCH bullish or BOS continuation
+                    else:
+                        return 'bearish'  # Lower Low = BOS bearish
+
+            return None
 
         except Exception as e:
             self.logger.error(f"Failed to get last BOS/CHoCH direction: {e}")

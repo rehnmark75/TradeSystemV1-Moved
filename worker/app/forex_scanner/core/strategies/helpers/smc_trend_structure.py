@@ -25,9 +25,9 @@ class SMCTrendStructure:
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
 
-        # Detection parameters
-        self.swing_strength = 5  # Bars on each side for swing detection
-        self.min_swing_significance = 0.0020  # Minimum price movement (20 pips for most pairs)
+        # Detection parameters (loosened for better swing detection)
+        self.swing_strength = 3  # Bars on each side for swing detection (reduced from 5)
+        self.min_swing_significance_pips = 5  # Minimum 5 pips swing size (more realistic)
         self.pullback_ratio = 0.382  # Fibonacci 38.2% minimum pullback
 
     def analyze_trend(
@@ -137,17 +137,24 @@ class SMCTrendStructure:
 
             # Check if current bar is highest in window
             if df['high'].iloc[i] == window.max():
-                # Check significance (must move at least min_swing_significance)
-                if i > 0:
-                    prev_high = df['high'].iloc[i - 1]
-                    movement = abs(df['high'].iloc[i] - prev_high)
+                # Check significance - compare to previous swing, not adjacent bar
+                if len(swing_highs) > 0:
+                    # Calculate movement in pips from last swing high
+                    movement_pips = abs(df['high'].iloc[i] - swing_highs[-1]['price']) / pip_value
 
-                    if movement >= self.min_swing_significance:
+                    if movement_pips >= self.min_swing_significance_pips:
                         swing_highs.append({
                             'index': i,
                             'price': df['high'].iloc[i],
                             'timestamp': df.index[i] if hasattr(df.index, '__getitem__') else i
                         })
+                else:
+                    # First swing is always valid (no previous swing to compare)
+                    swing_highs.append({
+                        'index': i,
+                        'price': df['high'].iloc[i],
+                        'timestamp': df.index[i] if hasattr(df.index, '__getitem__') else i
+                    })
 
         return swing_highs
 
@@ -171,17 +178,24 @@ class SMCTrendStructure:
 
             # Check if current bar is lowest in window
             if df['low'].iloc[i] == window.min():
-                # Check significance
-                if i > 0:
-                    prev_low = df['low'].iloc[i - 1]
-                    movement = abs(df['low'].iloc[i] - prev_low)
+                # Check significance - compare to previous swing, not adjacent bar
+                if len(swing_lows) > 0:
+                    # Calculate movement in pips from last swing low
+                    movement_pips = abs(df['low'].iloc[i] - swing_lows[-1]['price']) / pip_value
 
-                    if movement >= self.min_swing_significance:
+                    if movement_pips >= self.min_swing_significance_pips:
                         swing_lows.append({
                             'index': i,
                             'price': df['low'].iloc[i],
                             'timestamp': df.index[i] if hasattr(df.index, '__getitem__') else i
                         })
+                else:
+                    # First swing is always valid (no previous swing to compare)
+                    swing_lows.append({
+                        'index': i,
+                        'price': df['low'].iloc[i],
+                        'timestamp': df.index[i] if hasattr(df.index, '__getitem__') else i
+                    })
 
         return swing_lows
 

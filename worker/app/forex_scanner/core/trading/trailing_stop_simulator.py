@@ -51,6 +51,8 @@ class TrailingStopSimulator:
                  use_atr: bool = False,
                  atr_multiplier: float = 2.0,
                  target_atr_multiplier: float = 3.0,
+                 min_time_before_trailing_hours: float = 2.0,  # 🔧 NEW: Minimum time before trailing activates
+                 breakeven_buffer_pips: float = 5.0,  # 🔧 NEW: Buffer above entry when moving to breakeven
                  logger: Optional[logging.Logger] = None):
         """
         Initialize Progressive 3-Stage trailing stop simulator
@@ -73,10 +75,14 @@ class TrailingStopSimulator:
             use_atr: Use ATR-based dynamic stops
             atr_multiplier: ATR multiplier for stop loss
             target_atr_multiplier: ATR multiplier for profit target
+            min_time_before_trailing_hours: Minimum hours before trailing stops activate (default: 2.0)
+            breakeven_buffer_pips: Buffer in pips above entry when moving to breakeven (default: 5.0)
             logger: Optional logger instance
         """
         # Handle backward compatibility: prefer break_even_trigger, fallback to breakeven_trigger
-        be_trigger_default = 12.0
+        # 🔧 CRITICAL FIX: Changed default from 12.0 to 1.5R (1.5 * initial_stop_pips)
+        # This prevents premature breakeven exits that were causing 46% breakeven rate
+        be_trigger_default = initial_stop_pips * 1.5  # 1.5R instead of fixed 12 pips
         if break_even_trigger is not None:
             be_trigger = break_even_trigger
         elif breakeven_trigger is not None:
@@ -143,6 +149,8 @@ class TrailingStopSimulator:
         self.use_atr = use_atr
         self.atr_multiplier = atr_multiplier
         self.target_atr_multiplier = target_atr_multiplier
+        self.min_time_before_trailing_hours = min_time_before_trailing_hours  # 🔧 NEW: Minimum time before trailing
+        self.breakeven_buffer_pips = breakeven_buffer_pips  # 🔧 NEW: Buffer when moving to breakeven
         self.logger = logger or logging.getLogger(__name__)
         self.epic = epic
 
@@ -462,7 +470,8 @@ class TrailingStopSimulator:
                             breakeven_triggered,
                             stage1_triggered,
                             stage2_triggered,
-                            stage3_triggered
+                            stage3_triggered,
+                            bar_idx  # Pass bar index for time-based checks
                         )
 
                         # Update stage flags
@@ -504,7 +513,8 @@ class TrailingStopSimulator:
                             breakeven_triggered,
                             stage1_triggered,
                             stage2_triggered,
-                            stage3_triggered
+                            stage3_triggered,
+                            bar_idx  # Pass bar index for time-based checks
                         )
 
                         # Update stage flags
@@ -645,12 +655,13 @@ class TrailingStopSimulator:
                                           breakeven_triggered: bool,
                                           stage1_triggered: bool,
                                           stage2_triggered: bool,
-                                          stage3_triggered: bool) -> Tuple[float, Dict[str, Any]]:
+                                          stage3_triggered: bool,
+                                          bar_idx: int = 0) -> Tuple[float, Dict[str, Any]]:
         """
         Update trailing stop using Progressive 3-Stage system
 
         Stages:
-        - Break-Even: Move stop to entry (0 profit protection)
+        - Break-Even: Move stop to entry + buffer (small profit protection)
         - Stage 1: Lock initial profit (e.g., +4 pips)
         - Stage 2: Lock meaningful profit (e.g., +12 pips)
         - Stage 3: Percentage-based dynamic trailing
@@ -661,6 +672,7 @@ class TrailingStopSimulator:
             stage1_triggered: Whether stage 1 was triggered
             stage2_triggered: Whether stage 2 was triggered
             stage3_triggered: Whether stage 3 was triggered
+            bar_idx: Current bar index (for time-based checks)
 
         Returns:
             Tuple of (current_stop_pips, stage_info_dict)
@@ -674,6 +686,13 @@ class TrailingStopSimulator:
             'stage3_triggered': stage3_triggered,
             'stage_reached': 0
         }
+
+        # 🔧 CRITICAL FIX: Check minimum time requirement before allowing trailing
+        # Prevents premature exits within first 2 hours (8 bars on 15m timeframe)
+        time_elapsed_hours = (bar_idx + 1) * 15 / 60  # bars * 15 minutes / 60 = hours
+        if time_elapsed_hours < self.min_time_before_trailing_hours:
+            # Too early - keep initial stop loss
+            return self.initial_stop_pips, stage_info
 
         # Stage 3: Percentage-based dynamic trailing
         if best_profit_pips >= self.stage3_trigger:
@@ -705,10 +724,12 @@ class TrailingStopSimulator:
             stage_info['stage_reached'] = 1
             return -self.stage1_lock, stage_info
 
-        # Break-Even: Move to entry
+        # Break-Even: Move to entry + buffer for small profit protection
+        # 🔧 CRITICAL FIX: Changed from 0.0 to -breakeven_buffer_pips
+        # This protects a small profit (e.g., +5 pips) instead of exact breakeven
         elif best_profit_pips >= self.break_even_trigger:
             stage_info['breakeven_triggered'] = True
-            return 0.0, stage_info
+            return -self.breakeven_buffer_pips, stage_info
 
         # No stage triggered - use initial stop
         else:
