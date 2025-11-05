@@ -25,11 +25,16 @@ Design Philosophy:
 
 STRATEGY_NAME = "SMC_STRUCTURE"
 STRATEGY_DESCRIPTION = "Pure structure-based strategy using Smart Money Concepts (price action only)"
-STRATEGY_VERSION = "2.1.1"
-STRATEGY_DATE = "2025-11-03"
-STRATEGY_STATUS = "Production Baseline (Session Filter Disabled)"
+STRATEGY_VERSION = "2.2.0"
+STRATEGY_DATE = "2025-11-05"
+STRATEGY_STATUS = "Production Baseline - Optimized Entry Timing"
 
 # Version History:
+# v2.2.0 (2025-11-05): BASELINE - Optimized entry timing with 75% HTF strength threshold
+#                      Test 24: 39 signals, 25.6% WR, 0.86 PF (BEST PF achieved)
+#                      Premium/Discount zone context-aware filtering (75% threshold)
+#                      Balanced BOS/CHoCH detection (vote-based system)
+#                      Added bearish signal diagnostic logging
 # v2.1.1 (2025-11-03): Added session filter implementation (disabled), fixed timestamp bug
 # v2.1.0 (2025-11-02): Phase 2.1 baseline - HTF alignment enabled, 112 signals, 39.3% WR, 2.16 PF
 # v2.0.0 (2025-10-XX): BOS/CHoCH detection on 15m timeframe, Zero Lag entry trigger

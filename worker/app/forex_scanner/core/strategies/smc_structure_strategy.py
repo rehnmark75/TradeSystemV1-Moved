@@ -557,6 +557,8 @@ class SMCStructureStrategy:
                         bos_choch_info = self._detect_bos_choch_15m(df_15m, epic)
 
                         if bos_choch_info:
+                            # DIAGNOSTIC: Log BOS/CHoCH direction for tracking bullish/bearish ratio
+                            self.logger.info(f"   🔍 [DIAGNOSTIC] BOS/CHoCH Direction: {bos_choch_info['direction'].upper()}")
                             # Validate HTF alignment
                             htf_aligned = self._validate_htf_alignment(
                                 bos_direction=bos_choch_info['direction'],
@@ -567,6 +569,9 @@ class SMCStructureStrategy:
 
                             if not htf_aligned:
                                 self.logger.info(f"   ❌ BOS/CHoCH detected but HTF not aligned - SIGNAL REJECTED")
+                                # DIAGNOSTIC: Track bearish rejection reasons
+                                if bos_choch_info['direction'] == 'bearish':
+                                    self.logger.info(f"   🔍 [BEARISH DIAGNOSTIC] Rejected at HTF alignment check")
                                 return None
 
                             # NEW: Order Block Re-entry Logic (v2.2.0)
@@ -584,6 +589,9 @@ class SMCStructureStrategy:
                                 if not last_ob:
                                     self.logger.info(f"   ❌ No opposing Order Block found before BOS - SIGNAL REJECTED")
                                     self.logger.info(f"   💡 Institutional accumulation zone not identified")
+                                    # DIAGNOSTIC: Track bearish rejection reasons
+                                    if bos_choch_info['direction'] == 'bearish':
+                                        self.logger.info(f"   🔍 [BEARISH DIAGNOSTIC] Rejected - no opposing OB")
                                     return None
 
                                 self.logger.info(f"   ✅ Order Block identified:")
@@ -813,7 +821,10 @@ class SMCStructureStrategy:
                 self.logger.info(f"   🎯 HTF Trend Context: {final_trend} (strength: {final_strength*100:.0f}%)")
 
                 # Determine if we're in a strong trending or ranging market
-                is_strong_trend = final_strength >= 0.60  # Strong trend if strength >= 60%
+                # OPTIMIZED: Increased from 0.60 to 0.75 based on Test 23 analysis
+                # 60% threshold allowed too many weak trend continuations (all losers)
+                # 75% = truly strong, established trends only
+                is_strong_trend = final_strength >= 0.75  # Strong trend if strength >= 75%
 
                 if direction_str == 'bullish':
                     entry_quality = zone_info['entry_quality_buy']
@@ -847,6 +858,9 @@ class SMCStructureStrategy:
                             # REJECT: Counter-trend or weak trend
                             self.logger.info(f"   ❌ BEARISH entry in DISCOUNT zone - poor timing")
                             self.logger.info(f"   💡 Not in strong downtrend - wait for rally to premium")
+                            # DIAGNOSTIC: Track bearish rejection reasons
+                            self.logger.info(f"   🔍 [BEARISH DIAGNOSTIC] Rejected at premium/discount filter")
+                            self.logger.info(f"      Zone: DISCOUNT, Strength: {final_strength*100:.0f}%, Threshold: 75%")
                             return None
                     elif zone == 'equilibrium':
                         self.logger.info(f"   ⚠️  BEARISH entry in EQUILIBRIUM zone - neutral timing")
