@@ -182,6 +182,23 @@ class SignalDetector:
             self.smc_strategy = None
             self.logger.info("⚪ SMC strategy disabled")
 
+        # Initialize SMC Structure Strategy if enabled (v2.4.0 - Profitable)
+        if getattr(config, 'SMC_STRUCTURE_STRATEGY', False):
+            try:
+                # SMC Structure strategy uses lazy loading in detect_smc_structure_signals
+                # Just set a flag to indicate it's enabled
+                self.smc_structure_enabled = True
+                self.smc_structure_strategy = None  # Will be lazy-loaded on first use
+                self.logger.info("✅ SMC Structure strategy v2.4.0 enabled (lazy-load)")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to enable SMC Structure strategy: {e}")
+                self.smc_structure_enabled = False
+                self.smc_structure_strategy = None
+        else:
+            self.smc_structure_enabled = False
+            self.smc_structure_strategy = None
+            self.logger.info("⚪ SMC Structure strategy disabled")
+
         # Initialize Ichimoku Strategy if enabled
         if getattr(config, 'ICHIMOKU_CLOUD_STRATEGY', False):
             try:
@@ -867,7 +884,7 @@ class SignalDetector:
                     individual_results['ema'] = None
             
             # 2. MACD Strategy
-            macd_enabled = getattr(config, 'MACD_STRATEGY', True)
+            macd_enabled = getattr(config, 'MACD_STRATEGY', False)
             self.logger.info(f"🔍 [DEBUG] MACD_STRATEGY config={macd_enabled} for {epic}")
             if macd_enabled:
                 try:
@@ -1066,6 +1083,25 @@ class SignalDetector:
                     self.logger.error(f"❌ [RANGING MARKET STRATEGY] Error for {epic}: {e}")
                     individual_results['ranging_market'] = None
 
+            # 12. SMC Structure Strategy v2.4.0 (if enabled)
+            if getattr(config, 'SMC_STRUCTURE_STRATEGY', False) and self.smc_structure_enabled:
+                try:
+                    self.logger.debug(f"🔍 [SMC STRUCTURE] Starting detection for {epic}")
+                    smc_structure_signal = self.detect_smc_structure_signals(epic, pair, spread_pips, timeframe)
+
+                    # Store result for combined strategy
+                    individual_results['smc_structure'] = smc_structure_signal
+
+                    if smc_structure_signal:
+                        all_signals.append(smc_structure_signal)
+                        self.logger.info(f"✅ [SMC STRUCTURE] Signal detected for {epic}: {smc_structure_signal.get('signal')} @ {smc_structure_signal.get('entry_price', 0):.5f}")
+                    else:
+                        self.logger.debug(f"📊 [SMC STRUCTURE] No signal for {epic}")
+
+                except Exception as e:
+                    self.logger.error(f"❌ [SMC STRUCTURE] Error for {epic}: {e}")
+                    individual_results['smc_structure'] = None
+
             # ========== COMBINED STRATEGY REMOVED ==========
             # Combined strategy was disabled and unused, removed to clean up codebase
             
@@ -1180,7 +1216,7 @@ class SignalDetector:
                     individual_results['ema'] = None
             
             # 2. MACD Strategy
-            macd_enabled = getattr(config, 'MACD_STRATEGY', True)
+            macd_enabled = getattr(config, 'MACD_STRATEGY', False)
             self.logger.info(f"🔍 [DEBUG] MACD_STRATEGY config={macd_enabled} for {epic}")
             if macd_enabled:
                 try:
@@ -2374,7 +2410,7 @@ class SignalDetector:
         
         if getattr(config, 'SIMPLE_EMA_STRATEGY', True):
             strategies_to_try.append('ema')
-        if getattr(config, 'MACD_STRATEGY', True):
+        if getattr(config, 'MACD_STRATEGY', False):
             strategies_to_try.append('macd')
         if getattr(config, 'KAMA_STRATEGY', False) and self.kama_strategy:
             strategies_to_try.append('kama')
@@ -2806,7 +2842,21 @@ class SignalDetector:
                     return obj
 
             if all_indicators:
-                signal['strategy_indicators'] = clean_nan_values({
+                # FIXED: Preserve existing strategy_indicators (e.g., from SMC strategy)
+                # Instead of overwriting, merge the dataframe analysis with existing data
+                existing_strategy_indicators = signal.get('strategy_indicators', {})
+
+                # DEBUG: Log what we found
+                strategy_name = signal.get('strategy', 'unknown')
+                has_existing = bool(existing_strategy_indicators)
+                if has_existing:
+                    existing_keys = list(existing_strategy_indicators.keys())
+                    self.logger.info(f"🔍 [{strategy_name}] Found existing strategy_indicators with keys: {existing_keys}")
+                else:
+                    self.logger.info(f"🔍 [{strategy_name}] No existing strategy_indicators found - will use dataframe analysis")
+
+                # Create base dataframe analysis indicators
+                dataframe_indicators = clean_nan_values({
                     'ema_data': ema_indicators,
                     'macd_data': macd_indicators,
                     'kama_data': kama_indicators,
@@ -2818,7 +2868,20 @@ class SignalDetector:
                     'data_source': 'complete_dataframe_analysis'
                 })
 
-            self.logger.debug(f"📊 Enhanced signal with {len(all_indicators)} indicators + swing/SR data")
+                # Merge: strategy-specific indicators take precedence, dataframe analysis fills gaps
+                if existing_strategy_indicators:
+                    # Strategy already provided comprehensive indicators (e.g., SMC structure data)
+                    # Add dataframe analysis as supplementary data without overwriting
+                    merged_indicators = existing_strategy_indicators.copy()
+                    merged_indicators['dataframe_analysis'] = dataframe_indicators
+                    signal['strategy_indicators'] = merged_indicators
+                    self.logger.info(f"✅ [{strategy_name}] Preserved strategy indicators + added {len(all_indicators)} dataframe indicators")
+                    self.logger.info(f"   Final keys: {list(merged_indicators.keys())}")
+                else:
+                    # No existing strategy indicators, use dataframe analysis as primary
+                    signal['strategy_indicators'] = dataframe_indicators
+                    self.logger.debug(f"📊 Enhanced signal with {len(all_indicators)} indicators + swing/SR data")
+
             return signal
             
         except Exception as e:

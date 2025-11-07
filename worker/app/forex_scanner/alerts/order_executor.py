@@ -256,16 +256,47 @@ class OrderExecutor:
                     "alert_id": alert_id
                 }
             
-            # Calculate order parameters
-            stop_distance = signal.get('stop_distance', self.default_stop_distance)
-            limit_distance = signal.get('limit_distance', int(stop_distance * self.default_risk_reward))
+            # Calculate pip value for distance conversions
+            pip_value = 0.01 if 'JPY' in internal_epic else 0.0001
 
-            # Debug: Log if using defaults vs strategy values
-            if 'stop_distance' not in signal:
-                self.logger.warning(f"⚠️ Signal missing 'stop_distance', using default: {stop_distance} pips")
-                self.logger.debug(f"   Signal keys: {list(signal.keys())}")
-            if 'limit_distance' not in signal:
-                self.logger.warning(f"⚠️ Signal missing 'limit_distance', using default: {limit_distance} pips")
+            # Calculate order parameters with fallback to price level calculation
+            stop_distance = signal.get('stop_distance')
+            limit_distance = signal.get('limit_distance')
+
+            # If stop_distance not provided, try to calculate from price levels
+            if stop_distance is None:
+                entry_price = signal.get('entry_price', signal.get('price'))
+                stop_loss = signal.get('stop_loss')
+
+                if entry_price and stop_loss:
+                    # Calculate distance from price levels
+                    price_distance = abs(float(entry_price) - float(stop_loss))
+                    stop_distance = int(round(price_distance / pip_value))
+                    self.logger.info(f"📏 Calculated stop_distance from price levels: {stop_distance} pips (entry={entry_price:.5f}, SL={stop_loss:.5f})")
+                else:
+                    # Fallback to default
+                    stop_distance = self.default_stop_distance
+                    self.logger.warning(f"⚠️ No stop_distance or stop_loss in signal, using default: {stop_distance} pips")
+                    self.logger.debug(f"   Signal keys: {list(signal.keys())}")
+            else:
+                self.logger.debug(f"📋 Using strategy-provided stop_distance: {stop_distance} pips")
+
+            # If limit_distance not provided, try to calculate from price levels
+            if limit_distance is None:
+                entry_price = signal.get('entry_price', signal.get('price'))
+                take_profit = signal.get('take_profit')
+
+                if entry_price and take_profit:
+                    # Calculate distance from price levels
+                    price_distance = abs(float(take_profit) - float(entry_price))
+                    limit_distance = int(round(price_distance / pip_value))
+                    self.logger.info(f"📏 Calculated limit_distance from price levels: {limit_distance} pips (entry={entry_price:.5f}, TP={take_profit:.5f})")
+                else:
+                    # Fallback to R:R ratio
+                    limit_distance = int(stop_distance * self.default_risk_reward)
+                    self.logger.warning(f"⚠️ No limit_distance or take_profit in signal, using default R:R: {limit_distance} pips")
+            else:
+                self.logger.debug(f"📋 Using strategy-provided limit_distance: {limit_distance} pips")
 
             # ✅ SAFETY VALIDATION: Ensure reasonable SL/TP values
             # For all pairs, stop_distance and limit_distance should be in reasonable pip/point range

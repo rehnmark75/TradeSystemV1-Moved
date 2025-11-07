@@ -1179,9 +1179,20 @@ class AlertHistoryManager:
             # Clean and serialize strategy_indicators
             try:
                 if strategy_indicators:
+                    # DEBUG: Log what we received
+                    strategy_name = signal.get('strategy', 'unknown')
+                    indicator_keys = list(strategy_indicators.keys()) if isinstance(strategy_indicators, dict) else []
+                    self.logger.info(f"🔍 [ALERT_HISTORY] Received strategy_indicators for {strategy_name} with keys: {indicator_keys}")
+
                     cleaned_indicators = safe_json_serialize(strategy_indicators)
                     alert_data['strategy_indicators'] = json.dumps(cleaned_indicators) if cleaned_indicators else None
+
+                    # DEBUG: Verify what we're about to save
+                    if cleaned_indicators:
+                        saved_keys = list(cleaned_indicators.keys()) if isinstance(cleaned_indicators, dict) else []
+                        self.logger.info(f"   Saving to DB with keys: {saved_keys}")
                 else:
+                    self.logger.info(f"⚠️  [ALERT_HISTORY] No strategy_indicators in signal for {signal.get('strategy', 'unknown')}")
                     alert_data['strategy_indicators'] = None
             except Exception as e:
                 self.logger.warning(f"⚠️ Error serializing strategy_indicators: {e}")
