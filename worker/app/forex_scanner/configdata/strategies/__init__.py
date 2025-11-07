@@ -27,6 +27,22 @@ except ImportError as e:
     # Uncomment the line below if you want to see the import warning:
     # print(f"⚠️ TradingView integration not available: {e}")
 
+# Import main config flags for strategy enablement
+# These are defined in forex_scanner/config.py and need to be accessible here
+try:
+    from forex_scanner.config import SMC_STRUCTURE_STRATEGY
+except ImportError:
+    # If running from within forex_scanner directory
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from config import SMC_STRUCTURE_STRATEGY
+    except ImportError:
+        # Default to False if we can't import it
+        SMC_STRUCTURE_STRATEGY = False
+        print("⚠️ Could not import SMC_STRUCTURE_STRATEGY from main config, defaulting to False")
+
 # Define what gets exported when using "from strategies import *"
 __all__ = [
     # ZeroLag Strategy Settings (Enhanced Modular Configuration)
@@ -173,6 +189,7 @@ __all__ = [
     
     # SMC Strategy Core Settings
     'SMC_STRATEGY',
+    'SMC_STRUCTURE_STRATEGY',  # NEW: SMC Structure v2.4.0
     'SMC_STRATEGY_CONFIG',
     'ACTIVE_SMC_CONFIG',
     
@@ -1125,4 +1142,4 @@ try:
 except Exception as e:
     print(f"⚠️ Strategy configuration validation error: {e}")
 
-print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}, Mean Reversion: {globals().get('MEAN_REVERSION_STRATEGY', False)}, Ranging Market: {globals().get('RANGING_MARKET_STRATEGY', False)}, Momentum: {globals().get('MOMENTUM_STRATEGY', False)}, KAMA: {globals().get('KAMA_STRATEGY', False)}, Scalping: {globals().get('SCALPING_STRATEGY_ENABLED', False)}, BB SuperTrend: {globals().get('BOLLINGER_SUPERTREND_STRATEGY', False)}")
+print(f"📊 Strategy configs loaded - ZeroLag: {globals().get('ZERO_LAG_STRATEGY', False)}, MACD: {globals().get('MACD_EMA_STRATEGY', False)}, EMA: {globals().get('SIMPLE_EMA_STRATEGY', False)}, SMC: {globals().get('SMC_STRATEGY', False)}, SMC_STRUCTURE: {globals().get('SMC_STRUCTURE_STRATEGY', False)}, Ichimoku: {globals().get('ICHIMOKU_CLOUD_STRATEGY', False)}, Mean Reversion: {globals().get('MEAN_REVERSION_STRATEGY', False)}, Ranging Market: {globals().get('RANGING_MARKET_STRATEGY', False)}, Momentum: {globals().get('MOMENTUM_STRATEGY', False)}, KAMA: {globals().get('KAMA_STRATEGY', False)}, Scalping: {globals().get('SCALPING_STRATEGY_ENABLED', False)}, BB SuperTrend: {globals().get('BOLLINGER_SUPERTREND_STRATEGY', False)}")

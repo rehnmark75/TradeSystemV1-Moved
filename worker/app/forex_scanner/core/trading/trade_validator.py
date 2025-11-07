@@ -1062,8 +1062,10 @@ class TradeValidator:
             # STRATEGY-AWARE FILTERING: Some strategies exempt from EMA200 trend filter
             # - MACD: Can trade counter-trend (momentum reversals)
             # - ranging_market: Specifically designed for ranging/non-trending conditions
+            # - SMC_STRUCTURE: Has its own HTF trend validation and structure-based entries
             is_macd_strategy = 'MACD' in strategy
             is_ranging_strategy = 'ranging_market' in strategy.lower()
+            is_smc_structure = 'SMC_STRUCTURE' in strategy or 'smc_structure' in strategy.lower()
 
             # Apply trend filter logic with comprehensive logging
             self.logger.info(f"📊 EMA200 validation for {epic} {signal_type} ({strategy}): price={current_price:.5f}, ema200={ema_200:.5f}")
@@ -1080,6 +1082,9 @@ class TradeValidator:
                     elif is_ranging_strategy:
                         self.logger.info(f"✅ RANGING BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (ranging market strategy - no trend filter)")
                         return True, f"RANGING BUY valid: ranging market condition (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
+                    elif is_smc_structure:
+                        self.logger.info(f"✅ SMC_STRUCTURE BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (has own HTF trend validation)")
+                        return True, f"SMC_STRUCTURE BUY valid: structure-based entry with HTF validation (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
                     else:
                         self.logger.warning(f"🚫 BUY signal REJECTED {epic}: {current_price:.5f} <= {ema_200:.5f} (price at/below EMA200)")
                         return False, f"BUY rejected: price {current_price:.5f} at/below EMA200 {ema_200:.5f}"
@@ -1096,6 +1101,9 @@ class TradeValidator:
                     elif is_ranging_strategy:
                         self.logger.info(f"✅ RANGING SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (ranging market strategy - no trend filter)")
                         return True, f"RANGING SELL valid: ranging market condition (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
+                    elif is_smc_structure:
+                        self.logger.info(f"✅ SMC_STRUCTURE SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (has own HTF trend validation)")
+                        return True, f"SMC_STRUCTURE SELL valid: structure-based entry with HTF validation (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
                     else:
                         self.logger.warning(f"🚫 SELL signal REJECTED {epic}: {current_price:.5f} >= {ema_200:.5f} (price at/above EMA200)")
                         return False, f"SELL rejected: price {current_price:.5f} at/above EMA200 {ema_200:.5f}"
@@ -1548,6 +1556,13 @@ class TradeValidator:
                 if confidence < scalping_min_confidence:
                     return False, f"Scalping confidence {confidence:.1%} below scalping minimum {scalping_min_confidence:.1%}"
                 return True, f"Scalping confidence {confidence:.1%} meets requirements (min: {scalping_min_confidence:.1%})"
+
+            # SMC_STRUCTURE uses its own internal confidence threshold (45%) with multi-factor scoring
+            elif 'SMC_STRUCTURE' in strategy or 'smc_structure' in strategy.lower():
+                smc_min_confidence = 0.45  # Same as SMC strategy's internal MIN_CONFIDENCE
+                if confidence < smc_min_confidence:
+                    return False, f"SMC_STRUCTURE confidence {confidence:.1%} below SMC minimum {smc_min_confidence:.1%}"
+                return True, f"SMC_STRUCTURE confidence {confidence:.1%} meets requirements (min: {smc_min_confidence:.1%})"
 
             # Other strategy-specific thresholds
             elif strategy == 'swing' and confidence < 0.70:

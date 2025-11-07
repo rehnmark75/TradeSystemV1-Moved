@@ -826,6 +826,12 @@ class SMCStructureStrategy:
                 # 75% = truly strong, established trends only
                 is_strong_trend = final_strength >= 0.75  # Strong trend if strength >= 75%
 
+                # Initialize direction_str if not already set (from BOS/CHoCH or fallback logic)
+                # This ensures direction_str is always defined before use
+                if 'direction_str' not in locals():
+                    direction_str = 'bullish' if final_trend == 'BULL' else 'bearish'
+                    self.logger.info(f"   ℹ️  Direction initialized from HTF trend: {direction_str}")
+
                 if direction_str == 'bullish':
                     entry_quality = zone_info['entry_quality_buy']
 
@@ -875,10 +881,12 @@ class SMCStructureStrategy:
             # Neutral zones require higher confidence due to lack of zone edge
             if zone_info and zone_info['zone'] == 'equilibrium':
                 # Calculate preliminary confidence to check threshold
+                # Note: R:R ratio not yet calculated, so we use 0 for preliminary check
+                # Actual R:R will be validated later in STEP 6
                 htf_score = trend_analysis['strength'] * 0.4
                 pattern_score = rejection_pattern['strength'] * 0.3
                 sr_score = nearest_level['strength'] * 0.2
-                rr_score = min(rr_ratio / 4.0, 1.0) * 0.1
+                rr_score = 0.0  # R:R not calculated yet, will be validated in STEP 6
                 preliminary_confidence = htf_score + pattern_score + sr_score + rr_score
 
                 MIN_EQUILIBRIUM_CONFIDENCE = 0.50  # 50% minimum for neutral zones
@@ -1055,6 +1063,69 @@ class SMCStructureStrategy:
                 'pattern_type': rejection_pattern['pattern_type'],
                 'pattern_strength': rejection_pattern['strength'],
                 'rejection_level': rejection_pattern['rejection_level'],
+
+                # SMC-specific indicators for alert_history logging
+                'strategy_indicators': {
+                    # BOS/CHoCH Data
+                    'bos_choch': {
+                        'htf_direction': bos_choch_direction if 'bos_choch_direction' in locals() else None,
+                        'htf_trend': final_trend,
+                        'htf_strength': final_strength,
+                        'structure_type': trend_analysis['structure_type'],
+                    },
+
+                    # HTF Trend Data
+                    'htf_data': {
+                        'timeframe': self.htf_timeframe,
+                        'trend': trend_analysis['trend'],
+                        'strength': trend_analysis['strength'],
+                        'in_pullback': trend_analysis['in_pullback'],
+                        'pullback_depth': trend_analysis.get('pullback_depth', 0),
+                        'swing_highs': len(trend_analysis.get('swing_highs', [])),
+                        'swing_lows': len(trend_analysis.get('swing_lows', [])),
+                    },
+
+                    # Support/Resistance Data
+                    'sr_data': {
+                        'level_price': nearest_level['price'],
+                        'level_type': nearest_level['type'],
+                        'level_strength': nearest_level['strength'],
+                        'distance_pips': nearest_level['distance_pips'],
+                        'touch_count': nearest_level.get('touch_count', 0),
+                    },
+
+                    # Rejection Pattern Data
+                    'pattern_data': {
+                        'pattern_type': rejection_pattern['pattern_type'],
+                        'pattern_strength': rejection_pattern['strength'],
+                        'rejection_level': rejection_pattern['rejection_level'],
+                        'entry_price': rejection_pattern.get('entry_price', entry_price),
+                    },
+
+                    # Risk/Reward Data
+                    'rr_data': {
+                        'risk_pips': risk_pips,
+                        'reward_pips': reward_pips,
+                        'rr_ratio': rr_ratio,
+                        'entry_price': entry_price,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'partial_tp': partial_tp,
+                        'partial_percent': self.partial_profit_percent if self.partial_profit_enabled else None,
+                    },
+
+                    # Confidence Breakdown
+                    'confidence_breakdown': {
+                        'total': confidence,
+                        'htf_score': htf_score,
+                        'pattern_score': pattern_score,
+                        'sr_score': sr_score,
+                        'rr_score': rr_score,
+                    },
+
+                    # Indicator count for compatibility
+                    'indicator_count': 6,  # BOS/CHoCH, HTF, S/R, Pattern, R:R, Confidence
+                },
 
                 # Readable description
                 'description': self._build_signal_description(

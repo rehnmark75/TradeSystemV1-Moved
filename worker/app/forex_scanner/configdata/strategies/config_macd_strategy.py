@@ -102,7 +102,7 @@ MACD_CONFLUENCE_LOG_H4_VALIDATION = True  # Log H4 trend validation
 # =============================================================================
 
 # Core Strategy Settings
-MACD_EMA_STRATEGY = True     # True = enable MACD + EMA 200 strategy
+MACD_EMA_STRATEGY = False     # True = enable MACD + EMA 200 strategy
 STRATEGY_WEIGHT_MACD = 0.5   # MACD strategy weight  
 
 # MACD Periods Configuration  
