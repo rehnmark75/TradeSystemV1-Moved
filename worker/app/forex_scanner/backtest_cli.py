@@ -87,7 +87,19 @@ Signal Display Format:
             '--days',
             type=int,
             default=7,
-            help='Number of days to backtest (default: 7)'
+            help='Number of days to backtest (default: 7). Ignored if --start-date and --end-date are provided.'
+        )
+
+        parser.add_argument(
+            '--start-date',
+            type=str,
+            help='Start date for backtest in YYYY-MM-DD format (e.g., 2025-10-06). Requires --end-date.'
+        )
+
+        parser.add_argument(
+            '--end-date',
+            type=str,
+            help='End date for backtest in YYYY-MM-DD format (e.g., 2025-11-05). Requires --start-date.'
         )
 
         parser.add_argument(
@@ -169,6 +181,32 @@ Signal Display Format:
             # Setup logging level
             self.setup_logging(args.verbose)
 
+            # Validate date range parameters
+            if (args.start_date and not args.end_date) or (args.end_date and not args.start_date):
+                print("❌ Both --start-date and --end-date must be provided together")
+                return False
+
+            # Parse dates if provided
+            start_date = None
+            end_date = None
+            if args.start_date and args.end_date:
+                try:
+                    start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
+                    end_date = datetime.strptime(args.end_date, '%Y-%m-%d')
+
+                    if start_date >= end_date:
+                        print("❌ --start-date must be before --end-date")
+                        return False
+
+                    # Validate dates are not in the future
+                    if end_date > datetime.now():
+                        print("❌ --end-date cannot be in the future")
+                        return False
+
+                except ValueError as e:
+                    print(f"❌ Invalid date format. Use YYYY-MM-DD (e.g., 2025-10-06)")
+                    return False
+
             # Cleanup if requested
             if args.cleanup:
                 self.enhanced_backtest.cleanup_test_executions()
@@ -190,6 +228,8 @@ Signal Display Format:
             return self.enhanced_backtest.run_enhanced_backtest(
                 epic=args.epic,
                 days=args.days,
+                start_date=start_date,
+                end_date=end_date,
                 show_signals=args.show_signals,
                 timeframe=args.timeframe,
                 strategy=args.strategy,

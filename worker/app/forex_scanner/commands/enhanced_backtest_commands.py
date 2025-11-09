@@ -39,6 +39,8 @@ class EnhancedBacktestCommands:
         self,
         epic: str = None,
         days: int = 7,
+        start_date: datetime = None,
+        end_date: datetime = None,
         show_signals: bool = False,
         timeframe: str = '15m',
         strategy: str = 'EMA_CROSSOVER',
@@ -51,7 +53,9 @@ class EnhancedBacktestCommands:
 
         Args:
             epic: Specific epic to test (None = all epics from config.EPIC_LIST)
-            days: Number of days to backtest
+            days: Number of days to backtest (ignored if start_date and end_date provided)
+            start_date: Explicit start date (overrides days parameter)
+            end_date: Explicit end date (overrides days parameter)
             show_signals: Show detailed signal breakdown
             timeframe: Trading timeframe
             strategy: Strategy name to use
@@ -75,26 +79,42 @@ class EnhancedBacktestCommands:
                 self.logger.info(f"📊 Testing all epics: {len(epic_list)} pairs")
 
             self.logger.info(f"   Timeframe: {timeframe}")
-            self.logger.info(f"   Days: {days}")
             self.logger.info(f"   Strategy: {strategy}")
             self.logger.info(f"   Show signals: {'Yes' if show_signals else 'No'}")
             self.logger.info(f"   Mode: {'Full Pipeline' if pipeline else 'Basic Strategy Testing'}")
 
-            # Create backtest execution
-            end_date = datetime.now()
-            # CRITICAL FIX: Start early enough to capture all alerts AND have sufficient indicator data
-            # We need extra days for indicator calculation (e.g., EMA 50 needs 50+ bars)
-            # Add 2 extra days to ensure we have enough historical data before the target period
-            start_date = end_date - timedelta(days=days + 2)
-            start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            # Calculate date range
+            if start_date and end_date:
+                # Use explicit date range
+                # CRITICAL FIX: Start 2 days earlier for indicator warmup
+                actual_start_date = start_date - timedelta(days=2)
+                actual_end_date = end_date
+
+                # Calculate days for display
+                date_diff = (end_date - start_date).days
+                self.logger.info(f"   Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} ({date_diff} days)")
+                self.logger.info(f"   Warmup: Starting from {actual_start_date.strftime('%Y-%m-%d')} (2 days earlier for indicators)")
+            else:
+                # Use days parameter (backward from now)
+                actual_end_date = datetime.now()
+                # CRITICAL FIX: Start early enough to capture all alerts AND have sufficient indicator data
+                # We need extra days for indicator calculation (e.g., EMA 50 needs 50+ bars)
+                # Add 2 extra days to ensure we have enough historical data before the target period
+                actual_start_date = actual_end_date - timedelta(days=days + 2)
+
+                self.logger.info(f"   Days: {days}")
+
+            # Normalize dates to start/end of day
+            actual_start_date = actual_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            actual_end_date = actual_end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
             execution_id = self.scanner_factory.create_backtest_execution(
                 strategy_name=strategy,
-                start_date=start_date,
-                end_date=end_date,
+                start_date=actual_start_date,
+                end_date=actual_end_date,
                 epics=epic_list,
                 timeframe=timeframe,
-                execution_name=f"enhanced_backtest_{strategy}_{days}d"
+                execution_name=f"enhanced_backtest_{strategy}_{days}d" if not (start_date and end_date) else f"enhanced_backtest_{strategy}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
             )
 
             self.logger.info(f"✅ Created backtest execution: {execution_id}")
@@ -103,8 +123,8 @@ class EnhancedBacktestCommands:
             backtest_config = {
                 'execution_id': execution_id,
                 'strategy_name': strategy,
-                'start_date': start_date,
-                'end_date': end_date,
+                'start_date': actual_start_date,
+                'end_date': actual_end_date,
                 'epics': epic_list,
                 'timeframe': timeframe,
                 'pipeline_mode': pipeline

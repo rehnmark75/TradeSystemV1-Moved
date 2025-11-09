@@ -826,12 +826,6 @@ class SMCStructureStrategy:
                 # 75% = truly strong, established trends only
                 is_strong_trend = final_strength >= 0.75  # Strong trend if strength >= 75%
 
-                # CRITICAL FIX: Initialize direction_str if not already set (from BOS/CHoCH or fallback logic)
-                # This ensures direction_str is always defined before use in premium/discount filtering
-                if 'direction_str' not in locals():
-                    direction_str = 'bullish' if final_trend == 'BULL' else 'bearish'
-                    self.logger.info(f"   ℹ️  Direction initialized from HTF trend: {direction_str}")
-
                 if direction_str == 'bullish':
                     entry_quality = zone_info['entry_quality_buy']
 
@@ -884,7 +878,7 @@ class SMCStructureStrategy:
                 htf_score = trend_analysis['strength'] * 0.4
                 pattern_score = rejection_pattern['strength'] * 0.3
                 sr_score = nearest_level['strength'] * 0.2
-                rr_score = 0.0  # R:R not calculated yet at this stage (before SL/TP)
+                rr_score = min(rr_ratio / 4.0, 1.0) * 0.1
                 preliminary_confidence = htf_score + pattern_score + sr_score + rr_score
 
                 MIN_EQUILIBRIUM_CONFIDENCE = 0.50  # 50% minimum for neutral zones
