@@ -22,7 +22,9 @@
       "Bash(docker compose exec:*)",
       "Bash(docker compose:*)",
       "Bash(docker cp:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(/home/hr/Projects/TradeSystemV1/worker/app/forex_scanner/all_signals33_master_baseline.txt)"
     ],
     "deny": [],
     "ask": []
