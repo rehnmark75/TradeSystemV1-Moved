@@ -826,6 +826,12 @@ class SMCStructureStrategy:
                 # 75% = truly strong, established trends only
                 is_strong_trend = final_strength >= 0.75  # Strong trend if strength >= 75%
 
+                # CRITICAL FIX: Initialize direction_str if not already set (from BOS/CHoCH or fallback logic)
+                # This ensures direction_str is always defined before use in premium/discount filtering
+                if 'direction_str' not in locals():
+                    direction_str = 'bullish' if final_trend == 'BULL' else 'bearish'
+                    self.logger.info(f"   ℹ️  Direction initialized from HTF trend: {direction_str}")
+
                 if direction_str == 'bullish':
                     entry_quality = zone_info['entry_quality_buy']
 

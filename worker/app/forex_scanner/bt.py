@@ -21,7 +21,7 @@ def main():
     """Main wrapper function"""
 
     # Base command
-    base_cmd = ["python", "/app/forex_scanner/backtest_cli.py"]
+    base_cmd = ["python3", "/app/forex_scanner/backtest_cli.py"]
 
     args = sys.argv[1:]
 
