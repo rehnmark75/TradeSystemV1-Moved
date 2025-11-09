@@ -337,6 +337,12 @@ class BacktestDataFetcher(DataFetcher):
         self._backtest_cache = {}
         self._validation_cache = {}
 
+        # PERFORMANCE FIX: Cache resampled timeframes to avoid re-resampling on every iteration
+        # Key format: f"{epic}_{timeframe}" e.g., "CS.D.EURUSD.CEEM.IP_1h"
+        self._resampled_cache = {}
+        self._resampled_cache_hits = 0
+        self._resampled_cache_misses = 0
+
         # Initialize in-memory cache for ultra-fast data access
         self.memory_cache = get_forex_cache(db_manager)
         if self.memory_cache is None:
@@ -359,6 +365,20 @@ class BacktestDataFetcher(DataFetcher):
     def set_backtest_time(self, current_time: datetime):
         """Set the current backtest time for data filtering"""
         self.current_backtest_time = current_time
+
+    def get_resampled_cache_stats(self) -> dict:
+        """Get statistics about resampled data cache performance"""
+        total_requests = self._resampled_cache_hits + self._resampled_cache_misses
+        hit_rate = (self._resampled_cache_hits / total_requests * 100) if total_requests > 0 else 0
+
+        return {
+            'cache_hits': self._resampled_cache_hits,
+            'cache_misses': self._resampled_cache_misses,
+            'total_requests': total_requests,
+            'hit_rate_percent': hit_rate,
+            'cached_datasets': len(self._resampled_cache),
+            'cache_keys': list(self._resampled_cache.keys())
+        }
 
     async def get_historical_data_batch(
         self,
@@ -469,8 +489,25 @@ class BacktestDataFetcher(DataFetcher):
         try:
             # If we're in backtest mode and have a current timestamp, filter data accordingly
             if hasattr(self, 'current_backtest_time') and self.current_backtest_time:
-                # Call parent method to get the full dataset
-                full_df = super().get_enhanced_data(epic, pair, timeframe, **kwargs)
+                # PERFORMANCE FIX: Check resampled cache first to avoid expensive re-resampling
+                cache_key = f"{epic}_{timeframe}"
+
+                if cache_key in self._resampled_cache:
+                    # Cache HIT - reuse previously resampled data
+                    full_df = self._resampled_cache[cache_key]
+                    self._resampled_cache_hits += 1
+                    self.logger.debug(f"⚡ CACHE HIT: Reused {timeframe} data for {epic} (hits: {self._resampled_cache_hits})")
+                else:
+                    # Cache MISS - need to fetch and resample
+                    full_df = super().get_enhanced_data(epic, pair, timeframe, **kwargs)
+
+                    # Store in cache for future iterations (only if valid data)
+                    if full_df is not None and len(full_df) > 0:
+                        self._resampled_cache[cache_key] = full_df.copy()
+                        self._resampled_cache_misses += 1
+                        self.logger.debug(f"💾 CACHE MISS: Stored {timeframe} data for {epic} (misses: {self._resampled_cache_misses})")
+                    else:
+                        full_df = None
 
                 if full_df is None or len(full_df) == 0:
                     return full_df

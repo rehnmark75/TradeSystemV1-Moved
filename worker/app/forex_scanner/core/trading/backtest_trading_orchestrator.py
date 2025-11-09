@@ -160,6 +160,19 @@ class BacktestTradingOrchestrator:
             self.logger.info(f"✔️ Signals validated: {self.orchestrator_stats['signals_validated']}")
             self.logger.info(f"❌ Signals rejected: {self.orchestrator_stats['signals_rejected']}")
 
+            # Log resampled cache performance stats
+            if hasattr(self.scanner, 'signal_detector') and hasattr(self.scanner.signal_detector, 'data_fetcher'):
+                data_fetcher = self.scanner.signal_detector.data_fetcher
+                if hasattr(data_fetcher, 'get_resampled_cache_stats'):
+                    cache_stats = data_fetcher.get_resampled_cache_stats()
+                    self.logger.info(f"\n⚡ Resampled Data Cache Performance:")
+                    self.logger.info(f"   Cache Hits: {cache_stats['cache_hits']}")
+                    self.logger.info(f"   Cache Misses: {cache_stats['cache_misses']}")
+                    self.logger.info(f"   Hit Rate: {cache_stats['hit_rate_percent']:.1f}%")
+                    self.logger.info(f"   Cached Datasets: {cache_stats['cached_datasets']}")
+                    if cache_stats['hit_rate_percent'] > 90:
+                        self.logger.info(f"   ✅ Excellent cache performance!")
+
             return final_report
 
         except Exception as e:
