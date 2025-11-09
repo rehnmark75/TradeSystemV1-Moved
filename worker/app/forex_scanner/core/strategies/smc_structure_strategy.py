@@ -884,7 +884,7 @@ class SMCStructureStrategy:
                 htf_score = trend_analysis['strength'] * 0.4
                 pattern_score = rejection_pattern['strength'] * 0.3
                 sr_score = nearest_level['strength'] * 0.2
-                rr_score = min(rr_ratio / 4.0, 1.0) * 0.1
+                rr_score = 0.0  # R:R not calculated yet at this stage (before SL/TP)
                 preliminary_confidence = htf_score + pattern_score + sr_score + rr_score
 
                 MIN_EQUILIBRIUM_CONFIDENCE = 0.50  # 50% minimum for neutral zones
