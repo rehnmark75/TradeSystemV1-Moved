@@ -1060,6 +1060,35 @@ class SMCStructureStrategy:
                 'pattern_strength': rejection_pattern['strength'],
                 'rejection_level': rejection_pattern['rejection_level'],
 
+                # SMC-specific strategy indicators (preserved for alert_history)
+                'strategy_indicators': {
+                    'htf_data': {
+                        'trend': final_trend,
+                        'strength': trend_analysis['strength'],
+                        'structure_type': trend_analysis['structure_type'],
+                        'in_pullback': trend_analysis['in_pullback'],
+                        'pullback_depth': trend_analysis['pullback_depth']
+                    },
+                    'sr_data': {
+                        'level': nearest_level['price'],
+                        'type': nearest_level['type'],
+                        'strength': nearest_level['strength'],
+                        'distance_pips': nearest_level['distance_pips']
+                    },
+                    'pattern_data': {
+                        'type': rejection_pattern['pattern_type'],
+                        'strength': rejection_pattern['strength'],
+                        'rejection_level': rejection_pattern['rejection_level']
+                    },
+                    'rr_data': {
+                        'risk_pips': risk_pips,
+                        'reward_pips': reward_pips,
+                        'rr_ratio': rr_ratio
+                    },
+                    'data_source': 'smc_structure_analysis',
+                    'indicator_count': 4  # HTF, SR, Pattern, R:R
+                },
+
                 # Readable description
                 'description': self._build_signal_description(
                     trend_analysis, nearest_level, rejection_pattern, rr_ratio
