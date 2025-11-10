@@ -172,6 +172,12 @@ Signal Display Format:
             help='Clean up old test executions before running'
         )
 
+        parser.add_argument(
+            '--log-decisions',
+            action='store_true',
+            help='Enable detailed decision logging for every signal evaluation (approved + rejected). Creates logs/backtest_signals/execution_<id>/ with CSV and summary files.'
+        )
+
         return parser
 
     def execute_command(self, args) -> bool:
@@ -221,7 +227,8 @@ Signal Display Format:
                     epic=args.epic,
                     hours=args.hours,
                     show_signals=True,  # Always show signals for quick test
-                    pipeline=args.pipeline
+                    pipeline=args.pipeline,
+                    log_decisions=args.log_decisions
                 )
 
             # Standard backtest mode
@@ -235,7 +242,8 @@ Signal Display Format:
                 strategy=args.strategy,
                 max_signals_display=args.max_signals,
                 pipeline=args.pipeline,
-                csv_export=args.csv_export if hasattr(args, 'csv_export') else None
+                csv_export=args.csv_export if hasattr(args, 'csv_export') else None,
+                log_decisions=args.log_decisions
             )
 
         except KeyboardInterrupt:

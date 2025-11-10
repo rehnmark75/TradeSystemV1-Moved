@@ -17,6 +17,7 @@ try:
     from core.database import DatabaseManager
     from core.trading.backtest_order_logger import BacktestOrderLogger
     from core.trading.trailing_stop_simulator import TrailingStopSimulator
+    from core.logging.signal_decision_logger import SignalDecisionLogger
     from configdata.strategies import config_momentum_strategy
 except ImportError:
     from forex_scanner import config
@@ -24,6 +25,7 @@ except ImportError:
     from forex_scanner.core.database import DatabaseManager
     from forex_scanner.core.trading.backtest_order_logger import BacktestOrderLogger
     from forex_scanner.core.trading.trailing_stop_simulator import TrailingStopSimulator
+    from forex_scanner.core.logging.signal_decision_logger import SignalDecisionLogger
     try:
         from forex_scanner.configdata.strategies import config_momentum_strategy
     except ImportError:
@@ -78,6 +80,16 @@ class BacktestScanner(IntelligentForexScanner):
         else:
             self.logger.info("   ⚡ Fast strategy testing mode")
             self.logger.info("   ⚡ Minimal validation for parameter optimization")
+
+        # Initialize decision logger if enabled
+        self.decision_logger = None
+        if backtest_config.get('log_decisions', False):
+            self.decision_logger = SignalDecisionLogger(
+                execution_id=self.execution_id,
+                log_dir=backtest_config.get('log_dir')
+            )
+            log_dir = self.decision_logger.get_log_directory()
+            self.logger.info(f"📊 Decision logging enabled: {log_dir}")
 
         # Backtest-specific components
         self.order_logger = BacktestOrderLogger(
@@ -185,6 +197,10 @@ class BacktestScanner(IntelligentForexScanner):
 
             # Replace the data_fetcher in the existing signal_detector
             self.signal_detector.data_fetcher = backtest_data_fetcher
+
+            # Pass decision_logger to signal_detector so strategies can access it
+            if self.decision_logger:
+                self.signal_detector.decision_logger = self.decision_logger
 
             # Also need to replace the data_fetcher in the EMA strategy AND enable backtest mode
             if hasattr(self.signal_detector, 'ema_strategy') and self.signal_detector.ema_strategy:
@@ -956,6 +972,29 @@ class BacktestScanner(IntelligentForexScanner):
         self.logger.info(f"   Signals detected: {results['total_signals']}")
         self.logger.info(f"   Signals logged: {self.backtest_stats['signals_logged']}")
         self.logger.info(f"   Processing rate: {report['execution_stats']['processing_rate_per_second']:.1f} periods/sec")
+
+        # Finalize decision logger if enabled
+        if self.decision_logger:
+            try:
+                # Set backtest results for summary context
+                performance_summary = report.get('performance_summary', {})
+                self.decision_logger.set_backtest_results({
+                    'total_signals': performance_summary.get('total_signals', results['total_signals']),
+                    'win_rate': performance_summary.get('avg_win_rate', 0),
+                    'profit_factor': performance_summary.get('avg_profit_factor', 0),
+                    'total_pips': performance_summary.get('total_pips', 0),
+                    'execution_id': self.execution_id,
+                    'strategy_name': self.strategy_name,
+                    'timeframe': self.timeframe,
+                    'duration_seconds': duration
+                })
+
+                # Finalize and save decision logs
+                self.decision_logger.finalize()
+                log_dir = self.decision_logger.get_log_directory()
+                self.logger.info(f"📊 Decision logs saved: {log_dir}")
+            except Exception as e:
+                self.logger.error(f"❌ Error finalizing decision logger: {e}")
 
         return report
 

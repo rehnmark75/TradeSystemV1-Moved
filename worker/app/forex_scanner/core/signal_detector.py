@@ -664,7 +664,12 @@ class SignalDetector:
                 # Use relative import since signal_detector is in forex_scanner.core
                 from .strategies import create_smc_structure_strategy
 
-                self.smc_structure_strategy = create_smc_structure_strategy(logger=self.logger)
+                # Pass decision_logger if available (from parent scanner in backtest mode)
+                decision_logger = getattr(self, 'decision_logger', None)
+                self.smc_structure_strategy = create_smc_structure_strategy(
+                    logger=self.logger,
+                    decision_logger=decision_logger
+                )
                 self.logger.info("✅ SMC Structure strategy initialized")
 
             # Get 1H data (entry timeframe)

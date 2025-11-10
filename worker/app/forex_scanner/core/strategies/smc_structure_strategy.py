@@ -418,6 +418,8 @@ class SMCStructureStrategy:
         can_trade, cooldown_reason = self._check_cooldown(pair, current_time)
         if not can_trade:
             self.logger.info(f"   ⏱️  {cooldown_reason} - SKIPPING")
+            self._current_decision_context.update({'cooldown_active': True})
+            self._log_decision(current_time, epic, pair, 'unknown', 'REJECTED', 'COOLDOWN_ACTIVE', 'COOLDOWN_CHECK')
             return None
 
         # TIER 1 FILTER: Session Quality Check (use candle timestamp, not current time)
@@ -425,6 +427,8 @@ class SMCStructureStrategy:
         if not session_valid:
             self.logger.info(f"\n🕐 [SESSION FILTER] {session_reason}")
             self.logger.info(f"   ❌ SIGNAL REJECTED - Avoid low-quality trading sessions")
+            self._current_decision_context.update({'session_valid': False})
+            self._log_decision(current_time, epic, pair, 'unknown', 'REJECTED', 'SESSION_FILTERED', 'SESSION_CHECK')
             return None
         else:
             self.logger.info(f"\n🕐 [SESSION FILTER] {session_reason}")
@@ -485,6 +489,8 @@ class SMCStructureStrategy:
                 # No BOS/CHoCH found - reject signal
                 self.logger.info(f"   ❌ No BOS/CHoCH detected on HTF - SIGNAL REJECTED")
                 self.logger.info(f"   ℹ️  Swing structure: {trend_analysis['trend']} (not sufficient without BOS/CHoCH)")
+                self._current_decision_context.update({'bos_detected': False})
+                self._log_decision(current_time, epic, pair, 'unknown', 'REJECTED', 'NO_BOS_CHOCH', 'BOS_DETECTION')
                 return None
 
             # Must have minimum strength
@@ -493,6 +499,15 @@ class SMCStructureStrategy:
                 return None
 
             self.logger.info(f"   ✅ HTF Trend confirmed: {final_trend} (strength: {final_strength*100:.0f}%)")
+
+            # Store HTF data in context for logging
+            self._current_decision_context.update({
+                'htf_trend': final_trend,
+                'htf_strength': final_strength,
+                'htf_structure': trend_analysis['structure_type'],
+                'htf_in_pullback': trend_analysis['in_pullback'],
+                'htf_pullback_depth': trend_analysis.get('pullback_depth', 0)
+            })
 
             # Initialize direction_str from final_trend (may be overridden by BOS/CHoCH later)
             direction_str = 'bullish' if final_trend == 'BULL' else 'bearish'
@@ -507,6 +522,7 @@ class SMCStructureStrategy:
             if not momentum_valid:
                 self.logger.info(f"   ❌ {momentum_reason} - SIGNAL REJECTED")
                 self.logger.info(f"   💡 Counter-momentum entry detected - waiting for aligned candles")
+                self._log_decision(current_time, epic, pair, direction_str, 'REJECTED', 'MOMENTUM_FILTER', 'MOMENTUM_CHECK')
                 return None
             else:
                 self.logger.info(f"   ✅ {momentum_reason}")
@@ -558,6 +574,13 @@ class SMCStructureStrategy:
                 self.logger.info(f"      Distance: {nearest_level['distance_pips']:.1f} pips")
                 self.logger.info(f"      Strength: {nearest_level['strength']*100:.0f}%")
                 self.logger.info(f"      Confidence Boost: +{sr_confluence_boost*100:.1f}%")
+                # Store SR data in context
+                self._current_decision_context.update({
+                    'sr_level': nearest_level['price'],
+                    'sr_type': nearest_level['type'],
+                    'sr_strength': nearest_level['strength'],
+                    'sr_distance_pips': nearest_level['distance_pips']
+                })
             else:
                 self.logger.info(f"   ℹ️  No nearby {level_type} level (no S/R boost)")
                 # Create a minimal level dict for later use
@@ -594,6 +617,12 @@ class SMCStructureStrategy:
                         bos_choch_info = self._detect_bos_choch_15m(df_15m, epic)
 
                         if bos_choch_info:
+                            # Store BOS/CHoCH detection data
+                            self._current_decision_context.update({
+                                'bos_detected': True,
+                                'bos_direction': bos_choch_info['direction'],
+                                'bos_quality': bos_choch_info.get('quality', 0)
+                            })
                             # DIAGNOSTIC: Log BOS/CHoCH direction for tracking bullish/bearish ratio
                             self.logger.info(f"   🔍 [DIAGNOSTIC] BOS/CHoCH Direction: {bos_choch_info['direction'].upper()}")
                             # Validate HTF alignment
@@ -626,6 +655,11 @@ class SMCStructureStrategy:
                                 if not last_ob:
                                     self.logger.info(f"   ❌ No opposing Order Block found before BOS - SIGNAL REJECTED")
                                     self.logger.info(f"   💡 Institutional accumulation zone not identified")
+                                    # Store OB data
+                                    self._current_decision_context.update({
+                                        'ob_found': False,
+                                        'ob_distance_pips': None
+                                    })
                                     # DIAGNOSTIC: Track bearish rejection reasons
                                     if bos_choch_info['direction'] == 'bearish':
                                         self.logger.info(f"   🔍 [BEARISH DIAGNOSTIC] Rejected - no opposing OB")
@@ -636,6 +670,13 @@ class SMCStructureStrategy:
                                 self.logger.info(f"      Level: {last_ob['low']:.5f} - {last_ob['high']:.5f}")
                                 self.logger.info(f"      Size: {last_ob['size_pips']:.1f} pips")
                                 self.logger.info(f"      Re-entry zone: {last_ob['reentry_low']:.5f} - {last_ob['reentry_high']:.5f}")
+
+                                # Store OB data
+                                distance_to_ob = abs(current_price - last_ob['mid']) / pip_value
+                                self._current_decision_context.update({
+                                    'ob_found': True,
+                                    'ob_distance_pips': distance_to_ob
+                                })
 
                                 # Check if price has retraced to OB zone
                                 current_low = float(df_15m['low'].iloc[-1])
@@ -829,6 +870,13 @@ class SMCStructureStrategy:
                 self.logger.info(f"      Rejection Level: {rejection_pattern['rejection_level']:.5f}")
                 self.logger.info(f"      Description: {rejection_pattern['description']}")
 
+            # Store pattern data in context (after pattern is confirmed)
+            self._current_decision_context.update({
+                'pattern_found': rejection_pattern is not None,
+                'pattern_type': rejection_pattern['pattern_type'] if rejection_pattern else None,
+                'pattern_strength': rejection_pattern['strength'] if rejection_pattern else None
+            })
+
             # STEP 3D: Premium/Discount Zone Entry Timing (UNIVERSAL CHECK FOR ALL ENTRIES)
             self.logger.info(f"\n💎 STEP 3D: Premium/Discount Zone Entry Timing Validation")
 
@@ -852,6 +900,13 @@ class SMCStructureStrategy:
                 self.logger.info(f"      Low: {zone_info['range_low']:.5f}")
                 self.logger.info(f"   📍 Current Zone: {zone.upper()}")
                 self.logger.info(f"   📈 Price Position: {zone_info['price_position']*100:.1f}% of range")
+
+                # Store premium/discount data in context
+                self._current_decision_context.update({
+                    'premium_discount_zone': zone_info['zone'],
+                    'entry_quality': zone_info['entry_quality_buy'] if direction_str == 'bullish' else zone_info['entry_quality_sell'],
+                    'zone_position_pct': zone_info['price_position'] * 100
+                })
 
                 # CONTEXT-AWARE validation: Consider HTF trend for premium/discount logic
                 # In TRENDING markets: Allow continuation entries even in "wrong" zones
@@ -877,6 +932,7 @@ class SMCStructureStrategy:
                             # REJECT: Counter-trend or weak trend
                             self.logger.info(f"   ❌ BULLISH entry in PREMIUM zone - poor timing")
                             self.logger.info(f"   💡 Not in strong uptrend - wait for pullback to discount")
+                            self._log_decision(current_time, epic, pair, 'bullish', 'REJECTED', 'PREMIUM_DISCOUNT_REJECT', 'PREMIUM_DISCOUNT_CHECK')
                             return None
                     elif zone == 'equilibrium':
                         self.logger.info(f"   ⚠️  BULLISH entry in EQUILIBRIUM zone - neutral timing")
@@ -900,6 +956,7 @@ class SMCStructureStrategy:
                             # DIAGNOSTIC: Track bearish rejection reasons
                             self.logger.info(f"   🔍 [BEARISH DIAGNOSTIC] Rejected at premium/discount filter")
                             self.logger.info(f"      Zone: DISCOUNT, Strength: {final_strength*100:.0f}%, Threshold: 75%")
+                            self._log_decision(current_time, epic, pair, 'bearish', 'REJECTED', 'PREMIUM_DISCOUNT_REJECT', 'PREMIUM_DISCOUNT_CHECK')
                             return None
                     elif zone == 'equilibrium':
                         self.logger.info(f"   ⚠️  BEARISH entry in EQUILIBRIUM zone - neutral timing")
@@ -1046,6 +1103,21 @@ class SMCStructureStrategy:
 
             confidence = htf_score + pattern_score + sr_score + rr_score
 
+            # Store R:R and confidence data in context
+            self._current_decision_context.update({
+                'risk_pips': risk_pips,
+                'reward_pips': reward_pips,
+                'rr_ratio': rr_ratio,
+                'confidence': confidence,
+                'htf_score': htf_score,
+                'pattern_score': pattern_score,
+                'sr_score': sr_score,
+                'rr_score': rr_score,
+                'entry_price': entry_price,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit
+            })
+
             # STEP 6: Universal Confidence Floor (Phase 2.4)
             # Reject low-confidence signals regardless of other factors
             MIN_CONFIDENCE = 0.45  # 45% minimum confidence for all entries
@@ -1055,6 +1127,7 @@ class SMCStructureStrategy:
                 self.logger.info(f"   ❌ Signal confidence too low: {confidence*100:.0f}% < {MIN_CONFIDENCE*100:.0f}%")
                 self.logger.info(f"   💡 Minimum confidence required for entry quality")
                 self.logger.info(f"   📊 Breakdown: HTF={htf_score*100:.0f}% Pattern={pattern_score*100:.0f}% SR={sr_score*100:.0f}% RR={rr_score*100:.0f}%")
+                self._log_decision(current_time, epic, pair, direction_str, 'REJECTED', 'LOW_CONFIDENCE', 'CONFIDENCE_CHECK')
                 return None
 
             # BUILD SIGNAL
@@ -1169,6 +1242,9 @@ class SMCStructureStrategy:
 
             # Update cooldown state after successful signal generation
             self._update_cooldown(pair, current_time)
+
+            # Log signal approval
+            self._log_decision(current_time, epic, pair, direction_str, 'APPROVED')
 
             return signal
 
@@ -1610,6 +1686,7 @@ class SMCStructureStrategy:
             self.logger.info(f"      Quality: {quality_score*100:.0f}% < {MIN_BOS_QUALITY*100:.0f}% (minimum)")
             self.logger.info(f"      Direction: {bos_choch_direction}")
             self.logger.info(f"      💡 Weak/indecisive structure break - avoiding entry")
+            self._log_decision(datetime.now(), epic, 'unknown', bos_choch_direction, 'REJECTED', 'LOW_BOS_QUALITY', 'BOS_QUALITY_CHECK')
             return None
 
         # Get current price for level
