@@ -373,7 +373,7 @@ class SMCStructureStrategy:
         self.logger.info(f"\n{'='*70}")
         self.logger.info(f"🔍 SMC Structure Strategy - Signal Detection")
         self.logger.info(f"   Pair: {pair} ({epic})")
-        self.logger.info(f"   Entry TF: 1H | HTF: {self.htf_timeframe} | BOS/CHoCH TF: 15m")
+        self.logger.info(f"   Entry TF: 15m | HTF: {self.htf_timeframe} | SR/Confirmation TF: 1H")
         self.logger.info(f"{'='*70}")
 
         # Get candle timestamp (for backtesting compatibility)
