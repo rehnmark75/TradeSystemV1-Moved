@@ -1062,31 +1062,53 @@ class SMCStructureStrategy:
 
                 # SMC-specific strategy indicators (preserved for alert_history)
                 'strategy_indicators': {
+                    'bos_choch': {
+                        'htf_direction': direction_str,
+                        'htf_trend': final_trend,
+                        'htf_strength': trend_analysis['strength'],
+                        'structure_type': trend_analysis['structure_type']
+                    },
                     'htf_data': {
+                        'timeframe': self.htf_timeframe,
                         'trend': final_trend,
                         'strength': trend_analysis['strength'],
-                        'structure_type': trend_analysis['structure_type'],
                         'in_pullback': trend_analysis['in_pullback'],
-                        'pullback_depth': trend_analysis['pullback_depth']
+                        'pullback_depth': trend_analysis['pullback_depth'],
+                        'swing_highs': trend_analysis.get('swing_highs', 0),
+                        'swing_lows': trend_analysis.get('swing_lows', 0)
                     },
                     'sr_data': {
-                        'level': nearest_level['price'],
-                        'type': nearest_level['type'],
-                        'strength': nearest_level['strength'],
-                        'distance_pips': nearest_level['distance_pips']
+                        'level_price': nearest_level['price'],
+                        'level_type': nearest_level['type'],
+                        'level_strength': nearest_level['strength'],
+                        'distance_pips': nearest_level['distance_pips'],
+                        'touch_count': nearest_level.get('touch_count', 1)
                     },
                     'pattern_data': {
-                        'type': rejection_pattern['pattern_type'],
-                        'strength': rejection_pattern['strength'],
-                        'rejection_level': rejection_pattern['rejection_level']
+                        'pattern_type': rejection_pattern['pattern_type'],
+                        'pattern_strength': rejection_pattern['strength'],
+                        'rejection_level': rejection_pattern['rejection_level'],
+                        'entry_price': entry_price
                     },
                     'rr_data': {
                         'risk_pips': risk_pips,
                         'reward_pips': reward_pips,
-                        'rr_ratio': rr_ratio
+                        'rr_ratio': rr_ratio,
+                        'entry_price': entry_price,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'partial_tp': partial_tp if partial_tp else None,
+                        'partial_percent': self.partial_profit_percent if partial_tp else None
                     },
-                    'data_source': 'smc_structure_analysis',
-                    'indicator_count': 4  # HTF, SR, Pattern, R:R
+                    'confidence_breakdown': {
+                        'total': round(confidence, 4),
+                        'htf_score': round(htf_score, 4),
+                        'pattern_score': round(pattern_score, 4),
+                        'sr_score': round(sr_score, 4),
+                        'rr_score': round(rr_score, 4)
+                    },
+                    'indicator_count': 6,  # bos_choch, HTF, SR, Pattern, R:R, confidence_breakdown
+                    'data_source': 'smc_structure_analysis'
                 },
 
                 # Readable description
