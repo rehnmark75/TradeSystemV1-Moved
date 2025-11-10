@@ -64,10 +64,11 @@ class SMCStructureStrategy:
     6. R:R meets minimum requirement
     """
 
-    def __init__(self, config, logger=None):
+    def __init__(self, config, logger=None, decision_logger=None):
         """Initialize SMC Structure Strategy"""
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
+        self.decision_logger = decision_logger  # Optional: for backtest decision logging
 
         # Initialize helper modules
         self.trend_analyzer = SMCTrendStructure(logger=self.logger)
@@ -84,6 +85,9 @@ class SMCStructureStrategy:
 
         # Signal deduplication tracking
         self.recent_signals = {}  # {pair: [(timestamp, price), ...]}
+
+        # Decision tracking context (for logging)
+        self._current_decision_context = {}
 
         # Load configuration
         self._load_config()
@@ -163,6 +167,36 @@ class SMCStructureStrategy:
         self.ob_require_rejection = getattr(self.config, 'SMC_OB_REQUIRE_REJECTION', True)
         self.ob_rejection_min_wick = getattr(self.config, 'SMC_OB_REJECTION_MIN_WICK_RATIO', 0.60)
         self.ob_sl_buffer_pips = getattr(self.config, 'SMC_OB_SL_BUFFER_PIPS', 5)
+
+    def _log_decision(self, timestamp, epic, pair, direction, decision, rejection_reason=None, rejection_step=None):
+        """
+        Log signal decision to decision logger if enabled.
+
+        Args:
+            timestamp: Signal timestamp
+            epic: Epic/symbol
+            pair: Currency pair
+            direction: 'bullish' or 'bearish'
+            decision: 'APPROVED' or 'REJECTED'
+            rejection_reason: Why signal was rejected (if rejected)
+            rejection_step: Which step rejected the signal
+        """
+        if not self.decision_logger:
+            return
+
+        self.decision_logger.log_signal_decision(
+            timestamp=timestamp,
+            epic=epic,
+            pair=pair,
+            direction=direction,
+            decision=decision,
+            rejection_reason=rejection_reason,
+            rejection_step=rejection_step,
+            **self._current_decision_context
+        )
+
+        # Clear context after logging
+        self._current_decision_context = {}
 
     def _check_cooldown(self, pair: str, current_time: datetime) -> tuple[bool, str]:
         """
