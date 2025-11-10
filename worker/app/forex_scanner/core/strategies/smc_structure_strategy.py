@@ -460,6 +460,9 @@ class SMCStructureStrategy:
 
             self.logger.info(f"   ✅ HTF Trend confirmed: {final_trend} (strength: {final_strength*100:.0f}%)")
 
+            # Initialize direction_str from final_trend (may be overridden by BOS/CHoCH later)
+            direction_str = 'bullish' if final_trend == 'BULL' else 'bearish'
+
             # TIER 1 FILTER: Pullback Momentum Validator
             self.logger.info(f"\n🎯 TIER 1 FILTER: Validating Pullback Momentum (15m timeframe)")
             momentum_valid, momentum_reason = self._validate_pullback_momentum(
