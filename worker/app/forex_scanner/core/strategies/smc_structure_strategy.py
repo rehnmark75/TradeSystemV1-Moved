@@ -798,10 +798,12 @@ class SMCStructureStrategy:
             # STEP 3D: Premium/Discount Zone Entry Timing (UNIVERSAL CHECK FOR ALL ENTRIES)
             self.logger.info(f"\n💎 STEP 3D: Premium/Discount Zone Entry Timing Validation")
 
+            # Use 1H timeframe for swing-level premium/discount zones (not 15m micro-ranges)
+            # 50 bars on 1H = 50 hours (~2 days) - aligns with 4H HTF trend + 1H SR strategy
             zone_info = self.market_structure.get_premium_discount_zone(
-                df=df_15m if df_15m is not None and len(df_15m) > 0 else df_1h,
+                df=df_1h,  # Always use 1H for swing perspective, not 15m micro-ranges
                 current_price=current_price,
-                lookback_bars=50
+                lookback_bars=50  # 50 hours = ~2 days of range context
             )
 
             if zone_info:
@@ -810,7 +812,7 @@ class SMCStructureStrategy:
                 # Convert range size to pips
                 range_pips = zone_info['range_size_pips'] / pip_value
 
-                self.logger.info(f"   📊 Range Analysis (last 50 bars): {range_pips:.1f} pips")
+                self.logger.info(f"   📊 Range Analysis (1H - last 50 bars): {range_pips:.1f} pips")
                 self.logger.info(f"      High: {zone_info['range_high']:.5f}")
                 self.logger.info(f"      Mid: {zone_info['range_mid']:.5f}")
                 self.logger.info(f"      Low: {zone_info['range_low']:.5f}")
