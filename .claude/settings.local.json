@@ -29,7 +29,19 @@
       "Bash(git log:*)",
       "Bash(while ps aux)",
       "Bash(do sleep 10)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(timeout 120 bash -c:*)",
+      "Bash(find:*)",
+      "Bash(if grep -q \"Enhanced backtest completed successfully\" worker/app/forex_scanner/smc_priority1_fix_20251111.txt)",
+      "Bash(then tail -100 worker/app/forex_scanner/smc_priority1_fix_20251111.txt)",
+      "Bash(else echo \"Still running...\")",
+      "Bash(fi)",
+      "Bash(while ! grep -q 'Enhanced backtest completed successfully' worker/app/forex_scanner/smc_priority1_fix_20251111.txt)",
+      "Bash(while ! grep -q 'Enhanced backtest completed successfully' worker/app/forex_scanner/smc_priority1b_swing_detection_20251111.txt)",
+      "Bash(if grep -q \"Enhanced backtest completed successfully\" worker/app/forex_scanner/smc_priority1b_swing_detection_20251111.txt)",
+      "Bash(then tail -150 worker/app/forex_scanner/smc_priority1b_swing_detection_20251111.txt)",
+      "Bash(else echo \"Still running... Last lines:\")",
+      "Bash(xargs ls:*)"
     ],
     "deny": [],
     "ask": []

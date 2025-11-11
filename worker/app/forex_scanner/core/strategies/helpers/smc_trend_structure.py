@@ -30,6 +30,10 @@ class SMCTrendStructure:
         self.min_swing_significance_pips = 5  # Minimum 5 pips swing size (more realistic)
         self.pullback_ratio = 0.382  # Fibonacci 38.2% minimum pullback
 
+        # PRIORITY 1B: Improved bearish pattern detection
+        # More sensitive swing detection for lows to catch bearish structures
+        self.min_swing_significance_pips_lows = 3  # Lower threshold for swing lows (bearish)
+
     def analyze_trend(
         self,
         df: pd.DataFrame,
@@ -166,6 +170,9 @@ class SMCTrendStructure:
         """
         Find significant swing low points
 
+        PRIORITY 1B: More sensitive detection for bearish structures
+        Uses lower pip threshold (3 vs 5) to catch more swing lows
+
         Returns list of dicts with:
         - index: Position in dataframe
         - price: Low price
@@ -183,7 +190,8 @@ class SMCTrendStructure:
                     # Calculate movement in pips from last swing low
                     movement_pips = abs(df['low'].iloc[i] - swing_lows[-1]['price']) / pip_value
 
-                    if movement_pips >= self.min_swing_significance_pips:
+                    # PRIORITY 1B: Use lower threshold for swing lows (better bearish detection)
+                    if movement_pips >= self.min_swing_significance_pips_lows:
                         swing_lows.append({
                             'index': i,
                             'price': df['low'].iloc[i],

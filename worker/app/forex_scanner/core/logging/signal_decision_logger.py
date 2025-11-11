@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from collections import Counter, defaultdict
+import numpy as np
 
 
 class SignalDecisionLogger:
@@ -227,6 +228,29 @@ class SignalDecisionLogger:
             if rejection_step:
                 self.rejection_by_step[rejection_step] += 1
 
+    def _convert_to_json_serializable(self, obj: Any) -> Any:
+        """
+        Convert numpy/pandas types to JSON-serializable Python types.
+
+        Args:
+            obj: Any object that may contain numpy/pandas types
+
+        Returns:
+            JSON-serializable version of the object
+        """
+        if isinstance(obj, dict):
+            return {key: self._convert_to_json_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_to_json_serializable(item) for item in obj]
+        elif isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return obj
+
     def set_backtest_results(self, results: Dict[str, Any]):
         """
         Store backtest performance results for summary generation.
@@ -234,7 +258,8 @@ class SignalDecisionLogger:
         Args:
             results: Dict with backtest performance data (wins, losses, profit factor, etc.)
         """
-        self.backtest_results = results
+        # Convert any numpy/pandas types to standard Python types
+        self.backtest_results = self._convert_to_json_serializable(results)
 
     def finalize(self):
         """
