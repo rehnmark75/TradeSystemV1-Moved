@@ -64,10 +64,11 @@ class SMCStructureStrategy:
     6. R:R meets minimum requirement
     """
 
-    def __init__(self, config, logger=None):
+    def __init__(self, config, logger=None, decision_logger=None):
         """Initialize SMC Structure Strategy"""
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
+        # decision_logger parameter ignored in v2.4.0 - only for compatibility
 
         # Initialize helper modules
         self.trend_analyzer = SMCTrendStructure(logger=self.logger)

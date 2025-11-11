@@ -479,16 +479,24 @@ class BacktestDataFetcher(DataFetcher):
             # Return empty DataFrames for all epics
             return {epic: pd.DataFrame() for epic in epics}
 
-    def get_enhanced_data(self, epic: str, pair: str, timeframe: str = '5m', **kwargs) -> pd.DataFrame:
+    def get_enhanced_data(self, epic: str, pair: str, timeframe: str = '5m', disable_backtest_time_filter: bool = False, **kwargs) -> pd.DataFrame:
         """
         Override parent method to provide time-aware data for backtesting
 
         In backtest mode, this method respects the current_backtest_time to provide
         only data up to the current simulation timestamp, ensuring realistic backtesting.
+
+        Args:
+            epic: Trading instrument epic code
+            pair: Currency pair
+            timeframe: Data timeframe (e.g., '5m', '15m', '1H', '4H')
+            disable_backtest_time_filter: If True, returns full historical data ignoring current_backtest_time
+            **kwargs: Additional arguments passed to parent get_enhanced_data
         """
         try:
             # If we're in backtest mode and have a current timestamp, filter data accordingly
-            if hasattr(self, 'current_backtest_time') and self.current_backtest_time:
+            # UNLESS disable_backtest_time_filter is True (for BOS/CHoCH detection on 15m data)
+            if hasattr(self, 'current_backtest_time') and self.current_backtest_time and not disable_backtest_time_filter:
                 # PERFORMANCE FIX: Check resampled cache first to avoid expensive re-resampling
                 cache_key = f"{epic}_{timeframe}"
 

@@ -80,9 +80,11 @@ class TrailingStopSimulator:
             logger: Optional logger instance
         """
         # Handle backward compatibility: prefer break_even_trigger, fallback to breakeven_trigger
-        # 🔧 CRITICAL FIX: Changed default from 12.0 to 1.5R (1.5 * initial_stop_pips)
-        # This prevents premature breakeven exits that were causing 46% breakeven rate
-        be_trigger_default = initial_stop_pips * 1.5  # 1.5R instead of fixed 12 pips
+        # 🔧 v2.15.0 FIX: Changed from 1.5R to 2.5R to allow 2.0R targets to be reached
+        # TEST J showed avg winner stuck at 10.9 pips despite 2.0R targets
+        # Root cause: Partial TP at 1.0R + BE at 1.5R = trades exit before reaching 2.0R
+        # Solution: BE at 2.5R gives price room to reach 2.0R targets
+        be_trigger_default = initial_stop_pips * 2.5  # 2.5R to allow 2.0R targets (was 1.5R)
         if break_even_trigger is not None:
             be_trigger = break_even_trigger
         elif breakeven_trigger is not None:

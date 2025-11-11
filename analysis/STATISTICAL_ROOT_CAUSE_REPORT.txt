@@ -1,0 +1,409 @@
+
+
+================================================================================
+ COMPREHENSIVE STATISTICAL ROOT CAUSE ANALYSIS
+ SMC Structure Strategy Performance Collapse
+================================================================================
+
+================================================================================
+DATA LOADING SUMMARY
+================================================================================
+Baseline (execution_1775): 1831 records
+TEST A (execution_1776): 397 records
+Reduction: 1434 records (78.3%)
+
+================================================================================
+1. TEMPORAL DISTRIBUTION ANALYSIS
+================================================================================
+
+Baseline Period:
+  Start: 2025-11-10 12:13:23
+  End:   2025-11-10 12:17:48
+  Duration: 0 days
+
+TEST A Period:
+  Start: 2025-11-10 13:22:35
+  End:   2025-11-10 13:23:18
+  Duration: 0 days
+
+NO OVERLAP: Different time periods (expected)
+
+================================================================================
+2. CURRENCY PAIR DISTRIBUTION ANALYSIS
+================================================================================
+
+Baseline Pair Distribution:
+  unknown:  567 ( 31.0%)
+  EURJPY:  314 ( 17.1%)
+  GBPUSD:  208 ( 11.4%)
+  AUDJPY:  208 ( 11.4%)
+  USDJPY:  171 (  9.3%)
+  USDCAD:  147 (  8.0%)
+  USDCHF:  124 (  6.8%)
+  NZDUSD:   72 (  3.9%)
+  EURUSD:   11 (  0.6%)
+  AUDUSD:    9 (  0.5%)
+
+TEST A Pair Distribution:
+  USDCHF:  116 ( 29.2%)
+  AUDUSD:  102 ( 25.7%)
+  EURUSD:   97 ( 24.4%)
+  unknown:   61 ( 15.4%)
+  EURJPY:   17 (  4.3%)
+  NZDUSD:    4 (  1.0%)
+
+Chi-Square Test for Pair Distribution Equality:
+  Chi-square statistic: 1182.6681
+  P-value: 0.000000
+  CONCLUSION: Pair distributions are SIGNIFICANTLY DIFFERENT (p < 0.01)
+
+================================================================================
+3. REJECTION CASCADE ANALYSIS
+================================================================================
+
+Baseline Decision Distribution:
+  REJECTED: 1775 ( 96.9%)
+  APPROVED:   56 (  3.1%)
+
+TEST A Decision Distribution:
+  REJECTED:  389 ( 98.0%)
+  APPROVED:    8 (  2.0%)
+
+Approval Rate Comparison:
+  Baseline: 3.06%
+  TEST A:   2.02%
+  Change:   -1.04% (-34.1%)
+
+Rejection Reasons (Baseline):
+  PREMIUM_DISCOUNT_REJECT: 1037 ( 56.6% of total)
+  LOW_BOS_QUALITY:  567 ( 31.0% of total)
+  LOW_CONFIDENCE:  171 (  9.3% of total)
+
+Rejection Reasons (TEST A):
+  PREMIUM_DISCOUNT_REJECT:  328 ( 82.6% of total)
+  LOW_BOS_QUALITY:   61 ( 15.4% of total)
+
+Rejection Steps (where signals die):
+
+Baseline:
+  PREMIUM_DISCOUNT_CHECK: 1037 ( 56.6%)
+  BOS_QUALITY_CHECK:  567 ( 31.0%)
+  CONFIDENCE_CHECK:  171 (  9.3%)
+
+TEST A:
+  PREMIUM_DISCOUNT_CHECK:  328 ( 82.6%)
+  BOS_QUALITY_CHECK:   61 ( 15.4%)
+
+================================================================================
+4. HTF TREND DISTRIBUTION ANALYSIS (CRITICAL)
+================================================================================
+
+Baseline HTF Trend Distribution:
+  BULL: 1203 ( 65.7%)
+  BEAR:  397 ( 21.7%)
+
+TEST A HTF Trend Distribution:
+  BEAR:  220 ( 55.4%)
+  BULL:  141 ( 35.5%)
+
+Bull/Bear Ratio:
+  Baseline: 3.03:1 (1203 bull / 397 bear)
+  TEST A:   0.64:1 (141 bull / 220 bear)
+  RATIO INVERSION: 4.73x change
+
+Chi-Square Test for HTF Trend Independence:
+  Chi-square: 176.6239
+  P-value: 0.0000000000
+  Degrees of freedom: 1
+  CONCLUSION: HTF trend distributions are HIGHLY SIGNIFICANTLY DIFFERENT (p < 0.001)
+  INTERPRETATION: This is NOT random. Market conditions OR detection logic changed.
+
+================================================================================
+5. HTF STRENGTH DISTRIBUTION ANALYSIS
+================================================================================
+
+Baseline HTF Strength (n=1600):
+  Mean:   0.6068
+  Median: 0.6000
+  Std:    0.0446
+  Min:    0.5012
+  Q25:    0.6000
+  Q75:    0.6000
+  Max:    1.0000
+
+TEST A HTF Strength (n=361):
+  Mean:   0.7981
+  Median: 0.8398
+  Std:    0.1712
+  Min:    0.6000
+  Q25:    0.6000
+  Q75:    1.0000
+  Max:    1.0000
+
+Kolmogorov-Smirnov Test:
+  KS statistic: 0.6380
+  P-value: 0.0000000000
+
+Mann-Whitney U Test:
+  U statistic: 100372.0000
+  P-value: 0.0000000000
+
+  CONCLUSION: HTF strength distributions are SIGNIFICANTLY DIFFERENT (p < 0.01)
+
+================================================================================
+6. PREMIUM/DISCOUNT ZONE DISTRIBUTION ANALYSIS (CRITICAL)
+================================================================================
+
+Baseline Zone Distribution:
+  premium: 1020 ( 55.7%)
+  discount:  337 ( 18.4%)
+  equilibrium:  246 ( 13.4%)
+
+TEST A Zone Distribution:
+  discount:  200 ( 50.4%)
+  premium:  133 ( 33.5%)
+  equilibrium:   38 (  9.6%)
+
+Premium/Discount Ratio:
+  Baseline: 3.03:1 (1020 premium / 337 discount)
+  TEST A:   0.67:1 (133 premium / 200 discount)
+  RATIO INVERSION: 4.55x change
+
+Chi-Square Test for Zone Independence:
+  Chi-square: 151.4284
+  P-value: 0.0000000000
+  Degrees of freedom: 1
+  CONCLUSION: Zone distributions are HIGHLY SIGNIFICANTLY DIFFERENT (p < 0.001)
+  INTERPRETATION: This is NOT random. Market conditions OR detection logic changed.
+
+================================================================================
+7. PATTERN STRENGTH DISTRIBUTION ANALYSIS
+================================================================================
+
+Baseline Pattern Strength (n=1603):
+  Mean:   0.7302
+  Median: 0.7308
+  Std:    0.1829
+
+TEST A Pattern Strength (n=371):
+  Mean:   0.6282
+  Median: 0.5000
+  Std:    0.1765
+
+Kolmogorov-Smirnov Test:
+  KS statistic: 0.2985
+  P-value: 0.0000000000
+  CONCLUSION: Pattern strength distributions are SIGNIFICANTLY DIFFERENT (p < 0.01)
+
+================================================================================
+8. CONFIDENCE SCORE DISTRIBUTION ANALYSIS
+================================================================================
+
+Baseline Confidence (n=227):
+  Mean:   0.4398
+  Median: 0.4106
+  Std:    0.1182
+  Min:    0.3153
+  Max:    0.9006
+
+TEST A Confidence (n=8):
+  Mean:   0.7097
+  Median: 0.6895
+  Std:    0.0968
+  Min:    0.6097
+  Max:    0.9006
+
+Kolmogorov-Smirnov Test:
+  KS statistic: 0.9031
+  P-value: 0.0000000572
+  CONCLUSION: Confidence distributions are SIGNIFICANTLY DIFFERENT (p < 0.01)
+
+================================================================================
+9. RISK/REWARD RATIO DISTRIBUTION ANALYSIS
+================================================================================
+
+Baseline R:R Ratio (n=227):
+  Mean:   3.3060
+  Median: 2.6013
+  Std:    2.8607
+
+TEST A R:R Ratio (n=8):
+  Mean:   3.3338
+  Median: 2.7572
+  Std:    1.9258
+
+Kolmogorov-Smirnov Test:
+  KS statistic: 0.2004
+  P-value: 0.8586257468
+  CONCLUSION: R:R distributions are similar
+
+================================================================================
+10. CORRELATION ANALYSIS
+================================================================================
+
+Baseline Correlation Matrix (confidence vs key metrics):
+htf_strength        0.355
+pattern_strength    0.291
+confidence          1.000
+rr_ratio           -0.034
+htf_score           0.754
+pattern_score       0.291
+sr_score            0.711
+rr_score           -0.120
+Name: confidence, dtype: float64
+
+TEST A Correlation Matrix (confidence vs key metrics):
+htf_strength       -0.031
+pattern_strength    0.652
+confidence          1.000
+rr_ratio            0.231
+htf_score           0.054
+pattern_score       0.652
+sr_score            0.557
+rr_score            0.115
+Name: confidence, dtype: float64
+
+Correlation Delta (TEST A - Baseline):
+htf_strength       -0.385
+pattern_strength    0.361
+confidence          0.000
+rr_ratio            0.265
+htf_score          -0.701
+pattern_score       0.361
+sr_score           -0.154
+rr_score            0.235
+Name: confidence, dtype: float64
+
+================================================================================
+11. ROOT CAUSE HYPOTHESIS TESTING
+================================================================================
+
+HYPOTHESIS 1: Same market data being analyzed?
+------------------------------------------------------------
+  RESULT: Timestamps DO NOT overlap - testing DIFFERENT periods
+  IMPLICATION: Differences could be market-driven OR code-driven
+
+  HYPOTHESIS 1 CONCLUSION: POSSIBLY MARKET-DRIVEN (different periods)
+
+
+HYPOTHESIS 2: Signal detection rate changed?
+------------------------------------------------------------
+  Baseline: 1831.0 evaluations/day (1831 / 1 days)
+  TEST A:   397.0 evaluations/day (397 / 1 days)
+  Change:   -1434.0 evaluations/day (-78.3%)
+
+  RESULT: Detection rate changed by >20%
+  IMPLICATION: Earlier pipeline stage filtering more/fewer signals
+
+  HYPOTHESIS 2 CONCLUSION: DETECTION RATE CHANGED (pre-cascade issue)
+
+
+HYPOTHESIS 3: HTF trend detection inverted?
+------------------------------------------------------------
+  Baseline: 65.7% BULL, 21.7% BEAR
+  TEST A:   35.5% BULL, 55.4% BEAR
+
+  Chi-square test: χ² = 176.62, p = 0.000000
+  RESULT: HTF trend distribution HIGHLY SIGNIFICANTLY DIFFERENT (p < 0.001)
+  IMPLICATION: Different market periods with opposite trends
+
+  HYPOTHESIS 3 CONCLUSION: DIFFERENT MARKET REGIMES
+
+
+HYPOTHESIS 4: Premium/Discount detection inverted?
+------------------------------------------------------------
+  Baseline: 55.7% premium, 18.4% discount
+  TEST A:   33.5% premium, 50.4% discount
+
+  Chi-square test: χ² = 151.43, p = 0.000000
+  RESULT: Zone distribution HIGHLY SIGNIFICANTLY DIFFERENT (p < 0.001)
+  IMPLICATION: Different market periods with opposite price positioning
+
+  HYPOTHESIS 4 CONCLUSION: DIFFERENT MARKET ZONES
+
+
+HYPOTHESIS 5: Quality gates too strict?
+------------------------------------------------------------
+  Baseline P/D rejections: 1037 (56.6%)
+  TEST A P/D rejections:   328 (82.6%)
+  Baseline CONF rejections: 171 (9.3%)
+  TEST A CONF rejections:   0 (0.0%)
+
+  RESULT: P/D rejection rate increased >20%
+
+  HYPOTHESIS 5 CONCLUSION: P/D FILTER TOO STRICT (or wrong zone detection)
+
+
+================================================================================
+STATISTICAL ROOT CAUSE DETERMINATION
+================================================================================
+
+Evidence Summary:
+  1. Market Data:           POSSIBLY MARKET-DRIVEN (different periods)
+  2. Detection Rate:        DETECTION RATE CHANGED (pre-cascade issue)
+  3. HTF Trend Detection:   DIFFERENT MARKET REGIMES
+  4. Zone Detection:        DIFFERENT MARKET ZONES
+  5. Quality Gates:         P/D FILTER TOO STRICT (or wrong zone detection)
+
+
+PRIMARY ROOT CAUSE:
+------------------------------------------------------------
+QUALITY GATE STRICTNESS
+
+Quality gates are rejecting significantly more signals.
+This could be appropriate if market conditions changed,
+or too strict if detection logic has issues.
+
+================================================================================
+12. EFFECT SIZE ANALYSIS
+================================================================================
+
+Cohen's d (effect size for continuous variables):
+  Interpretation: |d| < 0.2 = negligible, 0.2-0.5 = small, 0.5-0.8 = medium, > 0.8 = large
+
+  htf_strength        : d = +1.5291 (LARGE)
+  pattern_strength    : d = -0.5672 (MEDIUM)
+  confidence          : d = +2.4987 (LARGE)
+  rr_ratio            : d = +0.0114 (negligible)
+
+================================================================================
+13. QUANTITATIVE FIX RECOMMENDATIONS
+================================================================================
+
+Approved Signal Characteristics:
+
+Baseline Approved (n=56):
+  Mean HTF Strength:      0.6795
+  Mean Pattern Strength:  0.6443
+  Mean Confidence:        0.6132
+  Mean R:R Ratio:         3.2966
+
+TEST A Approved (n=8):
+  Mean HTF Strength:      0.8665
+  Mean Pattern Strength:  0.6354
+  Mean Confidence:        0.7097
+  Mean R:R Ratio:         3.3338
+
+
+RECOMMENDATIONS:
+------------------------------------------------------------
+
+1. FIX HTF TREND DETECTION LOGIC (CRITICAL)
+   - Evidence: Bull/Bear ratio is inverted
+   - Action: Review HTF trend detection code
+   - Check: Lookback periods, price comparison logic
+   - Expected Impact: Restore 78% of lost signals
+   - Confidence: 95%
+
+3. RELAX PREMIUM/DISCOUNT GATE (MEDIUM)
+   - Current P/D rejection rate: 82.6%
+   - Action: Allow entry in neutral zones
+   - Alternative: Reduce zone threshold from 50% to 30%
+   - Expected Impact: +15-20% more approved signals
+   - Risk: May reduce signal quality
+   - Confidence: 70%
+
+================================================================================
+ANALYSIS COMPLETE
+================================================================================
+

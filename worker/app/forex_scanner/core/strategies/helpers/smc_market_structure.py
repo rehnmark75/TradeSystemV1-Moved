@@ -1334,22 +1334,42 @@ class SMCMarketStructure:
                         return direction
 
             # FALLBACK: Simple fractal-based detection (Pine Script style)
-            # Detect fractals: 3 consecutive rising highs = bullish fractal, 3 falling lows = bearish fractal
+            # Detect fractals using pivot point logic (center bar higher/lower than surrounding bars)
+            # This is more reliable than requiring 3 consecutive moves
             swing_highs = []
             swing_lows = []
 
-            for i in range(2, len(df)):
-                # Bullish fractal: 3 consecutive rising highs
-                if (i >= 2 and
-                    df.iloc[i]['high'] > df.iloc[i-1]['high'] and
-                    df.iloc[i-1]['high'] > df.iloc[i-2]['high']):
-                    swing_highs.append({'index': i, 'price': df.iloc[i]['high']})
+            # Use a 2-bar lookback for fractals (more sensitive for 15m data)
+            lookback = 2
 
-                # Bearish fractal: 3 consecutive falling lows
-                if (i >= 2 and
-                    df.iloc[i]['low'] < df.iloc[i-1]['low'] and
-                    df.iloc[i-1]['low'] < df.iloc[i-2]['low']):
-                    swing_lows.append({'index': i, 'price': df.iloc[i]['low']})
+            for i in range(lookback, len(df) - 1):
+                # Bullish fractal: center high is highest within lookback window
+                center_high = df.iloc[i]['high']
+                is_highest = True
+
+                # Check left side
+                for j in range(i - lookback, i):
+                    if df.iloc[j]['high'] >= center_high:
+                        is_highest = False
+                        break
+
+                # Check right side (at least 1 bar confirmation)
+                if is_highest and df.iloc[i + 1]['high'] < center_high:
+                    swing_highs.append({'index': i, 'price': center_high})
+
+                # Bearish fractal: center low is lowest within lookback window
+                center_low = df.iloc[i]['low']
+                is_lowest = True
+
+                # Check left side
+                for j in range(i - lookback, i):
+                    if df.iloc[j]['low'] <= center_low:
+                        is_lowest = False
+                        break
+
+                # Check right side (at least 1 bar confirmation)
+                if is_lowest and df.iloc[i + 1]['low'] > center_low:
+                    swing_lows.append({'index': i, 'price': center_low})
 
             if not swing_highs and not swing_lows:
                 return None

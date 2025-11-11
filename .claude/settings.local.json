@@ -24,7 +24,12 @@
       "Bash(docker cp:*)",
       "Bash(git commit:*)",
       "Bash(git checkout:*)",
-      "Bash(/home/hr/Projects/TradeSystemV1/worker/app/forex_scanner/all_signals33_master_baseline.txt)"
+      "Bash(/home/hr/Projects/TradeSystemV1/worker/app/forex_scanner/all_signals33_master_baseline.txt)",
+      "Bash(cat:*)",
+      "Bash(git log:*)",
+      "Bash(while ps aux)",
+      "Bash(do sleep 10)",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []

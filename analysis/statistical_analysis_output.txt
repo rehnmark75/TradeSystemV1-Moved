@@ -1,0 +1,123 @@
+
+
+================================================================================
+ COMPREHENSIVE STATISTICAL ROOT CAUSE ANALYSIS
+ SMC Structure Strategy Performance Collapse
+================================================================================
+
+================================================================================
+DATA LOADING SUMMARY
+================================================================================
+Baseline (execution_1775): 1831 records
+TEST A (execution_1776): 397 records
+Reduction: 1434 records (78.3%)
+
+================================================================================
+1. TEMPORAL DISTRIBUTION ANALYSIS
+================================================================================
+
+Baseline Period:
+  Start: 2025-11-10 12:13:23
+  End:   2025-11-10 12:17:48
+  Duration: 0 days
+
+TEST A Period:
+  Start: 2025-11-10 13:22:35
+  End:   2025-11-10 13:23:18
+  Duration: 0 days
+
+NO OVERLAP: Different time periods (expected)
+
+================================================================================
+2. CURRENCY PAIR DISTRIBUTION ANALYSIS
+================================================================================
+
+Baseline Pair Distribution:
+  unknown:  567 ( 31.0%)
+  EURJPY:  314 ( 17.1%)
+  GBPUSD:  208 ( 11.4%)
+  AUDJPY:  208 ( 11.4%)
+  USDJPY:  171 (  9.3%)
+  USDCAD:  147 (  8.0%)
+  USDCHF:  124 (  6.8%)
+  NZDUSD:   72 (  3.9%)
+  EURUSD:   11 (  0.6%)
+  AUDUSD:    9 (  0.5%)
+
+TEST A Pair Distribution:
+  USDCHF:  116 ( 29.2%)
+  AUDUSD:  102 ( 25.7%)
+  EURUSD:   97 ( 24.4%)
+  unknown:   61 ( 15.4%)
+  EURJPY:   17 (  4.3%)
+  NZDUSD:    4 (  1.0%)
+
+Chi-Square Test for Pair Distribution Equality:
+  Chi-square statistic: 1182.6681
+  P-value: 0.000000
+  CONCLUSION: Pair distributions are SIGNIFICANTLY DIFFERENT (p < 0.01)
+
+================================================================================
+3. REJECTION CASCADE ANALYSIS
+================================================================================
+
+Baseline Decision Distribution:
+  REJECTED: 1775 ( 96.9%)
+  APPROVED:   56 (  3.1%)
+
+TEST A Decision Distribution:
+  REJECTED:  389 ( 98.0%)
+  APPROVED:    8 (  2.0%)
+
+Approval Rate Comparison:
+  Baseline: 3.06%
+  TEST A:   2.02%
+  Change:   -1.04% (-34.1%)
+
+Rejection Reasons (Baseline):
+  PREMIUM_DISCOUNT_REJECT: 1037 ( 56.6% of total)
+  LOW_BOS_QUALITY:  567 ( 31.0% of total)
+  LOW_CONFIDENCE:  171 (  9.3% of total)
+
+Rejection Reasons (TEST A):
+  PREMIUM_DISCOUNT_REJECT:  328 ( 82.6% of total)
+  LOW_BOS_QUALITY:   61 ( 15.4% of total)
+
+Rejection Steps (where signals die):
+
+Baseline:
+  PREMIUM_DISCOUNT_CHECK: 1037 ( 56.6%)
+  BOS_QUALITY_CHECK:  567 ( 31.0%)
+  CONFIDENCE_CHECK:  171 (  9.3%)
+
+TEST A:
+  PREMIUM_DISCOUNT_CHECK:  328 ( 82.6%)
+  BOS_QUALITY_CHECK:   61 ( 15.4%)
+
+================================================================================
+4. HTF TREND DISTRIBUTION ANALYSIS (CRITICAL)
+================================================================================
+
+Baseline HTF Trend Distribution:
+  BULL: 1203 ( 65.7%)
+  BEAR:  397 ( 21.7%)
+
+TEST A HTF Trend Distribution:
+  BEAR:  220 ( 55.4%)
+  BULL:  141 ( 35.5%)
+
+Bull/Bear Ratio:
+  Baseline: 3.03:1 (1203 bull / 397 bear)
+  TEST A:   0.64:1 (141 bull / 220 bear)
+  RATIO INVERSION: 4.73x change
+Traceback (most recent call last):
+  File "/app/forex_scanner/analysis/statistical_root_cause_analysis.py", line 782, in <module>
+    main()
+  File "/app/forex_scanner/analysis/statistical_root_cause_analysis.py", line 764, in main
+    analyze_htf_trend_distribution(baseline, test_a)
+  File "/app/forex_scanner/analysis/statistical_root_cause_analysis.py", line 203, in analyze_htf_trend_distribution
+    chi2, p_value, dof, expected = chi2_contingency(contingency_table.values)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/scipy/stats/contingency.py", line 324, in chi2_contingency
+    raise ValueError("The internally computed table of expected "
+ValueError: The internally computed table of expected frequencies has a zero element at (2, 0).

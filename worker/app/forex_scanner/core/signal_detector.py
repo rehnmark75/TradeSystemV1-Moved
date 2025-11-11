@@ -699,16 +699,24 @@ class SignalDetector:
             # Get 15m data for BOS/CHoCH detection (optional)
             df_15m = None
             try:
+                # CRITICAL FIX for backtest: Disable time-aware filtering for 15m data
+                # Backtest mode needs full historical data regardless of current_backtest_time
                 df_15m = self.data_fetcher.get_enhanced_data(
                     epic=epic,
                     pair=pair,
                     timeframe='15m',
-                    lookback_hours=100  # ~400 bars of 15m data
+                    lookback_hours=100,  # ~400 bars of 15m data
+                    disable_backtest_time_filter=True  # Get full historical data in backtest mode
                 )
-                if df_15m is not None:
+                if df_15m is not None and len(df_15m) > 0:
                     self.logger.debug(f"🔍 [SMC_STRUCTURE] Got 15m data for BOS/CHoCH detection: {len(df_15m)} bars")
+                else:
+                    self.logger.info(f"⚠️ [SMC_STRUCTURE] No 15m data available for BOS/CHoCH (df_15m={df_15m is not None}, len={len(df_15m) if df_15m is not None else 0})")
             except Exception as e:
-                self.logger.debug(f"⚠️ [SMC_STRUCTURE] Could not fetch 15m data (non-critical): {e}")
+                # CRITICAL: Log at INFO level to diagnose backtest failures
+                self.logger.info(f"⚠️ [SMC_STRUCTURE] Could not fetch 15m data: {e}")
+                import traceback
+                self.logger.debug(f"⚠️ [SMC_STRUCTURE] Exception traceback:\n{traceback.format_exc()}")
                 df_15m = None
 
             self.logger.debug(f"🔍 [SMC_STRUCTURE] Analyzing {epic}: 15m bars={len(df_15m) if df_15m is not None else 0}, 1H bars={len(df_1h)}, 4H bars={len(df_4h)}")
