@@ -435,6 +435,8 @@ class SMCStructureStrategy:
             if bos_choch_direction in ['bullish', 'bearish']:
                 # Use BOS/CHoCH direction as trend
                 final_trend = 'BULL' if bos_choch_direction == 'bullish' else 'BEAR'
+                # Initialize direction_str for later use (fixes UnboundLocalError)
+                direction_str = 'bullish' if final_trend == 'BULL' else 'bearish'
 
                 # Calculate strength: use swing strength if aligned, otherwise moderate
                 if trend_analysis['trend'] == final_trend:
