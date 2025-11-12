@@ -25,11 +25,27 @@ Design Philosophy:
 
 STRATEGY_NAME = "SMC_STRUCTURE"
 STRATEGY_DESCRIPTION = "Pure structure-based strategy using Smart Money Concepts (price action only)"
-STRATEGY_VERSION = "2.4.0"
-STRATEGY_DATE = "2025-11-05"
-STRATEGY_STATUS = "Testing - Dual Tightening for Profitability"
+STRATEGY_VERSION = "2.6.0"
+STRATEGY_DATE = "2025-11-12"
+STRATEGY_STATUS = "Testing - Phase 1 HTF Strength Fix"
 
 # Version History:
+# v2.5.1 (2025-11-11): CRITICAL FIX - Removed trend continuation exception
+#                      Issue: Was allowing BULL entries in premium (buying at swing highs)
+#                             Was allowing BEAR entries in discount (selling at swing lows)
+#                      Fix: Always reject poor entry locations regardless of HTF strength
+#                      Expected: Win rate 31% → 35-38%, PF 0.52 → 0.65-0.75
+# v2.5.0 (2025-11-11): Analysis-driven optimization based on 30-day backtest (15m timeframe)
+#                      Test Results: 68 signals, 30.9% WR, 0.52 PF, -3.5 pips expectancy
+#                      CRITICAL CHANGES:
+#                      1. Premium/Discount Filter: DISABLED (was inverting performance)
+#                         - Premium zone had 45.8% WR (best), Discount 16.7% WR (worst)
+#                         - Filter rejected 398 high-quality signals
+#                      2. BOS Significance: 0.6 → 0.55 (increase BEAR signals)
+#                         - BEAR signals: 47.8% WR vs BULL: 22.2% WR
+#                      3. Min Confidence: 0.45 → 0.35 (not correlated with outcomes)
+#                         - Winners avg 60.7%, Losers avg 61.2% (confidence not predictive)
+#                      Expected Impact: WR 30.9% → 40-45%, Signals 68 → 100+, PF 0.52 → 1.2+
 # v2.4.0 (2025-11-05): Dual quality tightening - targeting first profitable configuration
 #                      BOS Quality: 60% → 65% (more selective on structure breaks)
 #                      Universal Confidence Floor: 45% minimum (all entries)
@@ -326,12 +342,12 @@ SMC_BACKTEST_COMMISSION_PER_LOT = 7.0
 
 # Entry timeframe
 # The timeframe used for signal generation and pattern detection
-# '1h' provides good balance for structure-based entries
-SMC_ENTRY_TIMEFRAME = '1h'
+# '15m' used for BOS/CHoCH detection and entry signals
+SMC_ENTRY_TIMEFRAME = '15m'
 
 # Lookback for entry timeframe analysis (hours)
 # How much entry TF data to fetch
-# 200 hours = ~8 days of 1H data
+# 200 hours = ~8 days of 15m data (800 bars)
 SMC_ENTRY_LOOKBACK_HOURS = 200
 
 # ============================================================================
@@ -413,8 +429,9 @@ SMC_MAX_WAIT_BARS = 20
 
 # Minimum BOS/CHoCH significance (0-1)
 # How significant the structure break must be
-# 0.6 = moderate significance requirement
-SMC_MIN_BOS_SIGNIFICANCE = 0.6
+# 0.55 = slightly relaxed to increase BEAR signals (analysis: BEAR 47.8% WR vs BULL 22.2% WR)
+# Lowered from 0.6 based on Nov 2025 backtest analysis
+SMC_MIN_BOS_SIGNIFICANCE = 0.55
 
 # Stop loss distance from structure level (pips)
 # For BOS/CHoCH re-entry, stop goes beyond structure level
@@ -456,6 +473,16 @@ SMC_OB_SL_BUFFER_PIPS = 5  # Pips beyond OB for stop loss (tighter than old 15 p
 # - Signals: 112 → 50-60 (-45% to -55%)
 # - Profit Factor: 2.16 → 2.5-3.5 (+16% to +62%)
 # - R:R Ratio: 1.2:1 → 2.5:1 (improved entry pricing)
+
+# ============================================================================
+# PREMIUM/DISCOUNT ZONE FILTER
+# ============================================================================
+
+# Enable Premium/Discount zone filtering for entry timing
+# True = Reject BULL entries in premium, BEAR entries in discount
+# False = Allow entries in all zones (analysis shows premium has HIGHEST win rate)
+# ANALYSIS RESULT: Filter was INVERTED - Premium zone = 45.8% WR (best), Discount = 16.7% WR (worst)
+SMC_PREMIUM_DISCOUNT_FILTER_ENABLED = False  # DISABLED based on backtest analysis (Nov 2025)
 
 # ============================================================================
 # ZERO LAG LIQUIDITY ENTRY TRIGGER

@@ -3,9 +3,9 @@
 SMC Pure Structure Strategy
 Structure-based trading using Smart Money Concepts (pure price action)
 
-VERSION: 2.2.0 (Order Block Re-entry Implementation)
-DATE: 2025-11-03
-STATUS: Production Ready - Testing Required
+VERSION: 2.6.0 (Phase 1 - HTF Strength Fix)
+DATE: 2025-11-12
+STATUS: Testing - Critical Bug Fix Applied
 
 Performance Metrics (v2.1.1 Baseline - 30 days, 9 pairs):
 - Total Signals: 112
@@ -460,6 +460,20 @@ class SMCStructureStrategy:
 
             self.logger.info(f"   ✅ HTF Trend confirmed: {final_trend} (strength: {final_strength*100:.0f}%)")
 
+            # PHASE 1 FIX: Enforce HTF strength minimum (v2.6.0)
+            # CRITICAL: Analysis shows 71% of signals had 60% strength → only 31% WR
+            # Signals with 75%+ strength → estimated 40-45% WR
+            min_htf_strength = 0.75
+            if final_strength < min_htf_strength:
+                self.logger.info(f"\n❌ HTF STRENGTH FILTER: Signal rejected")
+                self.logger.info(f"   Current HTF strength: {final_strength*100:.0f}%")
+                self.logger.info(f"   Minimum required: {min_htf_strength*100:.0f}%")
+                self.logger.info(f"   💡 Analysis: 71% of signals had 60% strength → 31% WR")
+                self.logger.info(f"   💡 Target: Signals with 75%+ strength → 40-45% WR")
+                return None
+
+            self.logger.info(f"   ✅ HTF strength filter passed: {final_strength*100:.0f}% >= {min_htf_strength*100:.0f}%")
+
             # Initialize direction_str from final_trend (may be overridden by BOS/CHoCH later)
             direction_str = 'bullish' if final_trend == 'BULL' else 'bearish'
 
@@ -885,7 +899,7 @@ class SMCStructureStrategy:
                 rr_score = min(self.min_rr_ratio / 4.0, 1.0) * 0.1  # Use min_rr_ratio as placeholder
                 preliminary_confidence = htf_score + pattern_score + sr_score + rr_score
 
-                MIN_EQUILIBRIUM_CONFIDENCE = 0.50  # 50% minimum for neutral zones
+                MIN_EQUILIBRIUM_CONFIDENCE = 0.75  # 75% minimum (Phase 1 fix - equilibrium 15.4% WR)
 
                 if preliminary_confidence < MIN_EQUILIBRIUM_CONFIDENCE:
                     self.logger.info(f"\n🎯 STEP 3E: Equilibrium Zone Confidence Filter")
