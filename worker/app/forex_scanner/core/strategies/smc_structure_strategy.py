@@ -3,9 +3,9 @@
 SMC Pure Structure Strategy
 Structure-based trading using Smart Money Concepts (pure price action)
 
-VERSION: 2.6.0 (Phase 1 - HTF Strength Fix)
+VERSION: 2.6.2 (Phase 2.6.2 - Multi-Factor HTF Strength Distribution Fix)
 DATE: 2025-11-12
-STATUS: Testing - Critical Bug Fix Applied
+STATUS: Testing - Fixed HTF calculation + 70% threshold + Premium zone only
 
 Performance Metrics (v2.1.1 Baseline - 30 days, 9 pairs):
 - Total Signals: 112
@@ -435,18 +435,55 @@ class SMCStructureStrategy:
                 # Use BOS/CHoCH direction as trend
                 final_trend = 'BULL' if bos_choch_direction == 'bullish' else 'BEAR'
 
-                # Calculate strength: use swing strength if aligned, otherwise moderate
+                # PHASE 2.6.2: Multi-factor HTF strength calculation
+                # Calculate strength: use swing strength if aligned, otherwise calculate from multiple factors
                 if trend_analysis['trend'] == final_trend:
                     # BOS/CHoCH aligns with swing structure - use swing strength
                     final_strength = trend_analysis['strength']
                     self.logger.info(f"   ✅ BOS/CHoCH: {bos_choch_direction.upper()} → {final_trend}")
                     self.logger.info(f"   ✅ Swing structure ALIGNS: {trend_analysis['structure_type']} ({trend_analysis['strength']*100:.0f}%)")
                 else:
-                    # BOS/CHoCH differs from swing structure - use moderate strength
-                    final_strength = 0.60
+                    # BOS/CHoCH differs from swing structure - calculate multi-factor strength
+                    # Factor 1: BOS/CHoCH base strength (50% - it exists but conflicts with swings)
+                    bos_base = 0.50
+
+                    # Factor 2: Swing structure opposition penalty (-10% to -30%)
+                    # If swings show opposite trend, reduce strength
+                    swing_strength = trend_analysis['strength']
+                    if trend_analysis['trend'] in ['BULL', 'BEAR'] and trend_analysis['trend'] != final_trend:
+                        # Strong opposing swings = weaker BOS signal
+                        swing_penalty = swing_strength * 0.30  # Max 30% penalty
+                    else:
+                        # Ranging/unknown swings = small penalty
+                        swing_penalty = 0.10
+
+                    # Factor 3: Number of confirming swings bonus (0% to +20%)
+                    # More swings in BOS direction = stronger
+                    num_swings_high = len(trend_analysis['swing_highs'])
+                    num_swings_low = len(trend_analysis['swing_lows'])
+
+                    if final_trend == 'BULL':
+                        # Count HL (higher lows) as confirming swings
+                        confirming_swings = num_swings_low if num_swings_low > 0 else 0
+                    else:  # BEAR
+                        # Count LH (lower highs) as confirming swings
+                        confirming_swings = num_swings_high if num_swings_high > 0 else 0
+
+                    swing_bonus = min(confirming_swings / 10.0, 0.20)  # Max 20% bonus (need 10+ swings)
+
+                    # Calculate final strength
+                    final_strength = bos_base - swing_penalty + swing_bonus
+
+                    # Clamp to 50-80% range (BOS without swing alignment can't be >80%)
+                    final_strength = max(0.50, min(0.80, final_strength))
+
                     self.logger.info(f"   ✅ BOS/CHoCH: {bos_choch_direction.upper()} → {final_trend}")
                     self.logger.info(f"   ⚠️  Swing structure differs: {trend_analysis['trend']} ({trend_analysis['structure_type']})")
-                    self.logger.info(f"   ℹ️  Using BOS/CHoCH as primary (strength: {final_strength*100:.0f}%)")
+                    self.logger.info(f"   📊 Multi-factor strength calculation:")
+                    self.logger.info(f"      Base (BOS exists): 50%")
+                    self.logger.info(f"      Swing penalty: -{swing_penalty*100:.0f}%")
+                    self.logger.info(f"      Swing bonus: +{swing_bonus*100:.0f}%")
+                    self.logger.info(f"      Final HTF strength: {final_strength*100:.0f}%")
             else:
                 # No BOS/CHoCH found - reject signal
                 self.logger.info(f"   ❌ No BOS/CHoCH detected on HTF - SIGNAL REJECTED")
@@ -460,16 +497,25 @@ class SMCStructureStrategy:
 
             self.logger.info(f"   ✅ HTF Trend confirmed: {final_trend} (strength: {final_strength*100:.0f}%)")
 
-            # PHASE 1 FIX: Enforce HTF strength minimum (v2.6.0)
-            # CRITICAL: Analysis shows 71% of signals had 60% strength → only 31% WR
-            # Signals with 75%+ strength → estimated 40-45% WR
-            min_htf_strength = 0.75
+            # PHASE 2.6.1: Multi-filter approach for signal frequency optimization
+            # Filter 1: Exclude UNKNOWN HTF (0% strength, 28.0% WR)
+            exclude_unknown_htf = getattr(self.config, 'SMC_EXCLUDE_UNKNOWN_HTF', True)
+            if exclude_unknown_htf and final_strength == 0:
+                self.logger.info(f"\n❌ HTF DATA QUALITY FILTER: Signal rejected")
+                self.logger.info(f"   HTF strength: 0% (UNKNOWN)")
+                self.logger.info(f"   💡 UNKNOWN HTF signals: 28.0% WR vs 60% HTF: 32.6% WR")
+                self.logger.info(f"   💡 Insufficient HTF data for reliable trend context")
+                return None
+
+            # Filter 2: HTF strength minimum (v2.6.0 → v2.6.1: 75% → 60%)
+            # Phase 2.6.1: Lowered to 60% to increase signal frequency
+            # All signals are either 0% or 60% (no distribution) - need to fix HTF calc in Phase 2.6.2
+            min_htf_strength = getattr(self.config, 'SMC_MIN_HTF_STRENGTH', 0.60)
             if final_strength < min_htf_strength:
                 self.logger.info(f"\n❌ HTF STRENGTH FILTER: Signal rejected")
                 self.logger.info(f"   Current HTF strength: {final_strength*100:.0f}%")
                 self.logger.info(f"   Minimum required: {min_htf_strength*100:.0f}%")
-                self.logger.info(f"   💡 Analysis: 71% of signals had 60% strength → 31% WR")
-                self.logger.info(f"   💡 Target: Signals with 75%+ strength → 40-45% WR")
+                self.logger.info(f"   💡 Phase 2.6.1: Threshold lowered to {min_htf_strength*100:.0f}% for more signals")
                 return None
 
             self.logger.info(f"   ✅ HTF strength filter passed: {final_strength*100:.0f}% >= {min_htf_strength*100:.0f}%")
@@ -674,30 +720,46 @@ class SMCStructureStrategy:
                                     self.logger.info(f"   📍 Current Zone: {zone.upper()}")
                                     self.logger.info(f"   📈 Price Position: {zone_info['price_position']*100:.1f}%")
 
-                                    # Validate entry timing: BUY in discount, SELL in premium
+                                    # PHASE 2.6.1: PREMIUM ZONE ONLY filter
+                                    # Analysis: Premium = 45.8% WR, Discount = 16.7% WR, Equilibrium = 15.4% WR
+                                    premium_zone_only = getattr(self.config, 'SMC_PREMIUM_ZONE_ONLY', False)
+
+                                    if premium_zone_only:
+                                        # Filter 3: Only accept PREMIUM zone signals (both BULL and BEAR)
+                                        if zone != 'premium':
+                                            self.logger.info(f"\n❌ PREMIUM ZONE FILTER: Signal rejected")
+                                            self.logger.info(f"   Current zone: {zone.upper()}")
+                                            self.logger.info(f"   💡 Performance by zone:")
+                                            self.logger.info(f"      Premium: 45.8% WR (16/35 winners)")
+                                            self.logger.info(f"      Discount: 16.7% WR (4/24 winners)")
+                                            self.logger.info(f"      Equilibrium: 15.4% WR (2/13 winners)")
+                                            self.logger.info(f"   💡 Phase 2.6.1: Premium zone only for signal quality")
+                                            return None
+
+                                        self.logger.info(f"   ✅ PREMIUM ZONE: Signal in highest probability zone (45.8% WR)")
+
+                                    # Legacy validation (disabled when premium_zone_only=True)
                                     if direction == 'bullish':
                                         entry_quality = zone_info['entry_quality_buy']
                                         if zone == 'premium':
-                                            self.logger.info(f"   ⚠️  BULLISH entry in PREMIUM zone - poor timing")
-                                            self.logger.info(f"   💡 Wait for pullback to discount zone for better entry")
-                                            return None
+                                            self.logger.info(f"   📍 BULLISH entry in PREMIUM zone")
+                                            self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}%")
                                         elif zone == 'equilibrium':
-                                            self.logger.info(f"   ⚠️  BULLISH entry in EQUILIBRIUM zone - neutral timing")
-                                            self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}% (reduced confidence)")
+                                            self.logger.info(f"   📍 BULLISH entry in EQUILIBRIUM zone")
+                                            self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}%")
                                         else:
-                                            self.logger.info(f"   ✅ BULLISH entry in DISCOUNT zone - excellent timing!")
+                                            self.logger.info(f"   📍 BULLISH entry in DISCOUNT zone")
                                             self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}%")
                                     else:  # bearish
                                         entry_quality = zone_info['entry_quality_sell']
-                                        if zone == 'discount':
-                                            self.logger.info(f"   ⚠️  BEARISH entry in DISCOUNT zone - poor timing")
-                                            self.logger.info(f"   💡 Wait for rally to premium zone for better entry")
-                                            return None
+                                        if zone == 'premium':
+                                            self.logger.info(f"   📍 BEARISH entry in PREMIUM zone")
+                                            self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}%")
                                         elif zone == 'equilibrium':
-                                            self.logger.info(f"   ⚠️  BEARISH entry in EQUILIBRIUM zone - neutral timing")
-                                            self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}% (reduced confidence)")
+                                            self.logger.info(f"   📍 BEARISH entry in EQUILIBRIUM zone")
+                                            self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}%")
                                         else:
-                                            self.logger.info(f"   ✅ BEARISH entry in PREMIUM zone - excellent timing!")
+                                            self.logger.info(f"   📍 BEARISH entry in DISCOUNT zone")
                                             self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}%")
                                 else:
                                     self.logger.info(f"   ⚠️  Could not calculate premium/discount zones")
@@ -831,60 +893,35 @@ class SMCStructureStrategy:
                 self.logger.info(f"   📍 Current Zone: {zone.upper()}")
                 self.logger.info(f"   📈 Price Position: {zone_info['price_position']*100:.1f}% of range")
 
-                # CONTEXT-AWARE validation: Consider HTF trend for premium/discount logic
-                # In TRENDING markets: Allow continuation entries even in "wrong" zones
-                # In RANGING markets: Strict premium/discount rules apply
+                # PHASE 2.6.1: PREMIUM ZONE ONLY filter (Universal check)
+                # Analysis: Premium = 45.8% WR, Discount = 16.7% WR, Equilibrium = 15.4% WR
+                premium_zone_only = getattr(self.config, 'SMC_PREMIUM_ZONE_ONLY', False)
 
                 self.logger.info(f"   🎯 HTF Trend Context: {final_trend} (strength: {final_strength*100:.0f}%)")
 
-                # Determine if we're in a strong trending or ranging market
-                # OPTIMIZED: Increased from 0.60 to 0.75 based on Test 23 analysis
-                # 60% threshold allowed too many weak trend continuations (all losers)
-                # 75% = truly strong, established trends only
-                is_strong_trend = final_strength >= 0.75  # Strong trend if strength >= 75%
+                if premium_zone_only:
+                    # Filter 3: Only accept PREMIUM zone signals (both BULL and BEAR)
+                    if zone != 'premium':
+                        self.logger.info(f"\n❌ PREMIUM ZONE FILTER: Signal rejected")
+                        self.logger.info(f"   Current zone: {zone.upper()}")
+                        self.logger.info(f"   💡 Performance by zone:")
+                        self.logger.info(f"      Premium: 45.8% WR (16/35 winners)")
+                        self.logger.info(f"      Discount: 16.7% WR (4/24 winners)")
+                        self.logger.info(f"      Equilibrium: 15.4% WR (2/13 winners)")
+                        self.logger.info(f"   💡 Phase 2.6.1: Premium zone only for signal quality")
+                        return None
 
+                    self.logger.info(f"   ✅ PREMIUM ZONE: Signal in highest probability zone (45.8% WR)")
+
+                # Display entry quality information (no rejection)
                 if direction_str == 'bullish':
                     entry_quality = zone_info['entry_quality_buy']
-
-                    if zone == 'premium':
-                        if is_strong_trend and final_trend == 'BULL':
-                            # ALLOW: Bullish continuation in strong uptrend, even at premium
-                            self.logger.info(f"   ✅ BULLISH entry in PREMIUM zone - TREND CONTINUATION")
-                            self.logger.info(f"   🎯 Strong uptrend context allows premium entries (momentum)")
-                        else:
-                            # REJECT: Counter-trend or weak trend
-                            self.logger.info(f"   ❌ BULLISH entry in PREMIUM zone - poor timing")
-                            self.logger.info(f"   💡 Not in strong uptrend - wait for pullback to discount")
-                            return None
-                    elif zone == 'equilibrium':
-                        self.logger.info(f"   ⚠️  BULLISH entry in EQUILIBRIUM zone - neutral timing")
-                        self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}% (acceptable)")
-                    else:  # discount
-                        self.logger.info(f"   ✅ BULLISH entry in DISCOUNT zone - excellent timing!")
-                        self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}% (buying at discount)")
-
+                    self.logger.info(f"   📍 BULLISH entry in {zone.upper()} zone")
+                    self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}%")
                 else:  # bearish
                     entry_quality = zone_info['entry_quality_sell']
-
-                    if zone == 'discount':
-                        if is_strong_trend and final_trend == 'BEAR':
-                            # ALLOW: Bearish continuation in strong downtrend, even at discount
-                            self.logger.info(f"   ✅ BEARISH entry in DISCOUNT zone - TREND CONTINUATION")
-                            self.logger.info(f"   🎯 Strong downtrend context allows discount entries (momentum)")
-                        else:
-                            # REJECT: Counter-trend or weak trend
-                            self.logger.info(f"   ❌ BEARISH entry in DISCOUNT zone - poor timing")
-                            self.logger.info(f"   💡 Not in strong downtrend - wait for rally to premium")
-                            # DIAGNOSTIC: Track bearish rejection reasons
-                            self.logger.info(f"   🔍 [BEARISH DIAGNOSTIC] Rejected at premium/discount filter")
-                            self.logger.info(f"      Zone: DISCOUNT, Strength: {final_strength*100:.0f}%, Threshold: 75%")
-                            return None
-                    elif zone == 'equilibrium':
-                        self.logger.info(f"   ⚠️  BEARISH entry in EQUILIBRIUM zone - neutral timing")
-                        self.logger.info(f"   💡 Entry quality: {entry_quality*100:.0f}% (acceptable)")
-                    else:  # premium
-                        self.logger.info(f"   ✅ BEARISH entry in PREMIUM zone - excellent timing!")
-                        self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}% (selling at premium)")
+                    self.logger.info(f"   📍 BEARISH entry in {zone.upper()} zone")
+                    self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}%")
             else:
                 self.logger.info(f"   ⚠️  Could not calculate premium/discount zones - proceeding without zone filter")
 

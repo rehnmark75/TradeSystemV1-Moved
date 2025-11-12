@@ -25,9 +25,9 @@ Design Philosophy:
 
 STRATEGY_NAME = "SMC_STRUCTURE"
 STRATEGY_DESCRIPTION = "Pure structure-based strategy using Smart Money Concepts (price action only)"
-STRATEGY_VERSION = "2.6.0"
+STRATEGY_VERSION = "2.6.2"
 STRATEGY_DATE = "2025-11-12"
-STRATEGY_STATUS = "Testing - Phase 1 HTF Strength Fix"
+STRATEGY_STATUS = "Testing - Phase 2.6.2 Multi-Factor HTF Strength (Distribution Fix)"
 
 # Version History:
 # v2.5.1 (2025-11-11): CRITICAL FIX - Removed trend continuation exception
@@ -479,10 +479,34 @@ SMC_OB_SL_BUFFER_PIPS = 5  # Pips beyond OB for stop loss (tighter than old 15 p
 # ============================================================================
 
 # Enable Premium/Discount zone filtering for entry timing
-# True = Reject BULL entries in premium, BEAR entries in discount
-# False = Allow entries in all zones (analysis shows premium has HIGHEST win rate)
-# ANALYSIS RESULT: Filter was INVERTED - Premium zone = 45.8% WR (best), Discount = 16.7% WR (worst)
-SMC_PREMIUM_DISCOUNT_FILTER_ENABLED = False  # DISABLED based on backtest analysis (Nov 2025)
+# Phase 2.6.1: PREMIUM ZONE ONLY mode (inverted from original logic)
+# True = ONLY accept signals in premium zone (45.8% WR vs 15-17% in other zones)
+# False = Allow entries in all zones
+# ANALYSIS RESULT: Premium zone = 45.8% WR (best), Discount = 16.7% WR, Equilibrium = 15.4% WR
+SMC_PREMIUM_ZONE_ONLY = False  # Phase 2.6.2: Disabled - HTF multi-factor strength is sufficient filter
+
+# Legacy filter (inverted logic - deprecated)
+SMC_PREMIUM_DISCOUNT_FILTER_ENABLED = False  # DISABLED - replaced by PREMIUM_ZONE_ONLY
+
+# ============================================================================
+# HTF STRENGTH FILTER (Phase 2.6.1)
+# ============================================================================
+
+# Minimum HTF strength required for signal generation
+# Phase 2.6.2: FINAL - 65% HTF with NO premium filter = optimal balance
+# New multi-factor calculation provides 50-100% distribution:
+#   - Aligned BOS+Swings: 60-100% (use swing strength)
+#   - Conflicting BOS/Swings: 50-80% (multi-factor: base 50% ± penalties/bonuses)
+# Test results comparison (no premium filter):
+#   - 70% HTF: 5 signals, 40% WR, 5.69 PF (too restrictive)
+#   - 65% HTF: 10 signals, 40% WR, 1.96 PF ✅ OPTIMAL
+#   - 60% HTF: 48 signals, 31% WR, 0.68 PF (quality degradation)
+# Conclusion: 65% is sweet spot - quality over quantity wins
+SMC_MIN_HTF_STRENGTH = 0.65  # Phase 2.6.2: 65% optimal threshold
+
+# Exclude signals with UNKNOWN HTF strength (0%)
+# UNKNOWN HTF = 28.0% WR vs 60% HTF = 32.6% WR
+SMC_EXCLUDE_UNKNOWN_HTF = True  # Phase 2.6.1: Reject 0% HTF signals
 
 # ============================================================================
 # ZERO LAG LIQUIDITY ENTRY TRIGGER
