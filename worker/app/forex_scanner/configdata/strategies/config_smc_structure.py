@@ -25,9 +25,9 @@ Design Philosophy:
 
 STRATEGY_NAME = "SMC_STRUCTURE"
 STRATEGY_DESCRIPTION = "Pure structure-based strategy using Smart Money Concepts (price action only)"
-STRATEGY_VERSION = "2.6.2"
+STRATEGY_VERSION = "2.6.3"
 STRATEGY_DATE = "2025-11-12"
-STRATEGY_STATUS = "Testing - Phase 2.6.2 Multi-Factor HTF Strength (Distribution Fix)"
+STRATEGY_STATUS = "Production Baseline - Phase 2.6.3 (4H-Only HTF, 75% Strength, NO Directional Filter)"
 
 # Version History:
 # v2.5.1 (2025-11-11): CRITICAL FIX - Removed trend continuation exception
@@ -366,11 +366,13 @@ SMC_BOS_CHOCH_TIMEFRAME = '15m'
 
 # Require 1H timeframe alignment
 # True = 1H structure must align with BOS/CHoCH direction
-SMC_REQUIRE_1H_ALIGNMENT = True
+# Phase 2.6.3: DISABLED - Skip 1H validation, use 4H only for cleaner signals
+SMC_REQUIRE_1H_ALIGNMENT = False  # Phase 2.6.3: Disabled - 4H-only alignment
 
 # Require 4H timeframe alignment
 # True = 4H structure must align with BOS/CHoCH direction
-SMC_REQUIRE_4H_ALIGNMENT = True
+# Phase 2.6.3: ENABLED - Primary HTF validation (4H only)
+SMC_REQUIRE_4H_ALIGNMENT = True  # Phase 2.6.3: Enabled - 4H-only alignment
 
 # Lookback for HTF structure validation (bars)
 # How many bars to analyze for HTF structure alignment
@@ -479,30 +481,43 @@ SMC_OB_SL_BUFFER_PIPS = 5  # Pips beyond OB for stop loss (tighter than old 15 p
 # ============================================================================
 
 # Enable Premium/Discount zone filtering for entry timing
-# Phase 2.6.1: PREMIUM ZONE ONLY mode (inverted from original logic)
-# True = ONLY accept signals in premium zone (45.8% WR vs 15-17% in other zones)
-# False = Allow entries in all zones
-# ANALYSIS RESULT: Premium zone = 45.8% WR (best), Discount = 16.7% WR, Equilibrium = 15.4% WR
-SMC_PREMIUM_ZONE_ONLY = False  # Phase 2.6.2: Disabled - HTF multi-factor strength is sufficient filter
+# Phase 2.6.7: DISABLED - Directional filter conflicts with profitable Phase 2.6.3 setup
+# False = Allow entries in all zones (NO directional restrictions)
+#
+# CRITICAL FINDING FROM TESTING:
+#   - Phase 2.6.3 (75% HTF, NO directional): 9 signals, 44.4% WR, 2.05 PF ✅ PROFITABLE
+#   - Phase 2.6.6 (75% HTF + directional): 1 signal, 0% WR ❌ FAILED
+#   - Root cause: All 8 winners from Phase 2.6.3 were SELL in discount (bearish trend continuation)
+#   - Directional filter logic: "SELL in discount = selling at bottom" is WRONG in strong trends
+#   - Reality: With 75% HTF strength, SELL in discount = valid trend continuation setup
+#   - Conclusion: Directional filter based on FALSE ASSUMPTION, revert to Phase 2.6.3
+SMC_DIRECTIONAL_ZONE_FILTER = False  # Phase 2.6.7: DISABLED - conflicts with 75% HTF logic
 
-# Legacy filter (inverted logic - deprecated)
-SMC_PREMIUM_DISCOUNT_FILTER_ENABLED = False  # DISABLED - replaced by PREMIUM_ZONE_ONLY
+# Legacy filter flags (deprecated - do not use)
+SMC_PREMIUM_ZONE_ONLY = False  # DEPRECATED - Use SMC_DIRECTIONAL_ZONE_FILTER instead
+SMC_PREMIUM_DISCOUNT_FILTER_ENABLED = False  # DEPRECATED
 
 # ============================================================================
 # HTF STRENGTH FILTER (Phase 2.6.1)
 # ============================================================================
 
 # Minimum HTF strength required for signal generation
-# Phase 2.6.2: FINAL - 65% HTF with NO premium filter = optimal balance
+# Phase 2.6.7: REVERTED to Phase 2.6.3 baseline (ONLY profitable configuration found)
 # New multi-factor calculation provides 50-100% distribution:
 #   - Aligned BOS+Swings: 60-100% (use swing strength)
 #   - Conflicting BOS/Swings: 50-80% (multi-factor: base 50% ± penalties/bonuses)
-# Test results comparison (no premium filter):
-#   - 70% HTF: 5 signals, 40% WR, 5.69 PF (too restrictive)
-#   - 65% HTF: 10 signals, 40% WR, 1.96 PF ✅ OPTIMAL
-#   - 60% HTF: 48 signals, 31% WR, 0.68 PF (quality degradation)
-# Conclusion: 65% is sweet spot - quality over quantity wins
-SMC_MIN_HTF_STRENGTH = 0.65  # Phase 2.6.2: 65% optimal threshold
+# Test results progression:
+#   - Phase 2.6.3 (75% HTF, no filters): 9 signals, 44.4% WR, 2.05 PF ✅ PROFITABLE
+#   - Phase 2.6.4 (60% HTF + directional): 28 signals, 21.4% WR, 0.27 PF ❌ LOSING
+#   - Phase 2.6.5 (60% HTF + directional + liquidity): 21 signals, 23.8% WR, 0.30 PF ❌ LOSING
+#   - Phase 2.6.6 (75% HTF + directional): 1 signal, 0% WR ❌ FAILED (too restrictive)
+# Phase 2.6.7: BASELINE RESTORATION
+#   - 75% HTF strength (proven quality filter)
+#   - 4H-only HTF validation (cleaner signals)
+#   - NO directional filter (conflicts with trend continuation logic)
+#   - NO liquidity sweep (adds complexity without value)
+# Expected: 9 signals, 44.4% WR, 2.05 PF (REPLICATE Phase 2.6.3 success)
+SMC_MIN_HTF_STRENGTH = 0.75  # Phase 2.6.7: Baseline restoration - Phase 2.6.3 configuration
 
 # Exclude signals with UNKNOWN HTF strength (0%)
 # UNKNOWN HTF = 28.0% WR vs 60% HTF = 32.6% WR
@@ -526,6 +541,47 @@ SMC_ZERO_LAG_WICK_THRESHOLD = 0.6
 # How many bars to track liquidity levels
 # 20 bars = good balance for 1H timeframe
 SMC_ZERO_LAG_LOOKBACK = 20
+
+# ============================================================================
+# LIQUIDITY SWEEP FILTER (Phase 2.6.5)
+# ============================================================================
+
+# Enable liquidity sweep filter for quality entry timing
+# This is a core SMC concept: smart money takes liquidity before reversing
+# True = Require price to take out recent highs/lows before entry
+# - SELL signals: Must take out recent swing high (liquidity grab above resistance)
+# - BUY signals: Must take out recent swing low (liquidity grab below support)
+# False = Allow entries without liquidity sweep requirement
+#
+# RATIONALE:
+# - Phase 2.6.4 with directional filter alone:
+#   - 60% HTF + directional: 28 signals, 21.4% WR (poor quality)
+#   - 55% HTF + directional: 29 signals, 20.7% WR (poor quality)
+# - Phase 2.6.5 test results (60% HTF + directional + liquidity):
+#   - 21 signals, 23.8% WR, 0.30 PF (STILL LOSING)
+#   - Liquidity sweep filtered 1,422 signals but barely improved WR (+2.4%)
+# - Conclusion: Liquidity sweep adds complexity without meaningful value
+# - Phase 2.6.6: DISABLED - HTF strength is far more important than liquidity sweeps
+SMC_LIQUIDITY_SWEEP_ENABLED = False  # Phase 2.6.6: Disabled - adds complexity without value
+
+# Lookback bars for detecting swing highs/lows
+# How many bars to look back for identifying swing points
+# 15m timeframe: 20 bars = 5 hours of price action
+# Higher values = more significant swings required (more restrictive)
+# Lower values = allows recent swings (less restrictive)
+SMC_LIQUIDITY_SWEEP_LOOKBACK = 20
+
+# Minimum bars since liquidity sweep occurred
+# Ensures entry happens after sweep, not during
+# 15m timeframe: 2 bars = 30 minutes after liquidity grab
+# This allows reversal to begin before entry
+SMC_LIQUIDITY_SWEEP_MIN_BARS = 2
+
+# Minimum bars before liquidity sweep occurred
+# Maximum age of the liquidity sweep
+# 15m timeframe: 10 bars = 2.5 hours maximum age
+# Too old = stale setup, price may have moved away
+SMC_LIQUIDITY_SWEEP_MAX_BARS = 10
 
 # ============================================================================
 # EPIC-SPECIFIC OVERRIDES (Optional)

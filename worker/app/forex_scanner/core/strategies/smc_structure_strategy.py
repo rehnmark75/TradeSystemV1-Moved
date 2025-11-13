@@ -3,9 +3,9 @@
 SMC Pure Structure Strategy
 Structure-based trading using Smart Money Concepts (pure price action)
 
-VERSION: 2.6.2 (Phase 2.6.2 - Multi-Factor HTF Strength Distribution Fix)
+VERSION: 2.6.5 (Phase 2.6.5 - Liquidity Sweep Filter)
 DATE: 2025-11-12
-STATUS: Testing - Fixed HTF calculation + 70% threshold + Premium zone only
+STATUS: Testing - SMC liquidity sweep concept (smart money takes liquidity before reversing)
 
 Performance Metrics (v2.1.1 Baseline - 30 days, 9 pairs):
 - Total Signals: 112
@@ -248,6 +248,153 @@ class SMCStructureStrategy:
         if pair not in self.recent_signals:
             self.recent_signals[pair] = []
         self.recent_signals[pair].append((current_time, entry_price))
+
+    def _detect_liquidity_sweep(self, df: pd.DataFrame, direction: str, current_idx: int, pair: str) -> dict:
+        """
+        Detect if price has taken out recent swing highs/lows (liquidity sweep)
+
+        SMC Concept: Smart money takes liquidity (stops above highs/below lows) before reversing
+        - SELL setup: Price should take out recent swing high (liquidity grab above resistance)
+        - BUY setup: Price should take out recent swing low (liquidity grab below support)
+
+        Args:
+            df: Price dataframe
+            direction: 'bearish' for SELL, 'bullish' for BUY
+            current_idx: Current bar index
+            pair: Currency pair
+
+        Returns:
+            dict with:
+                - has_sweep: bool - True if liquidity sweep detected
+                - sweep_level: float - Price level that was swept
+                - bars_since_sweep: int - Bars since sweep occurred
+                - sweep_type: str - 'high' or 'low'
+        """
+        # Load configuration
+        liquidity_sweep_enabled = getattr(self.config, 'SMC_LIQUIDITY_SWEEP_ENABLED', True)
+        lookback = getattr(self.config, 'SMC_LIQUIDITY_SWEEP_LOOKBACK', 20)
+        min_bars = getattr(self.config, 'SMC_LIQUIDITY_SWEEP_MIN_BARS', 2)
+        max_bars = getattr(self.config, 'SMC_LIQUIDITY_SWEEP_MAX_BARS', 10)
+
+        if not liquidity_sweep_enabled:
+            return {'has_sweep': True, 'sweep_level': 0.0, 'bars_since_sweep': 0, 'sweep_type': 'none'}
+
+        # Get lookback window (excluding current bar)
+        start_idx = max(0, current_idx - lookback)
+        lookback_df = df.iloc[start_idx:current_idx]
+
+        if len(lookback_df) < 3:
+            return {'has_sweep': False, 'sweep_level': 0.0, 'bars_since_sweep': 0, 'sweep_type': 'none'}
+
+        pip_value = 0.01 if 'JPY' in pair else 0.0001
+
+        if direction == 'bearish':
+            # SELL setup: Look for recent swing high that was taken out
+            # Find swing highs in lookback period (high higher than 2 bars before and after)
+            swing_highs = []
+            for i in range(2, len(lookback_df) - 2):
+                if (lookback_df['high'].iloc[i] > lookback_df['high'].iloc[i-1] and
+                    lookback_df['high'].iloc[i] > lookback_df['high'].iloc[i-2] and
+                    lookback_df['high'].iloc[i] > lookback_df['high'].iloc[i+1] and
+                    lookback_df['high'].iloc[i] > lookback_df['high'].iloc[i+2]):
+                    swing_highs.append({
+                        'level': lookback_df['high'].iloc[i],
+                        'bars_ago': len(lookback_df) - i
+                    })
+
+            if not swing_highs:
+                return {'has_sweep': False, 'sweep_level': 0.0, 'bars_since_sweep': 0, 'sweep_type': 'high'}
+
+            # Find the most recent swing high
+            recent_swing = max(swing_highs, key=lambda x: -x['bars_ago'])  # Most recent (lowest bars_ago)
+            swing_level = recent_swing['level']
+
+            # Check if price took out this high in recent bars (within max_bars)
+            recent_window = df.iloc[current_idx - max_bars:current_idx]
+            if len(recent_window) == 0:
+                return {'has_sweep': False, 'sweep_level': 0.0, 'bars_since_sweep': 0, 'sweep_type': 'high'}
+
+            # Price must have exceeded swing high
+            highest_recent = recent_window['high'].max()
+            if highest_recent <= swing_level:
+                return {'has_sweep': False, 'sweep_level': swing_level, 'bars_since_sweep': 0, 'sweep_type': 'high'}
+
+            # Find when the sweep occurred
+            sweep_idx = None
+            for i in range(len(recent_window)):
+                if recent_window['high'].iloc[i] > swing_level:
+                    sweep_idx = i
+                    break
+
+            if sweep_idx is None:
+                return {'has_sweep': False, 'sweep_level': swing_level, 'bars_since_sweep': 0, 'sweep_type': 'high'}
+
+            bars_since_sweep = len(recent_window) - sweep_idx - 1
+
+            # Must be at least min_bars after the sweep (allow reversal to begin)
+            if bars_since_sweep < min_bars:
+                return {'has_sweep': False, 'sweep_level': swing_level, 'bars_since_sweep': bars_since_sweep, 'sweep_type': 'high'}
+
+            return {
+                'has_sweep': True,
+                'sweep_level': swing_level,
+                'bars_since_sweep': bars_since_sweep,
+                'sweep_type': 'high'
+            }
+
+        else:  # direction == 'bullish'
+            # BUY setup: Look for recent swing low that was taken out
+            # Find swing lows in lookback period (low lower than 2 bars before and after)
+            swing_lows = []
+            for i in range(2, len(lookback_df) - 2):
+                if (lookback_df['low'].iloc[i] < lookback_df['low'].iloc[i-1] and
+                    lookback_df['low'].iloc[i] < lookback_df['low'].iloc[i-2] and
+                    lookback_df['low'].iloc[i] < lookback_df['low'].iloc[i+1] and
+                    lookback_df['low'].iloc[i] < lookback_df['low'].iloc[i+2]):
+                    swing_lows.append({
+                        'level': lookback_df['low'].iloc[i],
+                        'bars_ago': len(lookback_df) - i
+                    })
+
+            if not swing_lows:
+                return {'has_sweep': False, 'sweep_level': 0.0, 'bars_since_sweep': 0, 'sweep_type': 'low'}
+
+            # Find the most recent swing low
+            recent_swing = max(swing_lows, key=lambda x: -x['bars_ago'])  # Most recent (lowest bars_ago)
+            swing_level = recent_swing['level']
+
+            # Check if price took out this low in recent bars (within max_bars)
+            recent_window = df.iloc[current_idx - max_bars:current_idx]
+            if len(recent_window) == 0:
+                return {'has_sweep': False, 'sweep_level': 0.0, 'bars_since_sweep': 0, 'sweep_type': 'low'}
+
+            # Price must have gone below swing low
+            lowest_recent = recent_window['low'].min()
+            if lowest_recent >= swing_level:
+                return {'has_sweep': False, 'sweep_level': swing_level, 'bars_since_sweep': 0, 'sweep_type': 'low'}
+
+            # Find when the sweep occurred
+            sweep_idx = None
+            for i in range(len(recent_window)):
+                if recent_window['low'].iloc[i] < swing_level:
+                    sweep_idx = i
+                    break
+
+            if sweep_idx is None:
+                return {'has_sweep': False, 'sweep_level': swing_level, 'bars_since_sweep': 0, 'sweep_type': 'low'}
+
+            bars_since_sweep = len(recent_window) - sweep_idx - 1
+
+            # Must be at least min_bars after the sweep (allow reversal to begin)
+            if bars_since_sweep < min_bars:
+                return {'has_sweep': False, 'sweep_level': swing_level, 'bars_since_sweep': bars_since_sweep, 'sweep_type': 'low'}
+
+            return {
+                'has_sweep': True,
+                'sweep_level': swing_level,
+                'bars_since_sweep': bars_since_sweep,
+                'sweep_type': 'low'
+            }
 
     def _get_trading_session(self, timestamp):
         """
@@ -720,23 +867,52 @@ class SMCStructureStrategy:
                                     self.logger.info(f"   📍 Current Zone: {zone.upper()}")
                                     self.logger.info(f"   📈 Price Position: {zone_info['price_position']*100:.1f}%")
 
-                                    # PHASE 2.6.1: PREMIUM ZONE ONLY filter
-                                    # Analysis: Premium = 45.8% WR, Discount = 16.7% WR, Equilibrium = 15.4% WR
-                                    premium_zone_only = getattr(self.config, 'SMC_PREMIUM_ZONE_ONLY', False)
+                                    # PHASE 2.6.4: DIRECTIONAL ZONE FILTER
+                                    # Prevent selling at bottoms (SELL in discount) and buying at tops (BUY in premium)
+                                    # Analysis: Premium SELL = 45.8% WR, Discount SELL = 16.7% WR
+                                    directional_zone_filter = getattr(self.config, 'SMC_DIRECTIONAL_ZONE_FILTER', False)
 
-                                    if premium_zone_only:
-                                        # Filter 3: Only accept PREMIUM zone signals (both BULL and BEAR)
-                                        if zone != 'premium':
-                                            self.logger.info(f"\n❌ PREMIUM ZONE FILTER: Signal rejected")
-                                            self.logger.info(f"   Current zone: {zone.upper()}")
-                                            self.logger.info(f"   💡 Performance by zone:")
-                                            self.logger.info(f"      Premium: 45.8% WR (16/35 winners)")
-                                            self.logger.info(f"      Discount: 16.7% WR (4/24 winners)")
-                                            self.logger.info(f"      Equilibrium: 15.4% WR (2/13 winners)")
-                                            self.logger.info(f"   💡 Phase 2.6.1: Premium zone only for signal quality")
-                                            return None
+                                    if directional_zone_filter:
+                                        entry_quality_buy = zone_info.get('entry_quality_buy', 0.0)
+                                        entry_quality_sell = zone_info.get('entry_quality_sell', 0.0)
 
-                                        self.logger.info(f"   ✅ PREMIUM ZONE: Signal in highest probability zone (45.8% WR)")
+                                        # Check SELL signals (bearish direction)
+                                        if direction == 'bearish':
+                                            if zone == 'discount':
+                                                # REJECT: SELL in discount = selling at the bottom
+                                                self.logger.info(f"\n❌ DIRECTIONAL ZONE FILTER: SELL signal rejected")
+                                                self.logger.info(f"   Reason: SELL in DISCOUNT zone (selling at market low)")
+                                                self.logger.info(f"   Zone: {zone.upper()} (bottom 33% of range)")
+                                                self.logger.info(f"   Price Position: {zone_info['price_position']*100:.1f}%")
+                                                self.logger.info(f"   Entry quality for SELL: {entry_quality_sell*100:.0f}%")
+                                                self.logger.info(f"   💡 Smart money SELLs in PREMIUM zones (top 33%), not at lows")
+                                                self.logger.info(f"   💡 Analysis: Premium SELL = 45.8% WR vs Discount SELL = 16.7% WR")
+                                                return None
+                                            elif zone == 'premium':
+                                                self.logger.info(f"   ✅ DIRECTIONAL ZONE: SELL in PREMIUM (selling high)")
+                                                self.logger.info(f"   Entry quality: {entry_quality_sell*100:.0f}%")
+                                            else:  # equilibrium
+                                                self.logger.info(f"   ⚠️  DIRECTIONAL ZONE: SELL in EQUILIBRIUM (neutral)")
+                                                self.logger.info(f"   Entry quality: {entry_quality_sell*100:.0f}%")
+
+                                        # Check BUY signals (bullish direction)
+                                        else:  # direction == 'bullish'
+                                            if zone == 'premium':
+                                                # REJECT: BUY in premium = buying at the top
+                                                self.logger.info(f"\n❌ DIRECTIONAL ZONE FILTER: BUY signal rejected")
+                                                self.logger.info(f"   Reason: BUY in PREMIUM zone (buying at market high)")
+                                                self.logger.info(f"   Zone: {zone.upper()} (top 33% of range)")
+                                                self.logger.info(f"   Price Position: {zone_info['price_position']*100:.1f}%")
+                                                self.logger.info(f"   Entry quality for BUY: {entry_quality_buy*100:.0f}%")
+                                                self.logger.info(f"   💡 Smart money BUYs in DISCOUNT zones (bottom 33%), not at highs")
+                                                self.logger.info(f"   💡 SELL in premium = 45.8% WR, BUY in premium = likely poor")
+                                                return None
+                                            elif zone == 'discount':
+                                                self.logger.info(f"   ✅ DIRECTIONAL ZONE: BUY in DISCOUNT (buying low)")
+                                                self.logger.info(f"   Entry quality: {entry_quality_buy*100:.0f}%")
+                                            else:  # equilibrium
+                                                self.logger.info(f"   ⚠️  DIRECTIONAL ZONE: BUY in EQUILIBRIUM (neutral)")
+                                                self.logger.info(f"   Entry quality: {entry_quality_buy*100:.0f}%")
 
                                     # Legacy validation (disabled when premium_zone_only=True)
                                     if direction == 'bullish':
@@ -899,6 +1075,52 @@ class SMCStructureStrategy:
 
                 self.logger.info(f"   🎯 HTF Trend Context: {final_trend} (strength: {final_strength*100:.0f}%)")
 
+                # PHASE 2.6.4: DIRECTIONAL ZONE FILTER (Universal check for all entries)
+                # Prevent selling at bottoms (SELL in discount) and buying at tops (BUY in premium)
+                directional_zone_filter = getattr(self.config, 'SMC_DIRECTIONAL_ZONE_FILTER', False)
+
+                if directional_zone_filter:
+                    entry_quality_buy = zone_info.get('entry_quality_buy', 0.0)
+                    entry_quality_sell = zone_info.get('entry_quality_sell', 0.0)
+
+                    # Check SELL signals (bearish direction)
+                    if direction_str == 'bearish':
+                        if zone == 'discount':
+                            # REJECT: SELL in discount = selling at the bottom
+                            self.logger.info(f"\n❌ DIRECTIONAL ZONE FILTER: SELL signal rejected")
+                            self.logger.info(f"   Reason: SELL in DISCOUNT zone (selling at market low)")
+                            self.logger.info(f"   Zone: {zone.upper()} (bottom 33% of range)")
+                            self.logger.info(f"   Price Position: {zone_info['price_position']*100:.1f}%")
+                            self.logger.info(f"   Entry quality for SELL: {entry_quality_sell*100:.0f}%")
+                            self.logger.info(f"   💡 Smart money SELLs in PREMIUM zones (top 33%), not at lows")
+                            self.logger.info(f"   💡 Analysis: Premium SELL = 45.8% WR vs Discount SELL = 16.7% WR")
+                            return None
+                        elif zone == 'premium':
+                            self.logger.info(f"   ✅ DIRECTIONAL ZONE: SELL in PREMIUM (selling high)")
+                            self.logger.info(f"   Entry quality: {entry_quality_sell*100:.0f}%")
+                        else:  # equilibrium
+                            self.logger.info(f"   ⚠️  DIRECTIONAL ZONE: SELL in EQUILIBRIUM (neutral)")
+                            self.logger.info(f"   Entry quality: {entry_quality_sell*100:.0f}%")
+
+                    # Check BUY signals (bullish direction)
+                    else:  # direction_str == 'bullish'
+                        if zone == 'premium':
+                            # REJECT: BUY in premium = buying at the top
+                            self.logger.info(f"\n❌ DIRECTIONAL ZONE FILTER: BUY signal rejected")
+                            self.logger.info(f"   Reason: BUY in PREMIUM zone (buying at market high)")
+                            self.logger.info(f"   Zone: {zone.upper()} (top 33% of range)")
+                            self.logger.info(f"   Price Position: {zone_info['price_position']*100:.1f}%")
+                            self.logger.info(f"   Entry quality for BUY: {entry_quality_buy*100:.0f}%")
+                            self.logger.info(f"   💡 Smart money BUYs in DISCOUNT zones (bottom 33%), not at highs")
+                            self.logger.info(f"   💡 SELL in premium = 45.8% WR, BUY in premium = likely poor")
+                            return None
+                        elif zone == 'discount':
+                            self.logger.info(f"   ✅ DIRECTIONAL ZONE: BUY in DISCOUNT (buying low)")
+                            self.logger.info(f"   Entry quality: {entry_quality_buy*100:.0f}%")
+                        else:  # equilibrium
+                            self.logger.info(f"   ⚠️  DIRECTIONAL ZONE: BUY in EQUILIBRIUM (neutral)")
+                            self.logger.info(f"   Entry quality: {entry_quality_buy*100:.0f}%")
+
                 if premium_zone_only:
                     # Filter 3: Only accept PREMIUM zone signals (both BULL and BEAR)
                     if zone != 'premium':
@@ -924,6 +1146,66 @@ class SMCStructureStrategy:
                     self.logger.info(f"   🎯 Entry quality: {entry_quality*100:.0f}%")
             else:
                 self.logger.info(f"   ⚠️  Could not calculate premium/discount zones - proceeding without zone filter")
+
+            # STEP 3D2: Liquidity Sweep Filter (Phase 2.6.5)
+            # SMC Concept: Smart money takes liquidity (stops) before reversing
+            # SELL: Must sweep recent highs (liquidity above resistance)
+            # BUY: Must sweep recent lows (liquidity below support)
+            self.logger.info(f"\n💧 STEP 3D2: Liquidity Sweep Filter (SMC Smart Money Concept)")
+
+            # Use the correct dataframe (15m preferred, fallback to 1h)
+            entry_df = df_15m if df_15m is not None and len(df_15m) > 0 else df_1h
+
+            # Detect liquidity sweep
+            liquidity_sweep = self._detect_liquidity_sweep(
+                df=entry_df,
+                direction=direction_str,
+                current_idx=len(entry_df) - 1,  # Current bar index
+                pair=pair
+            )
+
+            if not liquidity_sweep['has_sweep']:
+                sweep_type = liquidity_sweep['sweep_type']
+                sweep_level = liquidity_sweep['sweep_level']
+                bars_since = liquidity_sweep['bars_since_sweep']
+
+                self.logger.info(f"   ❌ LIQUIDITY SWEEP FILTER: Signal rejected")
+                self.logger.info(f"   Direction: {direction_str.upper()}")
+                self.logger.info(f"   Sweep type: {sweep_type.upper()}")
+
+                if sweep_level > 0:
+                    if direction_str == 'bearish':
+                        self.logger.info(f"   Recent swing high: {sweep_level:.5f}")
+                        self.logger.info(f"   Reason: SELL signal requires recent high to be swept (liquidity grab)")
+                    else:
+                        self.logger.info(f"   Recent swing low: {sweep_level:.5f}")
+                        self.logger.info(f"   Reason: BUY signal requires recent low to be swept (liquidity grab)")
+
+                    if bars_since > 0:
+                        self.logger.info(f"   Bars since sweep: {bars_since} (minimum: {getattr(self.config, 'SMC_LIQUIDITY_SWEEP_MIN_BARS', 2)})")
+                        self.logger.info(f"   💡 Sweep too recent - need {getattr(self.config, 'SMC_LIQUIDITY_SWEEP_MIN_BARS', 2) - bars_since} more bars for reversal")
+                    else:
+                        self.logger.info(f"   💡 No liquidity sweep detected in last {getattr(self.config, 'SMC_LIQUIDITY_SWEEP_MAX_BARS', 10)} bars")
+                else:
+                    self.logger.info(f"   💡 No swing {sweep_type} found in lookback period ({getattr(self.config, 'SMC_LIQUIDITY_SWEEP_LOOKBACK', 20)} bars)")
+
+                self.logger.info(f"   💡 SMC Concept: Smart money takes liquidity before reversing")
+                self.logger.info(f"   💡 Phase 2.6.4 Directional filter: 60% HTF + directional = 28 signals, 21.4% WR (poor)")
+                self.logger.info(f"   💡 Phase 2.6.5 adds liquidity sweep for quality confirmation")
+                return None
+
+            # Log successful sweep
+            sweep_type = liquidity_sweep['sweep_type']
+            sweep_level = liquidity_sweep['sweep_level']
+            bars_since = liquidity_sweep['bars_since_sweep']
+
+            self.logger.info(f"   ✅ LIQUIDITY SWEEP DETECTED: {sweep_type.upper()} swept")
+            if direction_str == 'bearish':
+                self.logger.info(f"   SELL Setup: Recent high {sweep_level:.5f} taken out {bars_since} bars ago")
+                self.logger.info(f"   💡 Smart money grabbed liquidity above resistance → now reversing")
+            else:
+                self.logger.info(f"   BUY Setup: Recent low {sweep_level:.5f} taken out {bars_since} bars ago")
+                self.logger.info(f"   💡 Smart money grabbed liquidity below support → now reversing")
 
             # STEP 3E: Equilibrium Zone Confidence Filter (Phase 2.3)
             # Neutral zones require higher confidence due to lack of zone edge

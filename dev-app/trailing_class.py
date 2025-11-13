@@ -1355,94 +1355,104 @@ class EnhancedTradeProcessor:
                 partial_close_succeeded = False  # Track if partial close succeeded to skip BE stop move
 
                 if enable_partial_close and not getattr(trade, 'partial_close_executed', False):
-                    self.logger.info(f"💡 [PARTIAL CLOSE] Trade {trade.id}: Attempting to close {partial_close_size} position")
-
-                    # Import partial close function
-                    import asyncio
-                    from services.ig_orders import partial_close_position
-                    from dependencies import get_ig_auth_headers
-
+                    # ✅ CRITICAL FIX: Re-check partial_close_executed with database lock to prevent race condition
+                    # This prevents duplicate executions when monitoring cycles overlap
                     try:
-                        # Get auth headers asynchronously
-                        auth_headers = await get_ig_auth_headers()
+                        # Refresh trade from database with FOR UPDATE lock
+                        db.expire(trade)  # Expire current session cache
+                        refreshed_trade = db.query(TradeLog).filter(TradeLog.id == trade.id).with_for_update().first()
 
-                        # Execute partial close asynchronously
-                        partial_result = await partial_close_position(
-                            deal_id=trade.deal_id,
-                            epic=trade.symbol,
-                            direction=trade.direction,
-                            size_to_close=partial_close_size,
-                            auth_headers=auth_headers
-                        )
-
-                        if partial_result.get("success"):
-                            # ✅ Partial close succeeded!
-                            self.logger.info(f"✅ [PARTIAL CLOSE SUCCESS] Trade {trade.id} {trade.symbol}: "
-                                           f"Closed {partial_close_size}, keeping {1.0 - partial_close_size} with original SL")
-
-                            # Update trade tracking
-                            trade.current_size = 1.0 - partial_close_size  # e.g., 0.5 remaining
-                            trade.partial_close_executed = True
-                            trade.partial_close_time = datetime.utcnow()
-                            trade.status = "partial_closed"
-                            trade.moved_to_breakeven = True  # Enable Stage 2/3 progression
-
-                            # Commit changes
-                            try:
-                                db.commit()
-                                self.logger.info(f"✅ [PARTIAL CLOSE DB] Trade {trade.id}: Database updated, "
-                                               f"current_size={trade.current_size}, continuing to Stage 2/3")
-
-                                # ✅ ENHANCEMENT: Move SL to entry + min_distance to guarantee profit
-                                # Calculate profit protection stop level
-                                ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
-                                if ig_min_distance:
-                                    lock_points = max(1, round(ig_min_distance))
-                                else:
-                                    lock_points = trailing_config['stage1_lock_points']
-
-                                if trade.direction.upper() == "BUY":
-                                    profit_protection_stop = trade.entry_price + (lock_points * point_value)
-                                else:  # SELL
-                                    profit_protection_stop = trade.entry_price - (lock_points * point_value)
-
-                                self.logger.info(f"💰 [PARTIAL CLOSE PROTECTION] Trade {trade.id}: Moving SL to entry +/- {lock_points}pts "
-                                               f"to guarantee profit on remaining {trade.current_size} position")
-
-                                # Move the stop loss
-                                try:
-                                    adjustment_result = await self.send_stop_adjustment(
-                                        trade=trade,
-                                        new_stop=profit_protection_stop,
-                                        reason=f"partial_close_protection_{lock_points}pts"
-                                    )
-
-                                    if adjustment_result:
-                                        self.logger.info(f"✅ [SL MOVED] Trade {trade.id}: Stop moved to {profit_protection_stop:.5f} "
-                                                       f"(entry +/- {lock_points}pts) after partial close")
-                                        trade.sl_price = profit_protection_stop
-                                        db.commit()
-                                    else:
-                                        self.logger.warning(f"⚠️ [SL MOVE FAILED] Trade {trade.id}: Could not move stop after partial close")
-                                except Exception as sl_error:
-                                    self.logger.error(f"❌ [SL MOVE ERROR] Trade {trade.id}: {sl_error}")
-
-                                # ✅ SUCCESS: Set flag to skip break-even stop move
-                                partial_close_succeeded = True
-                                self.logger.info(f"🎉 [PARTIAL CLOSE COMPLETE] Trade {trade.id}: Banked 50% at +{profit_points}pts, "
-                                               f"remaining 50% protected at entry +/- {lock_points}pts")
-
-                            except Exception as commit_error:
-                                db.rollback()
-                                self.logger.error(f"❌ [PARTIAL CLOSE DB FAIL] Trade {trade.id}: {commit_error}")
-                                # Fall through to try break-even stop move as fallback
-                                raise
+                        if refreshed_trade.partial_close_executed:
+                            self.logger.info(f"⏭️ [PARTIAL CLOSE SKIP] Trade {trade.id}: Already executed (detected via database lock)")
+                            partial_close_succeeded = True  # Skip break-even logic
                         else:
-                            # ❌ Partial close failed
-                            error_msg = partial_result.get("error", "Unknown error")
-                            self.logger.warning(f"⚠️ [PARTIAL CLOSE FAILED] Trade {trade.id}: {error_msg}")
-                            self.logger.info(f"🔄 [FALLBACK] Trade {trade.id}: Will try moving stop to break-even instead")
-                            # Fall through to execute break-even stop move logic below
+                            self.logger.info(f"💡 [PARTIAL CLOSE] Trade {trade.id}: Attempting to close {partial_close_size} position (WITH ROW LOCK)")
+
+                            # Import partial close function
+                            import asyncio
+                            from services.ig_orders import partial_close_position
+                            from dependencies import get_ig_auth_headers
+
+                            # Get auth headers asynchronously
+                            auth_headers = await get_ig_auth_headers()
+
+                            # Execute partial close asynchronously
+                            partial_result = await partial_close_position(
+                                deal_id=trade.deal_id,
+                                epic=trade.symbol,
+                                direction=trade.direction,
+                                size_to_close=partial_close_size,
+                                auth_headers=auth_headers
+                            )
+
+                            if partial_result.get("success"):
+                                # ✅ Partial close succeeded!
+                                self.logger.info(f"✅ [PARTIAL CLOSE SUCCESS] Trade {trade.id} {trade.symbol}: "
+                                               f"Closed {partial_close_size}, keeping {1.0 - partial_close_size} with original SL")
+
+                                # Update trade tracking (using refreshed_trade to maintain lock)
+                                refreshed_trade.current_size = 1.0 - partial_close_size  # e.g., 0.5 remaining
+                                refreshed_trade.partial_close_executed = True
+                                refreshed_trade.partial_close_time = datetime.utcnow()
+                                refreshed_trade.status = "partial_closed"
+                                refreshed_trade.moved_to_breakeven = True  # Enable Stage 2/3 progression
+
+                                # Commit changes
+                                try:
+                                    db.commit()
+                                    self.logger.info(f"✅ [PARTIAL CLOSE DB] Trade {trade.id}: Database updated, "
+                                                   f"current_size={refreshed_trade.current_size}, continuing to Stage 2/3")
+
+                                    # ✅ ENHANCEMENT: Move SL to entry + min_distance to guarantee profit
+                                    # Calculate profit protection stop level
+                                    ig_min_distance = getattr(refreshed_trade, 'min_stop_distance_points', None)
+                                    if ig_min_distance:
+                                        lock_points = max(1, round(ig_min_distance))
+                                    else:
+                                        lock_points = trailing_config['stage1_lock_points']
+
+                                    if refreshed_trade.direction.upper() == "BUY":
+                                        profit_protection_stop = refreshed_trade.entry_price + (lock_points * point_value)
+                                    else:  # SELL
+                                        profit_protection_stop = refreshed_trade.entry_price - (lock_points * point_value)
+
+                                    self.logger.info(f"💰 [PARTIAL CLOSE PROTECTION] Trade {trade.id}: Moving SL to entry +/- {lock_points}pts "
+                                                   f"to guarantee profit on remaining {refreshed_trade.current_size} position")
+
+                                    # Move the stop loss
+                                    try:
+                                        adjustment_result = await self.send_stop_adjustment(
+                                            trade=refreshed_trade,
+                                            new_stop=profit_protection_stop,
+                                            reason=f"partial_close_protection_{lock_points}pts"
+                                        )
+
+                                        if adjustment_result:
+                                            self.logger.info(f"✅ [SL MOVED] Trade {trade.id}: Stop moved to {profit_protection_stop:.5f} "
+                                                           f"(entry +/- {lock_points}pts) after partial close")
+                                            refreshed_trade.sl_price = profit_protection_stop
+                                            db.commit()
+                                        else:
+                                            self.logger.warning(f"⚠️ [SL MOVE FAILED] Trade {trade.id}: Could not move stop after partial close")
+                                    except Exception as sl_error:
+                                        self.logger.error(f"❌ [SL MOVE ERROR] Trade {trade.id}: {sl_error}")
+
+                                    # ✅ SUCCESS: Set flag to skip break-even stop move
+                                    partial_close_succeeded = True
+                                    self.logger.info(f"🎉 [PARTIAL CLOSE COMPLETE] Trade {trade.id}: Banked 50% at +{profit_points}pts, "
+                                                   f"remaining 50% protected at entry +/- {lock_points}pts")
+
+                                except Exception as commit_error:
+                                    db.rollback()
+                                    self.logger.error(f"❌ [PARTIAL CLOSE DB FAIL] Trade {trade.id}: {commit_error}")
+                                    # Fall through to try break-even stop move as fallback
+                                    raise
+                            else:
+                                # ❌ Partial close failed
+                                error_msg = partial_result.get("error", "Unknown error")
+                                self.logger.warning(f"⚠️ [PARTIAL CLOSE FAILED] Trade {trade.id}: {error_msg}")
+                                self.logger.info(f"🔄 [FALLBACK] Trade {trade.id}: Will try moving stop to break-even instead")
+                                # Fall through to execute break-even stop move logic below
 
                     except Exception as partial_error:
                         # ❌ Exception during partial close attempt
