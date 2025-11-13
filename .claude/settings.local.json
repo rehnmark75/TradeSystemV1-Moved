@@ -79,7 +79,10 @@
       "Bash(if grep -q \"Win Rate:\\|📊 BACKTEST COMPLETE\" worker/app/forex_scanner/logs/smc_15m_v2.6.6_optimal_20251112.log)",
       "Bash(then echo '✅ Phase 2.6.6 optimal backtest completed!')",
       "Bash(if grep -q \"Win Rate:\\|📊 BACKTEST COMPLETE\" worker/app/forex_scanner/logs/smc_15m_v2.6.7_baseline_revert_20251112.log)",
-      "Bash(then echo '✅ Phase 2.6.7 baseline validation completed!')"
+      "Bash(then echo '✅ Phase 2.6.7 baseline validation completed!')",
+      "Bash(sudo mkdir:*)",
+      "Bash(sudo chown:*)",
+      "Bash(lsof:*)"
     ],
     "deny": [],
     "ask": []
