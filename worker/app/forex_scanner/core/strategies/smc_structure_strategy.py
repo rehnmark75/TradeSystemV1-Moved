@@ -3,9 +3,9 @@
 SMC Pure Structure Strategy
 Structure-based trading using Smart Money Concepts (pure price action)
 
-VERSION: 2.6.5 (Phase 2.6.5 - Liquidity Sweep Filter)
-DATE: 2025-11-12
-STATUS: Testing - SMC liquidity sweep concept (smart money takes liquidity before reversing)
+VERSION: 2.7.1 (Swing Proximity Filter)
+DATE: 2025-11-15
+STATUS: Testing - Structure-based entry timing (replaces PD filter)
 
 Performance Metrics (v2.1.1 Baseline - 30 days, 9 pairs):
 - Total Signals: 112
@@ -163,6 +163,10 @@ class SMCStructureStrategy:
         self.ob_require_rejection = getattr(self.config, 'SMC_OB_REQUIRE_REJECTION', True)
         self.ob_rejection_min_wick = getattr(self.config, 'SMC_OB_REJECTION_MIN_WICK_RATIO', 0.60)
         self.ob_sl_buffer_pips = getattr(self.config, 'SMC_OB_SL_BUFFER_PIPS', 5)
+
+        # Swing Proximity Filter configuration (v2.7.1)
+        self.swing_proximity_filter_enabled = getattr(self.config, 'SMC_SWING_PROXIMITY_FILTER_ENABLED', True)
+        self.swing_exhaustion_threshold = getattr(self.config, 'SMC_SWING_EXHAUSTION_THRESHOLD', 0.20)
 
     def _check_cooldown(self, pair: str, current_time: datetime) -> tuple[bool, str]:
         """
@@ -496,6 +500,118 @@ class SMCStructureStrategy:
         else:
             return False, f"Momentum lacking: {aligned}/{lookback} {candle_type} 15m candles (need {min_required})"
 
+    def _validate_swing_proximity(
+        self,
+        current_price: float,
+        trade_direction: str,
+        swing_highs: List[Dict],
+        swing_lows: List[Dict],
+        pip_value: float
+    ) -> tuple:
+        """
+        TIER 1 FILTER: Swing Proximity Validator (v2.7.1)
+
+        Validates entry price distance from significant swing levels to prevent exhaustion zone entries.
+        REPLACES the failed Premium/Discount zone filter with structure-based logic.
+
+        CRITICAL DIFFERENCE FROM PD FILTER:
+          - PD Filter (FAILED): Used arbitrary 33% zones based on fixed lookback range
+          - Swing Filter (NEW): Uses actual HTF swing highs/lows from trend structure analysis
+
+        WHY PD FILTER FAILED (v2.6.7 analysis):
+          - Rejected ALL 8 winners in Phase 2.6.3 (SELL in discount = valid trend continuation)
+          - "SELL in discount = selling at bottom" was WRONG assumption in strong trends
+          - Reality: SELL in discount during downtrend = VALID continuation setup
+
+        HOW SWING FILTER IS BETTER:
+          - BUY signals: Reject if too close to swing HIGH (chasing/exhaustion)
+          - SELL signals: Reject if too close to swing LOW (chasing/exhaustion)
+          - Allows trend continuations at proper pullback distances
+          - Adaptive: Uses real swing points, not arbitrary % zones
+
+        Example (SELL in downtrend):
+          Swing High: 154.50
+          Swing Low:  153.90 (range = 60 pips)
+          Entry: 154.30
+          Position: (154.30 - 153.90) / 60 = 67% from low ✅ ALLOW (good pullback from low)
+          Entry: 154.00
+          Position: (154.00 - 153.90) / 60 = 17% from low ❌ REJECT (too close to low = exhaustion)
+
+        Args:
+            current_price: Entry price
+            trade_direction: 'BULL' or 'BEAR'
+            swing_highs: List of swing high dicts from HTF analysis
+            swing_lows: List of swing low dicts from HTF analysis
+            pip_value: Pip value for distance calculation
+
+        Returns:
+            tuple: (is_valid, reason_string)
+        """
+        if not self.swing_proximity_filter_enabled:
+            return True, "Swing proximity filter disabled"
+
+        if not swing_highs or not swing_lows:
+            return True, "Insufficient swing data - allowing entry"
+
+        last_swing_high = swing_highs[-1]['price']
+        last_swing_low = swing_lows[-1]['price']
+        swing_range = last_swing_high - last_swing_low
+
+        if swing_range <= 0:
+            return True, "Invalid swing range - allowing entry"
+
+        # Exhaustion threshold from config (default 20%)
+        exhaustion_threshold = self.swing_exhaustion_threshold
+
+        if trade_direction == 'BULL':
+            # For BUY: Check distance from swing HIGH (avoid buying near tops)
+            distance_from_high = last_swing_high - current_price
+            position_in_range = distance_from_high / swing_range
+            distance_pips = distance_from_high / pip_value
+
+            if position_in_range < exhaustion_threshold:
+                return False, (
+                    f"BUY rejected - Too close to swing high (exhaustion/chasing zone)\n"
+                    f"   Current price: {current_price:.5f}\n"
+                    f"   Swing High: {last_swing_high:.5f} (only {distance_pips:.1f} pips away)\n"
+                    f"   Swing Low: {last_swing_low:.5f}\n"
+                    f"   Swing Range: {swing_range/pip_value:.1f} pips\n"
+                    f"   Position: {position_in_range*100:.0f}% from high (need >{exhaustion_threshold*100:.0f}%)\n"
+                    f"   💡 Buying near swing highs = chasing price, not pullback entry\n"
+                    f"   💡 PD filter would use arbitrary zones - this uses REAL swing structure"
+                )
+            else:
+                return True, (
+                    f"BUY allowed - Good distance from swing high ({distance_pips:.1f} pips)\n"
+                    f"   Position: {position_in_range*100:.0f}% from high (range: {swing_range/pip_value:.1f} pips)\n"
+                    f"   ✅ Proper pullback entry, not exhaustion zone"
+                )
+
+        else:  # BEAR
+            # For SELL: Check distance from swing LOW (avoid selling near bottoms)
+            distance_from_low = current_price - last_swing_low
+            position_in_range = distance_from_low / swing_range
+            distance_pips = distance_from_low / pip_value
+
+            if position_in_range < exhaustion_threshold:
+                return False, (
+                    f"SELL rejected - Too close to swing low (exhaustion/chasing zone)\n"
+                    f"   Current price: {current_price:.5f}\n"
+                    f"   Swing High: {last_swing_high:.5f}\n"
+                    f"   Swing Low: {last_swing_low:.5f} (only {distance_pips:.1f} pips away)\n"
+                    f"   Swing Range: {swing_range/pip_value:.1f} pips\n"
+                    f"   Position: {position_in_range*100:.0f}% from low (need >{exhaustion_threshold*100:.0f}%)\n"
+                    f"   💡 Selling near swing lows = chasing price, not pullback entry\n"
+                    f"   💡 PD filter rejected this type (WRONG!) - swing filter is smarter"
+                )
+            else:
+                return True, (
+                    f"SELL allowed - Good distance from swing low ({distance_pips:.1f} pips)\n"
+                    f"   Position: {position_in_range*100:.0f}% from low (range: {swing_range/pip_value:.1f} pips)\n"
+                    f"   ✅ Proper pullback entry, not exhaustion zone\n"
+                    f"   ✅ PD filter would reject trend continuations - this allows them"
+                )
+
     def detect_signal(
         self,
         df_1h: pd.DataFrame,
@@ -531,6 +647,14 @@ class SMCStructureStrategy:
         can_trade, cooldown_reason = self._check_cooldown(pair, current_time)
         if not can_trade:
             self.logger.info(f"   ⏱️  {cooldown_reason} - SKIPPING")
+            return None
+
+        # TIER 0 FILTER: Pair Blacklist (v2.8.5 - Quality Optimization)
+        blacklist_pairs = getattr(self.config, 'SMC_BLACKLIST_PAIRS', [])
+        if pair in blacklist_pairs:
+            self.logger.info(f"\n🚫 PAIR BLACKLIST FILTER:")
+            self.logger.info(f"   ❌ {pair} is blacklisted (poor historical performance)")
+            self.logger.info(f"   💡 Based on v2.8.4 analysis: Low win rate on this pair")
             return None
 
         # TIER 1 FILTER: Session Quality Check (use candle timestamp, not current time)
@@ -582,64 +706,27 @@ class SMCStructureStrategy:
                 # Use BOS/CHoCH direction as trend
                 final_trend = 'BULL' if bos_choch_direction == 'bullish' else 'BEAR'
 
-                # PHASE 2.6.2: Multi-factor HTF strength calculation
-                # Calculate strength: use swing strength if aligned, otherwise calculate from multiple factors
+                # PHASE 2.8.0: DYNAMIC HTF STRENGTH - Use new multi-factor quality calculation
+                # ALWAYS use the dynamic strength from SMCTrendStructure.analyze_trend()
+                # This provides true quality-based scoring (30-100% distribution)
+                final_strength = trend_analysis['strength']
+
                 if trend_analysis['trend'] == final_trend:
-                    # BOS/CHoCH aligns with swing structure - use swing strength
-                    final_strength = trend_analysis['strength']
+                    # BOS/CHoCH aligns with swing structure - optimal setup
                     self.logger.info(f"   ✅ BOS/CHoCH: {bos_choch_direction.upper()} → {final_trend}")
-                    self.logger.info(f"   ✅ Swing structure ALIGNS: {trend_analysis['structure_type']} ({trend_analysis['strength']*100:.0f}%)")
+                    self.logger.info(f"   ✅ Swing structure ALIGNS: {trend_analysis['structure_type']}")
+                    self.logger.info(f"   🎯 DYNAMIC HTF Strength: {final_strength*100:.0f}%")
                 else:
-                    # BOS/CHoCH differs from swing structure - calculate multi-factor strength
-                    # Factor 1: BOS/CHoCH base strength (50% - it exists but conflicts with swings)
-                    bos_base = 0.50
-
-                    # Factor 2: Swing structure opposition penalty (-10% to -30%)
-                    # If swings show opposite trend, reduce strength
-                    swing_strength = trend_analysis['strength']
-                    if trend_analysis['trend'] in ['BULL', 'BEAR'] and trend_analysis['trend'] != final_trend:
-                        # Strong opposing swings = weaker BOS signal
-                        swing_penalty = swing_strength * 0.30  # Max 30% penalty
-                    else:
-                        # Ranging/unknown swings = small penalty
-                        swing_penalty = 0.10
-
-                    # Factor 3: Number of confirming swings bonus (0% to +20%)
-                    # More swings in BOS direction = stronger
-                    num_swings_high = len(trend_analysis['swing_highs'])
-                    num_swings_low = len(trend_analysis['swing_lows'])
-
-                    if final_trend == 'BULL':
-                        # Count HL (higher lows) as confirming swings
-                        confirming_swings = num_swings_low if num_swings_low > 0 else 0
-                    else:  # BEAR
-                        # Count LH (lower highs) as confirming swings
-                        confirming_swings = num_swings_high if num_swings_high > 0 else 0
-
-                    swing_bonus = min(confirming_swings / 10.0, 0.20)  # Max 20% bonus (need 10+ swings)
-
-                    # Calculate final strength
-                    final_strength = bos_base - swing_penalty + swing_bonus
-
-                    # Clamp to 50-80% range (BOS without swing alignment can't be >80%)
-                    final_strength = max(0.50, min(0.80, final_strength))
-
+                    # BOS/CHoCH differs from swing structure - still use dynamic strength but log conflict
+                    # The dynamic calculation factors in the swing quality regardless
                     self.logger.info(f"   ✅ BOS/CHoCH: {bos_choch_direction.upper()} → {final_trend}")
                     self.logger.info(f"   ⚠️  Swing structure differs: {trend_analysis['trend']} ({trend_analysis['structure_type']})")
-                    self.logger.info(f"   📊 Multi-factor strength calculation:")
-                    self.logger.info(f"      Base (BOS exists): 50%")
-                    self.logger.info(f"      Swing penalty: -{swing_penalty*100:.0f}%")
-                    self.logger.info(f"      Swing bonus: +{swing_bonus*100:.0f}%")
-                    self.logger.info(f"      Final HTF strength: {final_strength*100:.0f}%")
+                    self.logger.info(f"   🎯 DYNAMIC HTF Strength: {final_strength*100:.0f}% (from multi-factor analysis)")
+                    self.logger.info(f"      ℹ️  Using quality-based strength regardless of BOS/swing alignment")
             else:
                 # No BOS/CHoCH found - reject signal
                 self.logger.info(f"   ❌ No BOS/CHoCH detected on HTF - SIGNAL REJECTED")
                 self.logger.info(f"   ℹ️  Swing structure: {trend_analysis['trend']} (not sufficient without BOS/CHoCH)")
-                return None
-
-            # Must have minimum strength
-            if final_strength < 0.50:
-                self.logger.info(f"   ❌ Trend too weak ({final_strength*100:.0f}% < 50%) - SIGNAL REJECTED")
                 return None
 
             self.logger.info(f"   ✅ HTF Trend confirmed: {final_trend} (strength: {final_strength*100:.0f}%)")
@@ -683,6 +770,30 @@ class SMCStructureStrategy:
                 return None
             else:
                 self.logger.info(f"   ✅ {momentum_reason}")
+
+            # TIER 1 FILTER: Swing Proximity Validator (v2.7.1)
+            # Replaces failed Premium/Discount filter with structure-based logic
+            self.logger.info(f"\n📏 TIER 1 FILTER: Validating Swing Proximity (Structure-Based)")
+
+            # Get current price for proximity check
+            current_price = df_1h['close'].iloc[-1]
+
+            swing_proximity_valid, proximity_reason = self._validate_swing_proximity(
+                current_price=current_price,
+                trade_direction=final_trend,
+                swing_highs=trend_analysis['swing_highs'],
+                swing_lows=trend_analysis['swing_lows'],
+                pip_value=pip_value
+            )
+
+            if not swing_proximity_valid:
+                self.logger.info(f"\n❌ SWING PROXIMITY FILTER: Signal rejected")
+                self.logger.info(f"   {proximity_reason}")
+                self.logger.info(f"   💡 NOTE: This REPLACES the failed Premium/Discount filter")
+                self.logger.info(f"   💡 PD filter used arbitrary zones - this uses REAL swing structure")
+                return None
+            else:
+                self.logger.info(f"   {proximity_reason}")
 
             # STEP 2: Detect S/R levels (optional - for confidence boost)
             self.logger.info(f"\n🎯 STEP 2: Detecting Support/Resistance Levels")
@@ -1343,14 +1454,25 @@ class SMCStructureStrategy:
 
             confidence = htf_score + pattern_score + sr_score + rr_score
 
-            # STEP 6: Universal Confidence Floor (Phase 2.4)
-            # Reject low-confidence signals regardless of other factors
-            MIN_CONFIDENCE = 0.45  # 45% minimum confidence for all entries
+            # STEP 6: Confidence Range Filter (v2.8.5 - Quality Optimization)
+            # Reject both low-confidence AND overconfident signals
+            # Analysis showed 70-76% confidence = 0% WR (overconfident paradox)
+            # Optimal range: 50-70% (55-60% had 73% WR in analysis)
+            MIN_CONFIDENCE = getattr(self.config, 'SMC_MIN_CONFIDENCE', 0.50)
+            MAX_CONFIDENCE = getattr(self.config, 'SMC_MAX_CONFIDENCE', 0.70)
 
             if confidence < MIN_CONFIDENCE:
-                self.logger.info(f"\n🎯 STEP 6: Universal Confidence Filter")
+                self.logger.info(f"\n🎯 STEP 6: Confidence Range Filter")
                 self.logger.info(f"   ❌ Signal confidence too low: {confidence*100:.0f}% < {MIN_CONFIDENCE*100:.0f}%")
                 self.logger.info(f"   💡 Minimum confidence required for entry quality")
+                self.logger.info(f"   📊 Breakdown: HTF={htf_score*100:.0f}% Pattern={pattern_score*100:.0f}% SR={sr_score*100:.0f}% RR={rr_score*100:.0f}%")
+                return None
+
+            if confidence > MAX_CONFIDENCE:
+                self.logger.info(f"\n🎯 STEP 6: Confidence Range Filter")
+                self.logger.info(f"   ❌ Signal overconfident: {confidence*100:.0f}% > {MAX_CONFIDENCE*100:.0f}%")
+                self.logger.info(f"   💡 CONFIDENCE PARADOX: 70-76% signals had 0% WR in v2.8.4 analysis")
+                self.logger.info(f"   💡 Overconfidence indicates false positives (misaligned factors)")
                 self.logger.info(f"   📊 Breakdown: HTF={htf_score*100:.0f}% Pattern={pattern_score*100:.0f}% SR={sr_score*100:.0f}% RR={rr_score*100:.0f}%")
                 return None
 
