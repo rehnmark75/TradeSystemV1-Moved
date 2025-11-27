@@ -651,12 +651,20 @@ class SignalDetector:
         Detect SMC Pure Structure signals (price action only)
 
         Uses multi-timeframe analysis:
-        - Entry timeframe: 1H (pattern detection, S/R levels)
-        - HTF timeframe: 4H (trend structure analysis)
+        - Entry timeframe: From config SMC_ENTRY_TIMEFRAME (default 15m)
+        - HTF timeframe: From config SMC_HTF_TIMEFRAME (default 4H)
         """
-        # SMC Structure strategy always uses 1H for entry, 4H for trend
-        entry_tf = '1h'
-        htf_tf = '4h'
+        # Load timeframes from SMC structure config
+        try:
+            from configdata.strategies import config_smc_structure as smc_config
+            entry_tf = getattr(smc_config, 'SMC_ENTRY_TIMEFRAME', '15m')
+            htf_tf = getattr(smc_config, 'SMC_HTF_TIMEFRAME', '4h')
+        except ImportError:
+            # Fallback to defaults if config not available
+            entry_tf = '15m'
+            htf_tf = '4h'
+
+        self.logger.debug(f"🔍 [SMC_STRUCTURE] Using entry_tf={entry_tf}, htf_tf={htf_tf}")
 
         try:
             # Initialize strategy if not already done
@@ -665,21 +673,21 @@ class SignalDetector:
                 from .strategies import create_smc_structure_strategy
 
                 self.smc_structure_strategy = create_smc_structure_strategy(logger=self.logger)
-                self.logger.info("✅ SMC Structure strategy initialized")
+                self.logger.info(f"✅ SMC Structure strategy initialized (entry_tf={entry_tf}, htf_tf={htf_tf})")
 
-            # Get 1H data (entry timeframe)
-            df_1h = self.data_fetcher.get_enhanced_data(
+            # Get entry timeframe data (15m by default, configured via SMC_ENTRY_TIMEFRAME)
+            df_entry = self.data_fetcher.get_enhanced_data(
                 epic=epic,
                 pair=pair,
                 timeframe=entry_tf,
                 lookback_hours=200
             )
 
-            if df_1h is None or len(df_1h) < 50:
-                self.logger.debug(f"Insufficient 1H data for {epic} (got {len(df_1h) if df_1h is not None else 0} bars)")
+            if df_entry is None or len(df_entry) < 50:
+                self.logger.debug(f"Insufficient {entry_tf} data for {epic} (got {len(df_entry) if df_entry is not None else 0} bars)")
                 return None
 
-            # Get 4H data (HTF for trend)
+            # Get HTF data (4H by default, configured via SMC_HTF_TIMEFRAME)
             df_4h = self.data_fetcher.get_enhanced_data(
                 epic=epic,
                 pair=pair,
@@ -688,29 +696,33 @@ class SignalDetector:
             )
 
             if df_4h is None or len(df_4h) < 20:
-                self.logger.debug(f"Insufficient 4H data for {epic} (got {len(df_4h) if df_4h is not None else 0} bars)")
+                self.logger.debug(f"Insufficient {htf_tf} data for {epic} (got {len(df_4h) if df_4h is not None else 0} bars)")
                 return None
 
-            # Get 15m data for BOS/CHoCH detection (optional)
-            df_15m = None
-            try:
-                df_15m = self.data_fetcher.get_enhanced_data(
-                    epic=epic,
-                    pair=pair,
-                    timeframe='15m',
-                    lookback_hours=100  # ~400 bars of 15m data
-                )
-                if df_15m is not None:
-                    self.logger.debug(f"🔍 [SMC_STRUCTURE] Got 15m data for BOS/CHoCH detection: {len(df_15m)} bars")
-            except Exception as e:
-                self.logger.debug(f"⚠️ [SMC_STRUCTURE] Could not fetch 15m data (non-critical): {e}")
-                df_15m = None
+            # df_15m is the entry timeframe data when entry_tf='15m'
+            # For backwards compatibility, pass it as df_15m to detect_signal
+            df_15m = df_entry if entry_tf == '15m' else None
 
-            self.logger.debug(f"🔍 [SMC_STRUCTURE] Analyzing {epic}: 15m bars={len(df_15m) if df_15m is not None else 0}, 1H bars={len(df_1h)}, 4H bars={len(df_4h)}")
+            # If entry_tf is not 15m but we still need 15m for BOS/CHoCH, fetch it separately
+            if entry_tf != '15m' and df_15m is None:
+                try:
+                    df_15m = self.data_fetcher.get_enhanced_data(
+                        epic=epic,
+                        pair=pair,
+                        timeframe='15m',
+                        lookback_hours=100
+                    )
+                    if df_15m is not None:
+                        self.logger.debug(f"🔍 [SMC_STRUCTURE] Got 15m data for BOS/CHoCH detection: {len(df_15m)} bars")
+                except Exception as e:
+                    self.logger.debug(f"⚠️ [SMC_STRUCTURE] Could not fetch 15m data (non-critical): {e}")
+                    df_15m = None
 
-            # Detect signal
+            self.logger.debug(f"🔍 [SMC_STRUCTURE] Analyzing {epic}: entry_tf={entry_tf} ({len(df_entry)} bars), htf_tf={htf_tf} ({len(df_4h)} bars)")
+
+            # Detect signal - pass df_entry as df_1h for backwards compatibility with strategy interface
             signal = self.smc_structure_strategy.detect_signal(
-                df_1h=df_1h,
+                df_1h=df_entry,
                 df_4h=df_4h,
                 epic=epic,
                 pair=pair,
@@ -718,9 +730,11 @@ class SignalDetector:
             )
 
             if signal:
-                self.logger.info(f"✅ [SMC_STRUCTURE] Signal detected for {epic}: {signal['signal']} @ {signal['entry_price']:.5f}")
+                # Update signal timeframe to reflect actual entry timeframe used
+                signal['timeframe'] = entry_tf
+                self.logger.info(f"✅ [SMC_STRUCTURE] Signal detected for {epic}: {signal['signal']} @ {signal['entry_price']:.5f} (tf={entry_tf})")
                 # Add market context if available
-                signal = self._add_market_context(signal, df_1h)
+                signal = self._add_market_context(signal, df_entry)
 
             return signal
 

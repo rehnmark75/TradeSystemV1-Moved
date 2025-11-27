@@ -102,6 +102,9 @@ class SMCStructureStrategy:
 
     def _load_config(self):
         """Load strategy configuration"""
+        # Entry timeframe for signal detection
+        self.entry_timeframe = getattr(self.config, 'SMC_ENTRY_TIMEFRAME', '15m')
+
         # Higher timeframe for trend analysis
         self.htf_timeframe = getattr(self.config, 'SMC_HTF_TIMEFRAME', '4h')
         self.htf_lookback = getattr(self.config, 'SMC_HTF_LOOKBACK', 100)
@@ -1305,18 +1308,22 @@ class SMCStructureStrategy:
                 self.logger.info(f"   💡 Phase 2.6.5 adds liquidity sweep for quality confirmation")
                 return None
 
-            # Log successful sweep
+            # Log successful sweep or disabled state
             sweep_type = liquidity_sweep['sweep_type']
             sweep_level = liquidity_sweep['sweep_level']
             bars_since = liquidity_sweep['bars_since_sweep']
 
-            self.logger.info(f"   ✅ LIQUIDITY SWEEP DETECTED: {sweep_type.upper()} swept")
-            if direction_str == 'bearish':
-                self.logger.info(f"   SELL Setup: Recent high {sweep_level:.5f} taken out {bars_since} bars ago")
-                self.logger.info(f"   💡 Smart money grabbed liquidity above resistance → now reversing")
+            # Check if filter is disabled (sweep_type='none' indicates bypass)
+            if sweep_type == 'none':
+                self.logger.info(f"   ⏭️  SKIPPED: Filter disabled (SMC_LIQUIDITY_SWEEP_ENABLED = False)")
             else:
-                self.logger.info(f"   BUY Setup: Recent low {sweep_level:.5f} taken out {bars_since} bars ago")
-                self.logger.info(f"   💡 Smart money grabbed liquidity below support → now reversing")
+                self.logger.info(f"   ✅ LIQUIDITY SWEEP DETECTED: {sweep_type.upper()} swept")
+                if direction_str == 'bearish':
+                    self.logger.info(f"   SELL Setup: Recent high {sweep_level:.5f} taken out {bars_since} bars ago")
+                    self.logger.info(f"   💡 Smart money grabbed liquidity above resistance → now reversing")
+                else:
+                    self.logger.info(f"   BUY Setup: Recent low {sweep_level:.5f} taken out {bars_since} bars ago")
+                    self.logger.info(f"   💡 Smart money grabbed liquidity below support → now reversing")
 
             # STEP 3E: Equilibrium Zone Confidence Filter (Phase 2.3)
             # Neutral zones require higher confidence due to lack of zone edge
