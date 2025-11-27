@@ -136,7 +136,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15,   # Move to BE after 6 pts
+        'break_even_trigger_points': 20,   # Move to BE after 20 pts (65% of typical 31-pip TP)
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
     },
@@ -150,7 +150,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15, 
+        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP) 
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
     },
@@ -164,7 +164,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15,  
+        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)  
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
     },
@@ -178,7 +178,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15,
+        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
     },
@@ -192,7 +192,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15, 
+        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP) 
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
     },
@@ -208,7 +208,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15,   # Later BE
+        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)   # Later BE
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
     },
@@ -266,7 +266,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15,
+        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
     },
@@ -280,7 +280,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15,
+        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
     },
@@ -294,7 +294,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15, 
+        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP) 
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
     },
@@ -410,7 +410,7 @@ DEFAULT_TRAILING_CONFIG = {
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 15,
+        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)
         'enable_partial_close': True,     # Enable partial close at break-even
         'partial_close_size': 0.5,        # Close 50% of position
 }

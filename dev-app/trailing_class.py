@@ -1377,10 +1377,11 @@ class EnhancedTradeProcessor:
                             auth_headers = await get_ig_auth_headers()
 
                             # Execute partial close asynchronously
+                            # ✅ FIX: Use refreshed_trade instead of detached trade object
                             partial_result = await partial_close_position(
-                                deal_id=trade.deal_id,
-                                epic=trade.symbol,
-                                direction=trade.direction,
+                                deal_id=refreshed_trade.deal_id,
+                                epic=refreshed_trade.symbol,
+                                direction=refreshed_trade.direction,
                                 size_to_close=partial_close_size,
                                 auth_headers=auth_headers
                             )
@@ -1458,6 +1459,13 @@ class EnhancedTradeProcessor:
                         # ❌ Exception during partial close attempt
                         self.logger.error(f"❌ [PARTIAL CLOSE ERROR] Trade {trade.id}: {str(partial_error)}")
                         self.logger.info(f"🔄 [FALLBACK] Trade {trade.id}: Exception occurred, trying break-even stop move")
+                        # ✅ FIX: Re-merge trade object back into session after exception
+                        # The trade object was detached by db.expire() earlier
+                        try:
+                            db.merge(trade)
+                            self.logger.debug(f"🔄 [SESSION FIX] Trade {trade.id}: Re-merged trade object into session")
+                        except Exception as merge_error:
+                            self.logger.warning(f"⚠️ [SESSION FIX FAILED] Trade {trade.id}: {merge_error}")
                         # Fall through to execute break-even stop move logic below
                 else:
                     if not enable_partial_close:
