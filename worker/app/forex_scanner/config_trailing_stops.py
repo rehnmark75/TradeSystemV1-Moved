@@ -1,8 +1,23 @@
 # config_trailing_stops.py
 """
-Progressive 3-Stage Trailing Stop Configuration
+Progressive 3-Stage Trailing Stop Configuration with MFE Protection
 Used by both live trading and backtest systems
+
+Stage 2.5 (MFE Protection):
+- Triggers when profit reaches mfe_protection_threshold_pct of target (default: 70%)
+- AND profit declines by mfe_protection_decline_pct from peak (default: 10%)
+- Locks mfe_protection_lock_pct of MFE (default: 60%)
+- Example: Target=30 pips, MFE=26 pips (86% of target)
+  - If profit drops to 23.4 pips (10% decline from 26), trigger protection
+  - Lock 60% of 26 = 15.6 pips minimum exit
 """
+
+# 🆕 Stage 2.5: Global MFE Protection defaults (can be overridden per pair)
+MFE_PROTECTION_DEFAULTS = {
+    'mfe_protection_threshold_pct': 0.70,  # Trigger when profit >= 70% of target
+    'mfe_protection_decline_pct': 0.10,    # Trigger on 10% decline from peak MFE
+    'mfe_protection_lock_pct': 0.60,       # Lock 60% of MFE when triggered
+}
 
 PAIR_TRAILING_CONFIGS = {
     # ========== MAJOR PAIRS - Standard Volatility ==========

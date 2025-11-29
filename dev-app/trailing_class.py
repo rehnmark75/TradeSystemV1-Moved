@@ -703,6 +703,14 @@ class Progressive3StageTrailing(TrailingStrategy):
 
         current_stop = trade.sl_price or 0.0
 
+        # 🆕 Stage 2.5: MFE Protection Check
+        # Estimate MFE from current stop position (higher stop = higher MFE was reached)
+        mfe_protection_level = self._check_mfe_protection(trade, current_price, current_stop, profit_points, point_value)
+        if mfe_protection_level is not None:
+            self.logger.info(f"[MFE PROTECTION] {trade.symbol}: "
+                           f"Profit declined, protecting at {mfe_protection_level:.5f}")
+            return mfe_protection_level
+
         # Determine which stage we're in and calculate appropriate trail level
         if profit_points >= stage3_trigger:
             # Stage 3: ATR-based trailing for trend following
@@ -897,6 +905,94 @@ class Progressive3StageTrailing(TrailingStrategy):
                         f"{retracement_percentage*100:.0f}% retracement = {trail_distance_points:.1f}pts trail distance")
 
         return round(trail_level, 5)
+
+    def _check_mfe_protection(self, trade: TradeLog, current_price: float,
+                              current_stop: float, current_profit_points: float,
+                              point_value: float) -> Optional[float]:
+        """
+        Stage 2.5: MFE Protection Rule
+
+        When profit has reached 70% of target AND then declines 10% from peak (MFE),
+        lock 60% of MFE to prevent giving back significant profits.
+
+        MFE is estimated from the current stop position - if stop is in profit,
+        it indicates how far in profit the trade has gone (via previous stage progressions).
+
+        Args:
+            trade: The trade being monitored
+            current_price: Current market price
+            current_stop: Current stop loss price
+            current_profit_points: Current profit in points
+            point_value: Point value for the pair (e.g., 0.0001 for EURUSD)
+
+        Returns:
+            Trail level if MFE protection should trigger, None otherwise
+        """
+        direction = trade.direction.upper()
+
+        # Get target profit from trade's TP or config default
+        if trade.tp_price and trade.entry_price:
+            if direction == "BUY":
+                target_points = abs(trade.tp_price - trade.entry_price) / point_value
+            else:
+                target_points = abs(trade.entry_price - trade.tp_price) / point_value
+        else:
+            # Default target if TP not set
+            target_points = 30.0  # Default 30 points
+
+        # MFE Protection configuration (from config_trailing_stops.py defaults)
+        mfe_threshold_pct = 0.70   # Trigger when profit >= 70% of target
+        mfe_decline_pct = 0.10     # Trigger on 10% decline from MFE
+        mfe_lock_pct = 0.60        # Lock 60% of MFE
+
+        # Estimate MFE from current stop position
+        # If stop is in profit (moved via stages), the profit locked indicates approximate MFE
+        if current_stop > 0:
+            if direction == "BUY":
+                mfe_from_stop = (current_stop - trade.entry_price) / point_value
+            else:
+                mfe_from_stop = (trade.entry_price - current_stop) / point_value
+
+            # MFE is the better of current profit or profit indicated by stop
+            estimated_mfe = max(current_profit_points, mfe_from_stop + 5)  # +5 buffer
+        else:
+            # No stop in profit, use current profit as MFE
+            estimated_mfe = current_profit_points
+
+        # Check if MFE threshold is reached (70% of target)
+        mfe_threshold = target_points * mfe_threshold_pct
+        if estimated_mfe < mfe_threshold:
+            # MFE hasn't reached threshold yet
+            return None
+
+        # Check for profit decline (10% drop from MFE)
+        if estimated_mfe > 0:
+            decline_pct = 1.0 - (current_profit_points / estimated_mfe)
+            if decline_pct >= mfe_decline_pct:
+                # MFE Protection triggered!
+                protected_profit_points = estimated_mfe * mfe_lock_pct
+
+                # Calculate trail level that locks this profit
+                if direction == "BUY":
+                    mfe_trail_level = trade.entry_price + (protected_profit_points * point_value)
+                else:
+                    mfe_trail_level = trade.entry_price - (protected_profit_points * point_value)
+
+                # Only return if it's an improvement over current stop
+                if current_stop > 0:
+                    if direction == "BUY" and mfe_trail_level <= current_stop:
+                        return None
+                    if direction == "SELL" and mfe_trail_level >= current_stop:
+                        return None
+
+                self.logger.info(
+                    f"🛡️ [MFE PROTECTION] {trade.symbol}: MFE={estimated_mfe:.1f}pts, "
+                    f"Current={current_profit_points:.1f}pts, Decline={decline_pct*100:.1f}%, "
+                    f"Locking {mfe_lock_pct*100:.0f}% = {protected_profit_points:.1f}pts"
+                )
+                return round(mfe_trail_level, 5)
+
+        return None
 
     def should_trail(self, trade: TradeLog, current_price: float,
                     candle_data: List[IGCandle]) -> bool:

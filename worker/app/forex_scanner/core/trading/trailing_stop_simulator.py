@@ -40,6 +40,10 @@ class TrailingStopSimulator:
                  stage2_lock: float = 12.0,
                  stage3_trigger: float = 23.0,
                  stage3_min_distance: float = 4.0,
+                 # Stage 2.5: MFE Protection parameters
+                 mfe_protection_threshold_pct: float = 0.70,  # Trigger when profit reaches 70% of target
+                 mfe_protection_decline_pct: float = 0.10,    # Trigger on 10% decline from peak
+                 mfe_protection_lock_pct: float = 0.60,       # Lock 60% of MFE
                  # Legacy/system parameters (ignored for 3-stage system)
                  stop_to_profit_trigger: float = None,
                  stop_to_profit_level: float = None,
@@ -55,7 +59,7 @@ class TrailingStopSimulator:
                  breakeven_buffer_pips: float = 5.0,  # 🔧 NEW: Buffer above entry when moving to breakeven
                  logger: Optional[logging.Logger] = None):
         """
-        Initialize Progressive 3-Stage trailing stop simulator
+        Initialize Progressive 3-Stage trailing stop simulator with MFE Protection
 
         Args:
             epic: Trading pair (e.g., 'CS.D.EURUSD.MINI.IP') - loads config automatically
@@ -69,6 +73,9 @@ class TrailingStopSimulator:
             stage2_lock: Stage 2 profit to lock
             stage3_trigger: Stage 3 activation profit level
             stage3_min_distance: Minimum trailing distance for Stage 3
+            mfe_protection_threshold_pct: Stage 2.5 - Trigger when profit reaches this % of target (default: 0.70)
+            mfe_protection_decline_pct: Stage 2.5 - Trigger on this % decline from peak (default: 0.10)
+            mfe_protection_lock_pct: Stage 2.5 - Lock this % of MFE when triggered (default: 0.60)
             stop_to_profit_trigger: Legacy parameter (ignored)
             stop_to_profit_level: Legacy parameter (ignored)
             max_bars: Maximum bars to look ahead (default: 96 = 24 hours on 15m)
@@ -106,11 +113,16 @@ class TrailingStopSimulator:
                     self.stage2_lock = pair_config.get('stage2_lock_points', stage2_lock)
                     self.stage3_trigger = pair_config.get('stage3_trigger_points', stage3_trigger)
                     self.stage3_min_distance = pair_config.get('stage3_min_distance', stage3_min_distance)
+                    # 🆕 Stage 2.5: MFE Protection config
+                    self.mfe_protection_threshold_pct = pair_config.get('mfe_protection_threshold_pct', mfe_protection_threshold_pct)
+                    self.mfe_protection_decline_pct = pair_config.get('mfe_protection_decline_pct', mfe_protection_decline_pct)
+                    self.mfe_protection_lock_pct = pair_config.get('mfe_protection_lock_pct', mfe_protection_lock_pct)
                     if logger:
                         logger.info(f"📊 Loaded config for {epic}: BE={self.break_even_trigger}, "
                                   f"S1={self.stage1_trigger}→{self.stage1_lock}, "
                                   f"S2={self.stage2_trigger}→{self.stage2_lock}, "
-                                  f"S3={self.stage3_trigger}")
+                                  f"S3={self.stage3_trigger}, "
+                                  f"MFE_Protection={self.mfe_protection_threshold_pct*100:.0f}%/{self.mfe_protection_decline_pct*100:.0f}%/{self.mfe_protection_lock_pct*100:.0f}%")
                 else:
                     # Use defaults
                     self.break_even_trigger = be_trigger
@@ -151,6 +163,10 @@ class TrailingStopSimulator:
         self.target_atr_multiplier = target_atr_multiplier
         self.min_time_before_trailing_hours = min_time_before_trailing_hours  # 🔧 NEW: Minimum time before trailing
         self.breakeven_buffer_pips = breakeven_buffer_pips  # 🔧 NEW: Buffer when moving to breakeven
+        # 🆕 Stage 2.5: MFE Protection parameters
+        self.mfe_protection_threshold_pct = mfe_protection_threshold_pct  # Trigger when profit >= 70% of target
+        self.mfe_protection_decline_pct = mfe_protection_decline_pct      # Trigger on 10% decline from peak
+        self.mfe_protection_lock_pct = mfe_protection_lock_pct            # Lock 60% of MFE when triggered
         self.logger = logger or logging.getLogger(__name__)
         self.epic = epic
 
@@ -381,6 +397,7 @@ class TrailingStopSimulator:
         stage1_triggered = False
         stage2_triggered = False
         stage3_triggered = False
+        mfe_protection_triggered = False  # 🆕 Stage 2.5: MFE Protection
         stage_reached = 0
 
         # Normalize signal type
@@ -458,28 +475,31 @@ class TrailingStopSimulator:
                 if current_loss_pips > worst_loss_pips:
                     worst_loss_pips = current_loss_pips
 
-                # Update best profit and adjust trailing stop using Progressive 3-Stage
+                # Update best profit (MFE tracking)
                 if current_profit_pips > best_profit_pips:
                     best_profit_pips = current_profit_pips
 
-                    # 🎯 FIXED SL/TP MODE: Skip trailing for scalping (keep original SL/TP)
-                    if not self.use_fixed_sl_tp:
-                        # Apply Progressive 3-Stage trailing stop logic
-                        current_stop_pips, stage_info = self._update_progressive_trailing_stop(
-                            best_profit_pips,
-                            breakeven_triggered,
-                            stage1_triggered,
-                            stage2_triggered,
-                            stage3_triggered,
-                            bar_idx  # Pass bar index for time-based checks
-                        )
+                # 🎯 FIXED SL/TP MODE: Skip trailing for scalping (keep original SL/TP)
+                if not self.use_fixed_sl_tp:
+                    # Apply Progressive 3-Stage trailing stop logic with MFE Protection
+                    # Called on every bar to check for MFE protection (profit decline from peak)
+                    current_stop_pips, stage_info = self._update_progressive_trailing_stop(
+                        best_profit_pips,
+                        breakeven_triggered,
+                        stage1_triggered,
+                        stage2_triggered,
+                        stage3_triggered,
+                        bar_idx,  # Pass bar index for time-based checks
+                        current_profit_pips  # Pass current profit for MFE protection
+                    )
 
-                        # Update stage flags
-                        breakeven_triggered = stage_info['breakeven_triggered']
-                        stage1_triggered = stage_info['stage1_triggered']
-                        stage2_triggered = stage_info['stage2_triggered']
-                        stage3_triggered = stage_info['stage3_triggered']
-                        stage_reached = max(stage_reached, stage_info['stage_reached'])
+                    # Update stage flags
+                    breakeven_triggered = stage_info['breakeven_triggered']
+                    stage1_triggered = stage_info['stage1_triggered']
+                    stage2_triggered = stage_info['stage2_triggered']
+                    stage3_triggered = stage_info['stage3_triggered']
+                    mfe_protection_triggered = stage_info.get('mfe_protection_triggered', False) or mfe_protection_triggered
+                    stage_reached = max(stage_reached, stage_info['stage_reached'])
 
                 # Check exit conditions
                 trade_closed, exit_pnl, exit_reason = self._check_exit_conditions(
@@ -488,6 +508,10 @@ class TrailingStopSimulator:
                     current_stop_pips,
                     target_pips
                 )
+
+                # 🆕 Update exit reason if MFE protection triggered
+                if trade_closed and mfe_protection_triggered and exit_reason == "TRAILING_STOP":
+                    exit_reason = "MFE_PROTECTION"
 
                 if trade_closed:
                     exit_bar = bar_idx
@@ -501,28 +525,31 @@ class TrailingStopSimulator:
                 if current_loss_pips > worst_loss_pips:
                     worst_loss_pips = current_loss_pips
 
-                # Update best profit and adjust trailing stop using Progressive 3-Stage
+                # Update best profit (MFE tracking)
                 if current_profit_pips > best_profit_pips:
                     best_profit_pips = current_profit_pips
 
-                    # 🎯 FIXED SL/TP MODE: Skip trailing for scalping (keep original SL/TP)
-                    if not self.use_fixed_sl_tp:
-                        # Apply Progressive 3-Stage trailing stop logic
-                        current_stop_pips, stage_info = self._update_progressive_trailing_stop(
-                            best_profit_pips,
-                            breakeven_triggered,
-                            stage1_triggered,
-                            stage2_triggered,
-                            stage3_triggered,
-                            bar_idx  # Pass bar index for time-based checks
-                        )
+                # 🎯 FIXED SL/TP MODE: Skip trailing for scalping (keep original SL/TP)
+                if not self.use_fixed_sl_tp:
+                    # Apply Progressive 3-Stage trailing stop logic with MFE Protection
+                    # Called on every bar to check for MFE protection (profit decline from peak)
+                    current_stop_pips, stage_info = self._update_progressive_trailing_stop(
+                        best_profit_pips,
+                        breakeven_triggered,
+                        stage1_triggered,
+                        stage2_triggered,
+                        stage3_triggered,
+                        bar_idx,  # Pass bar index for time-based checks
+                        current_profit_pips  # Pass current profit for MFE protection
+                    )
 
-                        # Update stage flags
-                        breakeven_triggered = stage_info['breakeven_triggered']
-                        stage1_triggered = stage_info['stage1_triggered']
-                        stage2_triggered = stage_info['stage2_triggered']
-                        stage3_triggered = stage_info['stage3_triggered']
-                        stage_reached = max(stage_reached, stage_info['stage_reached'])
+                    # Update stage flags
+                    breakeven_triggered = stage_info['breakeven_triggered']
+                    stage1_triggered = stage_info['stage1_triggered']
+                    stage2_triggered = stage_info['stage2_triggered']
+                    stage3_triggered = stage_info['stage3_triggered']
+                    mfe_protection_triggered = stage_info.get('mfe_protection_triggered', False) or mfe_protection_triggered
+                    stage_reached = max(stage_reached, stage_info['stage_reached'])
 
                 # Check exit conditions
                 trade_closed, exit_pnl, exit_reason = self._check_exit_conditions(
@@ -531,6 +558,10 @@ class TrailingStopSimulator:
                     current_stop_pips,
                     target_pips
                 )
+
+                # 🆕 Update exit reason if MFE protection triggered
+                if trade_closed and mfe_protection_triggered and exit_reason == "TRAILING_STOP":
+                    exit_reason = "MFE_PROTECTION"
 
                 if trade_closed:
                     exit_bar = bar_idx
@@ -647,6 +678,7 @@ class TrailingStopSimulator:
             'stage1_triggered': stage1_triggered,
             'stage2_triggered': stage2_triggered,
             'stage3_triggered': stage3_triggered,
+            'mfe_protection_triggered': mfe_protection_triggered,  # 🆕 Stage 2.5
             'stage_reached': stage_reached,
         }
 
@@ -656,23 +688,26 @@ class TrailingStopSimulator:
                                           stage1_triggered: bool,
                                           stage2_triggered: bool,
                                           stage3_triggered: bool,
-                                          bar_idx: int = 0) -> Tuple[float, Dict[str, Any]]:
+                                          bar_idx: int = 0,
+                                          current_profit_pips: float = None) -> Tuple[float, Dict[str, Any]]:
         """
-        Update trailing stop using Progressive 3-Stage system
+        Update trailing stop using Progressive 3-Stage system with MFE Protection
 
         Stages:
         - Break-Even: Move stop to entry + buffer (small profit protection)
         - Stage 1: Lock initial profit (e.g., +4 pips)
         - Stage 2: Lock meaningful profit (e.g., +12 pips)
+        - Stage 2.5: MFE Protection - Lock 60% of MFE when profit declines 10% from peak
         - Stage 3: Percentage-based dynamic trailing
 
         Args:
-            best_profit_pips: Best profit achieved so far
+            best_profit_pips: Best profit achieved so far (MFE)
             breakeven_triggered: Whether break-even was triggered
             stage1_triggered: Whether stage 1 was triggered
             stage2_triggered: Whether stage 2 was triggered
             stage3_triggered: Whether stage 3 was triggered
             bar_idx: Current bar index (for time-based checks)
+            current_profit_pips: Current profit level (for MFE protection calculation)
 
         Returns:
             Tuple of (current_stop_pips, stage_info_dict)
@@ -684,6 +719,7 @@ class TrailingStopSimulator:
             'stage1_triggered': stage1_triggered,
             'stage2_triggered': stage2_triggered,
             'stage3_triggered': stage3_triggered,
+            'mfe_protection_triggered': False,
             'stage_reached': 0
         }
 
@@ -693,6 +729,31 @@ class TrailingStopSimulator:
         if time_elapsed_hours < self.min_time_before_trailing_hours:
             # Too early - keep initial stop loss
             return self.initial_stop_pips, stage_info
+
+        # 🆕 Stage 2.5: MFE Protection Rule
+        # When profit reaches 70% of target AND then declines 10% from peak, lock 60% of MFE
+        # This prevents giving back significant profits when momentum fades
+        mfe_protection_threshold_pct = getattr(self, 'mfe_protection_threshold_pct', 0.70)
+        mfe_protection_decline_pct = getattr(self, 'mfe_protection_decline_pct', 0.10)
+        mfe_protection_lock_pct = getattr(self, 'mfe_protection_lock_pct', 0.60)
+
+        mfe_protection_threshold = self.target_pips * mfe_protection_threshold_pct
+
+        if current_profit_pips is not None and best_profit_pips >= mfe_protection_threshold:
+            # Check if we're in decline (current profit < 90% of best)
+            if best_profit_pips > 0:
+                current_decline_pct = 1.0 - (current_profit_pips / best_profit_pips)
+                if current_decline_pct >= mfe_protection_decline_pct:
+                    # Trigger MFE Protection: Lock percentage of MFE
+                    protected_profit = best_profit_pips * mfe_protection_lock_pct
+                    stage_info['mfe_protection_triggered'] = True
+                    stage_info['stage_reached'] = 2.5
+                    self.logger.debug(
+                        f"🛡️ MFE PROTECTION: Best={best_profit_pips:.1f}, Current={current_profit_pips:.1f}, "
+                        f"Decline={current_decline_pct*100:.1f}% >= {mfe_protection_decline_pct*100:.0f}%, "
+                        f"Locking {mfe_protection_lock_pct*100:.0f}% = {protected_profit:.1f} pips"
+                    )
+                    return -protected_profit, stage_info
 
         # Stage 3: Percentage-based dynamic trailing
         if best_profit_pips >= self.stage3_trigger:
