@@ -25,9 +25,9 @@ Design Philosophy:
 
 STRATEGY_NAME = "SMC_STRUCTURE"
 STRATEGY_DESCRIPTION = "Pure structure-based strategy using Smart Money Concepts (price action only)"
-STRATEGY_VERSION = "2.8.5"
-STRATEGY_DATE = "2025-11-16"
-STRATEGY_STATUS = "Testing - QUALITY OPTIMIZATION: Confidence cap + Pair blacklist + Tighter R:R"
+STRATEGY_VERSION = "2.9.0"
+STRATEGY_DATE = "2025-11-29"
+STRATEGY_STATUS = "Testing - PULLBACK DEPTH FILTER: Validates 30-60% retracement from BOS extreme"
 
 # Version History:
 # v2.8.5 (2025-11-16): QUALITY OPTIMIZATION: Signal pattern analysis fixes
@@ -577,6 +577,45 @@ SMC_OB_REJECTION_MIN_WICK_RATIO = 0.60  # Min wick ratio for wick rejection (60%
 
 # Stop loss placement
 SMC_OB_SL_BUFFER_PIPS = 5  # Pips beyond OB for stop loss (tighter than old 15 pips)
+
+# ============================================================================
+# PULLBACK DEPTH FILTER (Phase 3 - Entry Timing Optimization)
+# ============================================================================
+# CRITICAL FIX for profit erosion issue identified in analysis:
+# - Problem: Trades enter at local price extremes instead of proper pullbacks
+# - Evidence: 68% of losers show immediate adverse movement (>5 pips within 2 bars)
+# - Root Cause: Current OB check only validates price IN zone, not retracement depth
+#
+# This filter validates that price has ACTUALLY pulled back from the BOS swing
+# before entering, preventing entries at exhaustion points.
+#
+# For BULLISH BOS:
+#   - BOS level = swing low that was broken
+#   - Entry must be below (BOS_high - MIN_RETRACEMENT% * range)
+#   - Example: BOS high=1.1050, OB=1.1020, range=30 pips
+#     - Min 30% retracement: Entry must be < 1.1041 (at least 9 pips pullback)
+#     - Max 60% retracement: Entry must be > 1.1032 (don't enter too low = reversal risk)
+#
+# For BEARISH BOS:
+#   - BOS level = swing high that was broken
+#   - Entry must be above (BOS_low + MIN_RETRACEMENT% * range)
+
+# Enable pullback depth filter
+SMC_PULLBACK_FILTER_ENABLED = True
+
+# Minimum retracement required before entry (as % of BOS-to-OB range)
+# Lower = more signals but more entries at extremes
+# Higher = fewer signals but better entry pricing
+SMC_PULLBACK_MIN_RETRACEMENT = 0.30  # 30% minimum retracement from BOS extreme
+
+# Maximum retracement allowed (to avoid entering reversal)
+# If price retraces too much (>60%), structure might be failing
+SMC_PULLBACK_MAX_RETRACEMENT = 0.60  # 60% maximum retracement
+
+# Expected Impact (based on Plan analysis):
+# - Win Rate: +8-12% (avoids immediate adverse entries)
+# - Profit Factor: +0.3-0.5 (better entry = larger winners, smaller losers)
+# - Signal reduction: -20-30% (filters extreme entries)
 
 # Expected Impact (based on trading-strategy-analyst analysis):
 # - Win Rate: 39.3% → 48-55% (+10-15%)

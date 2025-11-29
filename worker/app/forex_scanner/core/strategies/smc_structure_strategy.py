@@ -3,37 +3,41 @@
 SMC Pure Structure Strategy
 Structure-based trading using Smart Money Concepts (pure price action)
 
-VERSION: 2.7.1 (Swing Proximity Filter)
-DATE: 2025-11-15
-STATUS: Testing - Structure-based entry timing (replaces PD filter)
+VERSION: 2.9.0 (Pullback Depth Filter)
+DATE: 2025-11-29
+STATUS: Testing - Entry timing optimization via pullback depth validation
 
-Performance Metrics (v2.1.1 Baseline - 30 days, 9 pairs):
-- Total Signals: 112
-- Win Rate: 39.3%
-- Profit Factor: 2.16
-- Bull/Bear Ratio: 107/5 (95.5% bull bias)
+Performance Metrics (v2.8.5 Baseline - 90 days):
+- Total Signals: 55
+- Win Rate: 38.2%
+- Profit Factor: 0.53
+- Issue: Entries at local price extremes cause immediate adverse movement
 
-Expected Performance (v2.2.0 with OB Re-entry):
-- Total Signals: 50-60 (quality over quantity)
-- Win Rate: 48-55% (+10-15% improvement)
-- Profit Factor: 2.5-3.5 (+16% to +62% improvement)
-- R:R Ratio: 2.5:1 (improved entry pricing)
+Expected Performance (v2.9.0 with Pullback Filter):
+- Total Signals: 40-50 (quality over quantity)
+- Win Rate: 45-50% (+7-12% improvement)
+- Profit Factor: 1.0-1.5 (+0.5-1.0 improvement)
+- Key Fix: Validates retracement depth before entry
 
 Strategy Logic:
 1. Identify HTF trend (4H structure)
 2. Detect BOS/CHoCH on 15m timeframe
 3. Identify last opposing Order Block (institutional accumulation zone)
 4. Wait for price to RETRACE to OB zone
-5. Detect REJECTION at OB level (wick rejection, engulfing, bounce)
-6. Enter at OB with tight stop loss (5-8 pips beyond OB)
-7. Target next structure level
+5. **NEW: Validate pullback depth (30-60% retracement from BOS extreme)**
+6. Detect REJECTION at OB level (wick rejection, engulfing, bounce)
+7. Enter at OB with tight stop loss (5-8 pips beyond OB)
+8. Target next structure level
 
 Version History:
+- v2.9.0 (2025-11-29): Pullback Depth Filter - validates retracement from BOS extreme
+  Problem: Entries at local extremes (68% of losers had immediate adverse movement)
+  Solution: Require 30-60% retracement from BOS swing before entry
+- v2.8.5 (2025-11-16): Quality optimization (confidence cap, pair blacklist)
+- v2.7.1 (2025-11-15): Swing Proximity Filter (replaces PD filter)
 - v2.2.0 (2025-11-03): Order Block Re-entry implementation (major enhancement)
 - v2.1.1 (2025-11-03): Added session filter (disabled), fixed timestamp bug
 - v2.1.0 (2025-11-02): Phase 2.1 baseline - HTF alignment enabled
-- v2.0.0 (2025-10-XX): BOS/CHoCH detection on 15m timeframe
-- v1.0.0 (2025-10-XX): Initial SMC Structure implementation
 """
 
 import pandas as pd
@@ -170,6 +174,11 @@ class SMCStructureStrategy:
         # Swing Proximity Filter configuration (v2.7.1)
         self.swing_proximity_filter_enabled = getattr(self.config, 'SMC_SWING_PROXIMITY_FILTER_ENABLED', True)
         self.swing_exhaustion_threshold = getattr(self.config, 'SMC_SWING_EXHAUSTION_THRESHOLD', 0.20)
+
+        # Pullback Depth Filter configuration (Phase 3 - Entry Timing)
+        self.pullback_filter_enabled = getattr(self.config, 'SMC_PULLBACK_FILTER_ENABLED', True)
+        self.pullback_min_retracement = getattr(self.config, 'SMC_PULLBACK_MIN_RETRACEMENT', 0.30)
+        self.pullback_max_retracement = getattr(self.config, 'SMC_PULLBACK_MAX_RETRACEMENT', 0.60)
 
     def _check_cooldown(self, pair: str, current_time: datetime) -> tuple[bool, str]:
         """
@@ -615,6 +624,192 @@ class SMCStructureStrategy:
                     f"   ✅ PD filter would reject trend continuations - this allows them"
                 )
 
+    def _validate_pullback_depth(
+        self,
+        current_price: float,
+        bos_direction: str,
+        df_15m: pd.DataFrame,
+        order_block: Optional[Dict],
+        pip_value: float
+    ) -> tuple:
+        """
+        PULLBACK DEPTH FILTER (Phase 3 - Entry Timing Optimization)
+
+        Validates that price has ACTUALLY retraced from the BOS swing extreme
+        before entering. Prevents entries at local price extremes where
+        immediate adverse movement is likely.
+
+        The Problem This Solves:
+        - Analysis showed 68% of losers had immediate adverse movement (>5 pips in 2 bars)
+        - Current OB check only validates price is IN the zone
+        - Missing: validation that we've had meaningful retracement from BOS level
+
+        For BULLISH BOS (looking to buy on pullback):
+            - BOS created new swing high (price broke above previous structure)
+            - We want to BUY on pullback to Order Block
+            - Entry should be BELOW the BOS high by at least MIN_RETRACEMENT%
+            - Example: BOS high=1.1050, OB=1.1020, range=30 pips
+              - Min 30% retracement: Entry must be < 1.1041 (9+ pips from high)
+              - If entry at 1.1048, only 2 pips pullback = TOO CLOSE TO EXTREME
+
+        For BEARISH BOS (looking to sell on pullback):
+            - BOS created new swing low (price broke below previous structure)
+            - We want to SELL on pullback to Order Block
+            - Entry should be ABOVE the BOS low by at least MIN_RETRACEMENT%
+            - Example: BOS low=1.0950, OB=1.0980, range=30 pips
+              - Min 30% retracement: Entry must be > 1.0959 (9+ pips from low)
+
+        Args:
+            current_price: Current entry price
+            bos_direction: 'bullish' or 'bearish'
+            df_15m: 15m DataFrame for finding BOS extremes
+            order_block: Order block dict (contains high/low levels)
+            pip_value: Pip value for the pair
+
+        Returns:
+            tuple: (is_valid, reason_string)
+        """
+        if not self.pullback_filter_enabled:
+            return True, "Pullback filter disabled"
+
+        if order_block is None:
+            return True, "No order block - pullback filter skipped"
+
+        # Get recent price action to find BOS extreme
+        lookback_bars = 20  # Same as OB lookback
+        recent_df = df_15m.tail(lookback_bars)
+
+        if len(recent_df) < 5:
+            return True, "Insufficient data for pullback calculation"
+
+        if bos_direction == 'bullish':
+            # For BULLISH BOS:
+            # - Recent high = BOS swing extreme (where smart money pushed price)
+            # - OB low = pullback target zone
+            # - Entry should be meaningfully below the high
+            bos_extreme = float(recent_df['high'].max())
+            ob_level = order_block['low']  # Bottom of OB for bullish entry
+
+            # Calculate range from BOS extreme to OB
+            pullback_range = bos_extreme - ob_level
+
+            if pullback_range <= 0:
+                return True, "Invalid pullback range - allowing entry"
+
+            # Calculate current retracement from BOS extreme
+            # For bullish: how far below the high is current price?
+            retracement_distance = bos_extreme - current_price
+            retracement_pct = retracement_distance / pullback_range
+
+            # Calculate pip values for logging
+            range_pips = pullback_range / pip_value
+            retracement_pips = retracement_distance / pip_value
+            min_required_pips = (pullback_range * self.pullback_min_retracement) / pip_value
+            max_allowed_pips = (pullback_range * self.pullback_max_retracement) / pip_value
+
+            # Check minimum retracement (must have pulled back enough)
+            if retracement_pct < self.pullback_min_retracement:
+                return False, (
+                    f"❌ PULLBACK FILTER: BUY entry too close to BOS high\n"
+                    f"   BOS High: {bos_extreme:.5f} (recent swing extreme)\n"
+                    f"   OB Low: {ob_level:.5f} (pullback target)\n"
+                    f"   Current Price: {current_price:.5f}\n"
+                    f"   Pullback Range: {range_pips:.1f} pips\n"
+                    f"   Current Retracement: {retracement_pips:.1f} pips ({retracement_pct*100:.0f}%)\n"
+                    f"   Minimum Required: {min_required_pips:.1f} pips ({self.pullback_min_retracement*100:.0f}%)\n"
+                    f"   💡 Entry at local HIGH = immediate adverse movement likely\n"
+                    f"   💡 Wait for deeper pullback toward OB before entry"
+                )
+
+            # Check maximum retracement (shouldn't have pulled back too much)
+            if retracement_pct > self.pullback_max_retracement:
+                return False, (
+                    f"❌ PULLBACK FILTER: BUY entry too deep - structure may be failing\n"
+                    f"   BOS High: {bos_extreme:.5f}\n"
+                    f"   OB Low: {ob_level:.5f}\n"
+                    f"   Current Price: {current_price:.5f}\n"
+                    f"   Pullback Range: {range_pips:.1f} pips\n"
+                    f"   Current Retracement: {retracement_pips:.1f} pips ({retracement_pct*100:.0f}%)\n"
+                    f"   Maximum Allowed: {max_allowed_pips:.1f} pips ({self.pullback_max_retracement*100:.0f}%)\n"
+                    f"   💡 Price pulled back too far - BOS structure may be failing\n"
+                    f"   💡 Deep retracements often signal trend reversal"
+                )
+
+            # Valid pullback
+            return True, (
+                f"✅ PULLBACK FILTER PASSED (BUY)\n"
+                f"   BOS High: {bos_extreme:.5f}\n"
+                f"   OB Low: {ob_level:.5f}\n"
+                f"   Current Price: {current_price:.5f}\n"
+                f"   Retracement: {retracement_pips:.1f} pips ({retracement_pct*100:.0f}%)\n"
+                f"   Valid Range: {self.pullback_min_retracement*100:.0f}%-{self.pullback_max_retracement*100:.0f}%\n"
+                f"   ✅ Proper pullback entry, not at local extreme"
+            )
+
+        else:  # bearish
+            # For BEARISH BOS:
+            # - Recent low = BOS swing extreme (where smart money pushed price)
+            # - OB high = pullback target zone
+            # - Entry should be meaningfully above the low
+            bos_extreme = float(recent_df['low'].min())
+            ob_level = order_block['high']  # Top of OB for bearish entry
+
+            # Calculate range from BOS extreme to OB
+            pullback_range = ob_level - bos_extreme
+
+            if pullback_range <= 0:
+                return True, "Invalid pullback range - allowing entry"
+
+            # Calculate current retracement from BOS extreme
+            # For bearish: how far above the low is current price?
+            retracement_distance = current_price - bos_extreme
+            retracement_pct = retracement_distance / pullback_range
+
+            # Calculate pip values for logging
+            range_pips = pullback_range / pip_value
+            retracement_pips = retracement_distance / pip_value
+            min_required_pips = (pullback_range * self.pullback_min_retracement) / pip_value
+            max_allowed_pips = (pullback_range * self.pullback_max_retracement) / pip_value
+
+            # Check minimum retracement (must have pulled back enough)
+            if retracement_pct < self.pullback_min_retracement:
+                return False, (
+                    f"❌ PULLBACK FILTER: SELL entry too close to BOS low\n"
+                    f"   BOS Low: {bos_extreme:.5f} (recent swing extreme)\n"
+                    f"   OB High: {ob_level:.5f} (pullback target)\n"
+                    f"   Current Price: {current_price:.5f}\n"
+                    f"   Pullback Range: {range_pips:.1f} pips\n"
+                    f"   Current Retracement: {retracement_pips:.1f} pips ({retracement_pct*100:.0f}%)\n"
+                    f"   Minimum Required: {min_required_pips:.1f} pips ({self.pullback_min_retracement*100:.0f}%)\n"
+                    f"   💡 Entry at local LOW = immediate adverse movement likely\n"
+                    f"   💡 Wait for deeper pullback toward OB before entry"
+                )
+
+            # Check maximum retracement (shouldn't have pulled back too much)
+            if retracement_pct > self.pullback_max_retracement:
+                return False, (
+                    f"❌ PULLBACK FILTER: SELL entry too deep - structure may be failing\n"
+                    f"   BOS Low: {bos_extreme:.5f}\n"
+                    f"   OB High: {ob_level:.5f}\n"
+                    f"   Current Price: {current_price:.5f}\n"
+                    f"   Pullback Range: {range_pips:.1f} pips\n"
+                    f"   Current Retracement: {retracement_pips:.1f} pips ({retracement_pct*100:.0f}%)\n"
+                    f"   Maximum Allowed: {max_allowed_pips:.1f} pips ({self.pullback_max_retracement*100:.0f}%)\n"
+                    f"   💡 Price pulled back too far - BOS structure may be failing\n"
+                    f"   💡 Deep retracements often signal trend reversal"
+                )
+
+            # Valid pullback
+            return True, (
+                f"✅ PULLBACK FILTER PASSED (SELL)\n"
+                f"   BOS Low: {bos_extreme:.5f}\n"
+                f"   OB High: {ob_level:.5f}\n"
+                f"   Current Price: {current_price:.5f}\n"
+                f"   Retracement: {retracement_pips:.1f} pips ({retracement_pct*100:.0f}%)\n"
+                f"   Valid Range: {self.pullback_min_retracement*100:.0f}%-{self.pullback_max_retracement*100:.0f}%\n"
+                f"   ✅ Proper pullback entry, not at local extreme"
+            )
+
     def detect_signal(
         self,
         df_1h: pd.DataFrame,
@@ -957,6 +1152,24 @@ class SMCStructureStrategy:
                                 self.logger.info(f"   ✅ OB Rejection detected:")
                                 self.logger.info(f"      Type: {rejection_signal['type']}")
                                 self.logger.info(f"      Strength: {rejection_signal['strength']*100:.0f}%")
+
+                                # STEP 3B2: Pullback Depth Filter (Phase 3 - Entry Timing)
+                                # Validates price has ACTUALLY retraced from BOS swing, not just IN OB zone
+                                self.logger.info(f"\n📐 STEP 3B2: Pullback Depth Filter (Entry Timing Optimization)")
+
+                                pullback_valid, pullback_reason = self._validate_pullback_depth(
+                                    current_price=current_price,
+                                    bos_direction=bos_choch_info['direction'],
+                                    df_15m=df_15m,
+                                    order_block=last_ob,
+                                    pip_value=pip_value
+                                )
+
+                                if not pullback_valid:
+                                    self.logger.info(f"   {pullback_reason}")
+                                    return None
+
+                                self.logger.info(f"   {pullback_reason}")
 
                                 # STEP 3C: Premium/Discount Zone Validation for Entry Timing
                                 self.logger.info(f"\n💎 STEP 3C: Premium/Discount Zone Entry Timing")
