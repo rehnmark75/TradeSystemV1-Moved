@@ -1653,11 +1653,11 @@ class UnifiedTradingDashboard:
             st.error(f"❌ Error rendering individual epic regimes: {e}")
 
     def render_trade_analysis_tab(self):
-        """Render the Trade Analysis tab for detailed trailing stop analysis"""
+        """Render the Trade Analysis tab with sub-tabs for trailing stop and signal analysis"""
         st.header("🔍 Individual Trade Analysis")
-        st.markdown("*Analyze trailing stop stages and performance for specific trades*")
+        st.markdown("*Comprehensive analysis of trade execution and entry signals*")
 
-        # Input for trade ID
+        # Input for trade ID (shared between sub-tabs)
         col1, col2 = st.columns([3, 1])
 
         with col1:
@@ -1665,6 +1665,27 @@ class UnifiedTradingDashboard:
 
         with col2:
             analyze_btn = st.button("🔍 Analyze Trade", type="primary")
+
+        # Sub-tabs for different analysis types
+        sub_tab1, sub_tab2, sub_tab3 = st.tabs([
+            "📊 Trailing Stop Analysis",
+            "🎯 Signal Analysis",
+            "📚 Outcome Analysis"
+        ])
+
+        with sub_tab1:
+            self._render_trailing_stop_analysis(trade_id, analyze_btn)
+
+        with sub_tab2:
+            self._render_signal_analysis(trade_id, analyze_btn)
+
+        with sub_tab3:
+            self._render_outcome_analysis(trade_id, analyze_btn)
+
+    def _render_trailing_stop_analysis(self, trade_id: int, analyze_btn: bool):
+        """Render the trailing stop stage analysis sub-tab"""
+        st.subheader("📊 Trailing Stop Stage Analysis")
+        st.markdown("*Analyze break-even triggers and profit lock stages*")
 
         if analyze_btn or trade_id:
             try:
@@ -1923,6 +1944,1046 @@ class UnifiedTradingDashboard:
 
             except Exception as e:
                 st.error(f"❌ Error analyzing trade: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
+    def _render_signal_analysis(self, trade_id: int, analyze_btn: bool):
+        """Render the strategy signal analysis sub-tab"""
+        st.subheader("🎯 Entry Signal Analysis")
+        st.markdown("*Analyze the strategy signal that triggered this trade*")
+
+        if analyze_btn or trade_id:
+            try:
+                import requests
+
+                # Call the FastAPI signal analysis endpoint
+                headers = {
+                    "X-APIM-Gateway": "verified",
+                    "X-API-KEY": "436abe054a074894a0517e5172f0e5b6"
+                }
+
+                with st.spinner(f"Analyzing signal for trade {trade_id}..."):
+                    response = requests.get(
+                        f"http://fastapi-dev:8000/api/trade-analysis/signal/{trade_id}",
+                        headers=headers
+                    )
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    # Check if signal exists
+                    if not data.get('has_signal', False):
+                        st.warning(f"⚠️ {data.get('message', 'No signal data available for this trade')}")
+                        if 'trade_details' in data:
+                            td = data['trade_details']
+                            st.info(f"Trade: {td.get('symbol')} | {td.get('direction')} | Entry: {td.get('entry_price'):.5f}")
+                        return
+
+                    # Signal Overview Section
+                    st.subheader("📋 Signal Overview")
+                    sig = data['signal_overview']
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        pair_display = sig['pair'] or sig['epic'].replace('CS.D.', '').replace('.MINI.IP', '')
+                        st.metric("Pair", pair_display)
+                        direction_emoji = "🟢" if sig['direction'] == "BUY" else "🔴"
+                        st.metric("Direction", f"{direction_emoji} {sig['direction']}")
+
+                    with col2:
+                        st.metric("Strategy", sig['strategy'] or "Unknown")
+                        st.metric("Timeframe", sig['timeframe'] or "N/A")
+
+                    with col3:
+                        conf_pct = sig['confidence_score'] * 100 if sig['confidence_score'] < 1 else sig['confidence_score']
+                        st.metric("Confidence", f"{conf_pct:.1f}%")
+                        st.metric("Price at Signal", f"{sig['price_at_signal']:.5f}")
+
+                    with col4:
+                        st.metric("Spread", f"{sig['spread_pips']:.1f} pips" if sig['spread_pips'] else "N/A")
+                        st.metric("Session", sig['market_session'] or "Unknown")
+
+                    # Smart Money Validation Section
+                    st.subheader("🧠 Smart Money Validation")
+                    smc = data['smart_money_analysis']
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        validated = smc['validated']
+                        val_emoji = "✅" if validated else "❌"
+                        val_bg = '#d4edda' if validated else '#f8d7da'
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: {val_bg};">
+                            <h4>{val_emoji} SMC Validated</h4>
+                            <p><strong>Type:</strong> {smc['type'] or 'Unknown'}</p>
+                            <p><strong>Score:</strong> {smc['score']*100:.1f}%</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        ms = smc['market_structure']
+                        structure = ms['current_structure'] or ms['structure_type'] or 'Unknown'
+                        struct_emoji = "📈" if 'bullish' in structure.lower() else ("📉" if 'bearish' in structure.lower() else "➡️")
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>{struct_emoji} Market Structure</h4>
+                            <p><strong>Type:</strong> {structure.upper()}</p>
+                            <p><strong>Trend Strength:</strong> {ms['trend_strength']*100:.0f}%</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col3:
+                        # Structure breaks
+                        breaks = ms.get('structure_breaks', [])
+                        break_count = len(breaks) if isinstance(breaks, list) else 0
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📊 Structure Details</h4>
+                            <p><strong>Swing High:</strong> {ms['swing_high']:.5f}</p>
+                            <p><strong>Swing Low:</strong> {ms['swing_low']:.5f}</p>
+                            <p><strong>Breaks:</strong> {break_count}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # Confluence Factors Section
+                    st.subheader("🎯 Confluence Factors")
+                    conf = data['confluence_factors']
+
+                    factors_present = conf['factors_present']
+                    factors_total = conf['factors_total']
+                    conf_score = conf['total_score']
+
+                    # Progress bar for confluence
+                    if factors_total > 0:
+                        progress = factors_present / factors_total
+                        st.progress(progress, text=f"Confluence: {factors_present}/{factors_total} factors present")
+
+                    # Display individual factors
+                    if conf['factors']:
+                        cols = st.columns(min(len(conf['factors']), 6))
+                        for i, factor in enumerate(conf['factors']):
+                            with cols[i % len(cols)]:
+                                emoji = "✅" if factor['present'] else "❌"
+                                bg = '#d4edda' if factor['present'] else '#fff3cd'
+                                st.markdown(f"""
+                                <div style="background: {bg}; padding: 0.5rem; border-radius: 5px; margin: 0.25rem 0; text-align: center;">
+                                    {emoji} {factor['name']}
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                    # Entry Timing Section
+                    st.subheader("⏱️ Entry Timing Quality")
+                    timing = data['entry_timing']
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        zone = timing['premium_discount_zone']
+                        zone_emoji = "🟢" if zone == 'discount' else ("🔴" if zone == 'premium' else "🟡")
+                        zone_quality = "Good for BUY" if zone == 'discount' else ("Good for SELL" if zone == 'premium' else "Neutral")
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📍 Price Zone</h4>
+                            <h3>{zone_emoji} {zone.upper()}</h3>
+                            <small>{zone_quality}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        htf_aligned = timing['htf_aligned']
+                        htf_emoji = "✅" if htf_aligned else "❌"
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📈 HTF Alignment</h4>
+                            <h3>{htf_emoji} {'Aligned' if htf_aligned else 'Not Aligned'}</h3>
+                            <small>Structure: {timing['htf_structure']}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col3:
+                        mtf_ratio = timing['mtf_alignment_ratio'] * 100
+                        htf_strength = timing.get('htf_strength', 0) * 100
+                        # Use HTF strength if MTF not available (SMC strategy uses HTF)
+                        if mtf_ratio > 0:
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>🔄 MTF Consensus</h4>
+                                <h3>{mtf_ratio:.0f}%</h3>
+                                <small>Timeframes aligned</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            # Show HTF strength for SMC trades
+                            htf_color = '#28a745' if htf_strength >= 60 else ('#ffc107' if htf_strength >= 40 else '#dc3545')
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📊 HTF Strength</h4>
+                                <h3 style="color: {htf_color};">{htf_strength:.0f}%</h3>
+                                <small>4H trend strength</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                    with col4:
+                        entry_quality = timing['entry_quality_score'] * 100
+                        quality_color = '#28a745' if entry_quality >= 70 else ('#ffc107' if entry_quality >= 50 else '#dc3545')
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>⭐ Entry Quality</h4>
+                            <h3 style="color: {quality_color};">{entry_quality:.0f}%</h3>
+                            <small>Overall score</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # Technical Context Section
+                    st.subheader("📊 Technical Context at Entry")
+                    tech = data['technical_context']
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        # EMA data from new structure
+                        ema_50 = tech.get('ema_50', 0)
+                        ema_200 = tech.get('ema_200', 0)
+                        price_pos = tech.get('price_vs_ema_50', 'unknown')
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📈 EMA Analysis</h4>
+                            <p><strong>EMA 50:</strong> {ema_50:.5f}</p>
+                            <p><strong>EMA 200:</strong> {ema_200:.5f}</p>
+                            <p><strong>Price vs EMA50:</strong> {price_pos.upper()}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        macd = tech.get('macd', {})
+                        macd_dir = macd.get('direction', 'unknown')
+                        macd_emoji = "📈" if macd_dir == 'bullish' else "📉"
+                        hist_val = macd.get('histogram', 0)
+                        hist_color = '#28a745' if hist_val > 0 else '#dc3545'
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>{macd_emoji} MACD</h4>
+                            <p><strong>Line:</strong> {macd.get('line', 0):.6f}</p>
+                            <p><strong>Signal:</strong> {macd.get('signal', 0):.6f}</p>
+                            <p style="color: {hist_color};"><strong>Histogram:</strong> {hist_val:.6f}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col3:
+                        # Bollinger Bands
+                        bb = tech.get('bollinger_bands', {})
+                        if bb and bb.get('upper', 0) > 0:
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📊 Bollinger Bands</h4>
+                                <p><strong>Upper:</strong> {bb.get('upper', 0):.5f}</p>
+                                <p><strong>Middle:</strong> {bb.get('middle', 0):.5f}</p>
+                                <p><strong>Lower:</strong> {bb.get('lower', 0):.5f}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            rsi = tech.get('rsi', 50)
+                            rsi_zone = tech.get('rsi_zone', 'neutral')
+                            rsi_color = '#dc3545' if rsi_zone == 'overbought' else ('#28a745' if rsi_zone == 'oversold' else '#6c757d')
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📊 RSI</h4>
+                                <h3 style="color: {rsi_color};">{rsi:.1f}</h3>
+                                <small>{rsi_zone.upper()}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                    with col4:
+                        vol_ratio = tech.get('volume_ratio', 0)
+                        vol_conf = tech.get('volume_confirmation', False)
+                        vol_emoji = "✅" if vol_conf else "⚪"
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📊 Volume & ATR</h4>
+                            <p><strong>Ratio:</strong> {vol_ratio:.2f}x</p>
+                            <p><strong>Confirmed:</strong> {vol_emoji}</p>
+                            <p><strong>ATR:</strong> {tech.get('atr', 0):.5f}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # Pattern Analysis (if present)
+                    pattern = data.get('pattern_analysis')
+                    if pattern and pattern.get('pattern_type'):
+                        st.subheader("🕯️ Price Pattern Detected")
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        with col1:
+                            pattern_type = pattern.get('pattern_type', 'unknown')
+                            pattern_emoji = "🟢" if 'bullish' in pattern_type.lower() else ("🔴" if 'bearish' in pattern_type.lower() else "🟡")
+                            st.metric("Pattern", f"{pattern_emoji} {pattern_type.replace('_', ' ').title()}")
+
+                        with col2:
+                            strength = pattern.get('pattern_strength', 0) * 100
+                            st.metric("Strength", f"{strength:.1f}%")
+
+                        with col3:
+                            st.metric("Rejection Level", f"{pattern.get('rejection_level', 0):.5f}")
+
+                        with col4:
+                            st.metric("Entry Price", f"{pattern.get('entry_price', 0):.5f}")
+
+                    # Support/Resistance Analysis
+                    sr = data.get('support_resistance', {})
+                    if sr and sr.get('level_price', 0) > 0:
+                        st.subheader("🎯 Support/Resistance Analysis")
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        with col1:
+                            level_type = sr.get('level_type', 'unknown')
+                            level_emoji = "🟢" if level_type == 'support' else "🔴"
+                            st.metric("Key Level", f"{level_emoji} {level_type.upper()}")
+
+                        with col2:
+                            st.metric("Level Price", f"{sr.get('level_price', 0):.5f}")
+
+                        with col3:
+                            strength = sr.get('level_strength', 0) * 100
+                            st.metric("Strength", f"{strength:.0f}%")
+
+                        with col4:
+                            st.metric("Touch Count", sr.get('touch_count', 0))
+
+                        # S/R distances
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.info(f"📗 **Nearest Support:** {sr.get('nearest_support', 0):.5f} ({sr.get('distance_to_support_pips', 0):.1f} pips)")
+                        with col2:
+                            st.info(f"📕 **Nearest Resistance:** {sr.get('nearest_resistance', 0):.5f} ({sr.get('distance_to_resistance_pips', 0):.1f} pips)")
+
+                    # Risk/Reward Section
+                    st.subheader("💰 Risk/Reward Setup")
+                    rr = data.get('risk_reward', {})
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        initial_rr = rr.get('initial_rr', 0)
+                        rr_color = '#28a745' if initial_rr >= 2 else ('#ffc107' if initial_rr >= 1.5 else '#dc3545')
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📐 Initial R:R Ratio</h4>
+                            <h2 style="color: {rr_color};">{initial_rr:.2f}</h2>
+                            <small>{'Excellent' if initial_rr >= 2 else ('Good' if initial_rr >= 1.5 else 'Poor')}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📏 Risk/Reward Pips</h4>
+                            <p><strong>Risk:</strong> {rr.get('risk_pips', 0):.1f} pips</p>
+                            <p><strong>Reward:</strong> {rr.get('reward_pips', 0):.1f} pips</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col3:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>📍 Trade Levels</h4>
+                            <p><strong>Entry:</strong> {rr.get('entry_price', 0):.5f}</p>
+                            <p><strong>SL:</strong> {rr.get('stop_loss', 0):.5f}</p>
+                            <p><strong>TP:</strong> {rr.get('take_profit', 0):.5f}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col4:
+                        partial_tp = rr.get('partial_tp', 0)
+                        partial_pct = rr.get('partial_percent', 0)
+                        if partial_tp > 0:
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>🎯 Partial Take Profit</h4>
+                                <p><strong>Level:</strong> {partial_tp:.5f}</p>
+                                <p><strong>Size:</strong> {partial_pct:.0f}%</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📊 No Partial TP</h4>
+                                <p>Full position to TP</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                    # Confidence Breakdown (if present)
+                    conf_breakdown = data.get('confidence_breakdown')
+                    if conf_breakdown:
+                        st.subheader("📊 Confidence Breakdown")
+                        col1, col2, col3, col4, col5 = st.columns(5)
+
+                        with col1:
+                            total = conf_breakdown.get('total', 0) * 100
+                            st.metric("Total", f"{total:.1f}%")
+
+                        with col2:
+                            htf = conf_breakdown.get('htf_score', 0) * 100
+                            st.metric("HTF Score", f"{htf:.1f}%")
+
+                        with col3:
+                            pattern_score = conf_breakdown.get('pattern_score', 0) * 100
+                            st.metric("Pattern Score", f"{pattern_score:.1f}%")
+
+                        with col4:
+                            sr_score = conf_breakdown.get('sr_score', 0) * 100
+                            st.metric("S/R Score", f"{sr_score:.1f}%")
+
+                        with col5:
+                            rr_score = conf_breakdown.get('rr_score', 0) * 100
+                            st.metric("R:R Score", f"{rr_score:.1f}%")
+
+                    # Order Block Details (if present)
+                    if data.get('order_block_details'):
+                        st.subheader("🧱 Order Block Details")
+                        ob = data['order_block_details']
+
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        with col1:
+                            ob_type = ob['type']
+                            ob_emoji = "🟢" if 'bullish' in ob_type.lower() else "🔴"
+                            st.metric("Type", f"{ob_emoji} {ob_type.upper()}")
+
+                        with col2:
+                            strength = ob['strength']
+                            strength_colors = {'weak': '#dc3545', 'medium': '#ffc107', 'strong': '#28a745', 'very_strong': '#198754'}
+                            st.metric("Strength", strength.upper())
+
+                        with col3:
+                            st.metric("Tested Count", ob['tested_count'])
+
+                        with col4:
+                            valid_emoji = "✅" if ob['still_valid'] else "❌"
+                            st.metric("Still Valid", valid_emoji)
+
+                    # FVG Details (if present)
+                    if data.get('fair_value_gap_details'):
+                        st.subheader("📊 Fair Value Gap Details")
+                        fvg = data['fair_value_gap_details']
+
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        with col1:
+                            fvg_type = fvg['type']
+                            fvg_emoji = "🟢" if 'bullish' in fvg_type.lower() else "🔴"
+                            st.metric("Type", f"{fvg_emoji} {fvg_type.upper()}")
+
+                        with col2:
+                            st.metric("Size", f"{fvg['size_pips']:.1f} pips")
+
+                        with col3:
+                            status = fvg['status']
+                            status_emoji = "✅" if status == 'active' else ("⚠️" if status == 'filled' else "❌")
+                            st.metric("Status", f"{status_emoji} {status.upper()}")
+
+                        with col4:
+                            st.metric("Confluence", f"{fvg['confluence_score']*100:.0f}%")
+
+                    # Market Intelligence (if present)
+                    market_intel = data.get('market_intelligence')
+                    if market_intel:
+                        st.subheader("🧠 Market Intelligence at Entry")
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        with col1:
+                            regime = market_intel.get('regime', {})
+                            regime_name = regime.get('dominant', 'unknown').replace('_', ' ').title()
+                            regime_conf = regime.get('confidence', 0) * 100
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📊 Market Regime</h4>
+                                <h3>{regime_name}</h3>
+                                <small>Confidence: {regime_conf:.0f}%</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col2:
+                            session = market_intel.get('session', {})
+                            session_name = session.get('current', 'unknown').replace('_', ' ').title()
+                            volatility = session.get('volatility', 'unknown')
+                            vol_emoji = "🔴" if volatility == 'high' else ("🟡" if volatility == 'medium' else "🟢")
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>⏰ Trading Session</h4>
+                                <h3>{session_name}</h3>
+                                <small>{vol_emoji} Volatility: {volatility.upper()}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col3:
+                            strength = market_intel.get('market_strength', {})
+                            trend_str = strength.get('trend_strength', 0) * 100
+                            bias = strength.get('market_bias', 'neutral')
+                            bias_emoji = "📈" if bias == 'bullish' else ("📉" if bias == 'bearish' else "➡️")
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>{bias_emoji} Market Bias</h4>
+                                <h3>{bias.upper()}</h3>
+                                <small>Trend Strength: {trend_str:.0f}%</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col4:
+                            intel_applied = market_intel.get('intelligence_applied', False)
+                            intel_emoji = "✅" if intel_applied else "❌"
+                            risk_level = session.get('risk_level', 'unknown')
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>{intel_emoji} Intelligence Applied</h4>
+                                <p><strong>Risk Level:</strong> {risk_level.upper()}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                    # Trade Outcome Correlation
+                    st.subheader("📈 Trade Outcome Correlation")
+                    outcome = data['trade_outcome']
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        status = outcome['status']
+                        status_emoji = "✅" if status == 'closed' else ("🔄" if status == 'tracking' else "⏳")
+                        st.metric("Status", f"{status_emoji} {status.upper()}")
+
+                    with col2:
+                        is_winner = outcome['is_winner']
+                        if is_winner is not None:
+                            result_emoji = "🏆" if is_winner else "❌"
+                            result_text = "WIN" if is_winner else "LOSS"
+                            result_color = '#28a745' if is_winner else '#dc3545'
+                            st.markdown(f"""
+                            <div class="metric-card" style="background: {'#d4edda' if is_winner else '#f8d7da'};">
+                                <h4>Result</h4>
+                                <h2 style="color: {result_color};">{result_emoji} {result_text}</h2>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.metric("Result", "Pending")
+
+                    with col3:
+                        pnl = outcome['profit_loss']
+                        pnl_color = '#28a745' if pnl > 0 else '#dc3545'
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>P&L</h4>
+                            <h3 style="color: {pnl_color};">{'+' if pnl > 0 else ''}{pnl:.2f}</h3>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col4:
+                        pips = outcome['pips_gained']
+                        pips_color = '#28a745' if pips > 0 else '#dc3545'
+                        duration = outcome['duration_minutes']
+                        duration_str = f"{duration // 60}h {duration % 60}m" if duration else "N/A"
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>Pips & Duration</h4>
+                            <p style="color: {pips_color};"><strong>{'+' if pips > 0 else ''}{pips:.1f} pips</strong></p>
+                            <small>Duration: {duration_str}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # Claude Analysis (if present)
+                    if data.get('claude_analysis') and data['claude_analysis'].get('analysis_text'):
+                        st.subheader("🤖 Claude AI Analysis")
+                        claude = data['claude_analysis']
+
+                        col1, col2, col3 = st.columns([1, 1, 2])
+
+                        with col1:
+                            if claude['score']:
+                                st.metric("Score", f"{claude['score']}/100")
+
+                        with col2:
+                            if claude['decision']:
+                                decision_emoji = "✅" if claude['approved'] else "❌"
+                                st.metric("Decision", f"{decision_emoji} {claude['decision']}")
+
+                        with col3:
+                            if claude['reason']:
+                                st.info(f"**Reason:** {claude['reason']}")
+
+                        if claude['analysis_text']:
+                            with st.expander("📝 Full Analysis"):
+                                st.markdown(claude['analysis_text'])
+
+                    # Raw Data Expander
+                    with st.expander("🔍 View Raw Signal Data"):
+                        st.json(data.get('raw_data', {}))
+
+                elif response.status_code == 404:
+                    st.error(f"❌ Trade {trade_id} not found in database")
+                else:
+                    st.error(f"❌ API Error: {response.status_code} - {response.text}")
+
+            except Exception as e:
+                st.error(f"❌ Error analyzing signal: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
+    def _render_outcome_analysis(self, trade_id: int, analyze_btn: bool):
+        """Render the trade outcome analysis sub-tab - WHY the trade won or lost"""
+        st.subheader("📚 Trade Outcome Analysis")
+        st.markdown("*Understand WHY this trade won or lost - Learn from every trade*")
+
+        if analyze_btn or trade_id:
+            try:
+                import requests
+
+                # Call the FastAPI outcome analysis endpoint
+                headers = {
+                    "X-APIM-Gateway": "verified",
+                    "X-API-KEY": "436abe054a074894a0517e5172f0e5b6"
+                }
+
+                with st.spinner(f"Analyzing outcome for trade {trade_id}..."):
+                    response = requests.get(
+                        f"http://fastapi-dev:8000/api/trade-analysis/outcome/{trade_id}",
+                        headers=headers
+                    )
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    # Check if trade is still open
+                    if data.get('status') == 'TRADE_STILL_OPEN':
+                        st.warning(f"⚠️ {data.get('message', 'Trade is still open')}")
+                        if 'trade_details' in data:
+                            td = data['trade_details']
+                            st.info(f"Trade: {td.get('symbol')} | {td.get('direction')} | Entry: {td.get('entry_price'):.5f} | Status: {td.get('status')}")
+                        return
+
+                    # ===== OUTCOME SUMMARY SECTION =====
+                    st.subheader("📊 Outcome Summary")
+                    summary = data['outcome_summary']
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        result = summary['result']
+                        if result == "WIN":
+                            result_bg = '#d4edda'
+                            result_emoji = "🏆"
+                            result_color = '#28a745'
+                        elif result == "LOSS":
+                            result_bg = '#f8d7da'
+                            result_emoji = "❌"
+                            result_color = '#dc3545'
+                        else:
+                            result_bg = '#fff3cd'
+                            result_emoji = "⚖️"
+                            result_color = '#856404'
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: {result_bg}; text-align: center;">
+                            <h4>Result</h4>
+                            <h2 style="color: {result_color};">{result_emoji} {result}</h2>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        pips = summary['pips_gained']
+                        profit_loss = summary['profit_loss']
+                        pnl_color = '#28a745' if profit_loss > 0 else '#dc3545'
+                        # Show pips if available, otherwise show P&L prominently
+                        if pips != 0:
+                            st.markdown(f"""
+                            <div class="metric-card" style="text-align: center;">
+                                <h4>P&L</h4>
+                                <h3 style="color: {pnl_color};">{'+' if pips > 0 else ''}{pips:.1f} pips</h3>
+                                <small>{'+' if profit_loss > 0 else ''}{profit_loss:.2f}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.markdown(f"""
+                            <div class="metric-card" style="text-align: center;">
+                                <h4>P&L</h4>
+                                <h3 style="color: {pnl_color};">{'+' if profit_loss > 0 else ''}{profit_loss:.2f}</h3>
+                                <small>pips not recorded</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                    with col3:
+                        r_mult = summary['r_multiple']
+                        # If R-multiple is 0 but we have MFE/MAE, calculate approximate R
+                        if r_mult == 0 and summary.get('mfe_pips', 0) > 0:
+                            # Use MFE/MAE ratio as proxy for trade quality
+                            mfe_mae_ratio = summary.get('mfe_mae_ratio', 0)
+                            if result == "WIN":
+                                r_display = f"~{mfe_mae_ratio:.1f}R*"
+                                r_color = '#28a745'
+                            elif result == "LOSS":
+                                r_display = f"-1R*"
+                                r_color = '#dc3545'
+                            else:
+                                r_display = "0R"
+                                r_color = '#856404'
+                            st.markdown(f"""
+                            <div class="metric-card" style="text-align: center;">
+                                <h4>R-Multiple</h4>
+                                <h3 style="color: {r_color};">{r_display}</h3>
+                                <small>*estimated</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            r_color = '#28a745' if r_mult > 0 else '#dc3545'
+                            st.markdown(f"""
+                            <div class="metric-card" style="text-align: center;">
+                                <h4>R-Multiple</h4>
+                                <h3 style="color: {r_color};">{'+' if r_mult > 0 else ''}{r_mult:.2f}R</h3>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                    with col4:
+                        exit_type = summary['exit_type']
+                        exit_emoji = "🎯" if exit_type == "TP_HIT" else ("🛑" if exit_type == "SL_HIT" else "📊")
+                        st.markdown(f"""
+                        <div class="metric-card" style="text-align: center;">
+                            <h4>Exit Type</h4>
+                            <h3>{exit_emoji} {exit_type.replace('_', ' ')}</h3>
+                            <small>Duration: {summary['duration_display']}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # ===== MFE/MAE ANALYSIS SECTION =====
+                    st.subheader("📈 MFE/MAE Analysis")
+                    st.markdown("*Maximum Favorable Excursion (MFE) vs Maximum Adverse Excursion (MAE)*")
+
+                    price_action = data['price_action_analysis']
+                    mfe = price_action['mfe']
+                    mae = price_action['mae']
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        mfe_pips = mfe['pips']
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: #d4edda;">
+                            <h4>📈 MFE (Max Profit)</h4>
+                            <h3 style="color: #28a745;">+{mfe_pips:.1f} pips</h3>
+                            <small>Peak: {mfe['time_to_peak_minutes']}m</small>
+                            <p><small>{mfe['percentage_of_tp']:.0f}% of TP distance</small></p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        mae_pips = mae['pips']
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: #f8d7da;">
+                            <h4>📉 MAE (Max Drawdown)</h4>
+                            <h3 style="color: #dc3545;">-{mae_pips:.1f} pips</h3>
+                            <small>Trough: {mae['time_to_trough_minutes']}m</small>
+                            <p><small>{mae['percentage_of_sl']:.0f}% of SL distance</small></p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col3:
+                        ratio = price_action['mfe_mae_ratio']
+                        ratio_color = '#28a745' if ratio > 2 else ('#ffc107' if ratio > 1 else '#dc3545')
+                        ratio_verdict = "Excellent" if ratio > 3 else ("Good" if ratio > 2 else ("Fair" if ratio > 1 else "Poor"))
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>⚖️ MFE/MAE Ratio</h4>
+                            <h3 style="color: {ratio_color};">{ratio:.2f}</h3>
+                            <small>{ratio_verdict}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col4:
+                        initial = price_action['initial_move']
+                        initial_emoji = "🟢" if initial == "FAVORABLE" else ("🔴" if initial == "ADVERSE" else "🟡")
+                        reversal = price_action['immediate_reversal']
+                        reversal_emoji = "⚠️" if reversal else "✅"
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h4>🚀 Initial Move</h4>
+                            <h3>{initial_emoji} {initial}</h3>
+                            <small>{reversal_emoji} {'Immediate Reversal' if reversal else 'No Quick Reversal'}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # ===== ENTRY QUALITY SECTION =====
+                    st.subheader("✅ Entry Quality Assessment")
+                    entry_q = data['entry_quality_assessment']
+
+                    score = entry_q['score']
+                    verdict = entry_q['verdict']
+                    verdict_color = '#28a745' if verdict == "GOOD_ENTRY" else ('#ffc107' if verdict in ["AVERAGE_ENTRY", "BELOW_AVERAGE_ENTRY"] else '#dc3545')
+                    verdict_bg = '#d4edda' if verdict == "GOOD_ENTRY" else ('#fff3cd' if verdict in ["AVERAGE_ENTRY", "BELOW_AVERAGE_ENTRY"] else '#f8d7da')
+
+                    # Show overall score
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: {verdict_bg}; text-align: center;">
+                            <h4>Entry Score</h4>
+                            <h2 style="color: {verdict_color};">{score:.0f}/100</h2>
+                            <p><strong>{verdict.replace('_', ' ')}</strong></p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        # Show factor breakdown
+                        factors = entry_q.get('factors', [])
+                        if factors:
+                            for factor in factors:
+                                points = factor.get('points', 0)
+                                max_pts = factor.get('max_points', 0)
+                                pct = (points / max_pts * 100) if max_pts > 0 else 0
+                                bar_color = '#28a745' if pct >= 70 else ('#ffc107' if pct >= 40 else '#dc3545')
+                                st.markdown(f"""
+                                <div style="margin-bottom: 0.5rem;">
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span>{factor['name']}: {factor['value']}</span>
+                                        <span><strong>+{points:.0f}/{max_pts}</strong></span>
+                                    </div>
+                                    <div style="background: #e9ecef; border-radius: 4px; height: 8px;">
+                                        <div style="background: {bar_color}; width: {pct}%; height: 100%; border-radius: 4px;"></div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                    # ===== EXIT QUALITY SECTION =====
+                    st.subheader("🎯 Exit Quality Assessment")
+                    exit_q = data['exit_quality_assessment']
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        exit_verdict = exit_q['verdict']
+                        exit_v_color = '#28a745' if exit_verdict in ["OPTIMAL_EXIT", "EXCELLENT_EXIT", "GOOD_EXIT"] else ('#ffc107' if exit_verdict == "ACCEPTABLE_EXIT" else '#dc3545')
+                        exit_v_bg = '#d4edda' if exit_verdict in ["OPTIMAL_EXIT", "EXCELLENT_EXIT", "GOOD_EXIT"] else ('#fff3cd' if exit_verdict == "ACCEPTABLE_EXIT" else '#f8d7da')
+                        st.markdown(f"""
+                        <div class="metric-card" style="background: {exit_v_bg}; text-align: center;">
+                            <h4>Exit Verdict</h4>
+                            <h3 style="color: {exit_v_color};">{exit_verdict.replace('_', ' ')}</h3>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        efficiency = exit_q['exit_efficiency_pct']
+                        eff_color = '#28a745' if efficiency >= 70 else ('#ffc107' if efficiency >= 40 else '#dc3545')
+                        st.markdown(f"""
+                        <div class="metric-card" style="text-align: center;">
+                            <h4>Exit Efficiency</h4>
+                            <h3 style="color: {eff_color};">{efficiency:.0f}%</h3>
+                            <small>of MFE captured</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col3:
+                        actual_pips = exit_q['actual_pips']
+                        # Show actual pips or P&L if pips is 0
+                        if actual_pips != 0:
+                            actual_display = f"{'+' if actual_pips > 0 else ''}{actual_pips:.1f} pips"
+                        else:
+                            actual_pnl = summary['profit_loss']
+                            actual_display = f"{'+' if actual_pnl > 0 else ''}{actual_pnl:.2f}"
+                        st.markdown(f"""
+                        <div class="metric-card" style="text-align: center;">
+                            <h4>Comparison</h4>
+                            <p>MFE: <strong>+{exit_q['mfe_pips']:.1f}</strong> pips</p>
+                            <p>Actual: <strong>{actual_display}</strong></p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col4:
+                        missed = exit_q['missed_profit_pips']
+                        missed_color = '#dc3545' if missed > 10 else ('#ffc107' if missed > 5 else '#28a745')
+                        st.markdown(f"""
+                        <div class="metric-card" style="text-align: center;">
+                            <h4>Missed Profit</h4>
+                            <h3 style="color: {missed_color};">{missed:.1f} pips</h3>
+                            <small>{exit_q['verdict_details']}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # ===== LEARNING INSIGHTS SECTION =====
+                    st.subheader("🎓 Learning Insights")
+                    insights = data['learning_insights']
+
+                    result_color = '#28a745' if insights['trade_result'] == "WIN" else ('#dc3545' if insights['trade_result'] == "LOSS" else '#856404')
+                    result_bg = '#d4edda' if insights['trade_result'] == "WIN" else ('#f8d7da' if insights['trade_result'] == "LOSS" else '#fff3cd')
+
+                    # Primary Factor
+                    st.markdown(f"""
+                    <div class="metric-card" style="background: {result_bg}; border-left: 4px solid {result_color};">
+                        <h4>🏆 PRIMARY FACTOR</h4>
+                        <p style="font-size: 1.1rem;"><strong>{insights['primary_factor']}</strong></p>
+                        <small>Pattern: <em>{insights.get('pattern_identified', 'Unknown').replace('_', ' ')}</em></small>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # What went right/wrong
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        if insights.get('what_went_right'):
+                            st.markdown("#### ✅ What Went Right")
+                            for item in insights['what_went_right']:
+                                st.success(f"• {item}")
+                        elif insights['trade_result'] == "WIN":
+                            st.markdown("#### ✅ What Went Right")
+                            st.success("• Trade reached target as planned")
+
+                    with col2:
+                        if insights.get('what_went_wrong'):
+                            st.markdown("#### ❌ What Went Wrong")
+                            for item in insights['what_went_wrong']:
+                                st.error(f"• {item}")
+
+                    # Contributing Factors
+                    if insights.get('contributing_factors'):
+                        st.markdown("#### 📋 Contributing Factors")
+                        for factor in insights['contributing_factors']:
+                            st.info(f"• {factor}")
+
+                    # Improvement Suggestions
+                    if insights.get('improvement_suggestions'):
+                        st.markdown("#### 💡 Improvement Suggestions")
+                        for suggestion in insights['improvement_suggestions']:
+                            st.warning(f"• {suggestion}")
+
+                    # Key Takeaway
+                    if insights.get('key_takeaway'):
+                        st.markdown("---")
+                        st.markdown(f"""
+                        <div style="background: #e7f1ff; padding: 1rem; border-radius: 8px; border-left: 4px solid #0066cc;">
+                            <h4>🔑 KEY TAKEAWAY</h4>
+                            <p style="font-size: 1.1rem; margin: 0;"><em>{insights['key_takeaway']}</em></p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # ===== TRADE DETAILS SECTION =====
+                    with st.expander("📋 Trade Details"):
+                        td = data['trade_details']
+                        col1, col2, col3 = st.columns(3)
+
+                        with col1:
+                            st.metric("Symbol", td['symbol'].replace('CS.D.', '').replace('.MINI.IP', ''))
+                            st.metric("Direction", td['direction'])
+                            st.metric("Deal ID", td.get('deal_id', 'N/A'))
+
+                        with col2:
+                            st.metric("Entry Price", f"{td['entry_price']:.5f}")
+                            st.metric("Exit Price", f"{td['exit_price']:.5f}" if td.get('exit_price') else "N/A")
+                            st.metric("Moved to BE", "Yes" if td['moved_to_breakeven'] else "No")
+
+                        with col3:
+                            st.metric("Stop Loss", f"{td['sl_price']:.5f}")
+                            st.metric("Take Profit", f"{td['tp_price']:.5f}")
+                            st.metric("Alert ID", td.get('alert_id', 'N/A'))
+
+                        st.write(f"**Opened:** {td.get('opened_at', 'N/A')}")
+                        st.write(f"**Closed:** {td.get('closed_at', 'N/A')}")
+
+                    # ===== MARKET CONTEXT =====
+                    market_ctx = data.get('market_context', {})
+                    if market_ctx:
+                        with st.expander("🌐 Market Context at Entry"):
+                            col1, col2, col3, col4 = st.columns(4)
+
+                            with col1:
+                                st.metric("Market Regime", market_ctx.get('regime_at_entry', 'Unknown').replace('_', ' ').title())
+
+                            with col2:
+                                st.metric("Session", market_ctx.get('session_at_entry', 'Unknown').replace('_', ' ').title())
+
+                            with col3:
+                                htf = market_ctx.get('htf_aligned', False)
+                                htf_emoji = "✅" if htf else "❌"
+                                st.metric("HTF Aligned", f"{htf_emoji} {'Yes' if htf else 'No'}")
+
+                            with col4:
+                                vol = market_ctx.get('volatility_percentile', 0)
+                                st.metric("Volatility", f"{vol*100:.0f}%")
+
+                    # ===== CANDLE DATA (Optional Chart) =====
+                    candle_data = data.get('candle_data', {})
+                    if candle_data and candle_data.get('trade_candles'):
+                        with st.expander("📊 Price Chart During Trade"):
+                            import plotly.graph_objects as go
+
+                            all_candles = (
+                                candle_data.get('entry_context', []) +
+                                candle_data.get('trade_candles', []) +
+                                candle_data.get('exit_context', [])
+                            )
+
+                            if all_candles:
+                                times = [c['timestamp'] for c in all_candles]
+                                opens = [c['open'] for c in all_candles]
+                                highs = [c['high'] for c in all_candles]
+                                lows = [c['low'] for c in all_candles]
+                                closes = [c['close'] for c in all_candles]
+
+                                fig = go.Figure(data=[go.Candlestick(
+                                    x=times,
+                                    open=opens,
+                                    high=highs,
+                                    low=lows,
+                                    close=closes,
+                                    name='Price'
+                                )])
+
+                                # Add entry price line
+                                td = data['trade_details']
+                                fig.add_hline(y=td['entry_price'], line_dash="dash", line_color="blue",
+                                             annotation_text="Entry")
+
+                                # Add SL and TP lines
+                                if td.get('sl_price'):
+                                    fig.add_hline(y=td['sl_price'], line_dash="dash", line_color="red",
+                                                 annotation_text="SL")
+                                if td.get('tp_price'):
+                                    fig.add_hline(y=td['tp_price'], line_dash="dash", line_color="green",
+                                                 annotation_text="TP")
+
+                                # Add MFE/MAE markers
+                                if mfe.get('price') and mfe.get('timestamp'):
+                                    fig.add_trace(go.Scatter(
+                                        x=[mfe['timestamp']],
+                                        y=[mfe['price']],
+                                        mode='markers',
+                                        marker=dict(size=12, color='green', symbol='triangle-up'),
+                                        name=f"MFE (+{mfe['pips']:.1f} pips)"
+                                    ))
+
+                                if mae.get('price') and mae.get('timestamp'):
+                                    fig.add_trace(go.Scatter(
+                                        x=[mae['timestamp']],
+                                        y=[mae['price']],
+                                        mode='markers',
+                                        marker=dict(size=12, color='red', symbol='triangle-down'),
+                                        name=f"MAE (-{mae['pips']:.1f} pips)"
+                                    ))
+
+                                fig.update_layout(
+                                    title=f"Trade {trade_id} - Price Action with MFE/MAE",
+                                    xaxis_title="Time",
+                                    yaxis_title="Price",
+                                    height=500,
+                                    showlegend=True
+                                )
+
+                                st.plotly_chart(fig, use_container_width=True)
+
+                    # Raw Data Expander
+                    with st.expander("🔍 View Raw Outcome Data"):
+                        st.json(data)
+
+                elif response.status_code == 404:
+                    st.error(f"❌ Trade {trade_id} not found in database")
+                else:
+                    st.error(f"❌ API Error: {response.status_code} - {response.text}")
+
+            except Exception as e:
+                st.error(f"❌ Error analyzing trade outcome: {e}")
                 import traceback
                 st.code(traceback.format_exc())
 

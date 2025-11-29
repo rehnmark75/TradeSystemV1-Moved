@@ -5,11 +5,24 @@ Trade Analysis Router - Detailed trailing stop analysis for individual trades
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from services.db import get_db
-from services.models import TradeLog
+from services.models import TradeLog, AlertHistory, IGCandle
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import re
+import json
 from pathlib import Path
+
+# Import trade analysis service functions
+from services.trade_analysis_service import (
+    calculate_mfe_mae,
+    classify_exit_type,
+    assess_entry_quality,
+    assess_exit_quality,
+    generate_learning_insights,
+    get_outcome_summary,
+    fetch_trade_candles,
+    safe_float as service_safe_float
+)
 
 router = APIRouter(prefix="/api/trade-analysis", tags=["trade-analysis"])
 
@@ -400,3 +413,568 @@ async def get_trade_timeline(trade_id: int, db: Session = Depends(get_db)):
         "timeline": timeline,
         "total_events": len(timeline)
     }
+
+
+def safe_json_parse(data: Any) -> Dict:
+    """Safely parse JSON data that might already be a dict or a string"""
+    if data is None:
+        return {}
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, str):
+        try:
+            return json.loads(data)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def safe_float(value: Any, default: float = 0.0) -> float:
+    """Safely convert value to float"""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+@router.get("/signal/{trade_id}")
+async def get_signal_analysis(trade_id: int, db: Session = Depends(get_db)):
+    """
+    Get comprehensive signal analysis for a specific trade
+
+    Analyzes the strategy signal that triggered this trade, including:
+    - Smart Money Concepts validation
+    - Confluence factors
+    - Entry timing quality
+    - Technical context at entry
+    - Risk/reward setup
+
+    Args:
+        trade_id: Trade ID to analyze
+
+    Returns:
+        Detailed signal analysis with all SMC and technical data
+    """
+    # Get trade from database
+    trade = db.query(TradeLog).filter(TradeLog.id == trade_id).first()
+
+    if not trade:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+
+    # Check if trade has an associated alert
+    if not trade.alert_id:
+        return {
+            "trade_id": trade_id,
+            "has_signal": False,
+            "message": "This trade has no linked signal (alert_id is null)",
+            "trade_details": {
+                "symbol": trade.symbol,
+                "direction": trade.direction,
+                "entry_price": safe_float(trade.entry_price),
+                "status": trade.status
+            }
+        }
+
+    # Get the alert/signal from database
+    alert = db.query(AlertHistory).filter(AlertHistory.id == trade.alert_id).first()
+
+    if not alert:
+        return {
+            "trade_id": trade_id,
+            "has_signal": False,
+            "message": f"Signal with alert_id={trade.alert_id} not found in database",
+            "trade_details": {
+                "symbol": trade.symbol,
+                "direction": trade.direction,
+                "entry_price": safe_float(trade.entry_price),
+                "status": trade.status
+            }
+        }
+
+    # Parse JSON fields
+    strategy_indicators = safe_json_parse(alert.strategy_indicators)
+    strategy_metadata = safe_json_parse(alert.strategy_metadata)
+    market_structure = safe_json_parse(alert.market_structure_analysis)
+    order_flow = safe_json_parse(alert.order_flow_analysis)
+    confluence = safe_json_parse(alert.confluence_details)
+    signal_conditions = safe_json_parse(alert.signal_conditions)
+
+    # Extract SMC data from strategy_indicators (primary source for SMC strategies)
+    bos_choch = strategy_indicators.get('bos_choch', {}) or {}
+    htf_data = strategy_indicators.get('htf_data', {}) or {}
+    sr_data = strategy_indicators.get('sr_data', {}) or {}
+    pattern_data = strategy_indicators.get('pattern_data', {}) or {}
+    rr_data = strategy_indicators.get('rr_data', {}) or {}
+    confidence_breakdown = strategy_indicators.get('confidence_breakdown', {}) or {}
+    dataframe_analysis = strategy_indicators.get('dataframe_analysis', {}) or {}
+    ema_data = dataframe_analysis.get('ema_data', {}) or {}
+    df_sr_data = dataframe_analysis.get('sr_data', {}) or {}
+
+    # Extract confluence factors
+    confluence_factors = []
+    confluence_score = 0.0
+
+    if confluence:
+        # Parse confluence details from SMC strategy
+        factors_list = confluence.get('factors', [])
+        if isinstance(factors_list, list):
+            for factor in factors_list:
+                if isinstance(factor, dict):
+                    confluence_factors.append({
+                        "name": factor.get('name', 'Unknown'),
+                        "present": factor.get('present', False),
+                        "weight": safe_float(factor.get('weight', 0)),
+                        "details": factor.get('details', '')
+                    })
+        confluence_score = safe_float(confluence.get('total_score', 0))
+
+    # If no structured confluence, build from strategy_indicators and metadata
+    if not confluence_factors:
+        # Check for SMC confluence factors from strategy_indicators
+        has_htf = bool(htf_data and htf_data.get('trend'))
+        has_pattern = bool(pattern_data and pattern_data.get('pattern_type'))
+        has_sr = bool(sr_data and sr_data.get('level_price'))
+        has_rr = bool(rr_data and safe_float(rr_data.get('rr_ratio', 0)) >= 1.5)
+        has_bos = bool(bos_choch and bos_choch.get('htf_direction'))
+
+        smc_factors = [
+            ('htf_alignment', 'HTF Alignment', has_htf, htf_data.get('trend', '')),
+            ('bos_choch', 'BOS/ChoCH Structure', has_bos, bos_choch.get('structure_type', '')),
+            ('pattern', 'Price Pattern', has_pattern, pattern_data.get('pattern_type', '')),
+            ('sr_level', 'S/R Level', has_sr, sr_data.get('level_type', '')),
+            ('risk_reward', 'Risk/Reward', has_rr, f"R:R {safe_float(rr_data.get('rr_ratio', 0)):.2f}"),
+        ]
+
+        # Also check metadata for additional factors
+        if strategy_metadata:
+            smc_factors.extend([
+                ('order_block', 'Order Block', strategy_metadata.get('has_order_block', False), ''),
+                ('fair_value_gap', 'Fair Value Gap', strategy_metadata.get('has_fvg', False), ''),
+                ('liquidity_sweep', 'Liquidity Sweep', strategy_metadata.get('liquidity_swept', False), ''),
+            ])
+
+        for key, name, present, details in smc_factors:
+            confluence_factors.append({
+                "name": name,
+                "present": bool(present),
+                "weight": 1.0 if present else 0.0,
+                "details": str(details) if details else ""
+            })
+
+        # Calculate confluence score from confidence_breakdown if available
+        if confidence_breakdown:
+            confluence_score = safe_float(confidence_breakdown.get('total', 0))
+
+    # Extract order block details
+    order_block_details = None
+    if order_flow:
+        ob_data = order_flow.get('order_block', {}) or order_flow.get('nearest_order_block', {})
+        if ob_data:
+            order_block_details = {
+                "type": ob_data.get('type', 'unknown'),
+                "strength": ob_data.get('strength', 'unknown'),
+                "tested_count": ob_data.get('tested_count', 0),
+                "still_valid": ob_data.get('still_valid', ob_data.get('valid', True)),
+                "fvg_confluence": safe_float(ob_data.get('fvg_confluence_score', 0)),
+                "price_high": safe_float(ob_data.get('high', 0)),
+                "price_low": safe_float(ob_data.get('low', 0))
+            }
+
+    # Extract FVG details
+    fvg_details = None
+    if order_flow:
+        fvg_data = order_flow.get('fair_value_gap', {}) or order_flow.get('nearest_fvg', {})
+        if fvg_data:
+            fvg_details = {
+                "type": fvg_data.get('type', 'unknown'),
+                "size_pips": safe_float(fvg_data.get('size_pips', 0)),
+                "status": fvg_data.get('status', 'unknown'),
+                "confluence_score": safe_float(fvg_data.get('confluence_score', 0)),
+                "price_high": safe_float(fvg_data.get('high', 0)),
+                "price_low": safe_float(fvg_data.get('low', 0))
+            }
+
+    # Extract HTF alignment info - prefer strategy_indicators over strategy_metadata
+    htf_info = strategy_metadata.get('htf_analysis', {}) or {}
+
+    # Extract market intelligence data from strategy_metadata
+    market_intel = strategy_metadata.get('market_intelligence', {}) or {}
+    regime_analysis = market_intel.get('regime_analysis', {}) or {}
+    session_analysis = market_intel.get('session_analysis', {}) or {}
+    market_context = market_intel.get('market_context', {}) or {}
+
+    # Build entry timing from strategy_indicators (htf_data, bos_choch)
+    htf_trend = htf_data.get('trend', htf_info.get('trend', 'unknown'))
+    htf_strength = safe_float(htf_data.get('strength', bos_choch.get('htf_strength', 0)))
+    htf_aligned = bool(htf_trend and htf_trend != 'unknown')
+
+    entry_timing = {
+        "premium_discount_zone": strategy_metadata.get('zone', 'equilibrium'),
+        "zone_quality": safe_float(strategy_metadata.get('zone_quality', 0.5)),
+        "htf_aligned": htf_aligned,
+        "htf_trend": htf_trend,
+        "htf_strength": htf_strength,
+        "htf_structure": bos_choch.get('structure_type', htf_info.get('structure', 'unknown')),
+        "htf_bias": bos_choch.get('htf_direction', market_context.get('market_strength', {}).get('market_bias', 'neutral')),
+        "in_pullback": htf_data.get('in_pullback', False),
+        "pullback_depth": safe_float(htf_data.get('pullback_depth', 0)),
+        "mtf_alignment_ratio": safe_float(strategy_metadata.get('mtf_alignment', 0)),
+        "entry_quality_score": safe_float(strategy_metadata.get('entry_quality', safe_float(alert.confidence_score)))
+    }
+
+    # Build market intelligence section
+    market_intelligence = None
+    if market_intel:
+        market_strength = market_context.get('market_strength', {})
+        market_intelligence = {
+            "regime": {
+                "dominant": regime_analysis.get('dominant_regime', 'unknown'),
+                "confidence": safe_float(regime_analysis.get('confidence', 0)),
+                "scores": regime_analysis.get('regime_scores', {})
+            },
+            "session": {
+                "current": session_analysis.get('current_session', 'unknown'),
+                "volatility": session_analysis.get('session_config', {}).get('volatility', 'unknown'),
+                "risk_level": session_analysis.get('session_config', {}).get('risk_level', 'unknown')
+            },
+            "market_strength": {
+                "trend_strength": safe_float(market_strength.get('average_trend_strength', 0)),
+                "volatility": safe_float(market_strength.get('average_volatility', 0)),
+                "market_bias": market_strength.get('market_bias', 'neutral'),
+                "directional_consensus": safe_float(market_strength.get('directional_consensus', 0))
+            },
+            "correlation": market_context.get('correlation_analysis', {}),
+            "intelligence_applied": market_intel.get('intelligence_applied', False)
+        }
+
+    # Calculate pip value based on pair
+    symbol = trade.symbol or alert.epic or ''
+    is_jpy = 'JPY' in symbol.upper()
+    pip_multiplier = 100 if is_jpy else 10000
+
+    # Calculate trade outcome
+    trade_outcome = {
+        "status": trade.status,
+        "profit_loss": safe_float(trade.profit_loss),
+        "pips_gained": safe_float(trade.pips_gained),
+        "duration_minutes": trade.lifecycle_duration_minutes,
+        "is_winner": safe_float(trade.profit_loss) > 0 if trade.profit_loss is not None else None,
+        "exit_reason": "trailing_stop" if trade.moved_to_breakeven else "unknown"
+    }
+
+    # Build the response
+    response = {
+        "trade_id": trade_id,
+        "alert_id": trade.alert_id,
+        "has_signal": True,
+
+        "signal_overview": {
+            "timestamp": str(alert.alert_timestamp) if alert.alert_timestamp else None,
+            "pair": alert.pair,
+            "epic": alert.epic,
+            "direction": alert.signal_type,
+            "strategy": alert.strategy,
+            "confidence_score": safe_float(alert.confidence_score),
+            "enhanced_confidence": safe_float(alert.enhanced_confidence_score),
+            "price_at_signal": safe_float(alert.price),
+            "bid_price": safe_float(alert.bid_price),
+            "ask_price": safe_float(alert.ask_price),
+            "spread_pips": safe_float(alert.spread_pips),
+            "timeframe": alert.timeframe,
+            "signal_trigger": alert.signal_trigger,
+            "market_session": alert.market_session
+        },
+
+        "smart_money_analysis": {
+            "validated": bool(alert.smart_money_validated) or bool(bos_choch),
+            "type": alert.smart_money_type or bos_choch.get('structure_type'),
+            "score": safe_float(alert.smart_money_score) or safe_float(confidence_breakdown.get('total', 0)),
+            "market_structure": {
+                "current_structure": bos_choch.get('htf_direction', market_structure.get('current_structure', 'unknown')),
+                "structure_type": bos_choch.get('structure_type', market_structure.get('structure_type', 'unknown')),
+                "htf_trend": htf_data.get('trend', 'unknown'),
+                "htf_strength": safe_float(htf_data.get('strength', 0)),
+                "swing_high": safe_float(market_structure.get('swing_high', 0)),
+                "swing_low": safe_float(market_structure.get('swing_low', 0)),
+                "swing_highs": htf_data.get('swing_highs', [])[:5],  # Last 5 swing highs
+                "swing_lows": htf_data.get('swing_lows', [])[:5],    # Last 5 swing lows
+                "structure_breaks": market_structure.get('structure_breaks', []),
+                "trend_strength": safe_float(htf_data.get('strength', market_structure.get('trend_strength', 0)))
+            }
+        },
+
+        "confluence_factors": {
+            "total_score": confluence_score,
+            "factors_present": sum(1 for f in confluence_factors if f.get('present', False)),
+            "factors_total": len(confluence_factors),
+            "factors": confluence_factors
+        },
+
+        "entry_timing": entry_timing,
+
+        "technical_context": {
+            # EMA data from strategy_indicators.dataframe_analysis.ema_data
+            "ema_9": safe_float(ema_data.get('ema_9', alert.ema_short or 0)),
+            "ema_21": safe_float(ema_data.get('ema_21', 0)),
+            "ema_50": safe_float(ema_data.get('ema_50', alert.ema_long or 0)),
+            "ema_100": safe_float(ema_data.get('ema_100', 0)),
+            "ema_200": safe_float(ema_data.get('ema_200', alert.ema_trend or 0)),
+            "price_vs_ema_50": "above" if safe_float(alert.price) > safe_float(ema_data.get('ema_50', 0)) else "below",
+            "price_vs_ema_200": "above" if safe_float(alert.price) > safe_float(ema_data.get('ema_200', 0)) else "below",
+            "macd": {
+                "line": safe_float(alert.macd_line) or safe_float(dataframe_analysis.get('macd_data', {}).get('macd_line', 0)),
+                "signal": safe_float(alert.macd_signal) or safe_float(dataframe_analysis.get('macd_data', {}).get('macd_signal', 0)),
+                "histogram": safe_float(alert.macd_histogram) or safe_float(dataframe_analysis.get('macd_data', {}).get('macd_histogram', 0)),
+                "direction": "bullish" if safe_float(alert.macd_histogram or 0) > 0 else "bearish"
+            },
+            "bollinger_bands": {
+                "upper": safe_float(dataframe_analysis.get('other_indicators', {}).get('bb_upper', 0)),
+                "middle": safe_float(dataframe_analysis.get('other_indicators', {}).get('bb_middle', 0)),
+                "lower": safe_float(dataframe_analysis.get('other_indicators', {}).get('bb_lower', 0))
+            },
+            "rsi": safe_float(strategy_indicators.get('rsi', 50)),
+            "rsi_zone": "overbought" if safe_float(strategy_indicators.get('rsi', 50)) > 70 else (
+                "oversold" if safe_float(strategy_indicators.get('rsi', 50)) < 30 else "neutral"
+            ),
+            "atr": safe_float(strategy_indicators.get('atr', 0)),
+            "volume": safe_float(alert.volume),
+            "volume_ratio": safe_float(alert.volume_ratio),
+            "volume_confirmation": bool(alert.volume_confirmation)
+        },
+
+        # Pattern detection from strategy_indicators
+        "pattern_analysis": {
+            "pattern_type": pattern_data.get('pattern_type'),
+            "pattern_strength": safe_float(pattern_data.get('pattern_strength', 0)),
+            "rejection_level": safe_float(pattern_data.get('rejection_level', 0)),
+            "entry_price": safe_float(pattern_data.get('entry_price', 0))
+        } if pattern_data else None,
+
+        # S/R analysis from strategy_indicators
+        "support_resistance": {
+            "level_price": safe_float(sr_data.get('level_price', 0)),
+            "level_type": sr_data.get('level_type', 'unknown'),
+            "level_strength": safe_float(sr_data.get('level_strength', 0)),
+            "distance_pips": safe_float(sr_data.get('distance_pips', 0)),
+            "touch_count": sr_data.get('touch_count', 0),
+            # Also include dataframe analysis S/R
+            "nearest_support": safe_float(df_sr_data.get('nearest_support', alert.nearest_support or 0)),
+            "nearest_resistance": safe_float(df_sr_data.get('nearest_resistance', alert.nearest_resistance or 0)),
+            "distance_to_support_pips": safe_float(df_sr_data.get('distance_to_support_pips', alert.distance_to_support_pips or 0)),
+            "distance_to_resistance_pips": safe_float(df_sr_data.get('distance_to_resistance_pips', alert.distance_to_resistance_pips or 0))
+        },
+
+        # Risk/Reward from strategy_indicators.rr_data (primary) or alert columns (fallback)
+        "risk_reward": {
+            "initial_rr": safe_float(rr_data.get('rr_ratio', alert.risk_reward_ratio or 0)),
+            "risk_pips": safe_float(rr_data.get('risk_pips', 0)),
+            "reward_pips": safe_float(rr_data.get('reward_pips', 0)),
+            "entry_price": safe_float(rr_data.get('entry_price', trade.entry_price or 0)),
+            "stop_loss": safe_float(rr_data.get('stop_loss', trade.sl_price or 0)),
+            "take_profit": safe_float(rr_data.get('take_profit', trade.tp_price or 0)),
+            "partial_tp": safe_float(rr_data.get('partial_tp', 0)),
+            "partial_percent": safe_float(rr_data.get('partial_percent', 0))
+        },
+
+        # Confidence breakdown from strategy_indicators
+        "confidence_breakdown": {
+            "total": safe_float(confidence_breakdown.get('total', alert.confidence_score or 0)),
+            "htf_score": safe_float(confidence_breakdown.get('htf_score', 0)),
+            "pattern_score": safe_float(confidence_breakdown.get('pattern_score', 0)),
+            "sr_score": safe_float(confidence_breakdown.get('sr_score', 0)),
+            "rr_score": safe_float(confidence_breakdown.get('rr_score', 0))
+        } if confidence_breakdown else None,
+
+        "order_block_details": order_block_details,
+        "fair_value_gap_details": fvg_details,
+
+        "market_intelligence": market_intelligence,
+
+        "trade_outcome": trade_outcome,
+
+        "claude_analysis": {
+            "score": alert.claude_score,
+            "decision": alert.claude_decision,
+            "approved": alert.claude_approved,
+            "reason": alert.claude_reason,
+            "analysis_text": alert.claude_analysis
+        },
+
+        "raw_data": {
+            "strategy_indicators": strategy_indicators,
+            "strategy_metadata": strategy_metadata,
+            "market_structure_analysis": market_structure,
+            "order_flow_analysis": order_flow,
+            "confluence_details": confluence,
+            "signal_conditions": signal_conditions
+        }
+    }
+
+    return response
+
+
+@router.get("/outcome/{trade_id}")
+async def get_trade_outcome_analysis(trade_id: int, db: Session = Depends(get_db)):
+    """
+    Get comprehensive outcome analysis for a trade - WHY it won or lost.
+
+    This endpoint analyzes the trade to understand:
+    - MFE/MAE: How much profit was available vs how much drawdown occurred
+    - Entry quality: Was the signal strong?
+    - Exit quality: Did we exit optimally?
+    - Learning insights: What can we learn from this trade?
+
+    Args:
+        trade_id: Trade ID to analyze
+
+    Returns:
+        Comprehensive outcome analysis with actionable insights
+    """
+    # Get trade from database
+    trade = db.query(TradeLog).filter(TradeLog.id == trade_id).first()
+
+    if not trade:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+
+    # Check if trade is closed
+    if trade.status != "closed":
+        return {
+            "trade_id": trade_id,
+            "status": "TRADE_STILL_OPEN",
+            "message": f"Trade is still {trade.status}. Outcome analysis only available for closed trades.",
+            "trade_details": {
+                "symbol": trade.symbol,
+                "direction": trade.direction,
+                "entry_price": safe_float(trade.entry_price),
+                "status": trade.status
+            }
+        }
+
+    # Get associated alert for signal data
+    alert = None
+    strategy_indicators = {}
+    if trade.alert_id:
+        alert = db.query(AlertHistory).filter(AlertHistory.id == trade.alert_id).first()
+        if alert:
+            strategy_indicators = safe_json_parse(alert.strategy_indicators)
+
+    # Calculate MFE/MAE from candle data (using IGCandle table with 5m for precision)
+    mfe_mae = calculate_mfe_mae(trade, db, IGCandle, timeframe=5)
+
+    # Classify exit type
+    exit_type = classify_exit_type(trade)
+
+    # Assess entry quality
+    entry_quality = assess_entry_quality(alert, strategy_indicators)
+
+    # Assess exit quality
+    exit_quality = assess_exit_quality(trade, mfe_mae, exit_type)
+
+    # Generate learning insights
+    insights = generate_learning_insights(
+        trade, entry_quality, exit_quality, mfe_mae, strategy_indicators
+    )
+
+    # Get outcome summary
+    outcome_summary = get_outcome_summary(trade, mfe_mae, exit_type)
+
+    # Fetch candle data for visualization (using IGCandle with 5m candles)
+    candle_data = fetch_trade_candles(trade, db, IGCandle, context_candles=10, timeframe=5)
+
+    # Get market context from strategy metadata
+    market_context = {}
+    if alert:
+        strategy_metadata = safe_json_parse(alert.strategy_metadata)
+        market_intel = strategy_metadata.get('market_intelligence', {}) or {}
+        market_context = {
+            "regime_at_entry": market_intel.get('regime_analysis', {}).get('dominant_regime', 'unknown'),
+            "session_at_entry": alert.market_session or market_intel.get('session_analysis', {}).get('current_session', 'unknown'),
+            "volatility_percentile": safe_float(market_intel.get('market_context', {}).get('market_strength', {}).get('average_volatility', 0)),
+            "htf_aligned": entry_quality.get('htf_aligned', False)
+        }
+
+    # Build the response
+    response = {
+        "trade_id": trade_id,
+        "status": "ANALYSIS_COMPLETE",
+
+        "outcome_summary": outcome_summary,
+
+        "price_action_analysis": {
+            "mfe": {
+                "pips": mfe_mae.get('mfe_pips'),
+                "price": mfe_mae.get('mfe_price'),
+                "timestamp": mfe_mae.get('mfe_timestamp'),
+                "time_to_peak_minutes": mfe_mae.get('mfe_time_to_peak_minutes'),
+                "percentage_of_tp": mfe_mae.get('percentage_of_tp')
+            },
+            "mae": {
+                "pips": mfe_mae.get('mae_pips'),
+                "price": mfe_mae.get('mae_price'),
+                "timestamp": mfe_mae.get('mae_timestamp'),
+                "time_to_trough_minutes": mfe_mae.get('mae_time_to_trough_minutes'),
+                "percentage_of_sl": mfe_mae.get('percentage_of_sl')
+            },
+            "mfe_mae_ratio": mfe_mae.get('mfe_mae_ratio'),
+            "initial_move": mfe_mae.get('initial_move'),
+            "immediate_reversal": mfe_mae.get('immediate_reversal'),
+            "candle_count": mfe_mae.get('candle_count')
+        },
+
+        "entry_quality_assessment": {
+            "score": entry_quality.get('score'),
+            "max_score": entry_quality.get('max_score'),
+            "percentage": entry_quality.get('percentage'),
+            "verdict": entry_quality.get('verdict'),
+            "factors": entry_quality.get('factors'),
+            "htf_aligned": entry_quality.get('htf_aligned'),
+            "confluence_count": entry_quality.get('confluence_count')
+        },
+
+        "exit_quality_assessment": {
+            "exit_type": exit_quality.get('exit_type'),
+            "mfe_pips": exit_quality.get('mfe_pips'),
+            "actual_pips": exit_quality.get('actual_pips'),
+            "missed_profit_pips": exit_quality.get('missed_profit_pips'),
+            "exit_efficiency": exit_quality.get('exit_efficiency'),
+            "exit_efficiency_pct": exit_quality.get('exit_efficiency_pct'),
+            "optimal_exit_price": exit_quality.get('optimal_exit_price'),
+            "actual_exit_price": exit_quality.get('actual_exit_price'),
+            "stages_activated": exit_quality.get('stages_activated'),
+            "verdict": exit_quality.get('verdict'),
+            "verdict_details": exit_quality.get('verdict_details')
+        },
+
+        "learning_insights": {
+            "trade_result": insights.get('trade_result'),
+            "primary_factor": insights.get('primary_factor'),
+            "pattern_identified": insights.get('pattern_identified'),
+            "contributing_factors": insights.get('contributing_factors'),
+            "what_went_right": insights.get('what_went_right'),
+            "what_went_wrong": insights.get('what_went_wrong'),
+            "improvement_suggestions": insights.get('improvement_suggestions'),
+            "key_takeaway": insights.get('key_takeaway')
+        },
+
+        "market_context": market_context,
+
+        "trade_details": {
+            "symbol": trade.symbol,
+            "direction": trade.direction,
+            "entry_price": safe_float(trade.entry_price),
+            "exit_price": safe_float(trade.exit_price_calculated),
+            "sl_price": safe_float(trade.sl_price),
+            "tp_price": safe_float(trade.tp_price),
+            "opened_at": str(trade.timestamp) if trade.timestamp else None,
+            "closed_at": str(trade.closed_at) if trade.closed_at else None,
+            "moved_to_breakeven": trade.moved_to_breakeven,
+            "deal_id": trade.deal_id,
+            "alert_id": trade.alert_id
+        },
+
+        "candle_data": candle_data
+    }
+
+    return response
