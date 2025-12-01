@@ -2004,48 +2004,116 @@ class UnifiedTradingDashboard:
                         st.metric("Spread", f"{sig['spread_pips']:.1f} pips" if sig['spread_pips'] else "N/A")
                         st.metric("Session", sig['market_session'] or "Unknown")
 
-                    # Smart Money Validation Section
-                    st.subheader("🧠 Smart Money Validation")
-                    smc = data['smart_money_analysis']
+                    # Detect strategy type from signal overview
+                    strategy_name = (sig.get('strategy') or '').upper()
+                    is_smc_simple = 'SMC_SIMPLE' in strategy_name
 
-                    col1, col2, col3 = st.columns(3)
+                    # Get raw strategy indicators for SMC_SIMPLE display
+                    raw_data = data.get('raw_data', {})
+                    strategy_indicators = raw_data.get('strategy_indicators', {})
 
-                    with col1:
-                        validated = smc['validated']
-                        val_emoji = "✅" if validated else "❌"
-                        val_bg = '#d4edda' if validated else '#f8d7da'
-                        st.markdown(f"""
-                        <div class="metric-card" style="background: {val_bg};">
-                            <h4>{val_emoji} SMC Validated</h4>
-                            <p><strong>Type:</strong> {smc['type'] or 'Unknown'}</p>
-                            <p><strong>Score:</strong> {smc['score']*100:.1f}%</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    # Smart Money / Strategy Validation Section
+                    if is_smc_simple:
+                        st.subheader("📊 SMC Simple - 3-Tier Analysis")
 
-                    with col2:
-                        ms = smc['market_structure']
-                        structure = ms['current_structure'] or ms['structure_type'] or 'Unknown'
-                        struct_emoji = "📈" if 'bullish' in structure.lower() else ("📉" if 'bearish' in structure.lower() else "➡️")
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <h4>{struct_emoji} Market Structure</h4>
-                            <p><strong>Type:</strong> {structure.upper()}</p>
-                            <p><strong>Trend Strength:</strong> {ms['trend_strength']*100:.0f}%</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        # Extract tier data from raw strategy_indicators
+                        tier1 = strategy_indicators.get('tier1_ema', {})
+                        tier2 = strategy_indicators.get('tier2_swing', {})
+                        tier3 = strategy_indicators.get('tier3_entry', {})
 
-                    with col3:
-                        # Structure breaks
-                        breaks = ms.get('structure_breaks', [])
-                        break_count = len(breaks) if isinstance(breaks, list) else 0
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <h4>📊 Structure Details</h4>
-                            <p><strong>Swing High:</strong> {ms['swing_high']:.5f}</p>
-                            <p><strong>Swing Low:</strong> {ms['swing_low']:.5f}</p>
-                            <p><strong>Breaks:</strong> {break_count}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        col1, col2, col3 = st.columns(3)
+
+                        with col1:
+                            # TIER 1: EMA Bias
+                            ema_dir = tier1.get('direction', 'Unknown')
+                            dir_emoji = "📈" if ema_dir == 'BULL' else ("📉" if ema_dir == 'BEAR' else "➡️")
+                            dir_bg = '#d4edda' if ema_dir in ['BULL', 'BEAR'] else '#f8d7da'
+                            ema_value = tier1.get('ema_value', 0)
+                            ema_distance = tier1.get('distance_pips', 0)
+                            st.markdown(f"""
+                            <div class="metric-card" style="background: {dir_bg};">
+                                <h4>{dir_emoji} TIER 1: 4H EMA Bias</h4>
+                                <p><strong>Direction:</strong> {ema_dir}</p>
+                                <p><strong>EMA {tier1.get('ema_period', 50)}:</strong> {ema_value:.5f}</p>
+                                <p><strong>Distance:</strong> {ema_distance:.1f} pips</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col2:
+                            # TIER 2: Swing Break
+                            swing_level = tier2.get('swing_level', 0)
+                            body_confirmed = tier2.get('body_close_confirmed', False)
+                            vol_confirmed = tier2.get('volume_confirmed', False)
+                            body_emoji = "✅" if body_confirmed else "❌"
+                            vol_emoji = "✅" if vol_confirmed else "⚪"
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📊 TIER 2: Swing Break</h4>
+                                <p><strong>Swing Level:</strong> {swing_level:.5f}</p>
+                                <p><strong>Body Close:</strong> {body_emoji} {'Confirmed' if body_confirmed else 'Not confirmed'}</p>
+                                <p><strong>Volume:</strong> {vol_emoji} {'Confirmed' if vol_confirmed else 'No spike'}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col3:
+                            # TIER 3: Entry Timing
+                            entry_price = tier3.get('entry_price', 0)
+                            pullback = tier3.get('pullback_depth', 0)
+                            fib_zone = tier3.get('fib_zone', 'N/A')
+                            in_optimal = tier3.get('in_optimal_zone', False)
+                            optimal_emoji = "🎯" if in_optimal else "⚪"
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>🎯 TIER 3: Entry Timing</h4>
+                                <p><strong>Entry:</strong> {entry_price:.5f}</p>
+                                <p><strong>Pullback:</strong> {pullback*100:.1f}%</p>
+                                <p><strong>Fib Zone:</strong> {fib_zone}</p>
+                                <p><strong>Optimal:</strong> {optimal_emoji} {'Yes' if in_optimal else 'No'}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    else:
+                        # Original SMC_STRUCTURE display
+                        st.subheader("🧠 Smart Money Validation")
+                        smc = data['smart_money_analysis']
+
+                        col1, col2, col3 = st.columns(3)
+
+                        with col1:
+                            validated = smc['validated']
+                            val_emoji = "✅" if validated else "❌"
+                            val_bg = '#d4edda' if validated else '#f8d7da'
+                            st.markdown(f"""
+                            <div class="metric-card" style="background: {val_bg};">
+                                <h4>{val_emoji} SMC Validated</h4>
+                                <p><strong>Type:</strong> {smc['type'] or 'Unknown'}</p>
+                                <p><strong>Score:</strong> {smc['score']*100:.1f}%</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col2:
+                            ms = smc['market_structure']
+                            structure = ms['current_structure'] or ms['structure_type'] or 'Unknown'
+                            struct_emoji = "📈" if 'bullish' in structure.lower() else ("📉" if 'bearish' in structure.lower() else "➡️")
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>{struct_emoji} Market Structure</h4>
+                                <p><strong>Type:</strong> {structure.upper()}</p>
+                                <p><strong>Trend Strength:</strong> {ms['trend_strength']*100:.0f}%</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col3:
+                            # Structure breaks
+                            breaks = ms.get('structure_breaks', [])
+                            break_count = len(breaks) if isinstance(breaks, list) else 0
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📊 Structure Details</h4>
+                                <p><strong>Swing High:</strong> {ms['swing_high']:.5f}</p>
+                                <p><strong>Swing Low:</strong> {ms['swing_low']:.5f}</p>
+                                <p><strong>Breaks:</strong> {break_count}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
 
                     # Confluence Factors Section
                     st.subheader("🎯 Confluence Factors")
@@ -2077,64 +2145,127 @@ class UnifiedTradingDashboard:
                     st.subheader("⏱️ Entry Timing Quality")
                     timing = data['entry_timing']
 
-                    col1, col2, col3, col4 = st.columns(4)
+                    if is_smc_simple:
+                        # SMC_SIMPLE: Display Fibonacci pullback and entry quality
+                        tier3 = strategy_indicators.get('tier3_entry', {})
+                        risk_mgmt = strategy_indicators.get('risk_management', {})
 
-                    with col1:
-                        zone = timing['premium_discount_zone']
-                        zone_emoji = "🟢" if zone == 'discount' else ("🔴" if zone == 'premium' else "🟡")
-                        zone_quality = "Good for BUY" if zone == 'discount' else ("Good for SELL" if zone == 'premium' else "Neutral")
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <h4>📍 Price Zone</h4>
-                            <h3>{zone_emoji} {zone.upper()}</h3>
-                            <small>{zone_quality}</small>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        col1, col2, col3, col4 = st.columns(4)
 
-                    with col2:
-                        htf_aligned = timing['htf_aligned']
-                        htf_emoji = "✅" if htf_aligned else "❌"
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <h4>📈 HTF Alignment</h4>
-                            <h3>{htf_emoji} {'Aligned' if htf_aligned else 'Not Aligned'}</h3>
-                            <small>Structure: {timing['htf_structure']}</small>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                    with col3:
-                        mtf_ratio = timing['mtf_alignment_ratio'] * 100
-                        htf_strength = timing.get('htf_strength', 0) * 100
-                        # Use HTF strength if MTF not available (SMC strategy uses HTF)
-                        if mtf_ratio > 0:
+                        with col1:
+                            pullback = tier3.get('pullback_depth', 0)
+                            # Determine pullback quality based on Fib levels
+                            if 0.382 <= pullback <= 0.500:
+                                pullback_quality = "Optimal (38.2-50%)"
+                                pullback_color = '#28a745'
+                            elif 0.236 <= pullback <= 0.618:
+                                pullback_quality = "Good (Fib zone)"
+                                pullback_color = '#ffc107'
+                            else:
+                                pullback_quality = "Extended"
+                                pullback_color = '#dc3545'
                             st.markdown(f"""
                             <div class="metric-card">
-                                <h4>🔄 MTF Consensus</h4>
-                                <h3>{mtf_ratio:.0f}%</h3>
-                                <small>Timeframes aligned</small>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        else:
-                            # Show HTF strength for SMC trades
-                            htf_color = '#28a745' if htf_strength >= 60 else ('#ffc107' if htf_strength >= 40 else '#dc3545')
-                            st.markdown(f"""
-                            <div class="metric-card">
-                                <h4>📊 HTF Strength</h4>
-                                <h3 style="color: {htf_color};">{htf_strength:.0f}%</h3>
-                                <small>4H trend strength</small>
+                                <h4>📐 Pullback Depth</h4>
+                                <h3 style="color: {pullback_color};">{pullback*100:.1f}%</h3>
+                                <small>{pullback_quality}</small>
                             </div>
                             """, unsafe_allow_html=True)
 
-                    with col4:
-                        entry_quality = timing['entry_quality_score'] * 100
-                        quality_color = '#28a745' if entry_quality >= 70 else ('#ffc107' if entry_quality >= 50 else '#dc3545')
-                        st.markdown(f"""
-                        <div class="metric-card">
-                            <h4>⭐ Entry Quality</h4>
-                            <h3 style="color: {quality_color};">{entry_quality:.0f}%</h3>
-                            <small>Overall score</small>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        with col2:
+                            fib_zone = tier3.get('fib_zone', 'N/A')
+                            in_optimal = tier3.get('in_optimal_zone', False)
+                            zone_emoji = "🎯" if in_optimal else "⚪"
+                            zone_bg = '#d4edda' if in_optimal else '#f0f0f0'
+                            st.markdown(f"""
+                            <div class="metric-card" style="background: {zone_bg};">
+                                <h4>{zone_emoji} Fibonacci Zone</h4>
+                                <p><strong>Range:</strong> {fib_zone}</p>
+                                <p><strong>Optimal:</strong> {'Yes' if in_optimal else 'No'}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col3:
+                            rr_ratio = risk_mgmt.get('rr_ratio', 0)
+                            rr_color = '#28a745' if rr_ratio >= 2 else ('#ffc107' if rr_ratio >= 1.5 else '#dc3545')
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📐 Risk:Reward</h4>
+                                <h3 style="color: {rr_color};">{rr_ratio:.2f}</h3>
+                                <small>{'Excellent' if rr_ratio >= 2 else ('Good' if rr_ratio >= 1.5 else 'Fair')}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col4:
+                            entry_quality = timing.get('entry_quality_score', 0) * 100
+                            quality_color = '#28a745' if entry_quality >= 70 else ('#ffc107' if entry_quality >= 50 else '#dc3545')
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>⭐ Entry Quality</h4>
+                                <h3 style="color: {quality_color};">{entry_quality:.0f}%</h3>
+                                <small>Overall score</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    else:
+                        # Original SMC_STRUCTURE: Premium/Discount zones
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        with col1:
+                            zone = timing['premium_discount_zone']
+                            zone_emoji = "🟢" if zone == 'discount' else ("🔴" if zone == 'premium' else "🟡")
+                            zone_quality = "Good for BUY" if zone == 'discount' else ("Good for SELL" if zone == 'premium' else "Neutral")
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📍 Price Zone</h4>
+                                <h3>{zone_emoji} {zone.upper()}</h3>
+                                <small>{zone_quality}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col2:
+                            htf_aligned = timing['htf_aligned']
+                            htf_emoji = "✅" if htf_aligned else "❌"
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>📈 HTF Alignment</h4>
+                                <h3>{htf_emoji} {'Aligned' if htf_aligned else 'Not Aligned'}</h3>
+                                <small>Structure: {timing['htf_structure']}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        with col3:
+                            mtf_ratio = timing['mtf_alignment_ratio'] * 100
+                            htf_strength = timing.get('htf_strength', 0) * 100
+                            # Use HTF strength if MTF not available (SMC strategy uses HTF)
+                            if mtf_ratio > 0:
+                                st.markdown(f"""
+                                <div class="metric-card">
+                                    <h4>🔄 MTF Consensus</h4>
+                                    <h3>{mtf_ratio:.0f}%</h3>
+                                    <small>Timeframes aligned</small>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            else:
+                                # Show HTF strength for SMC trades
+                                htf_color = '#28a745' if htf_strength >= 60 else ('#ffc107' if htf_strength >= 40 else '#dc3545')
+                                st.markdown(f"""
+                                <div class="metric-card">
+                                    <h4>📊 HTF Strength</h4>
+                                    <h3 style="color: {htf_color};">{htf_strength:.0f}%</h3>
+                                    <small>4H trend strength</small>
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                        with col4:
+                            entry_quality = timing['entry_quality_score'] * 100
+                            quality_color = '#28a745' if entry_quality >= 70 else ('#ffc107' if entry_quality >= 50 else '#dc3545')
+                            st.markdown(f"""
+                            <div class="metric-card">
+                                <h4>⭐ Entry Quality</h4>
+                                <h3 style="color: {quality_color};">{entry_quality:.0f}%</h3>
+                                <small>Overall score</small>
+                            </div>
+                            """, unsafe_allow_html=True)
 
                     # Technical Context Section
                     st.subheader("📊 Technical Context at Entry")
@@ -2314,32 +2445,74 @@ class UnifiedTradingDashboard:
 
                     # Confidence Breakdown (if present)
                     conf_breakdown = data.get('confidence_breakdown')
+                    # Also check raw strategy indicators for SMC_SIMPLE breakdown
+                    if not conf_breakdown and is_smc_simple:
+                        conf_breakdown = strategy_indicators.get('confidence_breakdown', {})
+
                     if conf_breakdown:
                         st.subheader("📊 Confidence Breakdown")
-                        col1, col2, col3, col4, col5 = st.columns(5)
 
-                        with col1:
-                            total = conf_breakdown.get('total', 0) * 100
-                            st.metric("Total", f"{total:.1f}%")
+                        if is_smc_simple:
+                            # SMC_SIMPLE uses different breakdown: ema_alignment, volume_bonus, pullback_quality, rr_quality, fib_accuracy
+                            col1, col2, col3, col4, col5 = st.columns(5)
 
-                        with col2:
-                            htf = conf_breakdown.get('htf_score', 0) * 100
-                            st.metric("HTF Score", f"{htf:.1f}%")
+                            with col1:
+                                total = conf_breakdown.get('total', 0) * 100
+                                total_color = '#28a745' if total >= 60 else ('#ffc107' if total >= 50 else '#dc3545')
+                                st.markdown(f"""
+                                <div class="metric-card">
+                                    <h4>📊 Total</h4>
+                                    <h3 style="color: {total_color};">{total:.1f}%</h3>
+                                </div>
+                                """, unsafe_allow_html=True)
 
-                        with col3:
-                            pattern_score = conf_breakdown.get('pattern_score', 0) * 100
-                            st.metric("Pattern Score", f"{pattern_score:.1f}%")
+                            with col2:
+                                ema = conf_breakdown.get('ema_alignment', 0) * 100
+                                st.metric("EMA Alignment", f"{ema:.1f}%")
 
-                        with col4:
-                            sr_score = conf_breakdown.get('sr_score', 0) * 100
-                            st.metric("S/R Score", f"{sr_score:.1f}%")
+                            with col3:
+                                vol = conf_breakdown.get('volume_bonus', 0) * 100
+                                vol_emoji = "✅" if vol > 10 else "⚪"
+                                st.metric("Volume Bonus", f"{vol_emoji} {vol:.1f}%")
 
-                        with col5:
-                            rr_score = conf_breakdown.get('rr_score', 0) * 100
-                            st.metric("R:R Score", f"{rr_score:.1f}%")
+                            with col4:
+                                pullback = conf_breakdown.get('pullback_quality', 0) * 100
+                                st.metric("Pullback Quality", f"{pullback:.1f}%")
 
-                    # Order Block Details (if present)
-                    if data.get('order_block_details'):
+                            with col5:
+                                rr = conf_breakdown.get('rr_quality', 0) * 100
+                                st.metric("R:R Quality", f"{rr:.1f}%")
+
+                            # Show Fib accuracy in an additional row
+                            fib_acc = conf_breakdown.get('fib_accuracy', 0) * 100
+                            if fib_acc > 0:
+                                st.info(f"📐 **Fibonacci Accuracy:** {fib_acc:.1f}% (how close to 38.2% optimal zone)")
+                        else:
+                            # Original SMC_STRUCTURE breakdown
+                            col1, col2, col3, col4, col5 = st.columns(5)
+
+                            with col1:
+                                total = conf_breakdown.get('total', 0) * 100
+                                st.metric("Total", f"{total:.1f}%")
+
+                            with col2:
+                                htf = conf_breakdown.get('htf_score', 0) * 100
+                                st.metric("HTF Score", f"{htf:.1f}%")
+
+                            with col3:
+                                pattern_score = conf_breakdown.get('pattern_score', 0) * 100
+                                st.metric("Pattern Score", f"{pattern_score:.1f}%")
+
+                            with col4:
+                                sr_score = conf_breakdown.get('sr_score', 0) * 100
+                                st.metric("S/R Score", f"{sr_score:.1f}%")
+
+                            with col5:
+                                rr_score = conf_breakdown.get('rr_score', 0) * 100
+                                st.metric("R:R Score", f"{rr_score:.1f}%")
+
+                    # Order Block Details (if present) - not used by SMC_SIMPLE
+                    if data.get('order_block_details') and not is_smc_simple:
                         st.subheader("🧱 Order Block Details")
                         ob = data['order_block_details']
 
@@ -2362,8 +2535,8 @@ class UnifiedTradingDashboard:
                             valid_emoji = "✅" if ob['still_valid'] else "❌"
                             st.metric("Still Valid", valid_emoji)
 
-                    # FVG Details (if present)
-                    if data.get('fair_value_gap_details'):
+                    # FVG Details (if present) - not used by SMC_SIMPLE
+                    if data.get('fair_value_gap_details') and not is_smc_simple:
                         st.subheader("📊 Fair Value Gap Details")
                         fvg = data['fair_value_gap_details']
 

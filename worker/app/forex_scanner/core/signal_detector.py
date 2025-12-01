@@ -200,7 +200,8 @@ class SignalDetector:
             self.logger.info("⚪ SMC Structure strategy disabled")
 
         # Initialize SMC Simple Strategy if enabled (v1.0.0 - 3-Tier EMA)
-        if getattr(config, 'SMC_SIMPLE_STRATEGY', False):
+        # NOTE: Use system_config (main config.py) not configdata.config for strategy flags
+        if getattr(system_config, 'SMC_SIMPLE_STRATEGY', False):
             try:
                 # SMC Simple strategy uses lazy loading for consistency
                 self.smc_simple_enabled = True
@@ -1267,6 +1268,25 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [SMC STRUCTURE] Error for {epic}: {e}")
                     individual_results['smc_structure'] = None
+
+            # 13. SMC Simple Strategy v1.5.3 (if enabled) - 3-Tier EMA approach
+            if getattr(system_config, 'SMC_SIMPLE_STRATEGY', False) and self.smc_simple_enabled:
+                try:
+                    self.logger.debug(f"🔍 [SMC SIMPLE] Starting detection for {epic}")
+                    smc_simple_signal = self.detect_smc_simple_signals(epic, pair, spread_pips, timeframe)
+
+                    # Store result for combined strategy
+                    individual_results['smc_simple'] = smc_simple_signal
+
+                    if smc_simple_signal:
+                        all_signals.append(smc_simple_signal)
+                        self.logger.info(f"✅ [SMC SIMPLE] Signal detected for {epic}: {smc_simple_signal.get('signal')} @ {smc_simple_signal.get('entry_price', 0):.5f}")
+                    else:
+                        self.logger.debug(f"📊 [SMC SIMPLE] No signal for {epic}")
+
+                except Exception as e:
+                    self.logger.error(f"❌ [SMC SIMPLE] Error for {epic}: {e}")
+                    individual_results['smc_simple'] = None
 
             # ========== COMBINED STRATEGY REMOVED ==========
             # Combined strategy was disabled and unused, removed to clean up codebase

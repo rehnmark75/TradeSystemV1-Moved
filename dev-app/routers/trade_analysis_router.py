@@ -532,36 +532,70 @@ async def get_signal_analysis(trade_id: int, db: Session = Depends(get_db)):
 
     # If no structured confluence, build from strategy_indicators and metadata
     if not confluence_factors:
-        # Check for SMC confluence factors from strategy_indicators
-        has_htf = bool(htf_data and htf_data.get('trend'))
-        has_pattern = bool(pattern_data and pattern_data.get('pattern_type'))
-        has_sr = bool(sr_data and sr_data.get('level_price'))
-        has_rr = bool(rr_data and safe_float(rr_data.get('rr_ratio', 0)) >= 1.5)
-        has_bos = bool(bos_choch and bos_choch.get('htf_direction'))
+        # Check if this is SMC_SIMPLE strategy (has tier1_ema, tier2_swing, tier3_entry)
+        tier1_ema = strategy_indicators.get('tier1_ema', {}) or {}
+        tier2_swing = strategy_indicators.get('tier2_swing', {}) or {}
+        tier3_entry = strategy_indicators.get('tier3_entry', {}) or {}
+        risk_management = strategy_indicators.get('risk_management', {}) or {}
 
-        smc_factors = [
-            ('htf_alignment', 'HTF Alignment', has_htf, htf_data.get('trend', '')),
-            ('bos_choch', 'BOS/ChoCH Structure', has_bos, bos_choch.get('structure_type', '')),
-            ('pattern', 'Price Pattern', has_pattern, pattern_data.get('pattern_type', '')),
-            ('sr_level', 'S/R Level', has_sr, sr_data.get('level_type', '')),
-            ('risk_reward', 'Risk/Reward', has_rr, f"R:R {safe_float(rr_data.get('rr_ratio', 0)):.2f}"),
-        ]
+        is_smc_simple = bool(tier1_ema and tier2_swing)
 
-        # Also check metadata for additional factors
-        if strategy_metadata:
-            smc_factors.extend([
-                ('order_block', 'Order Block', strategy_metadata.get('has_order_block', False), ''),
-                ('fair_value_gap', 'Fair Value Gap', strategy_metadata.get('has_fvg', False), ''),
-                ('liquidity_sweep', 'Liquidity Sweep', strategy_metadata.get('liquidity_swept', False), ''),
-            ])
+        if is_smc_simple:
+            # SMC_SIMPLE: Build confluence factors from 3-tier structure
+            has_ema_bias = bool(tier1_ema.get('direction') in ['BULL', 'BEAR'])
+            has_swing_break = bool(tier2_swing.get('body_close_confirmed', False))
+            has_volume = bool(tier2_swing.get('volume_confirmed', False))
+            has_pullback = bool(tier3_entry.get('pullback_depth', 0) > 0)
+            has_optimal_zone = bool(tier3_entry.get('in_optimal_zone', False))
+            has_rr = bool(safe_float(risk_management.get('rr_ratio', 0)) >= 1.5)
 
-        for key, name, present, details in smc_factors:
-            confluence_factors.append({
-                "name": name,
-                "present": bool(present),
-                "weight": 1.0 if present else 0.0,
-                "details": str(details) if details else ""
-            })
+            smc_simple_factors = [
+                ('ema_bias', '4H EMA Bias', has_ema_bias, tier1_ema.get('direction', '')),
+                ('swing_break', 'Swing Break', has_swing_break, 'Body close confirmed'),
+                ('volume', 'Volume Spike', has_volume, 'Above average volume'),
+                ('pullback', 'Fib Pullback', has_pullback, f"{safe_float(tier3_entry.get('pullback_depth', 0))*100:.1f}%"),
+                ('optimal_zone', 'Optimal Zone', has_optimal_zone, tier3_entry.get('fib_zone', '')),
+                ('risk_reward', 'Risk/Reward', has_rr, f"R:R {safe_float(risk_management.get('rr_ratio', 0)):.2f}"),
+            ]
+
+            for key, name, present, details in smc_simple_factors:
+                confluence_factors.append({
+                    "name": name,
+                    "present": bool(present),
+                    "weight": 1.0 if present else 0.0,
+                    "details": str(details) if details else ""
+                })
+        else:
+            # SMC_STRUCTURE: Original confluence factors
+            has_htf = bool(htf_data and htf_data.get('trend'))
+            has_pattern = bool(pattern_data and pattern_data.get('pattern_type'))
+            has_sr = bool(sr_data and sr_data.get('level_price'))
+            has_rr = bool(rr_data and safe_float(rr_data.get('rr_ratio', 0)) >= 1.5)
+            has_bos = bool(bos_choch and bos_choch.get('htf_direction'))
+
+            smc_factors = [
+                ('htf_alignment', 'HTF Alignment', has_htf, htf_data.get('trend', '')),
+                ('bos_choch', 'BOS/ChoCH Structure', has_bos, bos_choch.get('structure_type', '')),
+                ('pattern', 'Price Pattern', has_pattern, pattern_data.get('pattern_type', '')),
+                ('sr_level', 'S/R Level', has_sr, sr_data.get('level_type', '')),
+                ('risk_reward', 'Risk/Reward', has_rr, f"R:R {safe_float(rr_data.get('rr_ratio', 0)):.2f}"),
+            ]
+
+            # Also check metadata for additional factors
+            if strategy_metadata:
+                smc_factors.extend([
+                    ('order_block', 'Order Block', strategy_metadata.get('has_order_block', False), ''),
+                    ('fair_value_gap', 'Fair Value Gap', strategy_metadata.get('has_fvg', False), ''),
+                    ('liquidity_sweep', 'Liquidity Sweep', strategy_metadata.get('liquidity_swept', False), ''),
+                ])
+
+            for key, name, present, details in smc_factors:
+                confluence_factors.append({
+                    "name": name,
+                    "present": bool(present),
+                    "weight": 1.0 if present else 0.0,
+                    "details": str(details) if details else ""
+                })
 
         # Calculate confluence score from confidence_breakdown if available
         if confidence_breakdown:
