@@ -86,61 +86,48 @@ class BacktestScanner(IntelligentForexScanner):
             logger=self.logger
         )
 
-        # Initialize trailing stop simulator with ATR-based dynamic stops
-        # Can be configured per-strategy in the future
-        trailing_stop_config = backtest_config.get('trailing_stop_config', {})
+        # ============================================================================
+        # STANDARD TRAILING STOP COMPONENT - Uses pair-specific config from config_trailing_stops.py
+        # ============================================================================
+        # The trailing stop is now a STANDARD component that uses pair-specific
+        # Progressive 3-Stage configuration. Each pair has its own optimized settings.
+        # This ensures consistency between backtest and live trading systems.
 
-        # Check if momentum strategy is using static stops (testing mode)
-        use_static_stops = getattr(config_momentum_strategy, 'MOMENTUM_USE_STATIC_STOPS', False) if config_momentum_strategy and self.strategy_name == 'MOMENTUM' else False
-        static_stop_pips = getattr(config_momentum_strategy, 'MOMENTUM_STATIC_STOP_PIPS', 40.0) if use_static_stops else 10.0
-        static_target_pips = getattr(config_momentum_strategy, 'MOMENTUM_STATIC_TARGET_PIPS', 80.0) if use_static_stops else 15.0
+        # Import the factory function for creating per-epic simulators
+        try:
+            from core.trading.trailing_stop_simulator import create_trailing_stop_simulator
+        except ImportError:
+            from forex_scanner.core.trading.trailing_stop_simulator import create_trailing_stop_simulator
 
-        # 🔥 SCALPING-SPECIFIC CONFIGURATION: Read from config_scalping_strategy.py
-        if 'SCALPING' in self.strategy_name.upper():
-            # Read scalping config from config_scalping_strategy.py
+        # Cache for per-epic trailing stop simulators
+        self._trailing_stop_simulators = {}
+        self._create_trailing_stop_simulator = create_trailing_stop_simulator
+
+        # 🔥 SCALPING-SPECIFIC CONFIGURATION: Still uses fixed SL/TP (no trailing)
+        self._use_scalping_mode = 'SCALPING' in self.strategy_name.upper()
+        if self._use_scalping_mode:
             try:
                 from configdata.strategies.config_scalping_strategy import SCALPING_MODE, SCALPING_STRATEGY_CONFIG
                 scalping_config = SCALPING_STRATEGY_CONFIG.get(SCALPING_MODE, {})
-                scalping_target_pips = scalping_config.get('target_pips', 8.0)
-                scalping_stop_pips = scalping_config.get('stop_loss_pips', 4.0)
-                scalping_max_bars = scalping_config.get('max_bars', 10000)
-                scalping_breakeven_trigger = 999.0  # DISABLED for pure fixed SL/TP
-                scalping_time_exit_hours = None  # DISABLED - no time exits
-                self.logger.info(f"📊 Scalping Exit Rules: PURE FIXED SL/TP - Target={scalping_target_pips} pips, Stop={scalping_stop_pips} pips (from config)")
+                self._scalping_target_pips = scalping_config.get('target_pips', 8.0)
+                self._scalping_stop_pips = scalping_config.get('stop_loss_pips', 4.0)
+                self._scalping_max_bars = scalping_config.get('max_bars', 10000)
+                self.logger.info(f"📊 Scalping Exit Rules: PURE FIXED SL/TP - Target={self._scalping_target_pips} pips, Stop={self._scalping_stop_pips} pips")
+                self.logger.info(f"   ⚠️ NO trailing, NO breakeven, NO time exits - trades MUST hit SL or TP")
             except ImportError:
-                # Fallback to hardcoded values if config not available
-                scalping_target_pips = 8.0
-                scalping_stop_pips = 6.0
-                scalping_max_bars = 10000
-                scalping_breakeven_trigger = 999.0
-                scalping_time_exit_hours = None
-                self.logger.warning(f"⚠️ Could not load scalping config, using fallback: Target={scalping_target_pips} pips, Stop={scalping_stop_pips} pips")
-
-            self.logger.info(f"   ⚠️ NO trailing, NO breakeven, NO time exits - trades MUST hit SL or TP")
+                self._scalping_target_pips = 8.0
+                self._scalping_stop_pips = 6.0
+                self._scalping_max_bars = 10000
+                self.logger.warning(f"⚠️ Could not load scalping config, using fallback")
         else:
-            scalping_target_pips = static_target_pips
-            scalping_stop_pips = static_stop_pips
-            scalping_max_bars = 96  # Default 24 hours for other strategies
-            scalping_breakeven_trigger = static_stop_pips * 0.8
-            scalping_time_exit_hours = None  # No time-based exit for non-scalping
+            # Standard strategies use Progressive 3-Stage trailing from config_trailing_stops.py
+            self.logger.info(f"📊 Trailing Stop: Using pair-specific Progressive 3-Stage system from config_trailing_stops.py")
 
+        # Backward compatibility: keep a default simulator for legacy code
         self.trailing_stop_simulator = TrailingStopSimulator(
-            target_pips=trailing_stop_config.get('target_pips', scalping_target_pips),
-            initial_stop_pips=trailing_stop_config.get('initial_stop_pips', scalping_stop_pips),
-            breakeven_trigger=trailing_stop_config.get('breakeven_trigger', scalping_breakeven_trigger),
-            stop_to_profit_trigger=trailing_stop_config.get('stop_to_profit_trigger', scalping_target_pips),
-            stop_to_profit_level=trailing_stop_config.get('stop_to_profit_level', scalping_stop_pips),
-            trailing_start=trailing_stop_config.get('trailing_start', scalping_target_pips),
-            trailing_ratio=trailing_stop_config.get('trailing_ratio', 0.5),
-            max_bars=trailing_stop_config.get('max_bars', scalping_max_bars),
-            time_exit_hours=scalping_time_exit_hours,  # New parameter for time-based exits
-            use_fixed_sl_tp='SCALPING' in self.strategy_name.upper(),  # 🎯 SCALPING: Use fixed SL/TP only (no trailing)
-            use_atr=trailing_stop_config.get('use_atr', False if 'SCALPING' in self.strategy_name.upper() else not use_static_stops),  # 🔥 FIXED: DISABLE ATR for scalping!
-            # Phase 1: Use momentum strategy config ATR multipliers (2.5x stop, 2.0x target)
-            atr_multiplier=trailing_stop_config.get('atr_multiplier',
-                getattr(config_momentum_strategy, 'MOMENTUM_STOP_LOSS_ATR_MULTIPLIER', 2.5) if config_momentum_strategy and self.strategy_name == 'MOMENTUM' else 2.0),
-            target_atr_multiplier=trailing_stop_config.get('target_atr_multiplier',
-                getattr(config_momentum_strategy, 'MOMENTUM_TAKE_PROFIT_ATR_MULTIPLIER', 2.0) if config_momentum_strategy and self.strategy_name == 'MOMENTUM' else 3.0),
+            target_pips=30.0,
+            initial_stop_pips=20.0,
+            max_bars=96,
             logger=self.logger
         )
 
@@ -591,6 +578,8 @@ class BacktestScanner(IntelligentForexScanner):
                 'SMC': 'detect_smc_signals',
                 'SMC_STRUCTURE': 'detect_smc_structure_signals',
                 'SMC_PURE': 'detect_smc_structure_signals',
+                'SMC_SIMPLE': 'detect_smc_simple_signals',
+                'SMC_EMA': 'detect_smc_simple_signals',  # Alternative name
                 'ICHIMOKU': 'detect_ichimoku_signals',
                 'ICHIMOKU_CLOUD': 'detect_ichimoku_signals',
                 'MEAN_REVERSION': 'detect_mean_reversion_signals',
@@ -615,8 +604,8 @@ class BacktestScanner(IntelligentForexScanner):
                     if method_name in ['detect_signals_mid_prices']:
                         signals = method(epic, pair_name, self.timeframe)
                     else:
-                        # 🔒 HARD-CODED: MACD and SMC_STRUCTURE strategies always use 1H timeframe
-                        strategy_timeframe = '1h' if strategy_name in ['MACD', 'MACD_EMA', 'SMC_STRUCTURE', 'SMC_PURE'] else self.timeframe
+                        # 🔒 HARD-CODED: MACD and SMC strategies always use 1H timeframe
+                        strategy_timeframe = '1h' if strategy_name in ['MACD', 'MACD_EMA', 'SMC_STRUCTURE', 'SMC_PURE', 'SMC_SIMPLE', 'SMC_EMA'] else self.timeframe
                         signals = method(epic, pair_name, self.spread_pips, strategy_timeframe)
 
                     # Some methods return a single signal dict, others return lists
@@ -761,10 +750,52 @@ class BacktestScanner(IntelligentForexScanner):
 
         return processed_signals
 
+    def _get_trailing_stop_simulator(self, epic: str):
+        """
+        Get or create a per-epic trailing stop simulator with pair-specific config.
+
+        This ensures each pair uses its optimized Progressive 3-Stage trailing stop
+        settings from config_trailing_stops.py, matching the live trading system.
+
+        Args:
+            epic: Trading pair (e.g., 'CS.D.EURUSD.MINI.IP')
+
+        Returns:
+            TrailingStopSimulator configured for the specific pair
+        """
+        # Check cache first
+        if epic in self._trailing_stop_simulators:
+            return self._trailing_stop_simulators[epic]
+
+        # Create new simulator with pair-specific config
+        if self._use_scalping_mode:
+            # Scalping uses fixed SL/TP, no trailing
+            simulator = TrailingStopSimulator(
+                epic=epic,
+                target_pips=self._scalping_target_pips,
+                initial_stop_pips=self._scalping_stop_pips,
+                max_bars=self._scalping_max_bars,
+                use_fixed_sl_tp=True,
+                logger=self.logger
+            )
+            self.logger.debug(f"📊 Created SCALPING simulator for {epic}: SL={self._scalping_stop_pips}, TP={self._scalping_target_pips}")
+        else:
+            # Standard strategies use Progressive 3-Stage from config_trailing_stops.py
+            # The factory function auto-loads pair config
+            simulator = self._create_trailing_stop_simulator(epic=epic, logger=self.logger)
+            self.logger.debug(f"📊 Created Progressive 3-Stage simulator for {epic}")
+
+        # Cache for reuse
+        self._trailing_stop_simulators[epic] = simulator
+        return simulator
+
     def _add_trade_simulation(self, signal: Dict, signal_timestamp: datetime) -> Dict:
         """
         Add trade simulation with trailing stop logic
         Fetches future price data and simulates trade execution
+
+        IMPORTANT: Uses pair-specific trailing stop configuration from config_trailing_stops.py
+        This ensures backtest results match live trading behavior.
         """
         try:
             epic = signal.get('epic')
@@ -772,8 +803,11 @@ class BacktestScanner(IntelligentForexScanner):
                 self.logger.warning("Signal missing epic, skipping trade simulation")
                 return signal
 
-            # Fetch future price data for simulation (use configured max_bars from trailing stop simulator)
-            future_df = self._fetch_future_price_data(epic, signal_timestamp, max_bars=self.trailing_stop_simulator.max_bars)
+            # Get per-epic trailing stop simulator with pair-specific config
+            trailing_simulator = self._get_trailing_stop_simulator(epic)
+
+            # Fetch future price data for simulation
+            future_df = self._fetch_future_price_data(epic, signal_timestamp, max_bars=trailing_simulator.max_bars)
 
             if future_df is None or len(future_df) == 0:
                 self.logger.debug(f"No future data available for {epic} at {signal_timestamp}, skipping simulation")
@@ -784,9 +818,9 @@ class BacktestScanner(IntelligentForexScanner):
                 signal['max_loss_pips'] = 0
                 return signal
 
-            # Simulate trade with trailing stop
-            self.logger.debug(f"Simulating trade for {epic} with {len(future_df)} future bars")
-            enhanced_signal = self.trailing_stop_simulator.simulate_trade(
+            # Simulate trade with pair-specific trailing stop
+            self.logger.debug(f"Simulating trade for {epic} with {len(future_df)} future bars (3-stage trailing)")
+            enhanced_signal = trailing_simulator.simulate_trade(
                 signal=signal,
                 df=future_df,
                 signal_idx=0  # Signal is at the start of the future data
@@ -794,7 +828,8 @@ class BacktestScanner(IntelligentForexScanner):
 
             self.logger.debug(f"Simulation complete: profit={enhanced_signal.get('max_profit_pips', 0):.1f}, "
                             f"loss={enhanced_signal.get('max_loss_pips', 0):.1f}, "
-                            f"result={enhanced_signal.get('trade_result', 'UNKNOWN')}")
+                            f"result={enhanced_signal.get('trade_result', 'UNKNOWN')}, "
+                            f"stage={enhanced_signal.get('stage_reached', 0)}")
 
             return enhanced_signal
 

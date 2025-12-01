@@ -25,9 +25,9 @@ Design Philosophy:
 
 STRATEGY_NAME = "SMC_STRUCTURE"
 STRATEGY_DESCRIPTION = "Pure structure-based strategy using Smart Money Concepts (price action only)"
-STRATEGY_VERSION = "2.9.0"
-STRATEGY_DATE = "2025-11-29"
-STRATEGY_STATUS = "Testing - PULLBACK DEPTH FILTER: Validates 30-60% retracement from BOS extreme"
+STRATEGY_VERSION = "2.9.3"
+STRATEGY_DATE = "2025-11-30"
+STRATEGY_STATUS = "TESTING: OpenAI + 25% HTF + 65% EQUILIBRIUM confidence"
 
 # Version History:
 # v2.8.5 (2025-11-16): QUALITY OPTIMIZATION: Signal pattern analysis fixes
@@ -262,9 +262,48 @@ SMC_HAMMER_MAX_OPPOSITE_WICK = 0.15  # Opposite wick 15% or less
 SMC_MIN_CONFIDENCE = 0.50  # 50% minimum confidence
 SMC_MAX_CONFIDENCE = 0.70  # 70% maximum confidence (reject overconfident)
 
+# ============================================================================
+# OPENAI RECOMMENDATIONS (v2.9.0 - Structure Quality Enhancements)
+# ============================================================================
+
+# PRIORITY 1: Body-Close BOS Validation
+# Require candle BODY (not wick) to close beyond swing level for valid BOS
+# This reduces false signals from wick spikes that quickly reverse
+# True = require close beyond swing (stricter, fewer false breaks)
+# False = allow high/low beyond swing (original behavior)
+SMC_BODY_CLOSE_BOS_ENABLED = True
+
+# PRIORITY 2: ATR-Based Displacement Filter
+# Validates that BOS has meaningful momentum using ATR multiples
+# SMC Concept: Institutional moves create displacement, not small bounces
+SMC_ATR_DISPLACEMENT_ENABLED = True
+
+# ATR period for displacement calculation
+SMC_ATR_DISPLACEMENT_PERIOD = 20  # 20-bar ATR (standard)
+
+# Minimum BOS displacement as ATR multiple
+# BOS candle range must exceed this * ATR to be valid
+SMC_BOS_MIN_ATR_MULTIPLE = 0.4  # 0.4x ATR = meaningful move
+
+# Minimum OB impulse move as ATR multiple
+# The move that creates the OB must exceed this * ATR
+SMC_OB_MIN_ATR_MULTIPLE = 1.3  # 1.3x ATR = strong institutional impulse
+
+# PRIORITY 3: Unmitigated Order Block Tracking
+# Track which OBs have been "mitigated" (revisited) and skip them
+# SMC Concept: Only fresh, untested OBs provide valid re-entry opportunities
+SMC_UNMITIGATED_OB_TRACKING = True
+
+# Mitigation threshold (% of OB zone penetration to consider mitigated)
+# 0.50 = price entering 50%+ into OB zone = mitigated
+SMC_OB_MITIGATION_THRESHOLD = 0.50
+
 # Pair blacklist (underperforming pairs from v2.8.4 analysis)
+# Phase 3.0: Cleared blacklist to re-test all pairs with fixed strategy
 # GBPUSD: 17% WR (1/6), EURJPY: 22% WR (2/9), USDJPY: 25% WR (1/4)
-SMC_BLACKLIST_PAIRS = ['GBPUSD', 'EURJPY', 'USDJPY']
+# NOTE: These pairs performed poorly with the OLD 30% HTF threshold
+#       With 55% HTF + wider SL + min TP, they may perform well
+SMC_BLACKLIST_PAIRS = []  # Re-test all pairs with fixed strategy
 
 # ============================================================================
 # RISK MANAGEMENT
@@ -272,15 +311,21 @@ SMC_BLACKLIST_PAIRS = ['GBPUSD', 'EURJPY', 'USDJPY']
 
 # Stop loss buffer (pips)
 # Additional pips beyond structure invalidation point
-# v2.8.5: Targeting 10 pips avg loss (down from 13.8 pips)
-# OPTIMIZED: Tighter stops for better R:R ratio
-SMC_SL_BUFFER_PIPS = 6
+# Phase 3.0: Widened from 6 to 10 pips to avoid noise stops
+# Analysis: 6 pips < 1 ATR on 15m, causing premature stop-outs on winners
+SMC_SL_BUFFER_PIPS = 10
 
 # Minimum Risk:Reward ratio
 # Trade must offer at least this R:R to be valid
 # v2.8.5: Targeting 1.8:1 R:R (18 pips TP / 10 pips SL)
-# INCREASED: Was 1.2, now 1.8 for better profitability
+# REVERTED: Relaxing to 1.3 degraded WR from 40-50% to 16-20%
 SMC_MIN_RR_RATIO = 1.8
+
+# Minimum Take Profit (pips)
+# Phase 3.0: Reject setups where TP < this value
+# Ensures minimum reward for each trade and filters tight-range setups
+# REVERTED: Relaxing to 13 pips degraded performance
+SMC_MIN_TP_PIPS = 18
 
 # Maximum risk per trade (pips)
 # Reject trades with stop loss larger than this
@@ -491,7 +536,7 @@ SMC_HTF_ALIGNMENT_LOOKBACK = 50
 # =============================================================================
 
 # Enable/disable session filtering
-SMC_SESSION_FILTER_ENABLED = False  # DISABLED - needs proper testing with working baseline
+SMC_SESSION_FILTER_ENABLED = False  # v2.9.0: 24/7 TRADING ENABLED (per OpenAI recommendation)
 
 # Block Asian session (0-7 UTC) - low liquidity, ranging markets
 # Asian session typically has false signals due to range-bound behavior
@@ -576,7 +621,7 @@ SMC_OB_REQUIRE_REJECTION = True  # Require rejection signal at OB
 SMC_OB_REJECTION_MIN_WICK_RATIO = 0.60  # Min wick ratio for wick rejection (60%)
 
 # Stop loss placement
-SMC_OB_SL_BUFFER_PIPS = 5  # Pips beyond OB for stop loss (tighter than old 15 pips)
+SMC_OB_SL_BUFFER_PIPS = 8  # Phase 3.0: Widened from 5 to 8 pips for OB-based stops
 
 # ============================================================================
 # PULLBACK DEPTH FILTER (Phase 3 - Entry Timing Optimization)
@@ -601,16 +646,17 @@ SMC_OB_SL_BUFFER_PIPS = 5  # Pips beyond OB for stop loss (tighter than old 15 p
 #   - Entry must be above (BOS_low + MIN_RETRACEMENT% * range)
 
 # Enable pullback depth filter
-SMC_PULLBACK_FILTER_ENABLED = True
+# NOTE: Testing showed this filter doesn't improve results - filtering randomly
+SMC_PULLBACK_FILTER_ENABLED = False
 
 # Minimum retracement required before entry (as % of BOS-to-OB range)
 # Lower = more signals but more entries at extremes
 # Higher = fewer signals but better entry pricing
-SMC_PULLBACK_MIN_RETRACEMENT = 0.30  # 30% minimum retracement from BOS extreme
+SMC_PULLBACK_MIN_RETRACEMENT = 0.20  # 20% minimum retracement (loosened - was 40%)
 
 # Maximum retracement allowed (to avoid entering reversal)
-# If price retraces too much (>60%), structure might be failing
-SMC_PULLBACK_MAX_RETRACEMENT = 0.60  # 60% maximum retracement
+# If price retraces too much (>80%), structure might be failing
+SMC_PULLBACK_MAX_RETRACEMENT = 0.80  # 80% maximum retracement (loosened - was 55%)
 
 # Expected Impact (based on Plan analysis):
 # - Win Rate: +8-12% (avoids immediate adverse entries)
@@ -670,7 +716,7 @@ SMC_PREMIUM_DISCOUNT_FILTER_ENABLED = False  # DEPRECATED
 #   - Trading-strategy-analyst verdict: "PRIMARY test candidate - optimal sweet spot"
 # Phase 2.6.7: BASELINE (75% HTF, no other filters)
 #   - Result: 11 signals, 45.5% WR, 2.05 PF (profitable but too few signals)
-SMC_MIN_HTF_STRENGTH = 0.30  # Phase 2.8.4: Accept ranging markets at quality floor (30% = minimum from dynamic calculation)
+SMC_MIN_HTF_STRENGTH = 0.25  # v2.9.3: Lowered to 25% - most HTF strength values are 30%, need to allow them through OpenAI quality filters
 
 # Exclude signals with UNKNOWN HTF strength (0%)
 # UNKNOWN HTF = 28.0% WR vs 60% HTF = 32.6% WR
@@ -772,7 +818,7 @@ SMC_SWING_PROXIMITY_FILTER_ENABLED = True  # v2.7.1: Structure-based replacement
 #   Position: (154.30 - 153.90) / 60 = 40/60 = 67% from low ✅ ALLOW
 #   If entry was 154.45: (154.45 - 153.90) / 60 = 92% from low ✅ ALLOW (near high)
 #   If entry was 154.00: (154.00 - 153.90) / 60 = 17% from low ❌ REJECT (too close)
-SMC_SWING_EXHAUSTION_THRESHOLD = 0.10  # Phase 2.8.3: Reverted to 10% (optimal balance from v2.8.1)
+SMC_SWING_EXHAUSTION_THRESHOLD = 0.10  # REVERTED: Phase 2.8.3 baseline (optimal balance from v2.8.1)
 
 # ============================================================================
 # EPIC-SPECIFIC OVERRIDES (Optional)
