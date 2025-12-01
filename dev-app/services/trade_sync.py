@@ -49,48 +49,89 @@ class EnhancedTradeStatusManager:
         """
         Comprehensive trade verification using stored deal_id and deal_reference
         Returns the determined status with full reasoning
+
+        IMPORTANT: We must check ALL sources before marking a trade as expired/invalid.
+        The deal confirmation API returning NOT_FOUND does NOT mean the position is closed -
+        it could be a timing issue or API quirk. The position endpoint is the source of truth.
         """
         try:
             self.logger.info(f"🔍 [VERIFICATION] Trade {trade.id} {trade.symbol} - Starting comprehensive verification")
-            
-            # Step 1: Check if position still exists (current system)
+
+            # Step 1: Check if position still exists by deal_id
             position_data = await self._check_position_exists(trade.deal_id)
-            
+
             if position_data:
                 self.logger.info(f"✅ [ACTIVE] Trade {trade.id} position still active on IG")
                 return self._update_trade_status(trade, "tracking", "position_verified_active", db, position_data)
-            
-            # Step 2: Position not found - investigate using deal_reference
-            self.logger.info(f"🔎 [INVESTIGATE] Trade {trade.id} position not found, investigating with deal_reference")
-            
-            # Check deal confirmation to see what happened
-            deal_outcome = await self._investigate_deal_outcome(trade.deal_reference)
-            
-            if deal_outcome:
-                return self._handle_deal_outcome(trade, deal_outcome, db)
-            
-            # Step 3: Check transaction history for this deal
-            transaction_result = await self._check_transaction_history(trade.deal_id, trade.deal_reference)
-            
-            if transaction_result:
-                return self._handle_transaction_result(trade, transaction_result, db)
-            
-            # Step 4: NEW FALLBACK - Get ALL positions and check both deal_id and deal_reference
-            self.logger.info(f"🔄 [FALLBACK] Trade {trade.id} - Fetching ALL positions to double-check")
+
+            # Step 2: CRITICAL - Check ALL positions before investigating deal outcome
+            # This is the most reliable check - positions endpoint is the source of truth
+            self.logger.info(f"🔄 [ALL POSITIONS CHECK] Trade {trade.id} - Checking ALL open positions")
             all_positions_check = await self._comprehensive_position_check(trade)
-            
+
             if all_positions_check:
-                self.logger.warning(f"⚠️ [FOUND IN FALLBACK] Trade {trade.id} found in comprehensive check!")
-                return self._update_trade_status(trade, "tracking", "found_in_fallback_check", db)
-            
-            # Step 5: Final fallback - check if deal was ever valid
+                self.logger.info(f"✅ [FOUND IN ALL POSITIONS] Trade {trade.id} found in comprehensive position check!")
+                return self._update_trade_status(trade, "tracking", "found_in_comprehensive_check", db)
+
+            # Step 3: Check transaction history BEFORE deal outcome
+            # If trade was closed, it will appear in transaction history
+            self.logger.info(f"📋 [TRANSACTION CHECK] Trade {trade.id} - Checking transaction history")
+            transaction_result = await self._check_transaction_history(trade.deal_id, trade.deal_reference)
+
+            if transaction_result and transaction_result.get("found"):
+                self.logger.info(f"📋 [TRANSACTION FOUND] Trade {trade.id} found in transaction history")
+                return self._handle_transaction_result(trade, transaction_result, db)
+
+            # Step 4: Now check deal confirmation outcome
+            # Only use this for ACCEPTED/REJECTED status, NOT for NOT_FOUND
+            self.logger.info(f"🔎 [DEAL OUTCOME] Trade {trade.id} - Investigating deal confirmation")
+            deal_outcome = await self._investigate_deal_outcome(trade.deal_reference)
+
+            if deal_outcome:
+                status = deal_outcome.get("status", "").upper()
+                # Only act on definitive statuses (ACCEPTED with no position = closed, REJECTED = rejected)
+                # Do NOT act on NOT_FOUND - this is unreliable and caused trade 1524 to lose 58 pips
+                if status == "ACCEPTED":
+                    # Deal was accepted but not in positions and not in transactions = likely just closed
+                    self.logger.info(f"📊 [DEAL ACCEPTED] Trade {trade.id} deal accepted but position not found - likely closed")
+                    return self._update_trade_status(trade, "closed", "deal_accepted_position_closed", db)
+                elif status == "REJECTED":
+                    reason = deal_outcome.get("reason", "Unknown rejection reason")
+                    self.logger.warning(f"❌ [DEAL REJECTED] Trade {trade.id} deal was rejected: {reason}")
+                    return self._update_trade_status(trade, "rejected", f"deal_rejected: {reason}", db)
+                elif status == "NOT_FOUND":
+                    # NOT_FOUND is unreliable - the deal confirmation API is not the source of truth
+                    # Log a warning but DO NOT mark as expired - continue to allow trailing
+                    self.logger.warning(f"⚠️ [DEAL NOT_FOUND] Trade {trade.id} deal confirmation returned NOT_FOUND - this is UNRELIABLE, continuing to track")
+                    # Return tracking status to allow trailing stop to continue working
+                    return self._update_trade_status(trade, "tracking", "deal_not_found_but_continuing", db)
+
+            # Step 5: Final fallback - check if deal reference format is valid
             deal_validity = await self._verify_deal_validity(trade.deal_reference)
-            
-            return self._handle_final_determination(trade, deal_validity, db)
-            
+
+            if not deal_validity.get("valid"):
+                reason = deal_validity.get("reason", "Invalid deal")
+                self.logger.error(f"❌ [INVALID DEAL] Trade {trade.id}: {reason}")
+                return self._update_trade_status(trade, "invalid_deal", reason, db)
+
+            # Step 6: If we get here, we have a valid deal but can't find it anywhere
+            # This is genuinely problematic - but still give benefit of the doubt for first occurrence
+            # Track how many times we've seen this trade as "uncertain"
+            uncertain_count = getattr(trade, '_verification_uncertain_count', 0) + 1
+            trade._verification_uncertain_count = uncertain_count
+
+            if uncertain_count < 3:
+                self.logger.warning(f"⚠️ [UNCERTAIN] Trade {trade.id}: Cannot verify status (attempt {uncertain_count}/3) - continuing to track")
+                return self._update_trade_status(trade, "tracking", f"uncertain_status_attempt_{uncertain_count}", db)
+            else:
+                self.logger.error(f"❌ [MISSING] Trade {trade.id}: Failed to verify after 3 attempts - marking as missing")
+                return self._update_trade_status(trade, "missing_on_ig", "failed_verification_3_attempts", db)
+
         except Exception as e:
             self.logger.error(f"❌ [VERIFICATION ERROR] Trade {trade.id}: {e}")
-            return self._update_trade_status(trade, "verification_error", f"Error during verification: {str(e)}", db)
+            # On error, DON'T block processing - continue to track the trade
+            self.logger.warning(f"⚠️ [VERIFICATION ERROR] Trade {trade.id}: Continuing to track despite error")
+            return "tracking"
     
     async def _get_all_positions(self, force_refresh: bool = False) -> List[Dict]:
         """
@@ -427,22 +468,34 @@ class EnhancedTradeStatusManager:
         return {"valid": True, "reason": "Deal reference format appears valid"}
     
     def _handle_deal_outcome(self, trade: TradeLog, deal_outcome: Dict, db: Session) -> str:
-        """Handle the result from deal confirmation"""
+        """
+        Handle the result from deal confirmation
+
+        IMPORTANT: NOT_FOUND status is UNRELIABLE and should NOT mark trades as expired.
+        Trade 1524 was lost because NOT_FOUND caused premature expiration while the position
+        was still active and went to +58 pips before reversing.
+        """
         status = deal_outcome.get("status", "").upper()
-        
+
         if status == "ACCEPTED":
             # Deal was accepted but position not found - likely closed
             return self._update_trade_status(trade, "closed", "deal_accepted_but_position_closed", db)
-        
+
         elif status == "REJECTED":
             reason = deal_outcome.get("reason", "Unknown rejection reason")
             return self._update_trade_status(trade, "rejected", f"deal_rejected: {reason}", db)
-        
+
         elif status == "NOT_FOUND":
-            return self._update_trade_status(trade, "expired", "deal_reference_expired", db)
-        
+            # CRITICAL FIX: Do NOT mark as expired - this is unreliable
+            # The deal confirmation API returning NOT_FOUND does NOT mean the position is closed
+            # Continue tracking to allow trailing stop to work
+            self.logger.warning(f"⚠️ [DEAL NOT_FOUND] Trade {trade.id}: Deal confirmation returned NOT_FOUND - continuing to track (NOT expiring)")
+            return self._update_trade_status(trade, "tracking", "deal_not_found_continuing", db)
+
         else:
-            return self._update_trade_status(trade, "unknown_outcome", f"deal_status: {status}", db)
+            # For unknown statuses, also continue tracking rather than blocking
+            self.logger.warning(f"⚠️ [UNKNOWN STATUS] Trade {trade.id}: Deal confirmation returned unknown status '{status}' - continuing to track")
+            return self._update_trade_status(trade, "tracking", f"unknown_deal_status_{status}", db)
     
     def _handle_transaction_result(self, trade: TradeLog, transaction_result: Dict, db: Session) -> str:
         """Handle transaction history findings"""
