@@ -72,3 +72,6 @@ worker/app/forex_scanner/all_signals*.txt
 
 # Analysis and planning documentation (local only)
 analysis_docs/
+
+# Claude Code local settings (user-specific)
+.claude/settings.local.json
