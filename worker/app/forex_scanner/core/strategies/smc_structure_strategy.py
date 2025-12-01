@@ -3,9 +3,9 @@
 SMC Pure Structure Strategy
 Structure-based trading using Smart Money Concepts (pure price action)
 
-VERSION: 2.9.0 (Pullback Depth Filter)
-DATE: 2025-11-29
-STATUS: Testing - Entry timing optimization via pullback depth validation
+VERSION: 2.9.0 (OpenAI Recommendations)
+DATE: 2025-11-30
+STATUS: Testing - OpenAI recommendations: Body-Close BOS, ATR Displacement, Unmitigated OB
 
 Performance Metrics (v2.8.5 Baseline - 90 days):
 - Total Signals: 55
@@ -96,6 +96,7 @@ class SMCStructureStrategy:
         self.logger.info(f"   HTF Timeframe: {self.htf_timeframe}")
         self.logger.info(f"   Min Pattern Strength: {self.min_pattern_strength}")
         self.logger.info(f"   Min R:R Ratio: {self.min_rr_ratio}")
+        self.logger.info(f"   Min TP: {self.min_tp_pips} pips")
         self.logger.info(f"   SR Proximity: {self.sr_proximity_pips} pips")
         if self.cooldown_enabled:
             self.logger.info(f"   Cooldown: {self.signal_cooldown_hours}h per-pair, {self.global_cooldown_minutes}m global")
@@ -124,6 +125,7 @@ class SMCStructureStrategy:
         # Risk management
         self.sl_buffer_pips = getattr(self.config, 'SMC_SL_BUFFER_PIPS', 5)
         self.min_rr_ratio = getattr(self.config, 'SMC_MIN_RR_RATIO', 2.0)
+        self.min_tp_pips = getattr(self.config, 'SMC_MIN_TP_PIPS', 18)  # Phase 3.0: Minimum TP requirement
 
         # Partial profit settings
         self.partial_profit_enabled = getattr(self.config, 'SMC_PARTIAL_PROFIT_ENABLED', True)
@@ -219,6 +221,19 @@ class SMCStructureStrategy:
         self.pair_cooldowns[pair] = current_time
         self.last_global_signal_time = current_time
         self.active_signals_count += 1
+
+    def reset_cooldowns(self):
+        """Reset all cooldowns - call this at the start of each backtest to ensure fresh state
+
+        This prevents stale cooldowns from previous backtests blocking signals in new backtests.
+        The strategy instance persists in Docker container memory, so cooldowns can carry over.
+        """
+        self.pair_cooldowns = {}
+        self.last_global_signal_time = None
+        self.active_signals_count = 0
+        self.recent_signals = {}
+        if self.logger:
+            self.logger.info("🔄 SMC Structure strategy cooldowns reset for new backtest")
 
     def _is_duplicate_signal(self, pair: str, entry_price: float, current_time: datetime) -> tuple[bool, str]:
         """
@@ -810,6 +825,113 @@ class SMCStructureStrategy:
                 f"   ✅ Proper pullback entry, not at local extreme"
             )
 
+    def _validate_pullback_depth_universal(
+        self,
+        current_price: float,
+        direction: str,
+        df: pd.DataFrame,
+        pip_value: float
+    ) -> tuple:
+        """
+        UNIVERSAL PULLBACK DEPTH FILTER (Phase 3 - Entry Timing)
+
+        Validates entry isn't at local price extremes using recent swing structure.
+        This is a SIMPLIFIED version for use in STEP 3D path where no Order Block exists.
+
+        Uses recent high/low from swing range to determine if entry is at an extreme.
+
+        For BULLISH entries (BUY):
+            - Entry should NOT be too close to recent HIGH (buying at top)
+            - Entry should have meaningful pullback from recent high
+
+        For BEARISH entries (SELL):
+            - Entry should NOT be too close to recent LOW (selling at bottom)
+            - Entry should have meaningful pullback from recent low
+
+        Args:
+            current_price: Current entry price
+            direction: 'bullish' or 'bearish'
+            df: Price DataFrame (15m or 1H)
+            pip_value: Pip value for the pair
+
+        Returns:
+            tuple: (is_valid, reason_string)
+        """
+        if not self.pullback_filter_enabled:
+            return True, "Pullback filter disabled"
+
+        if df is None or len(df) < 20:
+            return True, "Insufficient data for pullback calculation"
+
+        # Use recent 20 bars for swing analysis
+        recent_df = df.tail(20)
+
+        swing_high = float(recent_df['high'].max())
+        swing_low = float(recent_df['low'].min())
+        swing_range = swing_high - swing_low
+
+        if swing_range <= 0:
+            return True, "Invalid swing range - allowing entry"
+
+        # Calculate pip values
+        range_pips = swing_range / pip_value
+
+        # For very tight ranges, skip filter (low volatility)
+        if range_pips < 15:
+            return True, f"Swing range too small ({range_pips:.1f} pips) - allowing entry"
+
+        if direction == 'bullish':
+            # For BULLISH (BUY): Check we're not buying at the top
+            # Distance from swing high (how far below the high)
+            distance_from_high = swing_high - current_price
+            position_pct = distance_from_high / swing_range  # 0% = at high, 100% = at low
+
+            distance_pips = distance_from_high / pip_value
+            min_required_pips = (swing_range * self.pullback_min_retracement) / pip_value
+
+            if position_pct < self.pullback_min_retracement:
+                return False, (
+                    f"❌ UNIVERSAL PULLBACK FILTER: BUY too close to swing high\n"
+                    f"   Swing High: {swing_high:.5f}\n"
+                    f"   Swing Low: {swing_low:.5f}\n"
+                    f"   Current Price: {current_price:.5f}\n"
+                    f"   Distance from High: {distance_pips:.1f} pips ({position_pct*100:.0f}%)\n"
+                    f"   Minimum Required: {min_required_pips:.1f} pips ({self.pullback_min_retracement*100:.0f}%)\n"
+                    f"   💡 Buying at local HIGH = poor entry timing"
+                )
+
+            return True, (
+                f"✅ UNIVERSAL PULLBACK: BUY entry OK\n"
+                f"   Distance from High: {distance_pips:.1f} pips ({position_pct*100:.0f}%)\n"
+                f"   ✅ Good pullback from swing high"
+            )
+
+        else:  # bearish
+            # For BEARISH (SELL): Check we're not selling at the bottom
+            # Distance from swing low (how far above the low)
+            distance_from_low = current_price - swing_low
+            position_pct = distance_from_low / swing_range  # 0% = at low, 100% = at high
+
+            distance_pips = distance_from_low / pip_value
+            min_required_pips = (swing_range * self.pullback_min_retracement) / pip_value
+
+            if position_pct < self.pullback_min_retracement:
+                return False, (
+                    f"❌ UNIVERSAL PULLBACK FILTER: SELL too close to swing low\n"
+                    f"   Swing High: {swing_high:.5f}\n"
+                    f"   Swing Low: {swing_low:.5f}\n"
+                    f"   Current Price: {current_price:.5f}\n"
+                    f"   Distance from Low: {distance_pips:.1f} pips ({position_pct*100:.0f}%)\n"
+                    f"   Minimum Required: {min_required_pips:.1f} pips ({self.pullback_min_retracement*100:.0f}%)\n"
+                    f"   💡 Selling at local LOW = poor entry timing"
+                )
+
+            return True, (
+                f"✅ UNIVERSAL PULLBACK: SELL entry OK\n"
+                f"   Distance from Low: {distance_pips:.1f} pips ({position_pct*100:.0f}%)\n"
+                f"   ✅ Good pullback from swing low"
+            )
+
     def detect_signal(
         self,
         df_1h: pd.DataFrame,
@@ -838,10 +960,25 @@ class SMCStructureStrategy:
         self.logger.info(f"{'='*70}")
 
         # Get candle timestamp (for backtesting compatibility)
-        candle_timestamp = df_1h.index[-1]
+        # CRITICAL FIX: Use column data if index is reset to integers (same fix as SMC_SIMPLE)
+        if 'start_time' in df_1h.columns:
+            candle_timestamp = df_1h['start_time'].iloc[-1]
+        elif 'timestamp' in df_1h.columns:
+            candle_timestamp = df_1h['timestamp'].iloc[-1]
+        else:
+            candle_timestamp = df_1h.index[-1]
 
-        # Check cooldown before processing
-        current_time = datetime.now()
+        # Convert to datetime for cooldown check
+        # Handle various timestamp types: pd.Timestamp, datetime, numpy.int64 (nanoseconds)
+        if hasattr(candle_timestamp, 'to_pydatetime'):
+            current_time = candle_timestamp.to_pydatetime()
+        elif isinstance(candle_timestamp, (int, np.integer)):
+            # numpy.int64 nanosecond timestamp - convert to datetime
+            current_time = pd.Timestamp(candle_timestamp).to_pydatetime()
+        else:
+            current_time = candle_timestamp
+
+        # Check cooldown before processing - USE CANDLE TIME, NOT datetime.now()!
         can_trade, cooldown_reason = self._check_cooldown(pair, current_time)
         if not can_trade:
             self.logger.info(f"   ⏱️  {cooldown_reason} - SKIPPING")
@@ -897,7 +1034,9 @@ class SMCStructureStrategy:
             )
 
             # Get last BOS/CHoCH direction from the annotated DataFrame
-            bos_choch_direction = self.market_structure.get_last_bos_choch_direction(df_4h_with_structure)
+            # v2.9.0: Pass config for body-close BOS validation
+            bos_config = vars(self.config) if hasattr(self.config, '__dict__') else {}
+            bos_choch_direction = self.market_structure.get_last_bos_choch_direction(df_4h_with_structure, bos_config)
 
             # ALWAYS use BOS/CHoCH as primary trend indicator (smart money direction)
             if bos_choch_direction in ['bullish', 'bearish']:
@@ -1118,6 +1257,34 @@ class SMCStructureStrategy:
                                 self.logger.info(f"      Level: {last_ob['low']:.5f} - {last_ob['high']:.5f}")
                                 self.logger.info(f"      Size: {last_ob['size_pips']:.1f} pips")
                                 self.logger.info(f"      Re-entry zone: {last_ob['reentry_low']:.5f} - {last_ob['reentry_high']:.5f}")
+
+                                # v2.9.0: ATR Displacement Filter (OpenAI Priority 2)
+                                self.logger.info(f"\n📈 STEP 3A2: ATR Displacement Filter (v2.9.0)")
+                                atr_valid, atr_reason, atr_info = self._validate_atr_displacement(
+                                    df=df_15m,
+                                    direction=bos_choch_info['direction'],
+                                    pip_value=pip_value
+                                )
+
+                                if not atr_valid:
+                                    self.logger.info(f"   {atr_reason}")
+                                    return None
+
+                                self.logger.info(f"   {atr_reason}")
+
+                                # v2.9.0: Unmitigated OB Check (OpenAI Priority 3)
+                                self.logger.info(f"\n📦 STEP 3A3: Unmitigated OB Filter (v2.9.0)")
+                                is_mitigated, mitigation_reason = self._is_ob_mitigated(
+                                    df=df_15m,
+                                    order_block=last_ob,
+                                    pip_value=pip_value
+                                )
+
+                                if is_mitigated:
+                                    self.logger.info(f"   {mitigation_reason}")
+                                    return None
+
+                                self.logger.info(f"   {mitigation_reason}")
 
                                 # Check if price has retraced to OB zone
                                 current_low = float(df_15m['low'].iloc[-1])
@@ -1374,6 +1541,23 @@ class SMCStructureStrategy:
                 self.logger.info(f"      Rejection Level: {rejection_pattern['rejection_level']:.5f}")
                 self.logger.info(f"      Description: {rejection_pattern['description']}")
 
+            # STEP 3C_UNIVERSAL: Universal Pullback Filter for ALL entries (Phase 3 Entry Timing)
+            # This applies to entries NOT going through OB re-entry path (majority of signals)
+            self.logger.info(f"\n📐 STEP 3C_UNIVERSAL: Pullback Depth Filter (Entry Timing)")
+
+            pullback_valid, pullback_reason = self._validate_pullback_depth_universal(
+                current_price=current_price,
+                direction=direction_str,
+                df=df_15m if df_15m is not None and len(df_15m) > 0 else df_1h,
+                pip_value=pip_value
+            )
+
+            if not pullback_valid:
+                self.logger.info(f"   {pullback_reason}")
+                return None
+
+            self.logger.info(f"   {pullback_reason}")
+
             # STEP 3D: Premium/Discount Zone Entry Timing (UNIVERSAL CHECK FOR ALL ENTRIES)
             self.logger.info(f"\n💎 STEP 3D: Premium/Discount Zone Entry Timing Validation")
 
@@ -1549,7 +1733,7 @@ class SMCStructureStrategy:
                 rr_score = min(self.min_rr_ratio / 4.0, 1.0) * 0.1  # Use min_rr_ratio as placeholder
                 preliminary_confidence = htf_score + pattern_score + sr_score + rr_score
 
-                MIN_EQUILIBRIUM_CONFIDENCE = 0.75  # 75% minimum (Phase 1 fix - equilibrium 15.4% WR)
+                MIN_EQUILIBRIUM_CONFIDENCE = 0.65  # v2.9.1: Lowered from 75% to allow more signals through OpenAI quality filters
 
                 if preliminary_confidence < MIN_EQUILIBRIUM_CONFIDENCE:
                     self.logger.info(f"\n🎯 STEP 3E: Equilibrium Zone Confidence Filter")
@@ -1649,6 +1833,14 @@ class SMCStructureStrategy:
                 return None
 
             self.logger.info(f"   ✅ R:R meets minimum requirement ({rr_ratio:.2f} >= {self.min_rr_ratio})")
+
+            # STEP 6B: Validate minimum TP (Phase 3.0)
+            # Filter tight-range setups where TP is too small for meaningful profit
+            if reward_pips < self.min_tp_pips:
+                self.logger.info(f"   ❌ TP too small ({reward_pips:.1f} pips < {self.min_tp_pips} pips minimum) - SIGNAL REJECTED")
+                return None
+
+            self.logger.info(f"   ✅ TP meets minimum requirement ({reward_pips:.1f} pips >= {self.min_tp_pips} pips)")
 
             # Calculate partial profit if enabled
             partial_tp = None
@@ -2125,6 +2317,195 @@ class SMCStructureStrategy:
 
         return None  # No rejection detected
 
+    def _calculate_atr(self, df: pd.DataFrame, period: int = 20) -> float:
+        """
+        Calculate Average True Range (ATR) for displacement validation.
+
+        v2.9.0: ATR-Based Displacement Filter (OpenAI Priority 2)
+        Used to validate that BOS moves have institutional momentum.
+
+        Args:
+            df: DataFrame with high, low, close
+            period: ATR period (default 20)
+
+        Returns:
+            ATR value
+        """
+        if len(df) < period + 1:
+            return 0.0
+
+        # Calculate True Range
+        high = df['high'].values
+        low = df['low'].values
+        close = df['close'].values
+
+        tr_values = []
+        for i in range(1, len(df)):
+            hl = high[i] - low[i]  # High - Low
+            hc = abs(high[i] - close[i-1])  # High - Previous Close
+            lc = abs(low[i] - close[i-1])  # Low - Previous Close
+            tr = max(hl, hc, lc)
+            tr_values.append(tr)
+
+        # Calculate ATR (simple moving average of TR)
+        if len(tr_values) >= period:
+            atr = sum(tr_values[-period:]) / period
+            return float(atr)
+
+        return float(sum(tr_values) / len(tr_values)) if tr_values else 0.0
+
+    def _validate_atr_displacement(self, df: pd.DataFrame, direction: str, pip_value: float) -> tuple:
+        """
+        v2.9.0: ATR-Based Displacement Filter (OpenAI Priority 2)
+
+        Validates that BOS has meaningful momentum using ATR multiples.
+        SMC Concept: Institutional moves create displacement, not small bounces.
+
+        Args:
+            df: DataFrame (15m timeframe)
+            direction: 'bullish' or 'bearish'
+            pip_value: Pip value for the pair
+
+        Returns:
+            tuple: (is_valid, reason_string, displacement_info)
+        """
+        atr_enabled = getattr(self.config, 'SMC_ATR_DISPLACEMENT_ENABLED', True)
+        if not atr_enabled:
+            return True, "ATR displacement filter disabled", {}
+
+        atr_period = getattr(self.config, 'SMC_ATR_DISPLACEMENT_PERIOD', 20)
+        bos_min_atr = getattr(self.config, 'SMC_BOS_MIN_ATR_MULTIPLE', 0.4)
+
+        # Calculate ATR
+        atr = self._calculate_atr(df, atr_period)
+        if atr == 0:
+            return True, "Insufficient data for ATR calculation", {}
+
+        # Get current candle metrics
+        current = df.iloc[-1]
+        candle_range = current['high'] - current['low']
+        body_size = abs(current['close'] - current['open'])
+
+        # Calculate displacement as ATR multiple
+        displacement_atr = candle_range / atr if atr > 0 else 0
+        body_atr = body_size / atr if atr > 0 else 0
+
+        # Validate minimum displacement
+        if displacement_atr < bos_min_atr:
+            atr_pips = atr / pip_value
+            range_pips = candle_range / pip_value
+            min_required = bos_min_atr * atr
+            min_pips = min_required / pip_value
+
+            return False, (
+                f"❌ ATR DISPLACEMENT FILTER: Insufficient momentum\n"
+                f"   ATR({atr_period}): {atr_pips:.1f} pips\n"
+                f"   BOS Candle Range: {range_pips:.1f} pips ({displacement_atr:.2f}x ATR)\n"
+                f"   Minimum Required: {min_pips:.1f} pips ({bos_min_atr}x ATR)\n"
+                f"   💡 Institutional moves create displacement > {bos_min_atr}x ATR\n"
+                f"   💡 Small moves often signal false breakouts"
+            ), {'atr': atr, 'displacement': displacement_atr}
+
+        atr_pips = atr / pip_value
+        range_pips = candle_range / pip_value
+
+        return True, (
+            f"✅ ATR DISPLACEMENT: Valid institutional momentum\n"
+            f"   ATR({atr_period}): {atr_pips:.1f} pips\n"
+            f"   BOS Displacement: {range_pips:.1f} pips ({displacement_atr:.2f}x ATR)\n"
+            f"   ✅ Exceeds minimum {bos_min_atr}x ATR threshold"
+        ), {'atr': atr, 'displacement': displacement_atr}
+
+    def _is_ob_mitigated(self, df: pd.DataFrame, order_block: Dict, pip_value: float) -> tuple:
+        """
+        v2.9.0: Unmitigated Order Block Tracking (OpenAI Priority 3)
+
+        Checks if an Order Block has already been "mitigated" (tested).
+        SMC Concept: Only fresh, untested OBs provide valid re-entry opportunities.
+
+        An OB is considered mitigated if price has already revisited and
+        penetrated into the zone significantly after initial formation.
+
+        Args:
+            df: DataFrame with price data after OB formation
+            order_block: Order Block dict with high, low, index
+            pip_value: Pip value for the pair
+
+        Returns:
+            tuple: (is_mitigated, reason_string)
+        """
+        tracking_enabled = getattr(self.config, 'SMC_UNMITIGATED_OB_TRACKING', True)
+        if not tracking_enabled:
+            return False, "OB mitigation tracking disabled"
+
+        mitigation_threshold = getattr(self.config, 'SMC_OB_MITIGATION_THRESHOLD', 0.50)
+
+        ob_high = order_block['high']
+        ob_low = order_block['low']
+        ob_index = order_block['index']
+        ob_size = ob_high - ob_low
+
+        if ob_size == 0:
+            return False, "OB has zero size - cannot calculate mitigation"
+
+        # Check price action AFTER OB formation
+        # Skip the first few candles immediately after OB (impulse move)
+        check_start = min(ob_index + 4, len(df) - 1)
+
+        if check_start >= len(df) - 1:
+            return False, "Not enough data after OB to check mitigation"
+
+        # Scan for mitigation (price entering the OB zone significantly)
+        for i in range(check_start, len(df) - 1):  # Exclude current candle
+            candle = df.iloc[i]
+
+            if order_block['type'] == 'bearish':
+                # For bearish OB (bullish setup): check if price came UP into OB
+                # Mitigation = price high entered OB zone significantly
+                if candle['high'] >= ob_low:
+                    # Calculate penetration depth
+                    penetration = min(candle['high'], ob_high) - ob_low
+                    penetration_pct = penetration / ob_size
+
+                    if penetration_pct >= mitigation_threshold:
+                        penetration_pips = penetration / pip_value
+                        return True, (
+                            f"❌ OB MITIGATED: Already tested (not fresh)\n"
+                            f"   OB Zone: {ob_low:.5f} - {ob_high:.5f}\n"
+                            f"   Mitigated at bar {i} (index)\n"
+                            f"   Penetration: {penetration_pips:.1f} pips ({penetration_pct*100:.0f}% of OB)\n"
+                            f"   Threshold: {mitigation_threshold*100:.0f}%\n"
+                            f"   💡 Mitigated OBs have reduced probability\n"
+                            f"   💡 Fresh OBs provide higher-probability entries"
+                        )
+
+            else:  # bullish OB
+                # For bullish OB (bearish setup): check if price came DOWN into OB
+                # Mitigation = price low entered OB zone significantly
+                if candle['low'] <= ob_high:
+                    # Calculate penetration depth
+                    penetration = ob_high - max(candle['low'], ob_low)
+                    penetration_pct = penetration / ob_size
+
+                    if penetration_pct >= mitigation_threshold:
+                        penetration_pips = penetration / pip_value
+                        return True, (
+                            f"❌ OB MITIGATED: Already tested (not fresh)\n"
+                            f"   OB Zone: {ob_low:.5f} - {ob_high:.5f}\n"
+                            f"   Mitigated at bar {i} (index)\n"
+                            f"   Penetration: {penetration_pips:.1f} pips ({penetration_pct*100:.0f}% of OB)\n"
+                            f"   Threshold: {mitigation_threshold*100:.0f}%\n"
+                            f"   💡 Mitigated OBs have reduced probability\n"
+                            f"   💡 Fresh OBs provide higher-probability entries"
+                        )
+
+        return False, (
+            f"✅ OB UNMITIGATED: Fresh opportunity\n"
+            f"   OB Zone: {ob_low:.5f} - {ob_high:.5f}\n"
+            f"   ✅ No significant penetration since formation\n"
+            f"   ✅ First test = highest probability entry"
+        )
+
     def _calculate_bos_quality(self, df_15m: pd.DataFrame, direction: str) -> float:
         """
         Calculate BOS/CHoCH quality score based on candle characteristics.
@@ -2230,7 +2611,9 @@ class SMCStructureStrategy:
         )
 
         # Use fractal-based detection (same as HTF)
-        bos_choch_direction = self.market_structure.get_last_bos_choch_direction(df_15m_with_structure)
+        # v2.9.0: Pass config for body-close BOS validation
+        bos_config = vars(self.config) if hasattr(self.config, '__dict__') else {}
+        bos_choch_direction = self.market_structure.get_last_bos_choch_direction(df_15m_with_structure, bos_config)
 
         if not bos_choch_direction:
             self.logger.info(f"   ℹ️  No recent BOS/CHoCH detected")

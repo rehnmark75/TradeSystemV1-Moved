@@ -1780,7 +1780,7 @@ class DataFetcher:
         # Calculate lookback time in UTC (database time)
         since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
         
-        # FIXED: Handle 15m and 60m data by resampling 5m data if needed
+        # FIXED: Handle 15m, 60m, and 4h data by resampling 5m data if needed
         if timeframe == '15m':
             source_tf = 5  # Always fetch 5m data for 15m resampling
             # Increase lookback to ensure we have enough 5m data
@@ -1791,6 +1791,11 @@ class DataFetcher:
             source_tf = 5  # Always fetch 5m data for 60m resampling
             # Increase lookback to ensure we have enough 5m data
             # 60m needs 12x more 5m bars, so increase lookback accordingly
+            adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
+            since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+        elif timeframe == '4h':
+            source_tf = 5  # Always fetch 5m data for 4h resampling
+            # 4h needs 48x more 5m bars (48 x 5m = 4h), increase lookback accordingly
             adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
             since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
         else:

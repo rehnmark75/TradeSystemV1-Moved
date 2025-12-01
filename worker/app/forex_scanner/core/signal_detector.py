@@ -199,6 +199,22 @@ class SignalDetector:
             self.smc_structure_strategy = None
             self.logger.info("⚪ SMC Structure strategy disabled")
 
+        # Initialize SMC Simple Strategy if enabled (v1.0.0 - 3-Tier EMA)
+        if getattr(config, 'SMC_SIMPLE_STRATEGY', False):
+            try:
+                # SMC Simple strategy uses lazy loading for consistency
+                self.smc_simple_enabled = True
+                self.smc_simple_strategy = None  # Will be lazy-loaded on first use
+                self.logger.info("✅ SMC Simple strategy v1.0.0 enabled (3-tier EMA, lazy-load)")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to enable SMC Simple strategy: {e}")
+                self.smc_simple_enabled = False
+                self.smc_simple_strategy = None
+        else:
+            self.smc_simple_enabled = False
+            self.smc_simple_strategy = None
+            self.logger.info("⚪ SMC Simple strategy disabled")
+
         # Initialize Ichimoku Strategy if enabled
         if getattr(config, 'ICHIMOKU_CLOUD_STRATEGY', False):
             try:
@@ -675,6 +691,17 @@ class SignalDetector:
                 self.smc_structure_strategy = create_smc_structure_strategy(logger=self.logger)
                 self.logger.info(f"✅ SMC Structure strategy initialized (entry_tf={entry_tf}, htf_tf={htf_tf})")
 
+            # CRITICAL FIX: Reset cooldowns at start of new backtest to prevent stale cooldowns
+            # from previous runs blocking signals (same fix as SMC_SIMPLE)
+            is_backtest = hasattr(self.data_fetcher, 'current_backtest_time') and self.data_fetcher.current_backtest_time is not None
+            if is_backtest and hasattr(self.smc_structure_strategy, 'reset_cooldowns'):
+                # Track backtest session ID to detect new backtests
+                # Use id(data_fetcher) as a unique identifier for this backtest session
+                current_backtest_id = id(self.data_fetcher)
+                if not hasattr(self, '_smc_structure_backtest_id') or self._smc_structure_backtest_id != current_backtest_id:
+                    self._smc_structure_backtest_id = current_backtest_id
+                    self.smc_structure_strategy.reset_cooldowns()
+
             # Get entry timeframe data (15m by default, configured via SMC_ENTRY_TIMEFRAME)
             df_entry = self.data_fetcher.get_enhanced_data(
                 epic=epic,
@@ -740,6 +767,131 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ [SMC_STRUCTURE] Error detecting signals for {epic}: {e}")
+            import traceback
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
+
+    def detect_smc_simple_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None
+    ) -> Optional[Dict]:
+        """
+        Detect SMC Simple 3-tier signals (50 EMA based)
+
+        Uses multi-timeframe analysis:
+        - Bias: 4H 50 EMA for directional bias
+        - Trigger: 1H swing break with body-close confirmation
+        - Entry: 15m pullback to Fibonacci zone
+        """
+        # Load timeframes from SMC simple config
+        try:
+            from configdata.strategies import config_smc_simple as smc_simple_config
+            htf_tf = getattr(smc_simple_config, 'HTF_TIMEFRAME', '4h')
+            trigger_tf = getattr(smc_simple_config, 'TRIGGER_TIMEFRAME', '1h')
+            entry_tf = getattr(smc_simple_config, 'ENTRY_TIMEFRAME', '15m')
+        except ImportError:
+            htf_tf = '4h'
+            trigger_tf = '1h'
+            entry_tf = '15m'
+
+        self.logger.debug(f"🔍 [SMC_SIMPLE] Using htf_tf={htf_tf}, trigger_tf={trigger_tf}, entry_tf={entry_tf}")
+
+        try:
+            # Initialize strategy if not already done (lazy loading)
+            if not hasattr(self, 'smc_simple_strategy') or self.smc_simple_strategy is None:
+                from .strategies.smc_simple_strategy import create_smc_simple_strategy
+
+                self.smc_simple_strategy = create_smc_simple_strategy(config, logger=self.logger)
+                self.logger.info(f"✅ SMC Simple strategy initialized (htf={htf_tf}, trigger={trigger_tf}, entry={entry_tf})")
+
+            # Check if data_fetcher is in backtest mode (needed for lookback calculations)
+            is_backtest = hasattr(self.data_fetcher, 'current_backtest_time') and self.data_fetcher.current_backtest_time is not None
+
+            # CRITICAL FIX: Reset cooldowns at start of new backtest to prevent stale cooldowns
+            # from previous runs blocking signals
+            if is_backtest and hasattr(self.smc_simple_strategy, 'reset_cooldowns'):
+                # Track backtest session ID to detect new backtests
+                # Use id(data_fetcher) as a unique identifier for this backtest session
+                current_backtest_id = id(self.data_fetcher)
+                if not hasattr(self, '_smc_simple_backtest_id') or self._smc_simple_backtest_id != current_backtest_id:
+                    self._smc_simple_backtest_id = current_backtest_id
+                    self.smc_simple_strategy.reset_cooldowns()
+
+            # Get 4H data for EMA bias
+            # BACKTEST FIX: Use longer lookback in backtest mode to cover full historical period
+            # 4H = 240 minutes, 4000 hours = ~1000 bars (covers ~166 days of backtest)
+            htf_lookback = 4000 if is_backtest else 400  # ~100 bars of 4H for live, ~1000 for backtest
+            df_4h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=htf_tf,
+                lookback_hours=htf_lookback
+            )
+
+            if df_4h is None or len(df_4h) < 60:  # Need 50+ bars for EMA
+                self.logger.debug(f"Insufficient {htf_tf} data for {epic} (got {len(df_4h) if df_4h is not None else 0} bars)")
+                return None
+
+            # Get trigger timeframe data for swing break detection (dynamic: can be 1H or 15m)
+
+            # Calculate lookback based on timeframe (need ~100 bars)
+            if trigger_tf == '15m':
+                trigger_lookback = 2000 if is_backtest else 30  # 15m: 30h = 120 bars, backtest needs more
+            else:  # 1h
+                trigger_lookback = 2000 if is_backtest else 100  # 1H: 100 bars
+
+            df_trigger = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=trigger_tf,
+                lookback_hours=trigger_lookback
+            )
+
+            if df_trigger is None or len(df_trigger) < 30:
+                self.logger.debug(f"Insufficient {trigger_tf} data for {epic} (got {len(df_trigger) if df_trigger is not None else 0} bars)")
+                return None
+
+            # Get entry timeframe data for pullback entry (dynamic: can be 15m or 5m)
+            df_entry = None
+            if entry_tf in ['15m', '5m']:
+                # For backtest mode, we need data going back far enough to cover historical periods
+                if entry_tf == '5m':
+                    entry_lookback = 2000 if is_backtest else 25  # 5m: 25h = 300 bars
+                else:  # 15m
+                    entry_lookback = 2000 if is_backtest else 50  # 15m: 50h = 200 bars
+
+                df_entry = self.data_fetcher.get_enhanced_data(
+                    epic=epic,
+                    pair=pair,
+                    timeframe=entry_tf,
+                    lookback_hours=entry_lookback
+                )
+
+            # Log the data being passed (INFO level for debugging)
+            df_entry_len = len(df_entry) if df_entry is not None else 0
+            self.logger.info(f"🔍 [SMC_SIMPLE] Passing to strategy: 4H({len(df_4h)} bars), {trigger_tf}({len(df_trigger)} bars), {entry_tf}({df_entry_len} bars)")
+
+            # Detect signal - pass trigger TF data as df_trigger and entry TF data as df_entry
+            signal = self.smc_simple_strategy.detect_signal(
+                df_trigger=df_trigger,  # 15m data for swing break (or 1h in old config)
+                df_4h=df_4h,
+                epic=epic,
+                pair=pair,
+                df_entry=df_entry  # 5m data for pullback entry (or 15m in old config)
+            )
+
+            if signal:
+                self.logger.info(f"✅ [SMC_SIMPLE] Signal detected for {epic}: {signal['signal']} @ {signal['entry_price']:.5f}")
+                # Add market context if available
+                signal = self._add_market_context(signal, df_trigger)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ [SMC_SIMPLE] Error detecting signals for {epic}: {e}")
             import traceback
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
             return None

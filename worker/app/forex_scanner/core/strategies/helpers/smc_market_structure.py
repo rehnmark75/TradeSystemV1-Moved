@@ -1304,7 +1304,7 @@ class SMCMarketStructure:
             self.logger.error(f"Failed to get nearest swing levels: {e}")
             return None
 
-    def get_last_bos_choch_direction(self, df: pd.DataFrame) -> Optional[str]:
+    def get_last_bos_choch_direction(self, df: pd.DataFrame, config: Dict = None) -> Optional[str]:
         """
         Get the direction of the most recent BOS/CHoCH using simplified crossover detection
 
@@ -1314,8 +1314,13 @@ class SMCMarketStructure:
         - Detect BOS when price crosses previous swing level in trend direction
         - Detect CHoCH when price crosses previous swing level against trend
 
+        v2.9.0 Enhancement (OpenAI Priority 1): Body-Close BOS Validation
+        - When enabled, requires candle BODY (close) to breach swing level
+        - Reduces false signals from wick spikes that immediately reverse
+
         Args:
             df: DataFrame with OHLC data
+            config: Optional config dict with SMC_BODY_CLOSE_BOS_ENABLED setting
 
         Returns:
             'bullish', 'bearish', or None if no BOS/CHoCH found
@@ -1323,6 +1328,9 @@ class SMCMarketStructure:
         try:
             if df.empty or len(df) < 10:
                 return None
+
+            # v2.9.0: Check body-close BOS setting
+            body_close_bos = config.get('SMC_BODY_CLOSE_BOS_ENABLED', True) if config else True
 
             # Use existing structure_break detection if available
             if 'structure_break' in df.columns and 'break_direction' in df.columns:
@@ -1339,17 +1347,33 @@ class SMCMarketStructure:
             swing_lows = []
 
             for i in range(2, len(df)):
-                # Bullish fractal: 3 consecutive rising highs
-                if (i >= 2 and
-                    df.iloc[i]['high'] > df.iloc[i-1]['high'] and
-                    df.iloc[i-1]['high'] > df.iloc[i-2]['high']):
-                    swing_highs.append({'index': i, 'price': df.iloc[i]['high']})
+                # v2.9.0: Body-Close BOS - use close for validation, high/low for detection
+                if body_close_bos:
+                    # BODY-CLOSE: Bullish fractal requires candle CLOSES above previous high
+                    # This filters out wick spikes that reverse immediately
+                    if (i >= 2 and
+                        df.iloc[i]['close'] > df.iloc[i-1]['high'] and
+                        df.iloc[i-1]['close'] > df.iloc[i-2]['high']):
+                        swing_highs.append({'index': i, 'price': df.iloc[i]['close'], 'type': 'body_close'})
 
-                # Bearish fractal: 3 consecutive falling lows
-                if (i >= 2 and
-                    df.iloc[i]['low'] < df.iloc[i-1]['low'] and
-                    df.iloc[i-1]['low'] < df.iloc[i-2]['low']):
-                    swing_lows.append({'index': i, 'price': df.iloc[i]['low']})
+                    # BODY-CLOSE: Bearish fractal requires candle CLOSES below previous low
+                    if (i >= 2 and
+                        df.iloc[i]['close'] < df.iloc[i-1]['low'] and
+                        df.iloc[i-1]['close'] < df.iloc[i-2]['low']):
+                        swing_lows.append({'index': i, 'price': df.iloc[i]['close'], 'type': 'body_close'})
+                else:
+                    # Original behavior: use high/low for detection
+                    # Bullish fractal: 3 consecutive rising highs
+                    if (i >= 2 and
+                        df.iloc[i]['high'] > df.iloc[i-1]['high'] and
+                        df.iloc[i-1]['high'] > df.iloc[i-2]['high']):
+                        swing_highs.append({'index': i, 'price': df.iloc[i]['high'], 'type': 'wick'})
+
+                    # Bearish fractal: 3 consecutive falling lows
+                    if (i >= 2 and
+                        df.iloc[i]['low'] < df.iloc[i-1]['low'] and
+                        df.iloc[i-1]['low'] < df.iloc[i-2]['low']):
+                        swing_lows.append({'index': i, 'price': df.iloc[i]['low'], 'type': 'wick'})
 
             if not swing_highs and not swing_lows:
                 return None
