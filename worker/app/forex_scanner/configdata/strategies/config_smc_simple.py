@@ -21,9 +21,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "1.5.3"
-STRATEGY_DATE = "2025-12-01"
-STRATEGY_STATUS = "Quality Optimization Phase 2.3 - Maximum Quality Filter"
+STRATEGY_VERSION = "1.6.0"
+STRATEGY_DATE = "2025-12-02"
+STRATEGY_STATUS = "Pullback Calculation Fix - Timeframe Alignment"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
