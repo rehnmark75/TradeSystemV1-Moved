@@ -2,9 +2,9 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 1.0.0
-DATE: 2025-11-30
-STATUS: Production - Initial Release
+VERSION: 1.6.0
+DATE: 2025-12-02
+STATUS: Pullback Calculation Fix - Timeframe Alignment
 
 Strategy Architecture:
     TIER 1: 4H 50 EMA for directional bias (institutional standard)
@@ -230,10 +230,12 @@ class SMCSimpleStrategy:
                 return None
 
             swing_level = swing_result['swing_level']
+            opposite_swing = swing_result['opposite_swing']  # v1.6.0: For Fib calculation
             break_candle = swing_result['break_candle']
             volume_confirmed = swing_result['volume_confirmed']
 
             self.logger.info(f"   ✅ Swing {'High' if direction == 'BEAR' else 'Low'} Break: {swing_level:.5f}")
+            self.logger.info(f"   ✅ Opposite Swing: {opposite_swing:.5f}")  # v1.6.0
             self.logger.info(f"   ✅ Body Close Confirmed: Yes")
             if self.volume_enabled:
                 self.logger.info(f"   {'✅' if volume_confirmed else '⚠️ '} Volume Spike: {'Yes' if volume_confirmed else 'No (optional)'}")
@@ -253,6 +255,7 @@ class SMCSimpleStrategy:
                 entry_df,
                 direction,
                 swing_level,
+                opposite_swing,  # v1.6.0: Pass opposite swing for correct Fib calc
                 break_candle,
                 pip_value
             )
@@ -655,15 +658,39 @@ class SMCSimpleStrategy:
             if vol_sma > 0:
                 volume_confirmed = break_vol > vol_sma * self.volume_multiplier
 
+        # v1.6.0: Find the opposite swing for Fib calculation
+        # For BULL: Need the swing LOW before the broken swing HIGH
+        # For BEAR: Need the swing HIGH before the broken swing LOW
+        opposite_swing = None
+        if direction == 'BULL':
+            # Find swing lows BEFORE the broken swing high
+            prior_lows = [sl for sl in swing_lows if sl[0] < best_swing_idx]
+            if prior_lows:
+                # Get the most recent swing low before the broken high
+                opposite_swing = max(prior_lows, key=lambda x: x[0])[1]
+            else:
+                # Fallback: use the lowest low in the range before the swing
+                opposite_swing = min(lows[max(0, best_swing_idx - self.swing_lookback):best_swing_idx])
+        else:  # BEAR
+            # Find swing highs BEFORE the broken swing low
+            prior_highs = [sh for sh in swing_highs if sh[0] < best_swing_idx]
+            if prior_highs:
+                # Get the most recent swing high before the broken low
+                opposite_swing = max(prior_highs, key=lambda x: x[0])[1]
+            else:
+                # Fallback: use the highest high in the range before the swing
+                opposite_swing = max(highs[max(0, best_swing_idx - self.swing_lookback):best_swing_idx])
+
         return {
             'valid': True,
             'swing_level': swing_level,
+            'opposite_swing': opposite_swing,  # v1.6.0: For accurate Fib calculation
             'break_candle': {
                 'open': break_open,
                 'close': break_close,
                 'high': break_high,
                 'low': break_low,
-                'bars_ago': current_idx - break_candle_idx  # NEW: How many bars ago break occurred
+                'bars_ago': current_idx - break_candle_idx
             },
             'volume_confirmed': volume_confirmed,
             'reason': f"Swing break confirmed ({current_idx - break_candle_idx} bars ago)"
@@ -674,77 +701,107 @@ class SMCSimpleStrategy:
         df: pd.DataFrame,
         direction: str,
         swing_level: float,
+        opposite_swing: float,
         break_candle: Dict,
         pip_value: float
     ) -> Dict:
         """
         TIER 3: Check if price has pulled back to Fibonacci zone
 
+        v1.6.0 FIX: Complete rewrite to fix timeframe mismatch bug
+
+        The Fib retracement is measured using swing data from Tier 2 (15m):
+        - For BULL: swing_level = broken swing HIGH, opposite_swing = swing LOW before it
+        - For BEAR: swing_level = broken swing LOW, opposite_swing = swing HIGH before it
+
+        Pullback depth:
+        - 0% = price at swing_level (the break point)
+        - 100% = price at opposite_swing (full retracement)
+        - 38.2%-61.8% = golden zone (optimal entry)
+
         Returns:
             Dict with: valid, entry_price, pullback_depth, in_optimal_zone, reason
         """
         current_close = df['close'].iloc[-1]
-        current_low = df['low'].iloc[-1]
-        current_high = df['high'].iloc[-1]
+        entry_price = current_close
 
-        # Calculate pullback range
-        # For BULL: swing_level is the broken high, measure from low before break
-        # For BEAR: swing_level is the broken low, measure from high before break
+        # v1.6.0: Use swing data from Tier 2 for consistent Fib calculation
+        # swing_level = the swing that was broken (HIGH for BULL, LOW for BEAR)
+        # opposite_swing = the swing on the other side (LOW for BULL, HIGH for BEAR)
 
         if direction == 'BULL':
-            # Pullback is measured from the break point to the swing low
-            break_extreme = break_candle['high']  # Highest point of break candle
+            # For BULL: Fib from swing_low (0%) to swing_high (100%)
+            # We want price to retrace FROM swing_high TOWARD swing_low
+            fib_high = swing_level       # The broken swing high (100% on Fib)
+            fib_low = opposite_swing     # The swing low before it (0% on Fib)
 
-            # Find recent low before the break
-            lookback_lows = df['low'].iloc[-self.max_pullback_wait:]
-            recent_low = lookback_lows.min()
+            # Calculate range in price terms
+            swing_range = fib_high - fib_low
 
-            # Calculate pullback depth (0 = at extreme, 1 = at swing)
-            if break_extreme == recent_low:
-                pullback_depth = 0.0
-            else:
-                pullback_depth = (break_extreme - current_close) / (break_extreme - recent_low)
-
-            entry_price = current_close
-
-            # Check if in Fib zone
-            if pullback_depth < self.fib_min:
+            # v1.6.0: Validate range size (minimum 10 pips)
+            range_pips = swing_range / pip_value
+            if range_pips < 10:
                 return {
                     'valid': False,
-                    'reason': f"Insufficient pullback ({pullback_depth*100:.1f}% < {self.fib_min*100:.1f}%)"
+                    'reason': f"Swing range too small ({range_pips:.1f} pips < 10 pips)"
                 }
-            if pullback_depth > self.fib_max:
-                return {
-                    'valid': False,
-                    'reason': f"Pullback too deep ({pullback_depth*100:.1f}% > {self.fib_max*100:.1f}%)"
-                }
-
-        else:  # BEAR
-            break_extreme = break_candle['low']  # Lowest point of break candle
-
-            # Find recent high before the break
-            lookback_highs = df['high'].iloc[-self.max_pullback_wait:]
-            recent_high = lookback_highs.max()
 
             # Calculate pullback depth
-            if recent_high == break_extreme:
-                pullback_depth = 0.0
-            else:
-                pullback_depth = (current_close - break_extreme) / (recent_high - break_extreme)
+            # 0% = at fib_high (no pullback yet)
+            # 100% = at fib_low (full retracement)
+            pullback_depth = (fib_high - current_close) / swing_range
 
-            entry_price = current_close
+        else:  # BEAR
+            # For BEAR: Fib from swing_high (0%) to swing_low (100%)
+            # We want price to retrace FROM swing_low TOWARD swing_high
+            fib_low = swing_level        # The broken swing low (100% on Fib)
+            fib_high = opposite_swing    # The swing high before it (0% on Fib)
 
-            # Check if in Fib zone
-            if pullback_depth < self.fib_min:
+            # Calculate range in price terms
+            swing_range = fib_high - fib_low
+
+            # v1.6.0: Validate range size (minimum 10 pips)
+            range_pips = swing_range / pip_value
+            if range_pips < 10:
                 return {
                     'valid': False,
-                    'reason': f"Insufficient pullback ({pullback_depth*100:.1f}% < {self.fib_min*100:.1f}%)"
+                    'reason': f"Swing range too small ({range_pips:.1f} pips < 10 pips)"
                 }
-            if pullback_depth > self.fib_max:
-                return {
-                    'valid': False,
-                    'reason': f"Pullback too deep ({pullback_depth*100:.1f}% > {self.fib_max*100:.1f}%)"
-                }
+
+            # Calculate pullback depth
+            # 0% = at fib_low (no pullback yet)
+            # 100% = at fib_high (full retracement)
+            pullback_depth = (current_close - fib_low) / swing_range
+
+        # v1.6.0: Sanity check - pullback depth should be between -50% and 150%
+        # Values outside this range indicate calculation errors or invalid setups
+        if pullback_depth < -0.5:
+            return {
+                'valid': False,
+                'reason': f"Price moved beyond break point ({pullback_depth*100:.1f}% - momentum continuation)"
+            }
+        if pullback_depth > 1.5:
+            return {
+                'valid': False,
+                'reason': f"Pullback exceeded swing ({pullback_depth*100:.1f}% - trend reversal)"
+            }
+
+        # Log debug info for troubleshooting
+        if self.debug_logging:
+            self.logger.debug(f"   Fib calc: high={fib_high:.5f}, low={fib_low:.5f}, range={range_pips:.1f} pips")
+            self.logger.debug(f"   Current: {current_close:.5f}, depth={pullback_depth*100:.1f}%")
+
+        # Check if in Fib zone
+        if pullback_depth < self.fib_min:
+            return {
+                'valid': False,
+                'reason': f"Insufficient pullback ({pullback_depth*100:.1f}% < {self.fib_min*100:.1f}%)"
+            }
+        if pullback_depth > self.fib_max:
+            return {
+                'valid': False,
+                'reason': f"Pullback too deep ({pullback_depth*100:.1f}% > {self.fib_max*100:.1f}%)"
+            }
 
         # Check if in optimal zone
         in_optimal = self.fib_optimal[0] <= pullback_depth <= self.fib_optimal[1]
@@ -754,6 +811,7 @@ class SMCSimpleStrategy:
             'entry_price': entry_price,
             'pullback_depth': pullback_depth,
             'in_optimal_zone': in_optimal,
+            'swing_range_pips': range_pips,  # v1.6.0: Include for debugging
             'reason': f"In Fib zone ({pullback_depth*100:.1f}%)"
         }
 
