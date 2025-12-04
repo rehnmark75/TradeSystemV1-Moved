@@ -2,37 +2,35 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 1.7.0
+VERSION: 1.8.0
 DATE: 2025-12-04
-STATUS: Phase 1 Quick Fixes - Relaxed Parameters & SL Bug Fix
+STATUS: Phase 2 Logic Enhancements - Momentum Mode + ATR Validation
 
-v1.7.0 CHANGES:
+v1.8.0 CHANGES (Phase 2):
+    - NEW: Momentum continuation entry mode (price beyond break = valid entry)
+    - NEW: ATR-based swing validation (adapts to pair volatility)
+    - NEW: Momentum quality filter (strong breakout candles only)
+    - Improved entry type tracking (pullback vs momentum)
+
+v1.7.0 CHANGES (Phase 1):
     - FIX: SL calculation now uses opposite_swing (not swing_level)
     - Wider Fib zones: 23.6%-70% (was 38%-62%)
     - Lower R:R minimum: 1.5 (was 2.5)
     - Lower confidence threshold: 60% (was 80%)
-    - Lower TP minimum: 8 pips (was 15)
-    - SL buffer increased: 8 pips (was 6)
-    - Volume confirmation re-enabled
 
 Strategy Architecture:
     TIER 1: 4H 50 EMA for directional bias (institutional standard)
     TIER 2: 15m swing break with body-close confirmation
-    TIER 3: 5m pullback to Fibonacci zone for entry
+    TIER 3: 5m pullback OR momentum continuation entry
 
-Key Differences from SMC_STRUCTURE:
-    - NO complex HTF strength calculations (uses simple EMA)
-    - NO cascading filters (only 3 simple checks)
-    - NO order block detection (uses swing structure)
-    - SIMPLE volume confirmation (optional)
-    - CLEAR entry rules (Fib pullback zones)
+Entry Types:
+    - PULLBACK: Price retraces 23.6%-70% of swing (classic Fib entry)
+    - MOMENTUM: Price continues beyond break point (trend continuation)
 
-Target Performance (v1.7.0):
-    - Signals: 15+ per 5 days (9 pairs)
+Target Performance (v1.8.0):
     - Win Rate: 45%+
-    - Profit Factor: 1.2+
-    - Avg Win: 15-20 pips
-    - Avg Loss: 8-12 pips
+    - Profit Factor: 1.4+
+    - Improved over v1.7.0: 39.4% WR, 1.24 PF
 """
 
 import pandas as pd
@@ -136,6 +134,23 @@ class SMCSimpleStrategy:
 
         # Confidence thresholds
         self.min_confidence = getattr(smc_config, 'MIN_CONFIDENCE_THRESHOLD', 0.50)
+
+        # v1.8.0 Phase 2: Momentum Continuation Mode
+        self.momentum_mode_enabled = getattr(smc_config, 'MOMENTUM_MODE_ENABLED', True)
+        self.momentum_min_depth = getattr(smc_config, 'MOMENTUM_MIN_DEPTH', -0.20)
+        self.momentum_max_depth = getattr(smc_config, 'MOMENTUM_MAX_DEPTH', 0.0)
+        self.momentum_confidence_penalty = getattr(smc_config, 'MOMENTUM_CONFIDENCE_PENALTY', 0.05)
+
+        # v1.8.0 Phase 2: ATR-based Swing Validation
+        self.use_atr_swing_validation = getattr(smc_config, 'USE_ATR_SWING_VALIDATION', True)
+        self.atr_period = getattr(smc_config, 'ATR_PERIOD', 14)
+        self.min_swing_atr_multiplier = getattr(smc_config, 'MIN_SWING_ATR_MULTIPLIER', 0.25)
+        self.fallback_min_swing_pips = getattr(smc_config, 'FALLBACK_MIN_SWING_PIPS', 5)
+
+        # v1.8.0 Phase 2: Momentum Quality Filter
+        self.momentum_quality_enabled = getattr(smc_config, 'MOMENTUM_QUALITY_ENABLED', True)
+        self.min_breakout_atr_ratio = getattr(smc_config, 'MIN_BREAKOUT_ATR_RATIO', 0.5)
+        self.min_body_percentage = getattr(smc_config, 'MIN_BODY_PERCENTAGE', 0.60)
 
         # Debug
         self.debug_logging = getattr(smc_config, 'ENABLE_DEBUG_LOGGING', True)
@@ -276,8 +291,15 @@ class SMCSimpleStrategy:
             entry_price = pullback_result['entry_price']
             pullback_depth = pullback_result['pullback_depth']
             in_optimal_zone = pullback_result['in_optimal_zone']
+            entry_type = pullback_result.get('entry_type', 'PULLBACK')  # v1.8.0
 
-            self.logger.info(f"   ✅ Pullback Depth: {pullback_depth*100:.1f}%")
+            # v1.8.0: Log entry type
+            if entry_type == 'MOMENTUM':
+                self.logger.info(f"   ✅ Entry Type: MOMENTUM (continuation)")
+                self.logger.info(f"   ✅ Beyond Break: {pullback_depth*100:.1f}%")
+            else:
+                self.logger.info(f"   ✅ Entry Type: PULLBACK (retracement)")
+                self.logger.info(f"   ✅ Pullback Depth: {pullback_depth*100:.1f}%")
             self.logger.info(f"   ✅ Entry Price: {entry_price:.5f}")
             self.logger.info(f"   {'✅' if in_optimal_zone else '⚠️ '} Optimal Zone: {'Yes' if in_optimal_zone else 'No'}")
 
@@ -335,6 +357,11 @@ class SMCSimpleStrategy:
                 pullback_depth=pullback_depth
             )
 
+            # v1.8.0: Apply confidence penalty for momentum entries
+            if entry_type == 'MOMENTUM':
+                confidence -= self.momentum_confidence_penalty
+                self.logger.info(f"   ⚠️  Momentum entry penalty: -{self.momentum_confidence_penalty*100:.0f}%")
+
             if confidence < self.min_confidence:
                 self.logger.info(f"\n❌ Confidence too low: {confidence*100:.0f}% < {self.min_confidence*100:.0f}%")
                 return None
@@ -373,6 +400,7 @@ class SMCSimpleStrategy:
                 'pullback_depth': pullback_depth,
                 'volume_confirmed': volume_confirmed,
                 'in_optimal_zone': in_optimal_zone,
+                'entry_type': entry_type,  # v1.8.0: PULLBACK or MOMENTUM
 
                 # Strategy indicators (for alert_history compatibility)
                 'strategy_indicators': {
@@ -394,7 +422,8 @@ class SMCSimpleStrategy:
                         'entry_price': entry_price,
                         'pullback_depth': pullback_depth,
                         'fib_zone': f"{self.fib_min*100:.1f}%-{self.fib_max*100:.1f}%",
-                        'in_optimal_zone': in_optimal_zone
+                        'in_optimal_zone': in_optimal_zone,
+                        'entry_type': entry_type  # v1.8.0: PULLBACK or MOMENTUM
                     },
                     'risk_management': {
                         'stop_loss': stop_loss,
@@ -670,6 +699,29 @@ class SMCSimpleStrategy:
             if vol_sma > 0:
                 volume_confirmed = break_vol > vol_sma * self.volume_multiplier
 
+        # v1.8.0: Momentum quality filter - ensure strong breakout candle
+        momentum_quality_passed = True
+        if self.momentum_quality_enabled:
+            # Calculate ATR for context
+            atr = self._calculate_atr(df)
+            if atr > 0:
+                # Check 1: Breakout candle range should be significant (> 50% of ATR)
+                break_range = break_high - break_low
+                if break_range < atr * self.min_breakout_atr_ratio:
+                    return {
+                        'valid': False,
+                        'reason': f"Weak breakout candle (range {break_range/atr*100:.0f}% of ATR < {self.min_breakout_atr_ratio*100:.0f}%)"
+                    }
+
+                # Check 2: Body should be majority of candle (> 60% = strong momentum)
+                break_body = abs(break_close - break_open)
+                body_percentage = break_body / break_range if break_range > 0 else 0
+                if body_percentage < self.min_body_percentage:
+                    return {
+                        'valid': False,
+                        'reason': f"Weak breakout body ({body_percentage*100:.0f}% < {self.min_body_percentage*100:.0f}%)"
+                    }
+
         # v1.6.0: Find the opposite swing for Fib calculation
         # For BULL: Need the swing LOW before the broken swing HIGH
         # For BEAR: Need the swing HIGH before the broken swing LOW
@@ -718,21 +770,25 @@ class SMCSimpleStrategy:
         pip_value: float
     ) -> Dict:
         """
-        TIER 3: Check if price has pulled back to Fibonacci zone
+        TIER 3: Check if price is in valid entry zone (pullback OR momentum continuation)
 
-        v1.6.0 FIX: Complete rewrite to fix timeframe mismatch bug
+        v1.8.0 ENHANCEMENTS:
+        - NEW: Momentum continuation mode (price beyond break = valid entry)
+        - NEW: ATR-based swing validation (adapts to pair volatility)
+        - Entry types: PULLBACK (23.6%-70% Fib) or MOMENTUM (-20% to 0%)
 
         The Fib retracement is measured using swing data from Tier 2 (15m):
         - For BULL: swing_level = broken swing HIGH, opposite_swing = swing LOW before it
         - For BEAR: swing_level = broken swing LOW, opposite_swing = swing HIGH before it
 
-        Pullback depth:
+        Pullback depth interpretation:
+        - Negative = price beyond break (momentum continuation)
         - 0% = price at swing_level (the break point)
         - 100% = price at opposite_swing (full retracement)
-        - 38.2%-61.8% = golden zone (optimal entry)
+        - 38.2%-61.8% = golden zone (optimal pullback entry)
 
         Returns:
-            Dict with: valid, entry_price, pullback_depth, in_optimal_zone, reason
+            Dict with: valid, entry_price, pullback_depth, in_optimal_zone, entry_type, reason
         """
         current_close = df['close'].iloc[-1]
         entry_price = current_close
@@ -750,18 +806,9 @@ class SMCSimpleStrategy:
             # Calculate range in price terms
             swing_range = fib_high - fib_low
 
-            # v1.6.0: Validate range size (minimum 10 pips)
-            range_pips = swing_range / pip_value
-            if range_pips < 10:
-                return {
-                    'valid': False,
-                    'reason': f"Swing range too small ({range_pips:.1f} pips < 10 pips)"
-                }
-
             # Calculate pullback depth
-            # 0% = at fib_high (no pullback yet)
-            # 100% = at fib_low (full retracement)
-            pullback_depth = (fib_high - current_close) / swing_range
+            # Negative = beyond break (momentum), 0% = at break, 100% = at swing low
+            pullback_depth = (fib_high - current_close) / swing_range if swing_range > 0 else 0
 
         else:  # BEAR
             # For BEAR: Fib from swing_high (0%) to swing_low (100%)
@@ -772,38 +819,80 @@ class SMCSimpleStrategy:
             # Calculate range in price terms
             swing_range = fib_high - fib_low
 
-            # v1.6.0: Validate range size (minimum 10 pips)
-            range_pips = swing_range / pip_value
+            # Calculate pullback depth
+            # Negative = beyond break (momentum), 0% = at break, 100% = at swing high
+            pullback_depth = (current_close - fib_low) / swing_range if swing_range > 0 else 0
+
+        range_pips = swing_range / pip_value if swing_range > 0 else 0
+
+        # v1.8.0: ATR-based swing validation (replaces fixed 10-pip minimum)
+        if self.use_atr_swing_validation:
+            atr = self._calculate_atr(df)
+            if atr > 0:
+                min_swing_range = atr * self.min_swing_atr_multiplier
+                min_swing_pips = min_swing_range / pip_value
+            else:
+                # Fallback if ATR unavailable
+                min_swing_pips = self.fallback_min_swing_pips
+                min_swing_range = min_swing_pips * pip_value
+
+            if swing_range < min_swing_range:
+                return {
+                    'valid': False,
+                    'reason': f"Swing range too small ({range_pips:.1f} pips < {min_swing_pips:.1f} ATR-based min)"
+                }
+        else:
+            # Legacy fixed 10-pip minimum
             if range_pips < 10:
                 return {
                     'valid': False,
                     'reason': f"Swing range too small ({range_pips:.1f} pips < 10 pips)"
                 }
 
-            # Calculate pullback depth
-            # 0% = at fib_low (no pullback yet)
-            # 100% = at fib_high (full retracement)
-            pullback_depth = (current_close - fib_low) / swing_range
+        # Log debug info for troubleshooting
+        if self.debug_logging:
+            self.logger.debug(f"   Fib calc: high={fib_high:.5f}, low={fib_low:.5f}, range={range_pips:.1f} pips")
+            self.logger.debug(f"   Current: {current_close:.5f}, depth={pullback_depth*100:.1f}%")
 
-        # v1.6.0: Sanity check - pullback depth should be between -50% and 150%
-        # Values outside this range indicate calculation errors or invalid setups
-        if pullback_depth < -0.5:
-            return {
-                'valid': False,
-                'reason': f"Price moved beyond break point ({pullback_depth*100:.1f}% - momentum continuation)"
-            }
+        # v1.8.0: Determine entry type and validate zone
+        entry_type = 'PULLBACK'  # Default
+
+        # Check for momentum continuation entry (price beyond break point)
+        if pullback_depth < 0:
+            if self.momentum_mode_enabled:
+                # v1.8.0: Allow momentum entries within configured range
+                if self.momentum_min_depth <= pullback_depth <= self.momentum_max_depth:
+                    entry_type = 'MOMENTUM'
+                    # Momentum entries are not in "optimal" Fib zone
+                    return {
+                        'valid': True,
+                        'entry_price': entry_price,
+                        'pullback_depth': pullback_depth,
+                        'in_optimal_zone': False,
+                        'entry_type': entry_type,
+                        'swing_range_pips': range_pips,
+                        'reason': f"Momentum continuation ({pullback_depth*100:.1f}% beyond break)"
+                    }
+                elif pullback_depth < self.momentum_min_depth:
+                    return {
+                        'valid': False,
+                        'reason': f"Price too far beyond break ({pullback_depth*100:.1f}% < {self.momentum_min_depth*100:.0f}%)"
+                    }
+            else:
+                # Momentum mode disabled - reject prices beyond break
+                return {
+                    'valid': False,
+                    'reason': f"Price beyond break point ({pullback_depth*100:.1f}% - momentum mode disabled)"
+                }
+
+        # v1.6.0: Sanity check - pullback depth should not exceed 150% (trend reversal)
         if pullback_depth > 1.5:
             return {
                 'valid': False,
                 'reason': f"Pullback exceeded swing ({pullback_depth*100:.1f}% - trend reversal)"
             }
 
-        # Log debug info for troubleshooting
-        if self.debug_logging:
-            self.logger.debug(f"   Fib calc: high={fib_high:.5f}, low={fib_low:.5f}, range={range_pips:.1f} pips")
-            self.logger.debug(f"   Current: {current_close:.5f}, depth={pullback_depth*100:.1f}%")
-
-        # Check if in Fib zone
+        # Check if in Fib pullback zone
         if pullback_depth < self.fib_min:
             return {
                 'valid': False,
@@ -815,7 +904,7 @@ class SMCSimpleStrategy:
                 'reason': f"Pullback too deep ({pullback_depth*100:.1f}% > {self.fib_max*100:.1f}%)"
             }
 
-        # Check if in optimal zone
+        # Check if in optimal zone (golden zone)
         in_optimal = self.fib_optimal[0] <= pullback_depth <= self.fib_optimal[1]
 
         return {
@@ -823,7 +912,8 @@ class SMCSimpleStrategy:
             'entry_price': entry_price,
             'pullback_depth': pullback_depth,
             'in_optimal_zone': in_optimal,
-            'swing_range_pips': range_pips,  # v1.6.0: Include for debugging
+            'entry_type': entry_type,
+            'swing_range_pips': range_pips,
             'reason': f"In Fib zone ({pullback_depth*100:.1f}%)"
         }
 
@@ -959,6 +1049,46 @@ class SMCSimpleStrategy:
         confidence = ema_score + volume_score + pullback_score + rr_score + fib_score
 
         return min(confidence, 1.0)
+
+    def _calculate_atr(self, df: pd.DataFrame, period: int = None) -> float:
+        """
+        Calculate Average True Range (ATR) for volatility-based thresholds
+
+        v1.8.0: Used for ATR-based swing validation and momentum quality filtering
+
+        Args:
+            df: OHLCV DataFrame with high, low, close columns
+            period: ATR period (default: self.atr_period)
+
+        Returns:
+            Current ATR value, or 0.0 if insufficient data
+        """
+        if period is None:
+            period = self.atr_period
+
+        if len(df) < period + 1:
+            return 0.0
+
+        high = df['high'].values
+        low = df['low'].values
+        close = df['close'].values
+
+        # Calculate True Range components
+        tr1 = high[1:] - low[1:]  # High - Low
+        tr2 = np.abs(high[1:] - close[:-1])  # |High - Previous Close|
+        tr3 = np.abs(low[1:] - close[:-1])  # |Low - Previous Close|
+
+        # True Range is the maximum of the three
+        true_range = np.maximum(np.maximum(tr1, tr2), tr3)
+
+        # Calculate ATR using exponential moving average (more responsive)
+        if len(true_range) < period:
+            return 0.0
+
+        # Simple initial ATR
+        atr = np.mean(true_range[-period:])
+
+        return atr
 
     def _check_session(self, timestamp) -> Tuple[bool, str]:
         """Check if current time is in allowed trading session"""

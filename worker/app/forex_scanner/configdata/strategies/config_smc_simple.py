@@ -1,20 +1,20 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 1.7.0 (Phase 1 Quick Fixes)
+# Version: 1.8.0 (Phase 2 Logic Enhancements)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
-#   TIER 3: 5m pullback entry with Fibonacci zones (was 15m)
+#   TIER 3: 5m pullback OR momentum continuation entry
 #
-# v1.7.0 PHASE 1 QUICK FIXES:
-#   - Problem: Over-tight parameters causing 0.34 PF, 33% WR
-#   - Root cause: Waiting for pullbacks in trending markets
-#   - Fixes: Wider Fib zones (23.6-70%), lower confidence (60%),
-#            realistic R:R (1.5), volume confirmation ON
-#   - Target: 15+ signals/5 days, 45%+ WR, 1.2+ PF
+# v1.8.0 PHASE 2 LOGIC ENHANCEMENTS:
+#   - NEW: Momentum continuation entry mode (price beyond break = valid)
+#   - NEW: ATR-based swing validation (adapts to pair volatility)
+#   - NEW: Momentum quality filter (strong breakout candles only)
+#   - Target: 45%+ WR, 1.4+ PF (improved from Phase 1's 1.24 PF)
 #
+# v1.7.0: Phase 1 Quick Fixes - Relaxed parameters (1.24 PF, 39.4% WR)
 # v1.6.0: Pullback calculation fix - Timeframe alignment
 # v1.5.x: Over-optimized (too restrictive, 80% confidence, 38-62% Fib)
 # ============================================================================
@@ -25,9 +25,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "1.7.0"
+STRATEGY_VERSION = "1.8.0"
 STRATEGY_DATE = "2025-12-04"
-STRATEGY_STATUS = "Phase 1 Quick Fixes - Relaxed Parameters"
+STRATEGY_STATUS = "Phase 2 Logic Enhancements - Momentum Mode + ATR Validation"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -88,6 +88,37 @@ FIB_OPTIMAL_ZONE = (0.382, 0.618)        # Golden zone for confidence scoring (n
 # Pullback timing
 MAX_PULLBACK_WAIT_BARS = 12              # Maximum bars to wait for pullback
 PULLBACK_CONFIRMATION_BARS = 2           # Bars to confirm pullback
+
+# ============================================================================
+# v1.8.0 PHASE 2: MOMENTUM CONTINUATION MODE
+# ============================================================================
+# Allow entries when price continues beyond break without pullback
+# In strong trends, price often doesn't pull back - momentum continuation is valid
+
+MOMENTUM_MODE_ENABLED = True             # v1.8.0: NEW - allow momentum entries
+MOMENTUM_MIN_DEPTH = -0.20               # Allow up to 20% beyond break point
+MOMENTUM_MAX_DEPTH = 0.0                 # 0% = at break point (no pullback yet)
+MOMENTUM_CONFIDENCE_PENALTY = 0.05       # Reduce confidence by 5% for momentum entries
+
+# ============================================================================
+# v1.8.0 PHASE 2: ATR-BASED SWING VALIDATION
+# ============================================================================
+# Replace fixed 10-pip minimum swing range with ATR-based threshold
+# Adapts to pair volatility (USDCHF has smaller swings than GBPJPY)
+
+USE_ATR_SWING_VALIDATION = True          # v1.8.0: NEW - dynamic swing validation
+ATR_PERIOD = 14                          # ATR calculation period
+MIN_SWING_ATR_MULTIPLIER = 0.25          # Minimum swing range = 25% of ATR
+FALLBACK_MIN_SWING_PIPS = 5              # Absolute minimum if ATR unavailable
+
+# ============================================================================
+# v1.8.0 PHASE 2: MOMENTUM QUALITY FILTER
+# ============================================================================
+# Filter weak breakouts - only enter on strong momentum candles
+
+MOMENTUM_QUALITY_ENABLED = True          # v1.8.0: NEW - filter weak breakouts
+MIN_BREAKOUT_ATR_RATIO = 0.5             # Breakout candle range > 50% of ATR
+MIN_BODY_PERCENTAGE = 0.60               # Body must be > 60% of candle range
 
 # ============================================================================
 # RISK MANAGEMENT
