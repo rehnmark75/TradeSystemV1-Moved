@@ -1,18 +1,22 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 1.4.0 (Quality Optimization Phase 1)
+# Version: 1.7.0 (Phase 1 Quick Fixes)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback entry with Fibonacci zones (was 15m)
 #
-# v1.4.0 OPTIMIZATION (Phase 1):
-#   - Baseline: 1068 signals, 25.7% WR, 0.93 PF, -0.3 pip expectancy
-#   - Target: 300-400 signals, 35%+ WR, 1.2+ PF, +2 pip expectancy
-#   - Changes: Session filter ON, confidence 65%, tighter Fib zones,
-#              higher EMA distance, increased R:R requirement
+# v1.7.0 PHASE 1 QUICK FIXES:
+#   - Problem: Over-tight parameters causing 0.34 PF, 33% WR
+#   - Root cause: Waiting for pullbacks in trending markets
+#   - Fixes: Wider Fib zones (23.6-70%), lower confidence (60%),
+#            realistic R:R (1.5), volume confirmation ON
+#   - Target: 15+ signals/5 days, 45%+ WR, 1.2+ PF
+#
+# v1.6.0: Pullback calculation fix - Timeframe alignment
+# v1.5.x: Over-optimized (too restrictive, 80% confidence, 38-62% Fib)
 # ============================================================================
 
 from datetime import time
@@ -21,9 +25,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "1.6.0"
-STRATEGY_DATE = "2025-12-02"
-STRATEGY_STATUS = "Pullback Calculation Fix - Timeframe Alignment"
+STRATEGY_VERSION = "1.7.0"
+STRATEGY_DATE = "2025-12-04"
+STRATEGY_STATUS = "Phase 1 Quick Fixes - Relaxed Parameters"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -58,9 +62,10 @@ REQUIRE_BODY_CLOSE_BREAK = False         # Disabled for 15m - use wick breaks in
 WICK_TOLERANCE_PIPS = 3                  # Tolerance for wick touches
 
 # Volume confirmation
-VOLUME_CONFIRMATION_ENABLED = False      # Disabled - was blocking too many signals
+# v1.7.0: RE-ENABLED - improves signal quality without blocking too many
+VOLUME_CONFIRMATION_ENABLED = True       # v1.7.0: ENABLED - quality filter
 VOLUME_SMA_PERIOD = 20                   # Period for volume moving average
-VOLUME_SPIKE_MULTIPLIER = 1.3            # Volume must be 1.3x average
+VOLUME_SPIKE_MULTIPLIER = 1.2            # v1.7.0: REDUCED from 1.3 - less strict
 
 # ============================================================================
 # TIER 3: 5M EXECUTION (Entry Timeframe)
@@ -72,12 +77,13 @@ ENTRY_TIMEFRAME = "5m"                   # Entry/execution timeframe (was 15m)
 PULLBACK_ENABLED = True                  # Wait for pullback before entry
 
 # Fibonacci pullback zones (measured from swing to break point)
-# v1.5.0: TIGHTENED to golden zone only (38%-62%) - highest probability entries
-# v1.4.0: Was 30%-65% (35% range) - still accepting marginal entries
-# Analysis: Strict golden zone improves entry timing and reduces false breakouts
-FIB_PULLBACK_MIN = 0.38                  # v1.5.0: TIGHTENED from 0.30 - golden zone start (38.2%)
-FIB_PULLBACK_MAX = 0.62                  # v1.5.0: TIGHTENED from 0.65 - golden zone end (61.8%)
-FIB_OPTIMAL_ZONE = (0.382, 0.618)        # Optimal entry zone (golden zone) - now strictly enforced
+# v1.7.0: WIDENED - over-tight zones were rejecting valid setups
+# v1.5.x: 38%-62% was too restrictive - only 24% band
+# Analysis: In trending markets, price often doesn't pull back to golden zone
+#           Wider zone catches more valid entries while maintaining quality
+FIB_PULLBACK_MIN = 0.236                 # v1.7.0: WIDENED from 0.38 - 23.6% Fib (shallow pullbacks OK)
+FIB_PULLBACK_MAX = 0.70                  # v1.7.0: WIDENED from 0.62 - allow deeper pullbacks
+FIB_OPTIMAL_ZONE = (0.382, 0.618)        # Golden zone for confidence scoring (not strict filter)
 
 # Pullback timing
 MAX_PULLBACK_WAIT_BARS = 12              # Maximum bars to wait for pullback
@@ -88,22 +94,23 @@ PULLBACK_CONFIRMATION_BARS = 2           # Bars to confirm pullback
 # ============================================================================
 
 # R:R Requirements
-# v1.5.2: INCREASED R:R requirements for better selectivity
-# Higher R:R = fewer but better setups with larger potential gains
-MIN_RR_RATIO = 2.5                       # v1.5.2: INCREASED from 2.0 - only trades with good reward potential
-OPTIMAL_RR_RATIO = 3.5                   # v1.5.2: INCREASED from 3.0 - target premium setups
-MAX_RR_RATIO = 6.0                       # v1.5.2: INCREASED from 5.0 - allow larger targets
+# v1.7.0: REDUCED R:R requirements - 2.5 was unrealistic for intraday
+# Analysis: Most intraday setups achieve 1.5-2.0 R:R, 2.5+ is too restrictive
+MIN_RR_RATIO = 1.5                       # v1.7.0: REDUCED from 2.5 - realistic for intraday
+OPTIMAL_RR_RATIO = 2.5                   # v1.7.0: REDUCED from 3.5 - achievable premium setups
+MAX_RR_RATIO = 5.0                       # v1.7.0: REDUCED from 6.0 - reasonable cap
 
 # Stop Loss
-# v1.5.2: TIGHT SL buffer - quality over quantity
-# Analysis: v1.5.0 with 6 pips was profitable (PF 1.18), v1.5.1 with 8 pips regressed
-SL_BUFFER_PIPS = 6                       # v1.5.2: Back to 6 (v1.5.0 was profitable with this)
-SL_ATR_MULTIPLIER = 1.0                  # v1.5.0: REDUCED from 1.2 - tighter ATR multiplier
-USE_ATR_STOP = True                      # v1.5.0: ENABLED - adaptive stops for volatility
+# v1.7.0: INCREASED buffer - 6 pips was too tight, causing premature stops
+# Analysis: Need more breathing room for volatility, especially on JPY pairs
+SL_BUFFER_PIPS = 8                       # v1.7.0: INCREASED from 6 - more breathing room
+SL_ATR_MULTIPLIER = 1.2                  # v1.7.0: INCREASED from 1.0 - better volatility adaptation
+USE_ATR_STOP = True                      # Keep ATR-based adaptive stops
 
 # Take Profit
-# v1.5.0: INCREASED minimum TP for better risk-reward with tighter stops
-MIN_TP_PIPS = 15                         # v1.5.0: INCREASED from 12 - larger targets for better R:R
+# v1.7.0: REDUCED minimum TP - 15 pips was rejecting valid tight-structure setups
+# Analysis: Rely more on R:R ratio, allow smaller TPs with good R:R
+MIN_TP_PIPS = 8                          # v1.7.0: REDUCED from 15 - allow tighter structures
 USE_SWING_TARGET = True                  # Target next swing high/low
 TP_STRUCTURE_LOOKBACK = 50               # Bars to look for structure targets
 
@@ -171,12 +178,11 @@ PAIR_PIP_VALUES = {
 # Simple confidence calculation based on setup quality
 
 # Confidence thresholds
-# v1.5.3: MAXIMUM quality filter - only the best setups
-# v1.5.2 (75%): 264 signals, 41.3% WR, PF 1.23 ✅ BEST SO FAR
-# v1.5.0 (70%): 201 signals, 39.8% WR, PF 1.18 ✅ PROFITABLE
-# v1.5.1 (65%): 319 signals, 37.6% WR, PF 0.94 ❌ UNPROFITABLE
-MIN_CONFIDENCE_THRESHOLD = 0.80          # v1.5.3: INCREASED from 0.75 - elite setups only
-HIGH_CONFIDENCE_THRESHOLD = 0.90         # v1.5.3: INCREASED from 0.85 - premium tier
+# v1.7.0: REDUCED confidence threshold - 80% was too restrictive
+# Analysis: With wider Fib zones and better R:R, lower confidence is acceptable
+# The tight 80% threshold combined with tight Fib zones left almost no signals
+MIN_CONFIDENCE_THRESHOLD = 0.60          # v1.7.0: REDUCED from 0.80 - allow more signals
+HIGH_CONFIDENCE_THRESHOLD = 0.75         # v1.7.0: REDUCED from 0.90 - achievable premium tier
 
 # Scoring weights (must sum to 1.0)
 CONFIDENCE_WEIGHTS = {

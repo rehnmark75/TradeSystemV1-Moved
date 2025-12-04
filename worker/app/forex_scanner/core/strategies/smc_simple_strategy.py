@@ -2,14 +2,23 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 1.6.0
-DATE: 2025-12-02
-STATUS: Pullback Calculation Fix - Timeframe Alignment
+VERSION: 1.7.0
+DATE: 2025-12-04
+STATUS: Phase 1 Quick Fixes - Relaxed Parameters & SL Bug Fix
+
+v1.7.0 CHANGES:
+    - FIX: SL calculation now uses opposite_swing (not swing_level)
+    - Wider Fib zones: 23.6%-70% (was 38%-62%)
+    - Lower R:R minimum: 1.5 (was 2.5)
+    - Lower confidence threshold: 60% (was 80%)
+    - Lower TP minimum: 8 pips (was 15)
+    - SL buffer increased: 8 pips (was 6)
+    - Volume confirmation re-enabled
 
 Strategy Architecture:
     TIER 1: 4H 50 EMA for directional bias (institutional standard)
-    TIER 2: 1H swing break with body-close confirmation
-    TIER 3: 15m pullback to Fibonacci zone for entry
+    TIER 2: 15m swing break with body-close confirmation
+    TIER 3: 5m pullback to Fibonacci zone for entry
 
 Key Differences from SMC_STRUCTURE:
     - NO complex HTF strength calculations (uses simple EMA)
@@ -18,12 +27,12 @@ Key Differences from SMC_STRUCTURE:
     - SIMPLE volume confirmation (optional)
     - CLEAR entry rules (Fib pullback zones)
 
-Expected Performance:
-    - Signals: 15-25 per month (9 pairs)
-    - Win Rate: 35-42%
-    - Profit Factor: 1.4-1.8
-    - Avg Win: 18-25 pips
-    - Avg Loss: 10-12 pips
+Target Performance (v1.7.0):
+    - Signals: 15+ per 5 days (9 pairs)
+    - Win Rate: 45%+
+    - Profit Factor: 1.2+
+    - Avg Win: 15-20 pips
+    - Avg Loss: 8-12 pips
 """
 
 import pandas as pd
@@ -277,11 +286,14 @@ class SMCSimpleStrategy:
             # ================================================================
             self.logger.info(f"\n🛑 STEP 4: Calculating SL/TP")
 
-            # Stop loss beyond swing level
+            # v1.7.0 FIX: Stop loss beyond OPPOSITE swing (not the broken swing)
+            # For BULL: SL below the swing LOW (opposite_swing) - the level we DON'T want price to break
+            # For BEAR: SL above the swing HIGH (opposite_swing) - the level we DON'T want price to break
+            # Previous bug: Used swing_level (the breakout level) which gave unrealistic 0.6 pip stops
             if direction == 'BULL':
-                stop_loss = swing_level - (self.sl_buffer_pips * pip_value)
+                stop_loss = opposite_swing - (self.sl_buffer_pips * pip_value)
             else:
-                stop_loss = swing_level + (self.sl_buffer_pips * pip_value)
+                stop_loss = opposite_swing + (self.sl_buffer_pips * pip_value)
 
             risk_pips = abs(entry_price - stop_loss) / pip_value
 
