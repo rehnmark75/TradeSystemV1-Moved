@@ -63,12 +63,71 @@ docker-compose exec -T task-worker python -m forex_scanner.main backtest --days 
 # python forex_scanner/backtests/backtest_ema.py  ❌ Missing dependencies
 ```
 
-### Strategy Backtesting
+### Strategy Backtesting (New CLI System)
+
+**IMPORTANT: Use `backtest_cli.py` for all strategy backtesting. Must run inside `task-worker` container.**
+
 ```bash
-# EMA strategy backtests
+# Basic syntax - ALWAYS run inside task-worker container
+docker exec task-worker bash -c "cd /app/forex_scanner && python backtest_cli.py --strategy STRATEGY_NAME --days N [options]"
+
+# SMC Simple Strategy (3-tier: 4H EMA → 15m break → 5m entry)
+docker exec task-worker bash -c "cd /app/forex_scanner && python backtest_cli.py --strategy smc_simple --days 60 --pipeline --verbose"
+
+# With signal output (show individual trades)
+docker exec task-worker bash -c "cd /app/forex_scanner && python backtest_cli.py --strategy smc_simple --days 30 --show-signals --max-signals 200"
+
+# Quick test (7 days)
+docker exec task-worker bash -c "cd /app/forex_scanner && python backtest_cli.py --strategy smc_simple --days 7 --pipeline"
+```
+
+### Backtest CLI Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--strategy` | Strategy name (required) | `smc_simple`, `smc_structure` |
+| `--days` | Backtest period in days | `30`, `60`, `90` |
+| `--timeframe` | Override default timeframe | `15m`, `1h`, `4h` |
+| `--pipeline` | Use pipeline mode (cleaner output, summarized results) | |
+| `--verbose` | Enable detailed logging | |
+| `--show-signals` | Output individual trade signals | |
+| `--max-signals` | Limit signal output count | `100`, `200` |
+
+### Backtest Results Summary
+
+When a backtest completes (with `--pipeline`), the output includes:
+
+```
+📊 BACKTEST COMPLETE
+====================
+Total Signals: 323
+Winners: 135 (41.8%)
+Losers: 188 (58.2%)
+Profit Factor: 1.46
+Avg Win: 18.2 pips
+Avg Loss: 8.5 pips
+Expectancy: +3.2 pips/trade
+```
+
+### Running Backtests in Background
+
+```bash
+# Run backtest in background and save to log file
+docker exec task-worker bash -c "cd /app/forex_scanner && python backtest_cli.py --strategy smc_simple --days 60 --pipeline --verbose" 2>&1 | tee /tmp/backtest_output.log &
+
+# Monitor progress
+tail -f /tmp/backtest_output.log
+
+# Check for completion
+grep -q "📊 BACKTEST COMPLETE" /tmp/backtest_output.log && echo "Done!"
+```
+
+### Legacy Strategy Backtests
+```bash
+# EMA strategy backtests (legacy)
 docker-compose exec -T task-worker python forex_scanner/backtests/backtest_ema.py --epic "CS.D.EURUSD.MINI.IP" --days 30 --show-signals
 
-# MACD strategy backtests  
+# MACD strategy backtests (legacy)
 docker-compose exec -T task-worker python forex_scanner/backtests/backtest_macd.py --epic "CS.D.AUDUSD.MINI.IP" --days 15 --show-signals
 
 # Signal validation (specific timestamps)
