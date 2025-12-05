@@ -94,22 +94,32 @@ ATR_PERIODS = 14  # Number of periods for ATR calculation
 ATR_STOP_MULTIPLIER = 1.5  # ATR multiplier for stop loss distance
 
 # ================== PROGRESSIVE TRAILING SETTINGS ==================
-# 3-Stage Progressive Trailing System (based on trade data analysis)
+# 4-Stage Progressive Trailing System (based on MAE analysis Dec 2025)
+#
+# MAE ANALYSIS FINDINGS (14 days of trade data):
+# - Winners: Avg MAE 3.1 pips, Median 2.7 pips, 75th percentile 3.5 pips
+# - Losers: Avg MAE 15.0 pips, Median 13.2 pips
+# - Conclusion: Good trades barely dip, bad trades dip significantly
+#
+# SMALL ACCOUNT PRIORITY: Protect capital early, accept smaller winners
 
-# Stage 1: Balanced Break-Even Protection (OPTIMIZED FOR PROFIT CAPTURE)
-# NOTE: Dynamic trigger uses IG minimum distance + offset:
-#       - JPY pairs: IG min + 8 points (e.g., 2 + 8 = 10 points for USDJPY)
-#       - Other pairs: IG min + 4 points (e.g., 2 + 4 = 6 points for EURUSD)
-#       This accommodates higher volatility in JPY pairs (0.01 point value vs 0.0001)
-STAGE1_TRIGGER_POINTS = 7    # Fallback when IG minimum not available
-STAGE1_LOCK_POINTS = 2       # Fallback: +2 point minimum profit (ENHANCED: uses IG min distance when available)
+# Stage 0: EARLY BREAKEVEN (NEW - Small Account Protection)
+# Triggers early to protect capital when trade shows initial profit
+# Based on MAE analysis: winners only dip 3 pips, so +6 pips is safe
+EARLY_BREAKEVEN_TRIGGER_POINTS = 6   # Move to breakeven after +6 points
+EARLY_BREAKEVEN_BUFFER_POINTS = 1    # SL moves to entry + 1 point (covers spread)
+
+# Stage 1: Profit Lock (formerly Break-Even)
+# Lock small guaranteed profit
+STAGE1_TRIGGER_POINTS = 10   # Lock profit after +10 points (was 7)
+STAGE1_LOCK_POINTS = 5       # Guarantee +5 points profit (was 2)
 
 # Stage 2: Profit Lock-In (OPTIMIZED FOR TREND FOLLOWING)
-STAGE2_TRIGGER_POINTS = 16   # Lock in meaningful profit after +16 points (was 12)
-STAGE2_LOCK_POINTS = 10      # Guarantee +10 points profit (was 6)
+STAGE2_TRIGGER_POINTS = 15   # Lock in meaningful profit after +15 points (was 16)
+STAGE2_LOCK_POINTS = 10      # Guarantee +10 points profit
 
 # Stage 3: Dynamic Percentage Trailing (STANDARDIZED FOR ALL PAIRS)
-STAGE3_TRIGGER_POINTS = 17   # Start percentage trailing after +17 points (was 15)
+STAGE3_TRIGGER_POINTS = 20   # Start percentage trailing after +20 points (was 17)
 STAGE3_ATR_MULTIPLIER = 0.8  # MUCH TIGHTER: 0.8x ATR (was 1.5x)
 STAGE3_MIN_DISTANCE = 2      # Small minimum trailing distance from current price (was 3)
 STAGE3_MIN_ADJUSTMENT = 5    # Minimum points to move stop (prevents too-frequent tiny adjustments)
@@ -127,90 +137,105 @@ PARTIAL_CLOSE_SIZE = 0.5  # Size to close (0.5 = 50% of position)
 PAIR_TRAILING_CONFIGS = {
     # ========== MAJOR PAIRS - Standard Volatility ==========
 
+    # ========== MAJOR PAIRS - Early Profit Protection (Small Account Mode) ==========
+    # Based on MAE analysis: Winners dip only 3 pips avg, so early BE at +6 is safe
+
     'CS.D.EURUSD.MINI.IP': {
-        'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 29,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,   # Move to BE after 20 pts (65% of typical 31-pip TP)
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+        'early_breakeven_trigger_points': 6,  # NEW: Move to BE after +6 pts
+        'early_breakeven_buffer_points': 1,   # NEW: SL at entry + 1 pt
+        'stage1_trigger_points': 10,          # Lock profit after +10 pts
+        'stage1_lock_points': 5,              # Guarantee +5 pts profit
+        'stage2_trigger_points': 15,          # Profit lock trigger
+        'stage2_lock_points': 10,             # Profit guarantee
+        'stage3_trigger_points': 20,          # Start percentage trailing
+        'stage3_atr_multiplier': 0.8,         # ATR trailing multiplier
+        'stage3_min_distance': 4,             # Minimum trail distance
+        'min_trail_distance': 4,              # Overall minimum distance
+        'break_even_trigger_points': 6,       # Legacy field (uses early_breakeven now)
+        'enable_partial_close': True,         # Enable partial close at break-even
+        'partial_close_size': 0.5,            # Close 50% of position
     },
 
     'CS.D.AUDUSD.MINI.IP': {
-        'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 29,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP) 
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+        'early_breakeven_trigger_points': 6,  # NEW: Move to BE after +6 pts
+        'early_breakeven_buffer_points': 1,   # NEW: SL at entry + 1 pt
+        'stage1_trigger_points': 10,          # Lock profit after +10 pts
+        'stage1_lock_points': 5,              # Guarantee +5 pts profit
+        'stage2_trigger_points': 15,          # Profit lock trigger
+        'stage2_lock_points': 10,             # Profit guarantee
+        'stage3_trigger_points': 20,          # Start percentage trailing
+        'stage3_atr_multiplier': 0.8,         # ATR trailing multiplier
+        'stage3_min_distance': 4,             # Minimum trail distance
+        'min_trail_distance': 4,              # Overall minimum distance
+        'break_even_trigger_points': 6,       # Legacy field
+        'enable_partial_close': True,
+        'partial_close_size': 0.5,
     },
 
     'CS.D.NZDUSD.MINI.IP': {
-        'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 29,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)  
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+        'early_breakeven_trigger_points': 6,
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 10,
+        'stage1_lock_points': 5,
+        'stage2_trigger_points': 15,
+        'stage2_lock_points': 10,
+        'stage3_trigger_points': 20,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 4,
+        'break_even_trigger_points': 6,
+        'enable_partial_close': True,
+        'partial_close_size': 0.5,
     },
 
     'CS.D.USDCAD.MINI.IP': {
-        'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 29,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+        'early_breakeven_trigger_points': 6,
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 10,
+        'stage1_lock_points': 5,
+        'stage2_trigger_points': 15,
+        'stage2_lock_points': 10,
+        'stage3_trigger_points': 20,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 4,
+        'break_even_trigger_points': 6,
+        'enable_partial_close': True,
+        'partial_close_size': 0.5,
     },
 
     'CS.D.USDCHF.MINI.IP': {
-        'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 29,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP) 
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+        'early_breakeven_trigger_points': 6,
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 10,
+        'stage1_lock_points': 5,
+        'stage2_trigger_points': 15,
+        'stage2_lock_points': 10,
+        'stage3_trigger_points': 20,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 4,
+        'break_even_trigger_points': 6,
+        'enable_partial_close': True,
+        'partial_close_size': 0.5,
     },
 
-    # ========== GBP PAIRS - High Volatility ==========
+    # ========== GBP PAIRS - High Volatility (slightly wider early BE) ==========
 
     'CS.D.GBPUSD.MINI.IP': {
-        'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 29,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)   # Later BE
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+        'early_breakeven_trigger_points': 8,  # Slightly wider for GBP volatility
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 12,
+        'stage1_lock_points': 6,
+        'stage2_trigger_points': 18,
+        'stage2_lock_points': 12,
+        'stage3_trigger_points': 25,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 4,
+        'break_even_trigger_points': 8,
+        'enable_partial_close': True,
+        'partial_close_size': 0.5,
     },
 
     'CS.D.GBPJPY.MINI.IP': {
@@ -255,48 +280,54 @@ PAIR_TRAILING_CONFIGS = {
         'partial_close_size': 0.5,        # Close 50% of position
     },
 
-    # ========== JPY PAIRS - Different Pip Scale ==========
+    # ========== JPY PAIRS - Different Pip Scale (Early Protection) ==========
 
     'CS.D.USDJPY.MINI.IP': {
-        'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 29,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+        'early_breakeven_trigger_points': 6,
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 10,
+        'stage1_lock_points': 5,
+        'stage2_trigger_points': 15,
+        'stage2_lock_points': 10,
+        'stage3_trigger_points': 20,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 4,
+        'break_even_trigger_points': 6,
+        'enable_partial_close': True,
+        'partial_close_size': 0.5,
     },
 
     'CS.D.EURJPY.MINI.IP': {
-        'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+        'early_breakeven_trigger_points': 6,
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 10,
+        'stage1_lock_points': 5,
+        'stage2_trigger_points': 15,
+        'stage2_lock_points': 10,
+        'stage3_trigger_points': 20,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 4,
+        'break_even_trigger_points': 6,
+        'enable_partial_close': True,
+        'partial_close_size': 0.5,
     },
 
     'CS.D.AUDJPY.MINI.IP': {
-        'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP) 
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+        'early_breakeven_trigger_points': 6,
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 10,
+        'stage1_lock_points': 5,
+        'stage2_trigger_points': 15,
+        'stage2_lock_points': 10,
+        'stage3_trigger_points': 20,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 4,
+        'break_even_trigger_points': 6,
+        'enable_partial_close': True,
+        'partial_close_size': 0.5,
     },
 
     'CS.D.CADJPY.MINI.IP': {
@@ -401,18 +432,21 @@ PAIR_TRAILING_CONFIGS = {
 }
 
 # Default configuration for pairs not explicitly configured above
+# Uses early profit protection settings for small account safety
 DEFAULT_TRAILING_CONFIG = {
-    'stage1_trigger_points': 25,      # Break-even trigger
-        'stage1_lock_points': 20,          # Minimum profit lock
-        'stage2_trigger_points': 28,      # Profit lock trigger
-        'stage2_lock_points': 23,         # Profit guarantee
-        'stage3_trigger_points': 24,      # Start percentage trailing
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 20,  # ✅ FIX: Increased from 15 to 20 (65% of TP)
-        'enable_partial_close': True,     # Enable partial close at break-even
-        'partial_close_size': 0.5,        # Close 50% of position
+    'early_breakeven_trigger_points': 6,  # NEW: Move to BE after +6 pts
+    'early_breakeven_buffer_points': 1,   # NEW: SL at entry + 1 pt
+    'stage1_trigger_points': 10,          # Lock profit after +10 pts
+    'stage1_lock_points': 5,              # Guarantee +5 pts profit
+    'stage2_trigger_points': 15,          # Profit lock trigger
+    'stage2_lock_points': 10,             # Profit guarantee
+    'stage3_trigger_points': 20,          # Start percentage trailing
+    'stage3_atr_multiplier': 0.8,         # ATR trailing multiplier
+    'stage3_min_distance': 4,             # Minimum trail distance
+    'min_trail_distance': 4,              # Overall minimum distance
+    'break_even_trigger_points': 6,       # Legacy field
+    'enable_partial_close': True,         # Enable partial close at break-even
+    'partial_close_size': 0.5,            # Close 50% of position
 }
 
 

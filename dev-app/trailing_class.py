@@ -663,18 +663,24 @@ class SmartTrailing(TrailingStrategy):
 
 class Progressive3StageTrailing(TrailingStrategy):
     """
-    3-Stage Progressive Trailing Strategy - Based on Trade Data Analysis
+    4-Stage Progressive Trailing Strategy - Optimized for Small Account Protection
 
-    Stage 1: Quick break-even at +6 points (35.8% → 60%+ trades protected)
-    Stage 2: Profit lock-in at +10 points (meaningful profit secured)
-    Stage 3: Percentage-based trailing at +18+ points (reliable trend following)
+    Based on MAE Analysis (Dec 2025):
+    - Winners only dip 3 pips on average (median 2.7 pips, 75th percentile 3.5 pips)
+    - Losers dip 15 pips on average before hitting SL
+    - Conclusion: Good trades barely dip, so early breakeven is safe
+
+    Stage 0: EARLY BREAKEVEN at +6 pts → SL to entry + 1 pt (NEW - capital protection)
+    Stage 1: Profit Lock at +10 pts → SL to entry + 5 pts (guaranteed small profit)
+    Stage 2: Profit Lock-in at +15 pts → SL to entry + 10 pts (meaningful profit secured)
+    Stage 3: Percentage-based trailing at +20+ pts (reliable trend following)
 
     Stage 3 uses tiered percentage retracement:
     - 50+ points profit: 15% retracement allowed
     - 25-49 points profit: 20% retracement allowed
-    - 18-24 points profit: 25% retracement allowed
+    - 20-24 points profit: 25% retracement allowed
 
-    This strategy replicates the success of trades with 4-6 adjustments (100% win rate)
+    This strategy prevents scenarios like GBPUSD (+15 → 0) where profit is given back.
     """
 
     def __init__(self, config: TrailingConfig, logger):
@@ -686,14 +692,16 @@ class Progressive3StageTrailing(TrailingStrategy):
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
 
-        # Use standard 3-stage configuration for all epics
-        from config import STAGE2_TRIGGER_POINTS, STAGE3_TRIGGER_POINTS
+        # Use 4-stage configuration with early breakeven (Stage 0)
+        from config import (EARLY_BREAKEVEN_TRIGGER_POINTS, STAGE1_TRIGGER_POINTS,
+                           STAGE2_TRIGGER_POINTS, STAGE3_TRIGGER_POINTS)
 
-        # Stage 1: Use config value only
-        stage1_trigger = self.config.stage1_trigger_points
-
-        stage2_trigger = STAGE2_TRIGGER_POINTS  # 16 points
-        stage3_trigger = STAGE3_TRIGGER_POINTS  # 17 points
+        # Get pair-specific early breakeven config if available
+        pair_config = self._get_pair_config(trade.symbol)
+        early_be_trigger = pair_config.get('early_breakeven_trigger_points', EARLY_BREAKEVEN_TRIGGER_POINTS)
+        stage1_trigger = pair_config.get('stage1_trigger_points', STAGE1_TRIGGER_POINTS)
+        stage2_trigger = pair_config.get('stage2_trigger_points', STAGE2_TRIGGER_POINTS)
+        stage3_trigger = pair_config.get('stage3_trigger_points', STAGE3_TRIGGER_POINTS)
 
         # Calculate current profit in points
         if direction == "BUY":
@@ -712,6 +720,7 @@ class Progressive3StageTrailing(TrailingStrategy):
             return mfe_protection_level
 
         # Determine which stage we're in and calculate appropriate trail level
+        # NEW 4-STAGE SYSTEM: Stage 0 (Early BE) → Stage 1 (Profit Lock) → Stage 2 → Stage 3
         if profit_points >= stage3_trigger:
             # Stage 3: ATR-based trailing for trend following
             trail_level = self._calculate_stage3_trail(trade, current_price, candle_data, current_stop)
@@ -723,9 +732,14 @@ class Progressive3StageTrailing(TrailingStrategy):
             stage = 2
 
         elif profit_points >= stage1_trigger:
-            # Stage 1: Break-even protection
+            # Stage 1: Profit lock (5 pts guaranteed)
             trail_level = self._calculate_stage1_trail(trade, current_price, current_stop)
             stage = 1
+
+        elif profit_points >= early_be_trigger:
+            # Stage 0: Early breakeven protection (NEW - small account safety)
+            trail_level = self._calculate_early_breakeven(trade, current_price, current_stop)
+            stage = 0
 
         else:
             # Not ready for any trailing yet
@@ -751,32 +765,91 @@ class Progressive3StageTrailing(TrailingStrategy):
 
         return trail_level
 
-    def _calculate_stage1_trail(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
-        """Stage 1: Break-even protection - ONE-TIME move, not continuous trailing"""
+    def _get_pair_config(self, symbol: str) -> dict:
+        """Get pair-specific trailing configuration from config.py"""
+        from config import get_trailing_config_for_epic
+        return get_trailing_config_for_epic(symbol)
 
-        # ✅ CRITICAL FIX: Stage 1 should only move ONCE to break-even, not continuously trail
+    def _calculate_early_breakeven(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
+        """
+        Stage 0: Early Breakeven Protection (NEW - Small Account Safety)
+
+        Based on MAE analysis (Dec 2025):
+        - Winners only dip 3 pips on average (median 2.7 pips)
+        - Move to breakeven at +6 pips to protect capital early
+        - SL moves to entry + 1 pip (covers spread)
+
+        This is a ONE-TIME move when trade first reaches +6 pips profit.
+        Prevents scenarios like GBPUSD (+15 → 0) where profit is given back.
+        """
+        # Check if already moved to early breakeven or beyond
         if trade.moved_to_breakeven:
-            self.logger.debug(f"[STAGE 1 SKIP] Trade {trade.id}: Already moved to break-even, no further Stage 1 action needed")
+            self.logger.debug(f"[STAGE 0 SKIP] Trade {trade.id}: Already at breakeven or beyond")
             return None
 
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
 
-        # ✅ ENHANCEMENT: Use IG's minimum stop distance for better trade evolution
-        ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
-        if ig_min_distance:
-            lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
-            self.logger.info(f"🎯 [STAGE 1 IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts (from IG: {ig_min_distance})")
-        else:
-            lock_points = self.config.stage1_lock_points
-            self.logger.info(f"⚠️ [STAGE 1 FALLBACK] Trade {trade.id}: No IG minimum distance, using config {lock_points}pts")
+        # Get pair-specific buffer or use default (1 point)
+        pair_config = self._get_pair_config(trade.symbol)
+        buffer_points = pair_config.get('early_breakeven_buffer_points', 1)
 
+        # Calculate breakeven level with small buffer (covers spread)
+        if direction == "BUY":
+            trail_level = trade.entry_price + (buffer_points * point_value)
+        else:  # SELL
+            trail_level = trade.entry_price - (buffer_points * point_value)
+
+        # Ensure we're actually improving the stop (not moving it worse)
+        if current_stop > 0:
+            if direction == "BUY" and trail_level <= current_stop:
+                self.logger.debug(f"[STAGE 0 SKIP] Trade {trade.id}: Early BE level {trail_level:.5f} not better than current {current_stop:.5f}")
+                return None
+            elif direction == "SELL" and trail_level >= current_stop:
+                self.logger.debug(f"[STAGE 0 SKIP] Trade {trade.id}: Early BE level {trail_level:.5f} not better than current {current_stop:.5f}")
+                return None
+
+        self.logger.info(f"🛡️ [STAGE 0 EARLY BE] Trade {trade.id} {trade.symbol}: "
+                        f"Moving stop to EARLY breakeven at {trail_level:.5f} (entry + {buffer_points}pts buffer)")
+
+        return round(trail_level, 5)
+
+    def _calculate_stage1_trail(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
+        """
+        Stage 1: Profit Lock - Lock in 5 pts profit when trade reaches +10 pts
+
+        This is a ONE-TIME move that triggers after Stage 0 (early breakeven).
+        At +10 pts profit, move SL to entry + 5 pts to guarantee small profit.
+        """
+        # Check if already in Stage 1 or beyond (status-based check)
+        if hasattr(trade, 'status') and trade.status in ['stage1_profit_lock', 'stage2_profit_lock', 'stage3_trailing']:
+            self.logger.debug(f"[STAGE 1 SKIP] Trade {trade.id}: Already in Stage 1+ ({trade.status})")
+            return None
+
+        direction = trade.direction.upper()
+        point_value = self._get_point_value(trade.symbol)
+
+        # Get pair-specific lock points or use default (5 points)
+        pair_config = self._get_pair_config(trade.symbol)
+        lock_points = pair_config.get('stage1_lock_points', 5)
+
+        # Calculate profit lock level
         if direction == "BUY":
             trail_level = trade.entry_price + (lock_points * point_value)
         else:  # SELL
             trail_level = trade.entry_price - (lock_points * point_value)
 
-        self.logger.info(f"🛡️ [STAGE 1 BREAK-EVEN] Trade {trade.id}: Moving stop to break-even protection at {trail_level:.5f} ({lock_points}pts from entry)")
+        # Ensure we're improving from Stage 0 (early breakeven)
+        if current_stop > 0:
+            if direction == "BUY" and trail_level <= current_stop:
+                self.logger.debug(f"[STAGE 1 SKIP] Trade {trade.id}: Stage 1 level {trail_level:.5f} not better than current {current_stop:.5f}")
+                return None
+            elif direction == "SELL" and trail_level >= current_stop:
+                self.logger.debug(f"[STAGE 1 SKIP] Trade {trade.id}: Stage 1 level {trail_level:.5f} not better than current {current_stop:.5f}")
+                return None
+
+        self.logger.info(f"💰 [STAGE 1 PROFIT LOCK] Trade {trade.id} {trade.symbol}: "
+                        f"Moving stop to lock {lock_points}pts profit at {trail_level:.5f}")
         return round(trail_level, 5)
 
     def _calculate_stage2_trail(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
