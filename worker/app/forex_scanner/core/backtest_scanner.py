@@ -53,6 +53,10 @@ class BacktestScanner(IntelligentForexScanner):
         self.timeframe = backtest_config.get('timeframe', '15m')
         self.pipeline_mode = backtest_config.get('pipeline_mode', False)
 
+        # CRITICAL FIX: Skip signal logging when orchestrator handles logging
+        # When True, scanner returns signals but doesn't log to DB (orchestrator does it)
+        self.skip_signal_logging = backtest_config.get('skip_signal_logging', False)
+
         # Initialize parent with backtest-specific settings
         backtest_kwargs = kwargs.copy()
         backtest_kwargs.update({
@@ -510,11 +514,14 @@ class BacktestScanner(IntelligentForexScanner):
                 processed_signals = self._process_backtest_signals(signals, current_time)
                 period_results['signals'] = processed_signals
 
-                # Log signals to database
-                for signal in processed_signals:
-                    success, message, order_data = self.order_logger.place_order(signal)
-                    if success:
-                        self.backtest_stats['signals_logged'] += 1
+                # Log signals to database (skip if orchestrator handles logging)
+                if not self.skip_signal_logging:
+                    for signal in processed_signals:
+                        success, message, order_data = self.order_logger.place_order(signal)
+                        if success:
+                            self.backtest_stats['signals_logged'] += 1
+                else:
+                    self.logger.debug(f"📝 Skipping scanner signal logging - orchestrator will handle {len(processed_signals)} signals")
 
         except Exception as e:
             self.logger.error(f"Error processing time period {current_time}: {e}")

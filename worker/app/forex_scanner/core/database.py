@@ -110,6 +110,10 @@ class DatabaseManager:
                 else:
                     # For SELECT queries, INSERT with RETURNING, or function calls, return the data as DataFrame
                     df = pd.DataFrame(result.fetchall(), columns=result.keys())
+                    # CRITICAL FIX: Commit INSERT/UPDATE queries even when they have RETURNING clause
+                    # Without this, the transaction is rolled back when the connection closes
+                    if query_str.startswith('INSERT') or query_str.startswith('UPDATE'):
+                        conn.commit()
                     return df
 
         except Exception as e:

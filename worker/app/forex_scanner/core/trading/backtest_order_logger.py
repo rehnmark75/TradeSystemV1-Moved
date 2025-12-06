@@ -242,6 +242,11 @@ class BacktestOrderLogger:
             # Normalize trade_result to lowercase for database constraint (win/loss/breakeven)
             if trade_result:
                 trade_result = trade_result.lower()
+                # Fix common variations: "lose" -> "loss", "winner" -> "win"
+                if trade_result == 'lose':
+                    trade_result = 'loss'
+                elif trade_result == 'winner':
+                    trade_result = 'win'
 
             # Truncate exit_reason if too long for VARCHAR(10)
             if exit_reason and len(exit_reason) > 10:

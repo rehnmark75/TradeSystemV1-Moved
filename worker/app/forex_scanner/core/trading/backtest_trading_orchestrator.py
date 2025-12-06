@@ -105,7 +105,12 @@ class BacktestTradingOrchestrator:
 
         # Backtest-specific components
         self.order_logger = BacktestOrderLogger(self.db_manager, execution_id, logger=self.logger)
-        self.scanner = BacktestScanner(backtest_config, db_manager=self.db_manager)
+
+        # CRITICAL FIX: Set skip_signal_logging=True so scanner doesn't log signals
+        # The orchestrator will handle all signal logging to prevent duplicates
+        scanner_config = backtest_config.copy()
+        scanner_config['skip_signal_logging'] = True
+        self.scanner = BacktestScanner(scanner_config, db_manager=self.db_manager)
 
         # Alert history DISABLED for backtests - only for production signals
         self.alert_history_manager = None  # Never use alert_history for backtest data
