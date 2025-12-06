@@ -330,11 +330,28 @@ def assess_entry_quality(
         "max_points": 30
     })
 
+    # Detect strategy type - SMC_SIMPLE uses tier1_ema, SMC_STRUCTURE uses htf_data/bos_choch
+    is_smc_simple = 'tier1_ema' in strategy_indicators
+    tier1_ema = strategy_indicators.get('tier1_ema', {}) or {}
+    tier2_swing = strategy_indicators.get('tier2_swing', {}) or {}
+    tier3_entry = strategy_indicators.get('tier3_entry', {}) or {}
+    risk_management = strategy_indicators.get('risk_management', {}) or {}
+    dataframe_analysis = strategy_indicators.get('dataframe_analysis', {}) or {}
+
     # 2. HTF alignment (0-20 points)
+    # SMC_SIMPLE: tier1_ema.direction, SMC_STRUCTURE: htf_data.trend or bos_choch.htf_direction
     htf_data = strategy_indicators.get('htf_data', {}) or {}
     bos_choch = strategy_indicators.get('bos_choch', {}) or {}
-    htf_trend = htf_data.get('trend') or bos_choch.get('htf_direction')
-    htf_strength = safe_float(htf_data.get('strength', 0) or bos_choch.get('htf_strength', 0))
+
+    if is_smc_simple:
+        htf_trend = tier1_ema.get('direction')  # "BULL" or "BEAR"
+        # Distance from EMA as strength indicator (closer = stronger alignment)
+        ema_distance = safe_float(tier1_ema.get('distance_pips', 0))
+        # Consider aligned if within reasonable distance and has direction
+        htf_strength = 0.8 if htf_trend and ema_distance < 100 else 0.5 if htf_trend else 0
+    else:
+        htf_trend = htf_data.get('trend') or bos_choch.get('htf_direction')
+        htf_strength = safe_float(htf_data.get('strength', 0) or bos_choch.get('htf_strength', 0))
 
     if htf_trend:
         htf_points = htf_strength * 20
@@ -353,34 +370,103 @@ def assess_entry_quality(
             "max_points": 20
         })
 
-    # 3. Pattern detection (0-15 points)
+    # 3. Pattern/Entry detection (0-15 points)
+    # SMC_SIMPLE: tier3_entry (pullback entry), SMC_STRUCTURE: pattern_data
     pattern_data = strategy_indicators.get('pattern_data', {}) or {}
-    pattern_type = pattern_data.get('pattern_type')
-    pattern_strength = safe_float(pattern_data.get('pattern_strength', 0))
 
-    if pattern_type:
-        pattern_points = pattern_strength * 15
-        score += pattern_points
-        factors.append({
-            "name": "Price Pattern",
-            "value": f"{pattern_type} ({pattern_strength*100:.0f}%)",
-            "points": round(pattern_points, 1),
-            "max_points": 15
-        })
+    if is_smc_simple:
+        entry_type = tier3_entry.get('entry_type')  # "PULLBACK"
+        pullback_depth = safe_float(tier3_entry.get('pullback_depth', 0))
+        in_optimal_zone = tier3_entry.get('in_optimal_zone', False)
+        fib_zone = tier3_entry.get('fib_zone', '')
+
+        if entry_type:
+            # Score based on pullback quality and zone
+            if in_optimal_zone:
+                pattern_strength = 0.9
+            elif pullback_depth > 0.2 and pullback_depth < 0.7:
+                pattern_strength = 0.7
+            elif pullback_depth > 0:
+                pattern_strength = 0.5
+            else:
+                pattern_strength = 0.3
+
+            pattern_points = pattern_strength * 15
+            score += pattern_points
+            factors.append({
+                "name": "Entry Pattern",
+                "value": f"{entry_type} {fib_zone} ({pattern_strength*100:.0f}%)",
+                "points": round(pattern_points, 1),
+                "max_points": 15
+            })
+        else:
+            factors.append({
+                "name": "Entry Pattern",
+                "value": "None detected",
+                "points": 0,
+                "max_points": 15
+            })
     else:
-        factors.append({
-            "name": "Price Pattern",
-            "value": "None detected",
-            "points": 0,
-            "max_points": 15
-        })
+        pattern_type = pattern_data.get('pattern_type')
+        pattern_strength = safe_float(pattern_data.get('pattern_strength', 0))
+
+        if pattern_type:
+            pattern_points = pattern_strength * 15
+            score += pattern_points
+            factors.append({
+                "name": "Price Pattern",
+                "value": f"{pattern_type} ({pattern_strength*100:.0f}%)",
+                "points": round(pattern_points, 1),
+                "max_points": 15
+            })
+        else:
+            factors.append({
+                "name": "Price Pattern",
+                "value": "None detected",
+                "points": 0,
+                "max_points": 15
+            })
 
     # 4. S/R level (0-15 points)
+    # SMC_SIMPLE: dataframe_analysis.sr_data, SMC_STRUCTURE: sr_data at root
     sr_data = strategy_indicators.get('sr_data', {}) or {}
-    sr_level = sr_data.get('level_price')
+    df_sr_data = dataframe_analysis.get('sr_data', {}) or {}
+
+    # Use dataframe_analysis sr_data if root sr_data is empty
+    if not sr_data.get('level_price') and df_sr_data:
+        sr_data = df_sr_data
+
+    sr_level = sr_data.get('level_price') or sr_data.get('nearest_support') or sr_data.get('nearest_resistance')
     sr_strength = safe_float(sr_data.get('level_strength', 0))
 
-    if sr_level:
+    # For SMC_SIMPLE, calculate strength based on distance to S/R
+    if is_smc_simple and (df_sr_data.get('nearest_support') or df_sr_data.get('nearest_resistance')):
+        dist_support = safe_float(df_sr_data.get('distance_to_support_pips', 999))
+        dist_resistance = safe_float(df_sr_data.get('distance_to_resistance_pips', 999))
+        min_dist = min(dist_support, dist_resistance)
+
+        if min_dist < 10:
+            sr_strength = 0.9
+            sr_level_type = "Very close"
+        elif min_dist < 20:
+            sr_strength = 0.7
+            sr_level_type = "Near"
+        elif min_dist < 40:
+            sr_strength = 0.5
+            sr_level_type = "Moderate"
+        else:
+            sr_strength = 0.3
+            sr_level_type = "Far"
+
+        sr_points = sr_strength * 15
+        score += sr_points
+        factors.append({
+            "name": "S/R Level",
+            "value": f"{sr_level_type} ({min_dist:.1f} pips)",
+            "points": round(sr_points, 1),
+            "max_points": 15
+        })
+    elif sr_level:
         sr_points = sr_strength * 15
         score += sr_points
         factors.append({
@@ -398,8 +484,13 @@ def assess_entry_quality(
         })
 
     # 5. R:R ratio (0-20 points)
+    # SMC_SIMPLE: risk_management.rr_ratio, SMC_STRUCTURE: rr_data.rr_ratio
     rr_data = strategy_indicators.get('rr_data', {}) or {}
     rr_ratio = safe_float(rr_data.get('rr_ratio', 0))
+
+    # Fallback to risk_management for SMC_SIMPLE
+    if rr_ratio == 0 and risk_management:
+        rr_ratio = safe_float(risk_management.get('rr_ratio', 0))
 
     if rr_ratio >= 2.5:
         rr_points = 20
@@ -811,12 +902,26 @@ def get_outcome_summary(
 
     # If pips_gained is not recorded, calculate from entry/exit prices
     if pips == 0 and entry_price > 0:
-        # Fallback: if exit_price not recorded, estimate from SL/TP based on P&L
+        # Fallback: if exit_price not recorded, estimate from SL/TP based on P&L and trade state
         if exit_price == 0:
             if profit_loss < 0:
+                # Loss - likely hit SL
                 exit_price = sl_price
             elif profit_loss > 0:
-                exit_price = tp_price
+                # Winner - check if exited via trailing stop or TP
+                # If SL is above entry (BUY) or below entry (SELL), trade was trailed
+                is_trailing_exit = False
+                if trade.direction == "BUY" and sl_price > entry_price:
+                    is_trailing_exit = True
+                    exit_price = sl_price  # Exited at trailing stop
+                elif trade.direction == "SELL" and sl_price < entry_price:
+                    is_trailing_exit = True
+                    exit_price = sl_price  # Exited at trailing stop
+
+                # If not trailing exit, assume TP was hit
+                if not is_trailing_exit:
+                    exit_price = tp_price
+
         if exit_price > 0:
             if trade.direction == "BUY":
                 pips = (exit_price - entry_price) * pip_multiplier

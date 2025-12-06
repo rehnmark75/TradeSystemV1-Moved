@@ -342,6 +342,28 @@ class UnifiedTradingDashboard:
         finally:
             conn.close()
 
+    def fetch_latest_closed_trade_id(self) -> int:
+        """Fetch the ID of the most recent trade entry that is closed"""
+        conn = self.get_database_connection()
+        if not conn:
+            return 1  # Default fallback
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id FROM trade_log
+                    WHERE status = 'closed'
+                    ORDER BY id DESC
+                    LIMIT 1
+                """)
+                result = cursor.fetchone()
+                return result[0] if result else 1
+        except Exception as e:
+            logging.warning(f"Error fetching latest closed trade: {e}")
+            return 1  # Default fallback
+        finally:
+            conn.close()
+
     def render_overview_tab(self):
         """Render the overview tab with key metrics and charts"""
         st.header("📊 Trading Overview")
@@ -1657,11 +1679,14 @@ class UnifiedTradingDashboard:
         st.header("🔍 Individual Trade Analysis")
         st.markdown("*Comprehensive analysis of trade execution and entry signals*")
 
+        # Get latest closed trade ID as default
+        default_trade_id = self.fetch_latest_closed_trade_id()
+
         # Input for trade ID (shared between sub-tabs)
         col1, col2 = st.columns([3, 1])
 
         with col1:
-            trade_id = st.number_input("Enter Trade ID", min_value=1, value=1273, step=1, key="trade_id_input")
+            trade_id = st.number_input("Enter Trade ID", min_value=1, value=default_trade_id, step=1, key="trade_id_input")
 
         with col2:
             analyze_btn = st.button("🔍 Analyze Trade", type="primary")

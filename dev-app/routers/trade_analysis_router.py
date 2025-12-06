@@ -27,13 +27,42 @@ from services.trade_analysis_service import (
 router = APIRouter(prefix="/api/trade-analysis", tags=["trade-analysis"])
 
 
+def get_rotated_log_files(base_log_file: str) -> List[Path]:
+    """
+    Get all rotated log files in chronological order (oldest first).
+
+    Handles rotation pattern: trade_monitor.log, trade_monitor.log.1, trade_monitor.log.2, etc.
+    Returns files sorted so oldest rotated files are read first, newest last.
+    """
+    log_path = Path(base_log_file)
+    log_dir = log_path.parent
+    log_name = log_path.name
+
+    # Find all matching log files
+    log_files = []
+
+    # Add rotated files first (oldest to newest: .5, .4, .3, .2, .1)
+    for i in range(10, 0, -1):  # Check up to .10 rotation
+        rotated = log_dir / f"{log_name}.{i}"
+        if rotated.exists():
+            log_files.append(rotated)
+
+    # Add current log file last (most recent)
+    if log_path.exists():
+        log_files.append(log_path)
+
+    return log_files
+
+
 def parse_trade_logs(trade_id: int, log_file: str = "/app/logs/trade_monitor.log") -> Dict[str, Any]:
     """
-    Parse trade monitor logs to extract trailing stop events for a specific trade
+    Parse trade monitor logs to extract trailing stop events for a specific trade.
+
+    Reads all rotated log files to find historical data.
 
     Args:
         trade_id: Trade ID to search for
-        log_file: Path to log file
+        log_file: Base path to log file (will also check rotated versions)
 
     Returns:
         Dictionary with parsed events
@@ -48,73 +77,127 @@ def parse_trade_logs(trade_id: int, log_file: str = "/app/logs/trade_monitor.log
         "errors": []
     }
 
-    try:
-        log_path = Path(log_file)
-        if not log_path.exists():
-            return events
+    # Get all rotated log files
+    log_files = get_rotated_log_files(log_file)
 
-        with open(log_file, 'r') as f:
-            for line in f:
-                # Only process lines for this trade
-                if f"trade {trade_id}" not in line.lower() and f"trade.id.*{trade_id}" not in line.lower():
-                    continue
-
-                timestamp_match = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
-                timestamp = timestamp_match.group(1) if timestamp_match else None
-
-                # Break-even triggers
-                if "BREAK-EVEN TRIGGER" in line:
-                    profit_match = re.search(r'Profit (\d+)pts >= trigger (\d+)pts', line)
-                    if profit_match:
-                        events["break_even_triggers"].append({
-                            "timestamp": timestamp,
-                            "profit_pts": int(profit_match.group(1)),
-                            "trigger_pts": int(profit_match.group(2)),
-                            "line": line.strip()
-                        })
-
-                # Profit updates
-                elif "PROFIT]" in line and "entry=" in line:
-                    profit_match = re.search(r'entry=([\d.]+), current=([\d.]+), profit=(\d+)pts', line)
-                    if profit_match:
-                        events["profit_updates"].append({
-                            "timestamp": timestamp,
-                            "entry": float(profit_match.group(1)),
-                            "current": float(profit_match.group(2)),
-                            "profit_pts": int(profit_match.group(3))
-                        })
-
-                # Stop adjustments
-                elif "IMMEDIATE TRAIL SUCCESS" in line or "Stop moved" in line:
-                    stop_match = re.search(r'Stop moved to ([\d.]+)', line)
-                    if stop_match:
-                        events["stop_adjustments"].append({
-                            "timestamp": timestamp,
-                            "new_stop": float(stop_match.group(1)),
-                            "line": line.strip()
-                        })
-
-                # Status changes
-                elif "Processing trade" in line and "status=" in line:
-                    status_match = re.search(r'status=(\w+)', line)
-                    if status_match:
-                        events["status_changes"].append({
-                            "timestamp": timestamp,
-                            "status": status_match.group(1)
-                        })
-
-                # Errors
-                elif "ERROR" in line or "FAILED" in line:
-                    events["errors"].append({
-                        "timestamp": timestamp,
-                        "message": line.strip()
-                    })
-
-    except Exception as e:
+    if not log_files:
         events["errors"].append({
             "timestamp": None,
-            "message": f"Failed to parse logs: {str(e)}"
+            "message": f"No log files found at {log_file}"
         })
+        return events
+
+    # Build search patterns for this trade
+    # Match: "Trade 1535", "trade 1535", "Trade 1535:", etc.
+    trade_pattern = re.compile(rf'\btrade\s+{trade_id}\b', re.IGNORECASE)
+
+    for log_path in log_files:
+        try:
+            with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    # Only process lines for this trade
+                    if not trade_pattern.search(line):
+                        continue
+
+                    timestamp_match = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
+                    timestamp = timestamp_match.group(1) if timestamp_match else None
+
+                    # Break-even triggers
+                    # Matches: "[BREAK-EVEN TRIGGER] Trade 1535: Profit 6pts >= trigger 6pts"
+                    if "BREAK-EVEN TRIGGER" in line:
+                        profit_match = re.search(r'Profit (\d+)pts >= trigger (\d+)pts', line)
+                        if profit_match:
+                            events["break_even_triggers"].append({
+                                "timestamp": timestamp,
+                                "profit_pts": int(profit_match.group(1)),
+                                "trigger_pts": int(profit_match.group(2)),
+                                "line": line.strip()
+                            })
+
+                    # Break-even success confirmation
+                    # Matches: "[BREAK-EVEN] Trade 1535 CS.D.AUDUSD.MINI.IP moved to break-even: 0.66320"
+                    elif "[BREAK-EVEN]" in line and "moved to break-even" in line:
+                        stop_match = re.search(r'moved to break-even:\s*([\d.]+)', line)
+                        if stop_match:
+                            events["stop_adjustments"].append({
+                                "timestamp": timestamp,
+                                "new_stop": float(stop_match.group(1)),
+                                "type": "break_even",
+                                "line": line.strip()
+                            })
+
+                    # Stage triggers (stage 1, 2, 3)
+                    # Matches: "[STAGE1 TRIGGER]", "[STAGE2 TRIGGER]", "[STAGE3 TRIGGER]"
+                    elif "STAGE1 TRIGGER" in line or "STAGE1]" in line:
+                        events["stage2_triggers"].append({
+                            "timestamp": timestamp,
+                            "stage": 1,
+                            "line": line.strip()
+                        })
+                    elif "STAGE2 TRIGGER" in line or "STAGE2]" in line:
+                        events["stage2_triggers"].append({
+                            "timestamp": timestamp,
+                            "stage": 2,
+                            "line": line.strip()
+                        })
+                    elif "STAGE3 TRIGGER" in line or "STAGE3]" in line:
+                        events["stage3_triggers"].append({
+                            "timestamp": timestamp,
+                            "stage": 3,
+                            "line": line.strip()
+                        })
+
+                    # Profit updates
+                    # Matches: "[PROFIT] Trade 1535 CS.D.AUDUSD.MINI.IP BUY: entry=0.66300, current=0.66298, profit=0pts"
+                    elif "[PROFIT]" in line and "entry=" in line:
+                        profit_match = re.search(r'entry=([\d.]+),\s*current=([\d.]+),\s*profit=(-?\d+)pts', line)
+                        if profit_match:
+                            events["profit_updates"].append({
+                                "timestamp": timestamp,
+                                "entry": float(profit_match.group(1)),
+                                "current": float(profit_match.group(2)),
+                                "profit_pts": int(profit_match.group(3))
+                            })
+
+                    # Stop adjustments - multiple patterns
+                    # Pattern 1: "IMMEDIATE TRAIL SUCCESS" or "Stop moved to X"
+                    # Pattern 2: "moved to break-even: X" (handled above)
+                    # Pattern 3: "TRAIL SUCCESS" with new stop price
+                    elif "TRAIL SUCCESS" in line or "Stop moved" in line:
+                        stop_match = re.search(r'(?:Stop moved to|new stop[:\s]+|trailing.*?to[:\s]+)([\d.]+)', line, re.IGNORECASE)
+                        if stop_match:
+                            events["stop_adjustments"].append({
+                                "timestamp": timestamp,
+                                "new_stop": float(stop_match.group(1)),
+                                "type": "trail",
+                                "line": line.strip()
+                            })
+
+                    # Status changes
+                    # Matches: "Processing trade 1535 CS.D.AUDUSD.MINI.IP status=tracking"
+                    elif "Processing trade" in line and "status=" in line:
+                        status_match = re.search(r'status=(\w+)', line)
+                        if status_match:
+                            # Only add if status changed from last recorded
+                            new_status = status_match.group(1)
+                            if not events["status_changes"] or events["status_changes"][-1]["status"] != new_status:
+                                events["status_changes"].append({
+                                    "timestamp": timestamp,
+                                    "status": new_status
+                                })
+
+                    # Errors
+                    elif "ERROR" in line or "FAILED" in line:
+                        events["errors"].append({
+                            "timestamp": timestamp,
+                            "message": line.strip()
+                        })
+
+        except Exception as e:
+            events["errors"].append({
+                "timestamp": None,
+                "message": f"Failed to parse {log_path}: {str(e)}"
+            })
 
     return events
 
@@ -201,54 +284,34 @@ def analyze_stage_activation(trade: TradeLog, log_events: Dict[str, Any], pair_c
         else:
             return round(lock_distance * 10000, 1)
 
-    # Calculate final lock from current trade data (for overall summary)
+    # Calculate final lock from current trade data (the actual SL in DB)
     final_lock_pts = 0
     if trade.entry_price and trade.sl_price:
         final_lock_pts = calculate_lock_points(trade.sl_price, trade.entry_price, trade.symbol, trade.direction)
 
-    # Check Break-even activation and find what it locked
+    # Check Break-even activation and find when it was triggered
     if max_profit >= analysis["breakeven"]["trigger_threshold"]:
         analysis["breakeven"]["activated"] = True
-        # Find when it was triggered and what stop was set
+        # Find when it was triggered
         for event in log_events["profit_updates"]:
             if event["profit_pts"] >= analysis["breakeven"]["trigger_threshold"]:
                 analysis["breakeven"]["activation_time"] = event["timestamp"]
-                # Find the next stop adjustment after this time
-                for stop_adj in log_events["stop_adjustments"]:
-                    if stop_adj["timestamp"] >= event["timestamp"]:
-                        lock_pts = calculate_lock_points(stop_adj["new_stop"], trade.entry_price, trade.symbol, trade.direction)
-                        analysis["breakeven"]["final_lock"] = lock_pts
-                        break
                 break
 
     # Check Stage 1
     if max_profit >= analysis["stage1"]["trigger_threshold"]:
         analysis["stage1"]["activated"] = True
-        # Find when it was triggered and what stop was set
         for event in log_events["profit_updates"]:
             if event["profit_pts"] >= analysis["stage1"]["trigger_threshold"]:
                 analysis["stage1"]["activation_time"] = event["timestamp"]
-                # Find the next stop adjustment after this time
-                for stop_adj in log_events["stop_adjustments"]:
-                    if stop_adj["timestamp"] >= event["timestamp"]:
-                        lock_pts = calculate_lock_points(stop_adj["new_stop"], trade.entry_price, trade.symbol, trade.direction)
-                        analysis["stage1"]["actual_lock"] = lock_pts
-                        break
                 break
 
     # Check Stage 2
     if max_profit >= analysis["stage2"]["trigger_threshold"]:
         analysis["stage2"]["activated"] = True
-        # Find when it was triggered and what stop was set
         for event in log_events["profit_updates"]:
             if event["profit_pts"] >= analysis["stage2"]["trigger_threshold"]:
                 analysis["stage2"]["activation_time"] = event["timestamp"]
-                # Find the next stop adjustment after this time
-                for stop_adj in log_events["stop_adjustments"]:
-                    if stop_adj["timestamp"] >= event["timestamp"]:
-                        lock_pts = calculate_lock_points(stop_adj["new_stop"], trade.entry_price, trade.symbol, trade.direction)
-                        analysis["stage2"]["actual_lock"] = lock_pts
-                        break
                 break
 
     # Check Stage 3
@@ -259,8 +322,15 @@ def analyze_stage_activation(trade: TradeLog, log_events: Dict[str, Any], pair_c
                 analysis["stage3"]["activation_time"] = event["timestamp"]
                 break
 
-    # Set overall final lock for summary
-    analysis["breakeven"]["final_lock"] = analysis["breakeven"].get("final_lock", final_lock_pts)
+    # Set final lock from actual trade SL (the real protection level)
+    analysis["breakeven"]["final_lock"] = final_lock_pts
+
+    # Add stop adjustment history for transparency
+    if log_events["stop_adjustments"]:
+        # Get the last stop adjustment (most recent protection level)
+        last_stop_adj = log_events["stop_adjustments"][-1]
+        last_lock = calculate_lock_points(last_stop_adj["new_stop"], trade.entry_price, trade.symbol, trade.direction)
+        analysis["breakeven"]["last_logged_lock"] = last_lock
 
     return analysis
 
@@ -639,10 +709,28 @@ async def get_signal_analysis(trade_id: int, db: Session = Depends(get_db)):
     session_analysis = market_intel.get('session_analysis', {}) or {}
     market_context = market_intel.get('market_context', {}) or {}
 
-    # Build entry timing from strategy_indicators (htf_data, bos_choch)
-    htf_trend = htf_data.get('trend', htf_info.get('trend', 'unknown'))
-    htf_strength = safe_float(htf_data.get('strength', bos_choch.get('htf_strength', 0)))
-    htf_aligned = bool(htf_trend and htf_trend != 'unknown')
+    # Detect if this is SMC_SIMPLE strategy
+    tier1_ema = strategy_indicators.get('tier1_ema', {}) or {}
+    tier2_swing = strategy_indicators.get('tier2_swing', {}) or {}
+    tier3_entry = strategy_indicators.get('tier3_entry', {}) or {}
+    risk_management = strategy_indicators.get('risk_management', {}) or {}
+    is_smc_simple = bool(tier1_ema and tier2_swing)
+
+    # Build entry timing from strategy_indicators
+    # SMC_SIMPLE: tier1_ema.direction, SMC_STRUCTURE: htf_data.trend or bos_choch.htf_direction
+    if is_smc_simple:
+        htf_trend = tier1_ema.get('direction', 'unknown')  # "BULL" or "BEAR"
+        ema_distance = safe_float(tier1_ema.get('distance_pips', 0))
+        htf_strength = 0.8 if htf_trend in ['BULL', 'BEAR'] and ema_distance < 100 else 0.5 if htf_trend in ['BULL', 'BEAR'] else 0.0
+        htf_aligned = htf_trend in ['BULL', 'BEAR']
+        pullback_depth = safe_float(tier3_entry.get('pullback_depth', 0))
+        in_pullback = pullback_depth > 0
+    else:
+        htf_trend = htf_data.get('trend', htf_info.get('trend', 'unknown'))
+        htf_strength = safe_float(htf_data.get('strength', bos_choch.get('htf_strength', 0)))
+        htf_aligned = bool(htf_trend and htf_trend != 'unknown')
+        pullback_depth = safe_float(htf_data.get('pullback_depth', 0))
+        in_pullback = htf_data.get('in_pullback', False)
 
     entry_timing = {
         "premium_discount_zone": strategy_metadata.get('zone', 'equilibrium'),
@@ -650,10 +738,10 @@ async def get_signal_analysis(trade_id: int, db: Session = Depends(get_db)):
         "htf_aligned": htf_aligned,
         "htf_trend": htf_trend,
         "htf_strength": htf_strength,
-        "htf_structure": bos_choch.get('structure_type', htf_info.get('structure', 'unknown')),
-        "htf_bias": bos_choch.get('htf_direction', market_context.get('market_strength', {}).get('market_bias', 'neutral')),
-        "in_pullback": htf_data.get('in_pullback', False),
-        "pullback_depth": safe_float(htf_data.get('pullback_depth', 0)),
+        "htf_structure": bos_choch.get('structure_type', htf_info.get('structure', 'unknown')) if not is_smc_simple else tier3_entry.get('entry_type', 'PULLBACK'),
+        "htf_bias": bos_choch.get('htf_direction', market_context.get('market_strength', {}).get('market_bias', 'neutral')) if not is_smc_simple else htf_trend,
+        "in_pullback": in_pullback,
+        "pullback_depth": pullback_depth,
         "mtf_alignment_ratio": safe_float(strategy_metadata.get('mtf_alignment', 0)),
         "entry_quality_score": safe_float(strategy_metadata.get('entry_quality', safe_float(alert.confidence_score)))
     }
@@ -722,20 +810,20 @@ async def get_signal_analysis(trade_id: int, db: Session = Depends(get_db)):
         },
 
         "smart_money_analysis": {
-            "validated": bool(alert.smart_money_validated) or bool(bos_choch),
-            "type": alert.smart_money_type or bos_choch.get('structure_type'),
+            "validated": bool(alert.smart_money_validated) or bool(bos_choch) or is_smc_simple,
+            "type": alert.smart_money_type or bos_choch.get('structure_type') or (tier3_entry.get('entry_type') if is_smc_simple else None),
             "score": safe_float(alert.smart_money_score) or safe_float(confidence_breakdown.get('total', 0)),
             "market_structure": {
-                "current_structure": bos_choch.get('htf_direction', market_structure.get('current_structure', 'unknown')),
-                "structure_type": bos_choch.get('structure_type', market_structure.get('structure_type', 'unknown')),
-                "htf_trend": htf_data.get('trend', 'unknown'),
-                "htf_strength": safe_float(htf_data.get('strength', 0)),
-                "swing_high": safe_float(market_structure.get('swing_high', 0)),
+                "current_structure": bos_choch.get('htf_direction', market_structure.get('current_structure', htf_trend if is_smc_simple else 'unknown')),
+                "structure_type": bos_choch.get('structure_type', market_structure.get('structure_type', tier3_entry.get('entry_type', 'unknown') if is_smc_simple else 'unknown')),
+                "htf_trend": htf_trend,
+                "htf_strength": htf_strength,
+                "swing_high": safe_float(market_structure.get('swing_high', tier2_swing.get('swing_level', 0) if is_smc_simple else 0)),
                 "swing_low": safe_float(market_structure.get('swing_low', 0)),
                 "swing_highs": htf_data.get('swing_highs', [])[:5],  # Last 5 swing highs
                 "swing_lows": htf_data.get('swing_lows', [])[:5],    # Last 5 swing lows
                 "structure_breaks": market_structure.get('structure_breaks', []),
-                "trend_strength": safe_float(htf_data.get('strength', market_structure.get('trend_strength', 0)))
+                "trend_strength": htf_strength
             }
         },
 
@@ -800,14 +888,14 @@ async def get_signal_analysis(trade_id: int, db: Session = Depends(get_db)):
             "distance_to_resistance_pips": safe_float(df_sr_data.get('distance_to_resistance_pips', alert.distance_to_resistance_pips or 0))
         },
 
-        # Risk/Reward from strategy_indicators.rr_data (primary) or alert columns (fallback)
+        # Risk/Reward from strategy_indicators.rr_data (SMC_STRUCTURE) or risk_management (SMC_SIMPLE)
         "risk_reward": {
-            "initial_rr": safe_float(rr_data.get('rr_ratio', alert.risk_reward_ratio or 0)),
-            "risk_pips": safe_float(rr_data.get('risk_pips', 0)),
-            "reward_pips": safe_float(rr_data.get('reward_pips', 0)),
-            "entry_price": safe_float(rr_data.get('entry_price', trade.entry_price or 0)),
-            "stop_loss": safe_float(rr_data.get('stop_loss', trade.sl_price or 0)),
-            "take_profit": safe_float(rr_data.get('take_profit', trade.tp_price or 0)),
+            "initial_rr": safe_float(rr_data.get('rr_ratio', 0)) or safe_float(risk_management.get('rr_ratio', 0)) or safe_float(alert.risk_reward_ratio or 0),
+            "risk_pips": safe_float(rr_data.get('risk_pips', 0)) or safe_float(risk_management.get('risk_pips', 0)),
+            "reward_pips": safe_float(rr_data.get('reward_pips', 0)) or safe_float(risk_management.get('reward_pips', 0)),
+            "entry_price": safe_float(rr_data.get('entry_price', 0)) or safe_float(tier3_entry.get('entry_price', 0)) or safe_float(trade.entry_price or 0),
+            "stop_loss": safe_float(rr_data.get('stop_loss', 0)) or safe_float(risk_management.get('stop_loss', 0)) or safe_float(trade.sl_price or 0),
+            "take_profit": safe_float(rr_data.get('take_profit', 0)) or safe_float(risk_management.get('take_profit', 0)) or safe_float(trade.tp_price or 0),
             "partial_tp": safe_float(rr_data.get('partial_tp', 0)),
             "partial_percent": safe_float(rr_data.get('partial_percent', 0))
         },
@@ -815,6 +903,13 @@ async def get_signal_analysis(trade_id: int, db: Session = Depends(get_db)):
         # Confidence breakdown from strategy_indicators
         "confidence_breakdown": {
             "total": safe_float(confidence_breakdown.get('total', alert.confidence_score or 0)),
+            # SMC_SIMPLE breakdown
+            "ema_alignment": safe_float(confidence_breakdown.get('ema_alignment', 0)),
+            "volume_bonus": safe_float(confidence_breakdown.get('volume_bonus', 0)),
+            "pullback_quality": safe_float(confidence_breakdown.get('pullback_quality', 0)),
+            "rr_quality": safe_float(confidence_breakdown.get('rr_quality', 0)),
+            "fib_accuracy": safe_float(confidence_breakdown.get('fib_accuracy', 0)),
+            # SMC_STRUCTURE breakdown
             "htf_score": safe_float(confidence_breakdown.get('htf_score', 0)),
             "pattern_score": safe_float(confidence_breakdown.get('pattern_score', 0)),
             "sr_score": safe_float(confidence_breakdown.get('sr_score', 0)),
