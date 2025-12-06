@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"   - Port: {config.PORT}")
         logger.info(f"   - Debug mode: {config.DEBUG}")
         logger.info(f"   - Focus currencies: {', '.join(config.FOCUS_CURRENCIES)}")
-        logger.info(f"   - Weekly scrape: Sundays at {config.WEEKLY_SCRAPE_HOUR:02d}:{config.WEEKLY_SCRAPE_MINUTE:02d} UTC")
+        logger.info(f"   - Daily scrape: Every day at {config.DAILY_SCRAPE_HOUR:02d}:{config.DAILY_SCRAPE_MINUTE:02d} UTC")
 
         logger.info("🎯 Economic Calendar Service is ready!")
 

@@ -263,7 +263,8 @@ async def trigger_manual_scrape(
         raise HTTPException(status_code=403, detail="Manual scrape is disabled")
 
     try:
-        result = await economic_scheduler.manual_scrape(week_offset=week_offset)
+        # manual_scrape is now synchronous
+        result = economic_scheduler.manual_scrape(week_offset=week_offset)
 
         status_code = status.HTTP_200_OK if result['success'] else status.HTTP_500_INTERNAL_SERVER_ERROR
 

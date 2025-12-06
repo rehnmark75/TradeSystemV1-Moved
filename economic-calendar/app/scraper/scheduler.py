@@ -1,8 +1,7 @@
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.executors.pool import ThreadPoolExecutor
 import logging
-import asyncio
 from datetime import datetime
 from typing import Optional
 
@@ -32,7 +31,8 @@ class EconomicCalendarScheduler:
             'misfire_grace_time': 300  # 5 minutes
         }
 
-        self.scheduler = AsyncIOScheduler(
+        # Use BackgroundScheduler for synchronous jobs
+        self.scheduler = BackgroundScheduler(
             executors=executors,
             job_defaults=job_defaults,
             timezone=config.SCHEDULER_TIMEZONE
@@ -116,41 +116,43 @@ class EconomicCalendarScheduler:
 
         logger.info("Health check job scheduled every 30 minutes")
 
-    async def weekly_scrape_task(self):
-        """Main weekly scraping task"""
-        logger.info("Starting weekly economic calendar scrape")
+    def weekly_scrape_task(self):
+        """Main weekly scraping task (synchronous for BackgroundScheduler)"""
+        logger.info("Starting daily economic calendar scrape")
 
         try:
             # Scrape current week
             current_week_events, current_week_log = self.scraper.scrape_week(week_offset=0)
             self.scraper.save_events_to_database(current_week_events, current_week_log)
+            logger.info(f"Current week: {len(current_week_events)} events scraped")
 
             # Scrape next week
             next_week_events, next_week_log = self.scraper.scrape_week(week_offset=1)
             self.scraper.save_events_to_database(next_week_events, next_week_log)
+            logger.info(f"Next week: {len(next_week_events)} events scraped")
 
             total_events = len(current_week_events) + len(next_week_events)
-            logger.info(f"Weekly scrape completed successfully: {total_events} events")
+            logger.info(f"Daily scrape completed successfully: {total_events} total events")
 
             # Send notification if configured
-            await self.send_scrape_notification(
+            self.send_scrape_notification(
                 success=True,
                 total_events=total_events,
-                message=f"Weekly scrape completed: {total_events} events"
+                message=f"Daily scrape completed: {total_events} events"
             )
 
         except Exception as e:
-            logger.error(f"Weekly scrape failed: {e}")
+            logger.error(f"Daily scrape failed: {e}", exc_info=True)
 
             # Send failure notification
-            await self.send_scrape_notification(
+            self.send_scrape_notification(
                 success=False,
                 total_events=0,
-                message=f"Weekly scrape failed: {str(e)}"
+                message=f"Daily scrape failed: {str(e)}"
             )
 
-    async def daily_cleanup_task(self):
-        """Daily cleanup task"""
+    def daily_cleanup_task(self):
+        """Daily cleanup task (synchronous for BackgroundScheduler)"""
         logger.info("Starting daily cleanup task")
 
         try:
@@ -158,10 +160,10 @@ class EconomicCalendarScheduler:
             logger.info("Daily cleanup completed successfully")
 
         except Exception as e:
-            logger.error(f"Daily cleanup failed: {e}")
+            logger.error(f"Daily cleanup failed: {e}", exc_info=True)
 
-    async def health_check_task(self):
-        """Periodic health check task"""
+    def health_check_task(self):
+        """Periodic health check task (synchronous for BackgroundScheduler)"""
         try:
             # Check database connection
             from database.connection import db_manager
@@ -175,9 +177,9 @@ class EconomicCalendarScheduler:
         except Exception as e:
             logger.error(f"Health check failed: {e}")
 
-    async def manual_scrape(self, week_offset: int = 0) -> dict:
+    def manual_scrape(self, week_offset: int = 0) -> dict:
         """
-        Trigger manual scrape
+        Trigger manual scrape (synchronous)
 
         Args:
             week_offset: Week offset (0=current, 1=next, -1=previous)
@@ -194,7 +196,7 @@ class EconomicCalendarScheduler:
             result = {
                 'success': True,
                 'events_count': len(events),
-                'scrape_log_id': scrape_log.id,
+                'scrape_log_id': scrape_log.id if hasattr(scrape_log, 'id') else None,
                 'duration': scrape_log.duration_seconds,
                 'message': f"Manual scrape completed: {len(events)} events"
             }
@@ -204,7 +206,7 @@ class EconomicCalendarScheduler:
 
         except Exception as e:
             error_msg = f"Manual scrape failed: {str(e)}"
-            logger.error(error_msg)
+            logger.error(error_msg, exc_info=True)
 
             return {
                 'success': False,
@@ -213,7 +215,7 @@ class EconomicCalendarScheduler:
                 'message': error_msg
             }
 
-    async def send_scrape_notification(self, success: bool, total_events: int, message: str):
+    def send_scrape_notification(self, success: bool, total_events: int, message: str):
         """Send notification about scrape results (placeholder for future webhook/Slack integration)"""
         if config.WEBHOOK_URL:
             # TODO: Implement webhook notification
