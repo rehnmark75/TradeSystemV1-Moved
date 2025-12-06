@@ -7,7 +7,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
-from ..config import settings, HEALTH_ENDPOINTS, TCP_CHECK_CONTAINERS
+from ..config import settings, HEALTH_ENDPOINTS, TCP_CHECK_CONTAINERS, HEALTH_HEADERS
 from ..models import HealthStatus
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,9 @@ class HealthChecker:
         start_time = datetime.now()
         try:
             client = await self._get_client()
-            response = await client.get(url)
+            # Get any custom headers for this service
+            headers = HEALTH_HEADERS.get(name, {})
+            response = await client.get(url, headers=headers)
             response_time = (datetime.now() - start_time).total_seconds() * 1000
 
             if response.status_code == 200:

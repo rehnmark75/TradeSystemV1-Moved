@@ -21,12 +21,19 @@ class DockerMonitor:
     def _connect(self):
         """Connect to Docker daemon."""
         try:
-            self.client = docker.from_env()
+            # Try unix socket directly first
+            self.client = docker.DockerClient(base_url='unix://var/run/docker.sock')
             self.client.ping()
-            logger.info("Connected to Docker daemon")
-        except Exception as e:
-            logger.error(f"Failed to connect to Docker daemon: {e}")
-            self.client = None
+            logger.info("Connected to Docker daemon via unix socket")
+        except Exception as e1:
+            logger.warning(f"Unix socket connection failed: {e1}, trying from_env()")
+            try:
+                self.client = docker.from_env()
+                self.client.ping()
+                logger.info("Connected to Docker daemon via environment")
+            except Exception as e2:
+                logger.error(f"Failed to connect to Docker daemon: {e2}")
+                self.client = None
 
     def is_connected(self) -> bool:
         """Check if connected to Docker daemon."""
@@ -91,10 +98,22 @@ class DockerMonitor:
             logger.warning(f"Failed to parse started_at: {e}")
             return 0, "Unknown"
 
-    def _get_container_metrics(self, container) -> ContainerMetrics:
-        """Get resource metrics for a container."""
+    def _get_container_metrics(self, container, timeout_seconds: int = 5) -> ContainerMetrics:
+        """Get resource metrics for a container with timeout."""
+        import concurrent.futures
+
+        def fetch_stats():
+            return container.stats(stream=False)
+
         try:
-            stats = container.stats(stream=False)
+            # Use ThreadPoolExecutor to add timeout to stats call
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(fetch_stats)
+                try:
+                    stats = future.result(timeout=timeout_seconds)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(f"Stats timeout for container {container.name} after {timeout_seconds}s")
+                    return ContainerMetrics()
 
             # CPU calculation
             cpu_delta = stats["cpu_stats"]["cpu_usage"]["total_usage"] - \
@@ -166,10 +185,10 @@ class DockerMonitor:
             started_at = state.get("StartedAt")
             uptime_seconds, uptime_human = self._calculate_uptime(started_at)
 
-            # Get metrics (only for running containers)
+            # Get metrics (only for running containers and if enabled)
             metrics = ContainerMetrics()
-            if status == ContainerStatus.RUNNING:
-                metrics = self._get_container_metrics(container)
+            if status == ContainerStatus.RUNNING and settings.collect_container_metrics:
+                metrics = self._get_container_metrics(container, settings.metrics_timeout)
 
             # Parse ports
             ports = {}
@@ -229,6 +248,9 @@ class DockerMonitor:
         try:
             docker_containers = self.client.containers.list(all=include_stopped)
             for container in docker_containers:
+                # Skip excluded containers
+                if container.name in settings.excluded_containers:
+                    continue
                 health = self.get_container_health(container.name)
                 if health:
                     containers.append(health)

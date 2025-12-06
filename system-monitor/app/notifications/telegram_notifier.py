@@ -193,8 +193,9 @@ class TelegramNotifier:
 
         try:
             bot_info = await self.bot.get_me()
-            test_message = f"✅ *Test Connection Successful*\n\nBot: @{bot_info.username}\nSystem Monitor is connected\\!"
-            success = await self.send_message(test_message)
+            # Use plain text for test message to avoid parsing issues
+            test_message = f"✅ Test Connection Successful\n\nBot: @{bot_info.username}\nSystem Monitor is connected!"
+            success = await self.send_message(test_message, parse_mode=None)
 
             if success:
                 return True, f"Connected to bot @{bot_info.username}"

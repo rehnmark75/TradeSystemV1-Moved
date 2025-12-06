@@ -248,62 +248,44 @@ def render_container_grid(containers: list):
 
 
 def render_container_card(container: dict):
-    """Render a single container card."""
+    """Render a single container card using native Streamlit components."""
     name = container.get("name", "Unknown")
     status = container.get("status", "unknown")
     status_emoji = container.get("status_emoji", "⚪")
     is_critical = container.get("is_critical", False)
     uptime = container.get("uptime_human", "N/A")
-
-    metrics = container.get("metrics", {})
-    cpu = metrics.get("cpu_percent", 0)
-    memory = metrics.get("memory_percent", 0)
+    description = container.get("description", "")
 
     warnings = container.get("warnings", [])
     errors = container.get("errors", [])
 
-    # Determine card border color
-    if errors:
-        border_color = "#dc3545"
+    # Determine status indicator
+    if errors or status != "running":
+        status_icon = "🔴"
     elif warnings:
-        border_color = "#ffc107"
-    elif status == "running":
-        border_color = "#28a745"
+        status_icon = "🟡"
     else:
-        border_color = "#dc3545"
+        status_icon = "🟢"
 
-    # Create expandable card
-    with st.container():
-        st.markdown(f"""
-        <div style="
-            background: white;
-            padding: 1rem;
-            border-radius: 8px;
-            border-left: 4px solid {border_color};
-            margin-bottom: 0.5rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        ">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <strong>{status_emoji} {name}</strong>
-                {"⭐" if is_critical else ""}
-            </div>
-            <div style="color: #666; font-size: 0.85rem; margin-top: 0.5rem;">
-                Uptime: {uptime}
-            </div>
-            <div style="display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.85rem;">
-                <span>CPU: {cpu:.1f}%</span>
-                <span>Mem: {memory:.1f}%</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Build title with critical star
+    title = f"{status_icon} {name}"
+    if is_critical:
+        title += " ⭐"
+
+    # Use native Streamlit container with border
+    with st.container(border=True):
+        st.markdown(f"**{title}**")
+        st.caption(f"Uptime: {uptime}")
+        if description:
+            st.caption(description)
 
         # Show warnings/errors if any
-        if warnings or errors:
-            with st.expander("⚠️ Issues", expanded=False):
-                for error in errors:
-                    st.error(error)
-                for warning in warnings:
-                    st.warning(warning)
+        if errors:
+            for error in errors:
+                st.error(error, icon="🚨")
+        if warnings:
+            for warning in warnings:
+                st.warning(warning, icon="⚠️")
 
 
 def render_container_detail(service: object, container_name: str):
@@ -326,94 +308,6 @@ def render_container_detail(service: object, container_name: str):
         st.metric("Uptime", detail.get("uptime_human", "N/A"))
     with col4:
         st.metric("Restarts", detail.get("restart_count", 0))
-
-    # Metrics
-    st.markdown("### Resource Usage")
-    metrics = detail.get("metrics", {})
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        # CPU gauge
-        cpu = metrics.get("cpu_percent", 0)
-        fig_cpu = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=cpu,
-            title={"text": "CPU Usage"},
-            gauge={
-                "axis": {"range": [0, 100]},
-                "bar": {"color": "#28a745" if cpu < 70 else "#ffc107" if cpu < 90 else "#dc3545"},
-                "steps": [
-                    {"range": [0, 70], "color": "#e8f5e9"},
-                    {"range": [70, 90], "color": "#fff3e0"},
-                    {"range": [90, 100], "color": "#ffebee"},
-                ],
-            }
-        ))
-        fig_cpu.update_layout(height=250)
-        st.plotly_chart(fig_cpu, use_container_width=True)
-
-    with col2:
-        # Memory gauge
-        memory = metrics.get("memory_percent", 0)
-        fig_mem = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=memory,
-            title={"text": "Memory Usage"},
-            gauge={
-                "axis": {"range": [0, 100]},
-                "bar": {"color": "#28a745" if memory < 70 else "#ffc107" if memory < 90 else "#dc3545"},
-                "steps": [
-                    {"range": [0, 70], "color": "#e8f5e9"},
-                    {"range": [70, 90], "color": "#fff3e0"},
-                    {"range": [90, 100], "color": "#ffebee"},
-                ],
-            }
-        ))
-        fig_mem.update_layout(height=250)
-        st.plotly_chart(fig_mem, use_container_width=True)
-
-    # Network and disk I/O
-    st.markdown("### Network & Disk I/O")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Network RX", format_bytes(metrics.get("network_rx_bytes", 0)))
-    with col2:
-        st.metric("Network TX", format_bytes(metrics.get("network_tx_bytes", 0)))
-    with col3:
-        st.metric("Disk Read", format_bytes(metrics.get("block_read_bytes", 0)))
-    with col4:
-        st.metric("Disk Write", format_bytes(metrics.get("block_write_bytes", 0)))
-
-    # Metrics history chart
-    metrics_history = detail.get("metrics_history", [])
-    if metrics_history:
-        st.markdown("### Resource History (24h)")
-
-        df = pd.DataFrame(metrics_history)
-        if not df.empty and "timestamp" in df.columns:
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
-
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df["timestamp"],
-                y=df["cpu_percent"],
-                name="CPU %",
-                line=dict(color="#28a745")
-            ))
-            fig.add_trace(go.Scatter(
-                x=df["timestamp"],
-                y=df["memory_percent"],
-                name="Memory %",
-                line=dict(color="#007bff")
-            ))
-            fig.update_layout(
-                height=300,
-                xaxis_title="Time",
-                yaxis_title="Percentage",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            st.plotly_chart(fig, use_container_width=True)
 
     # Container info
     st.markdown("### Container Info")
