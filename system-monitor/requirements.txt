@@ -1,0 +1,13 @@
+fastapi==0.109.0
+uvicorn==0.27.0
+docker==7.0.0
+httpx==0.26.0
+python-telegram-bot==20.7
+aiosmtplib==3.0.1
+email-validator==2.1.0
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.25
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+apscheduler==3.10.4

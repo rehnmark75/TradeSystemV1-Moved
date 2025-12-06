@@ -161,6 +161,7 @@ services:
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
       - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
+      - SYSTEM_MONITOR_URL=http://system-monitor:8095
     volumes:
       - ./streamlit:/app
       - ./logs:/logs:ro  # Read-only for safety
@@ -271,6 +272,40 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  system-monitor:
+    build:
+      context: ./system-monitor
+    container_name: system-monitor
+    restart: unless-stopped
+    ports:
+      - "8095:8095"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./logs/system-monitor:/app/logs
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - TELEGRAM_ENABLED=true
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - EMAIL_ENABLED=false
+      - MONITOR_INTERVAL=30
+      - ALERT_COOLDOWN=900
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8095/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   db-backup:
     image: postgres:15
