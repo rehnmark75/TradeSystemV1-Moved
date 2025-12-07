@@ -120,6 +120,26 @@ class StockAnalyticsService:
                 """, (latest_date,))
                 smc_trends = {row['smc_trend']: row['count'] for row in cursor.fetchall()}
 
+                # Get upcoming earnings count (next 14 days)
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM stock_instruments
+                    WHERE earnings_date IS NOT NULL
+                    AND earnings_date >= CURRENT_DATE
+                    AND earnings_date <= CURRENT_DATE + INTERVAL '14 days'
+                    AND is_active = TRUE
+                """)
+                upcoming_earnings = cursor.fetchone()['count']
+
+                # Get high short interest count (>15% float)
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM stock_instruments
+                    WHERE short_percent_float >= 15
+                    AND is_active = TRUE
+                """)
+                high_short_interest = cursor.fetchone()['count']
+
                 return {
                     'latest_date': latest_date,
                     'total_with_metrics': total_with_metrics,
@@ -130,7 +150,9 @@ class StockAnalyticsService:
                     'total_signals': signal_counts.get('BUY', 0) + signal_counts.get('SELL', 0),
                     'smc_bullish': smc_trends.get('Bullish', 0),
                     'smc_bearish': smc_trends.get('Bearish', 0),
-                    'smc_neutral': smc_trends.get('Neutral', 0)
+                    'smc_neutral': smc_trends.get('Neutral', 0),
+                    'upcoming_earnings': upcoming_earnings,
+                    'high_short_interest': high_short_interest,
                 }
         except Exception as e:
             logger.error(f"Failed to get overview stats: {e}")
@@ -159,7 +181,10 @@ class StockAnalyticsService:
                 COALESCE(m.premium_discount_zone, '') as zone,
                 COALESCE(m.smc_confluence_score, 0) as smc_score,
                 COALESCE(s.signal_type, '') as signal_type,
-                COALESCE(s.confidence, 0) as signal_confidence
+                COALESCE(s.confidence, 0) as signal_confidence,
+                i.earnings_date,
+                i.beta,
+                i.short_percent_float
             FROM stock_watchlist w
             JOIN stock_instruments i ON w.ticker = i.ticker
             LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -233,7 +258,9 @@ class StockAnalyticsService:
                       min_rvol: float = 0,
                       max_rvol: float = 100,
                       has_signal: bool = None,
-                      is_new_to_tier: bool = None) -> pd.DataFrame:
+                      is_new_to_tier: bool = None,
+                      earnings_within_days: int = None,
+                      min_short_interest: float = None) -> pd.DataFrame:
         """Get filtered watchlist data."""
 
         query = """
@@ -267,7 +294,13 @@ class StockAnalyticsService:
                 w.is_new_to_tier,
                 w.tier_change,
                 COALESCE(sig.signal_count, 0) as signal_count,
-                COALESCE(sig.latest_signal, '') as latest_signal
+                COALESCE(sig.latest_signal, '') as latest_signal,
+                i.earnings_date,
+                i.beta,
+                i.short_percent_float,
+                i.short_ratio,
+                i.analyst_rating,
+                i.target_price
             FROM stock_watchlist w
             JOIN stock_instruments i ON w.ticker = i.ticker
             LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -330,9 +363,76 @@ class StockAnalyticsService:
         if is_new_to_tier is True:
             query += " AND w.is_new_to_tier = true"
 
+        # Add earnings date filter
+        if earnings_within_days is not None:
+            query += f" AND i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE AND i.earnings_date <= CURRENT_DATE + INTERVAL '{int(earnings_within_days)} days'"
+
+        # Add short interest filter
+        if min_short_interest is not None:
+            query += " AND COALESCE(i.short_percent_float, 0) >= %s"
+            params.append(min_short_interest)
+
         query += " ORDER BY w.rank_overall"
 
         results = _self._execute_query(query, tuple(params))
+        return pd.DataFrame(results) if results else pd.DataFrame()
+
+    @st.cache_data(ttl=300)
+    def get_upcoming_earnings(_self, days_ahead: int = 14) -> pd.DataFrame:
+        """Get stocks with earnings in the next N days."""
+        query = f"""
+            SELECT
+                i.ticker,
+                i.name,
+                i.earnings_date,
+                i.earnings_date_estimated,
+                i.beta,
+                i.analyst_rating,
+                i.target_price,
+                w.tier,
+                w.score,
+                m.close as current_price,
+                m.trend,
+                COALESCE(m.smc_trend, '') as smc_trend
+            FROM stock_instruments i
+            LEFT JOIN stock_watchlist w ON i.ticker = w.ticker
+                AND w.calculation_date = (SELECT MAX(calculation_date) FROM stock_watchlist)
+            LEFT JOIN stock_screening_metrics m ON i.ticker = m.ticker
+                AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+            WHERE i.earnings_date IS NOT NULL
+            AND i.earnings_date >= CURRENT_DATE
+            AND i.earnings_date <= CURRENT_DATE + INTERVAL '{int(days_ahead)} days'
+            AND i.is_active = TRUE
+            ORDER BY i.earnings_date, i.ticker
+        """
+        results = _self._execute_query(query, ())
+        return pd.DataFrame(results) if results else pd.DataFrame()
+
+    @st.cache_data(ttl=300)
+    def get_high_short_interest(_self, min_percent: float = 10.0) -> pd.DataFrame:
+        """Get stocks with high short interest (squeeze potential)."""
+        query = """
+            SELECT
+                i.ticker,
+                i.name,
+                i.short_ratio,
+                i.short_percent_float,
+                i.beta,
+                w.tier,
+                w.score,
+                m.close as current_price,
+                m.relative_volume,
+                COALESCE(m.smc_trend, '') as smc_trend
+            FROM stock_instruments i
+            LEFT JOIN stock_watchlist w ON i.ticker = w.ticker
+                AND w.calculation_date = (SELECT MAX(calculation_date) FROM stock_watchlist)
+            LEFT JOIN stock_screening_metrics m ON i.ticker = m.ticker
+                AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+            WHERE i.short_percent_float >= %s
+            AND i.is_active = TRUE
+            ORDER BY i.short_percent_float DESC
+        """
+        results = _self._execute_query(query, (min_percent,))
         return pd.DataFrame(results) if results else pd.DataFrame()
 
     # =========================================================================

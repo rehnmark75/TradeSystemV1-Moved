@@ -195,6 +195,23 @@ def render_overview_tab(service):
         else:
             st.metric("Bull/Bear Ratio", "N/A")
 
+    # Fundamentals metrics - Row 3
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        earnings_count = stats.get('upcoming_earnings', 0)
+        st.metric("Earnings (14d)", earnings_count, delta=None, help="Stocks with earnings in next 14 days")
+
+    with col2:
+        high_short = stats.get('high_short_interest', 0)
+        st.metric("High Short Interest", high_short, delta=None, help="Stocks with >15% short float (squeeze potential)")
+
+    with col3:
+        st.metric("Fundamentals", "Weekly", delta=None, help="Fundamental data refreshed weekly on Sundays")
+
+    with col4:
+        st.metric("Data Source", "yfinance", delta=None, help="Earnings, beta, short interest from yfinance")
+
     st.markdown("---")
 
     # Two columns: Tier distribution and Recent signals
@@ -377,6 +394,16 @@ def render_watchlist_sidebar_filters():
     )
     filters['smc_zones'] = smc_zone_options if smc_zone_options else None
 
+    # Fundamentals filters
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Fundamentals**")
+
+    earnings_filter = st.sidebar.checkbox("Has earnings in next 14 days", value=False)
+    filters['earnings_within_days'] = 14 if earnings_filter else None
+
+    short_filter = st.sidebar.checkbox("High short interest (>10%)", value=False)
+    filters['min_short_interest'] = 10.0 if short_filter else None
+
     # Additional filters
     st.sidebar.markdown("---")
     has_signal = st.sidebar.checkbox("Has active signal", value=False)
@@ -421,7 +448,9 @@ def render_watchlist_tab(service):
             min_rvol=filters['min_rvol'],
             max_rvol=filters['max_rvol'],
             has_signal=filters['has_signal'],
-            is_new_to_tier=filters['is_new_to_tier']
+            is_new_to_tier=filters['is_new_to_tier'],
+            earnings_within_days=filters['earnings_within_days'],
+            min_short_interest=filters['min_short_interest']
         )
 
     # Results header
@@ -451,8 +480,18 @@ def render_watchlist_tab(service):
     display_df['Signal'] = display_df.apply(lambda row: row['latest_signal'] if row['signal_count'] > 0 else '-', axis=1)
     display_df['SMC'] = display_df['smc_trend'].apply(lambda x: x if x else '-')
     display_df['Zone'] = display_df['smc_zone'].apply(lambda x: x.replace('Extreme ', 'X-').replace('Equilibrium', 'EQ') if x else '-')
+    # Fundamentals columns
+    display_df['Earn'] = display_df['earnings_date'].apply(
+        lambda x: x.strftime('%m/%d') if pd.notnull(x) else '-'
+    )
+    display_df['Beta'] = display_df['beta'].apply(
+        lambda x: f"{x:.1f}" if pd.notnull(x) else '-'
+    )
+    display_df['Short%'] = display_df['short_percent_float'].apply(
+        lambda x: f"{x:.1f}%" if pd.notnull(x) and x > 0 else '-'
+    )
 
-    result_df = display_df[['rank_overall', 'tier', 'ticker', 'name', 'Score', 'Price', 'ATR%', '$Vol(M)', '1D%', 'RSI', 'Trend', 'SMC', 'Zone', 'Signal']].rename(columns={
+    result_df = display_df[['rank_overall', 'tier', 'ticker', 'name', 'Score', 'Price', 'ATR%', '1D%', 'RSI', 'Trend', 'SMC', 'Earn', 'Beta', 'Short%', 'Signal']].rename(columns={
         'rank_overall': 'Rank', 'tier': 'Tier', 'ticker': 'Ticker', 'name': 'Name'
     })
     result_df['Name'] = result_df['Name'].apply(lambda x: x[:18] + '...' if len(str(x)) > 18 else x)
@@ -491,7 +530,26 @@ def render_watchlist_tab(service):
             return 'color: #dc3545;'
         return ''
 
-    styled_df = result_df.style.map(style_tier, subset=['Tier']).map(style_signal, subset=['Signal']).map(style_smc, subset=['SMC']).map(style_zone, subset=['Zone']).map(style_change, subset=['1D%'])
+    def style_short(val):
+        """Highlight high short interest stocks (squeeze potential)."""
+        if val != '-':
+            try:
+                pct = float(val.replace('%', ''))
+                if pct >= 15:
+                    return 'background-color: #fff3cd; color: #856404; font-weight: bold;'
+                elif pct >= 10:
+                    return 'background-color: #ffeeba; color: #856404;'
+            except Exception:
+                pass
+        return ''
+
+    def style_earn(val):
+        """Highlight stocks with upcoming earnings."""
+        if val != '-':
+            return 'background-color: #d1ecf1; color: #0c5460; font-weight: bold;'
+        return ''
+
+    styled_df = result_df.style.map(style_tier, subset=['Tier']).map(style_signal, subset=['Signal']).map(style_smc, subset=['SMC']).map(style_change, subset=['1D%']).map(style_short, subset=['Short%']).map(style_earn, subset=['Earn'])
 
     st.dataframe(styled_df, use_container_width=True, hide_index=True, height=500)
 

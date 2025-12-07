@@ -44,6 +44,7 @@ from stock_scanner.core.synthesis.daily_synthesizer import DailyCandleSynthesize
 from stock_scanner.core.metrics.calculator import MetricsCalculator
 from stock_scanner.core.screener.watchlist_builder import WatchlistBuilder
 from stock_scanner.core.smc.smc_stock_analyzer import SMCStockAnalyzer
+from stock_scanner.core.fundamentals.fundamentals_fetcher import FundamentalsFetcher
 from stock_scanner.strategies.zlma_trend import ZeroLagMATrendStrategy
 
 # Configure logging
@@ -86,6 +87,7 @@ class StockScheduler:
         self.synthesizer: DailyCandleSynthesizer = None
         self.calculator: MetricsCalculator = None
         self.smc_analyzer: SMCStockAnalyzer = None
+        self.fundamentals: FundamentalsFetcher = None
         self.watchlist_builder: WatchlistBuilder = None
         self.zlma_strategy: ZeroLagMATrendStrategy = None
         self.running = False
@@ -102,6 +104,7 @@ class StockScheduler:
         self.synthesizer = DailyCandleSynthesizer(db_manager=self.db)
         self.calculator = MetricsCalculator(db_manager=self.db)
         self.smc_analyzer = SMCStockAnalyzer(db_manager=self.db)
+        self.fundamentals = FundamentalsFetcher(db_manager=self.db)
         self.watchlist_builder = WatchlistBuilder(db_manager=self.db)
         self.zlma_strategy = ZeroLagMATrendStrategy(db_manager=self.db)
 
@@ -111,6 +114,8 @@ class StockScheduler:
         """Cleanup resources"""
         if self.fetcher:
             await self.fetcher.close()
+        if self.fundamentals:
+            await self.fundamentals.close()
         if self.db:
             await self.db.close()
         logger.info("Stock Scheduler cleaned up")
@@ -306,15 +311,17 @@ class StockScheduler:
         }
 
     async def weekly_sync(self):
-        """Run weekly instrument sync from RoboMarkets"""
+        """Run weekly instrument sync from RoboMarkets + fundamentals update"""
         logger.info("=" * 60)
-        logger.info("WEEKLY SYNC - Syncing instruments from RoboMarkets")
+        logger.info("WEEKLY SYNC - Syncing instruments and fundamentals")
         logger.info("=" * 60)
 
+        # Part 1: Sync instruments from RoboMarkets
         try:
+            logger.info("\n[PART 1/2] Syncing instruments from RoboMarkets...")
             stats = await self.fetcher.sync_us_stocks()
 
-            logger.info(f"Weekly sync complete:")
+            logger.info(f"Instrument sync complete:")
             logger.info(f"  Total from API: {stats['total_from_api']:,}")
             logger.info(f"  US stocks: {stats['unique_tickers']:,}")
             logger.info(f"  NYSE: {stats['nyse_count']:,}")
@@ -323,7 +330,26 @@ class StockScheduler:
             logger.info(f"  Updated: {stats['updated']}")
 
         except Exception as e:
-            logger.error(f"Weekly sync failed: {e}")
+            logger.error(f"Instrument sync failed: {e}")
+
+        # Part 2: Update fundamentals data
+        try:
+            logger.info("\n[PART 2/2] Fetching fundamentals data...")
+            fund_stats = await self.fundamentals.run_fundamentals_pipeline()
+
+            logger.info(f"Fundamentals sync complete:")
+            logger.info(f"  Total: {fund_stats['total']}")
+            logger.info(f"  Successful: {fund_stats['successful']}")
+            logger.info(f"  With earnings date: {fund_stats['with_earnings']}")
+            logger.info(f"  With beta: {fund_stats['with_beta']}")
+            logger.info(f"  With short interest: {fund_stats['with_short_interest']}")
+
+        except Exception as e:
+            logger.error(f"Fundamentals sync failed: {e}")
+
+        logger.info("\n" + "=" * 60)
+        logger.info("WEEKLY SYNC - Complete")
+        logger.info("=" * 60)
 
     async def _log_pipeline_run(
         self,
@@ -445,9 +471,11 @@ async def run_once(task: str):
             await scheduler.zlma_strategy.scan_all_stocks()
         elif task == "weekly":
             await scheduler.weekly_sync()
+        elif task == "fundamentals":
+            await scheduler.fundamentals.run_fundamentals_pipeline()
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, weekly")
+            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, weekly, fundamentals")
     finally:
         await scheduler.cleanup()
 
@@ -458,7 +486,7 @@ def main():
     parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
                        choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'smc',
-                               'watchlist', 'signals', 'weekly', 'status'],
+                               'watchlist', 'signals', 'weekly', 'fundamentals', 'status'],
                        help='Command to execute')
     args = parser.parse_args()
 
@@ -474,7 +502,7 @@ def main():
             print("\nShutdown requested...")
             scheduler.stop()
 
-    elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'smc', 'watchlist', 'signals', 'weekly']:
+    elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'smc', 'watchlist', 'signals', 'weekly', 'fundamentals']:
         print(f"Running {args.command}...")
         asyncio.run(run_once(args.command))
 
