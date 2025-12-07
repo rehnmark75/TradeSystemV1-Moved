@@ -98,29 +98,27 @@ class StockScannerCLI:
     # =========================================================================
 
     async def cmd_sync_tickers(self):
-        """Sync available tickers from RoboMarkets"""
-        print("\n=Ê Syncing tickers from RoboMarkets...")
-
-        if not self.robomarkets:
-            print("L RoboMarkets client not configured")
-            print("   Set ROBOMARKETS_API_KEY and ROBOMARKETS_ACCOUNT_ID environment variables")
-            return False
+        """Sync US stocks (NYSE/NASDAQ) from RoboMarkets API to database"""
+        print("\n[SYNC] Syncing US stocks from RoboMarkets API...")
+        print("[INFO] Filtering: NYSE + NASDAQ only, excluding ETFs")
 
         try:
-            # Test connection
-            connected = await self.robomarkets.test_connection()
-            if not connected:
-                print("L Failed to connect to RoboMarkets API")
-                return False
+            # Sync US stocks directly from API (no account ID needed)
+            stats = await self.data_fetcher.sync_us_stocks()
 
-            # Sync instruments
-            count = await self.data_fetcher.sync_instruments()
-            print(f" Synced {count} instruments from RoboMarkets")
+            print(f"\n[OK] Sync complete!")
+            print(f"   - Total from API: {stats['total_from_api']:,}")
+            print(f"   - US stocks found: {stats['us_stocks_found']:,}")
+            print(f"   - Unique tickers: {stats['unique_tickers']:,}")
+            print(f"   - NYSE: {stats['nyse_count']:,}")
+            print(f"   - NASDAQ: {stats['nasdaq_count']:,}")
+            print(f"   - Inserted: {stats['inserted']:,}")
+            print(f"   - Updated: {stats['updated']:,}")
 
             # Show some examples
             tickers = await self.data_fetcher.get_tradeable_tickers()
             if tickers:
-                print(f"\n=È Sample tickers available:")
+                print(f"\n[INFO] Sample tickers in database:")
                 for ticker in tickers[:10]:
                     print(f"   - {ticker}")
                 if len(tickers) > 10:
@@ -129,13 +127,13 @@ class StockScannerCLI:
             return True
 
         except Exception as e:
-            print(f"L Error syncing tickers: {e}")
+            print(f"[ERROR] Error syncing tickers: {e}")
             logger.exception("Sync error")
             return False
 
     async def cmd_fetch_data(self, ticker: str, days: int = 60, interval: str = "1h"):
         """Fetch historical data for a single ticker"""
-        print(f"\n=Ê Fetching {days} days of {interval} data for {ticker}...")
+        print(f"\n[FETCH] Fetching {days} days of {interval} data for {ticker}...")
 
         try:
             count = await self.data_fetcher.fetch_historical_data(
@@ -145,37 +143,37 @@ class StockScannerCLI:
             )
 
             if count > 0:
-                print(f" Fetched {count} candles for {ticker}")
+                print(f"[OK] Fetched {count} candles for {ticker}")
 
                 # Show data coverage
                 coverage = await self.data_fetcher.get_data_coverage(ticker)
                 if coverage:
-                    print(f"\n=È Data coverage for {ticker}:")
+                    print(f"\n[INFO] Data coverage for {ticker}:")
                     for tf, info in coverage.items():
                         print(f"   {tf}: {info['count']} candles "
                               f"({info['first'].strftime('%Y-%m-%d')} to "
                               f"{info['last'].strftime('%Y-%m-%d')})")
             else:
-                print(f"  No data fetched for {ticker}")
+                print(f"[WARN] No data fetched for {ticker}")
 
             return count > 0
 
         except Exception as e:
-            print(f"L Error fetching data: {e}")
+            print(f"[ERROR] Error fetching data: {e}")
             logger.exception("Fetch error")
             return False
 
     async def cmd_fetch_all(self, days: int = 60, interval: str = "1h"):
         """Fetch historical data for all tradeable tickers"""
-        print(f"\n=Ê Fetching {days} days of {interval} data for all tickers...")
+        print(f"\n[FETCH] Fetching {days} days of {interval} data for all tickers...")
 
         tickers = await self.data_fetcher.get_tradeable_tickers()
 
         if not tickers:
-            print("  No tradeable tickers found. Run 'sync-tickers' first.")
+            print("[WARN] No tradeable tickers found. Run 'sync-tickers' first.")
             return False
 
-        print(f"=È Fetching data for {len(tickers)} tickers...")
+        print(f"[INFO] Fetching data for {len(tickers)} tickers...")
 
         try:
             results = await self.data_fetcher.fetch_all_tickers(
@@ -187,28 +185,28 @@ class StockScannerCLI:
             successful = sum(1 for count in results.values() if count > 0)
             total_candles = sum(results.values())
 
-            print(f"\n Fetch complete:")
+            print(f"\n[OK] Fetch complete:")
             print(f"   - Successful: {successful}/{len(tickers)} tickers")
             print(f"   - Total candles: {total_candles:,}")
 
             # Show failures
             failures = [t for t, c in results.items() if c == 0]
             if failures:
-                print(f"\n  Failed to fetch: {', '.join(failures[:5])}")
+                print(f"\n[WARN] Failed to fetch: {', '.join(failures[:5])}")
                 if len(failures) > 5:
                     print(f"   ... and {len(failures) - 5} more")
 
             return successful > 0
 
         except Exception as e:
-            print(f"L Error fetching data: {e}")
+            print(f"[ERROR] Error fetching data: {e}")
             logger.exception("Fetch all error")
             return False
 
     async def cmd_fetch_watchlist(self, days: int = 60, interval: str = "1h"):
         """Fetch data for default watchlist (doesn't require RoboMarkets)"""
-        print(f"\n=Ê Fetching {days} days of {interval} data for watchlist...")
-        print(f"=È Watchlist: {len(config.DEFAULT_WATCHLIST)} stocks")
+        print(f"\n[FETCH] Fetching {days} days of {interval} data for watchlist...")
+        print(f"[INFO] Watchlist: {len(config.DEFAULT_WATCHLIST)} stocks")
 
         results = {}
         for i, ticker in enumerate(config.DEFAULT_WATCHLIST, 1):
@@ -220,15 +218,15 @@ class StockScannerCLI:
                     interval=interval
                 )
                 results[ticker] = count
-                print(f" {count} candles")
+                print(f"OK - {count} candles")
             except Exception as e:
                 results[ticker] = 0
-                print(f" {e}")
+                print(f"FAILED - {e}")
 
         successful = sum(1 for c in results.values() if c > 0)
         total_candles = sum(results.values())
 
-        print(f"\n Watchlist fetch complete:")
+        print(f"\n[OK] Watchlist fetch complete:")
         print(f"   - Successful: {successful}/{len(config.DEFAULT_WATCHLIST)} tickers")
         print(f"   - Total candles: {total_candles:,}")
 
@@ -236,38 +234,38 @@ class StockScannerCLI:
 
     async def cmd_synthesize(self, ticker: str = None, timeframe: str = "4h"):
         """Synthesize higher timeframe candles"""
-        print(f"\n= Synthesizing {timeframe} candles...")
+        print(f"\n[SYNTH] Synthesizing {timeframe} candles...")
 
         try:
             if ticker:
                 count = await self.data_fetcher.synthesize_candles(ticker, timeframe)
-                print(f" Synthesized {count} {timeframe} candles for {ticker}")
+                print(f"[OK] Synthesized {count} {timeframe} candles for {ticker}")
             else:
                 results = await self.data_fetcher.synthesize_all_tickers(timeframe)
                 total = sum(results.values())
-                print(f" Synthesized {total} {timeframe} candles for {len(results)} tickers")
+                print(f"[OK] Synthesized {total} {timeframe} candles for {len(results)} tickers")
 
             return True
 
         except Exception as e:
-            print(f"L Error synthesizing: {e}")
+            print(f"[ERROR] Error synthesizing: {e}")
             return False
 
     async def cmd_status(self):
         """Show scanner status and data coverage"""
-        print("\n=Ê Stock Scanner Status")
+        print("\n[STATUS] Stock Scanner Status")
         print("=" * 50)
 
         # Config info
-        print(f"\n™ Configuration:")
+        print(f"\n[CONFIG] Configuration:")
         print(f"   Version: {config.STOCK_SCANNER_VERSION}")
         print(f"   Database: {self.db_url.split('@')[-1]}")
-        print(f"   RoboMarkets: {' configured' if self.robomarkets else ' not configured'}")
+        print(f"   RoboMarkets: {'configured' if self.robomarkets else 'not configured'}")
 
         # Database health
-        print(f"\n=¾ Database:")
+        print(f"\n[DB] Database:")
         is_healthy = await self.db.health_check()
-        print(f"   Status: {' connected' if is_healthy else ' disconnected'}")
+        print(f"   Status: {'connected' if is_healthy else 'disconnected'}")
 
         if is_healthy:
             stats = self.db.get_stats()
@@ -280,10 +278,10 @@ class StockScannerCLI:
                     count = await self.db.get_table_count(table)
                     print(f"   {table}: {count:,} rows")
                 else:
-                    print(f"   {table}:  not created")
+                    print(f"   {table}: not created")
 
         # Market status
-        print(f"\n=È Market Status:")
+        print(f"\n[MARKET] Market Status:")
         market = config.get_market_status()
         print(f"   Status: {market['status']}")
         print(f"   Time (ET): {market['current_time_et']}")
@@ -291,69 +289,69 @@ class StockScannerCLI:
             print(f"   Next Open: {market['next_open']}")
 
         # Watchlist
-        print(f"\n=Ë Watchlist: {len(config.DEFAULT_WATCHLIST)} stocks")
+        print(f"\n[LIST] Watchlist: {len(config.DEFAULT_WATCHLIST)} stocks")
 
         print("\n" + "=" * 50)
         return True
 
     async def cmd_migrate(self):
         """Run database migrations"""
-        print("\n=' Running database migrations...")
+        print("\n[MIGRATE] Running database migrations...")
 
         import os
         migration_dir = os.path.join(os.path.dirname(__file__), "migrations")
         migration_file = os.path.join(migration_dir, "001_create_stock_tables.sql")
 
         if not os.path.exists(migration_file):
-            print(f"L Migration file not found: {migration_file}")
+            print(f"[ERROR] Migration file not found: {migration_file}")
             return False
 
         try:
             success = await self.db.run_migration(migration_file)
             if success:
-                print(" Migration completed successfully")
+                print("[OK] Migration completed successfully")
             else:
-                print("L Migration failed")
+                print("[ERROR] Migration failed")
             return success
 
         except Exception as e:
-            print(f"L Migration error: {e}")
+            print(f"[ERROR] Migration error: {e}")
             return False
 
     async def cmd_test_api(self):
         """Test RoboMarkets API connection"""
-        print("\n= Testing RoboMarkets API connection...")
+        print("\n[API] Testing RoboMarkets API connection...")
 
         if not self.robomarkets:
-            print("L RoboMarkets client not configured")
+            print("[ERROR] RoboMarkets client not configured")
             return False
 
         try:
             # Test connection
             connected = await self.robomarkets.test_connection()
             if connected:
-                print(" API connection successful")
+                print("[OK] API connection successful")
 
                 # Get instrument count
                 instruments = await self.robomarkets.get_instruments()
-                print(f"=Ê Available instruments: {len(instruments)}")
+                print(f"[INFO] Available instruments: {len(instruments)}")
 
                 # Try a quote
                 if instruments:
                     ticker = instruments[0].ticker
                     try:
                         quote = await self.robomarkets.get_quote(ticker)
-                        print(f"=° Sample quote ({ticker}): Bid={quote.bid}, Ask={quote.ask}")
+                        print(f"[INFO] Sample quote ({ticker}): Bid={quote.bid}, Ask={quote.ask}")
                     except Exception as e:
-                        print(f"  Could not get quote: {e}")
+                        print(f"[WARN] Could not get quote: {e}")
 
                 return True
             else:
-                print("L API connection failed")
+                print("[ERROR] API connection failed")
                 return False
 
         except Exception as e:
-            print(f"L API test error: {e}")
+            print(f"[ERROR] API test error: {e}")
             return False
 
 
@@ -466,12 +464,12 @@ async def main():
         return 0 if success else 1
 
     except KeyboardInterrupt:
-        print("\n\n  Interrupted by user")
+        print("\n\n[WARN] Interrupted by user")
         return 130
 
     except Exception as e:
         logger.exception("Unexpected error")
-        print(f"\nL Error: {e}")
+        print(f"\n[ERROR] Error: {e}")
         return 1
 
     finally:

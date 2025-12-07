@@ -207,17 +207,37 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
       - ORDER_API_URL=http://fastapi-dev:8000/orders
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
       - VECTOR_DB_URL=http://vector-db:8090
+      - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
+      - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
     networks:
       - lab-net
     depends_on:
       - postgres
       - vector-db
+
+  stock-scheduler:
+    build:
+      context: ./worker
+    container_name: stock-scheduler
+    restart: unless-stopped
+    volumes:
+      - ./worker/app:/app
+      - ./logs/stock-scheduler:/app/stock_scanner/logs
+    environment:
+      - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+      - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
+    command: ["python", "-m", "stock_scanner.scheduler", "run"]
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
 
   vector-db:
     build:

@@ -74,10 +74,10 @@ DATA_CACHE_TTL = 300  # 5 minutes
 # WATCHLIST CONFIGURATION
 # =============================================================================
 
-# Default watchlist - popular US stocks available on RoboMarkets
+# Default watchlist - US stocks from NYSE and NASDAQ only (no ETFs)
 # This will be synced with actual RoboMarkets instruments on startup
 DEFAULT_WATCHLIST: List[str] = [
-    # Tech Giants
+    # Tech Giants (NASDAQ)
     "AAPL",   # Apple
     "MSFT",   # Microsoft
     "GOOGL",  # Alphabet
@@ -86,35 +86,31 @@ DEFAULT_WATCHLIST: List[str] = [
     "META",   # Meta Platforms
     "TSLA",   # Tesla
 
-    # Financial
+    # Financial (NYSE)
     "JPM",    # JPMorgan
     "BAC",    # Bank of America
     "GS",     # Goldman Sachs
-    "V",      # Visa
-    "MA",     # Mastercard
+    "V",      # Visa (NYSE)
+    "MA",     # Mastercard (NYSE)
 
-    # Healthcare
+    # Healthcare (NYSE)
     "JNJ",    # Johnson & Johnson
     "UNH",    # UnitedHealth
     "PFE",    # Pfizer
 
-    # Consumer
+    # Consumer (NYSE)
     "WMT",    # Walmart
     "KO",     # Coca-Cola
     "PG",     # Procter & Gamble
     "MCD",    # McDonald's
 
-    # Energy
+    # Energy (NYSE)
     "XOM",    # Exxon Mobil
     "CVX",    # Chevron
 
-    # Industrial
+    # Industrial (NYSE)
     "BA",     # Boeing
     "CAT",    # Caterpillar
-
-    # ETFs (if available)
-    "SPY",    # S&P 500 ETF
-    "QQQ",    # Nasdaq 100 ETF
 ]
 
 # Sector mapping for stocks
@@ -127,7 +123,6 @@ SECTOR_MAPPING: Dict[str, str] = {
     "WMT": "Consumer Defensive", "KO": "Consumer Defensive",
     "PG": "Consumer Defensive", "MCD": "Consumer Cyclical",
     "XOM": "Energy", "CVX": "Energy", "BA": "Industrial", "CAT": "Industrial",
-    "SPY": "ETF", "QQQ": "ETF",
 }
 
 # =============================================================================
@@ -356,7 +351,6 @@ def get_market_status() -> Dict[str, Any]:
 # Import timedelta for get_market_status
 from datetime import timedelta
 
-# =============================================================================
 # VERSION INFO
 # =============================================================================
 
@@ -364,7 +358,7 @@ STOCK_SCANNER_VERSION = "0.1.0"
 STOCK_SCANNER_DATE = "2024-12-07"
 
 # Print config on load
-print(f" Stock Scanner config loaded v{STOCK_SCANNER_VERSION}")
-print(f"=Ê Database: {STOCKS_DATABASE_URL.split('@')[-1] if '@' in STOCKS_DATABASE_URL else 'configured'}")
-print(f"= RoboMarkets API: {'configured' if ROBOMARKETS_API_KEY else 'not configured'}")
-print(f"=È Watchlist: {len(DEFAULT_WATCHLIST)} stocks")
+print(f"[OK] Stock Scanner config loaded v{STOCK_SCANNER_VERSION}")
+print(f"[DB] Database: {STOCKS_DATABASE_URL.split('@')[-1] if '@' in STOCKS_DATABASE_URL else 'configured'}")
+print(f"[API] RoboMarkets API: {'configured' if ROBOMARKETS_API_KEY else 'not configured'}")
+print(f"[LIST] Watchlist: {len(DEFAULT_WATCHLIST)} stocks")

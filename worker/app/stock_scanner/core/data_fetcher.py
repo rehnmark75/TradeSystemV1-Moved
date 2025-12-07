@@ -20,7 +20,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
-from ..trading.robomarkets_client import RoboMarketsClient, Instrument
+from .trading.robomarkets_client import RoboMarketsClient, Instrument
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +80,162 @@ class StockDataFetcher:
     # INSTRUMENT SYNC
     # =========================================================================
 
+    # ETF keywords to filter out
+    ETF_KEYWORDS = [
+        'ETF', 'UCITS', 'Trust', 'Fund', 'Index', 'Leveraged', 'Short',
+        'Bull', 'Bear', '1x', '2x', '3x', 'Inverse', 'SPDR', 'iShares',
+        'Vanguard', 'ProShares', 'Direxion', 'VanEck', 'Graniteshares',
+        'WisdomTree', 'Invesco', 'Global X', 'First Trust'
+    ]
+
+    async def sync_us_stocks(self, api_key: str = None) -> dict:
+        """
+        Fetch US stocks (NYSE/NASDAQ only, no ETFs) from RoboMarkets API
+        and store them in the database.
+
+        Args:
+            api_key: RoboMarkets API key (uses config if not provided)
+
+        Returns:
+            Dict with sync statistics
+        """
+        import aiohttp
+        from .. import config
+
+        api_key = api_key or config.ROBOMARKETS_API_KEY
+        url = f"{config.ROBOMARKETS_API_URL}/instruments"
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json"
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status != 200:
+                        raise DataFetcherError(f"API error: {response.status}")
+
+                    data = await response.json()
+                    instruments = data.get('data', [])
+
+            # Filter for US stocks only (NYSE and NASDAQ)
+            us_stocks = []
+            for inst in instruments:
+                ticker = inst.get('ticker', '')
+                desc = inst.get('description', '')
+
+                # Only NYSE (.ny) or NASDAQ (.nq) suffixed tickers
+                if not (ticker.endswith('.ny') or ticker.endswith('.nq')):
+                    continue
+
+                # Skip ETFs
+                is_etf = any(kw.lower() in desc.lower() for kw in self.ETF_KEYWORDS)
+                if is_etf:
+                    continue
+
+                # Extract base ticker and exchange
+                if ticker.endswith('.ny'):
+                    base_ticker = ticker[:-3]
+                    exchange = 'NYSE'
+                else:
+                    base_ticker = ticker[:-3]
+                    exchange = 'NASDAQ'
+
+                us_stocks.append({
+                    'ticker': base_ticker,
+                    'robomarkets_ticker': ticker,
+                    'name': desc,
+                    'exchange': exchange,
+                    'contract_size': inst.get('contract_size', 1),
+                })
+
+            # Remove duplicates (prefer NASDAQ over NYSE if both exist)
+            seen = {}
+            for stock in us_stocks:
+                ticker = stock['ticker']
+                if ticker not in seen or stock['exchange'] == 'NASDAQ':
+                    seen[ticker] = stock
+
+            unique_stocks = list(seen.values())
+
+            # Store in database
+            inserted = 0
+            updated = 0
+
+            for stock in unique_stocks:
+                result = await self._upsert_us_stock(stock)
+                if result == 'inserted':
+                    inserted += 1
+                else:
+                    updated += 1
+
+            stats = {
+                'total_from_api': len(instruments),
+                'us_stocks_found': len(us_stocks),
+                'unique_tickers': len(unique_stocks),
+                'inserted': inserted,
+                'updated': updated,
+                'nyse_count': sum(1 for s in unique_stocks if s['exchange'] == 'NYSE'),
+                'nasdaq_count': sum(1 for s in unique_stocks if s['exchange'] == 'NASDAQ'),
+            }
+
+            logger.info(f"Synced {len(unique_stocks)} US stocks ({stats['nyse_count']} NYSE, {stats['nasdaq_count']} NASDAQ)")
+            return stats
+
+        except Exception as e:
+            logger.error(f"Failed to sync US stocks: {e}")
+            raise DataFetcherError(f"US stocks sync failed: {e}")
+
+    async def _upsert_us_stock(self, stock: dict) -> str:
+        """Insert or update a US stock in database"""
+        # Check if exists
+        check_query = "SELECT id FROM stock_instruments WHERE ticker = $1"
+        existing = await self.db.fetchval(check_query, stock['ticker'])
+
+        if existing:
+            query = """
+                UPDATE stock_instruments SET
+                    name = $2,
+                    exchange = $3,
+                    robomarkets_ticker = $4,
+                    contract_size = $5,
+                    is_tradeable = TRUE,
+                    is_active = TRUE,
+                    last_sync = NOW(),
+                    updated_at = NOW()
+                WHERE ticker = $1
+            """
+            await self.db.execute(
+                query,
+                stock['ticker'],
+                stock['name'],
+                stock['exchange'],
+                stock['robomarkets_ticker'],
+                stock['contract_size']
+            )
+            return 'updated'
+        else:
+            query = """
+                INSERT INTO stock_instruments (
+                    ticker, name, exchange, robomarkets_ticker, contract_size,
+                    currency, is_tradeable, is_active, last_sync
+                ) VALUES ($1, $2, $3, $4, $5, 'USD', TRUE, TRUE, NOW())
+            """
+            await self.db.execute(
+                query,
+                stock['ticker'],
+                stock['name'],
+                stock['exchange'],
+                stock['robomarkets_ticker'],
+                stock['contract_size']
+            )
+            return 'inserted'
+
     async def sync_instruments(self) -> int:
         """
         Sync available instruments from RoboMarkets to database
+        (Legacy method - use sync_us_stocks for US stocks only)
 
         Returns:
             Number of instruments synced
