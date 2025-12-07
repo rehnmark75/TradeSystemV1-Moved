@@ -155,7 +155,7 @@ def render_overview_tab(service):
     </div>
     """, unsafe_allow_html=True)
 
-    # Key metrics
+    # Key metrics - Row 1
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -171,6 +171,29 @@ def render_overview_tab(service):
         buy = stats.get('buy_signals', 0)
         sell = stats.get('sell_signals', 0)
         st.metric("BUY / SELL", f"{buy} / {sell}")
+
+    # SMC metrics - Row 2
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        bullish = stats.get('smc_bullish', 0)
+        st.metric("SMC Bullish", bullish, delta=None, help="Stocks with bullish market structure")
+
+    with col2:
+        bearish = stats.get('smc_bearish', 0)
+        st.metric("SMC Bearish", bearish, delta=None, help="Stocks with bearish market structure")
+
+    with col3:
+        neutral = stats.get('smc_neutral', 0)
+        st.metric("SMC Neutral", neutral, delta=None, help="Stocks with neutral/ranging structure")
+
+    with col4:
+        total_smc = bullish + bearish + neutral
+        if total_smc > 0:
+            bull_pct = round(bullish / total_smc * 100)
+            st.metric("Bull/Bear Ratio", f"{bull_pct}% / {100-bull_pct-round(neutral/total_smc*100)}%")
+        else:
+            st.metric("Bull/Bear Ratio", "N/A")
 
     st.markdown("---")
 
@@ -334,6 +357,26 @@ def render_watchlist_sidebar_filters():
     filters['min_rsi'] = rsi_range[0]
     filters['max_rsi'] = rsi_range[1]
 
+    # SMC Filters
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**SMC Filters**")
+
+    smc_trend_options = st.sidebar.multiselect(
+        "SMC Trend",
+        options=['Bullish', 'Bearish', 'Neutral'],
+        default=[],
+        help="Filter by Smart Money Concepts market structure"
+    )
+    filters['smc_trends'] = smc_trend_options if smc_trend_options else None
+
+    smc_zone_options = st.sidebar.multiselect(
+        "Price Zone",
+        options=['Extreme Discount', 'Discount', 'Equilibrium', 'Premium', 'Extreme Premium'],
+        default=[],
+        help="Filter by premium/discount zone"
+    )
+    filters['smc_zones'] = smc_zone_options if smc_zone_options else None
+
     # Additional filters
     st.sidebar.markdown("---")
     has_signal = st.sidebar.checkbox("Has active signal", value=False)
@@ -371,6 +414,8 @@ def render_watchlist_tab(service):
             min_dollar_vol=filters['min_dollar_vol'],
             trends=filters['trends'],
             ma_alignments=filters['ma_alignments'],
+            smc_trends=filters['smc_trends'],
+            smc_zones=filters['smc_zones'],
             min_rsi=filters['min_rsi'],
             max_rsi=filters['max_rsi'],
             min_rvol=filters['min_rvol'],
@@ -404,11 +449,13 @@ def render_watchlist_tab(service):
     display_df['RSI'] = display_df['rsi_14'].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else '-')
     display_df['Trend'] = display_df['trend_strength'].apply(lambda x: x.replace('_', ' ').title() if x else '-')
     display_df['Signal'] = display_df.apply(lambda row: row['latest_signal'] if row['signal_count'] > 0 else '-', axis=1)
+    display_df['SMC'] = display_df['smc_trend'].apply(lambda x: x if x else '-')
+    display_df['Zone'] = display_df['smc_zone'].apply(lambda x: x.replace('Extreme ', 'X-').replace('Equilibrium', 'EQ') if x else '-')
 
-    result_df = display_df[['rank_overall', 'tier', 'ticker', 'name', 'Score', 'Price', 'ATR%', '$Vol(M)', 'RVol', '1D%', '5D%', 'RSI', 'Trend', 'Signal']].rename(columns={
+    result_df = display_df[['rank_overall', 'tier', 'ticker', 'name', 'Score', 'Price', 'ATR%', '$Vol(M)', '1D%', 'RSI', 'Trend', 'SMC', 'Zone', 'Signal']].rename(columns={
         'rank_overall': 'Rank', 'tier': 'Tier', 'ticker': 'Ticker', 'name': 'Name'
     })
-    result_df['Name'] = result_df['Name'].apply(lambda x: x[:20] + '...' if len(str(x)) > 20 else x)
+    result_df['Name'] = result_df['Name'].apply(lambda x: x[:18] + '...' if len(str(x)) > 18 else x)
 
     # Style functions
     def style_tier(val):
@@ -423,6 +470,20 @@ def render_watchlist_tab(service):
             return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
         return ''
 
+    def style_smc(val):
+        if val == 'Bullish':
+            return 'color: #28a745; font-weight: bold;'
+        elif val == 'Bearish':
+            return 'color: #dc3545; font-weight: bold;'
+        return ''
+
+    def style_zone(val):
+        if 'Discount' in str(val):
+            return 'background-color: #d4edda; color: #155724;'
+        elif 'Premium' in str(val):
+            return 'background-color: #f8d7da; color: #721c24;'
+        return ''
+
     def style_change(val):
         if '+' in str(val):
             return 'color: #28a745;'
@@ -430,7 +491,7 @@ def render_watchlist_tab(service):
             return 'color: #dc3545;'
         return ''
 
-    styled_df = result_df.style.map(style_tier, subset=['Tier']).map(style_signal, subset=['Signal']).map(style_change, subset=['1D%', '5D%'])
+    styled_df = result_df.style.map(style_tier, subset=['Tier']).map(style_signal, subset=['Signal']).map(style_smc, subset=['SMC']).map(style_zone, subset=['Zone']).map(style_change, subset=['1D%'])
 
     st.dataframe(styled_df, use_container_width=True, hide_index=True, height=500)
 
@@ -555,6 +616,11 @@ def render_signals_tab(service):
             rr = row.get('risk_reward', 0)
             rr_str = f"{rr:.1f}:1" if rr and rr > 0 else '-'
 
+            smc_trend = row.get('smc_trend', '')
+            smc_align = row.get('smc_alignment', '')
+            align_icon = "✓" if smc_align == "Aligned" else ("✗" if smc_align == "Divergent" else "?")
+            align_color = "#28a745" if smc_align == "Aligned" else ("#dc3545" if smc_align == "Divergent" else "#666")
+
             st.markdown(f"""
             <div class="signal-card {sig_class}">
                 <div style="display: flex; justify-content: space-between;">
@@ -564,6 +630,9 @@ def render_signals_tab(service):
                 <div style="margin-top: 0.3rem; font-size: 0.85rem;">
                     Entry: ${row['entry_price']:.2f} | SL: ${row['stop_loss']:.2f} | TP: ${row['take_profit']:.2f} | R:R: {rr_str}
                 </div>
+                <div style="margin-top: 0.2rem; font-size: 0.8rem; color: #555;">
+                    SMC: {smc_trend if smc_trend else '-'} <span style="color: {align_color};">{align_icon}</span>
+                </div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -571,15 +640,18 @@ def render_signals_tab(service):
         st.markdown("### All Signals")
 
         display_df = df.copy()
-        display_df['Time'] = pd.to_datetime(display_df['signal_timestamp']).dt.strftime('%Y-%m-%d %H:%M')
+        display_df['Time'] = pd.to_datetime(display_df['signal_timestamp']).dt.strftime('%m-%d %H:%M')
         display_df['Entry'] = display_df['entry_price'].apply(lambda x: f"${x:.2f}")
         display_df['SL'] = display_df['stop_loss'].apply(lambda x: f"${x:.2f}")
         display_df['TP'] = display_df['take_profit'].apply(lambda x: f"${x:.2f}")
-        display_df['R:R'] = display_df['risk_reward'].apply(lambda x: f"{x:.1f}:1" if pd.notnull(x) and x > 0 else '-')
+        display_df['R:R'] = display_df['risk_reward'].apply(lambda x: f"{x:.1f}" if pd.notnull(x) and x > 0 else '-')
         display_df['Conf'] = display_df['confidence'].apply(lambda x: f"{x:.0f}%")
         display_df['Tier'] = display_df['tier'].apply(lambda x: f"T{int(x)}" if pd.notnull(x) else '-')
+        display_df['SMC'] = display_df['smc_trend'].apply(lambda x: x[:4] if x else '-')
+        display_df['Zone'] = display_df['smc_zone'].apply(lambda x: x.replace('Extreme ', 'X-').replace('Equilibrium', 'EQ')[:8] if x else '-')
+        display_df['Align'] = display_df['smc_alignment'].apply(lambda x: '✓' if x == 'Aligned' else ('✗' if x == 'Divergent' else '-'))
 
-        result_df = display_df[['Time', 'ticker', 'signal_type', 'Entry', 'SL', 'TP', 'R:R', 'Conf', 'Tier']].rename(columns={'ticker': 'Ticker', 'signal_type': 'Type'})
+        result_df = display_df[['Time', 'ticker', 'signal_type', 'Entry', 'R:R', 'Conf', 'Tier', 'SMC', 'Zone', 'Align']].rename(columns={'ticker': 'Ticker', 'signal_type': 'Type'})
 
         def style_type(val):
             if val == 'BUY':
@@ -588,7 +660,14 @@ def render_signals_tab(service):
                 return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
             return ''
 
-        styled_df = result_df.style.map(style_type, subset=['Type'])
+        def style_align(val):
+            if val == '✓':
+                return 'color: #28a745; font-weight: bold;'
+            elif val == '✗':
+                return 'color: #dc3545; font-weight: bold;'
+            return ''
+
+        styled_df = result_df.style.map(style_type, subset=['Type']).map(style_align, subset=['Align'])
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
 
         csv = df.to_csv(index=False)

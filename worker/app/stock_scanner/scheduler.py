@@ -43,6 +43,7 @@ from stock_scanner.core.data_fetcher import StockDataFetcher
 from stock_scanner.core.synthesis.daily_synthesizer import DailyCandleSynthesizer
 from stock_scanner.core.metrics.calculator import MetricsCalculator
 from stock_scanner.core.screener.watchlist_builder import WatchlistBuilder
+from stock_scanner.core.smc.smc_stock_analyzer import SMCStockAnalyzer
 from stock_scanner.strategies.zlma_trend import ZeroLagMATrendStrategy
 
 # Configure logging
@@ -62,8 +63,9 @@ class StockScheduler:
     1. sync       - Fetch latest 1H candles from yfinance
     2. synthesize - Aggregate 1H -> Daily candles
     3. metrics    - Calculate ATR, volume, momentum indicators
-    4. watchlist  - Build tiered, scored watchlist
-    5. signals    - Run ZLMA strategy for trading signals
+    4. smc        - Run SMC (Smart Money Concepts) analysis
+    5. watchlist  - Build tiered, scored watchlist
+    6. signals    - Run ZLMA strategy for trading signals
 
     Schedule:
     - Daily 10:30 PM ET (Mon-Fri): Full pipeline after market close
@@ -83,6 +85,7 @@ class StockScheduler:
         self.fetcher: StockDataFetcher = None
         self.synthesizer: DailyCandleSynthesizer = None
         self.calculator: MetricsCalculator = None
+        self.smc_analyzer: SMCStockAnalyzer = None
         self.watchlist_builder: WatchlistBuilder = None
         self.zlma_strategy: ZeroLagMATrendStrategy = None
         self.running = False
@@ -98,6 +101,7 @@ class StockScheduler:
         self.fetcher = StockDataFetcher(db_manager=self.db)
         self.synthesizer = DailyCandleSynthesizer(db_manager=self.db)
         self.calculator = MetricsCalculator(db_manager=self.db)
+        self.smc_analyzer = SMCStockAnalyzer(db_manager=self.db)
         self.watchlist_builder = WatchlistBuilder(db_manager=self.db)
         self.zlma_strategy = ZeroLagMATrendStrategy(db_manager=self.db)
 
@@ -160,7 +164,7 @@ class StockScheduler:
         results = {}
 
         # === STAGE 1: Sync 1H Candles ===
-        logger.info("\n[STAGE 1/5] Syncing 1H candle data...")
+        logger.info("\n[STAGE 1/6] Syncing 1H candle data...")
         try:
             sync_stats = await self._sync_hourly_data()
             results['sync'] = sync_stats
@@ -170,7 +174,7 @@ class StockScheduler:
             results['sync'] = {'error': str(e)}
 
         # === STAGE 2: Synthesize Daily Candles ===
-        logger.info("\n[STAGE 2/5] Synthesizing daily candles...")
+        logger.info("\n[STAGE 2/6] Synthesizing daily candles...")
         try:
             synth_stats = await self.synthesizer.synthesize_all_daily(incremental=True)
             results['synthesis'] = synth_stats
@@ -180,7 +184,7 @@ class StockScheduler:
             results['synthesis'] = {'error': str(e)}
 
         # === STAGE 3: Calculate Metrics ===
-        logger.info("\n[STAGE 3/5] Calculating screening metrics...")
+        logger.info("\n[STAGE 3/6] Calculating screening metrics...")
         try:
             metrics_stats = await self.calculator.calculate_all_metrics()
             results['metrics'] = metrics_stats
@@ -189,8 +193,21 @@ class StockScheduler:
             logger.error(f"[FAIL] Metrics: {e}")
             results['metrics'] = {'error': str(e)}
 
-        # === STAGE 4: Build Watchlist ===
-        logger.info("\n[STAGE 4/5] Building watchlist...")
+        # === STAGE 4: SMC Analysis ===
+        logger.info("\n[STAGE 4/6] Running SMC analysis...")
+        try:
+            smc_stats = await self.smc_analyzer.run_analysis_pipeline()
+            results['smc'] = smc_stats
+            logger.info(f"[OK] SMC: {smc_stats['analyzed']} stocks analyzed")
+            logger.info(f"     Bullish: {smc_stats['bullish']}, "
+                       f"Bearish: {smc_stats['bearish']}, "
+                       f"Neutral: {smc_stats['neutral']}")
+        except Exception as e:
+            logger.error(f"[FAIL] SMC: {e}")
+            results['smc'] = {'error': str(e)}
+
+        # === STAGE 5: Build Watchlist ===
+        logger.info("\n[STAGE 5/6] Building watchlist...")
         try:
             watchlist_stats = await self.watchlist_builder.build_watchlist()
             results['watchlist'] = watchlist_stats
@@ -203,8 +220,8 @@ class StockScheduler:
             logger.error(f"[FAIL] Watchlist: {e}")
             results['watchlist'] = {'error': str(e)}
 
-        # === STAGE 5: ZLMA Strategy Signals ===
-        logger.info("\n[STAGE 5/5] Running ZLMA strategy...")
+        # === STAGE 6: ZLMA Strategy Signals ===
+        logger.info("\n[STAGE 6/6] Running ZLMA strategy...")
         try:
             signals = await self.zlma_strategy.scan_all_stocks()
             results['signals'] = {
@@ -420,6 +437,8 @@ async def run_once(task: str):
             await scheduler.synthesizer.synthesize_all_daily()
         elif task == "metrics":
             await scheduler.calculator.calculate_all_metrics()
+        elif task == "smc":
+            await scheduler.smc_analyzer.run_analysis_pipeline()
         elif task == "watchlist":
             await scheduler.watchlist_builder.build_watchlist()
         elif task == "signals":
@@ -428,7 +447,7 @@ async def run_once(task: str):
             await scheduler.weekly_sync()
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, watchlist, signals, weekly")
+            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, weekly")
     finally:
         await scheduler.cleanup()
 
@@ -438,7 +457,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
-                       choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics',
+                       choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'smc',
                                'watchlist', 'signals', 'weekly', 'status'],
                        help='Command to execute')
     args = parser.parse_args()
@@ -455,7 +474,7 @@ def main():
             print("\nShutdown requested...")
             scheduler.stop()
 
-    elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'watchlist', 'signals', 'weekly']:
+    elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'smc', 'watchlist', 'signals', 'weekly']:
         print(f"Running {args.command}...")
         asyncio.run(run_once(args.command))
 

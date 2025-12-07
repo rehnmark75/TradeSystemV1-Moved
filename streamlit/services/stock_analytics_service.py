@@ -109,6 +109,17 @@ class StockAnalyticsService:
                 """)
                 signal_counts = {row['signal_type']: row['count'] for row in cursor.fetchall()}
 
+                # Get SMC trend breakdown
+                cursor.execute("""
+                    SELECT
+                        COALESCE(smc_trend, 'Unknown') as smc_trend,
+                        COUNT(*) as count
+                    FROM stock_screening_metrics
+                    WHERE calculation_date = %s
+                    GROUP BY smc_trend
+                """, (latest_date,))
+                smc_trends = {row['smc_trend']: row['count'] for row in cursor.fetchall()}
+
                 return {
                     'latest_date': latest_date,
                     'total_with_metrics': total_with_metrics,
@@ -116,7 +127,10 @@ class StockAnalyticsService:
                     'tier_stats': tier_stats,
                     'buy_signals': signal_counts.get('BUY', 0),
                     'sell_signals': signal_counts.get('SELL', 0),
-                    'total_signals': signal_counts.get('BUY', 0) + signal_counts.get('SELL', 0)
+                    'total_signals': signal_counts.get('BUY', 0) + signal_counts.get('SELL', 0),
+                    'smc_bullish': smc_trends.get('Bullish', 0),
+                    'smc_bearish': smc_trends.get('Bearish', 0),
+                    'smc_neutral': smc_trends.get('Neutral', 0)
                 }
         except Exception as e:
             logger.error(f"Failed to get overview stats: {e}")
@@ -140,10 +154,16 @@ class StockAnalyticsService:
                 w.relative_volume,
                 w.price_change_20d,
                 w.trend_strength,
+                COALESCE(m.smc_trend, '') as smc_trend,
+                COALESCE(m.smc_bias, '') as smc_bias,
+                COALESCE(m.premium_discount_zone, '') as zone,
+                COALESCE(m.smc_confluence_score, 0) as smc_score,
                 COALESCE(s.signal_type, '') as signal_type,
                 COALESCE(s.confidence, 0) as signal_confidence
             FROM stock_watchlist w
             JOIN stock_instruments i ON w.ticker = i.ticker
+            LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
+                AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
             LEFT JOIN LATERAL (
                 SELECT signal_type, confidence
                 FROM stock_zlma_signals
@@ -206,6 +226,8 @@ class StockAnalyticsService:
                       min_dollar_vol: float = 0,
                       trends: List[str] = None,
                       ma_alignments: List[str] = None,
+                      smc_trends: List[str] = None,
+                      smc_zones: List[str] = None,
                       min_rsi: float = 0,
                       max_rsi: float = 100,
                       min_rvol: float = 0,
@@ -236,6 +258,12 @@ class StockAnalyticsService:
                 w.trend_strength,
                 m.ma_alignment,
                 m.rsi_14,
+                COALESCE(m.smc_trend, '') as smc_trend,
+                COALESCE(m.smc_bias, '') as smc_bias,
+                COALESCE(m.premium_discount_zone, '') as smc_zone,
+                COALESCE(m.zone_position, 50) as zone_position,
+                COALESCE(m.smc_confluence_score, 0) as smc_score,
+                COALESCE(m.last_bos_type, '') as last_bos,
                 w.is_new_to_tier,
                 w.tier_change,
                 COALESCE(sig.signal_count, 0) as signal_count,
@@ -281,6 +309,16 @@ class StockAnalyticsService:
         if ma_alignments:
             query += " AND m.ma_alignment = ANY(%s)"
             params.append(ma_alignments)
+
+        # Add SMC trend filter
+        if smc_trends:
+            query += " AND m.smc_trend = ANY(%s)"
+            params.append(smc_trends)
+
+        # Add SMC zone filter
+        if smc_zones:
+            query += " AND m.premium_discount_zone = ANY(%s)"
+            params.append(smc_zones)
 
         # Add signal filter
         if has_signal is True:
@@ -333,7 +371,16 @@ class StockAnalyticsService:
                 w.tier,
                 w.score,
                 w.trend_strength,
-                m.current_price
+                m.current_price,
+                COALESCE(m.smc_trend, '') as smc_trend,
+                COALESCE(m.smc_bias, '') as smc_bias,
+                COALESCE(m.premium_discount_zone, '') as smc_zone,
+                COALESCE(m.smc_confluence_score, 0) as smc_score,
+                CASE
+                    WHEN s.signal_type = m.smc_bias THEN 'Aligned'
+                    WHEN m.smc_bias IS NULL OR m.smc_bias = '' THEN 'Unknown'
+                    ELSE 'Divergent'
+                END as smc_alignment
             FROM stock_zlma_signals s
             JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN stock_watchlist w ON s.ticker = w.ticker
