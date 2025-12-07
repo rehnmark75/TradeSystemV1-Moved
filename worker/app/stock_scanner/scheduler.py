@@ -1,16 +1,31 @@
 #!/usr/bin/env python3
 """
-Stock Scanner Scheduler
+Stock Scanner Scheduler - Enhanced Pipeline
 
-Runs scheduled tasks for the stock scanner:
-- Daily data updates after market close (10 PM ET / 3 AM UTC)
-- Weekly instrument sync (Sunday midnight)
+Runs the complete daily stock analysis pipeline:
+1. Sync 1H candles from yfinance
+2. Synthesize daily candles from 1H data
+3. Calculate screening metrics (ATR, volume, momentum)
+4. Build watchlist (tiered, scored stocks)
+5. Run ZLMA strategy for signals
+
+Schedule:
+- Daily 10:30 PM ET (Mon-Fri): Full pipeline
+- Weekly Sunday 1:00 AM ET: Instrument sync from RoboMarkets
 
 Usage:
-    # Run as standalone scheduler
-    docker exec task-worker python -m stock_scanner.scheduler
+    # Run full pipeline once
+    docker exec stock-scheduler python -m stock_scanner.scheduler pipeline
 
-    # Or add to docker-compose as separate service
+    # Run individual stages
+    docker exec stock-scheduler python -m stock_scanner.scheduler sync
+    docker exec stock-scheduler python -m stock_scanner.scheduler synthesize
+    docker exec stock-scheduler python -m stock_scanner.scheduler metrics
+    docker exec stock-scheduler python -m stock_scanner.scheduler watchlist
+    docker exec stock-scheduler python -m stock_scanner.scheduler signals
+
+    # Run continuous scheduler
+    docker exec stock-scheduler python -m stock_scanner.scheduler run
 """
 
 import asyncio
@@ -25,6 +40,10 @@ sys.path.insert(0, '/app')
 from stock_scanner import config
 from stock_scanner.core.database.async_database_manager import AsyncDatabaseManager
 from stock_scanner.core.data_fetcher import StockDataFetcher
+from stock_scanner.core.synthesis.daily_synthesizer import DailyCandleSynthesizer
+from stock_scanner.core.metrics.calculator import MetricsCalculator
+from stock_scanner.core.screener.watchlist_builder import WatchlistBuilder
+from stock_scanner.strategies.zlma_trend import ZeroLagMATrendStrategy
 
 # Configure logging
 logging.basicConfig(
@@ -37,36 +56,52 @@ logger = logging.getLogger("stock_scheduler")
 
 class StockScheduler:
     """
-    Scheduler for stock data updates.
+    Enhanced Stock Scanner Scheduler with full analysis pipeline.
+
+    Pipeline stages:
+    1. sync       - Fetch latest 1H candles from yfinance
+    2. synthesize - Aggregate 1H -> Daily candles
+    3. metrics    - Calculate ATR, volume, momentum indicators
+    4. watchlist  - Build tiered, scored watchlist
+    5. signals    - Run ZLMA strategy for trading signals
 
     Schedule:
-    - Daily 10:30 PM ET (after market close + buffer): Update all stock data
-    - Weekly Sunday 1:00 AM ET: Sync instrument list from RoboMarkets
+    - Daily 10:30 PM ET (Mon-Fri): Full pipeline after market close
+    - Weekly Sunday 1:00 AM ET: Sync instruments from RoboMarkets
     """
 
     # US Eastern timezone
     ET = pytz.timezone('America/New_York')
 
     # Schedule times (ET)
-    DAILY_UPDATE_TIME = time(22, 30)  # 10:30 PM ET
-    WEEKLY_SYNC_TIME = time(1, 0)     # 1:00 AM ET on Sunday
-    WEEKLY_SYNC_DAY = 6               # Sunday = 6
+    PIPELINE_TIME = time(22, 30)  # 10:30 PM ET - Full pipeline
+    WEEKLY_SYNC_TIME = time(1, 0) # 1:00 AM ET on Sunday
+    WEEKLY_SYNC_DAY = 6           # Sunday = 6
 
     def __init__(self):
         self.db: AsyncDatabaseManager = None
         self.fetcher: StockDataFetcher = None
+        self.synthesizer: DailyCandleSynthesizer = None
+        self.calculator: MetricsCalculator = None
+        self.watchlist_builder: WatchlistBuilder = None
+        self.zlma_strategy: ZeroLagMATrendStrategy = None
         self.running = False
 
     async def setup(self):
-        """Initialize database and fetcher"""
-        logger.info("Initializing Stock Scheduler...")
+        """Initialize all pipeline components"""
+        logger.info("Initializing Enhanced Stock Scheduler...")
 
         self.db = AsyncDatabaseManager(config.STOCKS_DATABASE_URL)
         await self.db.connect()
 
+        # Initialize all components
         self.fetcher = StockDataFetcher(db_manager=self.db)
+        self.synthesizer = DailyCandleSynthesizer(db_manager=self.db)
+        self.calculator = MetricsCalculator(db_manager=self.db)
+        self.watchlist_builder = WatchlistBuilder(db_manager=self.db)
+        self.zlma_strategy = ZeroLagMATrendStrategy(db_manager=self.db)
 
-        logger.info("Stock Scheduler initialized")
+        logger.info("Enhanced Stock Scheduler initialized")
 
     async def cleanup(self):
         """Cleanup resources"""
@@ -76,10 +111,10 @@ class StockScheduler:
             await self.db.close()
         logger.info("Stock Scheduler cleaned up")
 
-    def get_next_daily_update(self) -> datetime:
-        """Get next daily update time"""
+    def get_next_pipeline(self) -> datetime:
+        """Get next daily pipeline execution time"""
         now = datetime.now(self.ET)
-        target = datetime.combine(now.date(), self.DAILY_UPDATE_TIME)
+        target = datetime.combine(now.date(), self.PIPELINE_TIME)
         target = self.ET.localize(target)
 
         # If we've passed today's time, schedule for tomorrow
@@ -106,78 +141,155 @@ class StockScheduler:
         target += timedelta(days=days_until_sunday)
         return target
 
-    async def daily_update(self):
-        """Run daily data update for all stocks"""
-        logger.info("=" * 60)
-        logger.info("DAILY UPDATE - Starting stock data update")
-        logger.info("=" * 60)
+    async def run_pipeline(self):
+        """
+        Run the complete daily pipeline.
 
-        start_time = datetime.now()
+        Stages:
+        1. Sync 1H candles
+        2. Synthesize daily candles
+        3. Calculate metrics
+        4. Build watchlist
+        5. Run ZLMA strategy
+        """
+        logger.info("=" * 80)
+        logger.info(" DAILY PIPELINE - Starting")
+        logger.info("=" * 80)
 
+        pipeline_start = datetime.now()
+        results = {}
+
+        # === STAGE 1: Sync 1H Candles ===
+        logger.info("\n[STAGE 1/5] Syncing 1H candle data...")
         try:
-            # Get tickers needing update (older than 20 hours)
-            query = """
-                SELECT i.ticker
-                FROM stock_instruments i
-                LEFT JOIN (
-                    SELECT ticker, MAX(timestamp) as last_ts
-                    FROM stock_candles WHERE timeframe = '1h'
-                    GROUP BY ticker
-                ) c ON i.ticker = c.ticker
-                WHERE i.is_active = TRUE AND i.is_tradeable = TRUE
-                AND (c.last_ts IS NULL OR c.last_ts < NOW() - INTERVAL '20 hours')
-            """
-            rows = await self.db.fetch(query)
-            tickers = [row['ticker'] for row in rows]
-
-            if not tickers:
-                logger.info("All tickers up to date, nothing to update")
-                return
-
-            logger.info(f"Updating {len(tickers)} tickers...")
-
-            # Update with concurrency
-            successful = 0
-            failed = 0
-            total_candles = 0
-
-            semaphore = asyncio.Semaphore(5)
-
-            async def update_ticker(ticker):
-                async with semaphore:
-                    try:
-                        count = await self.fetcher.fetch_historical_data(
-                            ticker, days=5, interval='1h'
-                        )
-                        return (ticker, count, None)
-                    except Exception as e:
-                        return (ticker, 0, str(e))
-
-            tasks = [update_ticker(t) for t in tickers]
-            results = await asyncio.gather(*tasks)
-
-            for ticker, count, error in results:
-                if error:
-                    failed += 1
-                elif count > 0:
-                    successful += 1
-                    total_candles += count
-                else:
-                    failed += 1
-
-            elapsed = (datetime.now() - start_time).total_seconds()
-
-            logger.info(f"Daily update complete:")
-            logger.info(f"  - Duration: {int(elapsed//60)}m {int(elapsed%60)}s")
-            logger.info(f"  - Successful: {successful}/{len(tickers)}")
-            logger.info(f"  - Failed: {failed}")
-            logger.info(f"  - New candles: {total_candles:,}")
-
+            sync_stats = await self._sync_hourly_data()
+            results['sync'] = sync_stats
+            logger.info(f"[OK] Sync: {sync_stats['successful']} stocks, {sync_stats['total_candles']:,} candles")
         except Exception as e:
-            logger.error(f"Daily update failed: {e}")
+            logger.error(f"[FAIL] Sync: {e}")
+            results['sync'] = {'error': str(e)}
+
+        # === STAGE 2: Synthesize Daily Candles ===
+        logger.info("\n[STAGE 2/5] Synthesizing daily candles...")
+        try:
+            synth_stats = await self.synthesizer.synthesize_all_daily(incremental=True)
+            results['synthesis'] = synth_stats
+            logger.info(f"[OK] Synthesis: {synth_stats['total_daily_candles']:,} daily candles")
+        except Exception as e:
+            logger.error(f"[FAIL] Synthesis: {e}")
+            results['synthesis'] = {'error': str(e)}
+
+        # === STAGE 3: Calculate Metrics ===
+        logger.info("\n[STAGE 3/5] Calculating screening metrics...")
+        try:
+            metrics_stats = await self.calculator.calculate_all_metrics()
+            results['metrics'] = metrics_stats
+            logger.info(f"[OK] Metrics: {metrics_stats['successful']} stocks")
+        except Exception as e:
+            logger.error(f"[FAIL] Metrics: {e}")
+            results['metrics'] = {'error': str(e)}
+
+        # === STAGE 4: Build Watchlist ===
+        logger.info("\n[STAGE 4/5] Building watchlist...")
+        try:
+            watchlist_stats = await self.watchlist_builder.build_watchlist()
+            results['watchlist'] = watchlist_stats
+            logger.info(f"[OK] Watchlist: {watchlist_stats['passed_filters']} stocks")
+            logger.info(f"     Tier 1: {watchlist_stats['tier_1']}, "
+                       f"Tier 2: {watchlist_stats['tier_2']}, "
+                       f"Tier 3: {watchlist_stats['tier_3']}, "
+                       f"Tier 4: {watchlist_stats['tier_4']}")
+        except Exception as e:
+            logger.error(f"[FAIL] Watchlist: {e}")
+            results['watchlist'] = {'error': str(e)}
+
+        # === STAGE 5: ZLMA Strategy Signals ===
+        logger.info("\n[STAGE 5/5] Running ZLMA strategy...")
+        try:
+            signals = await self.zlma_strategy.scan_all_stocks()
+            results['signals'] = {
+                'total': len(signals),
+                'buy': sum(1 for s in signals if s.signal_type == 'BUY'),
+                'sell': sum(1 for s in signals if s.signal_type == 'SELL')
+            }
+            logger.info(f"[OK] Signals: {len(signals)} total "
+                       f"(BUY: {results['signals']['buy']}, SELL: {results['signals']['sell']})")
+        except Exception as e:
+            logger.error(f"[FAIL] Signals: {e}")
+            results['signals'] = {'error': str(e)}
+
+        # === Pipeline Summary ===
+        total_duration = (datetime.now() - pipeline_start).total_seconds()
+
+        logger.info("\n" + "=" * 80)
+        logger.info(" DAILY PIPELINE - Complete")
+        logger.info("=" * 80)
+        logger.info(f"Total duration: {int(total_duration//60)}m {int(total_duration%60)}s")
+
+        # Log to database
+        await self._log_pipeline_run('daily_pipeline', results, total_duration)
+
+        return results
+
+    async def _sync_hourly_data(self) -> dict:
+        """Sync 1H candles for stocks needing update"""
+        # Get tickers needing update (older than 20 hours)
+        query = """
+            SELECT i.ticker
+            FROM stock_instruments i
+            LEFT JOIN (
+                SELECT ticker, MAX(timestamp) as last_ts
+                FROM stock_candles WHERE timeframe = '1h'
+                GROUP BY ticker
+            ) c ON i.ticker = c.ticker
+            WHERE i.is_active = TRUE AND i.is_tradeable = TRUE
+            AND (c.last_ts IS NULL OR c.last_ts < NOW() - INTERVAL '20 hours')
+        """
+        rows = await self.db.fetch(query)
+        tickers = [row['ticker'] for row in rows]
+
+        if not tickers:
+            return {'successful': 0, 'failed': 0, 'total_candles': 0, 'message': 'All up to date'}
+
+        logger.info(f"Updating {len(tickers)} tickers...")
+
+        # Update with concurrency
+        successful = 0
+        failed = 0
+        total_candles = 0
+        semaphore = asyncio.Semaphore(5)
+
+        async def update_ticker(ticker):
+            async with semaphore:
+                try:
+                    count = await self.fetcher.fetch_historical_data(
+                        ticker, days=5, interval='1h'
+                    )
+                    return (ticker, count, None)
+                except Exception as e:
+                    return (ticker, 0, str(e))
+
+        tasks = [update_ticker(t) for t in tickers]
+        results = await asyncio.gather(*tasks)
+
+        for ticker, count, error in results:
+            if error:
+                failed += 1
+            elif count > 0:
+                successful += 1
+                total_candles += count
+            else:
+                failed += 1
+
+        return {
+            'total_tickers': len(tickers),
+            'successful': successful,
+            'failed': failed,
+            'total_candles': total_candles
+        }
 
     async def weekly_sync(self):
-        """Run weekly instrument sync"""
+        """Run weekly instrument sync from RoboMarkets"""
         logger.info("=" * 60)
         logger.info("WEEKLY SYNC - Syncing instruments from RoboMarkets")
         logger.info("=" * 60)
@@ -186,40 +298,80 @@ class StockScheduler:
             stats = await self.fetcher.sync_us_stocks()
 
             logger.info(f"Weekly sync complete:")
-            logger.info(f"  - Total from API: {stats['total_from_api']:,}")
-            logger.info(f"  - US stocks: {stats['unique_tickers']:,}")
-            logger.info(f"  - NYSE: {stats['nyse_count']:,}")
-            logger.info(f"  - NASDAQ: {stats['nasdaq_count']:,}")
-            logger.info(f"  - New: {stats['inserted']}")
-            logger.info(f"  - Updated: {stats['updated']}")
+            logger.info(f"  Total from API: {stats['total_from_api']:,}")
+            logger.info(f"  US stocks: {stats['unique_tickers']:,}")
+            logger.info(f"  NYSE: {stats['nyse_count']:,}")
+            logger.info(f"  NASDAQ: {stats['nasdaq_count']:,}")
+            logger.info(f"  New: {stats['inserted']}")
+            logger.info(f"  Updated: {stats['updated']}")
 
         except Exception as e:
             logger.error(f"Weekly sync failed: {e}")
+
+    async def _log_pipeline_run(
+        self,
+        pipeline_name: str,
+        results: dict,
+        duration_seconds: float
+    ):
+        """Log pipeline execution to database"""
+        import json
+
+        # Determine status
+        status = 'success'
+        for step_result in results.values():
+            if isinstance(step_result, dict) and 'error' in step_result:
+                status = 'partial_failure'
+                break
+
+        query = """
+            INSERT INTO stock_pipeline_log (
+                pipeline_name, execution_date, duration_seconds, results, status
+            ) VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (pipeline_name, execution_date)
+            DO UPDATE SET
+                duration_seconds = EXCLUDED.duration_seconds,
+                results = EXCLUDED.results,
+                status = EXCLUDED.status,
+                completed_at = NOW()
+        """
+
+        try:
+            await self.db.execute(
+                query,
+                pipeline_name,
+                datetime.now().date(),
+                round(duration_seconds, 2),
+                json.dumps(results, default=str),
+                status
+            )
+        except Exception as e:
+            logger.error(f"Failed to log pipeline run: {e}")
 
     async def run(self):
         """Main scheduler loop"""
         await self.setup()
         self.running = True
 
-        logger.info("Stock Scheduler started")
-        logger.info(f"  Daily update time: {self.DAILY_UPDATE_TIME} ET (Mon-Fri)")
-        logger.info(f"  Weekly sync time: Sunday {self.WEEKLY_SYNC_TIME} ET")
+        logger.info("Enhanced Stock Scheduler started")
+        logger.info(f"  Pipeline time: {self.PIPELINE_TIME} ET (Mon-Fri)")
+        logger.info(f"  Weekly sync: Sunday {self.WEEKLY_SYNC_TIME} ET")
 
         try:
             while self.running:
                 now = datetime.now(self.ET)
 
                 # Calculate next scheduled times
-                next_daily = self.get_next_daily_update()
+                next_pipeline = self.get_next_pipeline()
                 next_weekly = self.get_next_weekly_sync()
 
                 # Find which comes first
-                if next_weekly < next_daily:
+                if next_weekly < next_pipeline:
                     next_task = "weekly_sync"
                     next_time = next_weekly
                 else:
-                    next_task = "daily_update"
-                    next_time = next_daily
+                    next_task = "pipeline"
+                    next_time = next_pipeline
 
                 # Calculate sleep duration
                 sleep_seconds = (next_time - now).total_seconds()
@@ -236,8 +388,8 @@ class StockScheduler:
                     break
 
                 # Execute the task
-                if next_task == "daily_update":
-                    await self.daily_update()
+                if next_task == "pipeline":
+                    await self.run_pipeline()
                 else:
                     await self.weekly_sync()
 
@@ -260,12 +412,23 @@ async def run_once(task: str):
     await scheduler.setup()
 
     try:
-        if task == "daily":
-            await scheduler.daily_update()
+        if task == "pipeline":
+            await scheduler.run_pipeline()
+        elif task == "sync":
+            await scheduler._sync_hourly_data()
+        elif task == "synthesize":
+            await scheduler.synthesizer.synthesize_all_daily()
+        elif task == "metrics":
+            await scheduler.calculator.calculate_all_metrics()
+        elif task == "watchlist":
+            await scheduler.watchlist_builder.build_watchlist()
+        elif task == "signals":
+            await scheduler.zlma_strategy.scan_all_stocks()
         elif task == "weekly":
             await scheduler.weekly_sync()
         else:
             print(f"Unknown task: {task}")
+            print("Available: pipeline, sync, synthesize, metrics, watchlist, signals, weekly")
     finally:
         await scheduler.cleanup()
 
@@ -273,15 +436,15 @@ async def run_once(task: str):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Stock Scanner Scheduler')
+    parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
-                       choices=['run', 'daily', 'weekly', 'status'],
+                       choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics',
+                               'watchlist', 'signals', 'weekly', 'status'],
                        help='Command to execute')
     args = parser.parse_args()
 
     if args.command == 'run':
-        # Run continuous scheduler
-        print("Starting Stock Scanner Scheduler...")
+        print("Starting Enhanced Stock Scanner Scheduler...")
         print("Press Ctrl+C to stop")
 
         scheduler = StockScheduler()
@@ -292,25 +455,24 @@ def main():
             print("\nShutdown requested...")
             scheduler.stop()
 
-    elif args.command == 'daily':
-        # Run daily update once
-        print("Running daily update...")
-        asyncio.run(run_once('daily'))
-
-    elif args.command == 'weekly':
-        # Run weekly sync once
-        print("Running weekly sync...")
-        asyncio.run(run_once('weekly'))
+    elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'watchlist', 'signals', 'weekly']:
+        print(f"Running {args.command}...")
+        asyncio.run(run_once(args.command))
 
     elif args.command == 'status':
-        # Show scheduler status
         scheduler = StockScheduler()
 
-        print("\nStock Scanner Scheduler Status")
-        print("=" * 40)
-        print(f"Daily update time: {scheduler.DAILY_UPDATE_TIME} ET (Mon-Fri)")
-        print(f"Weekly sync time: Sunday {scheduler.WEEKLY_SYNC_TIME} ET")
-        print(f"\nNext daily update: {scheduler.get_next_daily_update()}")
+        print("\nEnhanced Stock Scanner Scheduler Status")
+        print("=" * 50)
+        print(f"Pipeline time: {scheduler.PIPELINE_TIME} ET (Mon-Fri)")
+        print(f"Weekly sync: Sunday {scheduler.WEEKLY_SYNC_TIME} ET")
+        print(f"\nPipeline stages:")
+        print("  1. sync       - Fetch 1H candles from yfinance")
+        print("  2. synthesize - Aggregate 1H -> Daily candles")
+        print("  3. metrics    - Calculate ATR, volume, momentum")
+        print("  4. watchlist  - Build tiered, scored watchlist")
+        print("  5. signals    - Run ZLMA strategy")
+        print(f"\nNext pipeline: {scheduler.get_next_pipeline()}")
         print(f"Next weekly sync: {scheduler.get_next_weekly_sync()}")
 
 
