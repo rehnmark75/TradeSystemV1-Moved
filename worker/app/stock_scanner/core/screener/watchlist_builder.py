@@ -7,8 +7,14 @@ Focuses on high volume + high movement stocks.
 Scoring System (0-100):
 - Volume Score (30 pts): Based on dollar volume
 - Volatility Score (25 pts): Based on ATR %
-- Momentum Score (30 pts): Based on price changes and trend
+- Momentum Score (30 pts): Based on price changes, trend, and MACD confirmation
 - Relative Strength Score (15 pts): Based on performance vs market
+
+MACD Integration:
+- MACD histogram sign adds/subtracts up to 3 pts from momentum
+- Positive histogram = bullish confirmation (bonus)
+- Negative histogram = bearish warning (penalty for longs)
+- Used as trend confirmation, not primary signal
 
 Tiers:
 - Tier 1 (80-100): Top 50 stocks - Day trading candidates
@@ -170,6 +176,7 @@ class WatchlistBuilder:
         roc_20d = float(metrics.get('price_change_20d') or 0)
         trend = metrics.get('trend_strength') or 'neutral'
         ma_align = metrics.get('ma_alignment') or 'mixed'
+        macd_histogram = float(metrics.get('macd_histogram') or 0)
 
         # === FILTERS (must pass all) ===
 
@@ -194,7 +201,7 @@ class WatchlistBuilder:
         volatility_score = self._score_volatility(atr_pct)
 
         # 3. Momentum Score (0-30 pts)
-        momentum_score = self._score_momentum(roc_1d, roc_5d, roc_20d, trend, ma_align)
+        momentum_score = self._score_momentum(roc_1d, roc_5d, roc_20d, trend, ma_align, macd_histogram)
 
         # 4. Relative Strength Score (0-15 pts)
         rs_score = self._score_relative_strength(roc_20d, market_avg['avg_roc20'])
@@ -264,9 +271,24 @@ class WatchlistBuilder:
         roc_5d: float,
         roc_20d: float,
         trend: str,
-        ma_alignment: str
+        ma_alignment: str,
+        macd_histogram: float = 0.0
     ) -> float:
-        """Score based on momentum indicators (0-30 pts)."""
+        """
+        Score based on momentum indicators (0-30 pts).
+
+        Components:
+        - ROC 1-day: 0-5 pts
+        - ROC 5-day: 0-8 pts
+        - ROC 20-day: 0-7 pts (reduced from 10)
+        - Trend strength: 0-4 pts
+        - MA alignment: 0-3 pts
+        - MACD confirmation: -3 to +3 pts (new)
+
+        MACD histogram provides trend confirmation:
+        - Positive histogram with uptrend = confirmation bonus
+        - Negative histogram with uptrend = divergence warning
+        """
         score = 0.0
 
         # ROC 1-day (0-5 pts)
@@ -287,15 +309,15 @@ class WatchlistBuilder:
         elif roc_5d > 0:
             score += 2.0
 
-        # ROC 20-day (0-10 pts)
+        # ROC 20-day (0-7 pts) - reduced to make room for MACD
         if roc_20d > 15:
-            score += 10.0
+            score += 7.0
         elif roc_20d > 10:
-            score += 8.0
+            score += 5.0
         elif roc_20d > 5:
-            score += 6.0
+            score += 4.0
         elif roc_20d > 0:
-            score += 3.0
+            score += 2.0
 
         # Trend strength (0-4 pts)
         trend_scores = {
@@ -315,7 +337,63 @@ class WatchlistBuilder:
         }
         score += align_scores.get(ma_alignment, 1.0)
 
-        return min(score, 30.0)
+        # MACD histogram confirmation (-3 to +3 pts)
+        # Positive histogram = bullish momentum confirmation
+        # Negative histogram = bearish momentum (penalty for long setups)
+        macd_score = self._score_macd_confirmation(macd_histogram, trend)
+        score += macd_score
+
+        return min(max(score, 0.0), 30.0)
+
+    def _score_macd_confirmation(
+        self,
+        macd_histogram: float,
+        trend: str
+    ) -> float:
+        """
+        Score MACD histogram as trend confirmation (-3 to +3 pts).
+
+        Logic:
+        - Strong positive histogram (>0.5) with uptrend = +3 (strong confirmation)
+        - Positive histogram with uptrend = +2 (confirmation)
+        - Positive histogram with neutral = +1 (potential start)
+        - Negative histogram with uptrend = -2 (divergence warning)
+        - Strong negative histogram (<-0.5) = -3 (bearish momentum)
+        """
+        is_bullish_trend = trend in ('strong_up', 'up')
+        is_bearish_trend = trend in ('strong_down', 'down')
+
+        if macd_histogram > 0.5:
+            # Strong positive histogram
+            if is_bullish_trend:
+                return 3.0  # Strong bullish confirmation
+            elif is_bearish_trend:
+                return 1.0  # Potential reversal signal
+            else:
+                return 2.0  # Bullish momentum building
+
+        elif macd_histogram > 0:
+            # Positive histogram
+            if is_bullish_trend:
+                return 2.0  # Bullish confirmation
+            else:
+                return 1.0  # Slight positive
+
+        elif macd_histogram > -0.5:
+            # Slight negative histogram
+            if is_bullish_trend:
+                return -1.0  # Momentum weakening
+            elif is_bearish_trend:
+                return 0.0  # Bearish, as expected
+            else:
+                return 0.0  # Neutral
+
+        else:
+            # Strong negative histogram
+            if is_bullish_trend:
+                return -2.0  # Divergence - bearish warning
+            else:
+                return -3.0  # Strong bearish momentum
 
     def _score_relative_strength(
         self,
