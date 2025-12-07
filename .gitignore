@@ -77,3 +77,4 @@ docs/
 # Claude Code local settings (user-specific)
 .claude/settings.local.json
 vector-db/vectordb/32cb61c2-d8ab-4295-b0ed-f764a453d8a2/length.bin
+worker/app/stock_scanner/logs/
