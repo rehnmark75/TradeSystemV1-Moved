@@ -10,6 +10,14 @@ Scoring System (0-100):
 - Momentum Score (30 pts): Based on price changes, trend, and MACD confirmation
 - Relative Strength Score (15 pts): Based on performance vs market
 
+Enhanced Signal Integration:
+- RSI signal classification (oversold/overbought)
+- SMA crossover detection (crossed_above/crossed_below)
+- Golden Cross / Death Cross detection
+- 52-week high/low proximity signals
+- Gap detection for momentum entries
+- Candlestick pattern recognition
+
 MACD Integration:
 - MACD histogram sign adds/subtracts up to 3 pts from momentum
 - Positive histogram = bullish confirmation (bonus)
@@ -213,6 +221,17 @@ class WatchlistBuilder:
         if total_score < self.config.TIER_4_MIN:
             return None
 
+        # Extract enhanced signals
+        rsi_signal = metrics.get('rsi_signal')
+        sma20_signal = metrics.get('sma20_signal')
+        sma50_signal = metrics.get('sma50_signal')
+        sma_cross_signal = metrics.get('sma_cross_signal')
+        macd_cross_signal = metrics.get('macd_cross_signal')
+        high_low_signal = metrics.get('high_low_signal')
+        gap_signal = metrics.get('gap_signal')
+        candlestick_pattern = metrics.get('candlestick_pattern')
+        pct_from_52w_high = float(metrics.get('pct_from_52w_high') or -100)
+
         return {
             'ticker': metrics['ticker'],
             'score': round(total_score, 2),
@@ -225,7 +244,17 @@ class WatchlistBuilder:
             'avg_dollar_volume': dollar_vol,
             'relative_volume': rvol,
             'price_change_20d': roc_20d,
-            'trend_strength': trend
+            'trend_strength': trend,
+            # Enhanced signals
+            'rsi_signal': rsi_signal,
+            'sma20_signal': sma20_signal,
+            'sma50_signal': sma50_signal,
+            'sma_cross_signal': sma_cross_signal,
+            'macd_cross_signal': macd_cross_signal,
+            'high_low_signal': high_low_signal,
+            'gap_signal': gap_signal,
+            'candlestick_pattern': candlestick_pattern,
+            'pct_from_52w_high': pct_from_52w_high
         }
 
     def _score_volume(self, dollar_volume: float) -> float:
@@ -510,10 +539,15 @@ class WatchlistBuilder:
                     tier, rank_in_tier, rank_overall,
                     current_price, atr_percent, avg_dollar_volume,
                     relative_volume, price_change_20d, trend_strength,
-                    is_new_to_tier, tier_change
+                    is_new_to_tier, tier_change,
+                    rsi_signal, sma20_signal, sma50_signal,
+                    sma_cross_signal, macd_cross_signal,
+                    high_low_signal, gap_signal, candlestick_pattern,
+                    pct_from_52w_high
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                    $11, $12, $13, $14, $15, $16, $17, $18
+                    $11, $12, $13, $14, $15, $16, $17, $18,
+                    $19, $20, $21, $22, $23, $24, $25, $26, $27
                 )
             """
 
@@ -536,7 +570,17 @@ class WatchlistBuilder:
                 stock['price_change_20d'],
                 stock['trend_strength'],
                 stock.get('is_new_to_tier', False),
-                stock.get('tier_change', 0)
+                stock.get('tier_change', 0),
+                # Enhanced signals
+                stock.get('rsi_signal'),
+                stock.get('sma20_signal'),
+                stock.get('sma50_signal'),
+                stock.get('sma_cross_signal'),
+                stock.get('macd_cross_signal'),
+                stock.get('high_low_signal'),
+                stock.get('gap_signal'),
+                stock.get('candlestick_pattern'),
+                stock.get('pct_from_52w_high'),
             )
 
     async def get_tier_stocks(
@@ -586,4 +630,260 @@ class WatchlistBuilder:
         return {
             'date': str(calculation_date),
             'tiers': [dict(r) for r in rows]
+        }
+
+    # ================================================================
+    # ENHANCED SIGNAL FILTERS
+    # ================================================================
+
+    async def filter_by_signals(
+        self,
+        calculation_date: datetime = None,
+        tier: Optional[int] = None,
+        rsi_signals: Optional[List[str]] = None,
+        sma_cross_signals: Optional[List[str]] = None,
+        macd_cross_signals: Optional[List[str]] = None,
+        high_low_signals: Optional[List[str]] = None,
+        gap_signals: Optional[List[str]] = None,
+        candlestick_patterns: Optional[List[str]] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Filter watchlist by enhanced signals.
+
+        Args:
+            calculation_date: Date to filter (default: yesterday)
+            tier: Optional tier filter (1-4)
+            rsi_signals: Filter by RSI signals (oversold, oversold_extreme, overbought, etc.)
+            sma_cross_signals: Filter by SMA cross signals (golden_cross, death_cross, etc.)
+            macd_cross_signals: Filter by MACD cross signals (bullish_cross, bearish_cross, etc.)
+            high_low_signals: Filter by 52W position (new_high, near_high, near_low, new_low)
+            gap_signals: Filter by gap signals (gap_up_large, gap_up, gap_down, etc.)
+            candlestick_patterns: Filter by candlestick patterns (hammer, engulfing, etc.)
+            limit: Maximum results
+
+        Returns:
+            List of matching stocks
+        """
+        if calculation_date is None:
+            calculation_date = datetime.now().date() - timedelta(days=1)
+
+        conditions = ["calculation_date = $1"]
+        params = [calculation_date]
+        param_num = 2
+
+        if tier is not None:
+            conditions.append(f"tier = ${param_num}")
+            params.append(tier)
+            param_num += 1
+
+        if rsi_signals:
+            conditions.append(f"rsi_signal = ANY(${param_num})")
+            params.append(rsi_signals)
+            param_num += 1
+
+        if sma_cross_signals:
+            conditions.append(f"sma_cross_signal = ANY(${param_num})")
+            params.append(sma_cross_signals)
+            param_num += 1
+
+        if macd_cross_signals:
+            conditions.append(f"macd_cross_signal = ANY(${param_num})")
+            params.append(macd_cross_signals)
+            param_num += 1
+
+        if high_low_signals:
+            conditions.append(f"high_low_signal = ANY(${param_num})")
+            params.append(high_low_signals)
+            param_num += 1
+
+        if gap_signals:
+            conditions.append(f"gap_signal = ANY(${param_num})")
+            params.append(gap_signals)
+            param_num += 1
+
+        if candlestick_patterns:
+            conditions.append(f"candlestick_pattern = ANY(${param_num})")
+            params.append(candlestick_patterns)
+            param_num += 1
+
+        where_clause = " AND ".join(conditions)
+
+        query = f"""
+            SELECT *
+            FROM stock_watchlist
+            WHERE {where_clause}
+            ORDER BY score DESC
+            LIMIT {limit}
+        """
+
+        rows = await self.db.fetch(query, *params)
+        return [dict(r) for r in rows]
+
+    async def get_breakout_candidates(
+        self,
+        calculation_date: datetime = None,
+        tier_max: int = 2
+    ) -> List[Dict[str, Any]]:
+        """
+        Get stocks near 52-week highs with bullish signals.
+
+        Filters:
+        - Near or at 52W high
+        - Bullish SMA cross or golden cross
+        - MACD bullish or bullish cross
+        """
+        if calculation_date is None:
+            calculation_date = datetime.now().date() - timedelta(days=1)
+
+        query = """
+            SELECT *
+            FROM stock_watchlist
+            WHERE calculation_date = $1
+              AND tier <= $2
+              AND high_low_signal IN ('new_high', 'near_high')
+              AND sma_cross_signal IN ('golden_cross', 'bullish')
+              AND macd_cross_signal IN ('bullish_cross', 'bullish')
+            ORDER BY pct_from_52w_high DESC, score DESC
+            LIMIT 20
+        """
+
+        rows = await self.db.fetch(query, calculation_date, tier_max)
+        return [dict(r) for r in rows]
+
+    async def get_oversold_bounces(
+        self,
+        calculation_date: datetime = None,
+        tier_max: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Get oversold stocks showing reversal signals.
+
+        Filters:
+        - RSI oversold or oversold_extreme
+        - Bullish candlestick pattern (hammer, bullish_engulfing, etc.)
+        """
+        if calculation_date is None:
+            calculation_date = datetime.now().date() - timedelta(days=1)
+
+        query = """
+            SELECT *
+            FROM stock_watchlist
+            WHERE calculation_date = $1
+              AND tier <= $2
+              AND rsi_signal IN ('oversold', 'oversold_extreme')
+              AND candlestick_pattern IN ('hammer', 'bullish_engulfing', 'dragonfly_doji', 'inverted_hammer', 'strong_bullish')
+            ORDER BY score DESC
+            LIMIT 20
+        """
+
+        rows = await self.db.fetch(query, calculation_date, tier_max)
+        return [dict(r) for r in rows]
+
+    async def get_gap_plays(
+        self,
+        calculation_date: datetime = None,
+        direction: str = 'up'
+    ) -> List[Dict[str, Any]]:
+        """
+        Get stocks with significant gaps for momentum plays.
+
+        Args:
+            direction: 'up' for gap ups, 'down' for gap downs
+        """
+        if calculation_date is None:
+            calculation_date = datetime.now().date() - timedelta(days=1)
+
+        if direction == 'up':
+            gap_signals = ['gap_up_large', 'gap_up']
+        else:
+            gap_signals = ['gap_down_large', 'gap_down']
+
+        query = """
+            SELECT *
+            FROM stock_watchlist
+            WHERE calculation_date = $1
+              AND gap_signal = ANY($2)
+            ORDER BY score DESC
+            LIMIT 20
+        """
+
+        rows = await self.db.fetch(query, calculation_date, gap_signals)
+        return [dict(r) for r in rows]
+
+    async def get_golden_cross_stocks(
+        self,
+        calculation_date: datetime = None
+    ) -> List[Dict[str, Any]]:
+        """Get stocks that just experienced a Golden Cross (SMA50 crossed above SMA200)."""
+        if calculation_date is None:
+            calculation_date = datetime.now().date() - timedelta(days=1)
+
+        query = """
+            SELECT *
+            FROM stock_watchlist
+            WHERE calculation_date = $1
+              AND sma_cross_signal = 'golden_cross'
+            ORDER BY score DESC
+            LIMIT 20
+        """
+
+        rows = await self.db.fetch(query, calculation_date)
+        return [dict(r) for r in rows]
+
+    async def get_signal_summary(
+        self,
+        calculation_date: datetime = None
+    ) -> Dict[str, Any]:
+        """Get summary of enhanced signals across the watchlist."""
+        if calculation_date is None:
+            calculation_date = datetime.now().date() - timedelta(days=1)
+
+        # RSI summary
+        rsi_query = """
+            SELECT rsi_signal, COUNT(*) as count
+            FROM stock_watchlist
+            WHERE calculation_date = $1 AND rsi_signal IS NOT NULL
+            GROUP BY rsi_signal
+            ORDER BY count DESC
+        """
+
+        # SMA cross summary
+        sma_cross_query = """
+            SELECT sma_cross_signal, COUNT(*) as count
+            FROM stock_watchlist
+            WHERE calculation_date = $1 AND sma_cross_signal IS NOT NULL
+            GROUP BY sma_cross_signal
+            ORDER BY count DESC
+        """
+
+        # 52W position summary
+        high_low_query = """
+            SELECT high_low_signal, COUNT(*) as count
+            FROM stock_watchlist
+            WHERE calculation_date = $1 AND high_low_signal IS NOT NULL
+            GROUP BY high_low_signal
+            ORDER BY count DESC
+        """
+
+        # Candlestick patterns summary
+        pattern_query = """
+            SELECT candlestick_pattern, COUNT(*) as count
+            FROM stock_watchlist
+            WHERE calculation_date = $1 AND candlestick_pattern IS NOT NULL
+            GROUP BY candlestick_pattern
+            ORDER BY count DESC
+        """
+
+        rsi_rows = await self.db.fetch(rsi_query, calculation_date)
+        sma_rows = await self.db.fetch(sma_cross_query, calculation_date)
+        high_low_rows = await self.db.fetch(high_low_query, calculation_date)
+        pattern_rows = await self.db.fetch(pattern_query, calculation_date)
+
+        return {
+            'date': str(calculation_date),
+            'rsi_signals': {r['rsi_signal']: r['count'] for r in rsi_rows},
+            'sma_cross_signals': {r['sma_cross_signal']: r['count'] for r in sma_rows},
+            'high_low_signals': {r['high_low_signal']: r['count'] for r in high_low_rows},
+            'candlestick_patterns': {r['candlestick_pattern']: r['count'] for r in pattern_rows}
         }
