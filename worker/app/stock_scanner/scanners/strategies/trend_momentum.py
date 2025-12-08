@@ -61,6 +61,29 @@ class TrendMomentumConfig(ScannerConfig):
     # Trend strength
     min_trend_strength: float = 0.4
 
+    # =========================================================================
+    # FUNDAMENTAL FILTERS FOR TREND MOMENTUM
+    # Focus: Growth + Quality stocks with institutional backing
+    # =========================================================================
+
+    # Valuation - not too expensive for continuation plays
+    max_pe_ratio: float = 50.0  # Avoid extremely overvalued
+
+    # Growth - prefer growing companies
+    min_earnings_growth: float = 0.0  # At least flat earnings
+
+    # Profitability - quality companies
+    min_profit_margin: float = 0.0  # Must be profitable
+
+    # Financial health
+    max_debt_to_equity: float = 3.0  # Reasonable debt load
+
+    # Institutional support (momentum stocks need institutional buying)
+    min_institutional_pct: float = 20.0
+
+    # Avoid earnings risk (don't enter momentum trade right before earnings)
+    days_to_earnings_min: int = 7
+
 
 class TrendMomentumScanner(BaseScanner):
     """

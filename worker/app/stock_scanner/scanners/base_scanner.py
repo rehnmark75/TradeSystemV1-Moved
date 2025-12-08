@@ -80,6 +80,41 @@ class ScannerConfig:
     tp1_rr_ratio: float = 2.0  # First target at 2R
     tp2_rr_ratio: float = 3.0  # Second target at 3R
 
+    # ==========================================================================
+    # FUNDAMENTAL FILTERS (from stock_instruments)
+    # Set to None to disable filter, or set value to enable
+    # ==========================================================================
+
+    # Valuation filters
+    max_pe_ratio: Optional[float] = None  # Max P/E ratio (e.g., 50)
+    min_pe_ratio: Optional[float] = None  # Min P/E ratio (e.g., 5, avoid negative earnings)
+    max_peg_ratio: Optional[float] = None  # Max PEG ratio (e.g., 2.0)
+
+    # Growth filters
+    min_earnings_growth: Optional[float] = None  # Min YoY earnings growth % (e.g., 0.10 for 10%)
+    min_revenue_growth: Optional[float] = None  # Min YoY revenue growth % (e.g., 0.05 for 5%)
+
+    # Profitability filters
+    min_profit_margin: Optional[float] = None  # Min profit margin % (e.g., 0.05 for 5%)
+    min_roe: Optional[float] = None  # Min return on equity % (e.g., 0.10 for 10%)
+
+    # Financial health filters
+    max_debt_to_equity: Optional[float] = None  # Max debt/equity ratio (e.g., 2.0)
+    min_current_ratio: Optional[float] = None  # Min current ratio (e.g., 1.0)
+
+    # Short interest filters
+    max_short_percent: Optional[float] = None  # Max short % of float (e.g., 30)
+    min_short_percent: Optional[float] = None  # Min short % for squeeze plays (e.g., 15)
+
+    # Ownership filters
+    min_institutional_pct: Optional[float] = None  # Min institutional ownership % (e.g., 20)
+
+    # Earnings risk filter
+    days_to_earnings_min: Optional[int] = None  # Avoid stocks with earnings within N days
+
+    # Include fundamentals data in query (enables fundamental columns in results)
+    include_fundamentals: bool = True
+
 
 @dataclass
 class SignalSetup:
@@ -470,15 +505,77 @@ class BaseScanner(ABC):
         additional_filters: str = ""
     ) -> List[Dict[str, Any]]:
         """
-        Get candidates from watchlist with signals.
+        Get candidates from watchlist with signals and fundamental data.
 
         Args:
             calculation_date: Date for watchlist data
             additional_filters: Extra SQL WHERE conditions
 
         Returns:
-            List of candidate dictionaries
+            List of candidate dictionaries with technical and fundamental data
         """
+        # Build fundamental columns selection
+        fundamental_columns = ""
+        fundamental_join = ""
+        fundamental_filters = ""
+
+        if self.config.include_fundamentals:
+            fundamental_columns = """,
+                -- Valuation metrics
+                i.trailing_pe,
+                i.forward_pe,
+                i.peg_ratio,
+                i.price_to_book,
+                i.price_to_sales,
+                i.enterprise_to_ebitda,
+                -- Growth metrics
+                i.earnings_growth,
+                i.revenue_growth,
+                i.earnings_quarterly_growth,
+                -- Profitability metrics
+                i.profit_margin,
+                i.operating_margin,
+                i.gross_margin,
+                i.return_on_equity,
+                i.return_on_assets,
+                -- Financial health
+                i.debt_to_equity,
+                i.current_ratio,
+                i.quick_ratio,
+                -- Short interest
+                i.short_percent_float,
+                i.short_ratio,
+                i.shares_short,
+                -- Ownership
+                i.institutional_percent,
+                i.insider_percent,
+                i.shares_float,
+                -- Dividend
+                i.dividend_yield,
+                i.payout_ratio,
+                -- 52-week data (from fundamentals, not watchlist)
+                i.fifty_two_week_high as fund_52w_high,
+                i.fifty_two_week_low as fund_52w_low,
+                i.fifty_two_week_change,
+                -- Analyst data
+                i.analyst_rating,
+                i.target_price,
+                i.number_of_analysts,
+                -- Company info
+                i.sector as company_sector,
+                i.industry,
+                i.market_cap,
+                -- Earnings calendar
+                i.earnings_date,
+                i.earnings_date_estimated,
+                i.fundamentals_updated_at"""
+
+            fundamental_join = """
+            LEFT JOIN stock_instruments i ON w.ticker = i.ticker"""
+
+            # Build dynamic fundamental filters
+            fundamental_filters = self._build_fundamental_filters()
+
         base_query = """
             SELECT
                 w.ticker,
@@ -509,15 +606,23 @@ class BaseScanner(ABC):
                 m.sma_50,
                 m.sma_200,
                 m.avg_volume_20
+                {fundamental_columns}
             FROM stock_watchlist w
             LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
                 AND m.calculation_date = w.calculation_date
+            {fundamental_join}
             WHERE w.calculation_date = $1
               AND w.tier <= $2
               AND w.relative_volume >= $3
+              {fundamental_filters}
               {additional_filters}
             ORDER BY w.score DESC
-        """.format(additional_filters=additional_filters)
+        """.format(
+            fundamental_columns=fundamental_columns,
+            fundamental_join=fundamental_join,
+            fundamental_filters=fundamental_filters,
+            additional_filters=additional_filters
+        )
 
         rows = await self.db.fetch(
             base_query,
@@ -526,6 +631,63 @@ class BaseScanner(ABC):
             self.config.min_relative_volume
         )
         return [dict(r) for r in rows]
+
+    def _build_fundamental_filters(self) -> str:
+        """
+        Build SQL WHERE clauses for fundamental filters based on config.
+
+        Returns:
+            SQL string with AND clauses for each enabled filter
+        """
+        filters = []
+
+        # Valuation filters
+        if self.config.max_pe_ratio is not None:
+            filters.append(f"(i.trailing_pe IS NULL OR i.trailing_pe <= {self.config.max_pe_ratio})")
+        if self.config.min_pe_ratio is not None:
+            filters.append(f"(i.trailing_pe IS NULL OR i.trailing_pe >= {self.config.min_pe_ratio})")
+        if self.config.max_peg_ratio is not None:
+            filters.append(f"(i.peg_ratio IS NULL OR i.peg_ratio <= {self.config.max_peg_ratio})")
+
+        # Growth filters
+        if self.config.min_earnings_growth is not None:
+            filters.append(f"(i.earnings_growth IS NULL OR i.earnings_growth >= {self.config.min_earnings_growth})")
+        if self.config.min_revenue_growth is not None:
+            filters.append(f"(i.revenue_growth IS NULL OR i.revenue_growth >= {self.config.min_revenue_growth})")
+
+        # Profitability filters
+        if self.config.min_profit_margin is not None:
+            filters.append(f"(i.profit_margin IS NULL OR i.profit_margin >= {self.config.min_profit_margin})")
+        if self.config.min_roe is not None:
+            filters.append(f"(i.return_on_equity IS NULL OR i.return_on_equity >= {self.config.min_roe})")
+
+        # Financial health filters
+        if self.config.max_debt_to_equity is not None:
+            filters.append(f"(i.debt_to_equity IS NULL OR i.debt_to_equity <= {self.config.max_debt_to_equity})")
+        if self.config.min_current_ratio is not None:
+            filters.append(f"(i.current_ratio IS NULL OR i.current_ratio >= {self.config.min_current_ratio})")
+
+        # Short interest filters
+        if self.config.max_short_percent is not None:
+            filters.append(f"(i.short_percent_float IS NULL OR i.short_percent_float <= {self.config.max_short_percent})")
+        if self.config.min_short_percent is not None:
+            filters.append(f"(i.short_percent_float IS NOT NULL AND i.short_percent_float >= {self.config.min_short_percent})")
+
+        # Ownership filters
+        if self.config.min_institutional_pct is not None:
+            filters.append(f"(i.institutional_percent IS NULL OR i.institutional_percent >= {self.config.min_institutional_pct})")
+
+        # Earnings date filter (avoid stocks with earnings within N days)
+        if self.config.days_to_earnings_min is not None:
+            filters.append(f"""
+                (i.earnings_date IS NULL OR
+                 i.earnings_date < CURRENT_DATE OR
+                 i.earnings_date > CURRENT_DATE + INTERVAL '{self.config.days_to_earnings_min} days')
+            """)
+
+        if filters:
+            return "AND " + " AND ".join(filters)
+        return ""
 
     def build_confluence_factors(self, candidate: Dict[str, Any]) -> List[str]:
         """
@@ -579,6 +741,96 @@ class BaseScanner(ABC):
         gap = candidate.get('gap_signal', '')
         if gap in ['gap_up', 'gap_up_large']:
             factors.append('Gap Up')
+
+        # =======================================================================
+        # FUNDAMENTAL CONFLUENCE FACTORS
+        # =======================================================================
+        if self.config.include_fundamentals:
+            factors.extend(self._build_fundamental_confluence(candidate))
+
+        return factors
+
+    def _build_fundamental_confluence(self, candidate: Dict[str, Any]) -> List[str]:
+        """
+        Build fundamental-based confluence factors.
+
+        Args:
+            candidate: Candidate data with fundamental fields
+
+        Returns:
+            List of fundamental confluence descriptions
+        """
+        factors = []
+
+        # Earnings growth
+        earnings_growth = candidate.get('earnings_growth')
+        if earnings_growth is not None:
+            eg = float(earnings_growth)
+            if eg >= 0.25:
+                factors.append(f'Strong Earnings Growth (+{eg*100:.0f}%)')
+            elif eg >= 0.10:
+                factors.append(f'Solid Earnings Growth (+{eg*100:.0f}%)')
+
+        # Revenue growth
+        revenue_growth = candidate.get('revenue_growth')
+        if revenue_growth is not None:
+            rg = float(revenue_growth)
+            if rg >= 0.20:
+                factors.append(f'High Revenue Growth (+{rg*100:.0f}%)')
+
+        # Return on Equity
+        roe = candidate.get('return_on_equity')
+        if roe is not None:
+            roe_val = float(roe)
+            if roe_val >= 0.20:
+                factors.append(f'Strong ROE ({roe_val*100:.0f}%)')
+
+        # Low P/E (value)
+        pe = candidate.get('trailing_pe')
+        if pe is not None:
+            pe_val = float(pe)
+            if 0 < pe_val < 15:
+                factors.append(f'Low P/E ({pe_val:.1f})')
+
+        # PEG ratio (growth at reasonable price)
+        peg = candidate.get('peg_ratio')
+        if peg is not None:
+            peg_val = float(peg)
+            if 0 < peg_val < 1.0:
+                factors.append(f'Attractive PEG ({peg_val:.2f})')
+
+        # Healthy balance sheet
+        debt_eq = candidate.get('debt_to_equity')
+        if debt_eq is not None:
+            de_val = float(debt_eq)
+            if de_val < 0.5:
+                factors.append('Low Debt')
+
+        # High short interest (squeeze potential)
+        short_pct = candidate.get('short_percent_float')
+        if short_pct is not None:
+            sp_val = float(short_pct)
+            if sp_val >= 15:
+                factors.append(f'High Short Interest ({sp_val:.1f}%)')
+
+        # Strong institutional support
+        inst_pct = candidate.get('institutional_percent')
+        if inst_pct is not None:
+            ip_val = float(inst_pct)
+            if ip_val >= 70:
+                factors.append(f'High Institutional ({ip_val:.0f}%)')
+
+        # Analyst sentiment
+        analyst_rating = candidate.get('analyst_rating')
+        if analyst_rating and 'buy' in str(analyst_rating).lower():
+            factors.append('Analyst: Buy')
+
+        # Dividend yield (income)
+        div_yield = candidate.get('dividend_yield')
+        if div_yield is not None:
+            dy_val = float(div_yield)
+            if dy_val >= 3.0:
+                factors.append(f'High Dividend ({dy_val:.1f}%)')
 
         return factors
 

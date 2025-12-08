@@ -1,5 +1,17 @@
 """Signal Scoring System"""
 
-from .signal_scorer import SignalScorer, ScoreComponents
+from .signal_scorer import (
+    SignalScorer,
+    ScoreComponents,
+    ScorerConfig,
+    SignalDirection,
+    get_quality_tier
+)
 
-__all__ = ['SignalScorer', 'ScoreComponents']
+__all__ = [
+    'SignalScorer',
+    'ScoreComponents',
+    'ScorerConfig',
+    'SignalDirection',
+    'get_quality_tier'
+]

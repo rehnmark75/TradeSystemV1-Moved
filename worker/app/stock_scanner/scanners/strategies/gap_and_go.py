@@ -61,6 +61,28 @@ class GapAndGoConfig(ScannerConfig):
     atr_stop_multiplier: float = 1.5
     max_stop_loss_pct: float = 5.0  # Tighter stops for gaps
 
+    # =========================================================================
+    # FUNDAMENTAL FILTERS FOR GAP & GO
+    # Focus: Catalyst-driven moves, accept earnings gaps
+    # Note: Gaps often occur ON earnings, so we DON'T filter earnings date
+    # =========================================================================
+
+    # Valuation - gaps can happen at any valuation
+    max_pe_ratio: float = 100.0  # Very permissive for gap plays
+
+    # Growth - prefer growing companies for continuation
+    min_revenue_growth: float = -0.10  # Allow 10% revenue decline (turnaround gaps)
+
+    # Short interest - high short can ADD fuel to gaps (squeeze)
+    # Note: We DON'T filter out high short interest here - it can help
+    max_short_percent: float = None  # Disabled - shorts can amplify gaps
+
+    # Liquidity - critical for gaps (need to exit fast if wrong)
+    min_institutional_pct: float = 15.0  # Some institutional presence
+
+    # NO earnings filter - gaps often ARE the earnings reaction
+    days_to_earnings_min: int = None  # Disabled for gap plays
+
 
 class GapAndGoScanner(BaseScanner):
     """

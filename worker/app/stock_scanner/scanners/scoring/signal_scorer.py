@@ -2,10 +2,11 @@
 Signal Scoring System
 
 Multi-component scoring for trading signals:
-- Trend Score (30%): Price vs MAs, trend strength, crossovers
-- Momentum Score (25%): RSI, MACD, price momentum
-- Volume Score (20%): Relative volume, volume trend
+- Trend Score (25%): Price vs MAs, trend strength, crossovers
+- Momentum Score (20%): RSI, MACD, price momentum
+- Volume Score (15%): Relative volume, volume trend
 - Pattern Score (15%): Candlestick patterns, chart patterns
+- Fundamental Score (15%): Growth, profitability, financial health
 - Confluence Bonus (10%): Multiple confirming factors
 
 Total composite score: 0-100
@@ -34,13 +35,16 @@ class ScoreComponents:
     momentum_score: float = 0.0
     volume_score: float = 0.0
     pattern_score: float = 0.0
+    fundamental_score: float = 0.0
     confluence_bonus: float = 0.0
 
     # Weights (must sum to 1.0)
-    trend_weight: float = 0.30
-    momentum_weight: float = 0.25
-    volume_weight: float = 0.20
+    # Adjusted to include fundamentals: 25 + 20 + 15 + 15 + 15 + 10 = 100
+    trend_weight: float = 0.25
+    momentum_weight: float = 0.20
+    volume_weight: float = 0.15
     pattern_weight: float = 0.15
+    fundamental_weight: float = 0.15
     confluence_weight: float = 0.10
 
     # Contributing factors for explanation
@@ -48,6 +52,7 @@ class ScoreComponents:
     momentum_factors: List[str] = field(default_factory=list)
     volume_factors: List[str] = field(default_factory=list)
     pattern_factors: List[str] = field(default_factory=list)
+    fundamental_factors: List[str] = field(default_factory=list)
 
     @property
     def weighted_trend(self) -> float:
@@ -66,6 +71,10 @@ class ScoreComponents:
         return self.pattern_score * self.pattern_weight * 100
 
     @property
+    def weighted_fundamental(self) -> float:
+        return self.fundamental_score * self.fundamental_weight * 100
+
+    @property
     def weighted_confluence(self) -> float:
         return self.confluence_bonus * self.confluence_weight * 100
 
@@ -77,6 +86,7 @@ class ScoreComponents:
             self.weighted_momentum +
             self.weighted_volume +
             self.weighted_pattern +
+            self.weighted_fundamental +
             self.weighted_confluence
         )
         return int(min(100, max(0, total)))
@@ -88,7 +98,8 @@ class ScoreComponents:
             self.trend_factors +
             self.momentum_factors +
             self.volume_factors +
-            self.pattern_factors
+            self.pattern_factors +
+            self.fundamental_factors
         )
 
 
@@ -123,6 +134,46 @@ class ScorerConfig:
     # Confluence
     min_factors_for_bonus: int = 3
     confluence_per_factor: float = 0.15  # 15% bonus per additional factor
+
+    # ==========================================================================
+    # FUNDAMENTAL SCORING THRESHOLDS
+    # ==========================================================================
+
+    # Growth thresholds
+    strong_earnings_growth: float = 0.25  # 25%+ is excellent
+    good_earnings_growth: float = 0.10  # 10%+ is good
+    strong_revenue_growth: float = 0.20  # 20%+ is excellent
+    good_revenue_growth: float = 0.10  # 10%+ is good
+
+    # Profitability thresholds
+    strong_roe: float = 0.20  # 20%+ ROE is excellent
+    good_roe: float = 0.10  # 10%+ ROE is good
+    strong_profit_margin: float = 0.15  # 15%+ margin is excellent
+    good_profit_margin: float = 0.05  # 5%+ margin is good
+
+    # Valuation thresholds
+    value_pe_max: float = 15.0  # Low P/E (value play)
+    growth_pe_max: float = 40.0  # Reasonable P/E for growth
+    attractive_peg: float = 1.0  # PEG < 1 is attractive
+
+    # Financial health thresholds
+    low_debt: float = 0.5  # D/E < 0.5 is low debt
+    moderate_debt: float = 1.5  # D/E < 1.5 is moderate
+    healthy_current_ratio: float = 1.5  # Current ratio > 1.5 is healthy
+
+    # Short interest thresholds
+    high_short_interest: float = 15.0  # 15%+ is high
+    extreme_short_interest: float = 25.0  # 25%+ is extreme (squeeze potential)
+
+    # Institutional ownership
+    strong_institutional: float = 70.0  # 70%+ is strong
+    good_institutional: float = 40.0  # 40%+ is good
+
+    # Analyst sentiment
+    analyst_buy_boost: float = 0.3  # Bonus for buy rating
+
+    # Include fundamentals in scoring (can be disabled)
+    score_fundamentals: bool = True
 
 
 class SignalScorer:
@@ -162,7 +213,7 @@ class SignalScorer:
         Score a candidate for bullish (BUY) signal quality.
 
         Args:
-            candidate: Dictionary with technical data
+            candidate: Dictionary with technical and fundamental data
 
         Returns:
             ScoreComponents with all scoring details
@@ -174,6 +225,11 @@ class SignalScorer:
         self._score_momentum(candidate, components, SignalDirection.BULLISH)
         self._score_volume(candidate, components, SignalDirection.BULLISH)
         self._score_pattern(candidate, components, SignalDirection.BULLISH)
+
+        # Fundamental scoring (if data available and enabled)
+        if self.config.score_fundamentals:
+            self._score_fundamentals(candidate, components, SignalDirection.BULLISH)
+
         self._calculate_confluence_bonus(components)
 
         return components
@@ -183,7 +239,7 @@ class SignalScorer:
         Score a candidate for bearish (SELL) signal quality.
 
         Args:
-            candidate: Dictionary with technical data
+            candidate: Dictionary with technical and fundamental data
 
         Returns:
             ScoreComponents with all scoring details
@@ -195,6 +251,11 @@ class SignalScorer:
         self._score_momentum(candidate, components, SignalDirection.BEARISH)
         self._score_volume(candidate, components, SignalDirection.BEARISH)
         self._score_pattern(candidate, components, SignalDirection.BEARISH)
+
+        # Fundamental scoring (if data available and enabled)
+        if self.config.score_fundamentals:
+            self._score_fundamentals(candidate, components, SignalDirection.BEARISH)
+
         self._calculate_confluence_bonus(components)
 
         return components
@@ -561,6 +622,207 @@ class SignalScorer:
         components.pattern_factors = factors
 
     # =========================================================================
+    # FUNDAMENTAL SCORING (15% weight)
+    # =========================================================================
+
+    def _score_fundamentals(
+        self,
+        candidate: Dict[str, Any],
+        components: ScoreComponents,
+        direction: SignalDirection
+    ):
+        """
+        Score fundamental health and quality.
+
+        Factors:
+        - Growth (earnings, revenue)
+        - Profitability (ROE, profit margins)
+        - Valuation (P/E, PEG)
+        - Financial health (debt, current ratio)
+        - Institutional ownership
+        - Short interest (context-dependent)
+        - Analyst sentiment
+        """
+        score = 0.0
+        factors = []
+
+        # Check if fundamental data is available
+        has_fundamentals = candidate.get('trailing_pe') is not None or \
+                          candidate.get('earnings_growth') is not None or \
+                          candidate.get('return_on_equity') is not None
+
+        if not has_fundamentals:
+            # No fundamental data - give neutral score (0.5)
+            components.fundamental_score = 0.5
+            components.fundamental_factors = ['No fundamental data']
+            return
+
+        # =====================================================================
+        # GROWTH SCORING
+        # =====================================================================
+        earnings_growth = candidate.get('earnings_growth')
+        if earnings_growth is not None:
+            eg = float(earnings_growth)
+            if eg >= self.config.strong_earnings_growth:
+                score += 0.5
+                factors.append(f'Strong Earnings Growth (+{eg*100:.0f}%)')
+            elif eg >= self.config.good_earnings_growth:
+                score += 0.3
+                factors.append(f'Good Earnings Growth (+{eg*100:.0f}%)')
+            elif eg > 0:
+                score += 0.1
+            elif eg < -0.20:
+                score -= 0.2  # Penalty for earnings decline
+
+        revenue_growth = candidate.get('revenue_growth')
+        if revenue_growth is not None:
+            rg = float(revenue_growth)
+            if rg >= self.config.strong_revenue_growth:
+                score += 0.4
+                factors.append(f'Strong Revenue Growth (+{rg*100:.0f}%)')
+            elif rg >= self.config.good_revenue_growth:
+                score += 0.2
+            elif rg < -0.10:
+                score -= 0.1  # Penalty for revenue decline
+
+        # =====================================================================
+        # PROFITABILITY SCORING
+        # =====================================================================
+        roe = candidate.get('return_on_equity')
+        if roe is not None:
+            roe_val = float(roe)
+            if roe_val >= self.config.strong_roe:
+                score += 0.4
+                factors.append(f'Strong ROE ({roe_val*100:.0f}%)')
+            elif roe_val >= self.config.good_roe:
+                score += 0.2
+            elif roe_val < 0:
+                score -= 0.2  # Penalty for negative ROE
+
+        profit_margin = candidate.get('profit_margin')
+        if profit_margin is not None:
+            pm = float(profit_margin)
+            if pm >= self.config.strong_profit_margin:
+                score += 0.3
+                factors.append(f'High Margin ({pm*100:.0f}%)')
+            elif pm >= self.config.good_profit_margin:
+                score += 0.15
+            elif pm < 0:
+                score -= 0.2  # Penalty for losses
+
+        # =====================================================================
+        # VALUATION SCORING
+        # =====================================================================
+        pe = candidate.get('trailing_pe')
+        if pe is not None:
+            pe_val = float(pe)
+            if 0 < pe_val <= self.config.value_pe_max:
+                score += 0.4
+                factors.append(f'Value P/E ({pe_val:.1f})')
+            elif pe_val <= self.config.growth_pe_max:
+                score += 0.2
+            elif pe_val > 80:
+                score -= 0.2  # Penalty for extreme valuation
+
+        peg = candidate.get('peg_ratio')
+        if peg is not None:
+            peg_val = float(peg)
+            if 0 < peg_val < self.config.attractive_peg:
+                score += 0.4
+                factors.append(f'Attractive PEG ({peg_val:.2f})')
+            elif peg_val < 1.5:
+                score += 0.2
+            elif peg_val > 3:
+                score -= 0.1  # Slight penalty for expensive growth
+
+        # =====================================================================
+        # FINANCIAL HEALTH SCORING
+        # =====================================================================
+        debt_eq = candidate.get('debt_to_equity')
+        if debt_eq is not None:
+            de = float(debt_eq)
+            if de < self.config.low_debt:
+                score += 0.3
+                factors.append('Low Debt')
+            elif de < self.config.moderate_debt:
+                score += 0.1
+            elif de > 3.0:
+                score -= 0.3  # Penalty for high debt
+                factors.append('High Debt Risk')
+
+        current_ratio = candidate.get('current_ratio')
+        if current_ratio is not None:
+            cr = float(current_ratio)
+            if cr >= self.config.healthy_current_ratio:
+                score += 0.2
+                factors.append(f'Healthy Liquidity ({cr:.1f})')
+            elif cr < 1.0:
+                score -= 0.2  # Liquidity concern
+
+        # =====================================================================
+        # SHORT INTEREST SCORING (direction-dependent)
+        # =====================================================================
+        short_pct = candidate.get('short_percent_float')
+        if short_pct is not None:
+            sp = float(short_pct)
+            if direction == SignalDirection.BULLISH:
+                # For bullish: high short can be squeeze potential or danger
+                if sp >= self.config.extreme_short_interest:
+                    # Extreme short interest - potential squeeze but risky
+                    score += 0.1  # Small boost for squeeze potential
+                    factors.append(f'Short Squeeze Potential ({sp:.1f}%)')
+                elif sp >= self.config.high_short_interest:
+                    # Moderate high - slight headwind
+                    score -= 0.1
+                elif sp < 5:
+                    # Low short interest - bullish
+                    score += 0.1
+            else:  # BEARISH
+                # For bearish: high short might mean crowded trade
+                if sp >= self.config.extreme_short_interest:
+                    score -= 0.2  # Crowded short risk
+                    factors.append('Crowded Short Risk')
+                elif sp >= self.config.high_short_interest:
+                    score -= 0.1
+
+        # =====================================================================
+        # INSTITUTIONAL OWNERSHIP SCORING
+        # =====================================================================
+        inst_pct = candidate.get('institutional_percent')
+        if inst_pct is not None:
+            ip = float(inst_pct)
+            if ip >= self.config.strong_institutional:
+                score += 0.3
+                factors.append(f'High Institutional ({ip:.0f}%)')
+            elif ip >= self.config.good_institutional:
+                score += 0.15
+            elif ip < 15:
+                score -= 0.1  # Low institutional - less support
+
+        # =====================================================================
+        # ANALYST SENTIMENT SCORING
+        # =====================================================================
+        analyst_rating = candidate.get('analyst_rating')
+        if analyst_rating:
+            rating_str = str(analyst_rating).lower()
+            if direction == SignalDirection.BULLISH:
+                if 'strong buy' in rating_str or 'buy' in rating_str:
+                    score += self.config.analyst_buy_boost
+                    factors.append('Analyst: Buy')
+                elif 'sell' in rating_str:
+                    score -= 0.2
+            else:  # BEARISH
+                if 'sell' in rating_str:
+                    score += 0.2
+                    factors.append('Analyst: Sell')
+                elif 'strong buy' in rating_str:
+                    score -= 0.2
+
+        # Normalize to 0-1 (total possible ~3.5, normalize by 3.0)
+        components.fundamental_score = min(1.0, max(0.0, (score + 0.5) / 3.0))
+        components.fundamental_factors = factors
+
+    # =========================================================================
     # CONFLUENCE BONUS (10% weight)
     # =========================================================================
 
@@ -570,12 +832,13 @@ class SignalScorer:
 
         More independent confirming signals = higher conviction.
         """
-        # Count factors across all categories
+        # Count factors across all categories (now includes fundamentals)
         factor_count = (
             len(components.trend_factors) +
             len(components.momentum_factors) +
             len(components.volume_factors) +
-            len(components.pattern_factors)
+            len(components.pattern_factors) +
+            len(components.fundamental_factors)
         )
 
         if factor_count >= self.config.min_factors_for_bonus:

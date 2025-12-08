@@ -1011,13 +1011,21 @@ class StockAnalyticsService:
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
+        # Use a subquery to get only the latest signal per ticker/scanner combination
+        # This prevents showing stale signals when a new scan has been run
         query = f"""
+            WITH latest_signals AS (
+                SELECT DISTINCT ON (ticker, scanner_name)
+                    *
+                FROM stock_scanner_signals
+                WHERE {where_clause}
+                ORDER BY ticker, scanner_name, signal_timestamp DESC
+            )
             SELECT
                 s.*,
                 i.name as company_name
-            FROM stock_scanner_signals s
+            FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
-            WHERE {where_clause}
             ORDER BY s.composite_score DESC, s.signal_timestamp DESC
             LIMIT {limit}
         """

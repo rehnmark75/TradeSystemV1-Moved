@@ -61,6 +61,28 @@ class BreakoutConfig(ScannerConfig):
     # ATR for stops
     atr_stop_multiplier: float = 2.0  # Wider stops for breakouts
 
+    # =========================================================================
+    # FUNDAMENTAL FILTERS FOR BREAKOUT
+    # Focus: Avoid short squeezes, look for quality breakouts
+    # =========================================================================
+
+    # Valuation - growth stocks can have higher P/E
+    max_pe_ratio: float = 80.0  # Allow growth premium for breakouts
+
+    # Growth - strong growth drives breakouts
+    min_earnings_growth: float = 0.05  # 5%+ earnings growth
+    min_revenue_growth: float = 0.0  # At least flat revenue
+
+    # Short interest - IMPORTANT: avoid high short interest breakouts
+    # These can be short squeezes that reverse violently
+    max_short_percent: float = 25.0  # Avoid high short interest
+
+    # Institutional support - big money drives breakouts
+    min_institutional_pct: float = 30.0
+
+    # Avoid earnings uncertainty
+    days_to_earnings_min: int = 5  # No breakout plays right before earnings
+
 
 class BreakoutConfirmationScanner(BaseScanner):
     """

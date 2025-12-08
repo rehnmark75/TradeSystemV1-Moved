@@ -62,6 +62,26 @@ class MeanReversionConfig(ScannerConfig):
     atr_stop_multiplier: float = 1.5
     max_stop_loss_pct: float = 6.0  # Tighter stops for reversals
 
+    # =========================================================================
+    # FUNDAMENTAL FILTERS FOR MEAN REVERSION
+    # Focus: Financial health (stock can survive the downturn and bounce)
+    # =========================================================================
+
+    # Valuation - prefer value plays for mean reversion
+    max_pe_ratio: float = 40.0  # Not too expensive
+
+    # Profitability - MUST be profitable to avoid value traps
+    min_profit_margin: float = 0.02  # At least 2% margin
+    min_roe: float = 0.05  # 5% ROE minimum
+
+    # Financial health - CRITICAL for mean reversion
+    # Don't catch falling knives in distressed companies
+    max_debt_to_equity: float = 2.0  # Healthy debt load
+    min_current_ratio: float = 1.0  # Can cover short-term obligations
+
+    # Avoid earnings volatility
+    days_to_earnings_min: int = 10  # More buffer for reversal plays
+
 
 class MeanReversionScanner(BaseScanner):
     """

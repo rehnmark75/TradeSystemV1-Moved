@@ -1381,9 +1381,10 @@ def _render_signal_card(signal: Dict[str, Any]):
     setup = signal.get('setup_description', '')[:100]
     factors = signal.get('confluence_factors', [])
     if isinstance(factors, list):
-        factors_str = ', '.join(factors[:3])
+        # Show all factors, separating technical and fundamental
+        factors_str = ', '.join(factors)
     else:
-        factors_str = str(factors)[:50] if factors else ''
+        factors_str = str(factors) if factors else ''
 
     # Tier styling
     tier_colors = {
