@@ -8,13 +8,23 @@ Calculates screening metrics for stocks:
 - Moving averages (SMA20, SMA50, SMA200, EMA20)
 - Trend classification
 - RSI, MACD
+
+Enhanced signals (Finviz-inspired):
+- RSI signal classification (oversold/overbought)
+- SMA signal classification (above/below/crossover)
+- SMA cross detection (golden cross/death cross)
+- MACD cross signals
+- 52-week high/low proximity
+- Gap detection
+- Candlestick pattern recognition
+- Multi-timeframe performance (1W, 1M, 3M, 6M, YTD)
 """
 
 import asyncio
 import logging
 import numpy as np
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta, date
+from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +270,91 @@ class MetricsCalculator:
         # Data quality assessment
         metrics['data_quality'] = 'good' if len(rows) >= 50 else 'incomplete'
 
+        # ============================================================
+        # ENHANCED SIGNALS (Finviz-inspired)
+        # ============================================================
+
+        # Get opens for gap detection and candlestick patterns
+        opens = np.array([float(r['open']) for r in reversed(rows)])
+
+        # RSI Signal Classification
+        if metrics.get('rsi_14'):
+            metrics['rsi_signal'] = self._classify_rsi_signal(metrics['rsi_14'])
+
+        # SMA Signal Classifications (price relative to SMA)
+        if metrics.get('sma_20'):
+            metrics['sma20_signal'] = self._classify_sma_signal(
+                current_price, metrics['sma_20'],
+                closes[-2] if len(closes) >= 2 else None,
+                np.mean(closes[-21:-1]) if len(closes) >= 21 else None
+            )
+        if metrics.get('sma_50'):
+            metrics['sma50_signal'] = self._classify_sma_signal(
+                current_price, metrics['sma_50'],
+                closes[-2] if len(closes) >= 2 else None,
+                np.mean(closes[-51:-1]) if len(closes) >= 51 else None
+            )
+        if metrics.get('sma_200'):
+            metrics['sma200_signal'] = self._classify_sma_signal(
+                current_price, metrics['sma_200'],
+                closes[-2] if len(closes) >= 2 else None,
+                np.mean(closes[-201:-1]) if len(closes) >= 201 else None
+            )
+
+        # SMA Cross Signal (Golden Cross / Death Cross)
+        if len(closes) >= 201:
+            metrics['sma_cross_signal'] = self._detect_sma_cross(closes)
+
+        # MACD Cross Signal
+        if macd_vals and len(closes) >= 36:  # Need enough data for previous MACD
+            prev_macd = self._calculate_macd(closes[:-1])
+            if prev_macd:
+                metrics['macd_cross_signal'] = self._classify_macd_cross(
+                    macd_vals['histogram'],
+                    prev_macd['histogram']
+                )
+
+        # 52-Week High/Low (need ~252 trading days)
+        if len(highs) >= 200:  # Use available data, ideally 252
+            lookback = min(len(highs), 252)
+            high_52w = float(np.max(highs[-lookback:]))
+            low_52w = float(np.min(lows[-lookback:]))
+            metrics['high_52w'] = round(high_52w, 4)
+            metrics['low_52w'] = round(low_52w, 4)
+            metrics['pct_from_52w_high'] = round(((current_price - high_52w) / high_52w) * 100, 2)
+            metrics['pct_from_52w_low'] = round(((current_price - low_52w) / low_52w) * 100, 2)
+            metrics['high_low_signal'] = self._classify_high_low_signal(
+                metrics['pct_from_52w_high'],
+                metrics['pct_from_52w_low']
+            )
+
+        # Gap Detection
+        if len(opens) >= 2 and len(closes) >= 2:
+            gap_pct = ((opens[-1] - closes[-2]) / closes[-2]) * 100
+            metrics['gap_percent'] = round(gap_pct, 2)
+            metrics['gap_signal'] = self._classify_gap_signal(gap_pct)
+
+        # Candlestick Pattern Detection
+        if len(opens) >= 2:
+            pattern = self._detect_candlestick_pattern(opens, highs, lows, closes)
+            if pattern:
+                metrics['candlestick_pattern'] = pattern
+
+        # Multi-timeframe Performance
+        if len(closes) >= 6:  # 1 week
+            metrics['perf_1w'] = round(((closes[-1] / closes[-6]) - 1) * 100, 2)
+        if len(closes) >= 22:  # 1 month
+            metrics['perf_1m'] = round(((closes[-1] / closes[-22]) - 1) * 100, 2)
+        if len(closes) >= 66:  # 3 months
+            metrics['perf_3m'] = round(((closes[-1] / closes[-66]) - 1) * 100, 2)
+        if len(closes) >= 126:  # 6 months
+            metrics['perf_6m'] = round(((closes[-1] / closes[-126]) - 1) * 100, 2)
+
+        # YTD Performance (find first trading day of current year)
+        ytd_perf = await self._calculate_ytd_performance(ticker, current_price, calculation_date)
+        if ytd_perf is not None:
+            metrics['perf_ytd'] = round(ytd_perf, 2)
+
         # Save to database
         await self._save_metrics(metrics)
 
@@ -424,6 +519,291 @@ class MetricsCalculator:
 
         return 'mixed'
 
+    # ================================================================
+    # ENHANCED SIGNAL METHODS (Finviz-inspired)
+    # ================================================================
+
+    def _classify_rsi_signal(self, rsi: float) -> str:
+        """
+        Classify RSI into actionable signals.
+
+        Returns:
+            'oversold_extreme': RSI < 20 (strong buy zone)
+            'oversold': RSI 20-30 (buy zone)
+            'neutral': RSI 30-70
+            'overbought': RSI 70-80 (sell zone)
+            'overbought_extreme': RSI > 80 (strong sell zone)
+        """
+        if rsi < 20:
+            return 'oversold_extreme'
+        elif rsi < 30:
+            return 'oversold'
+        elif rsi > 80:
+            return 'overbought_extreme'
+        elif rsi > 70:
+            return 'overbought'
+        return 'neutral'
+
+    def _classify_sma_signal(
+        self,
+        current_price: float,
+        current_sma: float,
+        prev_price: Optional[float],
+        prev_sma: Optional[float]
+    ) -> str:
+        """
+        Classify price relationship to SMA.
+
+        Returns:
+            'crossed_above': Price just crossed above SMA (bullish)
+            'crossed_below': Price just crossed below SMA (bearish)
+            'above': Price is above SMA
+            'below': Price is below SMA
+        """
+        price_above = current_price > current_sma
+
+        # Check for crossover
+        if prev_price is not None and prev_sma is not None:
+            prev_above = prev_price > prev_sma
+            if price_above and not prev_above:
+                return 'crossed_above'
+            if not price_above and prev_above:
+                return 'crossed_below'
+
+        return 'above' if price_above else 'below'
+
+    def _detect_sma_cross(self, closes: np.ndarray) -> str:
+        """
+        Detect Golden Cross or Death Cross (SMA50 vs SMA200).
+
+        Returns:
+            'golden_cross': SMA50 just crossed above SMA200 (bullish)
+            'death_cross': SMA50 just crossed below SMA200 (bearish)
+            'bullish': SMA50 > SMA200
+            'bearish': SMA50 < SMA200
+        """
+        if len(closes) < 201:
+            return 'unknown'
+
+        # Current SMAs
+        sma_50 = np.mean(closes[-50:])
+        sma_200 = np.mean(closes[-200:])
+
+        # Previous day SMAs
+        sma_50_prev = np.mean(closes[-51:-1])
+        sma_200_prev = np.mean(closes[-201:-1])
+
+        sma50_above = sma_50 > sma_200
+        sma50_prev_above = sma_50_prev > sma_200_prev
+
+        # Check for crossover
+        if sma50_above and not sma50_prev_above:
+            return 'golden_cross'
+        if not sma50_above and sma50_prev_above:
+            return 'death_cross'
+
+        return 'bullish' if sma50_above else 'bearish'
+
+    def _classify_macd_cross(
+        self,
+        current_histogram: float,
+        prev_histogram: float
+    ) -> str:
+        """
+        Classify MACD histogram crossover.
+
+        Returns:
+            'bullish_cross': Histogram crossed above zero
+            'bearish_cross': Histogram crossed below zero
+            'bullish': Histogram positive
+            'bearish': Histogram negative
+        """
+        curr_positive = current_histogram > 0
+        prev_positive = prev_histogram > 0
+
+        if curr_positive and not prev_positive:
+            return 'bullish_cross'
+        if not curr_positive and prev_positive:
+            return 'bearish_cross'
+
+        return 'bullish' if curr_positive else 'bearish'
+
+    def _classify_high_low_signal(
+        self,
+        pct_from_high: float,
+        pct_from_low: float
+    ) -> str:
+        """
+        Classify price position relative to 52-week range.
+
+        Returns:
+            'new_high': At or above 52W high
+            'near_high': Within 5% of 52W high
+            'new_low': At or below 52W low
+            'near_low': Within 5% of 52W low
+            'middle': In the middle range
+        """
+        if pct_from_high >= 0:
+            return 'new_high'
+        elif pct_from_high >= -5:
+            return 'near_high'
+        elif pct_from_low <= 0:
+            return 'new_low'
+        elif pct_from_low <= 5:
+            return 'near_low'
+        return 'middle'
+
+    def _classify_gap_signal(self, gap_pct: float) -> str:
+        """
+        Classify gap size.
+
+        Returns:
+            'gap_up_large': Gap up > 4%
+            'gap_up': Gap up 2-4%
+            'gap_up_small': Gap up 0.5-2%
+            'gap_down_large': Gap down > 4%
+            'gap_down': Gap down 2-4%
+            'gap_down_small': Gap down 0.5-2%
+            'no_gap': Gap < 0.5%
+        """
+        if gap_pct >= 4:
+            return 'gap_up_large'
+        elif gap_pct >= 2:
+            return 'gap_up'
+        elif gap_pct >= 0.5:
+            return 'gap_up_small'
+        elif gap_pct <= -4:
+            return 'gap_down_large'
+        elif gap_pct <= -2:
+            return 'gap_down'
+        elif gap_pct <= -0.5:
+            return 'gap_down_small'
+        return 'no_gap'
+
+    def _detect_candlestick_pattern(
+        self,
+        opens: np.ndarray,
+        highs: np.ndarray,
+        lows: np.ndarray,
+        closes: np.ndarray
+    ) -> Optional[str]:
+        """
+        Detect common candlestick patterns on the latest candle.
+
+        Returns pattern name or None if no significant pattern detected.
+        """
+        if len(opens) < 2:
+            return None
+
+        # Current candle
+        o, h, l, c = opens[-1], highs[-1], lows[-1], closes[-1]
+        body = abs(c - o)
+        upper_shadow = h - max(o, c)
+        lower_shadow = min(o, c) - l
+        total_range = h - l
+
+        if total_range == 0:
+            return None
+
+        body_pct = body / total_range
+
+        # Previous candle
+        prev_o, prev_h, prev_l, prev_c = opens[-2], highs[-2], lows[-2], closes[-2]
+        prev_body = abs(prev_c - prev_o)
+
+        is_bullish = c > o
+        is_bearish = c < o
+        prev_bullish = prev_c > prev_o
+        prev_bearish = prev_c < prev_o
+
+        # Doji (body < 10% of range)
+        if body_pct < 0.1:
+            if upper_shadow > body * 2 and lower_shadow > body * 2:
+                return 'doji'
+            elif upper_shadow > lower_shadow * 2:
+                return 'gravestone_doji'
+            elif lower_shadow > upper_shadow * 2:
+                return 'dragonfly_doji'
+            return 'doji'
+
+        # Hammer (small body at top, long lower shadow, bullish reversal)
+        if lower_shadow > body * 2 and upper_shadow < body * 0.5:
+            if is_bullish:
+                return 'hammer'
+            else:
+                return 'hanging_man'
+
+        # Inverted Hammer / Shooting Star
+        if upper_shadow > body * 2 and lower_shadow < body * 0.5:
+            if is_bullish:
+                return 'inverted_hammer'
+            else:
+                return 'shooting_star'
+
+        # Engulfing patterns (need to compare with previous candle)
+        if prev_body > 0:
+            # Bullish Engulfing
+            if is_bullish and prev_bearish:
+                if o <= prev_c and c >= prev_o and body > prev_body:
+                    return 'bullish_engulfing'
+
+            # Bearish Engulfing
+            if is_bearish and prev_bullish:
+                if o >= prev_c and c <= prev_o and body > prev_body:
+                    return 'bearish_engulfing'
+
+        # Marubozu (no or very small shadows)
+        shadow_ratio = (upper_shadow + lower_shadow) / total_range
+        if shadow_ratio < 0.1:
+            if is_bullish:
+                return 'bullish_marubozu'
+            else:
+                return 'bearish_marubozu'
+
+        # Strong candles (body > 70% of range)
+        if body_pct > 0.7:
+            if is_bullish:
+                return 'strong_bullish'
+            else:
+                return 'strong_bearish'
+
+        return None
+
+    async def _calculate_ytd_performance(
+        self,
+        ticker: str,
+        current_price: float,
+        calculation_date
+    ) -> Optional[float]:
+        """Calculate Year-To-Date performance."""
+        try:
+            # Get the year from calculation_date
+            if isinstance(calculation_date, datetime):
+                year = calculation_date.year
+            else:
+                year = calculation_date.year
+
+            # Query for first trading day of the year
+            query = """
+                SELECT close
+                FROM stock_candles_synthesized
+                WHERE ticker = $1 AND timeframe = '1d'
+                  AND DATE(timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') >= $2
+                ORDER BY timestamp ASC
+                LIMIT 1
+            """
+            year_start = date(year, 1, 1)
+            rows = await self.db.fetch(query, ticker, year_start)
+
+            if rows:
+                year_start_price = float(rows[0]['close'])
+                if year_start_price > 0:
+                    return ((current_price / year_start_price) - 1) * 100
+        except Exception as e:
+            logger.debug(f"Error calculating YTD for {ticker}: {e}")
+
+        return None
+
     async def _get_tickers_with_daily_data(self) -> List[str]:
         """Get tickers that have synthesized daily data."""
         query = """
@@ -449,12 +829,21 @@ class MetricsCalculator:
                 rsi_14, macd, macd_signal, macd_histogram,
                 daily_range_percent, weekly_range_percent,
                 z_score_50, percentile_volume,
-                data_quality, candles_available
+                data_quality, candles_available,
+                rsi_signal, sma20_signal, sma50_signal, sma200_signal,
+                sma_cross_signal, macd_cross_signal,
+                high_52w, low_52w, pct_from_52w_high, pct_from_52w_low, high_low_signal,
+                gap_percent, gap_signal, candlestick_pattern,
+                perf_1w, perf_1m, perf_3m, perf_6m, perf_ytd
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18,
                 $19, $20, $21, $22, $23, $24, $25, $26, $27,
-                $28, $29, $30, $31, $32, $33
+                $28, $29, $30, $31, $32, $33,
+                $34, $35, $36, $37, $38, $39,
+                $40, $41, $42, $43, $44,
+                $45, $46, $47,
+                $48, $49, $50, $51, $52
             )
             ON CONFLICT (ticker, calculation_date)
             DO UPDATE SET
@@ -489,6 +878,25 @@ class MetricsCalculator:
                 percentile_volume = EXCLUDED.percentile_volume,
                 data_quality = EXCLUDED.data_quality,
                 candles_available = EXCLUDED.candles_available,
+                rsi_signal = EXCLUDED.rsi_signal,
+                sma20_signal = EXCLUDED.sma20_signal,
+                sma50_signal = EXCLUDED.sma50_signal,
+                sma200_signal = EXCLUDED.sma200_signal,
+                sma_cross_signal = EXCLUDED.sma_cross_signal,
+                macd_cross_signal = EXCLUDED.macd_cross_signal,
+                high_52w = EXCLUDED.high_52w,
+                low_52w = EXCLUDED.low_52w,
+                pct_from_52w_high = EXCLUDED.pct_from_52w_high,
+                pct_from_52w_low = EXCLUDED.pct_from_52w_low,
+                high_low_signal = EXCLUDED.high_low_signal,
+                gap_percent = EXCLUDED.gap_percent,
+                gap_signal = EXCLUDED.gap_signal,
+                candlestick_pattern = EXCLUDED.candlestick_pattern,
+                perf_1w = EXCLUDED.perf_1w,
+                perf_1m = EXCLUDED.perf_1m,
+                perf_3m = EXCLUDED.perf_3m,
+                perf_6m = EXCLUDED.perf_6m,
+                perf_ytd = EXCLUDED.perf_ytd,
                 created_at = NOW()
         """
 
@@ -526,5 +934,25 @@ class MetricsCalculator:
             metrics.get('z_score_50'),
             metrics.get('percentile_volume'),
             metrics.get('data_quality'),
-            metrics.get('candles_available')
+            metrics.get('candles_available'),
+            # Enhanced signals
+            metrics.get('rsi_signal'),
+            metrics.get('sma20_signal'),
+            metrics.get('sma50_signal'),
+            metrics.get('sma200_signal'),
+            metrics.get('sma_cross_signal'),
+            metrics.get('macd_cross_signal'),
+            metrics.get('high_52w'),
+            metrics.get('low_52w'),
+            metrics.get('pct_from_52w_high'),
+            metrics.get('pct_from_52w_low'),
+            metrics.get('high_low_signal'),
+            metrics.get('gap_percent'),
+            metrics.get('gap_signal'),
+            metrics.get('candlestick_pattern'),
+            metrics.get('perf_1w'),
+            metrics.get('perf_1m'),
+            metrics.get('perf_3m'),
+            metrics.get('perf_6m'),
+            metrics.get('perf_ytd'),
         )
