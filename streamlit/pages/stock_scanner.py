@@ -404,6 +404,57 @@ def render_watchlist_sidebar_filters():
     short_filter = st.sidebar.checkbox("High short interest (>10%)", value=False)
     filters['min_short_interest'] = 10.0 if short_filter else None
 
+    # Enhanced Signal Filters
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Technical Signals**")
+
+    rsi_signal_options = st.sidebar.multiselect(
+        "RSI Signal",
+        options=['oversold_extreme', 'oversold', 'neutral', 'overbought', 'overbought_extreme'],
+        default=[],
+        format_func=lambda x: x.replace('_', ' ').title(),
+        help="Filter by RSI classification"
+    )
+    filters['rsi_signals'] = rsi_signal_options if rsi_signal_options else None
+
+    sma_cross_options = st.sidebar.multiselect(
+        "SMA Cross",
+        options=['golden_cross', 'death_cross', 'bullish', 'bearish'],
+        default=[],
+        format_func=lambda x: x.replace('_', ' ').title(),
+        help="Golden Cross = SMA50 crossed above SMA200"
+    )
+    filters['sma_cross_signals'] = sma_cross_options if sma_cross_options else None
+
+    macd_cross_options = st.sidebar.multiselect(
+        "MACD Signal",
+        options=['bullish_cross', 'bearish_cross', 'bullish', 'bearish'],
+        default=[],
+        format_func=lambda x: x.replace('_', ' ').title(),
+        help="MACD histogram direction"
+    )
+    filters['macd_cross_signals'] = macd_cross_options if macd_cross_options else None
+
+    high_low_options = st.sidebar.multiselect(
+        "52W Position",
+        options=['new_high', 'near_high', 'neutral', 'near_low', 'new_low'],
+        default=[],
+        format_func=lambda x: x.replace('_', ' ').title(),
+        help="Position relative to 52-week high/low"
+    )
+    filters['high_low_signals'] = high_low_options if high_low_options else None
+
+    pattern_options = st.sidebar.multiselect(
+        "Candlestick Pattern",
+        options=['hammer', 'inverted_hammer', 'bullish_engulfing', 'bearish_engulfing',
+                 'doji', 'dragonfly_doji', 'gravestone_doji', 'hanging_man', 'shooting_star',
+                 'strong_bullish', 'strong_bearish', 'bullish_marubozu', 'bearish_marubozu'],
+        default=[],
+        format_func=lambda x: x.replace('_', ' ').title(),
+        help="Latest candlestick pattern"
+    )
+    filters['candlestick_patterns'] = pattern_options if pattern_options else None
+
     # Additional filters
     st.sidebar.markdown("---")
     has_signal = st.sidebar.checkbox("Has active signal", value=False)
@@ -450,7 +501,13 @@ def render_watchlist_tab(service):
             has_signal=filters['has_signal'],
             is_new_to_tier=filters['is_new_to_tier'],
             earnings_within_days=filters['earnings_within_days'],
-            min_short_interest=filters['min_short_interest']
+            min_short_interest=filters['min_short_interest'],
+            # Technical signal filters
+            rsi_signals=filters.get('rsi_signals'),
+            sma_cross_signals=filters.get('sma_cross_signals'),
+            macd_cross_signals=filters.get('macd_cross_signals'),
+            high_low_signals=filters.get('high_low_signals'),
+            candlestick_patterns=filters.get('candlestick_patterns')
         )
 
     # Results header
@@ -480,18 +537,65 @@ def render_watchlist_tab(service):
     display_df['Signal'] = display_df.apply(lambda row: row['latest_signal'] if row['signal_count'] > 0 else '-', axis=1)
     display_df['SMC'] = display_df['smc_trend'].apply(lambda x: x if x else '-')
     display_df['Zone'] = display_df['smc_zone'].apply(lambda x: x.replace('Extreme ', 'X-').replace('Equilibrium', 'EQ') if x else '-')
-    # Fundamentals columns
-    display_df['Earn'] = display_df['earnings_date'].apply(
-        lambda x: x.strftime('%m/%d') if pd.notnull(x) else '-'
-    )
-    display_df['Beta'] = display_df['beta'].apply(
-        lambda x: f"{x:.1f}" if pd.notnull(x) else '-'
-    )
-    display_df['Short%'] = display_df['short_percent_float'].apply(
-        lambda x: f"{x:.1f}%" if pd.notnull(x) and x > 0 else '-'
-    )
+    # Fundamentals columns (with safety checks for missing columns)
+    if 'earnings_date' in display_df.columns:
+        display_df['Earn'] = display_df['earnings_date'].apply(
+            lambda x: x.strftime('%m/%d') if pd.notnull(x) else '-'
+        )
+    else:
+        display_df['Earn'] = '-'
 
-    result_df = display_df[['rank_overall', 'tier', 'ticker', 'name', 'Score', 'Price', 'ATR%', '1D%', 'RSI', 'Trend', 'SMC', 'Earn', 'Beta', 'Short%', 'Signal']].rename(columns={
+    if 'beta' in display_df.columns:
+        display_df['Beta'] = display_df['beta'].apply(
+            lambda x: f"{x:.1f}" if pd.notnull(x) else '-'
+        )
+    else:
+        display_df['Beta'] = '-'
+
+    if 'short_percent_float' in display_df.columns:
+        display_df['Short%'] = display_df['short_percent_float'].apply(
+            lambda x: f"{x:.1f}%" if pd.notnull(x) and x > 0 else '-'
+        )
+    else:
+        display_df['Short%'] = '-'
+
+    # Enhanced signal columns (with safety checks)
+    if 'rsi_signal' in display_df.columns:
+        display_df['RSI_Sig'] = display_df['rsi_signal'].apply(
+            lambda x: x.replace('_', ' ').title() if x else '-'
+        )
+    else:
+        display_df['RSI_Sig'] = '-'
+
+    if 'sma_cross_signal' in display_df.columns:
+        display_df['SMA_X'] = display_df['sma_cross_signal'].apply(
+            lambda x: x.replace('_', ' ').title() if x else '-'
+        )
+    else:
+        display_df['SMA_X'] = '-'
+
+    if 'macd_cross_signal' in display_df.columns:
+        display_df['MACD_X'] = display_df['macd_cross_signal'].apply(
+            lambda x: x.replace('_', ' ').title() if x else '-'
+        )
+    else:
+        display_df['MACD_X'] = '-'
+
+    if 'high_low_signal' in display_df.columns:
+        display_df['52W'] = display_df['high_low_signal'].apply(
+            lambda x: x.replace('_', ' ').title() if x else '-'
+        )
+    else:
+        display_df['52W'] = '-'
+
+    if 'candlestick_pattern' in display_df.columns:
+        display_df['Pattern'] = display_df['candlestick_pattern'].apply(
+            lambda x: x.replace('_', ' ').title() if x else '-'
+        )
+    else:
+        display_df['Pattern'] = '-'
+
+    result_df = display_df[['rank_overall', 'tier', 'ticker', 'name', 'Score', 'Price', 'ATR%', '1D%', 'RSI', 'RSI_Sig', 'SMA_X', 'MACD_X', '52W', 'Pattern', 'SMC', 'Earn', 'Short%', 'Signal']].rename(columns={
         'rank_overall': 'Rank', 'tier': 'Tier', 'ticker': 'Ticker', 'name': 'Name'
     })
     result_df['Name'] = result_df['Name'].apply(lambda x: x[:18] + '...' if len(str(x)) > 18 else x)
@@ -549,7 +653,56 @@ def render_watchlist_tab(service):
             return 'background-color: #d1ecf1; color: #0c5460; font-weight: bold;'
         return ''
 
-    styled_df = result_df.style.map(style_tier, subset=['Tier']).map(style_signal, subset=['Signal']).map(style_smc, subset=['SMC']).map(style_change, subset=['1D%']).map(style_short, subset=['Short%']).map(style_earn, subset=['Earn'])
+    def style_rsi_signal(val):
+        """Color RSI signals - green for oversold (buy opportunity), red for overbought (sell opportunity)."""
+        val_lower = str(val).lower()
+        if 'oversold' in val_lower:
+            return 'background-color: #d4edda; color: #155724; font-weight: bold;'
+        elif 'overbought' in val_lower:
+            return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+        return ''
+
+    def style_cross_signal(val):
+        """Color cross signals - green for bullish, red for bearish."""
+        val_lower = str(val).lower()
+        if 'golden' in val_lower or 'bullish' in val_lower:
+            return 'color: #28a745; font-weight: bold;'
+        elif 'death' in val_lower or 'bearish' in val_lower:
+            return 'color: #dc3545; font-weight: bold;'
+        return ''
+
+    def style_52w_signal(val):
+        """Color 52-week position signals."""
+        val_lower = str(val).lower()
+        if 'new high' in val_lower or 'near high' in val_lower:
+            return 'background-color: #d4edda; color: #155724; font-weight: bold;'
+        elif 'new low' in val_lower or 'near low' in val_lower:
+            return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+        return ''
+
+    def style_pattern(val):
+        """Color candlestick patterns - bullish green, bearish red."""
+        val_lower = str(val).lower()
+        bullish_patterns = ['hammer', 'bullish engulfing', 'morning star', 'piercing', 'three white']
+        bearish_patterns = ['hanging man', 'bearish engulfing', 'evening star', 'dark cloud', 'three black']
+        if any(p in val_lower for p in bullish_patterns):
+            return 'color: #28a745; font-weight: bold;'
+        elif any(p in val_lower for p in bearish_patterns):
+            return 'color: #dc3545; font-weight: bold;'
+        return ''
+
+    styled_df = (result_df.style
+        .map(style_tier, subset=['Tier'])
+        .map(style_signal, subset=['Signal'])
+        .map(style_smc, subset=['SMC'])
+        .map(style_change, subset=['1D%'])
+        .map(style_short, subset=['Short%'])
+        .map(style_earn, subset=['Earn'])
+        .map(style_rsi_signal, subset=['RSI_Sig'])
+        .map(style_cross_signal, subset=['SMA_X', 'MACD_X'])
+        .map(style_52w_signal, subset=['52W'])
+        .map(style_pattern, subset=['Pattern'])
+    )
 
     st.dataframe(styled_df, use_container_width=True, hide_index=True, height=500)
 
@@ -935,6 +1088,182 @@ def render_deep_dive_tab(service):
 
 
 # =============================================================================
+# TOP PICKS TAB
+# =============================================================================
+
+def render_top_picks_tab(service):
+    """Render the Daily Top Picks tab."""
+    st.markdown("""
+    <div class="main-header">
+        <h2>Daily Top Picks</h2>
+        <p>High-quality BUY candidates ranked by signal confluence and quality metrics</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.spinner("Generating top picks..."):
+        picks_data = service.get_daily_top_picks()
+
+    if not picks_data or picks_data.get('total_picks', 0) == 0:
+        st.warning("No top picks available. Please ensure the metrics have been calculated.")
+        return
+
+    # Header stats
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Total Picks", picks_data['total_picks'])
+    col2.metric("Momentum", len(picks_data.get('momentum', [])))
+    col3.metric("Breakout", len(picks_data.get('breakout', [])))
+    col4.metric("Bounce Plays", len(picks_data.get('mean_reversion', [])))
+    col5.metric("Data Date", picks_data.get('date', 'N/A'))
+
+    st.markdown("---")
+
+    # Render each category
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        _render_picks_category(
+            "Momentum Riders",
+            "Trending stocks with bullish confirmation signals",
+            picks_data.get('momentum', []),
+            "#1a5f7a"
+        )
+
+    with col2:
+        _render_picks_category(
+            "Breakout Watch",
+            "Stocks near 52W highs with volume surge",
+            picks_data.get('breakout', []),
+            "#28a745"
+        )
+
+    with col3:
+        _render_picks_category(
+            "Bounce Plays",
+            "Oversold stocks showing reversal patterns",
+            picks_data.get('mean_reversion', []),
+            "#6f42c1"
+        )
+
+    # Detailed table view
+    st.markdown("---")
+    st.markdown("### All Picks - Detailed View")
+
+    all_picks = (
+        picks_data.get('momentum', []) +
+        picks_data.get('breakout', []) +
+        picks_data.get('mean_reversion', [])
+    )
+
+    if all_picks:
+        # Sort by total_score descending
+        all_picks.sort(key=lambda x: x['total_score'], reverse=True)
+
+        df_data = []
+        for p in all_picks:
+            df_data.append({
+                'Ticker': p['ticker'],
+                'Name': p.get('name', '')[:20] + '...' if len(p.get('name', '')) > 20 else p.get('name', ''),
+                'Category': p['category'],
+                'Score': f"{p['total_score']:.0f}",
+                'Tier': p['tier'],
+                'Price': f"${p['current_price']:.2f}",
+                '1D%': f"{p['price_change_1d']:+.1f}%" if p['price_change_1d'] else '-',
+                'RVol': f"{p['relative_volume']:.1f}x" if p['relative_volume'] else '-',
+                'ATR%': f"{p['atr_percent']:.1f}%",
+                'Signals': p.get('signals_summary', '-')[:30],
+                'Stop%': f"-{p['suggested_stop_pct']:.1f}%",
+                'R/R': f"{p['risk_reward_ratio']:.1f}:1" if p['risk_reward_ratio'] else '-'
+            })
+
+        df = pd.DataFrame(df_data)
+
+        def style_category(val):
+            colors = {
+                'Momentum': '#1a5f7a',
+                'Breakout': '#28a745',
+                'Mean Reversion': '#6f42c1'
+            }
+            return f'background-color: {colors.get(val, "#fff")}; color: white; font-weight: bold;'
+
+        def style_tier(val):
+            colors = {1: '#28a745', 2: '#17a2b8', 3: '#ffc107'}
+            text_colors = {1: 'white', 2: 'white', 3: 'black'}
+            return f'background-color: {colors.get(val, "#fff")}; color: {text_colors.get(val, "black")}; font-weight: bold;'
+
+        def style_change(val):
+            if '+' in str(val):
+                return 'color: #28a745;'
+            elif '-' in str(val) and val != '-':
+                return 'color: #dc3545;'
+            return ''
+
+        styled_df = df.style.map(style_category, subset=['Category']).map(style_tier, subset=['Tier']).map(style_change, subset=['1D%'])
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
+
+        # Export button
+        csv = df.to_csv(index=False)
+        st.download_button(
+            "Export Top Picks CSV",
+            csv,
+            f"top_picks_{picks_data.get('date', 'unknown')}.csv",
+            "text/csv"
+        )
+
+    # Stats section
+    if picks_data.get('stats'):
+        st.markdown("---")
+        st.markdown("### Analysis Summary")
+        stats = picks_data['stats']
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Candidates Analyzed", stats.get('candidates_analyzed', 0))
+        col2.metric("Avg Momentum Score", stats.get('avg_score_momentum', 0))
+        col3.metric("Avg Breakout Score", stats.get('avg_score_breakout', 0))
+        col4.metric("Avg Bounce Score", stats.get('avg_score_reversion', 0))
+
+
+def _render_picks_category(title: str, description: str, picks: List[Dict], color: str):
+    """Render a single category of picks as cards."""
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, {color} 0%, {color}cc 100%); padding: 0.8rem; border-radius: 10px; color: white; margin-bottom: 0.8rem;">
+        <h4 style="margin: 0;">{title}</h4>
+        <p style="margin: 0.2rem 0 0 0; font-size: 0.8rem; opacity: 0.9;">{description}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not picks:
+        st.info("No picks in this category today")
+        return
+
+    for pick in picks:
+        change_color = "#28a745" if pick['price_change_1d'] >= 0 else "#dc3545"
+        tier_colors = {1: '#28a745', 2: '#17a2b8', 3: '#ffc107'}
+        tier_color = tier_colors.get(pick['tier'], '#6c757d')
+
+        st.markdown(f"""
+        <div style="background: #f8f9fa; padding: 0.7rem; border-radius: 8px; margin-bottom: 0.5rem; border-left: 4px solid {color};">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: bold; font-size: 1.1rem;">{pick['ticker']}</span>
+                <span style="background: {tier_color}; color: white; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.75rem;">T{pick['tier']}</span>
+            </div>
+            <div style="font-size: 0.85rem; color: #555; margin-top: 0.2rem;">
+                ${pick['current_price']:.2f} <span style="color: {change_color};">({pick['price_change_1d']:+.1f}%)</span>
+            </div>
+            <div style="font-size: 0.8rem; margin-top: 0.3rem;">
+                <span style="background: #e9ecef; padding: 0.1rem 0.3rem; border-radius: 3px;">Score: {pick['total_score']:.0f}</span>
+                <span style="background: #e9ecef; padding: 0.1rem 0.3rem; border-radius: 3px; margin-left: 0.3rem;">Vol: {pick['relative_volume']:.1f}x</span>
+            </div>
+            <div style="font-size: 0.75rem; color: #666; margin-top: 0.3rem;">
+                {pick.get('signals_summary', '')[:40]}
+            </div>
+            <div style="font-size: 0.75rem; color: #888; margin-top: 0.2rem;">
+                Stop: -{pick['suggested_stop_pct']:.1f}% | R/R: {pick['risk_reward_ratio']:.1f}:1
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# =============================================================================
 # MAIN APPLICATION
 # =============================================================================
 
@@ -943,7 +1272,7 @@ def main():
     service = get_stock_service()
 
     # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📋 Watchlist", "📡 Signals", "🔍 Deep Dive"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "📋 Watchlist", "📡 Signals", "🎯 Top Picks", "🔍 Deep Dive"])
 
     with tab1:
         render_overview_tab(service)
@@ -955,6 +1284,9 @@ def main():
         render_signals_tab(service)
 
     with tab4:
+        render_top_picks_tab(service)
+
+    with tab5:
         render_deep_dive_tab(service)
 
 
