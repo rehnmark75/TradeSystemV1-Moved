@@ -970,6 +970,148 @@ class StockAnalyticsService:
             'risk_reward_ratio': round(2.0 / suggested_stop_pct * atr_pct, 2) if suggested_stop_pct > 0 else 0
         }
 
+    # =========================================================================
+    # SCANNER SIGNALS
+    # =========================================================================
+
+    @st.cache_data(ttl=60)
+    def get_scanner_signals(
+        _self,
+        scanner_name: str = None,
+        status: str = 'active',
+        min_score: int = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get scanner signals from database.
+
+        Args:
+            scanner_name: Filter by specific scanner
+            status: Filter by status ('active', 'triggered', 'closed', etc.)
+            min_score: Minimum composite score
+            limit: Maximum results
+
+        Returns:
+            List of signal dictionaries
+        """
+        conditions = []
+        params = []
+
+        if scanner_name:
+            params.append(scanner_name)
+            conditions.append("scanner_name = %s")
+
+        if status:
+            params.append(status)
+            conditions.append("status = %s")
+
+        if min_score:
+            params.append(min_score)
+            conditions.append("composite_score >= %s")
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        query = f"""
+            SELECT
+                s.*,
+                i.name as company_name
+            FROM stock_scanner_signals s
+            LEFT JOIN stock_instruments i ON s.ticker = i.ticker
+            WHERE {where_clause}
+            ORDER BY s.composite_score DESC, s.signal_timestamp DESC
+            LIMIT {limit}
+        """
+
+        return _self._execute_query(query, tuple(params) if params else None)
+
+    @st.cache_data(ttl=60)
+    def get_scanner_stats(_self) -> Dict[str, Any]:
+        """Get statistics about scanner signals."""
+        conn = _self._get_connection()
+        if not conn:
+            return {}
+
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Total signals
+                cursor.execute("""
+                    SELECT
+                        COUNT(*) as total_signals,
+                        COUNT(*) FILTER (WHERE status = 'active') as active_signals,
+                        COUNT(*) FILTER (WHERE quality_tier IN ('A+', 'A')) as high_quality,
+                        COUNT(*) FILTER (WHERE DATE(signal_timestamp) = CURRENT_DATE) as today_signals
+                    FROM stock_scanner_signals
+                """)
+                totals = dict(cursor.fetchone())
+
+                # By scanner
+                cursor.execute("""
+                    SELECT
+                        scanner_name,
+                        COUNT(*) as signal_count,
+                        ROUND(AVG(composite_score)::numeric, 1) as avg_score,
+                        COUNT(*) FILTER (WHERE status = 'active') as active_count
+                    FROM stock_scanner_signals
+                    GROUP BY scanner_name
+                    ORDER BY signal_count DESC
+                """)
+                by_scanner = [dict(r) for r in cursor.fetchall()]
+
+                # By tier
+                cursor.execute("""
+                    SELECT
+                        quality_tier,
+                        COUNT(*) as count
+                    FROM stock_scanner_signals
+                    WHERE status = 'active'
+                    GROUP BY quality_tier
+                    ORDER BY
+                        CASE quality_tier
+                            WHEN 'A+' THEN 1
+                            WHEN 'A' THEN 2
+                            WHEN 'B' THEN 3
+                            WHEN 'C' THEN 4
+                            WHEN 'D' THEN 5
+                        END
+                """)
+                by_tier = {r['quality_tier']: r['count'] for r in cursor.fetchall()}
+
+                return {
+                    **totals,
+                    'by_scanner': by_scanner,
+                    'by_tier': by_tier
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to get scanner stats: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    @st.cache_data(ttl=300)
+    def get_scanner_performance(_self, days: int = 30) -> List[Dict[str, Any]]:
+        """Get scanner performance history."""
+        query = """
+            SELECT *
+            FROM stock_scanner_performance
+            WHERE evaluation_date >= CURRENT_DATE - INTERVAL '%s days'
+            ORDER BY evaluation_date DESC, scanner_name
+        """
+        return _self._execute_query(query, (days,))
+
+    def get_signal_details(_self, signal_id: int) -> Dict[str, Any]:
+        """Get detailed information about a specific signal."""
+        results = _self._execute_query("""
+            SELECT
+                s.*,
+                i.name as company_name,
+                i.sector
+            FROM stock_scanner_signals s
+            LEFT JOIN stock_instruments i ON s.ticker = i.ticker
+            WHERE s.id = %s
+        """, (signal_id,))
+        return results[0] if results else {}
+
 
 # Singleton instance
 @st.cache_resource

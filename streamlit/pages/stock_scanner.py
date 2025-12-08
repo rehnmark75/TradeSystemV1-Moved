@@ -1264,6 +1264,201 @@ def _render_picks_category(title: str, description: str, picks: List[Dict], colo
 
 
 # =============================================================================
+# SCANNER SIGNALS TAB
+# =============================================================================
+
+def render_scanner_signals_tab(service):
+    """Render the Scanner Signals tab - automated signal scanner results."""
+    st.markdown("""
+    <div class="main-header">
+        <h2>Signal Scanners</h2>
+        <p>Automated trading signals with entry, stop-loss, and take-profit levels</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Get scanner stats
+    stats = service.get_scanner_stats()
+
+    if not stats:
+        st.info("No scanner signals available yet. Run the scanner to generate signals.")
+        return
+
+    # Top metrics
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Active Signals", stats.get('active_signals', 0))
+    col2.metric("High Quality (A/A+)", stats.get('high_quality', 0))
+    col3.metric("Today's Signals", stats.get('today_signals', 0))
+    col4.metric("Total Signals", stats.get('total_signals', 0))
+
+    st.markdown("---")
+
+    # Filters
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        scanner_filter = st.selectbox(
+            "Scanner",
+            ["All Scanners", "trend_momentum", "breakout_confirmation", "mean_reversion", "gap_and_go"]
+        )
+
+    with col2:
+        tier_filter = st.selectbox(
+            "Quality Tier",
+            ["All Tiers", "A+", "A", "B", "C"]
+        )
+
+    with col3:
+        status_filter = st.selectbox(
+            "Status",
+            ["active", "triggered", "closed", "expired", "All"]
+        )
+
+    # Get filtered signals
+    scanner_name = None if scanner_filter == "All Scanners" else scanner_filter
+    status = None if status_filter == "All" else status_filter
+    min_score = {'A+': 85, 'A': 70, 'B': 60, 'C': 50}.get(tier_filter)
+
+    signals = service.get_scanner_signals(
+        scanner_name=scanner_name,
+        status=status,
+        min_score=min_score,
+        limit=100
+    )
+
+    if not signals:
+        st.info("No signals match the current filters.")
+        return
+
+    # Display signals
+    st.markdown(f"### Showing {len(signals)} Signals")
+
+    # Signal cards layout
+    for i, signal in enumerate(signals):
+        _render_signal_card(signal)
+
+    # Export section
+    st.markdown("---")
+    st.markdown("### Export")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # CSV export
+        if signals:
+            csv_data = _signals_to_csv(signals)
+            st.download_button(
+                "Download CSV (TradingView)",
+                csv_data,
+                f"scanner_signals_{datetime.now().strftime('%Y%m%d')}.csv",
+                "text/csv"
+            )
+
+    with col2:
+        # Symbol list export
+        if signals:
+            symbols = "\n".join([f"NASDAQ:{s['ticker']}" for s in signals])
+            st.download_button(
+                "Download Symbol List",
+                symbols,
+                f"watchlist_{datetime.now().strftime('%Y%m%d')}.txt",
+                "text/plain"
+            )
+
+
+def _render_signal_card(signal: Dict[str, Any]):
+    """Render a single signal card using native Streamlit components."""
+    tier = signal.get('quality_tier', 'D')
+    ticker = signal.get('ticker', 'N/A')
+    scanner = signal.get('scanner_name', '').replace('_', ' ').title()
+    score = signal.get('composite_score', 0)
+    entry = float(signal.get('entry_price', 0))
+    stop = float(signal.get('stop_loss', 0))
+    tp1 = float(signal.get('take_profit_1', 0))
+    tp2 = float(signal.get('take_profit_2', 0)) if signal.get('take_profit_2') else None
+    risk_pct = float(signal.get('risk_percent', 0))
+    rr = float(signal.get('risk_reward_ratio', 0))
+    setup = signal.get('setup_description', '')[:100]
+    factors = signal.get('confluence_factors', [])
+    if isinstance(factors, list):
+        factors_str = ', '.join(factors[:3])
+    else:
+        factors_str = str(factors)[:50] if factors else ''
+
+    # Tier styling
+    tier_colors = {
+        'A+': 'green', 'A': 'blue', 'B': 'orange', 'C': 'gray', 'D': 'red'
+    }
+    tier_color = tier_colors.get(tier, 'gray')
+
+    # Scanner styling
+    scanner_icons = {
+        'Trend Momentum': '📈',
+        'Breakout Confirmation': '🚀',
+        'Mean Reversion': '🔄',
+        'Gap And Go': '⚡'
+    }
+    scanner_icon = scanner_icons.get(scanner, '📊')
+
+    # Use expander for each signal card
+    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}", expanded=True):
+        # Metrics row
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Entry", f"${entry:.2f}")
+        with col2:
+            st.metric("Stop Loss", f"${stop:.2f}")
+        with col3:
+            st.metric("Target 1", f"${tp1:.2f}")
+        with col4:
+            st.metric("Risk", f"{risk_pct:.1f}%")
+        with col5:
+            st.metric("R:R", f"{rr:.1f}:1")
+
+        # Setup description
+        if setup:
+            st.caption(f"**Setup:** {setup}")
+
+        # Confluence factors
+        if factors_str:
+            st.caption(f"**Factors:** {factors_str}")
+
+
+def _signals_to_csv(signals: List[Dict]) -> str:
+    """Convert signals to CSV format."""
+    import io
+    import csv
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Header
+    writer.writerow([
+        'Symbol', 'Side', 'Entry', 'Stop', 'TP1', 'TP2',
+        'Risk%', 'R:R', 'Score', 'Tier', 'Scanner', 'Setup'
+    ])
+
+    # Data
+    for s in signals:
+        writer.writerow([
+            s.get('ticker', ''),
+            s.get('signal_type', 'BUY'),
+            f"{float(s.get('entry_price', 0)):.2f}",
+            f"{float(s.get('stop_loss', 0)):.2f}",
+            f"{float(s.get('take_profit_1', 0)):.2f}",
+            f"{float(s.get('take_profit_2', 0)):.2f}" if s.get('take_profit_2') else '',
+            f"{float(s.get('risk_percent', 0)):.1f}",
+            f"{float(s.get('risk_reward_ratio', 0)):.1f}",
+            s.get('composite_score', 0),
+            s.get('quality_tier', 'D'),
+            s.get('scanner_name', ''),
+            (s.get('setup_description', '') or '')[:50]
+        ])
+
+    return output.getvalue()
+
+
+# =============================================================================
 # MAIN APPLICATION
 # =============================================================================
 
@@ -1272,7 +1467,10 @@ def main():
     service = get_stock_service()
 
     # Create tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "📋 Watchlist", "📡 Signals", "🎯 Top Picks", "🔍 Deep Dive"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Overview", "📋 Watchlist", "📡 Signals",
+        "🎯 Top Picks", "🔎 Scanners", "🔍 Deep Dive"
+    ])
 
     with tab1:
         render_overview_tab(service)
@@ -1287,6 +1485,9 @@ def main():
         render_top_picks_tab(service)
 
     with tab5:
+        render_scanner_signals_tab(service)
+
+    with tab6:
         render_deep_dive_tab(service)
 
 

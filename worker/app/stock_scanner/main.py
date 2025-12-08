@@ -354,6 +354,54 @@ class StockScannerCLI:
             print(f"[ERROR] API test error: {e}")
             return False
 
+    async def cmd_run_scanners(self, scanner_name: str = None, save: bool = True):
+        """Run signal scanners to generate trading signals"""
+        print("\n[SCAN] Running Signal Scanners...")
+        print("=" * 60)
+
+        try:
+            from .scanners import ScannerManager, TradingViewExporter
+
+            # Initialize scanner manager
+            enabled = [scanner_name] if scanner_name else None
+            manager = ScannerManager(self.db, enabled_scanners=enabled)
+            await manager.initialize()
+
+            print(f"[INFO] Enabled scanners: {', '.join(manager.scanner_names)}")
+
+            # Run all scanners
+            signals = await manager.run_all_scanners(save_to_db=save)
+
+            # Print results
+            stats = manager.get_scan_stats()
+            print(f"\n[RESULTS]")
+            print(f"   Total Signals: {len(signals)}")
+            print(f"   High Quality (A/A+): {stats.get('high_quality_count', 0)}")
+
+            if signals:
+                print(f"\n[TOP SIGNALS]")
+                for i, signal in enumerate(signals[:10], 1):
+                    print(f"   {i}. {signal.ticker:6} | {signal.quality_tier.value:3} | "
+                          f"Score: {signal.composite_score:3} | "
+                          f"Entry: ${float(signal.entry_price):7.2f} | "
+                          f"Stop: ${float(signal.stop_loss):7.2f} | "
+                          f"{signal.scanner_name}")
+
+                # Export option
+                exporter = TradingViewExporter()
+                csv_content = exporter.to_csv(signals)
+                print(f"\n[EXPORT] CSV Preview (first 5 lines):")
+                for line in csv_content.split('\n')[:6]:
+                    print(f"   {line}")
+
+            print("\n" + "=" * 60)
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Scanner error: {e}")
+            logger.exception("Scanner error")
+            return False
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser"""
@@ -418,6 +466,21 @@ def create_parser() -> argparse.ArgumentParser:
     # test-api
     subparsers.add_parser("test-api", help="Test RoboMarkets API connection")
 
+    # run-scanners
+    scan_parser = subparsers.add_parser(
+        "run-scanners",
+        help="Run signal scanners to generate trading signals"
+    )
+    scan_parser.add_argument(
+        "--scanner",
+        help="Specific scanner to run (trend_momentum, breakout_confirmation, mean_reversion, gap_and_go)"
+    )
+    scan_parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help="Don't save signals to database"
+    )
+
     return parser
 
 
@@ -457,6 +520,11 @@ async def main():
             success = await cli.cmd_migrate()
         elif args.command == "test-api":
             success = await cli.cmd_test_api()
+        elif args.command == "run-scanners":
+            success = await cli.cmd_run_scanners(
+                scanner_name=getattr(args, "scanner", None),
+                save=not getattr(args, "no_save", False)
+            )
         else:
             parser.print_help()
             success = False
