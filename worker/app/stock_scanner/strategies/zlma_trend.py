@@ -80,7 +80,7 @@ class ZeroLagMATrendStrategy:
         Scan all stocks (or filtered by tier) for ZLMA signals.
 
         Args:
-            calculation_date: Date to scan (defaults to yesterday)
+            calculation_date: Date to scan (defaults to latest available)
             tier_filter: Only scan stocks in this tier (1-4)
 
         Returns:
@@ -92,8 +92,18 @@ class ZeroLagMATrendStrategy:
 
         start_time = datetime.now()
 
+        # Get the latest calculation date from metrics if not specified
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = await self._get_latest_calculation_date()
+            if calculation_date is None:
+                logger.error("No calculation date available in stock_screening_metrics")
+                return []
+
+        # Ensure calculation_date is a date object
+        if hasattr(calculation_date, 'date'):
+            calculation_date = calculation_date.date()
+
+        logger.info(f"Scanning for date: {calculation_date}")
 
         # Get tickers to scan
         if tier_filter:
@@ -137,7 +147,13 @@ class ZeroLagMATrendStrategy:
         Returns signal if crossover occurred on calculation_date.
         """
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = await self._get_latest_calculation_date()
+            if calculation_date is None:
+                return None
+
+        # Ensure calculation_date is a date object
+        if hasattr(calculation_date, 'date'):
+            calculation_date = calculation_date.date()
 
         # Fetch daily candles (need enough for ATR calculation)
         candles = await self._get_daily_candles(ticker, limit=250)
@@ -151,10 +167,21 @@ class ZeroLagMATrendStrategy:
         lows = np.array([float(c['low']) for c in candles])
         timestamps = [c['timestamp'] for c in candles]
 
-        # Check if latest candle is for calculation_date
-        latest_date = timestamps[-1].date() if hasattr(timestamps[-1], 'date') else timestamps[-1]
-        if latest_date != calculation_date:
-            return None  # No data for this date
+        # Check if latest candle is for calculation_date (with flexibility)
+        latest_ts = timestamps[-1]
+        if hasattr(latest_ts, 'date'):
+            latest_date = latest_ts.date()
+        elif hasattr(latest_ts, 'day'):
+            latest_date = latest_ts
+        else:
+            # Handle case where timestamp is a date string
+            latest_date = latest_ts
+
+        # Allow signals if we have recent data (within 3 days of calculation_date)
+        if hasattr(latest_date, 'toordinal') and hasattr(calculation_date, 'toordinal'):
+            days_diff = abs(calculation_date.toordinal() - latest_date.toordinal())
+            if days_diff > 3:
+                return None  # Data too old
 
         # Calculate indicators
         ema = self._calculate_ema(closes, self.config.length)
@@ -329,6 +356,18 @@ class ZeroLagMATrendStrategy:
         """
         rows = await self.db.fetch(query, ticker, limit)
         return [dict(r) for r in rows]
+
+    async def _get_latest_calculation_date(self):
+        """Get the latest calculation date from screening metrics."""
+        query = """
+            SELECT MAX(calculation_date) as latest_date
+            FROM stock_screening_metrics
+            WHERE data_quality = 'good'
+        """
+        row = await self.db.fetchrow(query)
+        if row and row['latest_date']:
+            return row['latest_date']
+        return None
 
     async def _get_qualified_tickers(
         self,

@@ -11,3 +11,5 @@ requests>=2.25.0
 # TradingView integration dependencies
 beautifulsoup4>=4.12.2
 aiohttp>=3.9.0
+# Claude AI integration
+anthropic>=0.70.0

@@ -23,6 +23,9 @@ from .strategies import (
     BreakoutConfirmationScanner,
     MeanReversionScanner,
     GapAndGoScanner,
+    EarningsMomentumScanner,
+    ShortSqueezeScanner,
+    SectorRotationScanner,
 )
 
 # Claude analysis imports (lazy load to avoid circular imports)
@@ -68,6 +71,9 @@ class ScannerManager:
         'breakout_confirmation': BreakoutConfirmationScanner,
         'mean_reversion': MeanReversionScanner,
         'gap_and_go': GapAndGoScanner,
+        'earnings_momentum': EarningsMomentumScanner,
+        'short_squeeze': ShortSqueezeScanner,
+        'sector_rotation': SectorRotationScanner,
     }
 
     def __init__(

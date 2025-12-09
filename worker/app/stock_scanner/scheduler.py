@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
-Stock Scanner Scheduler - Enhanced Pipeline
+Stock Scanner Scheduler - Enhanced Multi-Scan Pipeline
 
-Runs the complete daily stock analysis pipeline:
+Runs multiple daily stock analysis scans:
+1. Pre-Market (6:00 AM ET): Quick scan for overnight gaps and earnings
+2. Intraday (12:30 PM ET): Scanner-only run for momentum plays
+3. Post-Market (4:30 PM ET): Quick scan for EOD patterns
+4. Full Pipeline (10:30 PM ET): Complete 6-stage analysis
+5. Weekly (Sunday 1:00 AM ET): Instrument sync and fundamentals
+
+Full Pipeline Stages:
 1. Sync 1H candles from yfinance
 2. Synthesize daily candles from 1H data
 3. Calculate screening metrics (ATR, volume, momentum)
-4. Build watchlist (tiered, scored stocks)
-5. Run ZLMA strategy for signals
-
-Schedule:
-- Daily 10:30 PM ET (Mon-Fri): Full pipeline
-- Weekly Sunday 1:00 AM ET: Instrument sync from RoboMarkets
+4. Run SMC (Smart Money Concepts) analysis
+5. Build watchlist (tiered, scored stocks)
+6. Run all signal scanners (ZLMA + 4 scanner strategies)
 
 Usage:
     # Run full pipeline once
@@ -21,8 +25,15 @@ Usage:
     docker exec stock-scheduler python -m stock_scanner.scheduler sync
     docker exec stock-scheduler python -m stock_scanner.scheduler synthesize
     docker exec stock-scheduler python -m stock_scanner.scheduler metrics
+    docker exec stock-scheduler python -m stock_scanner.scheduler smc
     docker exec stock-scheduler python -m stock_scanner.scheduler watchlist
     docker exec stock-scheduler python -m stock_scanner.scheduler signals
+    docker exec stock-scheduler python -m stock_scanner.scheduler scanners
+
+    # Run quick scans
+    docker exec stock-scheduler python -m stock_scanner.scheduler premarket
+    docker exec stock-scheduler python -m stock_scanner.scheduler intraday
+    docker exec stock-scheduler python -m stock_scanner.scheduler postmarket
 
     # Run continuous scheduler
     docker exec stock-scheduler python -m stock_scanner.scheduler run
@@ -47,6 +58,22 @@ from stock_scanner.core.smc.smc_stock_analyzer import SMCStockAnalyzer
 from stock_scanner.core.fundamentals.fundamentals_fetcher import FundamentalsFetcher
 from stock_scanner.strategies.zlma_trend import ZeroLagMATrendStrategy
 
+# Import scanner manager for running all scanners
+try:
+    from stock_scanner.scanners.scanner_manager import ScannerManager
+    SCANNER_MANAGER_AVAILABLE = True
+except ImportError:
+    SCANNER_MANAGER_AVAILABLE = False
+    ScannerManager = None
+
+# Import performance tracker
+try:
+    from stock_scanner.services.performance_tracker import PerformanceTracker
+    PERFORMANCE_TRACKER_AVAILABLE = True
+except ImportError:
+    PERFORMANCE_TRACKER_AVAILABLE = False
+    PerformanceTracker = None
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -58,25 +85,59 @@ logger = logging.getLogger("stock_scheduler")
 
 class StockScheduler:
     """
-    Enhanced Stock Scanner Scheduler with full analysis pipeline.
+    Enhanced Stock Scanner Scheduler with multi-scan pipeline.
 
-    Pipeline stages:
+    Scan Types:
+    - pre_market: Quick scan for overnight gaps (6:00 AM ET)
+    - intraday: Scanner-only run for momentum plays (12:30 PM ET)
+    - post_market: Quick scan for EOD patterns (4:30 PM ET)
+    - full_pipeline: Complete 6-stage analysis (10:30 PM ET)
+    - weekly_sync: Instrument and fundamentals refresh (Sunday 1:00 AM ET)
+
+    Full Pipeline Stages:
     1. sync       - Fetch latest 1H candles from yfinance
     2. synthesize - Aggregate 1H -> Daily candles
     3. metrics    - Calculate ATR, volume, momentum indicators
     4. smc        - Run SMC (Smart Money Concepts) analysis
     5. watchlist  - Build tiered, scored watchlist
-    6. signals    - Run ZLMA strategy for trading signals
+    6. signals    - Run ZLMA + all scanner strategies
 
-    Schedule:
-    - Daily 10:30 PM ET (Mon-Fri): Full pipeline after market close
-    - Weekly Sunday 1:00 AM ET: Sync instruments from RoboMarkets
+    Schedule (Mon-Fri):
+    - 6:00 AM ET: Pre-market scan (gaps, earnings)
+    - 12:30 PM ET: Intraday scanner run
+    - 4:30 PM ET: Post-market quick scan
+    - 10:30 PM ET: Full pipeline after market close
+    - Sunday 1:00 AM ET: Weekly sync
     """
 
     # US Eastern timezone
     ET = pytz.timezone('America/New_York')
 
-    # Schedule times (ET)
+    # Schedule times (ET) - Multiple daily scans
+    SCHEDULE = {
+        'pre_market': {
+            'time': time(6, 0),       # 6:00 AM ET
+            'type': 'quick',
+            'description': 'Pre-market gap and earnings scan'
+        },
+        'intraday': {
+            'time': time(12, 30),     # 12:30 PM ET
+            'type': 'scanner_only',
+            'description': 'Intraday momentum scanner'
+        },
+        'post_market': {
+            'time': time(16, 30),     # 4:30 PM ET
+            'type': 'quick',
+            'description': 'Post-market EOD patterns'
+        },
+        'full_pipeline': {
+            'time': time(22, 30),     # 10:30 PM ET
+            'type': 'full',
+            'description': 'Complete daily pipeline'
+        }
+    }
+
+    # Legacy constants for backward compatibility
     PIPELINE_TIME = time(22, 30)  # 10:30 PM ET - Full pipeline
     WEEKLY_SYNC_TIME = time(1, 0) # 1:00 AM ET on Sunday
     WEEKLY_SYNC_DAY = 6           # Sunday = 6
@@ -90,6 +151,8 @@ class StockScheduler:
         self.fundamentals: FundamentalsFetcher = None
         self.watchlist_builder: WatchlistBuilder = None
         self.zlma_strategy: ZeroLagMATrendStrategy = None
+        self.scanner_manager: ScannerManager = None
+        self.performance_tracker: PerformanceTracker = None
         self.running = False
 
     async def setup(self):
@@ -107,6 +170,18 @@ class StockScheduler:
         self.fundamentals = FundamentalsFetcher(db_manager=self.db)
         self.watchlist_builder = WatchlistBuilder(db_manager=self.db)
         self.zlma_strategy = ZeroLagMATrendStrategy(db_manager=self.db)
+
+        # Initialize scanner manager if available
+        if SCANNER_MANAGER_AVAILABLE:
+            self.scanner_manager = ScannerManager(self.db)
+            await self.scanner_manager.initialize()
+            logger.info("Scanner Manager initialized with scanners: " +
+                       ", ".join(self.scanner_manager.scanner_names))
+
+        # Initialize performance tracker if available
+        if PERFORMANCE_TRACKER_AVAILABLE:
+            self.performance_tracker = PerformanceTracker(self.db)
+            logger.info("Performance Tracker initialized")
 
         logger.info("Enhanced Stock Scheduler initialized")
 
@@ -226,19 +301,76 @@ class StockScheduler:
             results['watchlist'] = {'error': str(e)}
 
         # === STAGE 6: ZLMA Strategy Signals ===
-        logger.info("\n[STAGE 6/6] Running ZLMA strategy...")
+        logger.info("\n[STAGE 6/7] Running ZLMA strategy...")
         try:
             signals = await self.zlma_strategy.scan_all_stocks()
-            results['signals'] = {
+            results['zlma_signals'] = {
                 'total': len(signals),
                 'buy': sum(1 for s in signals if s.signal_type == 'BUY'),
                 'sell': sum(1 for s in signals if s.signal_type == 'SELL')
             }
-            logger.info(f"[OK] Signals: {len(signals)} total "
-                       f"(BUY: {results['signals']['buy']}, SELL: {results['signals']['sell']})")
+            logger.info(f"[OK] ZLMA Signals: {len(signals)} total "
+                       f"(BUY: {results['zlma_signals']['buy']}, SELL: {results['zlma_signals']['sell']})")
         except Exception as e:
-            logger.error(f"[FAIL] Signals: {e}")
-            results['signals'] = {'error': str(e)}
+            logger.error(f"[FAIL] ZLMA Signals: {e}")
+            results['zlma_signals'] = {'error': str(e)}
+
+        # === STAGE 7: All Scanner Strategies ===
+        logger.info("\n[STAGE 7/9] Running all scanner strategies...")
+        try:
+            if self.scanner_manager:
+                scanner_signals = await self.scanner_manager.run_all_scanners()
+                results['scanner_signals'] = {
+                    'total': len(scanner_signals),
+                    'by_scanner': self.scanner_manager.get_scan_stats().get('signals_by_scanner', {}),
+                    'by_tier': self.scanner_manager.get_scan_stats().get('signals_by_tier', {}),
+                    'high_quality': sum(1 for s in scanner_signals if s.is_high_quality)
+                }
+                logger.info(f"[OK] Scanner Signals: {len(scanner_signals)} total "
+                           f"(A/A+: {results['scanner_signals']['high_quality']})")
+            else:
+                logger.warning("[SKIP] Scanner Manager not available")
+                results['scanner_signals'] = {'skipped': True}
+        except Exception as e:
+            logger.error(f"[FAIL] Scanner Signals: {e}")
+            results['scanner_signals'] = {'error': str(e)}
+
+        # === STAGE 8: Performance Tracking ===
+        logger.info("\n[STAGE 8/9] Updating signal performance...")
+        try:
+            if self.performance_tracker:
+                status_updates = await self.performance_tracker.update_signal_statuses()
+                await self.performance_tracker.record_daily_performance()
+                results['performance'] = status_updates
+                logger.info(f"[OK] Performance: Updated {sum(status_updates.values())} signals")
+            else:
+                logger.warning("[SKIP] Performance Tracker not available")
+                results['performance'] = {'skipped': True}
+        except Exception as e:
+            logger.error(f"[FAIL] Performance Tracking: {e}")
+            results['performance'] = {'error': str(e)}
+
+        # === STAGE 9: Claude AI Analysis ===
+        logger.info("\n[STAGE 9/9] Running Claude AI analysis on top signals...")
+        try:
+            if self.scanner_manager:
+                # Analyze top A+ and A tier signals
+                analyzed = await self.scanner_manager.analyze_signals_with_claude(
+                    min_tier='A',
+                    max_signals=10,
+                    analysis_level='standard'
+                )
+                results['claude_analysis'] = {
+                    'analyzed': len(analyzed),
+                    'skipped': 0
+                }
+                logger.info(f"[OK] Claude Analysis: Analyzed {len(analyzed)} signals")
+            else:
+                logger.warning("[SKIP] Claude Analysis not available")
+                results['claude_analysis'] = {'skipped': True}
+        except Exception as e:
+            logger.error(f"[FAIL] Claude Analysis: {e}")
+            results['claude_analysis'] = {'error': str(e)}
 
         # === Pipeline Summary ===
         total_duration = (datetime.now() - pipeline_start).total_seconds()
@@ -367,6 +499,170 @@ class StockScheduler:
             'total_candles': total_candles
         }
 
+    async def run_pre_market_scan(self):
+        """
+        Pre-market scan (6:00 AM ET) - Quick scan for overnight opportunities.
+
+        Scans for:
+        - Overnight gaps (pre-market price vs previous close)
+        - Earnings releases from previous night
+        - High pre-market volume
+        """
+        logger.info("=" * 60)
+        logger.info("PRE-MARKET SCAN - Checking overnight gaps and earnings")
+        logger.info("=" * 60)
+
+        start_time = datetime.now()
+        results = {}
+
+        try:
+            # Run scanner manager for quick signals
+            if self.scanner_manager:
+                signals = await self.scanner_manager.run_all_scanners()
+                results['scanner_signals'] = {
+                    'total': len(signals),
+                    'high_quality': sum(1 for s in signals if s.is_high_quality)
+                }
+                logger.info(f"[OK] Pre-market signals: {len(signals)} "
+                           f"(A/A+: {results['scanner_signals']['high_quality']})")
+
+            # Check for earnings releases
+            earnings_query = """
+                SELECT ticker, name, earnings_date
+                FROM stock_instruments
+                WHERE earnings_date IS NOT NULL
+                AND earnings_date >= CURRENT_DATE - INTERVAL '1 day'
+                AND earnings_date <= CURRENT_DATE
+                ORDER BY earnings_date DESC
+                LIMIT 50
+            """
+            earnings = await self.db.fetch(earnings_query)
+            results['earnings_stocks'] = len(earnings)
+            if earnings:
+                logger.info(f"[OK] Earnings releases: {len(earnings)} stocks")
+                for e in earnings[:5]:
+                    logger.info(f"     {e['ticker']}: {e['name'][:30]}")
+
+        except Exception as e:
+            logger.error(f"Pre-market scan error: {e}")
+            results['error'] = str(e)
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"\nPre-market scan complete in {elapsed:.1f}s")
+
+        await self._log_pipeline_run('pre_market_scan', results, elapsed)
+        return results
+
+    async def run_intraday_scan(self):
+        """
+        Intraday scan (12:30 PM ET) - Scanner-only run for momentum plays.
+
+        Runs all scanner strategies on current data to find:
+        - Momentum continuation
+        - Breakout confirmations
+        - Mean reversion setups
+        """
+        logger.info("=" * 60)
+        logger.info("INTRADAY SCAN - Running momentum scanners")
+        logger.info("=" * 60)
+
+        start_time = datetime.now()
+        results = {}
+
+        try:
+            # Quick sync of latest candles (top tickers only)
+            logger.info("[STAGE 1/2] Quick candle sync (top tickers)...")
+            top_tickers_query = """
+                SELECT ticker FROM stock_watchlist
+                WHERE tier IN (1, 2)
+                ORDER BY rank_overall
+                LIMIT 500
+            """
+            rows = await self.db.fetch(top_tickers_query)
+            top_tickers = [r['ticker'] for r in rows]
+
+            sync_count = 0
+            for ticker in top_tickers[:100]:  # Quick sync top 100
+                try:
+                    count = await self.fetcher.fetch_historical_data(ticker, days=1, interval='1h')
+                    if count > 0:
+                        sync_count += 1
+                except Exception:
+                    pass
+
+            results['quick_sync'] = sync_count
+            logger.info(f"[OK] Quick sync: {sync_count} tickers updated")
+
+            # Run scanner manager
+            logger.info("[STAGE 2/2] Running scanners...")
+            if self.scanner_manager:
+                signals = await self.scanner_manager.run_all_scanners()
+                results['scanner_signals'] = {
+                    'total': len(signals),
+                    'by_scanner': self.scanner_manager.get_scan_stats().get('signals_by_scanner', {}),
+                    'high_quality': sum(1 for s in signals if s.is_high_quality)
+                }
+                logger.info(f"[OK] Intraday signals: {len(signals)} "
+                           f"(A/A+: {results['scanner_signals']['high_quality']})")
+
+        except Exception as e:
+            logger.error(f"Intraday scan error: {e}")
+            results['error'] = str(e)
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"\nIntraday scan complete in {elapsed:.1f}s")
+
+        await self._log_pipeline_run('intraday_scan', results, elapsed)
+        return results
+
+    async def run_post_market_scan(self):
+        """
+        Post-market scan (4:30 PM ET) - Quick scan for EOD patterns.
+
+        Scans for:
+        - End-of-day breakouts/breakdowns
+        - Volume spikes
+        - Pattern completions
+        """
+        logger.info("=" * 60)
+        logger.info("POST-MARKET SCAN - Checking EOD patterns")
+        logger.info("=" * 60)
+
+        start_time = datetime.now()
+        results = {}
+
+        try:
+            # Run ZLMA strategy for fresh signals
+            logger.info("[STAGE 1/2] Running ZLMA strategy...")
+            zlma_signals = await self.zlma_strategy.scan_all_stocks()
+            results['zlma_signals'] = {
+                'total': len(zlma_signals),
+                'buy': sum(1 for s in zlma_signals if s.signal_type == 'BUY'),
+                'sell': sum(1 for s in zlma_signals if s.signal_type == 'SELL')
+            }
+            logger.info(f"[OK] ZLMA signals: {len(zlma_signals)}")
+
+            # Run scanner manager
+            logger.info("[STAGE 2/2] Running scanners...")
+            if self.scanner_manager:
+                signals = await self.scanner_manager.run_all_scanners()
+                results['scanner_signals'] = {
+                    'total': len(signals),
+                    'high_quality': sum(1 for s in signals if s.is_high_quality)
+                }
+                logger.info(f"[OK] Scanner signals: {len(signals)} "
+                           f"(A/A+: {results['scanner_signals']['high_quality']})")
+
+        except Exception as e:
+            logger.error(f"Post-market scan error: {e}")
+            results['error'] = str(e)
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"\nPost-market scan complete in {elapsed:.1f}s")
+
+        await self._log_pipeline_run('post_market_scan', results, elapsed)
+        return results
+
     async def weekly_sync(self):
         """Run weekly instrument sync from RoboMarkets + fundamentals update"""
         logger.info("=" * 60)
@@ -448,30 +744,59 @@ class StockScheduler:
         except Exception as e:
             logger.error(f"Failed to log pipeline run: {e}")
 
+    def get_next_scheduled_task(self) -> tuple:
+        """
+        Get the next scheduled task and its time.
+
+        Returns:
+            Tuple of (task_name, next_time)
+        """
+        now = datetime.now(self.ET)
+        today = now.date()
+        is_weekday = now.weekday() < 5  # Mon-Fri
+
+        candidates = []
+
+        # Add daily scans if weekday
+        if is_weekday:
+            for task_name, config in self.SCHEDULE.items():
+                target = datetime.combine(today, config['time'])
+                target = self.ET.localize(target)
+
+                if now >= target:
+                    # Schedule for tomorrow
+                    target += timedelta(days=1)
+                    # Skip weekends
+                    while target.weekday() >= 5:
+                        target += timedelta(days=1)
+
+                candidates.append((task_name, target))
+
+        # Add weekly sync
+        next_weekly = self.get_next_weekly_sync()
+        candidates.append(('weekly_sync', next_weekly))
+
+        # Sort by time and return the nearest
+        candidates.sort(key=lambda x: x[1])
+        return candidates[0]
+
     async def run(self):
-        """Main scheduler loop"""
+        """Main scheduler loop with multiple daily scans"""
         await self.setup()
         self.running = True
 
         logger.info("Enhanced Stock Scheduler started")
-        logger.info(f"  Pipeline time: {self.PIPELINE_TIME} ET (Mon-Fri)")
-        logger.info(f"  Weekly sync: Sunday {self.WEEKLY_SYNC_TIME} ET")
+        logger.info("Schedule (Mon-Fri ET):")
+        for task_name, config in self.SCHEDULE.items():
+            logger.info(f"  {config['time'].strftime('%H:%M')} - {task_name}: {config['description']}")
+        logger.info(f"  Sunday {self.WEEKLY_SYNC_TIME} - weekly_sync: Instrument and fundamentals refresh")
 
         try:
             while self.running:
                 now = datetime.now(self.ET)
 
-                # Calculate next scheduled times
-                next_pipeline = self.get_next_pipeline()
-                next_weekly = self.get_next_weekly_sync()
-
-                # Find which comes first
-                if next_weekly < next_pipeline:
-                    next_task = "weekly_sync"
-                    next_time = next_weekly
-                else:
-                    next_task = "pipeline"
-                    next_time = next_pipeline
+                # Get next scheduled task
+                next_task, next_time = self.get_next_scheduled_task()
 
                 # Calculate sleep duration
                 sleep_seconds = (next_time - now).total_seconds()
@@ -487,16 +812,24 @@ class StockScheduler:
                 if not self.running:
                     break
 
-                # Execute the task
-                if next_task == "pipeline":
+                # Execute the appropriate task
+                if next_task == "pre_market":
+                    await self.run_pre_market_scan()
+                elif next_task == "intraday":
+                    await self.run_intraday_scan()
+                elif next_task == "post_market":
+                    await self.run_post_market_scan()
+                elif next_task == "full_pipeline":
                     await self.run_pipeline()
-                else:
+                elif next_task == "weekly_sync":
                     await self.weekly_sync()
 
         except asyncio.CancelledError:
             logger.info("Scheduler cancelled")
         except Exception as e:
             logger.error(f"Scheduler error: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             await self.cleanup()
 
@@ -526,13 +859,24 @@ async def run_once(task: str):
             await scheduler.watchlist_builder.build_watchlist()
         elif task == "signals":
             await scheduler.zlma_strategy.scan_all_stocks()
+        elif task == "scanners":
+            if scheduler.scanner_manager:
+                await scheduler.scanner_manager.run_all_scanners()
+            else:
+                print("Scanner manager not available")
+        elif task == "premarket":
+            await scheduler.run_pre_market_scan()
+        elif task == "intraday":
+            await scheduler.run_intraday_scan()
+        elif task == "postmarket":
+            await scheduler.run_post_market_scan()
         elif task == "weekly":
             await scheduler.weekly_sync()
         elif task == "fundamentals":
             await scheduler.fundamentals.run_fundamentals_pipeline()
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, weekly, fundamentals")
+            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, scanners, premarket, intraday, postmarket, weekly, fundamentals")
     finally:
         await scheduler.cleanup()
 
@@ -543,7 +887,8 @@ def main():
     parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
                        choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'smc',
-                               'watchlist', 'signals', 'weekly', 'fundamentals', 'status'],
+                               'watchlist', 'signals', 'scanners', 'premarket', 'intraday',
+                               'postmarket', 'weekly', 'fundamentals', 'status'],
                        help='Command to execute')
     args = parser.parse_args()
 
@@ -559,7 +904,9 @@ def main():
             print("\nShutdown requested...")
             scheduler.stop()
 
-    elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'smc', 'watchlist', 'signals', 'weekly', 'fundamentals']:
+    elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'smc', 'watchlist',
+                          'signals', 'scanners', 'premarket', 'intraday', 'postmarket',
+                          'weekly', 'fundamentals']:
         print(f"Running {args.command}...")
         asyncio.run(run_once(args.command))
 
@@ -567,17 +914,37 @@ def main():
         scheduler = StockScheduler()
 
         print("\nEnhanced Stock Scanner Scheduler Status")
-        print("=" * 50)
-        print(f"Pipeline time: {scheduler.PIPELINE_TIME} ET (Mon-Fri)")
-        print(f"Weekly sync: Sunday {scheduler.WEEKLY_SYNC_TIME} ET")
-        print(f"\nPipeline stages:")
+        print("=" * 60)
+        print("\nSchedule (Mon-Fri ET):")
+        for task_name, config in scheduler.SCHEDULE.items():
+            print(f"  {config['time'].strftime('%H:%M')} - {task_name}: {config['description']}")
+        print(f"  Sunday {scheduler.WEEKLY_SYNC_TIME} - weekly_sync: Instrument refresh")
+
+        print(f"\nFull Pipeline stages:")
         print("  1. sync       - Fetch 1H candles from yfinance")
         print("  2. synthesize - Aggregate 1H -> Daily candles")
         print("  3. metrics    - Calculate ATR, volume, momentum")
-        print("  4. watchlist  - Build tiered, scored watchlist")
-        print("  5. signals    - Run ZLMA strategy")
-        print(f"\nNext pipeline: {scheduler.get_next_pipeline()}")
-        print(f"Next weekly sync: {scheduler.get_next_weekly_sync()}")
+        print("  4. smc        - Smart Money Concepts analysis")
+        print("  5. watchlist  - Build tiered, scored watchlist")
+        print("  6. zlma       - Run ZLMA strategy")
+        print("  7. scanners   - Run all scanner strategies")
+
+        print(f"\nNext scheduled tasks:")
+        print(f"  Full pipeline: {scheduler.get_next_pipeline()}")
+        print(f"  Weekly sync: {scheduler.get_next_weekly_sync()}")
+
+        print("\nAvailable commands:")
+        print("  run         - Start continuous scheduler")
+        print("  pipeline    - Run full 7-stage pipeline")
+        print("  premarket   - Run pre-market scan only")
+        print("  intraday    - Run intraday scan only")
+        print("  postmarket  - Run post-market scan only")
+        print("  scanners    - Run all scanner strategies")
+        print("  signals     - Run ZLMA strategy only")
+        print("  sync        - Sync candle data only")
+        print("  metrics     - Calculate metrics only")
+        print("  smc         - Run SMC analysis only")
+        print("  watchlist   - Build watchlist only")
 
 
 if __name__ == '__main__':

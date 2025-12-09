@@ -1107,6 +1107,10 @@ def render_top_picks_tab(service):
         st.warning("No top picks available. Please ensure the metrics have been calculated.")
         return
 
+    # Initialize Claude analysis session state
+    if 'claude_top_picks_analysis' not in st.session_state:
+        st.session_state.claude_top_picks_analysis = {}
+
     # Header stats
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Total Picks", picks_data['total_picks'])
@@ -1115,38 +1119,9 @@ def render_top_picks_tab(service):
     col4.metric("Bounce Plays", len(picks_data.get('mean_reversion', [])))
     col5.metric("Data Date", picks_data.get('date', 'N/A'))
 
+    # Claude Analysis section
     st.markdown("---")
-
-    # Render each category
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        _render_picks_category(
-            "Momentum Riders",
-            "Trending stocks with bullish confirmation signals",
-            picks_data.get('momentum', []),
-            "#1a5f7a"
-        )
-
-    with col2:
-        _render_picks_category(
-            "Breakout Watch",
-            "Stocks near 52W highs with volume surge",
-            picks_data.get('breakout', []),
-            "#28a745"
-        )
-
-    with col3:
-        _render_picks_category(
-            "Bounce Plays",
-            "Oversold stocks showing reversal patterns",
-            picks_data.get('mean_reversion', []),
-            "#6f42c1"
-        )
-
-    # Detailed table view
-    st.markdown("---")
-    st.markdown("### All Picks - Detailed View")
+    st.markdown("### Claude AI Analysis")
 
     all_picks = (
         picks_data.get('momentum', []) +
@@ -1154,14 +1129,113 @@ def render_top_picks_tab(service):
         picks_data.get('mean_reversion', [])
     )
 
-    if all_picks:
+    col_btn1, col_btn2, col_info = st.columns([1, 1, 2])
+    with col_btn1:
+        if st.button("Analyze Top 5 Picks", type="primary", key="analyze_top5"):
+            with st.spinner("Analyzing top picks with Claude AI..."):
+                # Sort by score and take top 5
+                sorted_picks = sorted(all_picks, key=lambda x: x['total_score'], reverse=True)[:5]
+                for pick in sorted_picks:
+                    ticker = pick['ticker']
+                    result = service.analyze_top_pick_with_claude(pick)
+                    st.session_state.claude_top_picks_analysis[ticker] = result
+                # Clear cache to reload picks with fresh Claude data
+                service.get_daily_top_picks.clear()
+            st.rerun()
+            st.stop()  # Ensure no further rendering
+
+    with col_btn2:
+        if st.button("Clear Analysis", key="clear_claude"):
+            st.session_state.claude_top_picks_analysis = {}
+            st.rerun()
+            st.stop()
+
+    with col_info:
+        analyzed_count = len([a for a in st.session_state.claude_top_picks_analysis.values() if a.get('success')])
+        if analyzed_count > 0:
+            st.info(f"{analyzed_count} picks analyzed by Claude AI")
+        else:
+            st.caption("Click 'Analyze Top 5' to get Claude AI recommendations")
+
+    st.markdown("---")
+
+    # Render each category with Claude analysis data
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        _render_picks_category(
+            "Momentum Riders",
+            "Trending stocks with bullish confirmation signals",
+            picks_data.get('momentum', []),
+            "#1a5f7a",
+            service,
+            st.session_state.claude_top_picks_analysis
+        )
+
+    with col2:
+        _render_picks_category(
+            "Breakout Watch",
+            "Stocks near 52W highs with volume surge",
+            picks_data.get('breakout', []),
+            "#28a745",
+            service,
+            st.session_state.claude_top_picks_analysis
+        )
+
+    with col3:
+        _render_picks_category(
+            "Bounce Plays",
+            "Oversold stocks showing reversal patterns",
+            picks_data.get('mean_reversion', []),
+            "#6f42c1",
+            service,
+            st.session_state.claude_top_picks_analysis
+        )
+
+    # Detailed table view
+    st.markdown("---")
+    st.markdown("### All Picks - Detailed View")
+
+    # Re-gather all picks for the table (already defined above but scoped differently)
+    all_picks_table = (
+        picks_data.get('momentum', []) +
+        picks_data.get('breakout', []) +
+        picks_data.get('mean_reversion', [])
+    )
+
+    if all_picks_table:
         # Sort by total_score descending
-        all_picks.sort(key=lambda x: x['total_score'], reverse=True)
+        all_picks_table.sort(key=lambda x: x['total_score'], reverse=True)
+
+        # Get Claude analysis from session state
+        claude_analysis = st.session_state.get('claude_top_picks_analysis', {})
 
         df_data = []
-        for p in all_picks:
-            df_data.append({
-                'Ticker': p['ticker'],
+        for p in all_picks_table:
+            ticker = p['ticker']
+
+            # Check for Claude analysis from both DB and session
+            has_claude_from_db = p.get('claude_grade') is not None
+            claude_data_from_session = claude_analysis.get(ticker, {})
+            has_claude_from_session = claude_data_from_session.get('success', False)
+            has_claude = has_claude_from_db or has_claude_from_session
+
+            # Get Claude values (prefer session, fallback to DB)
+            if has_claude_from_session:
+                ai_grade = claude_data_from_session.get('claude_grade', '-')
+                ai_score = claude_data_from_session.get('claude_score', 0)
+                ai_action = claude_data_from_session.get('claude_action', '-')
+            elif has_claude_from_db:
+                ai_grade = p.get('claude_grade', '-')
+                ai_score = p.get('claude_score', 0)
+                ai_action = p.get('claude_action', '-')
+            else:
+                ai_grade = '-'
+                ai_score = 0
+                ai_action = '-'
+
+            row = {
+                'Ticker': ticker,
                 'Name': p.get('name', '')[:20] + '...' if len(p.get('name', '')) > 20 else p.get('name', ''),
                 'Category': p['category'],
                 'Score': f"{p['total_score']:.0f}",
@@ -1172,8 +1246,13 @@ def render_top_picks_tab(service):
                 'ATR%': f"{p['atr_percent']:.1f}%",
                 'Signals': p.get('signals_summary', '-')[:30],
                 'Stop%': f"-{p['suggested_stop_pct']:.1f}%",
-                'R/R': f"{p['risk_reward_ratio']:.1f}:1" if p['risk_reward_ratio'] else '-'
-            })
+                'R/R': f"{p['risk_reward_ratio']:.1f}:1" if p['risk_reward_ratio'] else '-',
+                # Claude analysis columns
+                'AI Grade': ai_grade if has_claude else '-',
+                'AI Score': f"{ai_score}/10" if has_claude else '-',
+                'AI Action': ai_action if has_claude else '-',
+            }
+            df_data.append(row)
 
         df = pd.DataFrame(df_data)
 
@@ -1197,7 +1276,25 @@ def render_top_picks_tab(service):
                 return 'color: #dc3545;'
             return ''
 
-        styled_df = df.style.map(style_category, subset=['Category']).map(style_tier, subset=['Tier']).map(style_change, subset=['1D%'])
+        def style_ai_grade(val):
+            grade_colors = {'A+': '#28a745', 'A': '#28a745', 'B': '#17a2b8', 'C': '#ffc107', 'D': '#dc3545'}
+            if val in grade_colors:
+                return f'background-color: {grade_colors[val]}; color: white; font-weight: bold;'
+            return ''
+
+        def style_ai_action(val):
+            action_colors = {'STRONG BUY': '#28a745', 'BUY': '#28a745', 'HOLD': '#ffc107', 'AVOID': '#dc3545'}
+            if val in action_colors:
+                return f'background-color: {action_colors[val]}; color: white; font-weight: bold;'
+            return ''
+
+        styled_df = (df.style
+            .map(style_category, subset=['Category'])
+            .map(style_tier, subset=['Tier'])
+            .map(style_change, subset=['1D%'])
+            .map(style_ai_grade, subset=['AI Grade'])
+            .map(style_ai_action, subset=['AI Action'])
+        )
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
 
         # Export button
@@ -1222,8 +1319,8 @@ def render_top_picks_tab(service):
         col4.metric("Avg Bounce Score", stats.get('avg_score_reversion', 0))
 
 
-def _render_picks_category(title: str, description: str, picks: List[Dict], color: str):
-    """Render a single category of picks as cards."""
+def _render_picks_category(title: str, description: str, picks: List[Dict], color: str, service=None, claude_analysis: Dict = None):
+    """Render a single category of picks as cards with optional Claude analysis."""
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, {color} 0%, {color}cc 100%); padding: 0.8rem; border-radius: 10px; color: white; margin-bottom: 0.8rem;">
         <h4 style="margin: 0;">{title}</h4>
@@ -1235,15 +1332,47 @@ def _render_picks_category(title: str, description: str, picks: List[Dict], colo
         st.info("No picks in this category today")
         return
 
+    claude_analysis = claude_analysis or {}
+
     for pick in picks:
+        ticker = pick['ticker']
         change_color = "#28a745" if pick['price_change_1d'] >= 0 else "#dc3545"
         tier_colors = {1: '#28a745', 2: '#17a2b8', 3: '#ffc107'}
         tier_color = tier_colors.get(pick['tier'], '#6c757d')
 
+        # Check if this pick has Claude analysis from:
+        # 1. Database (stored in pick from query)
+        # 2. Session state (from recent API call)
+        has_claude_from_db = pick.get('claude_grade') is not None
+        claude_data_from_session = claude_analysis.get(ticker, {})
+        has_claude_from_session = claude_data_from_session.get('success', False)
+        has_claude = has_claude_from_db or has_claude_from_session
+
+        # Get Claude data if available
+        grade, score, action, pos_rec, thesis, strengths, risks = '', 0, '', '', '', [], []
+        if has_claude:
+            if has_claude_from_session:
+                grade = claude_data_from_session.get('claude_grade', 'N/A')
+                score = claude_data_from_session.get('claude_score', 0)
+                action = claude_data_from_session.get('claude_action', 'N/A')
+                pos_rec = claude_data_from_session.get('claude_position_rec', '')
+                thesis = claude_data_from_session.get('claude_thesis', '')
+                strengths = claude_data_from_session.get('claude_key_strengths', [])
+                risks = claude_data_from_session.get('claude_key_risks', [])
+            else:
+                grade = pick.get('claude_grade', 'N/A')
+                score = pick.get('claude_score', 0)
+                action = pick.get('claude_action', 'N/A')
+                pos_rec = pick.get('claude_position_rec', '')
+                thesis = pick.get('claude_thesis', '')
+                strengths = pick.get('claude_key_strengths', []) or []
+                risks = pick.get('claude_key_risks', []) or []
+
+        # Render the main card (without Claude badges - those go in separate markdown)
         st.markdown(f"""
-        <div style="background: #f8f9fa; padding: 0.7rem; border-radius: 8px; margin-bottom: 0.5rem; border-left: 4px solid {color};">
+        <div style="background: #f8f9fa; padding: 0.7rem; border-radius: 8px; margin-bottom: 0.3rem; border-left: 4px solid {color};">
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-weight: bold; font-size: 1.1rem;">{pick['ticker']}</span>
+                <span style="font-weight: bold; font-size: 1.1rem;">{ticker}</span>
                 <span style="background: {tier_color}; color: white; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.75rem;">T{pick['tier']}</span>
             </div>
             <div style="font-size: 0.85rem; color: #555; margin-top: 0.2rem;">
@@ -1254,13 +1383,62 @@ def _render_picks_category(title: str, description: str, picks: List[Dict], colo
                 <span style="background: #e9ecef; padding: 0.1rem 0.3rem; border-radius: 3px; margin-left: 0.3rem;">Vol: {pick['relative_volume']:.1f}x</span>
             </div>
             <div style="font-size: 0.75rem; color: #666; margin-top: 0.3rem;">
-                {pick.get('signals_summary', '')[:40]}
+                {pick.get('signals_summary', '')[:50]}
             </div>
             <div style="font-size: 0.75rem; color: #888; margin-top: 0.2rem;">
                 Stop: -{pick['suggested_stop_pct']:.1f}% | R/R: {pick['risk_reward_ratio']:.1f}:1
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+        # Render Claude badges in separate markdown call if has Claude
+        if has_claude:
+            grade_colors = {'A+': '#28a745', 'A': '#28a745', 'B': '#17a2b8', 'C': '#ffc107', 'D': '#dc3545'}
+            action_colors = {'STRONG BUY': '#28a745', 'BUY': '#28a745', 'HOLD': '#ffc107', 'AVOID': '#dc3545'}
+            pos_colors = {'Full': '#28a745', 'Half': '#17a2b8', 'Quarter': '#ffc107', 'Skip': '#dc3545'}
+
+            grade_bg = grade_colors.get(grade, '#6c757d')
+            action_bg = action_colors.get(action, '#6c757d')
+            pos_bg = pos_colors.get(pos_rec, '#6c757d')
+
+            st.markdown(f"""
+            <div style="display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: -0.2rem; margin-bottom: 0.5rem; padding: 0.3rem; background: #f0f0f0; border-radius: 0 0 8px 8px;">
+                <span style="background: {grade_bg}; color: white; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">AI: {grade}</span>
+                <span style="background: {action_bg}; color: white; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem;">{action}</span>
+                <span style="background: #6c757d; color: white; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem;">{score}/10</span>
+                <span style="background: {pos_bg}; color: white; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem;">{pos_rec}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Expandable section for detailed Claude analysis
+        if has_claude and (thesis or strengths or risks):
+            with st.expander(f"📊 View AI Analysis", expanded=False):
+                if thesis:
+                    st.markdown(f"**💡 Investment Thesis:**")
+                    st.info(thesis)
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if strengths:
+                        st.markdown("**✅ Key Strengths:**")
+                        for s in strengths[:3]:
+                            st.success(f"{s}")
+                with col2:
+                    if risks:
+                        st.markdown("**⚠️ Key Risks:**")
+                        for r in risks[:3]:
+                            st.error(f"{r}")
+
+        # Add individual analyze button if service is provided and no analysis yet
+        if service and not has_claude:
+            if st.button(f"Analyze {ticker}", key=f"analyze_{ticker}", type="secondary"):
+                with st.spinner(f"Analyzing {ticker}..."):
+                    result = service.analyze_top_pick_with_claude(pick)
+                    st.session_state.claude_top_picks_analysis[ticker] = result
+                    # Clear cache to reload picks with fresh Claude data
+                    service.get_daily_top_picks.clear()
+                st.rerun()
+                return  # Stop execution after rerun
 
 
 # =============================================================================

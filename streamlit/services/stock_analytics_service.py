@@ -663,7 +663,7 @@ class StockAnalyticsService:
     # TOP PICKS QUERIES
     # =========================================================================
 
-    @st.cache_data(ttl=300)
+    @st.cache_data(ttl=60)  # Reduced TTL to allow Claude analysis to show sooner
     def get_daily_top_picks(_self) -> Dict[str, Any]:
         """
         Get daily top picks categorized by setup type.
@@ -710,6 +710,19 @@ class StockAnalyticsService:
                         w.gap_signal,
                         w.candlestick_pattern,
                         w.pct_from_52w_high,
+                        w.calculation_date,
+                        -- Claude analysis columns
+                        w.claude_grade,
+                        w.claude_score,
+                        w.claude_action,
+                        w.claude_thesis,
+                        w.claude_conviction,
+                        w.claude_key_strengths,
+                        w.claude_key_risks,
+                        w.claude_position_rec,
+                        w.claude_stop_adjustment,
+                        w.claude_time_horizon,
+                        w.claude_analyzed_at,
                         m.price_change_1d,
                         m.price_change_5d,
                         m.rsi_14,
@@ -944,7 +957,7 @@ class StockAnalyticsService:
         # Calculate suggested stop
         suggested_stop_pct = min(atr_pct * 1.5, 8.0)
 
-        return {
+        pick = {
             'ticker': candidate['ticker'],
             'name': candidate.get('name', ''),
             'category': category,
@@ -967,8 +980,431 @@ class StockAnalyticsService:
             'gap_signal': gap_signal,
             'candlestick_pattern': candlestick_pattern,
             'suggested_stop_pct': round(suggested_stop_pct, 2),
-            'risk_reward_ratio': round(2.0 / suggested_stop_pct * atr_pct, 2) if suggested_stop_pct > 0 else 0
+            'risk_reward_ratio': round(2.0 / suggested_stop_pct * atr_pct, 2) if suggested_stop_pct > 0 else 0,
+            # Include calculation_date for Claude analysis lookup
+            'calculation_date': candidate.get('calculation_date'),
+            # Include existing Claude analysis from database if available
+            'claude_grade': candidate.get('claude_grade'),
+            'claude_score': candidate.get('claude_score'),
+            'claude_action': candidate.get('claude_action'),
+            'claude_thesis': candidate.get('claude_thesis'),
+            'claude_conviction': candidate.get('claude_conviction'),
+            'claude_key_strengths': candidate.get('claude_key_strengths'),
+            'claude_key_risks': candidate.get('claude_key_risks'),
+            'claude_position_rec': candidate.get('claude_position_rec'),
+            'claude_stop_adjustment': candidate.get('claude_stop_adjustment'),
+            'claude_time_horizon': candidate.get('claude_time_horizon'),
+            'claude_analyzed_at': candidate.get('claude_analyzed_at'),
         }
+        return pick
+
+    # =========================================================================
+    # CLAUDE ANALYSIS FOR TOP PICKS
+    # =========================================================================
+
+    def _get_claude_api_key(_self) -> Optional[str]:
+        """Get Claude API key from secrets or environment."""
+        import os
+        # Try streamlit secrets first (under [api] section)
+        try:
+            return st.secrets.api.claude_api_key
+        except Exception:
+            pass
+        # Try root level
+        try:
+            return st.secrets.get("CLAUDE_API_KEY")
+        except Exception:
+            pass
+        # Fallback to environment variable
+        return os.environ.get('CLAUDE_API_KEY')
+
+    def _get_stored_claude_analysis(_self, ticker: str, calculation_date) -> Optional[Dict[str, Any]]:
+        """Check if Claude analysis already exists in database for this ticker/date."""
+        conn = _self._get_connection()
+        if not conn:
+            return None
+
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT claude_grade, claude_score, claude_action, claude_thesis,
+                           claude_conviction, claude_key_strengths, claude_key_risks,
+                           claude_position_rec, claude_stop_adjustment, claude_time_horizon,
+                           claude_analyzed_at
+                    FROM stock_watchlist
+                    WHERE ticker = %s AND calculation_date = %s
+                      AND claude_analyzed_at IS NOT NULL
+                """, (ticker, calculation_date))
+                row = cursor.fetchone()
+                if row and row['claude_grade']:
+                    return {
+                        'success': True,
+                        'claude_grade': row['claude_grade'],
+                        'claude_score': row['claude_score'],
+                        'claude_action': row['claude_action'],
+                        'claude_thesis': row['claude_thesis'],
+                        'claude_conviction': row['claude_conviction'],
+                        'claude_key_strengths': row['claude_key_strengths'] or [],
+                        'claude_key_risks': row['claude_key_risks'] or [],
+                        'claude_position_rec': row['claude_position_rec'],
+                        'claude_stop_adjustment': row['claude_stop_adjustment'],
+                        'claude_time_horizon': row['claude_time_horizon'],
+                        'from_cache': True
+                    }
+        except Exception as e:
+            logger.error(f"Error checking stored Claude analysis: {e}")
+        finally:
+            conn.close()
+        return None
+
+    def _store_claude_analysis(_self, ticker: str, calculation_date, analysis: Dict[str, Any]) -> bool:
+        """Store Claude analysis in database."""
+        conn = _self._get_connection()
+        if not conn:
+            return False
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    UPDATE stock_watchlist
+                    SET claude_grade = %s,
+                        claude_score = %s,
+                        claude_action = %s,
+                        claude_thesis = %s,
+                        claude_conviction = %s,
+                        claude_key_strengths = %s,
+                        claude_key_risks = %s,
+                        claude_position_rec = %s,
+                        claude_stop_adjustment = %s,
+                        claude_time_horizon = %s,
+                        claude_tokens_used = %s,
+                        claude_model = %s,
+                        claude_analyzed_at = NOW()
+                    WHERE ticker = %s AND calculation_date = %s
+                """, (
+                    analysis.get('claude_grade'),
+                    analysis.get('claude_score'),
+                    analysis.get('claude_action'),
+                    analysis.get('claude_thesis'),
+                    analysis.get('claude_conviction'),
+                    analysis.get('claude_key_strengths', []),
+                    analysis.get('claude_key_risks', []),
+                    analysis.get('claude_position_rec'),
+                    analysis.get('claude_stop_adjustment'),
+                    analysis.get('claude_time_horizon'),
+                    analysis.get('claude_tokens_used', 0),
+                    analysis.get('claude_model', ''),
+                    ticker,
+                    calculation_date
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error storing Claude analysis for {ticker}: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def _build_standard_analysis_prompt(_self, pick: Dict[str, Any], technical: Dict[str, Any]) -> str:
+        """Build a standard institutional-grade analysis prompt matching the scanner approach."""
+        ticker = pick.get('ticker', 'UNKNOWN')
+        name = pick.get('name', ticker)
+        category = pick.get('category', 'unknown')
+        total_score = pick.get('total_score', 0)
+        tier = pick.get('tier', 3)
+        tier_label = {1: 'A (High Liquidity)', 2: 'B (Medium)', 3: 'C (Lower)'}.get(tier, 'C')
+
+        # Price info
+        current_price = pick.get('current_price', 0)
+        price_change_1d = pick.get('price_change_1d', 0)
+        price_change_5d = pick.get('price_change_5d', 0)
+
+        # Risk parameters
+        suggested_stop_pct = pick.get('suggested_stop_pct', 5.0)
+        stop_price = current_price * (1 - suggested_stop_pct / 100)
+        target_price = current_price * 1.10  # 10% target
+        rr_ratio = pick.get('risk_reward_ratio', 2.0)
+
+        # Technical section
+        rsi_signal = pick.get('rsi_signal', 'neutral')
+        sma_cross = pick.get('sma_cross_signal', 'neutral')
+        macd_cross = pick.get('macd_cross_signal', 'neutral')
+        high_low = pick.get('high_low_signal', 'neutral')
+        gap_signal = pick.get('gap_signal', 'none')
+        pattern = pick.get('candlestick_pattern', 'none')
+        rel_vol = pick.get('relative_volume', 1.0)
+        atr_pct = pick.get('atr_percent', 0)
+
+        # Additional technical from metrics
+        rsi_14 = technical.get('rsi_14', 50)
+        macd_hist = technical.get('macd_histogram', 0)
+
+        # Signals summary
+        signals_summary = pick.get('signals_summary', '')
+
+        prompt = f"""You are a Senior Equity Analyst. Analyze this stock signal with institutional rigor.
+
+## SIGNAL OVERVIEW
+**{ticker}** ({name}) | BUY Signal
+Category: {category} | Quality: {tier_label} ({total_score}/100)
+
+## RISK PARAMETERS
+Entry: ${current_price:.2f} | Stop: ${stop_price:.2f} (-{suggested_stop_pct:.1f}%)
+Target: ${target_price:.2f} (+10%) | Risk/Reward: {rr_ratio:.1f}:1
+
+## TECHNICAL ANALYSIS
+Price: ${current_price:.2f} | 1D: {price_change_1d:+.1f}% | 5D: {price_change_5d:+.1f}%
+RSI(14): {rsi_14:.0f} ({rsi_signal}) | MACD Hist: {macd_hist:+.3f} ({macd_cross})
+Volume: {rel_vol:.1f}x relative | ATR: {atr_pct:.1f}%
+MA Cross: {sma_cross} | 52W Position: {high_low} | Gap: {gap_signal}
+Pattern: {pattern}
+
+## CONFLUENCE FACTORS
+{signals_summary}
+
+---
+Analyze and respond in this exact JSON format:
+{{
+  "grade": "A+/A/B/C/D",
+  "score": 1-10,
+  "conviction": "HIGH/MEDIUM/LOW",
+  "action": "STRONG BUY/BUY/HOLD/AVOID",
+  "key_strengths": ["strength1", "strength2"],
+  "key_risks": ["risk1", "risk2"],
+  "thesis": "2-3 sentence investment thesis explaining your reasoning",
+  "position_recommendation": "Full/Half/Quarter/Skip",
+  "stop_adjustment": "Tighten/Keep/Widen",
+  "time_horizon": "Intraday/Swing/Position"
+}}"""
+        return prompt
+
+    def _parse_claude_response(_self, response_text: str) -> Dict[str, Any]:
+        """Parse Claude API response into structured dict."""
+        import json
+        import re
+
+        # Try to extract JSON from response
+        json_data = None
+
+        # Try direct JSON parse first
+        try:
+            json_data = json.loads(response_text.strip())
+        except json.JSONDecodeError:
+            pass
+
+        # Try to find JSON in markdown code block
+        if not json_data:
+            patterns = [
+                r'```json\s*([\s\S]*?)\s*```',
+                r'```\s*([\s\S]*?)\s*```',
+                r'\{[\s\S]*\}',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, response_text)
+                if match:
+                    json_str = match.group(1) if '```' in pattern else match.group(0)
+                    try:
+                        json_data = json.loads(json_str.strip())
+                        break
+                    except json.JSONDecodeError:
+                        continue
+
+        if not json_data:
+            return {'success': False, 'error': 'Failed to parse JSON response'}
+
+        # Normalize and validate
+        grade = str(json_data.get('grade', 'C')).upper().strip()
+        if grade not in ['A+', 'A', 'B', 'C', 'D']:
+            if grade.startswith('A') and '+' in grade:
+                grade = 'A+'
+            elif grade.startswith('A'):
+                grade = 'A'
+            elif grade.startswith('B'):
+                grade = 'B'
+            elif grade.startswith('D'):
+                grade = 'D'
+            else:
+                grade = 'C'
+
+        try:
+            score = max(1, min(10, int(json_data.get('score', 5))))
+        except (ValueError, TypeError):
+            score = 5
+
+        action = str(json_data.get('action', 'HOLD')).upper().strip()
+        if action not in ['STRONG BUY', 'BUY', 'HOLD', 'AVOID']:
+            if 'STRONG' in action and 'BUY' in action:
+                action = 'STRONG BUY'
+            elif 'BUY' in action:
+                action = 'BUY'
+            elif 'AVOID' in action or 'SELL' in action:
+                action = 'AVOID'
+            else:
+                action = 'HOLD'
+
+        conviction = str(json_data.get('conviction', 'MEDIUM')).upper().strip()
+        if conviction not in ['HIGH', 'MEDIUM', 'LOW']:
+            conviction = 'MEDIUM'
+
+        # Extract lists
+        strengths = json_data.get('key_strengths', [])
+        if isinstance(strengths, str):
+            strengths = [strengths]
+        risks = json_data.get('key_risks', [])
+        if isinstance(risks, str):
+            risks = [risks]
+
+        # Position recommendation
+        pos_rec = str(json_data.get('position_recommendation', 'Quarter')).title()
+        if pos_rec not in ['Full', 'Half', 'Quarter', 'Skip']:
+            pos_rec = 'Quarter'
+
+        # Stop adjustment
+        stop_adj = str(json_data.get('stop_adjustment', 'Keep')).title()
+        if stop_adj not in ['Tighten', 'Keep', 'Widen']:
+            stop_adj = 'Keep'
+
+        # Time horizon
+        horizon = str(json_data.get('time_horizon', 'Swing')).title()
+        if horizon not in ['Intraday', 'Swing', 'Position']:
+            horizon = 'Swing'
+
+        return {
+            'success': True,
+            'claude_grade': grade,
+            'claude_score': score,
+            'claude_action': action,
+            'claude_thesis': str(json_data.get('thesis', ''))[:500],
+            'claude_conviction': conviction,
+            'claude_key_strengths': [str(s) for s in strengths[:5]],
+            'claude_key_risks': [str(r) for r in risks[:5]],
+            'claude_position_rec': pos_rec,
+            'claude_stop_adjustment': stop_adj,
+            'claude_time_horizon': horizon,
+        }
+
+    def _get_technical_data_for_pick(_self, ticker: str, calculation_date) -> Dict[str, Any]:
+        """Fetch additional technical data from screening metrics."""
+        conn = _self._get_connection()
+        if not conn:
+            return {}
+
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT rsi_14, macd_histogram, price_change_1d, price_change_5d,
+                           perf_1w, perf_1m, relative_volume
+                    FROM stock_screening_metrics
+                    WHERE ticker = %s AND calculation_date = %s
+                """, (ticker, calculation_date))
+                row = cursor.fetchone()
+                return dict(row) if row else {}
+        except Exception as e:
+            logger.error(f"Error fetching technical data for {ticker}: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def analyze_top_pick_with_claude(_self, pick: Dict[str, Any], force_refresh: bool = False) -> Dict[str, Any]:
+        """
+        Analyze a top pick using Claude AI (same approach as scanner).
+
+        Uses Sonnet model with standard analysis level for institutional-grade analysis.
+        First checks database for existing analysis. If not found (or force_refresh=True),
+        calls Claude API and stores the result.
+
+        Args:
+            pick: Top pick data including ticker, signals, and technical data
+            force_refresh: If True, skip cache and call Claude API
+
+        Returns:
+            Dict with Claude analysis (grade, score, action, thesis, strengths, risks, etc.)
+        """
+        from datetime import date
+
+        ticker = pick.get('ticker', '')
+        if not ticker:
+            return {'success': False, 'error': 'No ticker provided'}
+
+        # Get calculation date from pick or use yesterday
+        calculation_date = pick.get('calculation_date')
+        if not calculation_date:
+            calculation_date = date.today() - timedelta(days=1)
+
+        # Check database first (unless force refresh)
+        if not force_refresh:
+            stored = _self._get_stored_claude_analysis(ticker, calculation_date)
+            if stored:
+                logger.info(f"Using cached Claude analysis for {ticker}")
+                return stored
+
+        # Get API key
+        api_key = _self._get_claude_api_key()
+        if not api_key:
+            return {'success': False, 'error': 'Claude API key not configured'}
+
+        try:
+            # Try to import anthropic
+            try:
+                import anthropic
+            except ImportError:
+                return {'success': False, 'error': 'anthropic package not installed. Run: pip install anthropic'}
+
+            # Fetch additional technical data
+            technical = _self._get_technical_data_for_pick(ticker, calculation_date)
+
+            # Build the standard institutional-grade prompt (same as scanner)
+            prompt = _self._build_standard_analysis_prompt(pick, technical)
+
+            # Call Claude API with Sonnet model (same as scanner standard analysis)
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",  # Use Sonnet for standard analysis (same as scanner)
+                max_tokens=300,  # Standard analysis token limit
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            # Parse response using robust parser
+            response_text = response.content[0].text.strip()
+            tokens_used = response.usage.input_tokens + response.usage.output_tokens
+
+            analysis = _self._parse_claude_response(response_text)
+
+            if analysis.get('success'):
+                # Add token tracking
+                analysis['claude_tokens_used'] = tokens_used
+                analysis['claude_model'] = 'claude-sonnet-4-20250514'
+
+                # Store in database for future use
+                _self._store_claude_analysis(ticker, calculation_date, analysis)
+                logger.info(f"Stored Claude analysis for {ticker} (Sonnet, {tokens_used} tokens)")
+
+                return analysis
+            else:
+                return analysis
+
+        except Exception as e:
+            logger.error(f"Failed to analyze top pick {ticker}: {e}")
+            return {'success': False, 'error': str(e)[:100]}
+
+    def batch_analyze_top_picks(_self, picks: List[Dict[str, Any]], max_picks: int = 5) -> Dict[str, Dict[str, Any]]:
+        """
+        Batch analyze multiple top picks with Claude.
+
+        Args:
+            picks: List of top pick dicts
+            max_picks: Maximum picks to analyze (to control costs)
+
+        Returns:
+            Dict mapping ticker to Claude analysis result
+        """
+        results = {}
+        for i, pick in enumerate(picks[:max_picks]):
+            ticker = pick.get('ticker', '')
+            if ticker:
+                results[ticker] = _self.analyze_top_pick_with_claude(pick)
+        return results
 
     # =========================================================================
     # SCANNER SIGNALS
