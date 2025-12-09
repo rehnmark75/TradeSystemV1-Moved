@@ -8,10 +8,16 @@ Data Strategy:
 - Primary timeframe: 1H (730 days history from yfinance)
 - Synthesized: 4H, Daily from 1H data
 - Real-time quotes: RoboMarkets API
+
+Rate Limiting:
+- Yahoo Finance has rate limits (~2000 requests/hour)
+- Implements exponential backoff with jitter for retries
+- Configurable delays between requests to avoid rate limiting
 """
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +29,11 @@ import yfinance as yf
 from .trading.robomarkets_client import RoboMarketsClient, Instrument
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimitError(Exception):
+    """Raised when Yahoo Finance rate limits are hit"""
+    pass
 
 
 class DataFetcherError(Exception):
@@ -55,11 +66,19 @@ class StockDataFetcher:
         "1d": {"max_days": None, "interval": "1d"},  # Unlimited
     }
 
+    # Rate limiting configuration
+    DEFAULT_MAX_RETRIES = 3
+    DEFAULT_BASE_DELAY = 1.0  # Base delay in seconds
+    DEFAULT_MAX_DELAY = 30.0  # Maximum delay between retries
+    DEFAULT_REQUEST_DELAY = 0.2  # Delay between individual requests (200ms)
+
     def __init__(
         self,
         db_manager,
         robomarkets_client: RoboMarketsClient = None,
-        thread_pool_size: int = 4
+        thread_pool_size: int = 4,
+        max_retries: int = None,
+        request_delay: float = None
     ):
         """
         Initialize data fetcher
@@ -68,6 +87,8 @@ class StockDataFetcher:
             db_manager: Async database manager instance
             robomarkets_client: RoboMarkets API client
             thread_pool_size: Size of thread pool for yfinance calls
+            max_retries: Max retries on rate limit (default: 3)
+            request_delay: Delay between requests in seconds (default: 0.2)
         """
         self.db = db_manager
         self.robomarkets = robomarkets_client
@@ -75,6 +96,11 @@ class StockDataFetcher:
         self._ticker_cache: Dict[str, yf.Ticker] = {}
         self._data_cache: Dict[str, Tuple[pd.DataFrame, datetime]] = {}
         self._cache_ttl = 300  # 5 minutes
+
+        # Rate limiting settings
+        self.max_retries = max_retries or self.DEFAULT_MAX_RETRIES
+        self.request_delay = request_delay or self.DEFAULT_REQUEST_DELAY
+        self._last_request_time = 0.0
 
     # =========================================================================
     # INSTRUMENT SYNC
@@ -336,6 +362,9 @@ class StockDataFetcher:
 
         Returns:
             DataFrame with OHLCV data
+
+        Raises:
+            RateLimitError: If Yahoo Finance returns rate limit error
         """
         try:
             stock = self._get_yf_ticker(ticker)
@@ -368,8 +397,40 @@ class StockDataFetcher:
             return df
 
         except Exception as e:
+            error_str = str(e).lower()
+            # Detect rate limiting errors
+            if "too many requests" in error_str or "rate limit" in error_str:
+                logger.warning(f"Rate limited for {ticker}: {e}")
+                raise RateLimitError(f"Rate limited for {ticker}")
             logger.error(f"Error fetching data for {ticker}: {e}")
             return pd.DataFrame()
+
+    async def _wait_for_rate_limit(self):
+        """Ensure minimum delay between requests to avoid rate limiting"""
+        import time
+        current_time = time.time()
+        elapsed = current_time - self._last_request_time
+        if elapsed < self.request_delay:
+            await asyncio.sleep(self.request_delay - elapsed)
+        self._last_request_time = time.time()
+
+    def _calculate_backoff_delay(self, attempt: int) -> float:
+        """
+        Calculate exponential backoff delay with jitter
+
+        Args:
+            attempt: Current retry attempt (0-indexed)
+
+        Returns:
+            Delay in seconds
+        """
+        # Exponential backoff: base_delay * 2^attempt
+        delay = self.DEFAULT_BASE_DELAY * (2 ** attempt)
+        # Add jitter (±25%)
+        jitter = delay * 0.25 * (random.random() * 2 - 1)
+        delay = delay + jitter
+        # Cap at max delay
+        return min(delay, self.DEFAULT_MAX_DELAY)
 
     async def fetch_historical_data(
         self,
@@ -378,7 +439,8 @@ class StockDataFetcher:
         interval: str = "1h"
     ) -> int:
         """
-        Fetch historical data from yfinance and store in database
+        Fetch historical data from yfinance and store in database.
+        Implements retry logic with exponential backoff for rate limiting.
 
         Args:
             ticker: Stock ticker symbol
@@ -404,30 +466,59 @@ class StockDataFetcher:
 
         period = f"{days}d"
 
-        # Fetch data in thread pool (yfinance is synchronous)
-        loop = asyncio.get_event_loop()
-        df = await loop.run_in_executor(
-            self._executor,
-            self._fetch_history_sync,
-            ticker,
-            period,
-            interval,
-            None,
-            None
-        )
+        # Retry loop with exponential backoff
+        last_error = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                # Wait for rate limit before making request
+                await self._wait_for_rate_limit()
 
-        if df.empty:
-            logger.warning(f"No data fetched for {ticker}")
-            return 0
+                # Fetch data in thread pool (yfinance is synchronous)
+                loop = asyncio.get_event_loop()
+                df = await loop.run_in_executor(
+                    self._executor,
+                    self._fetch_history_sync,
+                    ticker,
+                    period,
+                    interval,
+                    None,
+                    None
+                )
 
-        # Store in database
-        count = await self._store_candles(ticker, interval, df)
+                if df.empty:
+                    logger.warning(f"No data fetched for {ticker}")
+                    return 0
 
-        # Log sync
-        await self._log_sync(ticker, interval, "full", count, len(df))
+                # Store in database
+                count = await self._store_candles(ticker, interval, df)
 
-        logger.info(f"Fetched {count} {interval} candles for {ticker}")
-        return count
+                # Log sync
+                await self._log_sync(ticker, interval, "full", count, len(df))
+
+                logger.debug(f"Fetched {count} {interval} candles for {ticker}")
+                return count
+
+            except RateLimitError as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    delay = self._calculate_backoff_delay(attempt)
+                    logger.warning(
+                        f"Rate limited for {ticker}, retry {attempt + 1}/{self.max_retries} "
+                        f"after {delay:.1f}s"
+                    )
+                    await asyncio.sleep(delay)
+                    # Clear ticker from cache to force fresh connection
+                    self._ticker_cache.pop(ticker, None)
+                else:
+                    logger.error(f"Rate limit retries exhausted for {ticker}")
+
+            except Exception as e:
+                last_error = e
+                logger.error(f"Error fetching {ticker}: {e}")
+                break
+
+        # All retries failed
+        return 0
 
     async def fetch_incremental_data(
         self,

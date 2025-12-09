@@ -974,7 +974,7 @@ class StockAnalyticsService:
     # SCANNER SIGNALS
     # =========================================================================
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=60, show_spinner=False)
     def get_scanner_signals(
         _self,
         scanner_name: str = None,
@@ -982,6 +982,8 @@ class StockAnalyticsService:
         min_score: int = None,
         min_claude_grade: str = None,
         claude_analyzed_only: bool = False,
+        signal_date_from: str = None,
+        signal_date_to: str = None,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         """
@@ -993,6 +995,8 @@ class StockAnalyticsService:
             min_score: Minimum composite score
             min_claude_grade: Minimum Claude grade (A+, A, B, C, D)
             claude_analyzed_only: Only show signals with Claude analysis
+            signal_date_from: Filter signals from this date (str: YYYY-MM-DD)
+            signal_date_to: Filter signals up to this date (str: YYYY-MM-DD)
             limit: Maximum results
 
         Returns:
@@ -1021,6 +1025,15 @@ class StockAnalyticsService:
             valid_grades = [g for g, v in grade_order.items() if v >= grade_order.get(min_claude_grade, 1)]
             grades_str = ', '.join(f"'{g}'" for g in valid_grades)
             conditions.append(f"claude_grade IN ({grades_str})")
+
+        # Date range filters
+        if signal_date_from:
+            params.append(signal_date_from)
+            conditions.append("DATE(signal_timestamp) >= %s")
+
+        if signal_date_to:
+            params.append(signal_date_to)
+            conditions.append("DATE(signal_timestamp) <= %s")
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -1141,6 +1154,87 @@ class StockAnalyticsService:
             WHERE s.id = %s
         """, (signal_id,))
         return results[0] if results else {}
+
+    def reanalyze_signal(_self, signal_id: int) -> Dict[str, Any]:
+        """
+        Trigger Claude AI re-analysis for a specific signal.
+
+        This calls the worker container's batch analysis script for a single signal.
+
+        Args:
+            signal_id: The signal ID to re-analyze
+
+        Returns:
+            Dict with success status and message
+        """
+        import subprocess
+        import json
+
+        try:
+            # First, clear the existing Claude analysis
+            conn = _self._get_connection()
+            if not conn:
+                return {'success': False, 'error': 'Database connection failed'}
+
+            with conn.cursor() as cursor:
+                # Clear existing analysis to mark it for re-analysis
+                cursor.execute("""
+                    UPDATE stock_scanner_signals
+                    SET claude_analyzed_at = NULL,
+                        claude_grade = NULL,
+                        claude_score = NULL,
+                        claude_action = NULL,
+                        claude_thesis = NULL,
+                        claude_key_strengths = NULL,
+                        claude_key_risks = NULL,
+                        claude_conviction = NULL,
+                        claude_position_rec = NULL,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING ticker
+                """, (signal_id,))
+                result = cursor.fetchone()
+                conn.commit()
+
+                if not result:
+                    return {'success': False, 'error': f'Signal {signal_id} not found'}
+
+                ticker = result[0]
+
+            conn.close()
+
+            # Run the batch analysis script for this specific signal
+            # The script will pick it up since claude_analyzed_at is now NULL
+            cmd = [
+                'docker', 'exec', 'task-worker',
+                'python', '-m', 'stock_scanner.scripts.run_batch_claude_analysis',
+                '--limit', '1'
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120  # 2 minute timeout
+            )
+
+            if result.returncode == 0:
+                return {
+                    'success': True,
+                    'message': f'Re-analysis triggered for {ticker}',
+                    'ticker': ticker
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f'Analysis failed: {result.stderr[:200]}'
+                }
+
+        except subprocess.TimeoutExpired:
+            return {'success': False, 'error': 'Analysis timed out after 2 minutes'}
+        except Exception as e:
+            logger.error(f"Failed to re-analyze signal {signal_id}: {e}")
+            return {'success': False, 'error': str(e)}
 
 
 # Singleton instance

@@ -253,8 +253,18 @@ class StockScheduler:
 
         return results
 
+    # Sync configuration to avoid Yahoo Finance rate limiting
+    SYNC_CONCURRENCY = 3  # Max concurrent requests (reduced from 5)
+    SYNC_BATCH_SIZE = 100  # Process in batches
+    SYNC_BATCH_DELAY = 2.0  # Seconds between batches
+
     async def _sync_hourly_data(self) -> dict:
-        """Sync 1H candles for stocks needing update"""
+        """
+        Sync 1H candles for stocks needing update.
+
+        Uses batched processing with delays to avoid Yahoo Finance rate limiting.
+        Implements retry tracking for failed tickers.
+        """
         # Get tickers needing update (older than 20 hours)
         query = """
             SELECT i.ticker
@@ -273,35 +283,82 @@ class StockScheduler:
         if not tickers:
             return {'successful': 0, 'failed': 0, 'total_candles': 0, 'message': 'All up to date'}
 
-        logger.info(f"Updating {len(tickers)} tickers...")
+        logger.info(f"Updating {len(tickers)} tickers in batches of {self.SYNC_BATCH_SIZE}...")
 
-        # Update with concurrency
+        # Process in batches to avoid overwhelming Yahoo Finance
         successful = 0
         failed = 0
         total_candles = 0
-        semaphore = asyncio.Semaphore(5)
+        failed_tickers = []
 
-        async def update_ticker(ticker):
-            async with semaphore:
+        # Split into batches
+        batches = [
+            tickers[i:i + self.SYNC_BATCH_SIZE]
+            for i in range(0, len(tickers), self.SYNC_BATCH_SIZE)
+        ]
+
+        for batch_num, batch in enumerate(batches, 1):
+            logger.info(f"Processing batch {batch_num}/{len(batches)} ({len(batch)} tickers)...")
+
+            semaphore = asyncio.Semaphore(self.SYNC_CONCURRENCY)
+
+            async def update_ticker(ticker):
+                async with semaphore:
+                    try:
+                        count = await self.fetcher.fetch_historical_data(
+                            ticker, days=5, interval='1h'
+                        )
+                        return (ticker, count, None)
+                    except Exception as e:
+                        return (ticker, 0, str(e))
+
+            tasks = [update_ticker(t) for t in batch]
+            results = await asyncio.gather(*tasks)
+
+            batch_success = 0
+            batch_failed = 0
+            for ticker, count, error in results:
+                if error:
+                    failed += 1
+                    batch_failed += 1
+                    failed_tickers.append(ticker)
+                elif count > 0:
+                    successful += 1
+                    batch_success += 1
+                    total_candles += count
+                else:
+                    failed += 1
+                    batch_failed += 1
+                    failed_tickers.append(ticker)
+
+            logger.info(f"  Batch {batch_num}: {batch_success} success, {batch_failed} failed")
+
+            # Delay between batches (except for last batch)
+            if batch_num < len(batches):
+                logger.debug(f"  Waiting {self.SYNC_BATCH_DELAY}s before next batch...")
+                await asyncio.sleep(self.SYNC_BATCH_DELAY)
+
+        # Retry failed tickers with longer delays if we have time
+        if failed_tickers and len(failed_tickers) <= 500:
+            logger.info(f"Retrying {len(failed_tickers)} failed tickers with longer delays...")
+            retry_success = 0
+
+            for ticker in failed_tickers[:200]:  # Limit retries
                 try:
+                    await asyncio.sleep(0.5)  # 500ms delay between retries
                     count = await self.fetcher.fetch_historical_data(
                         ticker, days=5, interval='1h'
                     )
-                    return (ticker, count, None)
-                except Exception as e:
-                    return (ticker, 0, str(e))
+                    if count > 0:
+                        retry_success += 1
+                        successful += 1
+                        failed -= 1
+                        total_candles += count
+                except Exception:
+                    pass
 
-        tasks = [update_ticker(t) for t in tickers]
-        results = await asyncio.gather(*tasks)
-
-        for ticker, count, error in results:
-            if error:
-                failed += 1
-            elif count > 0:
-                successful += 1
-                total_candles += count
-            else:
-                failed += 1
+            if retry_success > 0:
+                logger.info(f"  Retry recovered {retry_success} tickers")
 
         return {
             'total_tickers': len(tickers),

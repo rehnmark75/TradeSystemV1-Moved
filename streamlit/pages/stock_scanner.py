@@ -1300,7 +1300,7 @@ def render_scanner_signals_tab(service):
 
     st.markdown("---")
 
-    # Filters
+    # Filters - Row 1
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -1327,6 +1327,31 @@ def render_scanner_signals_tab(service):
             ["All Signals", "Claude Analyzed Only", "A+ Grade", "A Grade", "B Grade", "STRONG BUY", "BUY"]
         )
 
+    # Filters - Row 2: Date range filters
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        # Default to last 7 days
+        default_from = datetime.now().date() - timedelta(days=7)
+        date_from = st.date_input(
+            "Signal Date From",
+            value=default_from,
+            help="Filter signals detected from this date"
+        )
+
+    with col2:
+        date_to = st.date_input(
+            "Signal Date To",
+            value=datetime.now().date(),
+            help="Filter signals detected up to this date"
+        )
+
+    with col3:
+        st.empty()  # Placeholder for alignment
+
+    with col4:
+        st.empty()  # Placeholder for alignment
+
     # Get filtered signals
     scanner_name = None if scanner_filter == "All Scanners" else scanner_filter
     status = None if status_filter == "All" else status_filter
@@ -1348,6 +1373,8 @@ def render_scanner_signals_tab(service):
         min_score=min_score,
         min_claude_grade=min_claude_grade,
         claude_analyzed_only=claude_analyzed_only,
+        signal_date_from=str(date_from) if date_from else None,
+        signal_date_to=str(date_to) if date_to else None,
         limit=100
     )
 
@@ -1360,7 +1387,7 @@ def render_scanner_signals_tab(service):
 
     # Signal cards layout
     for i, signal in enumerate(signals):
-        _render_signal_card(signal)
+        _render_signal_card(signal, service=service)
 
     # Export section
     st.markdown("---")
@@ -1391,8 +1418,9 @@ def render_scanner_signals_tab(service):
             )
 
 
-def _render_signal_card(signal: Dict[str, Any]):
+def _render_signal_card(signal: Dict[str, Any], service=None):
     """Render a single signal card using native Streamlit components."""
+    signal_id = signal.get('id')
     tier = signal.get('quality_tier', 'D')
     ticker = signal.get('ticker', 'N/A')
     scanner = signal.get('scanner_name', '').replace('_', ' ').title()
@@ -1411,6 +1439,16 @@ def _render_signal_card(signal: Dict[str, Any]):
     else:
         factors_str = str(factors) if factors else ''
 
+    # Signal timestamp
+    signal_timestamp = signal.get('signal_timestamp')
+    if signal_timestamp:
+        if isinstance(signal_timestamp, datetime):
+            signal_time_str = signal_timestamp.strftime('%Y-%m-%d %H:%M')
+        else:
+            signal_time_str = str(signal_timestamp)[:16]
+    else:
+        signal_time_str = 'Unknown'
+
     # Claude analysis data
     claude_grade = signal.get('claude_grade')
     claude_score = signal.get('claude_score')
@@ -1420,7 +1458,17 @@ def _render_signal_card(signal: Dict[str, Any]):
     claude_strengths = signal.get('claude_key_strengths', [])
     claude_risks = signal.get('claude_key_risks', [])
     claude_position = signal.get('claude_position_rec')
+    claude_analyzed_at = signal.get('claude_analyzed_at')
     has_claude = claude_grade is not None
+
+    # Format claude_analyzed_at timestamp
+    if claude_analyzed_at:
+        if isinstance(claude_analyzed_at, datetime):
+            analyzed_time_str = claude_analyzed_at.strftime('%Y-%m-%d %H:%M')
+        else:
+            analyzed_time_str = str(claude_analyzed_at)[:16]
+    else:
+        analyzed_time_str = None
 
     # Tier styling
     tier_colors = {
@@ -1453,6 +1501,9 @@ def _render_signal_card(signal: Dict[str, Any]):
 
     # Use expander for each signal card
     with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}", expanded=True):
+        # Signal detected timestamp
+        st.caption(f"📅 **Signal Detected:** {signal_time_str}")
+
         # Metrics row
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
@@ -1477,7 +1528,24 @@ def _render_signal_card(signal: Dict[str, Any]):
         # Claude AI Analysis Section
         if has_claude:
             st.markdown("---")
-            st.markdown("#### 🤖 Claude AI Analysis")
+
+            # Claude header with timestamp and re-analyze button
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown("#### 🤖 Claude AI Analysis")
+                if analyzed_time_str:
+                    st.caption(f"✅ Analyzed: {analyzed_time_str}")
+            with col2:
+                # Re-analyze button
+                if signal_id and service:
+                    if st.button("🔄 Re-analyze", key=f"reanalyze_{signal_id}", help="Run fresh Claude AI analysis"):
+                        with st.spinner(f"Re-analyzing {ticker}..."):
+                            result = service.reanalyze_signal(signal_id)
+                            if result.get('success'):
+                                st.success(f"✅ {result.get('message', 'Analysis complete!')}")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {result.get('error', 'Analysis failed')}")
 
             # Claude metrics row
             col1, col2, col3, col4 = st.columns(4)
@@ -1511,7 +1579,7 @@ def _render_signal_card(signal: Dict[str, Any]):
                             st.markdown(f"- :red[-] {r}")
         else:
             # Show pending analysis indicator
-            st.caption("🔄 *Awaiting Claude AI analysis*")
+            st.caption("⏳ *Awaiting Claude AI analysis*")
 
 
 def _signals_to_csv(signals: List[Dict]) -> str:
