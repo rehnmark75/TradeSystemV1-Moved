@@ -422,7 +422,7 @@ def get_vp_config_for_epic(epic: str, preset: str = None) -> dict:
     Get Volume Profile configuration for specific epic and preset.
 
     Args:
-        epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
         preset: Configuration preset name (default: ACTIVE_VP_CONFIG)
 
     Returns:
@@ -447,7 +447,7 @@ def extract_pair_from_epic(epic: str) -> str:
     Extract currency pair from epic code.
 
     Args:
-        epic: Epic code (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Epic code (e.g., 'CS.D.EURUSD.CEEM.IP')
 
     Returns:
         Currency pair (e.g., 'EURUSD')

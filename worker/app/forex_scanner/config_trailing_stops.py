@@ -22,7 +22,8 @@ MFE_PROTECTION_DEFAULTS = {
 PAIR_TRAILING_CONFIGS = {
     # ========== MAJOR PAIRS - Standard Volatility ==========
 
-    'CS.D.EURUSD.MINI.IP': {
+    # CEEM epic uses scaled pricing (11646 instead of 1.1646), 1 pip = 1 point
+    'CS.D.EURUSD.CEEM.IP': {
         'stage1_trigger_points': 20,      # Break-even trigger (was 16) - v1.5.0
         'stage1_lock_points': 6,          # Minimum profit lock (was 4) - lock MORE
         'stage2_trigger_points': 28,      # Profit lock trigger (was 20)

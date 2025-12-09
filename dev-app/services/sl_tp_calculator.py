@@ -16,7 +16,7 @@ async def calculate_trade_levels(epic: str, trading_headers: dict,
     Calculate optimal stop loss and take profit levels using ATR-based analysis.
 
     Args:
-        epic: IG market epic (e.g., "CS.D.EURUSD.MINI.IP")
+        epic: IG market epic (e.g., "CS.D.EURUSD.CEEM.IP")
         trading_headers: IG API authentication headers
         risk_reward_ratio: Desired reward-to-risk ratio (uses epic-specific or default if None)
 

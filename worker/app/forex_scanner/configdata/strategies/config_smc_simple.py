@@ -179,7 +179,7 @@ SIGNAL_COOLDOWN_HOURS = 4                # Hours between signals on same pair
 
 # Enabled pairs (major forex pairs with good liquidity)
 ENABLED_PAIRS = [
-    'CS.D.EURUSD.MINI.IP',
+    'CS.D.EURUSD.CEEM.IP',  # CEEM uses scaled pricing (11646 instead of 1.1646)
     'CS.D.GBPUSD.MINI.IP',
     'CS.D.USDJPY.MINI.IP',
     'CS.D.USDCHF.MINI.IP',
@@ -192,7 +192,7 @@ ENABLED_PAIRS = [
 
 # Pair-specific pip values (from existing config)
 PAIR_PIP_VALUES = {
-    'CS.D.EURUSD.MINI.IP': 0.0001,
+    'CS.D.EURUSD.CEEM.IP': 1.0,  # CEEM uses scaled pricing, 1 pip = 1 point
     'CS.D.GBPUSD.MINI.IP': 0.0001,
     'CS.D.USDJPY.MINI.IP': 0.01,
     'CS.D.USDCHF.MINI.IP': 0.0001,

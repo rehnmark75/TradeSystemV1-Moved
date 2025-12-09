@@ -142,7 +142,7 @@ class MACDMultiTimeframeFilter:
                 )
             elif hasattr(self.data_fetcher, 'get_enhanced_data'):
                 # Backtest data fetcher
-                # Extract pair name from epic (e.g., CS.D.EURUSD.MINI.IP -> EURUSD)
+                # Extract pair name from epic (e.g., CS.D.EURUSD.CEEM.IP -> EURUSD)
                 pair = epic.split('.')[2] if '.' in epic else epic
                 # 🔧 FIX: Use large lookback_hours for H4 in backtest mode
                 # For MACD calculation we need 35+ H4 bars

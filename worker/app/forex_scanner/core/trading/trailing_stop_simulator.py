@@ -62,7 +62,7 @@ class TrailingStopSimulator:
         Initialize Progressive 3-Stage trailing stop simulator with MFE Protection
 
         Args:
-            epic: Trading pair (e.g., 'CS.D.EURUSD.MINI.IP') - loads config automatically
+            epic: Trading pair (e.g., 'CS.D.EURUSD.CEEM.IP') - loads config automatically
             target_pips: Profit target in pips
             initial_stop_pips: Initial stop loss in pips
             break_even_trigger: Move to breakeven at this profit level (new name)
@@ -850,7 +850,7 @@ def create_trailing_stop_simulator(epic: str = None,
     Factory function to create TrailingStopSimulator with Progressive 3-Stage system
 
     Args:
-        epic: Trading pair (e.g., 'CS.D.EURUSD.MINI.IP') - auto-loads config
+        epic: Trading pair (e.g., 'CS.D.EURUSD.CEEM.IP') - auto-loads config
         config: Optional configuration dictionary (overrides auto-loaded config)
         logger: Optional logger instance
 

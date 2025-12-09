@@ -94,7 +94,7 @@ class TrailingConfig:
         Create TrailingConfig with pair-specific settings from config.py
 
         Args:
-            epic: Trading symbol (e.g., 'CS.D.EURUSD.MINI.IP')
+            epic: Trading symbol (e.g., 'CS.D.EURUSD.CEEM.IP')
             method: Trailing method to use (default: PROGRESSIVE_3_STAGE)
 
         Returns:

@@ -421,7 +421,7 @@ def get_macd_min_adx(epic: str) -> float:
     Reads from MACD_MIN_HISTOGRAM_THRESHOLDS which contains pair-specific settings.
 
     Args:
-        epic: Currency pair epic code (e.g., 'EURUSD', 'GBPJPY', 'CS.D.EURUSD.MINI.IP')
+        epic: Currency pair epic code (e.g., 'EURUSD', 'GBPJPY', 'CS.D.EURUSD.CEEM.IP')
 
     Returns:
         Minimum ADX threshold for the pair (defaults to MACD_MIN_ADX if not specified)

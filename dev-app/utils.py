@@ -8,22 +8,28 @@ trading-related calculations that are used across the application.
 def get_point_value(epic: str) -> float:
     """
     Get point value for the instrument based on epic name.
-    
+
     Args:
         epic (str): The trading instrument epic (e.g., "USDJPY", "EURUSD")
-        
+
     Returns:
         float: Point value for the instrument
-        
+
     Examples:
         >>> get_point_value("USDJPY")
         0.01
         >>> get_point_value("EURUSD")
         0.0001
+        >>> get_point_value("CS.D.EURUSD.CEEM.IP")
+        1.0  # CEEM uses scaled pricing (11646 instead of 1.1646)
         >>> get_point_value("US500")
         1.0
     """
-    if "JPY" in epic:
+    # CRITICAL: CEEM epics use scaled pricing format (e.g., 11646 instead of 1.1646)
+    # In this format, 1 pip = 1 point, so point_value = 1.0
+    if "CEEM" in epic:
+        return 1.0
+    elif "JPY" in epic:
         return 0.01
     elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
         return 0.0001

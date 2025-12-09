@@ -765,7 +765,7 @@ class BacktestScanner(IntelligentForexScanner):
         settings from config_trailing_stops.py, matching the live trading system.
 
         Args:
-            epic: Trading pair (e.g., 'CS.D.EURUSD.MINI.IP')
+            epic: Trading pair (e.g., 'CS.D.EURUSD.CEEM.IP')
 
         Returns:
             TrailingStopSimulator configured for the specific pair

@@ -1025,7 +1025,7 @@ class MACDStrategy(BaseStrategy):
             # Fetch H4 data for structure analysis
             bars_needed = max(100, self.h4_structure_lookback + 20)
 
-            # Extract pair from epic (e.g., CS.D.EURUSD.MINI.IP -> EURUSD)
+            # Extract pair from epic (e.g., CS.D.EURUSD.CEEM.IP -> EURUSD)
             pair = epic.split('.')[2] if '.' in epic else epic
 
             # Calculate hours needed (bars * 4 hours per bar)

@@ -38,7 +38,7 @@ BROKER_EPIC_MAP = {
 
 # Default epics for testing and examples
 DEFAULT_EPICS = {
-    'EURUSD': 'CS.D.EURUSD.MINI.IP',
+    'EURUSD': 'CS.D.EURUSD.CEEM.IP',
     'USDJPY': 'CS.D.USDJPY.MINI.IP',
     'GBPUSD': 'CS.D.GBPUSD.MINI.IP'
 }
@@ -68,7 +68,7 @@ IG_PWD = "demopwd"
 TRADE_COOLDOWN_ENABLED = True
 TRADE_COOLDOWN_MINUTES = 30  # Default cooldown period after closing a trade
 EPIC_SPECIFIC_COOLDOWNS = {
-    'CS.D.EURUSD.MINI.IP': 45,  # Major pairs get longer cooldown
+    'CS.D.EURUSD.CEEM.IP': 45,  # Major pairs get longer cooldown
     'CS.D.GBPUSD.MINI.IP': 45,
     'CS.D.USDJPY.MINI.IP': 30,
     'CS.D.AUDUSD.MINI.IP': 30,
@@ -82,7 +82,7 @@ DEFAULT_RISK_REWARD_RATIO = 2.0
 
 # Epic-specific risk-reward ratios (for fine-tuning based on volatility)
 EPIC_RISK_REWARD_RATIOS = {
-    'CS.D.EURUSD.MINI.IP': 2.5,  # More volatile pairs get higher RR
+    'CS.D.EURUSD.CEEM.IP': 2.5,  # More volatile pairs get higher RR
     'CS.D.GBPUSD.MINI.IP': 2.5,
     'CS.D.USDJPY.MINI.IP': 2.0,  # Stable pairs use default
     'CS.D.AUDUSD.MINI.IP': 2.0,
@@ -140,7 +140,8 @@ PAIR_TRAILING_CONFIGS = {
     # ========== MAJOR PAIRS - Early Profit Protection (Small Account Mode) ==========
     # Based on MAE analysis: Winners dip only 3 pips avg, so early BE at +6 is safe
 
-    'CS.D.EURUSD.MINI.IP': {
+    # CEEM epic uses scaled pricing (11646 instead of 1.1646)
+    'CS.D.EURUSD.CEEM.IP': {
         'early_breakeven_trigger_points': 6,  # Move to BE after +6 pts
         'early_breakeven_buffer_points': 1,   # SL at entry + 1 pt
         'stage1_trigger_points': 10,          # Lock profit after +10 pts
@@ -153,7 +154,7 @@ PAIR_TRAILING_CONFIGS = {
         'min_trail_distance': 4,              # Overall minimum distance
         'break_even_trigger_points': 6,       # Legacy field (uses early_breakeven now)
         'enable_partial_close': True,         # Enable partial close
-        'partial_close_trigger_points': 13,   # NEW: Partial close at +13 pips (not at BE)
+        'partial_close_trigger_points': 13,   # Partial close at +13 pips
         'partial_close_size': 0.5,            # Close 50% of position
     },
 
@@ -482,7 +483,7 @@ def get_trailing_config_for_epic(epic: str) -> dict:
     when available. These configs are fallback or can set HIGHER values.
 
     Args:
-        epic: Trading symbol (e.g., 'CS.D.EURUSD.MINI.IP')
+        epic: Trading symbol (e.g., 'CS.D.EURUSD.CEEM.IP')
 
     Returns:
         Dictionary with trailing configuration values
