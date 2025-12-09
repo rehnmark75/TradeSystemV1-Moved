@@ -1333,13 +1333,58 @@ class AdvancedTrailingManager:
 
 class EnhancedTradeProcessor:
     """Enhanced trade processor with advanced trailing strategies - CRITICALLY FIXED"""
-    
+
     def __init__(self, trailing_config: TrailingConfig, order_sender, logger):
         self.trailing_manager = AdvancedTrailingManager(trailing_config, logger)
         self.order_sender = order_sender
         self.logger = logger
         self.config = trailing_config
-    
+
+    async def send_stop_adjustment(self, trade: TradeLog, new_stop: float, reason: str = "") -> bool:
+        """
+        Async method to send stop adjustment using absolute stop level.
+        Used by partial close and other async contexts.
+
+        Args:
+            trade: The trade to adjust
+            new_stop: Absolute stop level to set
+            reason: Reason for the adjustment (for logging)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            from services.adjust_stop_service import adjust_stop_logic
+
+            self.logger.info(f"📍 [ASYNC STOP ADJUST] Trade {trade.id} {trade.symbol}: "
+                           f"Setting stop to {new_stop:.5f} ({reason})")
+
+            result = await adjust_stop_logic(
+                epic=trade.symbol,
+                new_stop=new_stop,
+                stop_offset_points=None,
+                limit_offset_points=None,
+                dry_run=False
+            )
+
+            status = result.get("status", "unknown")
+
+            if status == "updated":
+                sent_payload = result.get("sentPayload", {})
+                actual_stop = sent_payload.get("stopLevel")
+                self.logger.info(f"[✅ ASYNC STOP UPDATED] {trade.symbol} → IG set stopLevel={actual_stop}")
+                return True
+            elif status == "closed":
+                self.logger.warning(f"[❌ POSITION CLOSED] {trade.symbol}: {result.get('message')}")
+                return False
+            else:
+                self.logger.error(f"[❌ ASYNC ADJUSTMENT FAILED] {trade.symbol}: {result.get('message', 'Unknown error')}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"❌ [ASYNC SEND ERROR] Trade {trade.id}: {e}")
+            return False
+
     def calculate_safe_trail_distance(self, trade: TradeLog) -> int:
         """Calculate safe trailing distance respecting IG's minimum requirements - ENHANCED"""
         try:
@@ -1527,9 +1572,12 @@ class EnhancedTradeProcessor:
                     # ✅ CRITICAL FIX: Re-check partial_close_executed with database lock to prevent race condition
                     # This prevents duplicate executions when monitoring cycles overlap
                     try:
-                        # Refresh trade from database with FOR UPDATE lock
-                        db.expire(trade)  # Expire current session cache
+                        # ✅ FIX: Query fresh trade without expiring the original
+                        # This keeps the original trade attached to session for fallback logic
                         refreshed_trade = db.query(TradeLog).filter(TradeLog.id == trade.id).with_for_update().first()
+                        if not refreshed_trade:
+                            self.logger.error(f"❌ [PARTIAL CLOSE] Trade {trade.id}: Could not find trade in database")
+                            raise Exception("Trade not found in database")
 
                         if refreshed_trade.partial_close_executed:
                             self.logger.info(f"⏭️ [PARTIAL CLOSE SKIP] Trade {trade.id}: Already executed (detected via database lock)")
@@ -1628,13 +1676,21 @@ class EnhancedTradeProcessor:
                         # ❌ Exception during partial close attempt
                         self.logger.error(f"❌ [PARTIAL CLOSE ERROR] Trade {trade.id}: {str(partial_error)}")
                         self.logger.info(f"🔄 [FALLBACK] Trade {trade.id}: Exception occurred, trying break-even stop move")
-                        # ✅ FIX: Re-merge trade object back into session after exception
-                        # The trade object was detached by db.expire() earlier
+                        # ✅ FIX: Refresh trade from session to ensure it's attached
+                        # Since we no longer use db.expire(), the trade should still be attached
+                        # But verify and re-query if needed
                         try:
-                            db.merge(trade)
-                            self.logger.debug(f"🔄 [SESSION FIX] Trade {trade.id}: Re-merged trade object into session")
-                        except Exception as merge_error:
-                            self.logger.warning(f"⚠️ [SESSION FIX FAILED] Trade {trade.id}: {merge_error}")
+                            db.refresh(trade)
+                            self.logger.debug(f"🔄 [SESSION REFRESH] Trade {trade.id}: Trade refreshed in session")
+                        except Exception as refresh_error:
+                            # Trade might be detached, re-query it
+                            self.logger.warning(f"⚠️ [SESSION REFRESH FAILED] Trade {trade.id}: {refresh_error}, re-querying...")
+                            try:
+                                trade = db.query(TradeLog).filter(TradeLog.id == trade.id).first()
+                                if trade:
+                                    self.logger.info(f"✅ [SESSION FIX] Trade {trade.id}: Re-queried successfully")
+                            except Exception as query_error:
+                                self.logger.error(f"❌ [SESSION FIX FAILED] Trade {trade.id}: {query_error}")
                         # Fall through to execute break-even stop move logic below
                 else:
                     if not enable_partial_close:
@@ -1759,11 +1815,15 @@ class EnhancedTradeProcessor:
                         
                             if adjustment_points > 0:
                                 direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
-                            
+
                                 self.logger.info(f"📤 [BREAK-EVEN SEND] Trade {trade.id}: "
-                                            f"Moving stop to break-even (entry+{lock_points}pts), adjustment={adjustment_points}pts")
-                            
-                                api_result = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                                            f"Moving stop to break-even at {break_even_stop:.5f} (entry+{lock_points}pts)")
+
+                                # ✅ CRITICAL FIX: Use absolute stop level instead of offset
+                                api_result = self._send_stop_adjustment(
+                                    trade, adjustment_points, direction_stop, 0,
+                                    new_stop_level=break_even_stop  # Pass absolute level
+                                )
 
                                 if isinstance(api_result, dict) and api_result.get("status") == "updated":
                                     # Extract IG's actual stop level for break-even
@@ -1881,7 +1941,11 @@ class EnhancedTradeProcessor:
                             min_adjustment = STAGE3_MIN_ADJUSTMENT  # Default 5 points per trail movement
 
                             if adjustment_points >= min_adjustment:
-                                success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                                # ✅ CRITICAL FIX: Use absolute stop level for Stage 3
+                                success = self._send_stop_adjustment(
+                                    trade, adjustment_points, direction_stop, 0,
+                                    new_stop_level=new_trail_level
+                                )
                                 if isinstance(success, dict) and success.get("status") == "updated":
                                     old_sl = trade.sl_price
                                     old_status = trade.status
@@ -1937,8 +2001,12 @@ class EnhancedTradeProcessor:
                             adjustment_points = int(adjustment_distance / point_value)
                             if adjustment_points > 0:
                                 direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
-                                self.logger.info(f"📤 [STAGE 2 SEND] Trade {trade.id}: Moving to profit lock (+{lock_points}pts), adjustment={adjustment_points}pts")
-                                success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                                self.logger.info(f"📤 [STAGE 2 SEND] Trade {trade.id}: Moving to profit lock at {stage2_stop:.5f} (+{lock_points}pts)")
+                                # ✅ CRITICAL FIX: Use absolute stop level for Stage 2
+                                success = self._send_stop_adjustment(
+                                    trade, adjustment_points, direction_stop, 0,
+                                    new_stop_level=stage2_stop
+                                )
                                 if isinstance(success, dict) and success.get("status") == "updated":
                                     old_sl = trade.sl_price
                                     old_status = trade.status
@@ -2159,33 +2227,62 @@ class EnhancedTradeProcessor:
 
     
     def _send_stop_adjustment(self, trade: TradeLog, stop_points: int,
-                            direction_stop: str, limit_points: int):
-        """Send stop adjustment to order system - ENHANCED"""
+                            direction_stop: str, limit_points: int,
+                            new_stop_level: float = None):
+        """
+        Send stop adjustment to order system - ENHANCED WITH ABSOLUTE LEVEL SUPPORT
+
+        Args:
+            trade: The trade to adjust
+            stop_points: Points to adjust (for legacy offset mode)
+            direction_stop: 'increase' or 'decrease'
+            limit_points: Points to adjust limit (for legacy offset mode)
+            new_stop_level: PREFERRED - Absolute stop level to set directly
+        """
         try:
-            payload = {
-                "epic": trade.symbol,
-                "adjustDirectionStop": direction_stop,
-                "adjustDirectionLimit": "increase",
-                "stop_offset_points": stop_points,
-                "limit_offset_points": limit_points,
-                "dry_run": False
-            }
-            
-            self.logger.info(f"[TRAILING PAYLOAD] {trade.symbol} {payload}")
-            from config import ADJUST_STOP_URL
-            self.logger.info(f"[SENDING TO] {ADJUST_STOP_URL}")
-            
-            # Use the order sender to send the adjustment
-            result = self.order_sender.send_adjustment(trade.symbol, trade.direction,
-                                                     stop_points, limit_points)
+            from services.adjust_stop_service import adjust_stop_sync
 
-            self.logger.info(f"[✅ SENT] {trade.symbol} stop={stop_points}, limit={limit_points}")
+            # ✅ CRITICAL FIX: Use absolute stop level when provided
+            if new_stop_level is not None:
+                self.logger.info(f"📍 [ABSOLUTE STOP] Trade {trade.id} {trade.symbol}: Setting stop directly to {new_stop_level:.5f}")
 
-            return result  # Return the full API response instead of just True
-            
+                result = adjust_stop_sync(
+                    epic=trade.symbol,
+                    new_stop=new_stop_level,  # Use absolute level - no offset calculation needed
+                    stop_offset_points=None,
+                    limit_offset_points=None,
+                    dry_run=False
+                )
+            else:
+                # Legacy offset-based mode (fallback)
+                self.logger.info(f"[OFFSET MODE] Trade {trade.id} {trade.symbol}: Adjusting stop by {stop_points}pts ({direction_stop})")
+
+                result = adjust_stop_sync(
+                    epic=trade.symbol,
+                    stop_offset_points=stop_points,
+                    limit_offset_points=limit_points,
+                    adjust_direction_stop=direction_stop,
+                    adjust_direction_limit="increase",
+                    dry_run=False
+                )
+
+            status = result.get("status", "unknown")
+
+            if status == "updated":
+                sent_payload = result.get("sentPayload", {})
+                actual_stop = sent_payload.get("stopLevel")
+                self.logger.info(f"[✅ STOP UPDATED] {trade.symbol} → IG set stopLevel={actual_stop}")
+                return result
+            elif status == "closed":
+                self.logger.warning(f"[❌ POSITION CLOSED] {trade.symbol}: {result.get('message')}")
+                return result
+            else:
+                self.logger.error(f"[❌ ADJUSTMENT FAILED] {trade.symbol}: {result.get('message', 'Unknown error')}")
+                return result
+
         except Exception as e:
             self.logger.error(f"❌ [SEND ERROR] Trade {trade.id}: {e}")
-            return False
+            return {"status": "error", "message": str(e)}
 
 
 # Configuration examples for different market conditions - ENHANCED

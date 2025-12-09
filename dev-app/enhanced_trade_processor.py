@@ -662,26 +662,66 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
         """Apply volatility adaptive trailing - delegates to fixed points method"""
         return self._apply_fixed_points_trailing(trade, current_price, db)
 
-    def _send_stop_adjustment(self, trade: TradeLog, stop_points: int, 
-                            direction_stop: str, limit_points: int) -> bool:
-        """Send stop adjustment using the order sender - ENHANCED"""
+    def _send_stop_adjustment(self, trade: TradeLog, stop_points: int,
+                            direction_stop: str, limit_points: int,
+                            new_stop_level: float = None) -> dict:
+        """
+        Send stop adjustment to order system - ENHANCED WITH ABSOLUTE LEVEL SUPPORT
+
+        Args:
+            trade: The trade to adjust
+            stop_points: Points to adjust (for legacy offset mode)
+            direction_stop: 'increase' or 'decrease'
+            limit_points: Points to adjust limit (for legacy offset mode)
+            new_stop_level: PREFERRED - Absolute stop level to set directly
+
+        Returns:
+            dict: API response with status and details
+        """
         try:
-            # Log the adjustment we're about to send
-            self.logger.info(f"[TRAILING PAYLOAD] {trade.symbol} {{'epic': '{trade.symbol}', 'adjustDirectionStop': '{direction_stop}', 'adjustDirectionLimit': 'increase', 'stop_offset_points': {stop_points}, 'limit_offset_points': {limit_points}, 'dry_run': False}}")
-            from config import ADJUST_STOP_URL
-            self.logger.info(f"[SENDING TO] {ADJUST_STOP_URL}")
-            
-            # Use the order sender to send the adjustment
-            result = self.order_sender.send_adjustment(trade.symbol, trade.direction, 
-                                                     stop_points, limit_points)
-            
-            self.logger.info(f"[✅ SENT] {trade.symbol} stop={stop_points}, limit={limit_points}")
-            
-            return result
-            
+            from services.adjust_stop_service import adjust_stop_sync
+
+            # ✅ CRITICAL FIX: Use absolute stop level when provided
+            if new_stop_level is not None:
+                self.logger.info(f"📍 [ABSOLUTE STOP] Trade {trade.id} {trade.symbol}: Setting stop directly to {new_stop_level:.5f}")
+
+                result = adjust_stop_sync(
+                    epic=trade.symbol,
+                    new_stop=new_stop_level,  # Use absolute level - no offset calculation needed
+                    stop_offset_points=None,
+                    limit_offset_points=None,
+                    dry_run=False
+                )
+            else:
+                # Legacy offset-based mode (fallback)
+                self.logger.info(f"[OFFSET MODE] Trade {trade.id} {trade.symbol}: Adjusting stop by {stop_points}pts ({direction_stop})")
+
+                result = adjust_stop_sync(
+                    epic=trade.symbol,
+                    stop_offset_points=stop_points,
+                    limit_offset_points=limit_points,
+                    adjust_direction_stop=direction_stop,
+                    adjust_direction_limit="increase",
+                    dry_run=False
+                )
+
+            status = result.get("status", "unknown")
+
+            if status == "updated":
+                sent_payload = result.get("sentPayload", {})
+                actual_stop = sent_payload.get("stopLevel")
+                self.logger.info(f"[✅ STOP UPDATED] {trade.symbol} → IG set stopLevel={actual_stop}")
+                return result
+            elif status == "closed":
+                self.logger.warning(f"[❌ POSITION CLOSED] {trade.symbol}: {result.get('message')}")
+                return result
+            else:
+                self.logger.error(f"[❌ ADJUSTMENT FAILED] {trade.symbol}: {result.get('message', 'Unknown error')}")
+                return result
+
         except Exception as e:
             self.logger.error(f"❌ [SEND ERROR] Trade {trade.id}: {e}")
-            return False
+            return {"status": "error", "message": str(e)}
 
     def validate_stop_level(self, trade: TradeLog, current_price: float, proposed_stop: float) -> bool:
         """Validate that the proposed stop level meets IG's minimum distance requirements"""
