@@ -164,8 +164,12 @@ class StockScheduler:
         self.db = AsyncDatabaseManager(config.STOCKS_DATABASE_URL)
         await self.db.connect()
 
-        # Initialize all components
-        self.fetcher = StockDataFetcher(db_manager=self.db)
+        # Initialize all components with rate limiting
+        self.fetcher = StockDataFetcher(
+            db_manager=self.db,
+            max_retries=5,
+            request_delay=self.SYNC_REQUEST_DELAY
+        )
         self.synthesizer = DailyCandleSynthesizer(db_manager=self.db)
         self.calculator = MetricsCalculator(db_manager=self.db)
         self.smc_analyzer = SMCStockAnalyzer(db_manager=self.db)
@@ -388,9 +392,11 @@ class StockScheduler:
         return results
 
     # Sync configuration to avoid Yahoo Finance rate limiting
-    SYNC_CONCURRENCY = 3  # Max concurrent requests (reduced from 5)
-    SYNC_BATCH_SIZE = 100  # Process in batches
-    SYNC_BATCH_DELAY = 2.0  # Seconds between batches
+    # yfinance rate limit is ~2000 requests/hour, so ~33/min = 1.8s between requests
+    SYNC_CONCURRENCY = 2  # Max concurrent requests (conservative)
+    SYNC_BATCH_SIZE = 50  # Smaller batches for better rate limit handling
+    SYNC_BATCH_DELAY = 5.0  # Longer delay between batches (was 2.0)
+    SYNC_REQUEST_DELAY = 0.5  # Delay between individual requests (passed to fetcher)
 
     async def _sync_hourly_data(self) -> dict:
         """
@@ -476,10 +482,11 @@ class StockScheduler:
         if failed_tickers and len(failed_tickers) <= 500:
             logger.info(f"Retrying {len(failed_tickers)} failed tickers with longer delays...")
             retry_success = 0
+            still_failed = []
 
             for ticker in failed_tickers[:200]:  # Limit retries
                 try:
-                    await asyncio.sleep(0.5)  # 500ms delay between retries
+                    await asyncio.sleep(1.0)  # 1s delay between retries (was 0.5)
                     count = await self.fetcher.fetch_historical_data(
                         ticker, days=5, interval='1h'
                     )
@@ -488,11 +495,17 @@ class StockScheduler:
                         successful += 1
                         failed -= 1
                         total_candles += count
+                    else:
+                        still_failed.append(ticker)
                 except Exception:
-                    pass
+                    still_failed.append(ticker)
 
             if retry_success > 0:
                 logger.info(f"  Retry recovered {retry_success} tickers")
+
+            # Mark persistently failed tickers as potentially delisted
+            if still_failed:
+                await self._mark_potentially_delisted(still_failed)
 
         return {
             'total_tickers': len(tickers),
@@ -500,6 +513,51 @@ class StockScheduler:
             'failed': failed,
             'total_candles': total_candles
         }
+
+    async def _mark_potentially_delisted(self, tickers: list):
+        """
+        Track tickers that consistently fail to sync.
+        After 3 consecutive failures, mark them as inactive.
+        """
+        if not tickers:
+            return
+
+        for ticker in tickers:
+            # Increment failure count
+            query = """
+                INSERT INTO stock_sync_failures (ticker, failure_count, last_failure)
+                VALUES ($1, 1, NOW())
+                ON CONFLICT (ticker) DO UPDATE SET
+                    failure_count = stock_sync_failures.failure_count + 1,
+                    last_failure = NOW()
+                RETURNING failure_count
+            """
+            try:
+                result = await self.db.fetchval(query, ticker)
+                if result and result >= 3:
+                    # Mark as inactive after 3 failures
+                    deactivate_query = """
+                        UPDATE stock_instruments
+                        SET is_active = FALSE, is_tradeable = FALSE, updated_at = NOW()
+                        WHERE ticker = $1
+                    """
+                    await self.db.execute(deactivate_query, ticker)
+                    logger.warning(f"Marked {ticker} as inactive after {result} sync failures")
+            except Exception as e:
+                # Table might not exist, create it
+                if 'does not exist' in str(e):
+                    create_query = """
+                        CREATE TABLE IF NOT EXISTS stock_sync_failures (
+                            ticker VARCHAR(20) PRIMARY KEY,
+                            failure_count INT DEFAULT 0,
+                            last_failure TIMESTAMP DEFAULT NOW()
+                        )
+                    """
+                    try:
+                        await self.db.execute(create_query)
+                        logger.info("Created stock_sync_failures table")
+                    except Exception:
+                        pass
 
     async def run_pre_market_scan(self):
         """
