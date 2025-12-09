@@ -690,6 +690,7 @@ class StockAnalyticsService:
                     return {'momentum': [], 'breakout': [], 'mean_reversion': [], 'total_picks': 0, 'date': None}
 
                 # Query for eligible candidates with hard exclusions built into SQL
+                # Also pull Claude analysis from stock_scanner_signals as fallback
                 cursor.execute("""
                     SELECT
                         w.ticker,
@@ -711,18 +712,18 @@ class StockAnalyticsService:
                         w.candlestick_pattern,
                         w.pct_from_52w_high,
                         w.calculation_date,
-                        -- Claude analysis columns
-                        w.claude_grade,
-                        w.claude_score,
-                        w.claude_action,
-                        w.claude_thesis,
-                        w.claude_conviction,
-                        w.claude_key_strengths,
-                        w.claude_key_risks,
-                        w.claude_position_rec,
-                        w.claude_stop_adjustment,
-                        w.claude_time_horizon,
-                        w.claude_analyzed_at,
+                        -- Claude analysis columns (prefer watchlist, fallback to scanner signals)
+                        COALESCE(w.claude_grade, ss.claude_grade) as claude_grade,
+                        COALESCE(w.claude_score, ss.claude_score) as claude_score,
+                        COALESCE(w.claude_action, ss.claude_action) as claude_action,
+                        COALESCE(w.claude_thesis, ss.claude_thesis) as claude_thesis,
+                        COALESCE(w.claude_conviction, ss.claude_conviction) as claude_conviction,
+                        COALESCE(w.claude_key_strengths, ss.claude_key_strengths) as claude_key_strengths,
+                        COALESCE(w.claude_key_risks, ss.claude_key_risks) as claude_key_risks,
+                        COALESCE(w.claude_position_rec, ss.claude_position_rec) as claude_position_rec,
+                        COALESCE(w.claude_stop_adjustment, ss.claude_stop_adjustment) as claude_stop_adjustment,
+                        COALESCE(w.claude_time_horizon, ss.claude_time_horizon) as claude_time_horizon,
+                        COALESCE(w.claude_analyzed_at, ss.claude_analyzed_at) as claude_analyzed_at,
                         m.price_change_1d,
                         m.price_change_5d,
                         m.rsi_14,
@@ -733,6 +734,18 @@ class StockAnalyticsService:
                     JOIN stock_instruments i ON w.ticker = i.ticker
                     LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
                         AND m.calculation_date = w.calculation_date
+                    LEFT JOIN LATERAL (
+                        SELECT claude_grade, claude_score, claude_action, claude_thesis,
+                               claude_conviction, claude_key_strengths, claude_key_risks,
+                               claude_position_rec, claude_stop_adjustment, claude_time_horizon,
+                               claude_analyzed_at
+                        FROM stock_scanner_signals
+                        WHERE ticker = w.ticker
+                        AND claude_grade IS NOT NULL
+                        AND signal_timestamp > NOW() - INTERVAL '7 days'
+                        ORDER BY signal_timestamp DESC
+                        LIMIT 1
+                    ) ss ON true
                     WHERE w.calculation_date = %s
                       -- Hard exclusions
                       AND w.tier <= 3  -- Exclude low liquidity
