@@ -402,6 +402,377 @@ class StockScannerCLI:
             logger.exception("Scanner error")
             return False
 
+    # =========================================================================
+    # CLAUDE AI ANALYSIS COMMANDS
+    # =========================================================================
+
+    async def cmd_claude_analyze(
+        self,
+        signal_id: int = None,
+        min_tier: str = 'A',
+        max_signals: int = 10,
+        level: str = 'standard',
+        model: str = None
+    ):
+        """
+        Analyze signals with Claude AI.
+
+        Can analyze a single signal by ID, or batch analyze top signals.
+        """
+        print("\n[CLAUDE] Claude AI Signal Analysis")
+        print("=" * 60)
+
+        try:
+            from .scanners import ScannerManager
+
+            manager = ScannerManager(self.db)
+            await manager.initialize()
+
+            # Check Claude availability
+            claude_stats = manager.get_claude_stats()
+            if not claude_stats.get('available', False):
+                print("[ERROR] Claude API not available")
+                print(f"   Error: {claude_stats.get('error', 'Unknown')}")
+                print("\n[INFO] Ensure CLAUDE_API_KEY environment variable is set")
+                return False
+
+            print(f"[INFO] Claude API: Available")
+            print(f"[INFO] Analysis level: {level}")
+            print(f"[INFO] Model: {model or 'sonnet (default)'}")
+
+            if signal_id:
+                # Analyze single signal
+                print(f"\n[ANALYZE] Analyzing signal ID: {signal_id}")
+
+                analysis = await manager.analyze_single_signal_with_claude(
+                    signal_id=signal_id,
+                    analysis_level=level,
+                    model=model
+                )
+
+                if analysis:
+                    self._print_claude_analysis(analysis)
+                    return True
+                else:
+                    print("[ERROR] Analysis failed or signal not found")
+                    return False
+
+            else:
+                # Batch analyze
+                print(f"\n[BATCH] Analyzing up to {max_signals} signals (min tier: {min_tier})")
+
+                # Get unanalyzed signals
+                signals = await manager.get_unanalyzed_signals(
+                    min_tier=min_tier,
+                    limit=max_signals
+                )
+
+                if not signals:
+                    print("[INFO] No unanalyzed signals found matching criteria")
+                    return True
+
+                print(f"[INFO] Found {len(signals)} signals to analyze")
+
+                # Analyze
+                results = await manager.analyze_signals_with_claude(
+                    signals=signals,
+                    min_tier=min_tier,
+                    max_signals=max_signals,
+                    analysis_level=level,
+                    model=model
+                )
+
+                # Print summary
+                print(f"\n[RESULTS] Analyzed {len(results)} signals")
+                print("-" * 60)
+
+                for signal, analysis in results:
+                    ticker = signal.get('ticker', '???')
+                    scanner_tier = signal.get('quality_tier', '?')
+                    print(f"   {ticker:6} | Scanner: {scanner_tier} | "
+                          f"Claude: {analysis.grade} | {analysis.action} | "
+                          f"{analysis.conviction}")
+
+                # Print cost estimate
+                total_tokens = sum(a.tokens_used for _, a in results if a.tokens_used)
+                avg_latency = sum(a.latency_ms for _, a in results if a.latency_ms) / len(results) if results else 0
+                estimated_cost = total_tokens * 0.000003  # ~$3/1M tokens for Sonnet
+
+                print(f"\n[USAGE]")
+                print(f"   Total tokens: {total_tokens:,}")
+                print(f"   Avg latency: {avg_latency:.0f}ms")
+                print(f"   Est. cost: ${estimated_cost:.4f}")
+
+                return True
+
+        except Exception as e:
+            print(f"[ERROR] Claude analysis error: {e}")
+            logger.exception("Claude analysis error")
+            return False
+
+    async def cmd_claude_status(self):
+        """Show Claude analysis status and statistics"""
+        print("\n[CLAUDE] Claude Analysis Status")
+        print("=" * 60)
+
+        try:
+            from .scanners import ScannerManager
+
+            manager = ScannerManager(self.db)
+
+            # Get Claude stats
+            stats = manager.get_claude_stats()
+
+            print(f"\n[API STATUS]")
+            print(f"   Available: {'Yes' if stats.get('available') else 'No'}")
+
+            if not stats.get('available'):
+                print(f"   Error: {stats.get('error', 'Unknown')}")
+                return True
+
+            print(f"   Total requests: {stats.get('total_requests', 0)}")
+            print(f"   Successful: {stats.get('successful_requests', 0)}")
+            print(f"   Failed: {stats.get('failed_requests', 0)}")
+            print(f"   Total tokens: {stats.get('total_tokens', 0):,}")
+            print(f"   Daily requests: {stats.get('daily_requests', 0)}")
+
+            # Get analyzed signals from database
+            query = """
+                SELECT
+                    COUNT(*) as total_analyzed,
+                    COUNT(*) FILTER (WHERE claude_grade IN ('A+', 'A')) as high_grade,
+                    COUNT(*) FILTER (WHERE claude_action = 'STRONG BUY') as strong_buys,
+                    COUNT(*) FILTER (WHERE claude_action = 'BUY') as buys,
+                    COUNT(*) FILTER (WHERE claude_action = 'HOLD') as holds,
+                    COUNT(*) FILTER (WHERE claude_action = 'AVOID') as avoids,
+                    AVG(claude_tokens_used) as avg_tokens,
+                    AVG(claude_latency_ms) as avg_latency
+                FROM stock_scanner_signals
+                WHERE claude_analyzed_at IS NOT NULL
+                  AND signal_timestamp >= NOW() - INTERVAL '7 days'
+            """
+
+            row = await self.db.fetchrow(query)
+
+            if row and row['total_analyzed'] > 0:
+                print(f"\n[ANALYSIS SUMMARY] (Last 7 days)")
+                print(f"   Total analyzed: {row['total_analyzed']}")
+                print(f"   High grade (A/A+): {row['high_grade']}")
+                print(f"   Strong buys: {row['strong_buys']}")
+                print(f"   Buys: {row['buys']}")
+                print(f"   Holds: {row['holds']}")
+                print(f"   Avoids: {row['avoids']}")
+                print(f"   Avg tokens/signal: {int(row['avg_tokens'] or 0)}")
+                print(f"   Avg latency: {int(row['avg_latency'] or 0)}ms")
+
+            # Get pending signals
+            pending_query = """
+                SELECT COUNT(*) as pending
+                FROM stock_scanner_signals
+                WHERE claude_analyzed_at IS NULL
+                  AND status = 'active'
+                  AND signal_timestamp >= NOW() - INTERVAL '3 days'
+            """
+            pending_row = await self.db.fetchrow(pending_query)
+            pending = pending_row['pending'] if pending_row else 0
+
+            print(f"\n[PENDING]")
+            print(f"   Signals awaiting analysis: {pending}")
+
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Status error: {e}")
+            logger.exception("Claude status error")
+            return False
+
+    async def cmd_claude_list(
+        self,
+        min_grade: str = None,
+        days: int = 7,
+        limit: int = 20,
+        action_filter: str = None
+    ):
+        """List signals analyzed by Claude"""
+        print("\n[CLAUDE] Claude-Analyzed Signals")
+        print("=" * 60)
+
+        try:
+            from .scanners import ScannerManager
+
+            manager = ScannerManager(self.db)
+            await manager.initialize()
+
+            # Build filter query
+            filters = ["claude_analyzed_at IS NOT NULL"]
+            params = [limit]
+
+            if min_grade:
+                grade_order = {'A+': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1}
+                valid_grades = [g for g, v in grade_order.items() if v >= grade_order.get(min_grade, 1)]
+                grades_str = ', '.join(f"'{g}'" for g in valid_grades)
+                filters.append(f"claude_grade IN ({grades_str})")
+
+            if action_filter:
+                filters.append(f"claude_action = '{action_filter.upper()}'")
+
+            filters.append(f"signal_timestamp >= NOW() - INTERVAL '{days} days'")
+
+            query = f"""
+                SELECT
+                    id, ticker, scanner_name, quality_tier, composite_score,
+                    entry_price, stop_loss, risk_reward_ratio,
+                    claude_grade, claude_score, claude_conviction, claude_action,
+                    claude_thesis, claude_analyzed_at
+                FROM stock_scanner_signals
+                WHERE {' AND '.join(filters)}
+                ORDER BY claude_score DESC, composite_score DESC
+                LIMIT $1
+            """
+
+            rows = await self.db.fetch(query, *params)
+
+            if not rows:
+                print(f"[INFO] No signals found matching criteria")
+                return True
+
+            print(f"[INFO] Found {len(rows)} signals")
+            print("-" * 60)
+
+            for row in rows:
+                row = dict(row)
+                print(f"\n   {row['ticker']:6} | ID: {row['id']}")
+                print(f"      Scanner: {row['scanner_name']} | Tier: {row['quality_tier']} | Score: {row['composite_score']}")
+                print(f"      Claude: {row['claude_grade']} | Score: {row['claude_score']}/10 | {row['claude_action']}")
+                print(f"      Entry: ${float(row['entry_price']):.2f} | Stop: ${float(row['stop_loss']):.2f} | R:R: {float(row['risk_reward_ratio']):.1f}:1")
+
+                # Truncate thesis for display
+                thesis = row.get('claude_thesis', '') or ''
+                if len(thesis) > 80:
+                    thesis = thesis[:77] + "..."
+                if thesis:
+                    print(f"      Thesis: {thesis}")
+
+            print("\n" + "=" * 60)
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] List error: {e}")
+            logger.exception("Claude list error")
+            return False
+
+    async def cmd_claude_detail(self, signal_id: int):
+        """Show detailed Claude analysis for a signal"""
+        print(f"\n[CLAUDE] Signal Analysis Detail - ID: {signal_id}")
+        print("=" * 60)
+
+        try:
+            query = """
+                SELECT * FROM stock_scanner_signals
+                WHERE id = $1
+            """
+            row = await self.db.fetchrow(query, signal_id)
+
+            if not row:
+                print(f"[ERROR] Signal ID {signal_id} not found")
+                return False
+
+            row = dict(row)
+
+            # Signal info
+            print(f"\n[SIGNAL INFO]")
+            print(f"   Ticker: {row['ticker']}")
+            print(f"   Scanner: {row['scanner_name']}")
+            print(f"   Quality Tier: {row['quality_tier']}")
+            print(f"   Composite Score: {row['composite_score']}")
+            print(f"   Entry: ${float(row['entry_price']):.2f}")
+            print(f"   Stop Loss: ${float(row['stop_loss']):.2f}")
+            print(f"   Risk/Reward: {float(row['risk_reward_ratio']):.2f}:1")
+            print(f"   Signal Date: {row['signal_timestamp']}")
+
+            # Claude analysis
+            if row.get('claude_analyzed_at'):
+                print(f"\n[CLAUDE ANALYSIS]")
+                print(f"   Grade: {row['claude_grade']}")
+                print(f"   Score: {row['claude_score']}/10")
+                print(f"   Conviction: {row['claude_conviction']}")
+                print(f"   Action: {row['claude_action']}")
+                print(f"   Position: {row['claude_position_rec']}")
+                print(f"   Stop Adjust: {row['claude_stop_adjustment']}")
+                print(f"   Time Horizon: {row['claude_time_horizon']}")
+
+                print(f"\n[THESIS]")
+                thesis = row.get('claude_thesis', 'No thesis provided')
+                # Word wrap thesis
+                words = thesis.split()
+                line = "   "
+                for word in words:
+                    if len(line) + len(word) > 75:
+                        print(line)
+                        line = "   " + word + " "
+                    else:
+                        line += word + " "
+                if line.strip():
+                    print(line)
+
+                if row.get('claude_key_strengths'):
+                    print(f"\n[KEY STRENGTHS]")
+                    for strength in row['claude_key_strengths']:
+                        print(f"   + {strength}")
+
+                if row.get('claude_key_risks'):
+                    print(f"\n[KEY RISKS]")
+                    for risk in row['claude_key_risks']:
+                        print(f"   - {risk}")
+
+                print(f"\n[ANALYSIS META]")
+                print(f"   Analyzed: {row['claude_analyzed_at']}")
+                print(f"   Model: {row['claude_model']}")
+                print(f"   Tokens: {row['claude_tokens_used']}")
+                print(f"   Latency: {row['claude_latency_ms']}ms")
+
+            else:
+                print(f"\n[INFO] Signal has not been analyzed by Claude yet")
+                print(f"   Run: python -m stock_scanner.main claude-analyze --signal-id {signal_id}")
+
+            print("\n" + "=" * 60)
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Detail error: {e}")
+            logger.exception("Claude detail error")
+            return False
+
+    def _print_claude_analysis(self, analysis):
+        """Print a single Claude analysis in detail"""
+        print(f"\n[ANALYSIS RESULT]")
+        print(f"   Grade: {analysis.grade}")
+        print(f"   Score: {analysis.score}/10")
+        print(f"   Conviction: {analysis.conviction}")
+        print(f"   Action: {analysis.action}")
+        print(f"   Position: {analysis.position_recommendation}")
+        print(f"   Stop Adjust: {analysis.stop_adjustment}")
+        print(f"   Time Horizon: {analysis.time_horizon}")
+
+        if analysis.thesis:
+            print(f"\n[THESIS]")
+            print(f"   {analysis.thesis}")
+
+        if analysis.key_strengths:
+            print(f"\n[STRENGTHS]")
+            for s in analysis.key_strengths:
+                print(f"   + {s}")
+
+        if analysis.key_risks:
+            print(f"\n[RISKS]")
+            for r in analysis.key_risks:
+                print(f"   - {r}")
+
+        print(f"\n[META]")
+        print(f"   Model: {analysis.model}")
+        print(f"   Tokens: {analysis.tokens_used}")
+        print(f"   Latency: {analysis.latency_ms}ms")
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser"""
@@ -481,6 +852,89 @@ def create_parser() -> argparse.ArgumentParser:
         help="Don't save signals to database"
     )
 
+    # =========================================================================
+    # CLAUDE ANALYSIS COMMANDS
+    # =========================================================================
+
+    # claude-analyze
+    claude_analyze_parser = subparsers.add_parser(
+        "claude-analyze",
+        help="Analyze signals with Claude AI"
+    )
+    claude_analyze_parser.add_argument(
+        "--signal-id",
+        type=int,
+        help="Analyze specific signal by ID"
+    )
+    claude_analyze_parser.add_argument(
+        "--min-tier",
+        default="A",
+        choices=["A+", "A", "B", "C", "D"],
+        help="Minimum quality tier for batch analysis (default: A)"
+    )
+    claude_analyze_parser.add_argument(
+        "--max-signals",
+        type=int,
+        default=10,
+        help="Maximum signals to analyze in batch (default: 10)"
+    )
+    claude_analyze_parser.add_argument(
+        "--level",
+        choices=["quick", "standard", "comprehensive"],
+        default="standard",
+        help="Analysis depth (default: standard)"
+    )
+    claude_analyze_parser.add_argument(
+        "--model",
+        choices=["haiku", "sonnet", "opus"],
+        help="Claude model to use (default: sonnet)"
+    )
+
+    # claude-status
+    subparsers.add_parser(
+        "claude-status",
+        help="Show Claude analysis status and statistics"
+    )
+
+    # claude-list
+    claude_list_parser = subparsers.add_parser(
+        "claude-list",
+        help="List signals analyzed by Claude"
+    )
+    claude_list_parser.add_argument(
+        "--min-grade",
+        choices=["A+", "A", "B", "C", "D"],
+        help="Filter by minimum Claude grade"
+    )
+    claude_list_parser.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Days to look back (default: 7)"
+    )
+    claude_list_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum signals to show (default: 20)"
+    )
+    claude_list_parser.add_argument(
+        "--action",
+        choices=["STRONG BUY", "BUY", "HOLD", "AVOID"],
+        help="Filter by Claude action recommendation"
+    )
+
+    # claude-detail
+    claude_detail_parser = subparsers.add_parser(
+        "claude-detail",
+        help="Show detailed Claude analysis for a signal"
+    )
+    claude_detail_parser.add_argument(
+        "signal_id",
+        type=int,
+        help="Signal ID to show details for"
+    )
+
     return parser
 
 
@@ -525,6 +979,26 @@ async def main():
                 scanner_name=getattr(args, "scanner", None),
                 save=not getattr(args, "no_save", False)
             )
+        # Claude AI commands
+        elif args.command == "claude-analyze":
+            success = await cli.cmd_claude_analyze(
+                signal_id=getattr(args, "signal_id", None),
+                min_tier=getattr(args, "min_tier", "A"),
+                max_signals=getattr(args, "max_signals", 10),
+                level=getattr(args, "level", "standard"),
+                model=getattr(args, "model", None)
+            )
+        elif args.command == "claude-status":
+            success = await cli.cmd_claude_status()
+        elif args.command == "claude-list":
+            success = await cli.cmd_claude_list(
+                min_grade=getattr(args, "min_grade", None),
+                days=getattr(args, "days", 7),
+                limit=getattr(args, "limit", 20),
+                action_filter=getattr(args, "action", None)
+            )
+        elif args.command == "claude-detail":
+            success = await cli.cmd_claude_detail(args.signal_id)
         else:
             parser.print_help()
             success = False

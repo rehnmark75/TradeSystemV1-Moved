@@ -980,6 +980,8 @@ class StockAnalyticsService:
         scanner_name: str = None,
         status: str = 'active',
         min_score: int = None,
+        min_claude_grade: str = None,
+        claude_analyzed_only: bool = False,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
         """
@@ -989,6 +991,8 @@ class StockAnalyticsService:
             scanner_name: Filter by specific scanner
             status: Filter by status ('active', 'triggered', 'closed', etc.)
             min_score: Minimum composite score
+            min_claude_grade: Minimum Claude grade (A+, A, B, C, D)
+            claude_analyzed_only: Only show signals with Claude analysis
             limit: Maximum results
 
         Returns:
@@ -1009,6 +1013,15 @@ class StockAnalyticsService:
             params.append(min_score)
             conditions.append("composite_score >= %s")
 
+        if claude_analyzed_only:
+            conditions.append("claude_analyzed_at IS NOT NULL")
+
+        if min_claude_grade:
+            grade_order = {'A+': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1}
+            valid_grades = [g for g, v in grade_order.items() if v >= grade_order.get(min_claude_grade, 1)]
+            grades_str = ', '.join(f"'{g}'" for g in valid_grades)
+            conditions.append(f"claude_grade IN ({grades_str})")
+
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
         # Use a subquery to get only the latest signal per ticker/scanner combination
@@ -1026,7 +1039,11 @@ class StockAnalyticsService:
                 i.name as company_name
             FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
-            ORDER BY s.composite_score DESC, s.signal_timestamp DESC
+            ORDER BY
+                CASE WHEN s.claude_analyzed_at IS NOT NULL THEN 0 ELSE 1 END,
+                COALESCE(s.claude_score, 0) DESC,
+                s.composite_score DESC,
+                s.signal_timestamp DESC
             LIMIT {limit}
         """
 
@@ -1041,13 +1058,18 @@ class StockAnalyticsService:
 
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                # Total signals
+                # Total signals with Claude analysis stats
                 cursor.execute("""
                     SELECT
                         COUNT(*) as total_signals,
                         COUNT(*) FILTER (WHERE status = 'active') as active_signals,
                         COUNT(*) FILTER (WHERE quality_tier IN ('A+', 'A')) as high_quality,
-                        COUNT(*) FILTER (WHERE DATE(signal_timestamp) = CURRENT_DATE) as today_signals
+                        COUNT(*) FILTER (WHERE DATE(signal_timestamp) = CURRENT_DATE) as today_signals,
+                        COUNT(*) FILTER (WHERE claude_analyzed_at IS NOT NULL) as claude_analyzed,
+                        COUNT(*) FILTER (WHERE claude_grade IN ('A+', 'A')) as claude_high_grade,
+                        COUNT(*) FILTER (WHERE claude_action = 'STRONG BUY') as claude_strong_buys,
+                        COUNT(*) FILTER (WHERE claude_action = 'BUY') as claude_buys,
+                        COUNT(*) FILTER (WHERE claude_analyzed_at IS NULL AND status = 'active') as awaiting_analysis
                     FROM stock_scanner_signals
                 """)
                 totals = dict(cursor.fetchone())

@@ -7,12 +7,13 @@ Orchestrates all signal scanners and provides unified interface for:
 - Performance tracking
 - Signal management
 - Export functionality
+- Claude AI analysis integration
 """
 
 import logging
 import asyncio
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional, Type
+from typing import List, Dict, Any, Optional, Type, Tuple
 from collections import defaultdict
 
 from .base_scanner import BaseScanner, SignalSetup, ScannerConfig, QualityTier
@@ -23,6 +24,15 @@ from .strategies import (
     MeanReversionScanner,
     GapAndGoScanner,
 )
+
+# Claude analysis imports (lazy load to avoid circular imports)
+try:
+    from ..services import StockClaudeAnalyzer, ClaudeAnalysis
+    CLAUDE_AVAILABLE = True
+except ImportError:
+    CLAUDE_AVAILABLE = False
+    StockClaudeAnalyzer = None
+    ClaudeAnalysis = None
 
 logger = logging.getLogger(__name__)
 
@@ -560,3 +570,464 @@ class ScannerManager:
     def latest_signals(self) -> List[SignalSetup]:
         """Get signals from latest scan"""
         return self._latest_signals.copy()
+
+    # =========================================================================
+    # CLAUDE AI ANALYSIS
+    # =========================================================================
+
+    async def analyze_signals_with_claude(
+        self,
+        signals: List[Dict[str, Any]] = None,
+        min_tier: str = 'A',
+        max_signals: int = 10,
+        analysis_level: str = 'standard',
+        model: str = None
+    ) -> List[Tuple[Dict[str, Any], Any]]:
+        """
+        Analyze signals with Claude AI.
+
+        Args:
+            signals: Signals to analyze (None = get from DB)
+            min_tier: Minimum tier to analyze ('A+', 'A', 'B', etc.)
+            max_signals: Maximum number of signals to analyze
+            analysis_level: 'quick', 'standard', or 'comprehensive'
+            model: Override model ('haiku', 'sonnet', 'opus')
+
+        Returns:
+            List of (signal, ClaudeAnalysis) tuples
+        """
+        if not CLAUDE_AVAILABLE:
+            logger.warning("Claude analysis not available - missing dependencies")
+            return []
+
+        # Get signals if not provided
+        if signals is None:
+            signals = await self.get_unanalyzed_signals(min_tier=min_tier, limit=max_signals)
+
+        if not signals:
+            logger.info("No signals to analyze with Claude")
+            return []
+
+        logger.info(f"Starting Claude analysis for {len(signals)} signals")
+
+        # Initialize analyzer
+        analyzer = StockClaudeAnalyzer(default_model=model or 'sonnet')
+
+        if not analyzer.is_available:
+            logger.warning("Claude API not available - check API key")
+            return []
+
+        # Enrich signals with technical, fundamental, and SMC data
+        technical_data_list = []
+        fundamental_data_list = []
+
+        for signal in signals:
+            technical_data = await self._get_signal_technical_data(signal)
+            fundamental_data = await self._get_signal_fundamental_data(signal)
+            smc_data = await self._get_signal_smc_data(signal)
+
+            # Merge SMC data into technical data for Claude
+            if smc_data:
+                technical_data['smc'] = smc_data
+
+            technical_data_list.append(technical_data)
+            fundamental_data_list.append(fundamental_data)
+
+            ticker = signal.get('ticker', '???')
+            has_fundamentals = bool(fundamental_data)
+            has_smc = bool(smc_data)
+            logger.debug(f"Enriched {ticker}: fundamentals={'yes' if has_fundamentals else 'no'}, smc={'yes' if has_smc else 'no'}")
+
+        # Analyze in batch with enriched data
+        results = await analyzer.batch_analyze_signals(
+            signals=signals,
+            technical_data_list=technical_data_list,
+            fundamental_data_list=fundamental_data_list,
+            analysis_level=analysis_level,
+            max_concurrent=3,
+            delay_between_requests=0.5
+        )
+
+        # Save analysis results to database
+        for signal, analysis in results:
+            if analysis:
+                await self._save_claude_analysis(signal, analysis)
+
+        logger.info(f"Completed Claude analysis: {len(results)} signals")
+
+        return results
+
+    async def analyze_single_signal_with_claude(
+        self,
+        signal_id: int,
+        analysis_level: str = 'comprehensive',
+        model: str = None
+    ) -> Optional[Any]:
+        """
+        Analyze a single signal with Claude AI.
+
+        Args:
+            signal_id: Signal ID from database
+            analysis_level: 'quick', 'standard', or 'comprehensive'
+            model: Override model ('haiku', 'sonnet', 'opus')
+
+        Returns:
+            ClaudeAnalysis or None
+        """
+        if not CLAUDE_AVAILABLE:
+            logger.warning("Claude analysis not available - missing dependencies")
+            return None
+
+        # Get signal from database
+        query = """
+            SELECT * FROM stock_scanner_signals
+            WHERE id = $1
+        """
+        row = await self.db.fetchrow(query, signal_id)
+
+        if not row:
+            logger.warning(f"Signal {signal_id} not found")
+            return None
+
+        signal = dict(row)
+
+        # Get additional technical data if available
+        technical_data = await self._get_signal_technical_data(signal)
+        fundamental_data = await self._get_signal_fundamental_data(signal)
+        smc_data = await self._get_signal_smc_data(signal)
+
+        # Merge SMC data into technical data for Claude
+        if smc_data:
+            technical_data['smc'] = smc_data
+
+        # Initialize analyzer
+        analyzer = StockClaudeAnalyzer(default_model=model or 'sonnet')
+
+        if not analyzer.is_available:
+            logger.warning("Claude API not available - check API key")
+            return None
+
+        # Analyze
+        analysis = await analyzer.analyze_signal(
+            signal=signal,
+            technical_data=technical_data,
+            fundamental_data=fundamental_data,
+            analysis_level=analysis_level,
+            model=model
+        )
+
+        # Save to database
+        if analysis:
+            await self._save_claude_analysis(signal, analysis)
+
+        return analysis
+
+    async def get_unanalyzed_signals(
+        self,
+        min_tier: str = 'B',
+        limit: int = 20,
+        days_back: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Get signals that haven't been analyzed by Claude yet.
+
+        Args:
+            min_tier: Minimum quality tier
+            limit: Maximum number of signals
+            days_back: How many days back to look
+
+        Returns:
+            List of signal dictionaries
+        """
+        tier_order = {'A+': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1}
+        min_tier_value = tier_order.get(min_tier, 3)
+
+        # Build tier filter
+        valid_tiers = [t for t, v in tier_order.items() if v >= min_tier_value]
+        tier_filter = ', '.join(f"'{t}'" for t in valid_tiers)
+
+        query = f"""
+            SELECT * FROM stock_scanner_signals
+            WHERE claude_analyzed_at IS NULL
+              AND quality_tier IN ({tier_filter})
+              AND signal_timestamp >= NOW() - INTERVAL '{days_back} days'
+              AND status = 'active'
+            ORDER BY composite_score DESC
+            LIMIT $1
+        """
+
+        rows = await self.db.fetch(query, limit)
+        return [dict(r) for r in rows]
+
+    async def _save_claude_analysis(
+        self,
+        signal: Dict[str, Any],
+        analysis: Any
+    ) -> bool:
+        """
+        Save Claude analysis results to database.
+
+        Args:
+            signal: Original signal dictionary
+            analysis: ClaudeAnalysis object
+
+        Returns:
+            True if saved successfully
+        """
+        signal_id = signal.get('id')
+        if not signal_id:
+            logger.warning("Cannot save analysis - signal has no ID")
+            return False
+
+        try:
+            query = """
+                UPDATE stock_scanner_signals
+                SET
+                    claude_grade = $1,
+                    claude_score = $2,
+                    claude_conviction = $3,
+                    claude_action = $4,
+                    claude_thesis = $5,
+                    claude_key_strengths = $6,
+                    claude_key_risks = $7,
+                    claude_position_rec = $8,
+                    claude_stop_adjustment = $9,
+                    claude_time_horizon = $10,
+                    claude_raw_response = $11,
+                    claude_analyzed_at = NOW(),
+                    claude_tokens_used = $12,
+                    claude_latency_ms = $13,
+                    claude_model = $14
+                WHERE id = $15
+                RETURNING id
+            """
+
+            result = await self.db.fetchval(
+                query,
+                analysis.grade,
+                analysis.score,
+                analysis.conviction,
+                analysis.action,
+                analysis.thesis,
+                analysis.key_strengths,
+                analysis.key_risks,
+                analysis.position_recommendation,
+                analysis.stop_adjustment,
+                analysis.time_horizon,
+                analysis.raw_response,
+                analysis.tokens_used,
+                analysis.latency_ms,
+                analysis.model,
+                signal_id
+            )
+
+            if result:
+                logger.info(
+                    f"Saved Claude analysis for signal {signal_id}: "
+                    f"Grade={analysis.grade}, Action={analysis.action}"
+                )
+                return True
+            else:
+                logger.warning(f"Failed to save Claude analysis for signal {signal_id}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error saving Claude analysis: {e}")
+            return False
+
+    async def _get_signal_technical_data(
+        self,
+        signal: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Extract technical data from signal for Claude analysis.
+
+        Args:
+            signal: Signal dictionary
+
+        Returns:
+            Technical data dictionary
+        """
+        technical = {}
+
+        # Extract technical fields from signal
+        technical_fields = [
+            'rsi_14', 'macd_histogram', 'relative_volume', 'trend_strength',
+            'atr_stop_distance', 'entry_price', 'stop_loss', 'targets',
+            'volume_confirm', 'trend_alignment', 'momentum_score'
+        ]
+
+        for field in technical_fields:
+            if field in signal and signal[field] is not None:
+                technical[field] = signal[field]
+
+        # Add additional context
+        if signal.get('confluence_factors'):
+            technical['confluence_factors'] = signal['confluence_factors']
+
+        return technical
+
+    async def _get_signal_fundamental_data(
+        self,
+        signal: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Get fundamental data for signal ticker from stock_instruments table.
+
+        Args:
+            signal: Signal dictionary
+
+        Returns:
+            Fundamental data dictionary
+        """
+        ticker = signal.get('ticker')
+        if not ticker:
+            return {}
+
+        # Try to get fundamental data from stock_instruments table
+        try:
+            query = """
+                SELECT
+                    ticker, name, sector, industry,
+                    -- Valuation
+                    trailing_pe, forward_pe, price_to_book, price_to_sales,
+                    peg_ratio, enterprise_to_ebitda, enterprise_value,
+                    -- Growth
+                    revenue_growth, earnings_growth, earnings_quarterly_growth,
+                    -- Profitability
+                    profit_margin, operating_margin, gross_margin,
+                    return_on_equity, return_on_assets,
+                    -- Financial Health
+                    debt_to_equity, current_ratio, quick_ratio,
+                    -- Risk Metrics
+                    beta, short_ratio, short_percent_float,
+                    -- Ownership
+                    institutional_percent, insider_percent,
+                    -- Dividend
+                    dividend_yield, dividend_rate, payout_ratio,
+                    -- 52-Week Data
+                    fifty_two_week_high, fifty_two_week_low, fifty_two_week_change,
+                    fifty_day_average, two_hundred_day_average,
+                    -- Analyst Data
+                    analyst_rating, target_price, target_high, target_low, number_of_analysts,
+                    -- Calendar
+                    earnings_date, ex_dividend_date,
+                    -- Meta
+                    fundamentals_updated_at
+                FROM stock_instruments
+                WHERE ticker = $1
+                  AND fundamentals_updated_at IS NOT NULL
+            """
+            row = await self.db.fetchrow(query, ticker)
+
+            if row:
+                # Convert to dict and filter out None values for cleaner output
+                data = dict(row)
+                return {k: v for k, v in data.items() if v is not None}
+        except Exception as e:
+            logger.debug(f"Could not fetch fundamentals for {ticker}: {e}")
+
+        return {}
+
+    async def _get_signal_smc_data(
+        self,
+        signal: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Get SMC (Smart Money Concepts) data for signal ticker from stock_screening_metrics.
+
+        Args:
+            signal: Signal dictionary
+
+        Returns:
+            SMC data dictionary
+        """
+        ticker = signal.get('ticker')
+        if not ticker:
+            return {}
+
+        try:
+            query = """
+                SELECT
+                    smc_trend,
+                    smc_bias,
+                    last_bos_type,
+                    last_bos_date,
+                    last_bos_price,
+                    last_choch_type,
+                    last_choch_date,
+                    swing_high,
+                    swing_low,
+                    swing_high_date,
+                    swing_low_date,
+                    premium_discount_zone,
+                    zone_position,
+                    weekly_range_high,
+                    weekly_range_low,
+                    nearest_ob_type,
+                    nearest_ob_price,
+                    nearest_ob_distance,
+                    smc_confluence_score
+                FROM stock_screening_metrics
+                WHERE ticker = $1
+                  AND smc_trend IS NOT NULL
+                ORDER BY calculation_date DESC
+                LIMIT 1
+            """
+            row = await self.db.fetchrow(query, ticker)
+
+            if row:
+                data = dict(row)
+                return {k: v for k, v in data.items() if v is not None}
+        except Exception as e:
+            logger.debug(f"Could not fetch SMC data for {ticker}: {e}")
+
+        return {}
+
+    async def get_claude_analyzed_signals(
+        self,
+        min_grade: str = None,
+        days_back: int = 7,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get signals that have been analyzed by Claude.
+
+        Args:
+            min_grade: Minimum Claude grade ('A+', 'A', 'B', etc.)
+            days_back: How many days back to look
+            limit: Maximum number of signals
+
+        Returns:
+            List of signal dictionaries with Claude analysis
+        """
+        grade_filter = ""
+        if min_grade:
+            grade_order = {'A+': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1}
+            min_grade_value = grade_order.get(min_grade, 1)
+            valid_grades = [g for g, v in grade_order.items() if v >= min_grade_value]
+            grades_str = ', '.join(f"'{g}'" for g in valid_grades)
+            grade_filter = f"AND claude_grade IN ({grades_str})"
+
+        query = f"""
+            SELECT * FROM stock_scanner_signals
+            WHERE claude_analyzed_at IS NOT NULL
+              AND signal_timestamp >= NOW() - INTERVAL '{days_back} days'
+              {grade_filter}
+            ORDER BY claude_score DESC, composite_score DESC
+            LIMIT $1
+        """
+
+        rows = await self.db.fetch(query, limit)
+        return [dict(r) for r in rows]
+
+    def get_claude_stats(self) -> Dict[str, Any]:
+        """Get Claude analysis usage statistics"""
+        if not CLAUDE_AVAILABLE:
+            return {'available': False, 'error': 'Claude dependencies not installed'}
+
+        analyzer = StockClaudeAnalyzer()
+        return {
+            'available': analyzer.is_available,
+            **analyzer.get_stats()
+        }

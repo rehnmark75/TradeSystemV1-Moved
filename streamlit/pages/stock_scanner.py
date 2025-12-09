@@ -1272,7 +1272,7 @@ def render_scanner_signals_tab(service):
     st.markdown("""
     <div class="main-header">
         <h2>Signal Scanners</h2>
-        <p>Automated trading signals with entry, stop-loss, and take-profit levels</p>
+        <p>Automated trading signals with entry, stop-loss, and take-profit levels + Claude AI Analysis</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1283,7 +1283,7 @@ def render_scanner_signals_tab(service):
         st.info("No scanner signals available yet. Run the scanner to generate signals.")
         return
 
-    # Top metrics
+    # Top metrics - Row 1: Scanner stats
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("Active Signals", stats.get('active_signals', 0))
@@ -1291,10 +1291,17 @@ def render_scanner_signals_tab(service):
     col3.metric("Today's Signals", stats.get('today_signals', 0))
     col4.metric("Total Signals", stats.get('total_signals', 0))
 
+    # Claude AI stats - Row 2
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Claude Analyzed", stats.get('claude_analyzed', 0), help="Signals analyzed by Claude AI")
+    col2.metric("Claude A/A+", stats.get('claude_high_grade', 0), help="Claude high-grade signals")
+    col3.metric("Strong Buys", stats.get('claude_strong_buys', 0), help="Claude STRONG BUY recommendations")
+    col4.metric("Awaiting Analysis", stats.get('awaiting_analysis', 0), help="Active signals not yet analyzed")
+
     st.markdown("---")
 
     # Filters
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         scanner_filter = st.selectbox(
@@ -1314,15 +1321,33 @@ def render_scanner_signals_tab(service):
             ["active", "triggered", "closed", "expired", "All"]
         )
 
+    with col4:
+        claude_filter = st.selectbox(
+            "Claude Analysis",
+            ["All Signals", "Claude Analyzed Only", "A+ Grade", "A Grade", "B Grade", "STRONG BUY", "BUY"]
+        )
+
     # Get filtered signals
     scanner_name = None if scanner_filter == "All Scanners" else scanner_filter
     status = None if status_filter == "All" else status_filter
     min_score = {'A+': 85, 'A': 70, 'B': 60, 'C': 50}.get(tier_filter)
 
+    # Claude filter mapping
+    claude_analyzed_only = claude_filter in ["Claude Analyzed Only", "A+ Grade", "A Grade", "B Grade", "STRONG BUY", "BUY"]
+    min_claude_grade = None
+    if claude_filter in ["A+ Grade"]:
+        min_claude_grade = "A+"
+    elif claude_filter in ["A Grade"]:
+        min_claude_grade = "A"
+    elif claude_filter in ["B Grade"]:
+        min_claude_grade = "B"
+
     signals = service.get_scanner_signals(
         scanner_name=scanner_name,
         status=status,
         min_score=min_score,
+        min_claude_grade=min_claude_grade,
+        claude_analyzed_only=claude_analyzed_only,
         limit=100
     )
 
@@ -1386,6 +1411,17 @@ def _render_signal_card(signal: Dict[str, Any]):
     else:
         factors_str = str(factors) if factors else ''
 
+    # Claude analysis data
+    claude_grade = signal.get('claude_grade')
+    claude_score = signal.get('claude_score')
+    claude_action = signal.get('claude_action')
+    claude_conviction = signal.get('claude_conviction')
+    claude_thesis = signal.get('claude_thesis')
+    claude_strengths = signal.get('claude_key_strengths', [])
+    claude_risks = signal.get('claude_key_risks', [])
+    claude_position = signal.get('claude_position_rec')
+    has_claude = claude_grade is not None
+
     # Tier styling
     tier_colors = {
         'A+': 'green', 'A': 'blue', 'B': 'orange', 'C': 'gray', 'D': 'red'
@@ -1401,8 +1437,22 @@ def _render_signal_card(signal: Dict[str, Any]):
     }
     scanner_icon = scanner_icons.get(scanner, '📊')
 
+    # Claude action colors
+    claude_action_colors = {
+        'STRONG BUY': 'green',
+        'BUY': 'blue',
+        'HOLD': 'orange',
+        'AVOID': 'red'
+    }
+
+    # Build title with Claude info if available
+    claude_badge = ""
+    if has_claude:
+        action_color = claude_action_colors.get(claude_action, 'gray')
+        claude_badge = f" | 🤖 :{action_color}[{claude_action}] ({claude_grade})"
+
     # Use expander for each signal card
-    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}", expanded=True):
+    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}", expanded=True):
         # Metrics row
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
@@ -1424,19 +1474,59 @@ def _render_signal_card(signal: Dict[str, Any]):
         if factors_str:
             st.caption(f"**Factors:** {factors_str}")
 
+        # Claude AI Analysis Section
+        if has_claude:
+            st.markdown("---")
+            st.markdown("#### 🤖 Claude AI Analysis")
+
+            # Claude metrics row
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                grade_color = tier_colors.get(claude_grade, 'gray')
+                st.markdown(f"**Grade:** :{grade_color}[{claude_grade}]")
+            with col2:
+                st.markdown(f"**Score:** {claude_score}/10")
+            with col3:
+                action_color = claude_action_colors.get(claude_action, 'gray')
+                st.markdown(f"**Action:** :{action_color}[{claude_action}]")
+            with col4:
+                st.markdown(f"**Position:** {claude_position or '-'}")
+
+            # Thesis
+            if claude_thesis:
+                st.markdown(f"**Thesis:** {claude_thesis}")
+
+            # Strengths and Risks in columns
+            if claude_strengths or claude_risks:
+                col1, col2 = st.columns(2)
+                with col1:
+                    if claude_strengths:
+                        st.markdown("**Key Strengths:**")
+                        for s in claude_strengths[:3]:
+                            st.markdown(f"- :green[+] {s}")
+                with col2:
+                    if claude_risks:
+                        st.markdown("**Key Risks:**")
+                        for r in claude_risks[:3]:
+                            st.markdown(f"- :red[-] {r}")
+        else:
+            # Show pending analysis indicator
+            st.caption("🔄 *Awaiting Claude AI analysis*")
+
 
 def _signals_to_csv(signals: List[Dict]) -> str:
-    """Convert signals to CSV format."""
+    """Convert signals to CSV format including Claude analysis."""
     import io
     import csv
 
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Header
+    # Header with Claude columns
     writer.writerow([
         'Symbol', 'Side', 'Entry', 'Stop', 'TP1', 'TP2',
-        'Risk%', 'R:R', 'Score', 'Tier', 'Scanner', 'Setup'
+        'Risk%', 'R:R', 'Score', 'Tier', 'Scanner', 'Setup',
+        'Claude_Grade', 'Claude_Score', 'Claude_Action', 'Claude_Conviction', 'Claude_Thesis'
     ])
 
     # Data
@@ -1453,7 +1543,12 @@ def _signals_to_csv(signals: List[Dict]) -> str:
             s.get('composite_score', 0),
             s.get('quality_tier', 'D'),
             s.get('scanner_name', ''),
-            (s.get('setup_description', '') or '')[:50]
+            (s.get('setup_description', '') or '')[:50],
+            s.get('claude_grade', ''),
+            s.get('claude_score', ''),
+            s.get('claude_action', ''),
+            s.get('claude_conviction', ''),
+            (s.get('claude_thesis', '') or '')[:100]
         ])
 
     return output.getvalue()

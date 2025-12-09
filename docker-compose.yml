@@ -216,6 +216,7 @@ services:
       - VECTOR_DB_URL=http://vector-db:8090
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
     networks:
       - lab-net
     depends_on:
