@@ -1562,13 +1562,20 @@ class EnhancedTradeProcessor:
                 self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
                             f"Profit {profit_points}pts >= trigger {break_even_trigger_points}pts")
 
-                # ========== NEW: TRY PARTIAL CLOSE FIRST ==========
-                # Check if partial close feature is enabled
+                # ========== PARTIAL CLOSE CHECK (separate from break-even) ==========
+                # Partial close now triggers at partial_close_trigger_points (default 13 pips)
+                # NOT at break-even trigger
                 enable_partial_close = trailing_config.get('enable_partial_close', True)
                 partial_close_size = trailing_config.get('partial_close_size', 0.5)
-                partial_close_succeeded = False  # Track if partial close succeeded to skip BE stop move
+                partial_close_trigger = trailing_config.get('partial_close_trigger_points', 13)  # Default 13 pips
+                partial_close_succeeded = False
 
-                if enable_partial_close:
+                # Check if profit is sufficient for partial close (separate threshold from BE)
+                is_profitable_for_partial_close = profit_points >= partial_close_trigger
+
+                if enable_partial_close and is_profitable_for_partial_close:
+                    self.logger.info(f"💰 [PARTIAL CLOSE TRIGGER] Trade {trade.id}: "
+                                f"Profit {profit_points}pts >= partial close trigger {partial_close_trigger}pts")
                     # ✅ CRITICAL FIX: ALWAYS check database first with row lock to prevent race conditions
                     # The passed-in trade object may be stale/detached - never trust its partial_close_executed value
                     try:
