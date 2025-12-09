@@ -1568,17 +1568,17 @@ class EnhancedTradeProcessor:
                 partial_close_size = trailing_config.get('partial_close_size', 0.5)
                 partial_close_succeeded = False  # Track if partial close succeeded to skip BE stop move
 
-                if enable_partial_close and not getattr(trade, 'partial_close_executed', False):
-                    # ✅ CRITICAL FIX: Re-check partial_close_executed with database lock to prevent race condition
-                    # This prevents duplicate executions when monitoring cycles overlap
+                if enable_partial_close:
+                    # ✅ CRITICAL FIX: ALWAYS check database first with row lock to prevent race conditions
+                    # The passed-in trade object may be stale/detached - never trust its partial_close_executed value
                     try:
-                        # ✅ FIX: Query fresh trade without expiring the original
-                        # This keeps the original trade attached to session for fallback logic
-                        refreshed_trade = db.query(TradeLog).filter(TradeLog.id == trade.id).with_for_update().first()
+                        # Get fresh trade with row lock - this is the authoritative source
+                        refreshed_trade = db.query(TradeLog).filter(TradeLog.id == trade.id).with_for_update(nowait=False).first()
                         if not refreshed_trade:
                             self.logger.error(f"❌ [PARTIAL CLOSE] Trade {trade.id}: Could not find trade in database")
                             raise Exception("Trade not found in database")
 
+                        # ✅ ALWAYS check the DATABASE value, not the passed-in object
                         if refreshed_trade.partial_close_executed:
                             self.logger.info(f"⏭️ [PARTIAL CLOSE SKIP] Trade {trade.id}: Already executed (detected via database lock)")
                             partial_close_succeeded = True  # Skip break-even logic
@@ -1602,6 +1602,15 @@ class EnhancedTradeProcessor:
                                 size_to_close=partial_close_size,
                                 auth_headers=auth_headers
                             )
+
+                            # ✅ Handle case where position was already closed
+                            if partial_result.get("already_closed"):
+                                self.logger.warning(f"⚠️ [PARTIAL CLOSE] Trade {trade.id}: Position already closed on IG")
+                                # Mark as closed in database
+                                refreshed_trade.status = "closed"
+                                refreshed_trade.partial_close_executed = True  # Prevent further attempts
+                                db.commit()
+                                return True  # Exit processing for this trade
 
                             if partial_result.get("success"):
                                 # ✅ Partial close succeeded!

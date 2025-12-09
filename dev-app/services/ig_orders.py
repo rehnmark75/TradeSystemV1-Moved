@@ -205,6 +205,36 @@ async def partial_close_position(
     Note: Uses POST with _method:DELETE header due to IG API DELETE body limitation
     """
     try:
+        # ✅ SAFEGUARD: Check if position exists and has enough size before attempting close
+        try:
+            async with httpx.AsyncClient() as client:
+                pos_resp = await client.get(
+                    f"{API_BASE_URL}/positions",
+                    headers=auth_headers,
+                    timeout=15
+                )
+                if pos_resp.status_code == 200:
+                    positions = pos_resp.json().get("positions", [])
+                    match = next((p for p in positions if p["position"]["dealId"] == deal_id), None)
+                    if not match:
+                        logger.warning(f"⚠️ [PARTIAL CLOSE] Position {deal_id} not found on IG - may already be closed")
+                        return {
+                            "success": False,
+                            "error": "Position not found on IG",
+                            "already_closed": True
+                        }
+                    current_size = float(match["position"].get("size", 0))
+                    if current_size < size_to_close:
+                        logger.warning(f"⚠️ [PARTIAL CLOSE] Position {deal_id} size {current_size} < requested {size_to_close}")
+                        return {
+                            "success": False,
+                            "error": f"Position size {current_size} less than requested close size {size_to_close}",
+                            "current_size": current_size
+                        }
+                    logger.info(f"✅ [PARTIAL CLOSE CHECK] Position {deal_id} has size {current_size}, closing {size_to_close}")
+        except Exception as check_error:
+            logger.warning(f"⚠️ [PARTIAL CLOSE] Could not verify position size: {check_error}, proceeding anyway")
+
         # Opposite direction for closing (SELL closes BUY, BUY closes SELL)
         close_direction = "SELL" if direction.upper() == "BUY" else "BUY"
 
