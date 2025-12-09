@@ -20,6 +20,7 @@ The TradeSystemV1 documentation has been organized into focused, specialized fil
 ### ⚡ Advanced Features
 - **[Dynamic Parameter Optimization](claude-optimization.md)** - Database-driven parameter system
 - **[Market Intelligence](claude-intelligence.md)** - Real-time market analysis and trade context
+- **[Trailing Stop System](claude-trailing-system.md)** - Progressive trailing stops and partial close
 
 ## 🎯 Quick Navigation
 
@@ -31,6 +32,7 @@ The TradeSystemV1 documentation has been organized into focused, specialized fil
 | **Develop a new strategy** | [Strategy Development](claude-strategies.md) |
 | **Optimize parameters** | [Dynamic Parameter Optimization](claude-optimization.md) |
 | **Use market intelligence** | [Market Intelligence](claude-intelligence.md) |
+| **Modify trailing stops** | [Trailing Stop System](claude-trailing-system.md) |
 | **Follow best practices** | [Development Best Practices](claude-development.md) |
 
 ## ⚠️ Important Notes
@@ -81,7 +83,8 @@ The TradeSystemV1 documentation has been organized into focused, specialized fil
 - ✅ Market intelligence with regime detection
 - ✅ Modular strategy configuration architecture
 - ✅ Comprehensive documentation split
+- ✅ Progressive trailing stop system with 4 stages
+- ✅ Partial close at 13 pips (configurable per pair)
+- ✅ Absolute stop level updates (not offset-based)
 
 For detailed setup and usage instructions, start with the [Overview & Navigation](claude-overview.md).
-- Add information about the new backtest system to memory
-- memorize the new backtest system including the --pipeline switch and how the result is summarized when a backtest completes
