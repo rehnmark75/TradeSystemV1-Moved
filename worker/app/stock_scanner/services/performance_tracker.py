@@ -169,7 +169,11 @@ class PerformanceTracker:
 
         # Check expiration (5 days for active signals)
         if status == 'active':
-            days_active = (datetime.now() - signal_time).days
+            # Handle timezone-aware datetimes
+            now = datetime.now()
+            if signal_time.tzinfo is not None:
+                signal_time = signal_time.replace(tzinfo=None)
+            days_active = (now - signal_time).days
             if days_active > 5:
                 return 'expired'
 
