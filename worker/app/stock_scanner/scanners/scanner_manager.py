@@ -616,12 +616,21 @@ class ScannerManager:
 
         logger.info(f"Starting Claude analysis for {len(signals)} signals")
 
-        # Initialize analyzer
-        analyzer = StockClaudeAnalyzer(default_model=model or 'sonnet')
+        # Initialize analyzer with database for chart generation
+        analyzer = StockClaudeAnalyzer(
+            default_model=model or 'sonnet',
+            db_manager=self.db,
+            enable_charts=True
+        )
 
         if not analyzer.is_available:
             logger.warning("Claude API not available - check API key")
             return []
+
+        if analyzer.charts_available:
+            logger.info("Chart generation enabled for vision analysis")
+        else:
+            logger.info("Chart generation not available - text-only analysis")
 
         # Enrich signals with technical, fundamental, and SMC data
         technical_data_list = []
@@ -706,20 +715,25 @@ class ScannerManager:
         if smc_data:
             technical_data['smc'] = smc_data
 
-        # Initialize analyzer
-        analyzer = StockClaudeAnalyzer(default_model=model or 'sonnet')
+        # Initialize analyzer with database for chart generation
+        analyzer = StockClaudeAnalyzer(
+            default_model=model or 'sonnet',
+            db_manager=self.db,
+            enable_charts=True
+        )
 
         if not analyzer.is_available:
             logger.warning("Claude API not available - check API key")
             return None
 
-        # Analyze
+        # Analyze with chart if available
         analysis = await analyzer.analyze_signal(
             signal=signal,
             technical_data=technical_data,
             fundamental_data=fundamental_data,
             analysis_level=analysis_level,
-            model=model
+            model=model,
+            include_chart=True  # Enable chart for single signal analysis
         )
 
         # Save to database

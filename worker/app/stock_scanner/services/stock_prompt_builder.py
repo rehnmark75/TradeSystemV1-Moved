@@ -30,7 +30,8 @@ class StockPromptBuilder:
         signal: Dict[str, Any],
         technical_data: Dict[str, Any],
         fundamental_data: Dict[str, Any],
-        analysis_level: str = 'standard'
+        analysis_level: str = 'standard',
+        has_chart: bool = False
     ) -> str:
         """
         Build a comprehensive analysis prompt for a stock signal.
@@ -40,6 +41,7 @@ class StockPromptBuilder:
             technical_data: Technical indicators and metrics
             fundamental_data: Fundamental metrics and company data
             analysis_level: 'quick', 'standard', or 'comprehensive'
+            has_chart: Whether a chart image is included for vision analysis
 
         Returns:
             Formatted prompt string for Claude API
@@ -51,9 +53,9 @@ class StockPromptBuilder:
         if analysis_level == 'quick':
             return self._build_quick_prompt(signal, technical_data, fundamental_data)
         elif analysis_level == 'comprehensive':
-            return self._build_comprehensive_prompt(signal, technical_data, fundamental_data)
+            return self._build_comprehensive_prompt(signal, technical_data, fundamental_data, has_chart)
         else:
-            return self._build_standard_prompt(signal, technical_data, fundamental_data)
+            return self._build_standard_prompt(signal, technical_data, fundamental_data, has_chart)
 
     def _build_quick_prompt(
         self,
@@ -100,7 +102,8 @@ Respond in JSON only:
         self,
         signal: Dict[str, Any],
         technical: Dict[str, Any],
-        fundamental: Dict[str, Any]
+        fundamental: Dict[str, Any],
+        has_chart: bool = False
     ) -> str:
         """Build a standard analysis prompt (~800 tokens)"""
 
@@ -129,8 +132,29 @@ Respond in JSON only:
         factors = signal.get('confluence_factors', [])
         factors_str = ', '.join(factors[:6]) if factors else 'None listed'
 
-        prompt = f"""You are a Senior Equity Analyst. Analyze this stock signal with institutional rigor.
+        # Chart instruction if image is included
+        chart_instruction = ""
+        if has_chart:
+            chart_instruction = """
+## CHART ANALYSIS
+The attached chart shows 60-day price history with:
+- Candlesticks (green=up, red=down)
+- Moving averages: SMA20 (blue), SMA50 (orange), SMA200 (purple)
+- Signal levels: Entry (green dashed), Stop (red dashed), Targets (blue dashed)
+- Volume bars at bottom
 
+IMPORTANT: Carefully examine the chart for:
+1. Trend quality and direction (clean vs choppy)
+2. Price position relative to moving averages
+3. Recent candlestick patterns and momentum
+4. Entry quality (at support? resistance? mid-range?)
+5. Volume confirmation of price moves
+6. Any visual patterns not captured in the data
+
+"""
+
+        prompt = f"""You are a Senior Equity Analyst. Analyze this stock signal with institutional rigor.
+{chart_instruction}
 ## SIGNAL OVERVIEW
 **{ticker}** ({company_name}) | {direction} Signal
 Scanner: {scanner} | Quality: {tier} ({score}/100)
@@ -169,7 +193,8 @@ Analyze and respond in this exact JSON format:
         self,
         signal: Dict[str, Any],
         technical: Dict[str, Any],
-        fundamental: Dict[str, Any]
+        fundamental: Dict[str, Any],
+        has_chart: bool = False
     ) -> str:
         """Build a comprehensive institutional prompt (~1200 tokens)"""
 
@@ -209,7 +234,34 @@ Analyze and respond in this exact JSON format:
         factors = signal.get('confluence_factors', [])
         factors_str = '\n'.join([f"- {f}" for f in factors]) if factors else '- None listed'
 
+        # Chart analysis section if image is included
+        chart_section = ""
+        if has_chart:
+            chart_section = """
+## CHART ANALYSIS (CRITICAL)
+The attached chart shows 60-day price history with key levels and indicators.
+
+**Chart Elements:**
+- Candlesticks: Green (bullish), Red (bearish)
+- Moving Averages: SMA20 (blue), SMA50 (orange), SMA200 (purple)
+- Signal Levels: Entry (green dashed), Stop (red dashed), Targets (blue dashed)
+- Volume: Bar chart at bottom with color matching price direction
+- SMC Annotations: Swing highs/lows, order blocks, BOS levels (if visible)
+
+**Your Visual Analysis Must Include:**
+1. **Trend Quality**: Is the trend clean or choppy? Consistent higher highs/lows?
+2. **Entry Timing**: Is entry at a good location (pullback to support/MA, breakout confirmation)?
+3. **Pattern Recognition**: Any classic patterns visible (flags, wedges, double bottoms, head & shoulders)?
+4. **Volume Analysis**: Does volume support the move? Increasing on breakouts? Drying up on pullbacks?
+5. **Moving Average Confluence**: Price relationship to all MAs, MA alignment (bullish/bearish/mixed)
+6. **Risk Assessment**: Is stop placement logical based on structure? Room for targets?
+7. **Chart Personality**: Does this stock trade cleanly or erratically?
+
+Incorporate your visual analysis into your thesis and key observations.
+"""
+
         prompt = f"""You are a Senior Equity Analyst at a quantitative trading firm. Provide institutional-grade analysis of this stock signal.
+{chart_section}
 
 ## SIGNAL OVERVIEW
 **{ticker}** - {company_name}

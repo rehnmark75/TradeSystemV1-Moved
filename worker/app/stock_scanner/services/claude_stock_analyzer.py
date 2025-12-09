@@ -4,6 +4,9 @@ Stock Claude Analyzer
 Main service for analyzing stock signals using Claude API.
 Provides institutional-grade analysis with investment thesis,
 risk assessment, and actionable recommendations.
+
+Supports multimodal analysis with chart images for enhanced
+pattern recognition and visual context.
 """
 
 import asyncio
@@ -21,6 +24,7 @@ except ImportError:
 
 from .stock_prompt_builder import StockPromptBuilder
 from .stock_response_parser import StockResponseParser, ClaudeAnalysis
+from .stock_chart_generator import StockChartGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +34,22 @@ class StockClaudeAnalyzer:
     Claude API integration for stock signal analysis.
 
     Provides:
-    - Single signal analysis
+    - Single signal analysis with optional chart images
+    - Multimodal vision analysis for enhanced pattern recognition
     - Batch analysis with rate limiting
     - Cost tracking and optimization
     - Fallback handling when API unavailable
 
     Usage:
-        analyzer = StockClaudeAnalyzer()
-        result = await analyzer.analyze_signal(signal_data, technical_data, fundamental_data)
+        analyzer = StockClaudeAnalyzer(db_manager=db)
+        result = await analyzer.analyze_signal(
+            signal_data, technical_data, fundamental_data,
+            include_chart=True  # Enable vision analysis
+        )
         print(f"Grade: {result.grade}, Action: {result.action}")
     """
 
-    # Model configurations
+    # Model configurations - vision-capable models
     MODELS = {
         'haiku': 'claude-3-haiku-20240307',
         'sonnet': 'claude-sonnet-4-20250514',
@@ -49,6 +57,7 @@ class StockClaudeAnalyzer:
     }
 
     # Default model for different analysis levels
+    # Note: All these models support vision
     DEFAULT_MODELS = {
         'quick': 'haiku',
         'standard': 'sonnet',
@@ -59,19 +68,21 @@ class StockClaudeAnalyzer:
     MAX_REQUESTS_PER_MINUTE = 20
     MAX_REQUESTS_PER_DAY = 200
 
-    # Token limits
-    MAX_INPUT_TOKENS = 2000
+    # Token limits (increased for vision analysis)
+    MAX_INPUT_TOKENS = 4000  # Increased for image tokens
     MAX_OUTPUT_TOKENS = {
         'quick': 150,
-        'standard': 300,
-        'comprehensive': 500,
+        'standard': 400,  # Increased for richer analysis with charts
+        'comprehensive': 600,
     }
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         default_model: str = 'sonnet',
-        auto_save: bool = False
+        auto_save: bool = False,
+        db_manager=None,
+        enable_charts: bool = True
     ):
         """
         Initialize the stock Claude analyzer.
@@ -80,13 +91,27 @@ class StockClaudeAnalyzer:
             api_key: Anthropic API key. If None, reads from CLAUDE_API_KEY env var
             default_model: Default model to use ('haiku', 'sonnet', 'opus')
             auto_save: Whether to auto-save analyses to files
+            db_manager: Database manager for fetching candle data (required for charts)
+            enable_charts: Whether to enable chart generation (default True)
         """
         self.api_key = api_key or os.environ.get('CLAUDE_API_KEY')
         self.default_model = default_model
         self.auto_save = auto_save
+        self.db = db_manager
+        self.enable_charts = enable_charts
 
         self.prompt_builder = StockPromptBuilder()
         self.response_parser = StockResponseParser()
+
+        # Initialize chart generator if db available
+        self.chart_generator = None
+        if enable_charts:
+            self.chart_generator = StockChartGenerator(db_manager=db_manager)
+            if self.chart_generator.is_available:
+                logger.info("Chart generation enabled for vision analysis")
+            else:
+                logger.warning("Chart generation not available - mplfinance not installed")
+                self.chart_generator = None
 
         # Initialize client
         self.client = None
@@ -111,6 +136,8 @@ class StockClaudeAnalyzer:
             'failed_requests': 0,
             'total_tokens': 0,
             'total_latency_ms': 0,
+            'charts_generated': 0,
+            'vision_requests': 0,
         }
 
     @property
@@ -118,13 +145,20 @@ class StockClaudeAnalyzer:
         """Check if Claude API is available"""
         return self.client is not None
 
+    @property
+    def charts_available(self) -> bool:
+        """Check if chart generation is available"""
+        return self.chart_generator is not None and self.chart_generator.is_available
+
     async def analyze_signal(
         self,
         signal: Dict[str, Any],
         technical_data: Optional[Dict[str, Any]] = None,
         fundamental_data: Optional[Dict[str, Any]] = None,
         analysis_level: str = 'standard',
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        include_chart: bool = True,
+        candles: Optional[List[Dict[str, Any]]] = None
     ) -> ClaudeAnalysis:
         """
         Analyze a single stock signal with Claude.
@@ -135,6 +169,8 @@ class StockClaudeAnalyzer:
             fundamental_data: Fundamental metrics (P/E, growth, ownership, etc.)
             analysis_level: 'quick', 'standard', or 'comprehensive'
             model: Override model selection ('haiku', 'sonnet', 'opus')
+            include_chart: Whether to include a chart image for vision analysis
+            candles: Optional candle data for chart (fetched from DB if not provided)
 
         Returns:
             ClaudeAnalysis with grade, thesis, recommendations
@@ -157,23 +193,52 @@ class StockClaudeAnalyzer:
             if key in signal and key not in technical:
                 technical[key] = signal[key]
 
-        # Build prompt
+        # Generate chart image if enabled and available
+        chart_base64 = None
+        ticker = signal.get('ticker', 'UNKNOWN')
+
+        # Generate chart for all analysis levels when enabled (charts always included by default)
+        if include_chart and self.charts_available:
+            try:
+                smc_data = technical.get('smc', {})
+                chart_base64 = await self.chart_generator.generate_signal_chart(
+                    ticker=ticker,
+                    candles=candles,
+                    signal=signal,
+                    smc_data=smc_data,
+                    technical_data=technical
+                )
+                if chart_base64:
+                    self.stats['charts_generated'] += 1
+                    logger.debug(f"Generated chart for {ticker}")
+            except Exception as e:
+                logger.warning(f"Chart generation failed for {ticker}: {e}")
+
+        # Build prompt (with chart context if available)
         prompt = self.prompt_builder.build_signal_analysis_prompt(
             signal=signal,
             technical_data=technical,
             fundamental_data=fundamental,
-            analysis_level=analysis_level
+            analysis_level=analysis_level,
+            has_chart=chart_base64 is not None
         )
 
         # Select model
         model_name = model or self.DEFAULT_MODELS.get(analysis_level, self.default_model)
         model_id = self.MODELS.get(model_name, self.MODELS['sonnet'])
-        max_tokens = self.MAX_OUTPUT_TOKENS.get(analysis_level, 300)
+        max_tokens = self.MAX_OUTPUT_TOKENS.get(analysis_level, 400)
 
-        # Call API
+        # Call API (with or without image)
         start_time = time.time()
         try:
-            response = await self._call_api(prompt, model_id, max_tokens)
+            if chart_base64:
+                response = await self._call_api_with_image(
+                    prompt, chart_base64, model_id, max_tokens
+                )
+                self.stats['vision_requests'] += 1
+            else:
+                response = await self._call_api(prompt, model_id, max_tokens)
+
             latency_ms = int((time.time() - start_time) * 1000)
 
             if response:
@@ -190,8 +255,9 @@ class StockClaudeAnalyzer:
                 self.stats['total_tokens'] += response['tokens']
                 self.stats['total_latency_ms'] += latency_ms
 
+                vision_tag = " [with chart]" if chart_base64 else ""
                 logger.info(
-                    f"Analyzed {signal.get('ticker', '???')}: "
+                    f"Analyzed {ticker}{vision_tag}: "
                     f"Grade={analysis.grade}, Score={analysis.score}, "
                     f"Action={analysis.action} ({latency_ms}ms)"
                 )
@@ -213,7 +279,8 @@ class StockClaudeAnalyzer:
         fundamental_data_list: Optional[List[Dict[str, Any]]] = None,
         analysis_level: str = 'standard',
         max_concurrent: int = 3,
-        delay_between_requests: float = 0.5
+        delay_between_requests: float = 0.5,
+        include_chart: bool = True
     ) -> List[Tuple[Dict[str, Any], ClaudeAnalysis]]:
         """
         Analyze multiple signals in batch with rate limiting.
@@ -225,6 +292,7 @@ class StockClaudeAnalyzer:
             analysis_level: Analysis depth
             max_concurrent: Max concurrent API calls
             delay_between_requests: Delay between requests in seconds
+            include_chart: Whether to include chart images (default True - always includes charts)
 
         Returns:
             List of (signal, analysis) tuples
@@ -249,7 +317,8 @@ class StockClaudeAnalyzer:
                     signal=signal,
                     technical_data=technical,
                     fundamental_data=fundamental,
-                    analysis_level=analysis_level
+                    analysis_level=analysis_level,
+                    include_chart=include_chart  # Pass through chart setting
                 )
                 return (signal, analysis)
 
@@ -328,6 +397,84 @@ class StockClaudeAnalyzer:
             return None
         except Exception as e:
             logger.error(f"Unexpected error calling Claude API: {e}")
+            return None
+
+    async def _call_api_with_image(
+        self,
+        prompt: str,
+        image_base64: str,
+        model: str,
+        max_tokens: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Make API call to Claude with an image for vision analysis.
+
+        Args:
+            prompt: The text prompt to send
+            image_base64: Base64-encoded PNG image
+            model: Model ID to use (must support vision)
+            max_tokens: Maximum output tokens
+
+        Returns:
+            Dict with 'content' and 'tokens' or None on error
+        """
+        if not self.client:
+            return None
+
+        self._record_request()
+        self.stats['total_requests'] += 1
+
+        try:
+            # Build multimodal message content
+            message_content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": image_base64
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": prompt
+                }
+            ]
+
+            # Run in thread pool since anthropic client is sync
+            loop = asyncio.get_event_loop()
+            message = await loop.run_in_executor(
+                None,
+                lambda: self.client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": message_content
+                        }
+                    ]
+                )
+            )
+
+            content = message.content[0].text if message.content else ''
+            tokens = message.usage.input_tokens + message.usage.output_tokens
+
+            return {
+                'content': content,
+                'tokens': tokens,
+                'input_tokens': message.usage.input_tokens,
+                'output_tokens': message.usage.output_tokens,
+            }
+
+        except anthropic.RateLimitError as e:
+            logger.error(f"Rate limit error (vision): {e}")
+            return None
+        except anthropic.APIError as e:
+            logger.error(f"API error (vision): {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error calling Claude API (vision): {e}")
             return None
 
     def _check_rate_limit(self) -> bool:
