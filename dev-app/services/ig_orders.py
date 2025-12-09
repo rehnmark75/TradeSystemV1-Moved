@@ -8,7 +8,7 @@ from config import API_BASE_URL
 logger = logging.getLogger(__name__)
 
 async def has_open_position(epic: str, auth_headers: dict) -> bool:
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(f"{API_BASE_URL}/positions", headers=auth_headers)
         response.raise_for_status()
         positions = response.json().get("positions", [])
@@ -29,7 +29,7 @@ async def place_market_order(auth_headers, market_epic, direction, currency_code
         "limitDistance": limit_distance or 25  # Use provided limit_distance or fallback to 25
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             f"{API_BASE_URL}/positions/otc",
             headers=auth_headers,
@@ -74,7 +74,7 @@ async def get_deal_confirmation_with_retry(trading_headers: dict, deal_reference
     
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers)
                 
                 if response.status_code == 200:
@@ -127,14 +127,14 @@ async def get_deal_confirmation_simple(trading_headers: dict, deal_reference: st
         "Version": "1"
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(url, headers=headers)
         response.raise_for_status()
         return response.json()
 
 
 async def is_deal_closed(deal_id: str, headers: dict) -> bool:
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
             f"{API_BASE_URL}/positions",  # FIXED: Removed double slash
             headers=headers
@@ -176,7 +176,7 @@ async def update_stop_loss(deal_id: str, stop_distance: int, auth_headers: dict)
         "trailingStop": False
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.put(url, headers=auth_headers, data=json.dumps(payload))
         response.raise_for_status()
         return response.json()
@@ -207,11 +207,10 @@ async def partial_close_position(
     try:
         # ✅ SAFEGUARD: Check if position exists and has enough size before attempting close
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 pos_resp = await client.get(
                     f"{API_BASE_URL}/positions",
-                    headers=auth_headers,
-                    timeout=15
+                    headers=auth_headers
                 )
                 if pos_resp.status_code == 200:
                     positions = pos_resp.json().get("positions", [])
@@ -259,13 +258,12 @@ async def partial_close_position(
         logger.info(f"   Payload: {payload}")
         logger.info(f"   Using POST with _method:DELETE header")
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             # Use POST with _method:DELETE header (IG API requirement)
             response = await client.post(
                 f"{API_BASE_URL}/positions/otc",
                 headers=headers,
-                json=payload,
-                timeout=30
+                json=payload
             )
 
             if response.status_code in [200, 201]:
@@ -340,7 +338,7 @@ async def check_position_exists(epic: str, direction: str, trading_headers: dict
     """
     for wait_time in range(max_wait):
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(f"{API_BASE_URL}/positions", headers=trading_headers)
                 response.raise_for_status()
                 positions = response.json().get("positions", [])

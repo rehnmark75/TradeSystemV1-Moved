@@ -295,11 +295,11 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                 "Version": "2"
             }
             
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 # Check if deal ID exists in open positions
                 positions = data.get("positions", [])
                 deal_exists = any(
@@ -332,11 +332,11 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                 "Version": "2"
             }
             
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 # Find the specific deal
                 positions = data.get("positions", [])
                 for pos in positions:

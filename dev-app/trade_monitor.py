@@ -150,20 +150,20 @@ class PositionCache:
                 "Version": "2"
             }
             
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 positions = data.get("positions", [])
-                
+
                 # ✅ FIX: Atomic cache update
                 with self._lock:
                     self._positions_cache = positions
                     self._last_fetch_time = datetime.now()
-                
+
                 return positions
-                
+
         except Exception as e:
             logging.getLogger("trade_monitor").error(f"[POSITION CACHE ERROR] {e}")
             # Return stale cache if available, but don't update timestamp

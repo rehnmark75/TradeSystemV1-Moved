@@ -383,9 +383,9 @@ class EnhancedTradeStatusManager:
                 "Version": "1"
             }
             
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers)
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     self.logger.info(f"✅ [DEAL OUTCOME] {deal_reference}: {data.get('status', 'Unknown')}")
@@ -423,8 +423,8 @@ class EnhancedTradeStatusManager:
                 "maxSpanSeconds": 604800,  # 7 days
                 "pageSize": 500
             }
-            
-            async with httpx.AsyncClient() as client:
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers, params=params)
                 response.raise_for_status()
                 transactions = response.json().get("transactions", [])
@@ -670,7 +670,7 @@ async def test_sync_logic():
                 "Version": "2"
             }
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 r = await client.get(f"{API_BASE_URL}/positions", headers=headers)
                 r.raise_for_status()
                 ig_positions = r.json()["positions"]
