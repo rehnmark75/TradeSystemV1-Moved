@@ -3,10 +3,10 @@
 Stock Scanner Scheduler - Enhanced Multi-Scan Pipeline
 
 Runs multiple daily stock analysis scans:
-1. Pre-Market (6:00 AM ET): Quick scan for overnight gaps and earnings
-2. Intraday (12:30 PM ET): Scanner-only run for momentum plays
-3. Post-Market (4:30 PM ET): Quick scan for EOD patterns
-4. Full Pipeline (10:30 PM ET): Complete 6-stage analysis
+1. Full Pipeline (05:00 UTC / 00:00 ET): Complete daily analysis - ready before EU morning
+2. Pre-Market (6:00 AM ET): Quick scan for overnight gaps and earnings
+3. Intraday (12:30 PM ET): Scanner-only run for momentum plays
+4. Post-Market (4:30 PM ET): Quick scan for EOD patterns
 5. Weekly (Sunday 1:00 AM ET): Instrument sync and fundamentals
 
 Full Pipeline Stages:
@@ -88,10 +88,10 @@ class StockScheduler:
     Enhanced Stock Scanner Scheduler with multi-scan pipeline.
 
     Scan Types:
+    - full_pipeline: Complete 9-stage analysis (05:00 UTC / 00:00 ET)
     - pre_market: Quick scan for overnight gaps (6:00 AM ET)
     - intraday: Scanner-only run for momentum plays (12:30 PM ET)
     - post_market: Quick scan for EOD patterns (4:30 PM ET)
-    - full_pipeline: Complete 6-stage analysis (10:30 PM ET)
     - weekly_sync: Instrument and fundamentals refresh (Sunday 1:00 AM ET)
 
     Full Pipeline Stages:
@@ -103,18 +103,25 @@ class StockScheduler:
     6. signals    - Run ZLMA + all scanner strategies
 
     Schedule (Mon-Fri):
+    - 05:00 UTC (00:00 ET): Full pipeline - ready before EU morning
     - 6:00 AM ET: Pre-market scan (gaps, earnings)
     - 12:30 PM ET: Intraday scanner run
     - 4:30 PM ET: Post-market quick scan
-    - 10:30 PM ET: Full pipeline after market close
     - Sunday 1:00 AM ET: Weekly sync
     """
 
-    # US Eastern timezone
+    # Timezones
     ET = pytz.timezone('America/New_York')
+    UTC = pytz.UTC
 
-    # Schedule times (ET) - Multiple daily scans
+    # Schedule times - Multiple daily scans
+    # Full pipeline runs at 05:00 UTC (00:00 ET) so data is ready before EU morning
     SCHEDULE = {
+        'full_pipeline': {
+            'time': time(0, 0),       # 00:00 ET = 05:00 UTC
+            'type': 'full',
+            'description': 'Complete daily pipeline (05:00 UTC)'
+        },
         'pre_market': {
             'time': time(6, 0),       # 6:00 AM ET
             'type': 'quick',
@@ -129,16 +136,11 @@ class StockScheduler:
             'time': time(16, 30),     # 4:30 PM ET
             'type': 'quick',
             'description': 'Post-market EOD patterns'
-        },
-        'full_pipeline': {
-            'time': time(22, 30),     # 10:30 PM ET
-            'type': 'full',
-            'description': 'Complete daily pipeline'
         }
     }
 
     # Legacy constants for backward compatibility
-    PIPELINE_TIME = time(22, 30)  # 10:30 PM ET - Full pipeline
+    PIPELINE_TIME = time(0, 0)    # 00:00 ET (05:00 UTC) - Full pipeline
     WEEKLY_SYNC_TIME = time(1, 0) # 1:00 AM ET on Sunday
     WEEKLY_SYNC_DAY = 6           # Sunday = 6
 
@@ -786,10 +788,13 @@ class StockScheduler:
         self.running = True
 
         logger.info("Enhanced Stock Scheduler started")
-        logger.info("Schedule (Mon-Fri ET):")
+        logger.info("Schedule (Mon-Fri):")
         for task_name, config in self.SCHEDULE.items():
-            logger.info(f"  {config['time'].strftime('%H:%M')} - {task_name}: {config['description']}")
-        logger.info(f"  Sunday {self.WEEKLY_SYNC_TIME} - weekly_sync: Instrument and fundamentals refresh")
+            et_time = config['time'].strftime('%H:%M')
+            # Calculate UTC time (ET is UTC-5 in winter, UTC-4 in summer)
+            utc_hour = (config['time'].hour + 5) % 24  # Approximate UTC
+            logger.info(f"  {et_time} ET ({utc_hour:02d}:00 UTC) - {task_name}: {config['description']}")
+        logger.info(f"  Sunday {self.WEEKLY_SYNC_TIME} ET - weekly_sync: Instrument and fundamentals refresh")
 
         try:
             while self.running:
@@ -915,10 +920,12 @@ def main():
 
         print("\nEnhanced Stock Scanner Scheduler Status")
         print("=" * 60)
-        print("\nSchedule (Mon-Fri ET):")
+        print("\nSchedule (Mon-Fri):")
         for task_name, config in scheduler.SCHEDULE.items():
-            print(f"  {config['time'].strftime('%H:%M')} - {task_name}: {config['description']}")
-        print(f"  Sunday {scheduler.WEEKLY_SYNC_TIME} - weekly_sync: Instrument refresh")
+            et_time = config['time'].strftime('%H:%M')
+            utc_hour = (config['time'].hour + 5) % 24  # Approximate UTC
+            print(f"  {et_time} ET ({utc_hour:02d}:00 UTC) - {task_name}: {config['description']}")
+        print(f"  Sunday {scheduler.WEEKLY_SYNC_TIME} ET - weekly_sync: Instrument refresh")
 
         print(f"\nFull Pipeline stages:")
         print("  1. sync       - Fetch 1H candles from yfinance")
