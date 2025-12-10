@@ -26,6 +26,7 @@ from .strategies import (
     EarningsMomentumScanner,
     ShortSqueezeScanner,
     SectorRotationScanner,
+    ZLMATrendScanner,
     # Forex-adapted strategies
     SMCEmaTrendScanner,
     EMACrossoverScanner,
@@ -78,6 +79,7 @@ class ScannerManager:
         'earnings_momentum': EarningsMomentumScanner,
         'short_squeeze': ShortSqueezeScanner,
         'sector_rotation': SectorRotationScanner,
+        'zlma_trend': ZLMATrendScanner,
         # Forex-adapted strategies
         'smc_ema_trend': SMCEmaTrendScanner,
         'ema_crossover': EMACrossoverScanner,

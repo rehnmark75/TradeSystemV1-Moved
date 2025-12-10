@@ -321,10 +321,10 @@ class StockAnalyticsService:
             LEFT JOIN LATERAL (
                 SELECT
                     COUNT(*) as signal_count,
-                    (SELECT signal_type FROM stock_zlma_signals
-                     WHERE ticker = w.ticker
+                    (SELECT signal_type FROM stock_scanner_signals
+                     WHERE ticker = w.ticker AND status = 'active'
                      ORDER BY signal_timestamp DESC LIMIT 1) as latest_signal
-                FROM stock_zlma_signals
+                FROM stock_scanner_signals
                 WHERE ticker = w.ticker
                 AND signal_timestamp > NOW() - INTERVAL '7 days'
             ) sig ON true
@@ -1414,15 +1414,53 @@ Analyze and respond in this exact JSON format:
             # Fetch additional technical data
             technical = _self._get_technical_data_for_pick(ticker, calculation_date)
 
+            # Generate chart for vision analysis (same as deep dive)
+            chart_base64 = None
+            try:
+                candles = _self.get_daily_candles(ticker, days=60)
+                if candles is not None and not candles.empty:
+                    # Create a minimal signal dict for chart generation
+                    signal_for_chart = {
+                        'entry_price': pick.get('current_price'),
+                        'stop_loss': None,
+                        'take_profit_1': None
+                    }
+                    chart_base64 = _self._generate_analysis_chart(
+                        ticker, candles, signal_for_chart, technical or {}
+                    )
+                    if chart_base64:
+                        logger.debug(f"Generated chart for top pick {ticker}")
+            except Exception as e:
+                logger.warning(f"Chart generation failed for {ticker}: {e}")
+
             # Build the standard institutional-grade prompt (same as scanner)
             prompt = _self._build_standard_analysis_prompt(pick, technical)
 
             # Call Claude API with Sonnet model (same as scanner standard analysis)
+            # Use vision API if chart is available for richer analysis
             client = anthropic.Anthropic(api_key=api_key)
+
+            if chart_base64:
+                # Vision request with chart image
+                message_content = [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": chart_base64
+                        }
+                    },
+                    {"type": "text", "text": prompt}
+                ]
+            else:
+                # Text-only request (fallback)
+                message_content = [{"type": "text", "text": prompt}]
+
             response = client.messages.create(
                 model="claude-sonnet-4-20250514",  # Use Sonnet for standard analysis (same as scanner)
-                max_tokens=300,  # Standard analysis token limit
-                messages=[{"role": "user", "content": prompt}]
+                max_tokens=400,  # Increased for richer vision analysis
+                messages=[{"role": "user", "content": message_content}]
             )
 
             # Parse response using robust parser
@@ -1435,10 +1473,11 @@ Analyze and respond in this exact JSON format:
                 # Add token tracking
                 analysis['claude_tokens_used'] = tokens_used
                 analysis['claude_model'] = 'claude-sonnet-4-20250514'
+                analysis['has_chart'] = chart_base64 is not None
 
                 # Store in database for future use
                 _self._store_claude_analysis(ticker, calculation_date, analysis)
-                logger.info(f"Stored Claude analysis for {ticker} (Sonnet, {tokens_used} tokens)")
+                logger.info(f"Stored Claude analysis for {ticker} (Sonnet, {tokens_used} tokens, chart={'yes' if chart_base64 else 'no'})")
 
                 return analysis
             else:

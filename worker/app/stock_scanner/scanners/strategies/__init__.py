@@ -9,6 +9,7 @@ Concrete implementations of trading scanners:
 - EarningsMomentumScanner: Post-earnings drift plays
 - ShortSqueezeScanner: High short interest squeeze setups
 - SectorRotationScanner: Sector leaders and laggards
+- ZLMATrendScanner: Zero-Lag MA crossover signals
 
 Forex-adapted strategies:
 - SMCEmaTrendScanner: SMC-style EMA trend following with swing structure
@@ -23,6 +24,7 @@ from .gap_and_go import GapAndGoScanner
 from .earnings_momentum import EarningsMomentumScanner
 from .short_squeeze import ShortSqueezeScanner
 from .sector_rotation import SectorRotationScanner
+from .zlma_trend import ZLMATrendScanner
 
 # Forex-adapted strategies
 from .smc_ema_trend import SMCEmaTrendScanner
@@ -37,6 +39,7 @@ __all__ = [
     'EarningsMomentumScanner',
     'ShortSqueezeScanner',
     'SectorRotationScanner',
+    'ZLMATrendScanner',
     # Forex-adapted strategies
     'SMCEmaTrendScanner',
     'EMACrossoverScanner',

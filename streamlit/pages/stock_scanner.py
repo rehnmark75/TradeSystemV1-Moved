@@ -902,26 +902,35 @@ def render_deep_dive_tab(service):
     if 'deep_dive_claude_analysis' not in st.session_state:
         st.session_state.deep_dive_claude_analysis = {}
 
-    # Search
-    col1, col2 = st.columns([2, 1])
+    # Check if we have a ticker from navigation (e.g., from Top Picks table)
+    navigated_ticker = st.session_state.get('deep_dive_ticker', None)
+    if navigated_ticker:
+        # Clear it after use to prevent sticky behavior
+        st.session_state.deep_dive_ticker = None
+        ticker = navigated_ticker
+        st.info(f"Analyzing **{ticker}** from Top Picks")
+    else:
+        ticker = None
 
-    with col1:
-        search_term = st.text_input("Search for a stock", placeholder="Enter ticker or company name...")
+    # Search (only show if no navigated ticker)
+    if not ticker:
+        col1, col2 = st.columns([2, 1])
 
-    ticker = None
+        with col1:
+            search_term = st.text_input("Search for a stock", placeholder="Enter ticker or company name...")
 
-    if search_term:
-        with st.spinner("Searching..."):
-            results = service.get_ticker_search(search_term, limit=10)
+        if search_term:
+            with st.spinner("Searching..."):
+                results = service.get_ticker_search(search_term, limit=10)
 
-        if results:
-            with col2:
-                options = [f"{r['ticker']} - {r.get('name', '')[:30]}" for r in results]
-                selected = st.selectbox("Select stock", options, label_visibility="collapsed")
-                if selected:
-                    ticker = selected.split(" - ")[0]
-        else:
-            st.warning("No stocks found matching your search.")
+            if results:
+                with col2:
+                    options = [f"{r['ticker']} - {r.get('name', '')[:30]}" for r in results]
+                    selected = st.selectbox("Select stock", options, label_visibility="collapsed")
+                    if selected:
+                        ticker = selected.split(" - ")[0]
+            else:
+                st.warning("No stocks found matching your search.")
 
     if not ticker:
         # Show quick picks
@@ -1925,33 +1934,51 @@ def render_top_picks_tab(service):
         picks_data.get('mean_reversion', [])
     )
 
+    # Find picks without Claude analysis (not in DB and not in session)
+    unanalyzed_picks = []
+    for pick in all_picks:
+        ticker = pick['ticker']
+        has_db_analysis = pick.get('claude_grade') is not None
+        has_session_analysis = st.session_state.claude_top_picks_analysis.get(ticker, {}).get('success', False)
+        if not has_db_analysis and not has_session_analysis:
+            unanalyzed_picks.append(pick)
+
+    # Sort unanalyzed by score
+    unanalyzed_picks.sort(key=lambda x: x['total_score'], reverse=True)
+    unanalyzed_count = len(unanalyzed_picks)
+
     col_btn1, col_btn2, col_info = st.columns([1, 1, 2])
     with col_btn1:
-        if st.button("Analyze Top 5 Picks", type="primary", key="analyze_top5"):
-            with st.spinner("Analyzing top picks with Claude AI..."):
-                # Sort by score and take top 5
-                sorted_picks = sorted(all_picks, key=lambda x: x['total_score'], reverse=True)[:5]
-                for pick in sorted_picks:
-                    ticker = pick['ticker']
-                    result = service.analyze_top_pick_with_claude(pick)
-                    st.session_state.claude_top_picks_analysis[ticker] = result
-                # Clear cache to reload picks with fresh Claude data
-                service.get_daily_top_picks.clear()
+        btn_label = f"Analyze {unanalyzed_count} Unanalyzed" if unanalyzed_count > 0 else "All Analyzed"
+        btn_disabled = unanalyzed_count == 0
+        if st.button(btn_label, type="primary", key="analyze_unanalyzed", disabled=btn_disabled):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            for i, pick in enumerate(unanalyzed_picks):
+                ticker = pick['ticker']
+                status_text.text(f"Analyzing {ticker}... ({i+1}/{unanalyzed_count})")
+                result = service.analyze_top_pick_with_claude(pick)
+                st.session_state.claude_top_picks_analysis[ticker] = result
+                progress_bar.progress((i + 1) / unanalyzed_count)
+            status_text.text("Analysis complete!")
+            # Clear cache to reload picks with fresh Claude data
+            service.get_daily_top_picks.clear()
             st.rerun()
-            st.stop()  # Ensure no further rendering
 
     with col_btn2:
-        if st.button("Clear Analysis", key="clear_claude"):
+        if st.button("Clear Session Analysis", key="clear_claude"):
             st.session_state.claude_top_picks_analysis = {}
             st.rerun()
-            st.stop()
 
     with col_info:
-        analyzed_count = len([a for a in st.session_state.claude_top_picks_analysis.values() if a.get('success')])
-        if analyzed_count > 0:
-            st.info(f"{analyzed_count} picks analyzed by Claude AI")
-        else:
-            st.caption("Click 'Analyze Top 5' to get Claude AI recommendations")
+        total_picks = len(all_picks)
+        analyzed_in_db = len([p for p in all_picks if p.get('claude_grade') is not None])
+        analyzed_in_session = len([a for a in st.session_state.claude_top_picks_analysis.values() if a.get('success')])
+        total_analyzed = analyzed_in_db + analyzed_in_session - len([
+            p for p in all_picks
+            if p.get('claude_grade') is not None and st.session_state.claude_top_picks_analysis.get(p['ticker'], {}).get('success', False)
+        ])
+        st.info(f"{total_analyzed}/{total_picks} picks analyzed | {unanalyzed_count} remaining")
 
     st.markdown("---")
 
@@ -1991,6 +2018,7 @@ def render_top_picks_tab(service):
     # Detailed table view
     st.markdown("---")
     st.markdown("### All Picks - Detailed View")
+    st.caption("Click a stock name to open Deep Dive analysis")
 
     # Re-gather all picks for the table (already defined above but scoped differently)
     all_picks_table = (
@@ -2006,8 +2034,21 @@ def render_top_picks_tab(service):
         # Get Claude analysis from session state
         claude_analysis = st.session_state.get('claude_top_picks_analysis', {})
 
-        df_data = []
-        for p in all_picks_table:
+        # Initialize deep dive ticker in session state if not present
+        if 'deep_dive_ticker' not in st.session_state:
+            st.session_state.deep_dive_ticker = None
+
+        # Create header row
+        header_cols = st.columns([0.8, 2, 1.2, 0.6, 0.5, 0.8, 0.7, 0.6, 0.6, 0.7, 0.7, 0.8, 0.8])
+        headers = ['Ticker', 'Name', 'Category', 'Score', 'Tier', 'Price', '1D%', 'RVol', 'ATR%', 'Stop%', 'R/R', 'AI Grade', 'AI Action']
+        for col, header in zip(header_cols, headers):
+            col.markdown(f"**{header}**")
+
+        st.markdown("---")
+
+        # Build rows with clickable names
+        df_data = []  # Keep for CSV export
+        for idx, p in enumerate(all_picks_table):
             ticker = p['ticker']
 
             # Check for Claude analysis from both DB and session
@@ -2030,77 +2071,187 @@ def render_top_picks_tab(service):
                 ai_score = 0
                 ai_action = '-'
 
-            row = {
+            # Category colors
+            cat_colors = {'Momentum': '#1a5f7a', 'Breakout': '#28a745', 'Mean Reversion': '#6f42c1'}
+            cat_color = cat_colors.get(p['category'], '#666')
+
+            # Tier colors
+            tier_colors = {1: '#28a745', 2: '#17a2b8', 3: '#ffc107'}
+            tier_color = tier_colors.get(p['tier'], '#666')
+
+            # AI action colors
+            action_colors = {'STRONG BUY': '#28a745', 'BUY': '#28a745', 'HOLD': '#ffc107', 'AVOID': '#dc3545'}
+            action_color = action_colors.get(ai_action, '#666')
+
+            # 1D% color
+            change_1d = p.get('price_change_1d', 0) or 0
+            change_color = '#28a745' if change_1d >= 0 else '#dc3545'
+
+            # Create row
+            row_cols = st.columns([0.8, 2, 1.2, 0.6, 0.5, 0.8, 0.7, 0.6, 0.6, 0.7, 0.7, 0.8, 0.8])
+
+            row_cols[0].write(ticker)
+
+            # Clickable name - button styled as link (opens inline deep dive below table)
+            name_display = p.get('name', '')[:18] + '...' if len(p.get('name', '')) > 18 else p.get('name', '')
+            if row_cols[1].button(f"🔍 {name_display}", key=f"dive_{ticker}_{idx}", help=f"Quick view for {ticker}"):
+                st.session_state.inline_deep_dive_ticker = ticker
+                st.rerun()
+
+            row_cols[2].markdown(f"<span style='background-color:{cat_color};color:white;padding:2px 6px;border-radius:4px;font-size:0.8em'>{p['category']}</span>", unsafe_allow_html=True)
+            row_cols[3].write(f"{p['total_score']:.0f}")
+            row_cols[4].markdown(f"<span style='background-color:{tier_color};color:white;padding:2px 6px;border-radius:4px'>{p['tier']}</span>", unsafe_allow_html=True)
+            row_cols[5].write(f"${p['current_price']:.2f}")
+            row_cols[6].markdown(f"<span style='color:{change_color}'>{change_1d:+.1f}%</span>", unsafe_allow_html=True)
+            row_cols[7].write(f"{p['relative_volume']:.1f}x" if p.get('relative_volume') else '-')
+            row_cols[8].write(f"{p['atr_percent']:.1f}%")
+            row_cols[9].write(f"-{p['suggested_stop_pct']:.1f}%")
+            row_cols[10].write(f"{p['risk_reward_ratio']:.1f}:1" if p.get('risk_reward_ratio') else '-')
+
+            if has_claude:
+                grade_colors = {'A+': '#28a745', 'A': '#28a745', 'B': '#17a2b8', 'C': '#ffc107', 'D': '#dc3545'}
+                grade_color = grade_colors.get(ai_grade, '#666')
+                row_cols[11].markdown(f"<span style='background-color:{grade_color};color:white;padding:2px 6px;border-radius:4px'>{ai_grade}</span>", unsafe_allow_html=True)
+                row_cols[12].markdown(f"<span style='background-color:{action_color};color:white;padding:2px 6px;border-radius:4px;font-size:0.8em'>{ai_action}</span>", unsafe_allow_html=True)
+            else:
+                row_cols[11].write('-')
+                row_cols[12].write('-')
+
+            # Store for CSV export
+            df_data.append({
                 'Ticker': ticker,
-                'Name': p.get('name', '')[:20] + '...' if len(p.get('name', '')) > 20 else p.get('name', ''),
+                'Name': p.get('name', ''),
                 'Category': p['category'],
                 'Score': f"{p['total_score']:.0f}",
                 'Tier': p['tier'],
                 'Price': f"${p['current_price']:.2f}",
-                '1D%': f"{p['price_change_1d']:+.1f}%" if p['price_change_1d'] else '-',
-                'RVol': f"{p['relative_volume']:.1f}x" if p['relative_volume'] else '-',
+                '1D%': f"{change_1d:+.1f}%",
+                'RVol': f"{p['relative_volume']:.1f}x" if p.get('relative_volume') else '-',
                 'ATR%': f"{p['atr_percent']:.1f}%",
-                'Signals': p.get('signals_summary', '-')[:30],
                 'Stop%': f"-{p['suggested_stop_pct']:.1f}%",
-                'R/R': f"{p['risk_reward_ratio']:.1f}:1" if p['risk_reward_ratio'] else '-',
-                # Claude analysis columns
+                'R/R': f"{p['risk_reward_ratio']:.1f}:1" if p.get('risk_reward_ratio') else '-',
                 'AI Grade': ai_grade if has_claude else '-',
                 'AI Score': f"{ai_score}/10" if has_claude else '-',
                 'AI Action': ai_action if has_claude else '-',
-            }
-            df_data.append(row)
+            })
 
         df = pd.DataFrame(df_data)
 
-        def style_category(val):
-            colors = {
-                'Momentum': '#1a5f7a',
-                'Breakout': '#28a745',
-                'Mean Reversion': '#6f42c1'
-            }
-            return f'background-color: {colors.get(val, "#fff")}; color: white; font-weight: bold;'
+        # Export and Quick Deep Dive section
+        st.markdown("---")
+        col_export, col_dive_label, col_dive_select, col_dive_btn = st.columns([1, 0.8, 1.5, 0.8])
 
-        def style_tier(val):
-            colors = {1: '#28a745', 2: '#17a2b8', 3: '#ffc107'}
-            text_colors = {1: 'white', 2: 'white', 3: 'black'}
-            return f'background-color: {colors.get(val, "#fff")}; color: {text_colors.get(val, "black")}; font-weight: bold;'
+        with col_export:
+            csv = df.to_csv(index=False)
+            st.download_button(
+                "Export CSV",
+                csv,
+                f"top_picks_{picks_data.get('date', 'unknown')}.csv",
+                "text/csv"
+            )
 
-        def style_change(val):
-            if '+' in str(val):
-                return 'color: #28a745;'
-            elif '-' in str(val) and val != '-':
-                return 'color: #dc3545;'
-            return ''
+        with col_dive_label:
+            st.markdown("**Quick Deep Dive:**")
 
-        def style_ai_grade(val):
-            grade_colors = {'A+': '#28a745', 'A': '#28a745', 'B': '#17a2b8', 'C': '#ffc107', 'D': '#dc3545'}
-            if val in grade_colors:
-                return f'background-color: {grade_colors[val]}; color: white; font-weight: bold;'
-            return ''
+        with col_dive_select:
+            # Create options with ticker and name
+            dive_options = [f"{p['ticker']} - {p.get('name', '')[:20]}" for p in all_picks_table]
+            selected_dive = st.selectbox(
+                "Select stock",
+                dive_options,
+                label_visibility="collapsed",
+                key="quick_dive_select"
+            )
 
-        def style_ai_action(val):
-            action_colors = {'STRONG BUY': '#28a745', 'BUY': '#28a745', 'HOLD': '#ffc107', 'AVOID': '#dc3545'}
-            if val in action_colors:
-                return f'background-color: {action_colors[val]}; color: white; font-weight: bold;'
-            return ''
+        with col_dive_btn:
+            if st.button("🔍 Open Deep Dive", key="quick_dive_btn", type="primary"):
+                if selected_dive:
+                    ticker_to_dive = selected_dive.split(" - ")[0]
+                    st.session_state.inline_deep_dive_ticker = ticker_to_dive
+                    st.rerun()
 
-        styled_df = (df.style
-            .map(style_category, subset=['Category'])
-            .map(style_tier, subset=['Tier'])
-            .map(style_change, subset=['1D%'])
-            .map(style_ai_grade, subset=['AI Grade'])
-            .map(style_ai_action, subset=['AI Action'])
-        )
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
+        # Inline Deep Dive section (renders below the table when a stock is selected)
+        inline_ticker = st.session_state.get('inline_deep_dive_ticker')
+        if inline_ticker:
+            st.markdown("---")
+            st.markdown(f"### 🔍 Quick Deep Dive: {inline_ticker}")
 
-        # Export button
-        csv = df.to_csv(index=False)
-        st.download_button(
-            "Export Top Picks CSV",
-            csv,
-            f"top_picks_{picks_data.get('date', 'unknown')}.csv",
-            "text/csv"
-        )
+            col_close, col_spacer = st.columns([1, 5])
+            with col_close:
+                if st.button("✕ Close", key="close_inline_dive"):
+                    st.session_state.inline_deep_dive_ticker = None
+                    st.rerun()
+
+            # Fetch and display stock data inline
+            with st.spinner(f"Loading data for {inline_ticker}..."):
+                data = service.get_stock_details(inline_ticker)
+                candles = service.get_daily_candles(inline_ticker, days=90)
+
+            if data and data.get('instrument'):
+                inst = data['instrument']
+                metrics = data.get('metrics', {}) or {}
+                watchlist = data.get('watchlist', {}) or {}
+
+                # Quick metrics row
+                col1, col2, col3, col4, col5 = st.columns(5)
+                col1.metric("Price", f"${float(metrics.get('current_price', 0)):.2f}")
+                col2.metric("1D Change", f"{float(metrics.get('price_change_1d', 0)):+.1f}%")
+                col3.metric("RSI", f"{float(metrics.get('rsi_14', 0)):.1f}")
+                col4.metric("ATR%", f"{float(metrics.get('atr_percent', 0)):.1f}%")
+                col5.metric("Tier", watchlist.get('tier', '-'))
+
+                # Chart
+                if candles is not None and not candles.empty:
+                    import plotly.graph_objects as go
+
+                    # Use 'timestamp' column (from get_daily_candles) or 'date' as fallback
+                    date_col = 'timestamp' if 'timestamp' in candles.columns else 'date'
+
+                    fig = go.Figure()
+                    fig.add_trace(go.Candlestick(
+                        x=candles[date_col],
+                        open=candles['open'],
+                        high=candles['high'],
+                        low=candles['low'],
+                        close=candles['close'],
+                        name='Price'
+                    ))
+                    # Add SMAs if available
+                    if 'sma_20' in candles.columns:
+                        fig.add_trace(go.Scatter(x=candles[date_col], y=candles['sma_20'], name='SMA20', line=dict(color='orange', width=1)))
+                    if 'sma_50' in candles.columns:
+                        fig.add_trace(go.Scatter(x=candles[date_col], y=candles['sma_50'], name='SMA50', line=dict(color='blue', width=1)))
+
+                    fig.update_layout(
+                        title=f"{inline_ticker} - {inst.get('name', '')}",
+                        xaxis_rangeslider_visible=False,
+                        height=400,
+                        margin=dict(l=50, r=50, t=50, b=50)
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # Signals summary
+                signals = []
+                if watchlist.get('sma_cross_signal'):
+                    signals.append(f"SMA: {watchlist['sma_cross_signal']}")
+                if watchlist.get('rsi_signal'):
+                    signals.append(f"RSI: {watchlist['rsi_signal']}")
+                if watchlist.get('macd_cross_signal'):
+                    signals.append(f"MACD: {watchlist['macd_cross_signal']}")
+                if watchlist.get('trend_strength'):
+                    signals.append(f"Trend: {watchlist['trend_strength']}")
+
+                if signals:
+                    st.markdown(f"**Signals:** {' | '.join(signals)}")
+
+                # Link to full Deep Dive
+                st.markdown("---")
+                if st.button(f"📊 Open Full Deep Dive for {inline_ticker}", key="full_dive_from_inline"):
+                    st.session_state.deep_dive_ticker = inline_ticker
+                    st.session_state.inline_deep_dive_ticker = None
+                    st.info(f"📌 **{inline_ticker}** selected - click the **🔍 Deep Dive** tab above for full analysis")
+            else:
+                st.warning(f"Could not load data for {inline_ticker}")
 
     # Stats section
     if picks_data.get('stats'):
@@ -2264,11 +2415,11 @@ def _render_picks_category(title: str, description: str, picks: List[Dict], colo
 # =============================================================================
 
 def render_scanner_signals_tab(service):
-    """Render the Scanner Signals tab - automated signal scanner results."""
+    """Render the All Signals tab - unified view of all scanner signals."""
     st.markdown("""
     <div class="main-header">
-        <h2>Signal Scanners</h2>
-        <p>Automated trading signals with entry, stop-loss, and take-profit levels + Claude AI Analysis</p>
+        <h2>📡 All Signals</h2>
+        <p>Unified view of all trading signals from all scanners - with Claude AI Analysis</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2303,7 +2454,7 @@ def render_scanner_signals_tab(service):
         scanner_filter = st.selectbox(
             "Scanner",
             ["All Scanners", "trend_momentum", "breakout_confirmation", "mean_reversion", "gap_and_go",
-             "smc_ema_trend", "ema_crossover", "macd_momentum"]
+             "zlma_trend", "smc_ema_trend", "ema_crossover", "macd_momentum"]
         )
 
     with col2:
@@ -2491,6 +2642,7 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
         'Mean Reversion': '🔄',
         'Gap And Go': '⚡',
         'Sector Rotation': '🔀',
+        'Zlma Trend': '〰️',
         # Forex-adapted strategies
         'Smc Ema Trend': '🎯',
         'Ema Crossover': '📊',
@@ -2640,6 +2792,207 @@ def _signals_to_csv(signals: List[Dict]) -> str:
 
 
 # =============================================================================
+# SCANNER ANALYSIS TAB
+# =============================================================================
+
+def render_scanner_analysis_tab(service):
+    """
+    Scanner Analysis Tab - Individual scanner performance drill-down.
+
+    Provides detailed analysis of each scanner's performance including:
+    - Signal count and quality distribution
+    - Win/loss rates (if tracked)
+    - Historical performance trends
+    - Scanner-specific configuration info
+    """
+    st.header("Scanner Analysis")
+    st.markdown("*Drill down into individual scanner performance and statistics*")
+
+    # Get scanner stats
+    stats = service.get_scanner_stats()
+    by_scanner = stats.get('by_scanner', [])
+
+    if not by_scanner:
+        st.info("No scanner data available yet. Run scanners to generate signals.")
+        return
+
+    # Scanner selector
+    scanner_names = [s['scanner_name'] for s in by_scanner]
+    selected_scanner = st.selectbox(
+        "Select Scanner to Analyze",
+        scanner_names,
+        format_func=lambda x: x.replace('_', ' ').title()
+    )
+
+    st.markdown("---")
+
+    # Find selected scanner stats
+    scanner_stats = next((s for s in by_scanner if s['scanner_name'] == selected_scanner), None)
+
+    if scanner_stats:
+        # Scanner overview metrics
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Total Signals", scanner_stats.get('signal_count', 0))
+        with col2:
+            st.metric("Active Signals", scanner_stats.get('active_count', 0))
+        with col3:
+            st.metric("Avg Score", f"{scanner_stats.get('avg_score', 0):.1f}")
+        with col4:
+            # Calculate quality ratio
+            total = scanner_stats.get('signal_count', 0)
+            active = scanner_stats.get('active_count', 0)
+            active_pct = (active / total * 100) if total > 0 else 0
+            st.metric("Active %", f"{active_pct:.0f}%")
+
+        st.markdown("---")
+
+        # Get signals for this scanner
+        signals = service.get_scanner_signals(
+            scanner_name=selected_scanner,
+            status=None,  # All statuses
+            limit=100
+        )
+
+        if signals:
+            # Quality distribution
+            st.subheader("Quality Distribution")
+
+            tier_counts = {}
+            for s in signals:
+                tier = s.get('quality_tier', 'Unknown')
+                tier_counts[tier] = tier_counts.get(tier, 0) + 1
+
+            # Display as horizontal bar chart using columns
+            tier_order = ['A+', 'A', 'B', 'C', 'D']
+            tier_colors = {'A+': '🟢', 'A': '🔵', 'B': '🟡', 'C': '🟠', 'D': '🔴'}
+
+            for tier in tier_order:
+                if tier in tier_counts:
+                    count = tier_counts[tier]
+                    pct = count / len(signals) * 100
+                    st.write(f"{tier_colors.get(tier, '⚪')} **{tier}**: {count} signals ({pct:.1f}%)")
+
+            st.markdown("---")
+
+            # Signal type distribution
+            st.subheader("Signal Direction")
+            buy_count = sum(1 for s in signals if s.get('signal_type') == 'BUY')
+            sell_count = sum(1 for s in signals if s.get('signal_type') == 'SELL')
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("BUY Signals", buy_count, delta=None)
+            with col2:
+                st.metric("SELL Signals", sell_count, delta=None)
+
+            st.markdown("---")
+
+            # Claude Analysis Summary (if any)
+            claude_analyzed = [s for s in signals if s.get('claude_analyzed_at')]
+            if claude_analyzed:
+                st.subheader("Claude AI Analysis Summary")
+
+                # Claude action distribution
+                action_counts = {}
+                for s in claude_analyzed:
+                    action = s.get('claude_action', 'Unknown')
+                    action_counts[action] = action_counts.get(action, 0) + 1
+
+                cols = st.columns(len(action_counts))
+                for i, (action, count) in enumerate(sorted(action_counts.items())):
+                    with cols[i % len(cols)]:
+                        color = {'STRONG BUY': '🟢', 'BUY': '🔵', 'HOLD': '🟡', 'AVOID': '🔴'}.get(action, '⚪')
+                        st.metric(f"{color} {action}", count)
+
+                # Average Claude score
+                claude_scores = [s.get('claude_score', 0) for s in claude_analyzed if s.get('claude_score')]
+                if claude_scores:
+                    avg_claude_score = sum(claude_scores) / len(claude_scores)
+                    st.metric("Avg Claude Score", f"{avg_claude_score:.1f}/100")
+
+            st.markdown("---")
+
+            # Recent signals table
+            st.subheader(f"Recent {selected_scanner.replace('_', ' ').title()} Signals")
+
+            # Prepare data for table
+            table_data = []
+            for s in signals[:20]:  # Show last 20
+                table_data.append({
+                    'Ticker': s.get('ticker', ''),
+                    'Type': s.get('signal_type', ''),
+                    'Entry': f"${float(s.get('entry_price', 0)):.2f}",
+                    'Score': s.get('composite_score', 0),
+                    'Tier': s.get('quality_tier', ''),
+                    'Status': s.get('status', ''),
+                    'Claude': s.get('claude_action', '-'),
+                    'Date': str(s.get('signal_timestamp', ''))[:10] if s.get('signal_timestamp') else ''
+                })
+
+            if table_data:
+                import pandas as pd
+                df = pd.DataFrame(table_data)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No signals found for {selected_scanner.replace('_', ' ').title()}")
+
+    # Scanner descriptions
+    st.markdown("---")
+    st.subheader("Scanner Information")
+
+    scanner_info = {
+        'trend_momentum': {
+            'description': 'Finds pullback entry opportunities in established uptrends.',
+            'best_for': 'Trending markets, continuation plays',
+            'criteria': 'Above SMA20/50, RSI 35-65, MACD bullish'
+        },
+        'breakout_confirmation': {
+            'description': 'Identifies volume-confirmed breakouts above resistance.',
+            'best_for': 'Range breakouts, momentum starts',
+            'criteria': 'Price break + volume surge + trend alignment'
+        },
+        'mean_reversion': {
+            'description': 'Spots oversold bounces with reversal patterns.',
+            'best_for': 'Counter-trend entries, support bounces',
+            'criteria': 'RSI oversold, bullish divergence, support test'
+        },
+        'gap_and_go': {
+            'description': 'Gap continuation plays with momentum confirmation.',
+            'best_for': 'Opening momentum, news-driven moves',
+            'criteria': 'Gap up + volume + trend continuation'
+        },
+        'zlma_trend': {
+            'description': 'Zero-Lag Moving Average crossover with EMA confirmation.',
+            'best_for': 'Trend-following with reduced lag',
+            'criteria': 'ZLMA/EMA crossover, ATR-based stops'
+        },
+        'smc_ema_trend': {
+            'description': 'SMC-style EMA trend following with swing structure analysis.',
+            'best_for': 'Institutional order flow alignment',
+            'criteria': 'EMA stack, swing structure, volume profile'
+        },
+        'ema_crossover': {
+            'description': 'EMA cascade crossover with multi-timeframe trend alignment.',
+            'best_for': 'Clear trend transitions',
+            'criteria': 'EMA 9/21/50 cascade, trend alignment'
+        },
+        'macd_momentum': {
+            'description': 'MACD momentum confluence with price structure.',
+            'best_for': 'Momentum confirmation trades',
+            'criteria': 'MACD crossover, histogram expansion, price structure'
+        }
+    }
+
+    info = scanner_info.get(selected_scanner, {})
+    if info:
+        st.markdown(f"**Description:** {info.get('description', 'N/A')}")
+        st.markdown(f"**Best For:** {info.get('best_for', 'N/A')}")
+        st.markdown(f"**Entry Criteria:** {info.get('criteria', 'N/A')}")
+
+
+# =============================================================================
 # MAIN APPLICATION
 # =============================================================================
 
@@ -2649,8 +3002,8 @@ def main():
 
     # Create tabs
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Overview", "📋 Watchlist", "📡 Signals",
-        "🎯 Top Picks", "🔎 Scanners", "🔍 Deep Dive"
+        "📊 Overview", "📋 Watchlist", "📡 All Signals",
+        "📈 Scanner Analysis", "🎯 Top Picks", "🔍 Deep Dive"
     ])
 
     with tab1:
@@ -2660,13 +3013,15 @@ def main():
         render_watchlist_tab(service)
 
     with tab3:
-        render_signals_tab(service)
+        # Consolidated signals tab - shows all scanner signals including ZLMA
+        render_scanner_signals_tab(service)
 
     with tab4:
-        render_top_picks_tab(service)
+        # Individual scanner drill-down and analysis
+        render_scanner_analysis_tab(service)
 
     with tab5:
-        render_scanner_signals_tab(service)
+        render_top_picks_tab(service)
 
     with tab6:
         render_deep_dive_tab(service)

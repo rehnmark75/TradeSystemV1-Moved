@@ -43,6 +43,7 @@ from .strategies import (
     BreakoutConfirmationScanner,
     MeanReversionScanner,
     GapAndGoScanner,
+    ZLMATrendScanner,
     # Forex-adapted strategies
     SMCEmaTrendScanner,
     EMACrossoverScanner,
@@ -82,6 +83,7 @@ __all__ = [
     'BreakoutConfirmationScanner',
     'MeanReversionScanner',
     'GapAndGoScanner',
+    'ZLMATrendScanner',
     # Forex-adapted strategies
     'SMCEmaTrendScanner',
     'EMACrossoverScanner',

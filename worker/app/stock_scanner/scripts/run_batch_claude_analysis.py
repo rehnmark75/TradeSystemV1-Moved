@@ -47,7 +47,7 @@ class BatchClaudeAnalyzer:
 
     def __init__(self, db_manager: AsyncDatabaseManager):
         self.db = db_manager
-        self.claude = StockClaudeAnalyzer()
+        self.claude = StockClaudeAnalyzer(db_manager=db_manager, enable_charts=True)
 
     async def get_pending_signals(
         self,
