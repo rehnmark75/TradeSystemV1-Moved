@@ -134,7 +134,9 @@ class FundamentalsFetcher:
                 # Risk Metrics
                 'beta': self._safe_get(info, 'beta'),
                 'short_ratio': self._safe_get(info, 'shortRatio'),
-                'short_percent_float': self._safe_get(info, 'shortPercentOfFloat', multiply=100),
+                # Note: shortPercentOfFloat is already a percentage (e.g., 5.23 = 5.23%)
+                # Cap at 999.99 to fit NUMERIC(5,2) column - some heavily shorted stocks exceed 100%
+                'short_percent_float': min(self._safe_get(info, 'shortPercentOfFloat') or 0, 999.99) or None,
                 'shares_short': self._safe_get_int(info, 'sharesShort'),
 
                 # Ownership
@@ -142,6 +144,9 @@ class FundamentalsFetcher:
                 'insider_percent': self._safe_get(info, 'heldPercentInsiders', multiply=100),
                 'shares_outstanding': self._safe_get_int(info, 'sharesOutstanding'),
                 'shares_float': self._safe_get_int(info, 'floatShares'),
+
+                # Market Cap (stored as string in DB, but we format it nicely)
+                'market_cap': self._format_market_cap(info.get('marketCap')),
 
                 # Valuation Metrics
                 'forward_pe': self._safe_get(info, 'forwardPE'),
@@ -261,6 +266,23 @@ class FundamentalsFetcher:
         except Exception:
             return None
 
+    def _format_market_cap(self, value) -> Optional[str]:
+        """Format market cap as human-readable string (e.g., '150.5B', '2.3T')."""
+        if value is None:
+            return None
+        try:
+            val = float(value)
+            if val >= 1e12:
+                return f"{val / 1e12:.1f}T"
+            elif val >= 1e9:
+                return f"{val / 1e9:.1f}B"
+            elif val >= 1e6:
+                return f"{val / 1e6:.1f}M"
+            else:
+                return f"{val:.0f}"
+        except (ValueError, TypeError):
+            return None
+
     async def fetch_fundamentals(self, ticker: str) -> Optional[Dict]:
         """
         Fetch fundamentals for a single ticker.
@@ -366,6 +388,9 @@ class FundamentalsFetcher:
                 sector = COALESCE($50, sector),
                 industry = COALESCE($51, industry),
 
+                -- Market Cap
+                market_cap = COALESCE($52, market_cap),
+
                 -- Timestamps
                 fundamentals_updated_at = NOW(),
                 updated_at = NOW()
@@ -452,6 +477,9 @@ class FundamentalsFetcher:
                 # Sector/Industry
                 fundamentals['sector'],
                 fundamentals['industry'],
+
+                # Market Cap
+                fundamentals['market_cap'],
             )
             return True
         except Exception as e:

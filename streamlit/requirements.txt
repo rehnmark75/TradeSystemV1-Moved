@@ -13,3 +13,6 @@ beautifulsoup4>=4.12.2
 aiohttp>=3.9.0
 # Claude AI integration
 anthropic>=0.70.0
+# Chart generation for Claude vision
+mplfinance>=0.12.0
+matplotlib>=3.7.0

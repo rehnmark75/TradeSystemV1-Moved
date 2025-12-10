@@ -890,13 +890,17 @@ def render_signals_tab(service):
 # =============================================================================
 
 def render_deep_dive_tab(service):
-    """Render the Deep Dive tab."""
+    """Render the Deep Dive tab with comprehensive stock analysis."""
     st.markdown("""
     <div class="main-header">
         <h2>🔍 Stock Deep Dive</h2>
         <p>Comprehensive analysis for individual stocks</p>
     </div>
     """, unsafe_allow_html=True)
+
+    # Initialize session state for Claude analysis
+    if 'deep_dive_claude_analysis' not in st.session_state:
+        st.session_state.deep_dive_claude_analysis = {}
 
     # Search
     col1, col2 = st.columns([2, 1])
@@ -934,10 +938,12 @@ def render_deep_dive_tab(service):
                         st.rerun()
         return
 
-    # Fetch stock data
-    with st.spinner(f"Loading data for {ticker}..."):
+    # Fetch all stock data
+    with st.spinner(f"Loading comprehensive data for {ticker}..."):
         data = service.get_stock_details(ticker)
-        candles = service.get_daily_candles(ticker, days=60)
+        candles = service.get_daily_candles(ticker, days=90)  # Extended for better MAs
+        scanner_signals = service.get_scanner_signals_for_ticker(ticker, limit=10)
+        fundamentals = service.get_full_fundamentals(ticker)
 
     if not data or not data.get('instrument'):
         st.error(f"Stock '{ticker}' not found in database.")
@@ -946,21 +952,29 @@ def render_deep_dive_tab(service):
     instrument = data.get('instrument', {})
     metrics = data.get('metrics', {})
     watchlist = data.get('watchlist', {})
-    signals = data.get('signals', [])
 
-    # Header
+    # Get the most recent active signal (if any)
+    active_signal = scanner_signals[0] if scanner_signals else None
+
+    # ==========================================================================
+    # SECTION 1: Enhanced Header with Sector/Industry
+    # ==========================================================================
     tier = watchlist.get('tier')
     score = watchlist.get('score', 0)
     rank = watchlist.get('rank_overall', '-')
+    sector = instrument.get('sector', '') or fundamentals.get('sector', '')
+    industry = instrument.get('industry', '') or fundamentals.get('industry', '')
 
     tier_badge = f'<span class="tier-badge tier-{tier}">Tier {tier}</span>' if tier else ''
+    sector_info = f"{sector} | {industry}" if sector and industry else sector or industry or ""
 
     st.markdown(f"""
     <div style="background: linear-gradient(90deg, #0d6efd 0%, #6610f2 100%); padding: 1rem; border-radius: 10px; color: white; margin-bottom: 1rem;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div>
                 <span style="font-size: 1.8rem; font-weight: bold;">{ticker}</span> {tier_badge}
-                <div style="opacity: 0.9;">{instrument.get('name', '')}</div>
+                <div style="opacity: 0.9; font-size: 1.1rem;">{instrument.get('name', '')}</div>
+                <div style="opacity: 0.7; font-size: 0.85rem; margin-top: 0.2rem;">{sector_info}</div>
             </div>
             <div style="text-align: right;">
                 <div style="font-size: 1.8rem; font-weight: bold;">{score:.0f}</div>
@@ -970,8 +984,8 @@ def render_deep_dive_tab(service):
     </div>
     """, unsafe_allow_html=True)
 
-    # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
+    # Key metrics row
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         price = metrics.get('current_price', 0)
@@ -988,11 +1002,615 @@ def render_deep_dive_tab(service):
 
     with col4:
         rsi = metrics.get('rsi_14', 50) or 50
-        st.metric("RSI (14)", f"{rsi:.0f}")
+        rsi_delta = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else None
+        st.metric("RSI (14)", f"{rsi:.0f}", rsi_delta)
 
-    # Score breakdown
+    with col5:
+        market_cap = fundamentals.get('market_cap', 0) or 0
+        if market_cap >= 1_000_000_000_000:
+            cap_str = f"${market_cap / 1_000_000_000_000:.1f}T"
+        elif market_cap >= 1_000_000_000:
+            cap_str = f"${market_cap / 1_000_000_000:.1f}B"
+        elif market_cap >= 1_000_000:
+            cap_str = f"${market_cap / 1_000_000:.0f}M"
+        else:
+            cap_str = "N/A"
+        st.metric("Market Cap", cap_str)
+
+    st.markdown("---")
+
+    # ==========================================================================
+    # SECTION 2: Claude AI Analysis
+    # ==========================================================================
+    st.markdown('<div class="section-header">🤖 AI Analysis</div>', unsafe_allow_html=True)
+
+    # Check if we have existing Claude analysis from the most recent signal
+    # Database columns: claude_grade, claude_score, claude_action, claude_conviction,
+    # claude_thesis, claude_key_strengths, claude_key_risks, claude_position_rec,
+    # claude_time_horizon, claude_stop_adjustment, claude_analyzed_at
+    existing_analysis = None
+    if active_signal and active_signal.get('claude_grade'):
+        existing_analysis = {
+            'rating': active_signal.get('claude_grade'),
+            'confidence_score': active_signal.get('claude_score'),
+            'recommendation': active_signal.get('claude_action'),
+            'conviction': active_signal.get('claude_conviction'),
+            'thesis': active_signal.get('claude_thesis'),
+            'key_factors': active_signal.get('claude_key_strengths'),
+            'risk_assessment': active_signal.get('claude_key_risks'),
+            'position_sizing': active_signal.get('claude_position_rec'),
+            'time_horizon': active_signal.get('claude_time_horizon'),
+            'stop_adjustment': active_signal.get('claude_stop_adjustment'),
+            'analyzed_at': active_signal.get('claude_analyzed_at'),
+            'signal_id': active_signal.get('id')
+        }
+
+    # Check session state for fresh analysis
+    session_key = f"claude_analysis_{ticker}"
+    if session_key in st.session_state.deep_dive_claude_analysis:
+        existing_analysis = st.session_state.deep_dive_claude_analysis[session_key]
+
+    # Handle both fresh analysis (grade/score/action) and DB format (rating/confidence_score/recommendation)
+    if existing_analysis and (existing_analysis.get('rating') or existing_analysis.get('grade')):
+        # Display existing analysis - handle both API response and DB format
+        rating = existing_analysis.get('rating') or existing_analysis.get('grade', 'N/A')
+        conf_score = existing_analysis.get('confidence_score') or existing_analysis.get('score', 0) or 0
+        recommendation = existing_analysis.get('recommendation') or existing_analysis.get('action', 'N/A')
+        conviction = existing_analysis.get('conviction', 'MEDIUM')
+        thesis = existing_analysis.get('thesis', '')
+        key_factors = existing_analysis.get('key_factors') or existing_analysis.get('key_strengths', []) or []
+        risk_assessment = existing_analysis.get('risk_assessment') or existing_analysis.get('key_risks', 'N/A')
+        position_sizing = existing_analysis.get('position_sizing') or existing_analysis.get('position_recommendation', 'Standard')
+        time_horizon = existing_analysis.get('time_horizon', 'N/A')
+        stop_adjustment = existing_analysis.get('stop_adjustment', 'Keep')
+        analyzed_at = existing_analysis.get('analyzed_at')
+
+        # Rating color
+        rating_colors = {
+            'A+': '#28a745', 'A': '#28a745', 'A-': '#5cb85c',
+            'B+': '#17a2b8', 'B': '#17a2b8', 'B-': '#5bc0de',
+            'C+': '#ffc107', 'C': '#ffc107', 'C-': '#f0ad4e',
+            'D': '#dc3545', 'F': '#dc3545'
+        }
+        rating_color = rating_colors.get(rating, '#6c757d')
+
+        # Recommendation styling
+        rec_colors = {
+            'STRONG BUY': '#28a745', 'BUY': '#5cb85c',
+            'HOLD': '#ffc107', 'NEUTRAL': '#6c757d',
+            'SELL': '#dc3545', 'STRONG SELL': '#c9302c'
+        }
+        rec_color = rec_colors.get(recommendation.upper() if recommendation else '', '#6c757d')
+
+        col1, col2 = st.columns([1, 3])
+
+        with col1:
+            st.markdown(f"""
+            <div style="background: {rating_color}; color: white; padding: 1.5rem; border-radius: 10px; text-align: center;">
+                <div style="font-size: 2.5rem; font-weight: bold;">{rating}</div>
+                <div style="font-size: 0.9rem; opacity: 0.9;">AI Rating</div>
+                <div style="margin-top: 0.5rem; font-size: 1.2rem;">{conf_score:.1f}/10</div>
+                <div style="font-size: 0.8rem; opacity: 0.8;">Confidence</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col2:
+            # Conviction color
+            conviction_colors = {'HIGH': '#28a745', 'MEDIUM': '#ffc107', 'LOW': '#dc3545'}
+            conv_color = conviction_colors.get(conviction.upper() if conviction else 'MEDIUM', '#6c757d')
+
+            st.markdown(f"""
+            <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; border-left: 4px solid {rec_color};">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 1.2rem; font-weight: bold; color: {rec_color};">{recommendation}</span>
+                    <span style="background: {conv_color}; color: white; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem;">{conviction} Conviction</span>
+                </div>
+                <div style="margin-top: 0.5rem; font-size: 0.9rem;">
+                    <strong>Position:</strong> {position_sizing} |
+                    <strong>Horizon:</strong> {time_horizon} |
+                    <strong>Stop:</strong> {stop_adjustment}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Investment thesis
+            if thesis:
+                st.markdown(f"""
+                <div style="margin-top: 0.5rem; padding: 0.5rem; background: #e7f3ff; border-radius: 4px; font-size: 0.9rem;">
+                    💡 <strong>Thesis:</strong> {thesis}
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Key strengths as badges
+            if key_factors:
+                factors_list = key_factors if isinstance(key_factors, list) else [key_factors]
+                factors_html = " ".join([
+                    f'<span style="background: #d4edda; padding: 0.2rem 0.5rem; border-radius: 4px; margin-right: 0.3rem; font-size: 0.8rem;">✓ {f}</span>'
+                    for f in factors_list[:5]
+                ])
+                st.markdown(f"""
+                <div style="margin-top: 0.5rem;">
+                    <strong style="font-size: 0.85rem;">Strengths:</strong> {factors_html}
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Risk assessment (handle both string and list)
+            if risk_assessment:
+                if isinstance(risk_assessment, list):
+                    risks_html = " ".join([
+                        f'<span style="background: #f8d7da; padding: 0.2rem 0.5rem; border-radius: 4px; margin-right: 0.3rem; font-size: 0.8rem;">⚠️ {r}</span>'
+                        for r in risk_assessment[:3]
+                    ])
+                    st.markdown(f"""
+                    <div style="margin-top: 0.5rem;">
+                        <strong style="font-size: 0.85rem;">Risks:</strong> {risks_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fff3cd; border-radius: 4px; font-size: 0.85rem;">
+                        ⚠️ <strong>Risk:</strong> {risk_assessment}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # Show when analyzed
+        if analyzed_at:
+            if isinstance(analyzed_at, datetime):
+                time_ago = datetime.now() - analyzed_at
+                if time_ago.days > 0:
+                    ago_str = f"{time_ago.days}d ago"
+                elif time_ago.seconds >= 3600:
+                    ago_str = f"{time_ago.seconds // 3600}h ago"
+                else:
+                    ago_str = f"{time_ago.seconds // 60}m ago"
+            else:
+                ago_str = str(analyzed_at)[:16]
+            st.caption(f"📅 Analyzed: {ago_str}")
+
+        # Re-analyze button
+        if st.button("🔄 Re-analyze with Claude", key="reanalyze_claude"):
+            _run_claude_analysis(service, ticker, active_signal, metrics, fundamentals, candles, session_key)
+
+    else:
+        # No analysis - show analyze button
+        st.info("No AI analysis available for this stock yet.")
+
+        # Allow analysis even without a scanner signal - use metrics data
+        if st.button("🤖 Analyze with Claude (with Chart Vision)", key="analyze_claude", type="primary"):
+            # Create a synthetic signal from metrics if no active signal
+            signal_to_analyze = active_signal if active_signal else {
+                'ticker': ticker,
+                'signal_type': 'ANALYSIS',  # Not a real signal, just analysis
+                'scanner_name': 'Deep Dive',
+                'entry_price': metrics.get('current_price', 0),
+                'composite_score': watchlist.get('score', 50) if watchlist else 50,
+                'quality_tier': f"T{watchlist.get('tier', 3)}" if watchlist else 'T3',
+            }
+            _run_claude_analysis(service, ticker, signal_to_analyze, metrics, fundamentals, candles, session_key)
+
+    st.markdown("---")
+
+    # ==========================================================================
+    # SECTION 3: Active Signal Card
+    # ==========================================================================
+    if active_signal:
+        st.markdown('<div class="section-header">📈 Active Signal</div>', unsafe_allow_html=True)
+
+        sig_type = active_signal.get('signal_type', 'BUY')
+        scanner_name = active_signal.get('scanner_name', 'Unknown')
+        entry_price = active_signal.get('entry_price', 0)
+        stop_loss = active_signal.get('stop_loss', 0)
+        take_profit_1 = active_signal.get('take_profit_1', 0)
+        take_profit_2 = active_signal.get('take_profit_2', 0)
+        quality_tier = active_signal.get('quality_tier', '-')
+        composite_score = active_signal.get('composite_score', 0)
+        signal_timestamp = active_signal.get('signal_timestamp')
+
+        # Calculate P&L and R:R
+        current_price = metrics.get('current_price', entry_price)
+        if sig_type == 'BUY':
+            pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+            risk_pct = ((entry_price - stop_loss) / entry_price * 100) if entry_price > 0 and stop_loss > 0 else 0
+            reward_pct = ((take_profit_1 - entry_price) / entry_price * 100) if entry_price > 0 and take_profit_1 > 0 else 0
+        else:
+            pnl_pct = ((entry_price - current_price) / entry_price * 100) if entry_price > 0 else 0
+            risk_pct = ((stop_loss - entry_price) / entry_price * 100) if entry_price > 0 and stop_loss > 0 else 0
+            reward_pct = ((entry_price - take_profit_1) / entry_price * 100) if entry_price > 0 and take_profit_1 > 0 else 0
+
+        rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
+
+        # Days since signal
+        if signal_timestamp:
+            if isinstance(signal_timestamp, datetime):
+                days_active = (datetime.now() - signal_timestamp).days
+            else:
+                days_active = 0
+        else:
+            days_active = 0
+
+        sig_color = "#28a745" if sig_type == "BUY" else "#dc3545"
+        pnl_color = "#28a745" if pnl_pct >= 0 else "#dc3545"
+        tier_color = "#28a745" if quality_tier in ['A+', 'A'] else "#17a2b8" if quality_tier in ['A-', 'B+', 'B'] else "#ffc107"
+
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 1rem; border-radius: 10px; border-left: 5px solid {sig_color};">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
+                <div>
+                    <span style="font-size: 1.3rem; font-weight: bold; color: {sig_color};">{sig_type}</span>
+                    <span style="background: #e9ecef; padding: 0.2rem 0.5rem; border-radius: 4px; margin-left: 0.5rem; font-size: 0.85rem;">{scanner_name}</span>
+                </div>
+                <div>
+                    <span style="background: {tier_color}; color: white; padding: 0.3rem 0.6rem; border-radius: 4px; font-weight: bold;">{quality_tier}</span>
+                    <span style="margin-left: 0.5rem; font-size: 0.9rem;">Score: {composite_score:.1f}</span>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; text-align: center;">
+                <div>
+                    <div style="font-size: 0.8rem; color: #666;">Entry</div>
+                    <div style="font-size: 1.1rem; font-weight: bold;">${entry_price:.2f}</div>
+                </div>
+                <div>
+                    <div style="font-size: 0.8rem; color: #666;">Stop Loss</div>
+                    <div style="font-size: 1.1rem; font-weight: bold; color: #dc3545;">${stop_loss:.2f}</div>
+                    <div style="font-size: 0.75rem; color: #666;">-{risk_pct:.1f}%</div>
+                </div>
+                <div>
+                    <div style="font-size: 0.8rem; color: #666;">Target 1</div>
+                    <div style="font-size: 1.1rem; font-weight: bold; color: #28a745;">${take_profit_1:.2f}</div>
+                    <div style="font-size: 0.75rem; color: #666;">+{reward_pct:.1f}%</div>
+                </div>
+                <div>
+                    <div style="font-size: 0.8rem; color: #666;">R:R Ratio</div>
+                    <div style="font-size: 1.1rem; font-weight: bold;">{rr_ratio:.1f}:1</div>
+                </div>
+            </div>
+            <div style="margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid #dee2e6; display: flex; justify-content: space-between;">
+                <div>
+                    <span style="font-size: 0.85rem;">Current: </span>
+                    <span style="font-weight: bold;">${current_price:.2f}</span>
+                    <span style="color: {pnl_color}; font-weight: bold; margin-left: 0.3rem;">({pnl_pct:+.1f}%)</span>
+                </div>
+                <div style="font-size: 0.85rem; color: #666;">
+                    {days_active} days active
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("")
+
+    # ==========================================================================
+    # SECTION 4: Technical + SMC Analysis (side by side)
+    # ==========================================================================
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown('<div class="section-header">📊 Technical Analysis</div>', unsafe_allow_html=True)
+
+        # RSI with visual bar
+        rsi = metrics.get('rsi_14', 50) or 50
+        rsi_color = "#dc3545" if rsi > 70 else "#28a745" if rsi < 30 else "#17a2b8"
+        rsi_status = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
+
+        st.markdown(f"""
+        <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; margin-bottom: 0.5rem;">
+            <div style="display: flex; justify-content: space-between;">
+                <span><strong>RSI(14)</strong></span>
+                <span style="color: {rsi_color}; font-weight: bold;">{rsi:.0f} - {rsi_status}</span>
+            </div>
+            <div class="score-bar" style="margin-top: 0.3rem;">
+                <div class="score-fill" style="width: {rsi}%; background: {rsi_color};"></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # MACD
+        macd = metrics.get('macd', 0) or 0
+        macd_signal = metrics.get('macd_signal', 0) or 0
+        macd_hist = metrics.get('macd_histogram', 0) or 0
+        macd_status = "Bullish ✓" if macd > macd_signal else "Bearish ✗"
+        macd_color = "#28a745" if macd > macd_signal else "#dc3545"
+
+        st.markdown(f"""
+        <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; margin-bottom: 0.5rem;">
+            <div style="display: flex; justify-content: space-between;">
+                <span><strong>MACD</strong></span>
+                <span style="color: {macd_color}; font-weight: bold;">{macd_status}</span>
+            </div>
+            <div style="font-size: 0.85rem; color: #666; margin-top: 0.2rem;">
+                Line: {macd:.3f} | Signal: {macd_signal:.3f} | Hist: {macd_hist:+.3f}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Moving averages
+        sma_20 = metrics.get('sma_20', 0) or 0
+        sma_50 = metrics.get('sma_50', 0) or 0
+        sma_200 = metrics.get('sma_200', 0) or 0
+        current_price = metrics.get('current_price', 0) or 0
+
+        # Calculate price vs MAs
+        def pct_from_ma(price, ma):
+            return ((price - ma) / ma * 100) if ma > 0 else 0
+
+        pct_20 = pct_from_ma(current_price, sma_20)
+        pct_50 = pct_from_ma(current_price, sma_50)
+        pct_200 = pct_from_ma(current_price, sma_200)
+
+        # Trend determination
+        if sma_20 > sma_50 > sma_200 and current_price > sma_20:
+            trend = "Strong Uptrend ↗"
+            trend_color = "#28a745"
+        elif sma_20 < sma_50 < sma_200 and current_price < sma_20:
+            trend = "Strong Downtrend ↘"
+            trend_color = "#dc3545"
+        elif current_price > sma_50:
+            trend = "Uptrend ↗"
+            trend_color = "#5cb85c"
+        elif current_price < sma_50:
+            trend = "Downtrend ↘"
+            trend_color = "#f0ad4e"
+        else:
+            trend = "Sideways →"
+            trend_color = "#6c757d"
+
+        st.markdown(f"""
+        <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; margin-bottom: 0.5rem;">
+            <div style="display: flex; justify-content: space-between;">
+                <span><strong>Trend</strong></span>
+                <span style="color: {trend_color}; font-weight: bold;">{trend}</span>
+            </div>
+            <div style="font-size: 0.85rem; margin-top: 0.3rem;">
+                <div>SMA20: ${sma_20:.2f} <span style="color: {'#28a745' if pct_20 > 0 else '#dc3545'}">({pct_20:+.1f}%)</span></div>
+                <div>SMA50: ${sma_50:.2f} <span style="color: {'#28a745' if pct_50 > 0 else '#dc3545'}">({pct_50:+.1f}%)</span></div>
+                <div>SMA200: ${sma_200:.2f} <span style="color: {'#28a745' if pct_200 > 0 else '#dc3545'}">({pct_200:+.1f}%)</span></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown('<div class="section-header">🎯 SMC Analysis</div>', unsafe_allow_html=True)
+
+        # SMC data from active signal OR derive from metrics/price action
+        if active_signal:
+            smc_trend = active_signal.get('htf_trend', 'N/A')
+            smc_bias = active_signal.get('htf_bias', 'N/A')
+            smc_zone = active_signal.get('pd_zone', 'N/A')
+            smc_confluence = active_signal.get('smc_confluence', 0) or 0
+            bos_direction = active_signal.get('bos_direction', 'N/A')
+        else:
+            # Derive SMC-like analysis from metrics
+            # Trend from MA alignment
+            if sma_20 > sma_50 > sma_200 and current_price > sma_20:
+                smc_trend = 'Bullish'
+                smc_bias = 'Buy'
+            elif sma_20 < sma_50 < sma_200 and current_price < sma_20:
+                smc_trend = 'Bearish'
+                smc_bias = 'Sell'
+            elif current_price > sma_50:
+                smc_trend = 'Bullish'
+                smc_bias = 'Buy'
+            elif current_price < sma_50:
+                smc_trend = 'Bearish'
+                smc_bias = 'Sell'
+            else:
+                smc_trend = 'Neutral'
+                smc_bias = 'Neutral'
+
+            # Zone from price position in range (use 52-week high/low if available)
+            high_52w = fundamentals.get('fifty_two_week_high', 0) or fundamentals.get('week_52_high', 0)
+            low_52w = fundamentals.get('fifty_two_week_low', 0) or fundamentals.get('week_52_low', 0)
+            if high_52w and low_52w and high_52w > low_52w:
+                range_pct = (current_price - low_52w) / (high_52w - low_52w) * 100
+                if range_pct < 33:
+                    smc_zone = 'Discount'
+                elif range_pct > 67:
+                    smc_zone = 'Premium'
+                else:
+                    smc_zone = 'Equilibrium'
+            else:
+                smc_zone = 'N/A'
+
+            # Confluence from multiple factors
+            conf_factors = 0
+            if smc_trend == 'Bullish':
+                if rsi < 70: conf_factors += 2  # Not overbought
+                if macd > macd_signal: conf_factors += 2  # MACD bullish
+                if current_price > sma_20: conf_factors += 1.5
+                if current_price > sma_50: conf_factors += 1.5
+                if current_price > sma_200: conf_factors += 1.5
+            elif smc_trend == 'Bearish':
+                if rsi > 30: conf_factors += 2  # Not oversold
+                if macd < macd_signal: conf_factors += 2  # MACD bearish
+                if current_price < sma_20: conf_factors += 1.5
+                if current_price < sma_50: conf_factors += 1.5
+                if current_price < sma_200: conf_factors += 1.5
+            smc_confluence = min(conf_factors, 10)
+            bos_direction = smc_trend
+
+        # Trend styling
+        trend_colors = {'Bullish': '#28a745', 'Bearish': '#dc3545', 'Neutral': '#6c757d'}
+        trend_color = trend_colors.get(smc_trend, '#6c757d')
+
+        # Zone styling
+        zone_pct = 50  # Default
+        if smc_zone == 'Discount':
+            zone_pct = 25
+            zone_color = "#28a745"
+        elif smc_zone == 'Premium':
+            zone_pct = 75
+            zone_color = "#dc3545"
+        else:
+            zone_color = "#ffc107"
+
+        st.markdown(f"""
+        <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; margin-bottom: 0.5rem;">
+            <div style="display: flex; justify-content: space-between;">
+                <span><strong>HTF Trend</strong></span>
+                <span style="color: {trend_color}; font-weight: bold;">{smc_trend}</span>
+            </div>
+            <div style="font-size: 0.85rem; color: #666; margin-top: 0.2rem;">
+                Bias: {smc_bias} | Direction: {bos_direction}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px; margin-bottom: 0.5rem;">
+            <div style="display: flex; justify-content: space-between;">
+                <span><strong>Price Zone</strong></span>
+                <span style="color: {zone_color}; font-weight: bold;">{smc_zone}</span>
+            </div>
+            <div style="position: relative; height: 20px; background: linear-gradient(90deg, #28a745 0%, #ffc107 50%, #dc3545 100%); border-radius: 4px; margin-top: 0.3rem;">
+                <div style="position: absolute; left: {zone_pct}%; top: -2px; width: 4px; height: 24px; background: #000; border-radius: 2px;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: #666; margin-top: 0.2rem;">
+                <span>Discount (Buy)</span>
+                <span>Equilibrium</span>
+                <span>Premium (Sell)</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Confluence score
+        conf_color = "#28a745" if smc_confluence >= 7 else "#17a2b8" if smc_confluence >= 5 else "#ffc107"
+        st.markdown(f"""
+        <div style="background: #f8f9fa; padding: 0.8rem; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between;">
+                <span><strong>Confluence Score</strong></span>
+                <span style="color: {conf_color}; font-weight: bold;">{smc_confluence:.1f}/10</span>
+            </div>
+            <div class="score-bar" style="margin-top: 0.3rem;">
+                <div class="score-fill" style="width: {smc_confluence * 10}%; background: {conf_color};"></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if not active_signal:
+            st.caption("📊 Derived from technical indicators (no active signal)")
+
+    st.markdown("---")
+
+    # ==========================================================================
+    # SECTION 5: Fundamentals (Tiered - Key Metrics + Expandable Full)
+    # ==========================================================================
+    st.markdown('<div class="section-header">📊 Fundamentals</div>', unsafe_allow_html=True)
+
+    if fundamentals:
+        # Key metrics row (always visible)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+
+        with col1:
+            pe = fundamentals.get('pe_trailing', fundamentals.get('pe_ratio'))
+            st.metric("P/E", f"{pe:.1f}" if pe else "N/A")
+
+        with col2:
+            pb = fundamentals.get('pb_ratio', fundamentals.get('price_to_book'))
+            st.metric("P/B", f"{pb:.2f}" if pb else "N/A")
+
+        with col3:
+            peg = fundamentals.get('peg_ratio')
+            st.metric("PEG", f"{peg:.2f}" if peg else "N/A")
+
+        with col4:
+            beta = fundamentals.get('beta')
+            st.metric("Beta", f"{beta:.2f}" if beta else "N/A")
+
+        with col5:
+            profit_margin = fundamentals.get('profit_margin', fundamentals.get('net_margin'))
+            st.metric("Margin", f"{profit_margin*100:.1f}%" if profit_margin else "N/A")
+
+        with col6:
+            roe = fundamentals.get('roe', fundamentals.get('return_on_equity'))
+            st.metric("ROE", f"{roe*100:.1f}%" if roe else "N/A")
+
+        # Second row of key metrics
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+
+        with col1:
+            rev_growth = fundamentals.get('revenue_growth', fundamentals.get('rev_growth_yoy'))
+            st.metric("Rev Growth", f"{rev_growth*100:+.1f}%" if rev_growth else "N/A")
+
+        with col2:
+            short_pct = fundamentals.get('short_percent', fundamentals.get('short_percent_of_float'))
+            st.metric("Short %", f"{short_pct*100:.1f}%" if short_pct else "N/A")
+
+        with col3:
+            inst_pct = fundamentals.get('institutional_percent', fundamentals.get('held_percent_institutions'))
+            st.metric("Inst %", f"{inst_pct*100:.1f}%" if inst_pct else "N/A")
+
+        with col4:
+            insider_pct = fundamentals.get('insider_percent', fundamentals.get('held_percent_insiders'))
+            st.metric("Insider %", f"{insider_pct*100:.1f}%" if insider_pct else "N/A")
+
+        with col5:
+            div_yield = fundamentals.get('dividend_yield', fundamentals.get('forward_dividend_yield'))
+            st.metric("Div Yield", f"{div_yield*100:.2f}%" if div_yield else "N/A")
+
+        with col6:
+            earnings_date = fundamentals.get('earnings_date', fundamentals.get('next_earnings'))
+            if earnings_date:
+                if isinstance(earnings_date, datetime):
+                    days_to = (earnings_date - datetime.now()).days
+                    st.metric("Earnings", earnings_date.strftime('%b %d'), f"{days_to}d" if days_to > 0 else "Past")
+                else:
+                    st.metric("Earnings", str(earnings_date)[:10])
+            else:
+                st.metric("Earnings", "N/A")
+
+        # Expandable full fundamentals
+        with st.expander("📋 View All Fundamentals"):
+            # Organize into categories
+            valuation_cols = ['pe_trailing', 'pe_forward', 'pb_ratio', 'ps_ratio', 'peg_ratio',
+                              'ev_to_ebitda', 'ev_to_revenue', 'price_to_sales', 'enterprise_value']
+            growth_cols = ['revenue_growth', 'earnings_growth', 'quarterly_revenue_growth',
+                           'quarterly_earnings_growth', 'eps_growth_yoy']
+            profitability_cols = ['profit_margin', 'operating_margin', 'gross_margin', 'roe', 'roa', 'roic']
+            health_cols = ['debt_to_equity', 'current_ratio', 'quick_ratio', 'total_debt', 'total_cash']
+            dividend_cols = ['dividend_yield', 'dividend_rate', 'payout_ratio', 'ex_dividend_date']
+
+            def render_fundamental_section(title, cols, data):
+                items = []
+                for col in cols:
+                    val = data.get(col)
+                    if val is not None:
+                        # Format value
+                        if isinstance(val, float):
+                            if 'percent' in col or 'margin' in col or 'yield' in col or 'growth' in col or col in ['roe', 'roa', 'roic']:
+                                formatted = f"{val*100:.2f}%"
+                            elif val > 1_000_000_000:
+                                formatted = f"${val/1_000_000_000:.2f}B"
+                            elif val > 1_000_000:
+                                formatted = f"${val/1_000_000:.2f}M"
+                            else:
+                                formatted = f"{val:.2f}"
+                        else:
+                            formatted = str(val)
+                        # Clean column name
+                        clean_name = col.replace('_', ' ').title()
+                        items.append(f"**{clean_name}:** {formatted}")
+                if items:
+                    st.markdown(f"**{title}**")
+                    st.markdown(" | ".join(items[:6]))
+                    if len(items) > 6:
+                        st.markdown(" | ".join(items[6:]))
+
+            render_fundamental_section("💰 Valuation", valuation_cols, fundamentals)
+            render_fundamental_section("📈 Growth", growth_cols, fundamentals)
+            render_fundamental_section("💵 Profitability", profitability_cols, fundamentals)
+            render_fundamental_section("🏦 Financial Health", health_cols, fundamentals)
+            render_fundamental_section("💸 Dividends", dividend_cols, fundamentals)
+
+    else:
+        st.info("No fundamental data available")
+
+    st.markdown("---")
+
+    # ==========================================================================
+    # SECTION 6: Score Breakdown (keep existing)
+    # ==========================================================================
     if watchlist:
-        st.markdown('<div class="section-header">Score Breakdown</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">🎯 Score Breakdown</div>', unsafe_allow_html=True)
         cols = st.columns(4)
         components = [
             ('Volume', float(watchlist.get('volume_score', 0) or 0), 30),
@@ -1014,77 +1632,220 @@ def render_deep_dive_tab(service):
 
     st.markdown("---")
 
-    # Chart and signals
-    col1, col2 = st.columns([2, 1])
+    # ==========================================================================
+    # SECTION 7: Enhanced Price Chart with MAs, RSI subplot, Signal Levels
+    # ==========================================================================
+    st.markdown('<div class="section-header">📈 Price Chart (90 Days)</div>', unsafe_allow_html=True)
 
-    with col1:
-        st.markdown('<div class="section-header">Price Chart (Daily)</div>', unsafe_allow_html=True)
+    if not candles.empty:
+        # Calculate indicators
+        candles = candles.copy()
+        candles['sma20'] = candles['close'].rolling(20).mean()
+        candles['sma50'] = candles['close'].rolling(50).mean()
+        candles['sma200'] = candles['close'].rolling(200).mean()
 
-        if not candles.empty:
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
+        # RSI calculation
+        delta = candles['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        candles['rsi'] = 100 - (100 / (1 + rs))
 
-            fig.add_trace(go.Candlestick(
-                x=candles['timestamp'],
-                open=candles['open'],
-                high=candles['high'],
-                low=candles['low'],
-                close=candles['close'],
-                name='Price'
-            ), row=1, col=1)
+        # Volume average
+        candles['vol_avg'] = candles['volume'].rolling(20).mean()
 
-            # Add signals
-            for sig in signals:
-                timestamp = sig.get('signal_timestamp')
-                entry = sig.get('entry_price')
-                sig_type = sig.get('signal_type')
+        # Create figure with 3 subplots
+        fig = make_subplots(
+            rows=3, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.03,
+            row_heights=[0.6, 0.2, 0.2],
+            subplot_titles=('', 'RSI(14)', 'Volume')
+        )
 
-                if timestamp and entry:
-                    marker_color = '#28a745' if sig_type == 'BUY' else '#dc3545'
-                    marker_symbol = 'triangle-up' if sig_type == 'BUY' else 'triangle-down'
+        # Row 1: Candlesticks
+        fig.add_trace(go.Candlestick(
+            x=candles['timestamp'],
+            open=candles['open'],
+            high=candles['high'],
+            low=candles['low'],
+            close=candles['close'],
+            name='Price',
+            increasing_line_color='#28a745',
+            decreasing_line_color='#dc3545'
+        ), row=1, col=1)
 
-                    fig.add_trace(go.Scatter(
-                        x=[timestamp],
-                        y=[entry],
-                        mode='markers',
-                        marker=dict(size=12, color=marker_color, symbol=marker_symbol),
-                        name=sig_type,
-                        hovertemplate=f"{sig_type}<br>${entry:.2f}<extra></extra>"
-                    ), row=1, col=1)
+        # Moving averages
+        fig.add_trace(go.Scatter(
+            x=candles['timestamp'], y=candles['sma20'],
+            name='SMA20', line=dict(color='#2196F3', width=1),
+            hovertemplate='SMA20: $%{y:.2f}<extra></extra>'
+        ), row=1, col=1)
 
-            # Volume
-            colors = ['#28a745' if c >= o else '#dc3545' for c, o in zip(candles['close'], candles['open'])]
-            fig.add_trace(go.Bar(x=candles['timestamp'], y=candles['volume'], marker_color=colors, name='Volume', opacity=0.7), row=2, col=1)
+        fig.add_trace(go.Scatter(
+            x=candles['timestamp'], y=candles['sma50'],
+            name='SMA50', line=dict(color='#FF9800', width=1),
+            hovertemplate='SMA50: $%{y:.2f}<extra></extra>'
+        ), row=1, col=1)
 
-            fig.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20), showlegend=False, xaxis_rangeslider_visible=False)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No price data available")
+        fig.add_trace(go.Scatter(
+            x=candles['timestamp'], y=candles['sma200'],
+            name='SMA200', line=dict(color='#9C27B0', width=1.5),
+            hovertemplate='SMA200: $%{y:.2f}<extra></extra>'
+        ), row=1, col=1)
 
-    with col2:
-        st.markdown('<div class="section-header">Signal History</div>', unsafe_allow_html=True)
+        # Signal levels (if active signal)
+        if active_signal:
+            entry_price = active_signal.get('entry_price', 0)
+            stop_loss = active_signal.get('stop_loss', 0)
+            take_profit_1 = active_signal.get('take_profit_1', 0)
 
-        if signals:
-            for sig in signals[:8]:
-                sig_type = sig.get('signal_type', '')
-                sig_class = "signal-card-buy" if sig_type == "BUY" else "signal-card-sell"
-                sig_color = "#28a745" if sig_type == "BUY" else "#dc3545"
+            if entry_price > 0:
+                fig.add_hline(y=entry_price, line_dash="dash", line_color="#28a745",
+                              annotation_text=f"Entry ${entry_price:.2f}", row=1, col=1)
+            if stop_loss > 0:
+                fig.add_hline(y=stop_loss, line_dash="dash", line_color="#dc3545",
+                              annotation_text=f"Stop ${stop_loss:.2f}", row=1, col=1)
+            if take_profit_1 > 0:
+                fig.add_hline(y=take_profit_1, line_dash="dash", line_color="#2196F3",
+                              annotation_text=f"Target ${take_profit_1:.2f}", row=1, col=1)
 
-                timestamp = sig.get('signal_timestamp')
-                time_str = timestamp.strftime('%Y-%m-%d') if isinstance(timestamp, datetime) else str(timestamp)[:10]
+        # Signal markers
+        for sig in scanner_signals[:5]:
+            timestamp = sig.get('signal_timestamp')
+            entry = sig.get('entry_price')
+            sig_type = sig.get('signal_type')
 
-                st.markdown(f"""
-                <div class="signal-card {sig_class}">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="color: {sig_color}; font-weight: bold;">{sig_type}</span>
-                        <span style="font-size: 0.8rem; color: #666;">{time_str}</span>
-                    </div>
-                    <div style="font-size: 0.85rem;">
-                        Entry: ${sig.get('entry_price', 0):.2f} | Conf: {sig.get('confidence', 0):.0f}%
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("No signals for this stock")
+            if timestamp and entry:
+                marker_color = '#28a745' if sig_type == 'BUY' else '#dc3545'
+                marker_symbol = 'triangle-up' if sig_type == 'BUY' else 'triangle-down'
+
+                fig.add_trace(go.Scatter(
+                    x=[timestamp],
+                    y=[entry],
+                    mode='markers',
+                    marker=dict(size=14, color=marker_color, symbol=marker_symbol, line=dict(width=1, color='white')),
+                    name=f'{sig_type} Signal',
+                    hovertemplate=f"{sig_type}<br>${entry:.2f}<extra></extra>",
+                    showlegend=False
+                ), row=1, col=1)
+
+        # Row 2: RSI
+        fig.add_trace(go.Scatter(
+            x=candles['timestamp'], y=candles['rsi'],
+            name='RSI', line=dict(color='#9C27B0', width=1.5),
+            fill='tozeroy', fillcolor='rgba(156, 39, 176, 0.1)'
+        ), row=2, col=1)
+
+        fig.add_hline(y=70, line_dash="dot", line_color="#dc3545", row=2, col=1)
+        fig.add_hline(y=30, line_dash="dot", line_color="#28a745", row=2, col=1)
+        fig.add_hline(y=50, line_dash="dot", line_color="#6c757d", row=2, col=1)
+
+        # Row 3: Volume
+        colors = ['#28a745' if c >= o else '#dc3545' for c, o in zip(candles['close'], candles['open'])]
+        fig.add_trace(go.Bar(
+            x=candles['timestamp'], y=candles['volume'],
+            marker_color=colors, name='Volume', opacity=0.7
+        ), row=3, col=1)
+
+        # Volume average line
+        fig.add_trace(go.Scatter(
+            x=candles['timestamp'], y=candles['vol_avg'],
+            name='Vol Avg', line=dict(color='#FF9800', width=1, dash='dash')
+        ), row=3, col=1)
+
+        # Layout
+        fig.update_layout(
+            height=600,
+            margin=dict(l=20, r=20, t=30, b=20),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis_rangeslider_visible=False,
+            hovermode='x unified'
+        )
+
+        fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+        fig.update_yaxes(title_text="RSI", range=[0, 100], row=2, col=1)
+        fig.update_yaxes(title_text="Volume", row=3, col=1)
+
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No price data available")
+
+    st.markdown("---")
+
+    # ==========================================================================
+    # SECTION 8: Scanner Signal History (replacing ZLMA signals)
+    # ==========================================================================
+    st.markdown('<div class="section-header">📋 Scanner Signal History</div>', unsafe_allow_html=True)
+
+    if scanner_signals:
+        # Create a more detailed signal history table
+        signal_data = []
+        for sig in scanner_signals:
+            sig_type = sig.get('signal_type', '')
+            scanner = sig.get('scanner_name', 'Unknown')
+            entry = sig.get('entry_price', 0)
+            quality = sig.get('quality_tier', '-')
+            score = sig.get('composite_score', 0)
+            claude_rating = sig.get('claude_grade', '-')
+            timestamp = sig.get('signal_timestamp')
+
+            time_str = timestamp.strftime('%Y-%m-%d') if isinstance(timestamp, datetime) else str(timestamp)[:10]
+
+            signal_data.append({
+                'Date': time_str,
+                'Type': sig_type,
+                'Scanner': scanner,
+                'Entry': f"${entry:.2f}",
+                'Quality': quality,
+                'Score': f"{score:.1f}",
+                'Claude': claude_rating if claude_rating else '-'
+            })
+
+        if signal_data:
+            df = pd.DataFrame(signal_data)
+
+            # Style the dataframe
+            def style_type(val):
+                color = '#28a745' if val == 'BUY' else '#dc3545' if val == 'SELL' else '#6c757d'
+                return f'color: {color}; font-weight: bold;'
+
+            def style_quality(val):
+                colors = {'A+': '#28a745', 'A': '#28a745', 'A-': '#5cb85c',
+                          'B+': '#17a2b8', 'B': '#17a2b8', 'B-': '#5bc0de',
+                          'C+': '#ffc107', 'C': '#ffc107', 'C-': '#f0ad4e'}
+                color = colors.get(val, '#6c757d')
+                return f'color: {color}; font-weight: bold;'
+
+            styled_df = df.style.map(style_type, subset=['Type']).map(style_quality, subset=['Quality', 'Claude'])
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No scanner signals for this stock")
+
+
+def _run_claude_analysis(service, ticker, signal, metrics, fundamentals, candles, session_key):
+    """Helper function to run Claude analysis with chart vision."""
+    with st.spinner("🤖 Analyzing with Claude (generating chart + vision analysis)..."):
+        try:
+            analysis = service.analyze_stock_with_claude(
+                ticker=ticker,
+                signal=signal,
+                metrics=metrics,
+                fundamentals=fundamentals,
+                candles=candles
+            )
+
+            if analysis and analysis.get('grade'):
+                st.session_state.deep_dive_claude_analysis[session_key] = analysis
+                st.success("✅ Analysis complete!")
+                st.rerun()
+            elif analysis and analysis.get('error'):
+                st.error(f"Analysis failed: {analysis.get('error')}")
+            else:
+                st.error("Analysis failed - no grade returned")
+        except Exception as e:
+            st.error(f"Analysis failed: {str(e)}")
 
 
 # =============================================================================

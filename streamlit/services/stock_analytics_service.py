@@ -1685,6 +1685,455 @@ Analyze and respond in this exact JSON format:
             logger.error(f"Failed to re-analyze signal {signal_id}: {e}")
             return {'success': False, 'error': str(e)}
 
+    # =========================================================================
+    # DEEP DIVE TAB METHODS
+    # =========================================================================
+
+    @st.cache_data(ttl=300)
+    def get_scanner_signals_for_ticker(_self, ticker: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get scanner signals with Claude analysis for a specific ticker.
+
+        Returns signals from stock_scanner_signals table including all
+        Claude analysis fields (grade, thesis, strengths, risks, etc.)
+        """
+        query = """
+            SELECT
+                s.*,
+                i.name as company_name,
+                i.sector
+            FROM stock_scanner_signals s
+            LEFT JOIN stock_instruments i ON s.ticker = i.ticker
+            WHERE s.ticker = %s
+            ORDER BY s.signal_timestamp DESC
+            LIMIT %s
+        """
+        return _self._execute_query(query, (ticker, limit))
+
+    @st.cache_data(ttl=300)
+    def get_full_fundamentals(_self, ticker: str) -> Dict[str, Any]:
+        """
+        Get all fundamental data from stock_instruments for Deep Dive display.
+
+        Returns 50+ columns including valuation, growth, profitability,
+        risk metrics, ownership, and analyst data.
+        """
+        query = """
+            SELECT *
+            FROM stock_instruments
+            WHERE ticker = %s
+        """
+        results = _self._execute_query(query, (ticker,))
+        return results[0] if results else {}
+
+    def analyze_stock_with_claude(
+        _self,
+        ticker: str,
+        signal: Dict[str, Any],
+        metrics: Dict[str, Any],
+        fundamentals: Dict[str, Any],
+        candles: pd.DataFrame
+    ) -> Dict[str, Any]:
+        """
+        Direct Claude API call with chart vision for stock analysis.
+
+        This method:
+        1. Generates a professional chart image with MAs and indicators
+        2. Builds a comprehensive analysis prompt
+        3. Calls Claude API with vision
+        4. Parses response and saves to database
+        5. Returns analysis dict
+
+        Args:
+            ticker: Stock ticker symbol
+            signal: Signal dict with entry/stop/target
+            metrics: Technical metrics from stock_screening_metrics
+            fundamentals: Fundamental data from stock_instruments
+            candles: OHLCV DataFrame for chart generation
+
+        Returns:
+            Dict with grade, score, action, thesis, strengths, risks, etc.
+        """
+        import anthropic
+        import base64
+        import io
+        import json
+        import re
+
+        try:
+            # Get API key from secrets (try multiple locations)
+            api_key = None
+            try:
+                api_key = st.secrets.get("CLAUDE_API_KEY")  # Top level
+            except Exception:
+                pass
+            if not api_key:
+                try:
+                    api_key = st.secrets.api.claude_api_key  # Under [api] section
+                except Exception:
+                    pass
+            if not api_key:
+                return {'error': 'CLAUDE_API_KEY not configured in secrets'}
+
+            # 1. Generate chart image
+            chart_base64 = _self._generate_analysis_chart(ticker, candles, signal, metrics)
+
+            # 2. Build analysis prompt
+            prompt = _self._build_deep_dive_prompt(ticker, signal, metrics, fundamentals)
+
+            # 3. Call Claude API with vision
+            client = anthropic.Anthropic(api_key=api_key)
+
+            if chart_base64:
+                message_content = [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": chart_base64
+                        }
+                    },
+                    {"type": "text", "text": prompt}
+                ]
+            else:
+                message_content = [{"type": "text", "text": prompt}]
+
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=600,
+                messages=[{"role": "user", "content": message_content}]
+            )
+
+            # 4. Parse response
+            response_text = response.content[0].text if response.content else ''
+            analysis = _self._parse_claude_analysis_response(response_text)
+
+            # 5. Save to database if signal has an ID
+            signal_id = signal.get('id')
+            if signal_id and analysis.get('grade'):
+                _self._save_claude_analysis(signal_id, analysis)
+
+            # Add metadata
+            analysis['tokens_used'] = response.usage.input_tokens + response.usage.output_tokens
+            analysis['analyzed_at'] = datetime.now().isoformat()
+            analysis['has_chart'] = chart_base64 is not None
+
+            return analysis
+
+        except anthropic.RateLimitError:
+            return {'error': 'Claude API rate limit exceeded. Please try again later.'}
+        except anthropic.APIError as e:
+            return {'error': f'Claude API error: {str(e)}'}
+        except Exception as e:
+            logger.error(f"Failed to analyze {ticker} with Claude: {e}")
+            return {'error': str(e)}
+
+    def _generate_analysis_chart(
+        _self,
+        ticker: str,
+        candles: pd.DataFrame,
+        signal: Dict[str, Any],
+        metrics: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Generate a professional chart image for Claude vision analysis.
+
+        Creates a chart with:
+        - Candlesticks
+        - SMA 20/50/200 moving averages
+        - Entry/Stop/Target horizontal lines
+        - Volume bars
+        - RSI indicator (if space allows)
+
+        Returns base64-encoded PNG string.
+        """
+        try:
+            import mplfinance as mpf
+            import matplotlib.pyplot as plt
+            from io import BytesIO
+            import base64
+
+            if candles.empty:
+                return None
+
+            # Prepare data for mplfinance
+            df = candles.copy()
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.set_index('timestamp')
+            df = df.rename(columns={
+                'open': 'Open',
+                'high': 'High',
+                'low': 'Low',
+                'close': 'Close',
+                'volume': 'Volume'
+            })
+
+            # Calculate moving averages
+            df['SMA20'] = df['Close'].rolling(20).mean()
+            df['SMA50'] = df['Close'].rolling(50).mean()
+            df['SMA200'] = df['Close'].rolling(200).mean()
+
+            # Build addplots for moving averages
+            addplots = []
+
+            if df['SMA20'].notna().any():
+                addplots.append(mpf.make_addplot(df['SMA20'], color='blue', width=1, label='SMA20'))
+            if df['SMA50'].notna().any():
+                addplots.append(mpf.make_addplot(df['SMA50'], color='orange', width=1, label='SMA50'))
+            if df['SMA200'].notna().any():
+                addplots.append(mpf.make_addplot(df['SMA200'], color='purple', width=1, label='SMA200'))
+
+            # Add signal levels as horizontal lines
+            hlines_dict = {'hlines': [], 'colors': [], 'linestyle': [], 'linewidths': []}
+
+            if signal:
+                entry = signal.get('entry_price')
+                stop = signal.get('stop_loss')
+                target = signal.get('take_profit_1') or signal.get('take_profit')
+
+                if entry:
+                    hlines_dict['hlines'].append(float(entry))
+                    hlines_dict['colors'].append('green')
+                    hlines_dict['linestyle'].append('--')
+                    hlines_dict['linewidths'].append(1.5)
+
+                if stop:
+                    hlines_dict['hlines'].append(float(stop))
+                    hlines_dict['colors'].append('red')
+                    hlines_dict['linestyle'].append('--')
+                    hlines_dict['linewidths'].append(1.5)
+
+                if target:
+                    hlines_dict['hlines'].append(float(target))
+                    hlines_dict['colors'].append('blue')
+                    hlines_dict['linestyle'].append('--')
+                    hlines_dict['linewidths'].append(1.5)
+
+            # Chart style
+            mc = mpf.make_marketcolors(
+                up='#26a69a', down='#ef5350',
+                edge='inherit',
+                wick='inherit',
+                volume='inherit'
+            )
+            s = mpf.make_mpf_style(
+                marketcolors=mc,
+                gridstyle='-',
+                gridcolor='#e0e0e0',
+                figcolor='white',
+                facecolor='white'
+            )
+
+            # Create chart
+            fig, axes = mpf.plot(
+                df,
+                type='candle',
+                style=s,
+                volume=True,
+                addplot=addplots if addplots else None,
+                hlines=hlines_dict if hlines_dict['hlines'] else None,
+                figsize=(12, 8),
+                title=f'{ticker} - 60 Day Analysis',
+                returnfig=True
+            )
+
+            # Save to base64
+            buffer = BytesIO()
+            fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight', facecolor='white')
+            buffer.seek(0)
+            chart_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+            plt.close(fig)
+
+            return chart_base64
+
+        except Exception as e:
+            logger.error(f"Chart generation failed for {ticker}: {e}")
+            return None
+
+    def _build_deep_dive_prompt(
+        _self,
+        ticker: str,
+        signal: Dict[str, Any],
+        metrics: Dict[str, Any],
+        fundamentals: Dict[str, Any]
+    ) -> str:
+        """Build comprehensive analysis prompt for Deep Dive."""
+
+        # Signal info
+        signal_type = signal.get('signal_type', 'BUY')
+        scanner = signal.get('scanner_name', 'unknown')
+        entry = signal.get('entry_price', 0)
+        stop = signal.get('stop_loss', 0)
+        target = signal.get('take_profit_1') or signal.get('take_profit', 0)
+        score = signal.get('composite_score', 0)
+        tier = signal.get('quality_tier', 'B')
+
+        # Calculate R:R
+        if entry and stop and target:
+            risk = abs(float(entry) - float(stop))
+            reward = abs(float(target) - float(entry))
+            rr_ratio = reward / risk if risk > 0 else 0
+        else:
+            rr_ratio = 0
+
+        # Technical data
+        rsi = metrics.get('rsi_14', 50)
+        macd = metrics.get('macd_histogram', 0)
+        trend = metrics.get('trend_classification', 'neutral')
+        ma_align = metrics.get('ma_alignment', 'mixed')
+        smc_trend = metrics.get('smc_trend', 'neutral')
+        smc_bias = metrics.get('smc_bias', 'neutral')
+
+        # Fundamental data
+        company = fundamentals.get('name', ticker)
+        sector = fundamentals.get('sector', 'Unknown')
+        pe = fundamentals.get('trailing_pe', 'N/A')
+        growth = fundamentals.get('earnings_growth', 'N/A')
+        beta = fundamentals.get('beta', 'N/A')
+
+        # Determine if this is a signal analysis or general stock analysis
+        is_signal = signal_type not in ['ANALYSIS', 'N/A', None, '']
+
+        if is_signal:
+            signal_section = f"""## SIGNAL OVERVIEW
+**{ticker}** ({company}) | {signal_type} Signal
+Sector: {sector} | Scanner: {scanner}
+Quality: {tier} tier ({score}/100)
+
+## RISK PARAMETERS
+Entry: ${entry} | Stop: ${stop} | Target: ${target}
+Reward/Risk: {rr_ratio:.1f}:1"""
+        else:
+            signal_section = f"""## STOCK OVERVIEW
+**{ticker}** ({company})
+Sector: {sector}
+Current Price: ${entry}
+Quality Score: {score}/100"""
+
+        prompt = f"""You are a Senior Equity Analyst. Analyze this stock with institutional rigor.
+
+## CHART ANALYSIS (CRITICAL)
+The attached chart shows 60-day price history with:
+- Candlesticks (green=up, red=down)
+- Moving averages: SMA20 (blue), SMA50 (orange), SMA200 (purple)
+- Volume bars at bottom
+
+IMPORTANT: Carefully examine the chart for:
+1. Trend quality and direction (clean vs choppy)
+2. Price position relative to moving averages
+3. Support and resistance levels
+4. Volume confirmation of price moves
+5. Any visual patterns (flags, wedges, double bottoms, etc.)
+
+{signal_section}
+
+## TECHNICAL SNAPSHOT
+RSI(14): {rsi} | MACD: {macd}
+Trend: {trend} | MA Alignment: {ma_align}
+SMC Trend: {smc_trend} | SMC Bias: {smc_bias}
+
+## FUNDAMENTALS
+P/E: {pe} | Earnings Growth: {growth}% | Beta: {beta}
+
+Respond in this exact JSON format:
+{{"grade":"A+/A/B/C/D","score":1-10,"action":"STRONG BUY/BUY/HOLD/AVOID","conviction":"HIGH/MEDIUM/LOW","thesis":"2-3 sentence investment thesis","key_strengths":["strength1","strength2","strength3"],"key_risks":["risk1","risk2","risk3"],"position_recommendation":"Full/Half/Quarter/Skip","time_horizon":"Intraday/Swing/Position","stop_adjustment":"N/A"}}"""
+
+        return prompt
+
+    def _parse_claude_analysis_response(_self, response_text: str) -> Dict[str, Any]:
+        """Parse Claude's JSON response into analysis dict."""
+        import json
+        import re
+
+        try:
+            # Try to find JSON block - handle nested arrays/objects
+            # Look for JSON starting with { and ending with }
+            # Use a more robust approach that handles nested structures
+
+            # First try: find JSON between first { and last }
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}')
+
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                json_str = response_text[start_idx:end_idx + 1]
+                analysis = json.loads(json_str)
+
+                # Validate required fields exist
+                if 'grade' in analysis:
+                    return analysis
+
+            # Second try: look for JSON in code blocks
+            code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+            if code_block_match:
+                analysis = json.loads(code_block_match.group(1))
+                if 'grade' in analysis:
+                    return analysis
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON parse error: {e}. Response: {response_text[:500]}")
+        except Exception as e:
+            logger.warning(f"Parse error: {e}")
+
+        # Fallback: return empty analysis with error
+        return {
+            'grade': 'C',
+            'score': 5,
+            'action': 'HOLD',
+            'conviction': 'LOW',
+            'thesis': 'Unable to parse analysis response',
+            'key_strengths': [],
+            'key_risks': ['Analysis parsing failed'],
+            'position_recommendation': 'Skip',
+            'time_horizon': 'N/A',
+            'error': 'Failed to parse response'
+        }
+
+    def _save_claude_analysis(_self, signal_id: int, analysis: Dict[str, Any]):
+        """Save Claude analysis to database."""
+        conn = _self._get_connection()
+        if not conn:
+            return
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    UPDATE stock_scanner_signals
+                    SET
+                        claude_grade = %s,
+                        claude_score = %s,
+                        claude_action = %s,
+                        claude_conviction = %s,
+                        claude_thesis = %s,
+                        claude_key_strengths = %s,
+                        claude_key_risks = %s,
+                        claude_position_rec = %s,
+                        claude_time_horizon = %s,
+                        claude_stop_adjustment = %s,
+                        claude_analyzed_at = NOW(),
+                        updated_at = NOW()
+                    WHERE id = %s
+                """, (
+                    analysis.get('grade'),
+                    analysis.get('score'),
+                    analysis.get('action'),
+                    analysis.get('conviction'),
+                    analysis.get('thesis'),
+                    analysis.get('key_strengths'),
+                    analysis.get('key_risks'),
+                    analysis.get('position_recommendation'),
+                    analysis.get('time_horizon'),
+                    analysis.get('stop_adjustment'),
+                    signal_id
+                ))
+                conn.commit()
+                logger.info(f"Saved Claude analysis for signal {signal_id}: {analysis.get('grade')}")
+        except Exception as e:
+            logger.error(f"Failed to save Claude analysis for signal {signal_id}: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
 
 # Singleton instance
 @st.cache_resource
