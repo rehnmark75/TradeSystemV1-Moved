@@ -26,6 +26,10 @@ from .strategies import (
     EarningsMomentumScanner,
     ShortSqueezeScanner,
     SectorRotationScanner,
+    # Forex-adapted strategies
+    SMCEmaTrendScanner,
+    EMACrossoverScanner,
+    MACDMomentumScanner,
 )
 
 # Claude analysis imports (lazy load to avoid circular imports)
@@ -74,6 +78,10 @@ class ScannerManager:
         'earnings_momentum': EarningsMomentumScanner,
         'short_squeeze': ShortSqueezeScanner,
         'sector_rotation': SectorRotationScanner,
+        # Forex-adapted strategies
+        'smc_ema_trend': SMCEmaTrendScanner,
+        'ema_crossover': EMACrossoverScanner,
+        'macd_momentum': MACDMomentumScanner,
     }
 
     def __init__(
