@@ -1006,13 +1006,10 @@ def render_deep_dive_tab(service):
         st.metric("RSI (14)", f"{rsi:.0f}", rsi_delta)
 
     with col5:
-        market_cap = fundamentals.get('market_cap', 0) or 0
-        if market_cap >= 1_000_000_000_000:
-            cap_str = f"${market_cap / 1_000_000_000_000:.1f}T"
-        elif market_cap >= 1_000_000_000:
-            cap_str = f"${market_cap / 1_000_000_000:.1f}B"
-        elif market_cap >= 1_000_000:
-            cap_str = f"${market_cap / 1_000_000:.0f}M"
+        # market_cap is stored as formatted string (e.g., "150.5B", "2.3T")
+        market_cap = fundamentals.get('market_cap')
+        if market_cap:
+            cap_str = f"${market_cap}"
         else:
             cap_str = "N/A"
         st.metric("Market Cap", cap_str)
