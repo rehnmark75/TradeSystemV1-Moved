@@ -15,6 +15,11 @@ Forex-adapted strategies:
 - SMCEmaTrendScanner: SMC-style EMA trend following with swing structure
 - EMACrossoverScanner: EMA cascade crossover with trend alignment
 - MACDMomentumScanner: MACD momentum confluence with price structure
+
+AlphaSuite-adapted strategies:
+- SellingClimaxScanner: Capitulation bottoming with volume spike and reversal
+- RSIDivergenceScanner: Price/RSI divergence for reversal detection
+- WyckoffSpringScanner: Accumulation spring with support test
 """
 
 from .trend_momentum import TrendMomentumScanner
@@ -31,6 +36,11 @@ from .smc_ema_trend import SMCEmaTrendScanner
 from .ema_crossover import EMACrossoverScanner
 from .macd_momentum import MACDMomentumScanner
 
+# AlphaSuite-adapted strategies
+from .selling_climax import SellingClimaxScanner
+from .rsi_divergence import RSIDivergenceScanner
+from .wyckoff_spring import WyckoffSpringScanner
+
 __all__ = [
     'TrendMomentumScanner',
     'BreakoutConfirmationScanner',
@@ -44,4 +54,8 @@ __all__ = [
     'SMCEmaTrendScanner',
     'EMACrossoverScanner',
     'MACDMomentumScanner',
+    # AlphaSuite-adapted strategies
+    'SellingClimaxScanner',
+    'RSIDivergenceScanner',
+    'WyckoffSpringScanner',
 ]

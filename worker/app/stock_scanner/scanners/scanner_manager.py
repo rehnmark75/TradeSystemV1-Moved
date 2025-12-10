@@ -31,6 +31,10 @@ from .strategies import (
     SMCEmaTrendScanner,
     EMACrossoverScanner,
     MACDMomentumScanner,
+    # AlphaSuite-adapted strategies
+    SellingClimaxScanner,
+    RSIDivergenceScanner,
+    WyckoffSpringScanner,
 )
 
 # Claude analysis imports (lazy load to avoid circular imports)
@@ -84,6 +88,10 @@ class ScannerManager:
         'smc_ema_trend': SMCEmaTrendScanner,
         'ema_crossover': EMACrossoverScanner,
         'macd_momentum': MACDMomentumScanner,
+        # AlphaSuite-adapted strategies
+        'selling_climax': SellingClimaxScanner,
+        'rsi_divergence': RSIDivergenceScanner,
+        'wyckoff_spring': WyckoffSpringScanner,
     }
 
     def __init__(

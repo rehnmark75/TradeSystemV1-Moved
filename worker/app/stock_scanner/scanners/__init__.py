@@ -48,6 +48,10 @@ from .strategies import (
     SMCEmaTrendScanner,
     EMACrossoverScanner,
     MACDMomentumScanner,
+    # AlphaSuite-adapted strategies
+    SellingClimaxScanner,
+    RSIDivergenceScanner,
+    WyckoffSpringScanner,
 )
 
 __all__ = [
@@ -88,4 +92,8 @@ __all__ = [
     'SMCEmaTrendScanner',
     'EMACrossoverScanner',
     'MACDMomentumScanner',
+    # AlphaSuite-adapted strategies
+    'SellingClimaxScanner',
+    'RSIDivergenceScanner',
+    'WyckoffSpringScanner',
 ]

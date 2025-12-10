@@ -2454,7 +2454,8 @@ def render_scanner_signals_tab(service):
         scanner_filter = st.selectbox(
             "Scanner",
             ["All Scanners", "trend_momentum", "breakout_confirmation", "mean_reversion", "gap_and_go",
-             "zlma_trend", "smc_ema_trend", "ema_crossover", "macd_momentum"]
+             "zlma_trend", "smc_ema_trend", "ema_crossover", "macd_momentum",
+             "selling_climax", "rsi_divergence", "wyckoff_spring"]
         )
 
     with col2:
@@ -2647,6 +2648,10 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
         'Smc Ema Trend': '🎯',
         'Ema Crossover': '📊',
         'Macd Momentum': '📉',
+        # AlphaSuite-adapted strategies
+        'Selling Climax': '💥',
+        'Rsi Divergence': '↗️',
+        'Wyckoff Spring': '🌱',
     }
     scanner_icon = scanner_icons.get(scanner, '📊')
 
