@@ -1070,6 +1070,53 @@ class StockAnalyticsService:
             conn.close()
         return None
 
+    def get_latest_claude_analysis_from_watchlist(_self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent Claude analysis for a ticker from stock_watchlist.
+
+        This retrieves analysis done via Top Picks so it can be displayed in Deep Dive.
+        Returns the most recent analysis regardless of calculation_date.
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return None
+
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT claude_grade, claude_score, claude_action, claude_thesis,
+                           claude_conviction, claude_key_strengths, claude_key_risks,
+                           claude_position_rec, claude_stop_adjustment, claude_time_horizon,
+                           claude_analyzed_at, calculation_date
+                    FROM stock_watchlist
+                    WHERE ticker = %s AND claude_analyzed_at IS NOT NULL
+                    ORDER BY claude_analyzed_at DESC
+                    LIMIT 1
+                """, (ticker,))
+                row = cursor.fetchone()
+                if row and row['claude_grade']:
+                    return {
+                        'success': True,
+                        'rating': row['claude_grade'],
+                        'confidence_score': row['claude_score'],
+                        'recommendation': row['claude_action'],
+                        'thesis': row['claude_thesis'],
+                        'conviction': row['claude_conviction'],
+                        'key_factors': row['claude_key_strengths'] or [],
+                        'risk_assessment': row['claude_key_risks'] or [],
+                        'position_sizing': row['claude_position_rec'],
+                        'stop_adjustment': row['claude_stop_adjustment'],
+                        'time_horizon': row['claude_time_horizon'],
+                        'analyzed_at': row['claude_analyzed_at'],
+                        'calculation_date': row['calculation_date'],
+                        'source': 'top_picks'
+                    }
+        except Exception as e:
+            logger.error(f"Error fetching Claude analysis from watchlist for {ticker}: {e}")
+        finally:
+            conn.close()
+        return None
+
     def _store_claude_analysis(_self, ticker: str, calculation_date, analysis: Dict[str, Any]) -> bool:
         """Store Claude analysis in database."""
         conn = _self._get_connection()

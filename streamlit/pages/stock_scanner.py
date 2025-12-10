@@ -1021,12 +1021,21 @@ def render_deep_dive_tab(service):
     # ==========================================================================
     st.markdown('<div class="section-header">🤖 AI Analysis</div>', unsafe_allow_html=True)
 
-    # Check if we have existing Claude analysis from the most recent signal
-    # Database columns: claude_grade, claude_score, claude_action, claude_conviction,
-    # claude_thesis, claude_key_strengths, claude_key_risks, claude_position_rec,
-    # claude_time_horizon, claude_stop_adjustment, claude_analyzed_at
+    # Check multiple sources for Claude analysis (in priority order):
+    # 1. Session state (fresh analysis from this session)
+    # 2. Scanner signals table (analysis attached to a signal)
+    # 3. Watchlist table (analysis from Top Picks)
     existing_analysis = None
-    if active_signal and active_signal.get('claude_grade'):
+    analysis_source = None
+
+    # Source 1: Check session state for fresh analysis
+    session_key = f"claude_analysis_{ticker}"
+    if session_key in st.session_state.deep_dive_claude_analysis:
+        existing_analysis = st.session_state.deep_dive_claude_analysis[session_key]
+        analysis_source = 'session'
+
+    # Source 2: Check scanner signals table
+    if not existing_analysis and active_signal and active_signal.get('claude_grade'):
         existing_analysis = {
             'rating': active_signal.get('claude_grade'),
             'confidence_score': active_signal.get('claude_score'),
@@ -1041,11 +1050,14 @@ def render_deep_dive_tab(service):
             'analyzed_at': active_signal.get('claude_analyzed_at'),
             'signal_id': active_signal.get('id')
         }
+        analysis_source = 'signal'
 
-    # Check session state for fresh analysis
-    session_key = f"claude_analysis_{ticker}"
-    if session_key in st.session_state.deep_dive_claude_analysis:
-        existing_analysis = st.session_state.deep_dive_claude_analysis[session_key]
+    # Source 3: Check watchlist table (Top Picks analysis)
+    if not existing_analysis:
+        watchlist_analysis = service.get_latest_claude_analysis_from_watchlist(ticker)
+        if watchlist_analysis and watchlist_analysis.get('rating'):
+            existing_analysis = watchlist_analysis
+            analysis_source = 'top_picks'
 
     # Handle both fresh analysis (grade/score/action) and DB format (rating/confidence_score/recommendation)
     if existing_analysis and (existing_analysis.get('rating') or existing_analysis.get('grade')):
@@ -1150,10 +1162,12 @@ def render_deep_dive_tab(service):
                     </div>
                     """, unsafe_allow_html=True)
 
-        # Show when analyzed
+        # Show when analyzed and source
         if analyzed_at:
             if isinstance(analyzed_at, datetime):
-                time_ago = datetime.now() - analyzed_at
+                # Handle timezone-aware datetimes
+                now = datetime.now(analyzed_at.tzinfo) if analyzed_at.tzinfo else datetime.now()
+                time_ago = now - analyzed_at
                 if time_ago.days > 0:
                     ago_str = f"{time_ago.days}d ago"
                 elif time_ago.seconds >= 3600:
@@ -1162,7 +1176,15 @@ def render_deep_dive_tab(service):
                     ago_str = f"{time_ago.seconds // 60}m ago"
             else:
                 ago_str = str(analyzed_at)[:16]
-            st.caption(f"📅 Analyzed: {ago_str}")
+
+            # Show source of analysis
+            source_label = {
+                'session': 'This session',
+                'signal': 'Scanner Signal',
+                'top_picks': 'Top Picks'
+            }.get(analysis_source, '')
+            source_text = f" | Source: {source_label}" if source_label else ""
+            st.caption(f"📅 Analyzed: {ago_str}{source_text}")
 
         # Re-analyze button
         if st.button("🔄 Re-analyze with Claude", key="reanalyze_claude"):
@@ -1370,47 +1392,46 @@ def render_deep_dive_tab(service):
     with col2:
         st.markdown('<div class="section-header">🎯 SMC Analysis</div>', unsafe_allow_html=True)
 
-        # SMC data from active signal OR derive from metrics/price action
-        if active_signal:
-            smc_trend = active_signal.get('htf_trend', 'N/A')
-            smc_bias = active_signal.get('htf_bias', 'N/A')
-            smc_zone = active_signal.get('pd_zone', 'N/A')
-            smc_confluence = active_signal.get('smc_confluence', 0) or 0
-            bos_direction = active_signal.get('bos_direction', 'N/A')
-        else:
-            # Derive SMC-like analysis from metrics
-            # Trend from MA alignment
+        # SMC data priority: metrics table > derived from price action
+        # The metrics table has smc_trend, smc_bias, smc_confluence_score from daily calculations
+        smc_trend = metrics.get('smc_trend')
+        smc_bias = metrics.get('smc_bias')
+        smc_confluence = metrics.get('smc_confluence_score', 0) or 0
+
+        # If no SMC data in metrics, derive from price action
+        if not smc_trend:
             if sma_20 > sma_50 > sma_200 and current_price > sma_20:
                 smc_trend = 'Bullish'
-                smc_bias = 'Buy'
+                smc_bias = 'Bullish'
             elif sma_20 < sma_50 < sma_200 and current_price < sma_20:
                 smc_trend = 'Bearish'
-                smc_bias = 'Sell'
+                smc_bias = 'Bearish'
             elif current_price > sma_50:
                 smc_trend = 'Bullish'
-                smc_bias = 'Buy'
+                smc_bias = 'Bullish'
             elif current_price < sma_50:
                 smc_trend = 'Bearish'
-                smc_bias = 'Sell'
+                smc_bias = 'Bearish'
             else:
                 smc_trend = 'Neutral'
                 smc_bias = 'Neutral'
 
-            # Zone from price position in range (use 52-week high/low if available)
-            high_52w = fundamentals.get('fifty_two_week_high', 0) or fundamentals.get('week_52_high', 0)
-            low_52w = fundamentals.get('fifty_two_week_low', 0) or fundamentals.get('week_52_low', 0)
-            if high_52w and low_52w and high_52w > low_52w:
-                range_pct = (current_price - low_52w) / (high_52w - low_52w) * 100
-                if range_pct < 33:
-                    smc_zone = 'Discount'
-                elif range_pct > 67:
-                    smc_zone = 'Premium'
-                else:
-                    smc_zone = 'Equilibrium'
+        # Zone from price position in 52-week range
+        high_52w = fundamentals.get('fifty_two_week_high', 0) or fundamentals.get('week_52_high', 0) or 0
+        low_52w = fundamentals.get('fifty_two_week_low', 0) or fundamentals.get('week_52_low', 0) or 0
+        if high_52w and low_52w and high_52w > low_52w:
+            range_pct = (current_price - low_52w) / (high_52w - low_52w) * 100
+            if range_pct < 33:
+                smc_zone = 'Discount'
+            elif range_pct > 67:
+                smc_zone = 'Premium'
             else:
-                smc_zone = 'N/A'
+                smc_zone = 'Equilibrium'
+        else:
+            smc_zone = 'N/A'
 
-            # Confluence from multiple factors
+        # If no confluence score from metrics, calculate from multiple factors
+        if smc_confluence == 0:
             conf_factors = 0
             if smc_trend == 'Bullish':
                 if rsi < 70: conf_factors += 2  # Not overbought
@@ -1425,7 +1446,8 @@ def render_deep_dive_tab(service):
                 if current_price < sma_50: conf_factors += 1.5
                 if current_price < sma_200: conf_factors += 1.5
             smc_confluence = min(conf_factors, 10)
-            bos_direction = smc_trend
+
+        bos_direction = smc_trend
 
         # Trend styling
         trend_colors = {'Bullish': '#28a745', 'Bearish': '#dc3545', 'Neutral': '#6c757d'}
