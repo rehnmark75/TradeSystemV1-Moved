@@ -1219,7 +1219,9 @@ def render_deep_dive_tab(service):
         # Days since signal
         if signal_timestamp:
             if isinstance(signal_timestamp, datetime):
-                days_active = (datetime.now() - signal_timestamp).days
+                # Handle timezone-aware datetimes
+                now = datetime.now(signal_timestamp.tzinfo) if signal_timestamp.tzinfo else datetime.now()
+                days_active = (now - signal_timestamp).days
             else:
                 days_active = 0
         else:
