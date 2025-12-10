@@ -1162,20 +1162,30 @@ def render_deep_dive_tab(service):
                     </div>
                     """, unsafe_allow_html=True)
 
-        # Show when analyzed and source
+        # Show when analyzed and source with staleness indicator
         if analyzed_at:
             if isinstance(analyzed_at, datetime):
                 # Handle timezone-aware datetimes
                 now = datetime.now(analyzed_at.tzinfo) if analyzed_at.tzinfo else datetime.now()
                 time_ago = now - analyzed_at
+
+                # Format the actual date/time
+                date_str = analyzed_at.strftime("%b %d, %Y %H:%M")
+
+                # Calculate relative time
                 if time_ago.days > 0:
                     ago_str = f"{time_ago.days}d ago"
                 elif time_ago.seconds >= 3600:
                     ago_str = f"{time_ago.seconds // 3600}h ago"
                 else:
                     ago_str = f"{time_ago.seconds // 60}m ago"
+
+                # Check if stale (more than 7 days old)
+                is_stale = time_ago.days > 7
             else:
-                ago_str = str(analyzed_at)[:16]
+                date_str = str(analyzed_at)[:16]
+                ago_str = ""
+                is_stale = False
 
             # Show source of analysis
             source_label = {
@@ -1184,7 +1194,11 @@ def render_deep_dive_tab(service):
                 'top_picks': 'Top Picks'
             }.get(analysis_source, '')
             source_text = f" | Source: {source_label}" if source_label else ""
-            st.caption(f"📅 Analyzed: {ago_str}{source_text}")
+
+            # Build the display string with staleness warning
+            if is_stale:
+                st.warning(f"⚠️ Analysis is {time_ago.days} days old - consider refreshing")
+            st.caption(f"📅 {date_str} ({ago_str}){source_text}")
 
         # Re-analyze button
         if st.button("🔄 Re-analyze with Claude", key="reanalyze_claude"):
@@ -2131,7 +2145,7 @@ def _render_picks_category(title: str, description: str, picks: List[Dict], colo
         has_claude = has_claude_from_db or has_claude_from_session
 
         # Get Claude data if available
-        grade, score, action, pos_rec, thesis, strengths, risks = '', 0, '', '', '', [], []
+        grade, score, action, pos_rec, thesis, strengths, risks, analyzed_at = '', 0, '', '', '', [], [], None
         if has_claude:
             if has_claude_from_session:
                 grade = claude_data_from_session.get('claude_grade', 'N/A')
@@ -2141,6 +2155,7 @@ def _render_picks_category(title: str, description: str, picks: List[Dict], colo
                 thesis = claude_data_from_session.get('claude_thesis', '')
                 strengths = claude_data_from_session.get('claude_key_strengths', [])
                 risks = claude_data_from_session.get('claude_key_risks', [])
+                analyzed_at = None  # Session analysis is just done now
             else:
                 grade = pick.get('claude_grade', 'N/A')
                 score = pick.get('claude_score', 0)
@@ -2149,6 +2164,7 @@ def _render_picks_category(title: str, description: str, picks: List[Dict], colo
                 thesis = pick.get('claude_thesis', '')
                 strengths = pick.get('claude_key_strengths', []) or []
                 risks = pick.get('claude_key_risks', []) or []
+                analyzed_at = pick.get('claude_analyzed_at')
 
         # Render the main card (without Claude badges - those go in separate markdown)
         st.markdown(f"""
@@ -2195,6 +2211,26 @@ def _render_picks_category(title: str, description: str, picks: List[Dict], colo
         # Expandable section for detailed Claude analysis
         if has_claude and (thesis or strengths or risks):
             with st.expander(f"📊 View AI Analysis", expanded=False):
+                # Show analysis timestamp with staleness warning
+                if analyzed_at:
+                    if isinstance(analyzed_at, datetime):
+                        now = datetime.now(analyzed_at.tzinfo) if analyzed_at.tzinfo else datetime.now()
+                        time_ago = now - analyzed_at
+                        date_str = analyzed_at.strftime("%b %d, %Y %H:%M")
+                        if time_ago.days > 0:
+                            ago_str = f"{time_ago.days}d ago"
+                        elif time_ago.seconds >= 3600:
+                            ago_str = f"{time_ago.seconds // 3600}h ago"
+                        else:
+                            ago_str = f"{time_ago.seconds // 60}m ago"
+                        if time_ago.days > 7:
+                            st.warning(f"⚠️ Analysis is {time_ago.days} days old - consider refreshing")
+                        st.caption(f"📅 {date_str} ({ago_str})")
+                    else:
+                        st.caption(f"📅 {str(analyzed_at)[:16]}")
+                else:
+                    st.caption("📅 Just analyzed")
+
                 if thesis:
                     st.markdown(f"**💡 Investment Thesis:**")
                     st.info(thesis)
@@ -2266,7 +2302,8 @@ def render_scanner_signals_tab(service):
     with col1:
         scanner_filter = st.selectbox(
             "Scanner",
-            ["All Scanners", "trend_momentum", "breakout_confirmation", "mean_reversion", "gap_and_go"]
+            ["All Scanners", "trend_momentum", "breakout_confirmation", "mean_reversion", "gap_and_go",
+             "smc_ema_trend", "ema_crossover", "macd_momentum"]
         )
 
     with col2:
@@ -2399,15 +2436,15 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     else:
         factors_str = str(factors) if factors else ''
 
-    # Signal timestamp
+    # Signal timestamp - format for header display
     signal_timestamp = signal.get('signal_timestamp')
     if signal_timestamp:
         if isinstance(signal_timestamp, datetime):
-            signal_time_str = signal_timestamp.strftime('%Y-%m-%d %H:%M')
+            signal_time_str = signal_timestamp.strftime('%b %d %H:%M')
         else:
             signal_time_str = str(signal_timestamp)[:16]
     else:
-        signal_time_str = 'Unknown'
+        signal_time_str = ''
 
     # Claude analysis data
     claude_grade = signal.get('claude_grade')
@@ -2421,14 +2458,25 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     claude_analyzed_at = signal.get('claude_analyzed_at')
     has_claude = claude_grade is not None
 
-    # Format claude_analyzed_at timestamp
+    # Format claude_analyzed_at timestamp with staleness check
+    analyzed_time_str = None
+    analyzed_ago_str = None
+    is_analysis_stale = False
     if claude_analyzed_at:
         if isinstance(claude_analyzed_at, datetime):
-            analyzed_time_str = claude_analyzed_at.strftime('%Y-%m-%d %H:%M')
+            analyzed_time_str = claude_analyzed_at.strftime('%b %d, %Y %H:%M')
+            # Calculate time ago
+            now = datetime.now(claude_analyzed_at.tzinfo) if claude_analyzed_at.tzinfo else datetime.now()
+            time_ago = now - claude_analyzed_at
+            if time_ago.days > 0:
+                analyzed_ago_str = f"{time_ago.days}d ago"
+            elif time_ago.seconds >= 3600:
+                analyzed_ago_str = f"{time_ago.seconds // 3600}h ago"
+            else:
+                analyzed_ago_str = f"{time_ago.seconds // 60}m ago"
+            is_analysis_stale = time_ago.days > 7
         else:
             analyzed_time_str = str(claude_analyzed_at)[:16]
-    else:
-        analyzed_time_str = None
 
     # Tier styling
     tier_colors = {
@@ -2441,7 +2489,12 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
         'Trend Momentum': '📈',
         'Breakout Confirmation': '🚀',
         'Mean Reversion': '🔄',
-        'Gap And Go': '⚡'
+        'Gap And Go': '⚡',
+        'Sector Rotation': '🔀',
+        # Forex-adapted strategies
+        'Smc Ema Trend': '🎯',
+        'Ema Crossover': '📊',
+        'Macd Momentum': '📉',
     }
     scanner_icon = scanner_icons.get(scanner, '📊')
 
@@ -2459,10 +2512,11 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
         action_color = claude_action_colors.get(claude_action, 'gray')
         claude_badge = f" | 🤖 :{action_color}[{claude_action}] ({claude_grade})"
 
-    # Use expander for each signal card
-    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}", expanded=True):
-        # Signal detected timestamp
-        st.caption(f"📅 **Signal Detected:** {signal_time_str}")
+    # Build header with timestamp
+    timestamp_part = f" | 📅 {signal_time_str}" if signal_time_str else ""
+
+    # Use expander for each signal card (collapsed by default for easier browsing)
+    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{timestamp_part}", expanded=False):
 
         # Metrics row
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -2494,7 +2548,10 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
             with col1:
                 st.markdown("#### 🤖 Claude AI Analysis")
                 if analyzed_time_str:
-                    st.caption(f"✅ Analyzed: {analyzed_time_str}")
+                    ago_text = f" ({analyzed_ago_str})" if analyzed_ago_str else ""
+                    if is_analysis_stale:
+                        st.warning(f"⚠️ Analysis is stale - consider refreshing")
+                    st.caption(f"📅 {analyzed_time_str}{ago_text}")
             with col2:
                 # Re-analyze button
                 if signal_id and service:
