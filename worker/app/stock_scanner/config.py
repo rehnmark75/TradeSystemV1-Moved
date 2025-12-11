@@ -45,6 +45,22 @@ ROBOMARKETS_TIMEOUT = 30  # Request timeout in seconds
 ROBOMARKETS_MAX_RETRIES = 3
 
 # =============================================================================
+# FINNHUB API CONFIGURATION (News Data)
+# =============================================================================
+
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
+
+# Rate limiting: 30 req/min (50% of free tier's 60/min limit)
+FINNHUB_MAX_REQUESTS_PER_MINUTE = 30
+FINNHUB_TIMEOUT = 30
+FINNHUB_MAX_RETRIES = 3
+
+# News settings
+NEWS_LOOKBACK_DAYS = 7  # How far back to fetch news
+NEWS_CACHE_TTL = 3600   # Cache news for 1 hour
+NEWS_MIN_ARTICLES = 2   # Minimum articles for confident sentiment
+
+# =============================================================================
 # DATA FETCHING CONFIGURATION
 # =============================================================================
 

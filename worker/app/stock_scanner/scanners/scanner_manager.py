@@ -46,6 +46,15 @@ except ImportError:
     StockClaudeAnalyzer = None
     ClaudeAnalysis = None
 
+# News enrichment imports
+try:
+    from ..core.news import NewsEnrichmentService, EnrichmentResult
+    NEWS_ENRICHMENT_AVAILABLE = True
+except ImportError:
+    NEWS_ENRICHMENT_AVAILABLE = False
+    NewsEnrichmentService = None
+    EnrichmentResult = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -1068,4 +1077,234 @@ class ScannerManager:
         return {
             'available': analyzer.is_available,
             **analyzer.get_stats()
+        }
+
+    # =========================================================================
+    # NEWS SENTIMENT ENRICHMENT
+    # =========================================================================
+
+    async def enrich_signals_with_news(
+        self,
+        signals: List[Dict[str, Any]] = None,
+        auto_only: bool = True,
+        force_refresh: bool = False,
+    ) -> List[Any]:
+        """
+        Enrich signals with news sentiment data.
+
+        Args:
+            signals: Signals to enrich (None = get high-quality from DB)
+            auto_only: Only auto-enrich A+ and A signals (default True)
+            force_refresh: Force fetch even if cache valid
+
+        Returns:
+            List of EnrichmentResult objects
+        """
+        if not NEWS_ENRICHMENT_AVAILABLE:
+            logger.warning("News enrichment not available - missing dependencies")
+            return []
+
+        # Get Finnhub API key from config
+        from ..config import FINNHUB_API_KEY, NEWS_LOOKBACK_DAYS, NEWS_CACHE_TTL, NEWS_MIN_ARTICLES
+
+        if not FINNHUB_API_KEY:
+            logger.warning("News enrichment skipped - FINNHUB_API_KEY not configured")
+            return []
+
+        # Initialize enrichment service
+        enrichment_service = NewsEnrichmentService(
+            db_manager=self.db,
+            finnhub_api_key=FINNHUB_API_KEY,
+            lookback_days=NEWS_LOOKBACK_DAYS,
+            cache_ttl_hours=NEWS_CACHE_TTL // 3600,  # Convert seconds to hours
+            min_articles=NEWS_MIN_ARTICLES,
+        )
+
+        # Get signals if not provided
+        if signals is None:
+            signals = await self.get_unenriched_signals(
+                min_tier='A' if auto_only else 'D',
+                limit=50
+            )
+
+        if not signals:
+            logger.info("No signals to enrich with news")
+            return []
+
+        # Filter to high-quality only if auto_only
+        if auto_only:
+            signals = [
+                s for s in signals
+                if s.get('quality_tier') in ('A+', 'A')
+            ]
+
+        if not signals:
+            logger.info("No A+/A signals to auto-enrich")
+            return []
+
+        logger.info(f"Enriching {len(signals)} signals with news sentiment")
+
+        results = []
+        for signal in signals:
+            result = await enrichment_service.enrich_signal(
+                signal_id=signal['id'],
+                ticker=signal['ticker'],
+                force_refresh=force_refresh,
+            )
+            results.append(result)
+
+            # Log progress
+            if result.success and result.sentiment:
+                logger.info(
+                    f"  {signal['ticker']}: {result.sentiment.level.value} "
+                    f"({result.sentiment.score:.2f}) from {result.articles_count} articles"
+                )
+            elif not result.success:
+                logger.warning(f"  {signal['ticker']}: {result.error_message}")
+
+        # Process any queued retries
+        retry_results = await enrichment_service.process_retry_queue()
+        results.extend(retry_results)
+
+        # Summary
+        successful = sum(1 for r in results if r.success)
+        logger.info(f"News enrichment complete: {successful}/{len(results)} successful")
+
+        return results
+
+    async def enrich_single_signal_news(
+        self,
+        signal_id: int,
+        force_refresh: bool = False,
+    ) -> Optional[Any]:
+        """
+        Manually enrich a single signal with news sentiment.
+
+        Args:
+            signal_id: Signal ID to enrich
+            force_refresh: Force fetch even if cache valid
+
+        Returns:
+            EnrichmentResult or None
+        """
+        if not NEWS_ENRICHMENT_AVAILABLE:
+            logger.warning("News enrichment not available")
+            return None
+
+        from ..config import FINNHUB_API_KEY, NEWS_LOOKBACK_DAYS, NEWS_CACHE_TTL, NEWS_MIN_ARTICLES
+
+        if not FINNHUB_API_KEY:
+            logger.warning("FINNHUB_API_KEY not configured")
+            return None
+
+        # Get signal from database
+        query = "SELECT id, ticker FROM stock_scanner_signals WHERE id = $1"
+        row = await self.db.fetchrow(query, signal_id)
+
+        if not row:
+            logger.warning(f"Signal {signal_id} not found")
+            return None
+
+        # Initialize enrichment service
+        enrichment_service = NewsEnrichmentService(
+            db_manager=self.db,
+            finnhub_api_key=FINNHUB_API_KEY,
+            lookback_days=NEWS_LOOKBACK_DAYS,
+            cache_ttl_hours=NEWS_CACHE_TTL // 3600,
+            min_articles=NEWS_MIN_ARTICLES,
+        )
+
+        result = await enrichment_service.enrich_signal(
+            signal_id=row['id'],
+            ticker=row['ticker'],
+            force_refresh=force_refresh,
+        )
+
+        if result.success and result.sentiment:
+            logger.info(
+                f"Enriched signal {signal_id} ({row['ticker']}): "
+                f"{result.sentiment.level.value} ({result.sentiment.score:.2f})"
+            )
+
+        return result
+
+    async def get_unenriched_signals(
+        self,
+        min_tier: str = 'A',
+        limit: int = 50,
+        days_back: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Get signals that haven't been enriched with news yet.
+
+        Args:
+            min_tier: Minimum quality tier
+            limit: Maximum number of signals
+            days_back: How many days back to look
+
+        Returns:
+            List of signal dictionaries
+        """
+        tier_order = {'A+': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1}
+        min_tier_value = tier_order.get(min_tier, 4)
+
+        valid_tiers = [t for t, v in tier_order.items() if v >= min_tier_value]
+        tier_filter = ', '.join(f"'{t}'" for t in valid_tiers)
+
+        query = f"""
+            SELECT id, ticker, quality_tier, composite_score
+            FROM stock_scanner_signals
+            WHERE news_analyzed_at IS NULL
+              AND quality_tier IN ({tier_filter})
+              AND signal_timestamp >= NOW() - INTERVAL '{days_back} days'
+              AND status = 'active'
+            ORDER BY composite_score DESC
+            LIMIT $1
+        """
+
+        rows = await self.db.fetch(query, limit)
+        return [dict(r) for r in rows]
+
+    async def get_signal_news_data(self, signal_id: int) -> Dict[str, Any]:
+        """
+        Get news data for a signal (for UI display).
+
+        Args:
+            signal_id: Signal ID
+
+        Returns:
+            Dictionary with sentiment and articles
+        """
+        if not NEWS_ENRICHMENT_AVAILABLE:
+            return {"error": "News enrichment not available"}
+
+        from ..config import FINNHUB_API_KEY, NEWS_LOOKBACK_DAYS, NEWS_CACHE_TTL, NEWS_MIN_ARTICLES
+
+        if not FINNHUB_API_KEY:
+            return {"error": "FINNHUB_API_KEY not configured"}
+
+        enrichment_service = NewsEnrichmentService(
+            db_manager=self.db,
+            finnhub_api_key=FINNHUB_API_KEY,
+            lookback_days=NEWS_LOOKBACK_DAYS,
+            cache_ttl_hours=NEWS_CACHE_TTL // 3600,
+            min_articles=NEWS_MIN_ARTICLES,
+        )
+
+        return await enrichment_service.get_signal_news(signal_id)
+
+    def get_news_enrichment_stats(self) -> Dict[str, Any]:
+        """Get news enrichment availability status"""
+        if not NEWS_ENRICHMENT_AVAILABLE:
+            return {
+                'available': False,
+                'error': 'News enrichment dependencies not installed (finnhub-python, vaderSentiment)'
+            }
+
+        from ..config import FINNHUB_API_KEY
+
+        return {
+            'available': bool(FINNHUB_API_KEY),
+            'api_configured': bool(FINNHUB_API_KEY),
+            'error': None if FINNHUB_API_KEY else 'FINNHUB_API_KEY not configured'
         }

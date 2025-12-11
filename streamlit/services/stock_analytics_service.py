@@ -1771,6 +1771,238 @@ Analyze and respond in this exact JSON format:
             logger.error(f"Failed to re-analyze signal {signal_id}: {e}")
             return {'success': False, 'error': str(e)}
 
+    def enrich_signal_with_news(_self, signal_id: int) -> Dict[str, Any]:
+        """
+        Trigger news sentiment enrichment for a specific signal.
+
+        Fetches news from Finnhub and analyzes sentiment using VADER.
+
+        Args:
+            signal_id: The signal ID to enrich with news
+
+        Returns:
+            Dict with success status, sentiment data, and message
+        """
+        import os
+        import requests
+        from datetime import datetime, timedelta
+
+        try:
+            # Get the signal's ticker first
+            conn = _self._get_connection()
+            if not conn:
+                return {'success': False, 'error': 'Database connection failed'}
+
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT id, ticker, news_sentiment_score, news_analyzed_at
+                    FROM stock_scanner_signals
+                    WHERE id = %s
+                """, (signal_id,))
+                signal = cursor.fetchone()
+
+            if not signal:
+                conn.close()
+                return {'success': False, 'error': f'Signal {signal_id} not found'}
+
+            ticker = signal['ticker']
+
+            # Get Finnhub API key
+            finnhub_api_key = os.getenv('FINNHUB_API_KEY', '')
+            if not finnhub_api_key:
+                conn.close()
+                return {'success': False, 'error': 'FINNHUB_API_KEY not configured'}
+
+            # Fetch news from Finnhub
+            to_date = datetime.now()
+            from_date = to_date - timedelta(days=7)
+
+            url = "https://finnhub.io/api/v1/company-news"
+            params = {
+                'symbol': ticker.upper(),
+                'from': from_date.strftime('%Y-%m-%d'),
+                'to': to_date.strftime('%Y-%m-%d'),
+                'token': finnhub_api_key
+            }
+
+            response = requests.get(url, params=params, timeout=30)
+            if response.status_code != 200:
+                conn.close()
+                return {'success': False, 'error': f'Finnhub API error: {response.status_code}'}
+
+            articles = response.json()
+
+            if not articles:
+                # Update signal with no news found
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        UPDATE stock_scanner_signals
+                        SET news_sentiment_score = 0,
+                            news_sentiment_level = 'neutral',
+                            news_headlines_count = 0,
+                            news_factors = ARRAY['No news articles found'],
+                            news_analyzed_at = NOW()
+                        WHERE id = %s
+                    """, (signal_id,))
+                conn.commit()
+                conn.close()
+                return {
+                    'success': True,
+                    'message': f'No news found for {ticker}',
+                    'ticker': ticker,
+                    'articles_count': 0
+                }
+
+            # Analyze sentiment using VADER
+            try:
+                from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+                analyzer = SentimentIntensityAnalyzer()
+
+                scores = []
+                for article in articles[:50]:  # Limit to 50 articles
+                    headline = article.get('headline', '')
+                    summary = article.get('summary', '')
+                    text = f"{headline} {summary}"
+
+                    if text.strip():
+                        sentiment = analyzer.polarity_scores(text)
+                        scores.append(sentiment['compound'])
+
+                if scores:
+                    avg_score = sum(scores) / len(scores)
+                else:
+                    avg_score = 0.0
+
+                # Classify sentiment level
+                if avg_score >= 0.5:
+                    level = 'very_bullish'
+                elif avg_score >= 0.15:
+                    level = 'bullish'
+                elif avg_score <= -0.5:
+                    level = 'very_bearish'
+                elif avg_score <= -0.15:
+                    level = 'bearish'
+                else:
+                    level = 'neutral'
+
+                # Build factors
+                factors = []
+                level_labels = {
+                    'very_bullish': 'Strong positive',
+                    'bullish': 'Positive',
+                    'neutral': 'Neutral',
+                    'bearish': 'Negative',
+                    'very_bearish': 'Strong negative'
+                }
+                factors.append(f"{level_labels[level]} news sentiment ({avg_score:.2f})")
+                factors.append(f"{len(scores)} news articles analyzed")
+
+                # Add top headline
+                if articles:
+                    top_headline = articles[0].get('headline', '')[:80]
+                    if top_headline:
+                        factors.append(f'Key: "{top_headline}..."')
+
+            except ImportError:
+                # VADER not available, use simple keyword analysis
+                avg_score = 0.0
+                level = 'neutral'
+                factors = ['Sentiment analysis unavailable (VADER not installed)']
+
+            # Update signal in database
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    UPDATE stock_scanner_signals
+                    SET news_sentiment_score = %s,
+                        news_sentiment_level = %s,
+                        news_headlines_count = %s,
+                        news_factors = %s,
+                        news_analyzed_at = NOW()
+                    WHERE id = %s
+                """, (avg_score, level, len(scores), factors, signal_id))
+
+                # Also cache news articles
+                for article in articles[:20]:  # Cache top 20
+                    cursor.execute("""
+                        INSERT INTO stock_news_cache
+                            (ticker, headline, summary, source, url, published_at, sentiment_score, finnhub_id)
+                        VALUES (%s, %s, %s, %s, %s, to_timestamp(%s), %s, %s)
+                        ON CONFLICT (ticker, finnhub_id) DO UPDATE
+                        SET headline = EXCLUDED.headline,
+                            summary = EXCLUDED.summary,
+                            fetched_at = NOW()
+                    """, (
+                        ticker,
+                        article.get('headline', '')[:500],
+                        article.get('summary', '')[:1000] if article.get('summary') else None,
+                        article.get('source', '')[:100],
+                        article.get('url', ''),
+                        article.get('datetime', 0),
+                        None,  # Individual sentiment not calculated
+                        article.get('id')
+                    ))
+
+            conn.commit()
+            conn.close()
+
+            return {
+                'success': True,
+                'message': f'News enrichment completed for {ticker}',
+                'ticker': ticker,
+                'sentiment_score': avg_score,
+                'sentiment_level': level,
+                'articles_count': len(scores)
+            }
+
+        except requests.Timeout:
+            return {'success': False, 'error': 'Finnhub API request timed out'}
+        except Exception as e:
+            logger.error(f"Failed to enrich signal {signal_id} with news: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_signal_news_articles(_self, signal_id: int) -> List[Dict[str, Any]]:
+        """
+        Get cached news articles for a signal's ticker.
+
+        Args:
+            signal_id: The signal ID
+
+        Returns:
+            List of news articles from cache
+        """
+        try:
+            # First get the ticker
+            signal_result = _self._execute_query("""
+                SELECT ticker FROM stock_scanner_signals WHERE id = %s
+            """, (signal_id,))
+
+            if not signal_result:
+                return []
+
+            ticker = signal_result[0]['ticker']
+
+            # Get cached news articles
+            articles = _self._execute_query("""
+                SELECT
+                    headline,
+                    summary,
+                    source,
+                    url,
+                    published_at,
+                    sentiment_score
+                FROM stock_news_cache
+                WHERE ticker = %s
+                  AND fetched_at > NOW() - INTERVAL '24 hours'
+                ORDER BY published_at DESC
+                LIMIT 5
+            """, (ticker,))
+
+            return articles
+
+        except Exception as e:
+            logger.error(f"Failed to get news articles for signal {signal_id}: {e}")
+            return []
+
     # =========================================================================
     # DEEP DIVE TAB METHODS
     # =========================================================================

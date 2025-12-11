@@ -1233,6 +1233,154 @@ def render_deep_dive_tab(service):
     st.markdown("---")
 
     # ==========================================================================
+    # SECTION 2.5: News Sentiment
+    # ==========================================================================
+    st.markdown('<div class="section-header">📰 News Sentiment</div>', unsafe_allow_html=True)
+
+    # Get news data for this ticker from multiple sources:
+    # 1. Session state (freshly fetched this session)
+    # 2. Active signal in database
+    # 3. Other signals for this ticker
+    news_data = None
+    news_signal_id = None
+
+    # Source 1: Check session state for freshly fetched news
+    session_news_key = f"news_sentiment_{ticker}"
+    if session_news_key in st.session_state:
+        news_data = st.session_state[session_news_key]
+
+    # Source 2: Check if active signal has news data
+    if not news_data and active_signal and active_signal.get('news_sentiment_score') is not None:
+        news_data = {
+            'score': active_signal.get('news_sentiment_score'),
+            'level': active_signal.get('news_sentiment_level'),
+            'count': active_signal.get('news_headlines_count', 0),
+            'factors': active_signal.get('news_factors', []),
+            'analyzed_at': active_signal.get('news_analyzed_at')
+        }
+        news_signal_id = active_signal.get('id')
+
+    # Source 3: If no news from active signal, check other signals for this ticker
+    if not news_data and scanner_signals:
+        for sig in scanner_signals:
+            if sig.get('news_sentiment_score') is not None:
+                news_data = {
+                    'score': sig.get('news_sentiment_score'),
+                    'level': sig.get('news_sentiment_level'),
+                    'count': sig.get('news_headlines_count', 0),
+                    'factors': sig.get('news_factors', []),
+                    'analyzed_at': sig.get('news_analyzed_at')
+                }
+                news_signal_id = sig.get('id')
+                break
+
+    # If we have signals but no news_signal_id yet, use first signal for enrichment
+    if not news_signal_id and scanner_signals:
+        news_signal_id = scanner_signals[0].get('id')
+
+    col1, col2 = st.columns([3, 1])
+
+    with col2:
+        # Fetch/Refresh News button
+        button_label = "🔄 Refresh News" if news_data else "📰 Fetch News"
+        if st.button(button_label, key=f"fetch_news_{ticker}"):
+            with st.spinner(f"Fetching news for {ticker}..."):
+                # If we have a signal, enrich that signal
+                if news_signal_id:
+                    result = service.enrich_signal_with_news(news_signal_id)
+                else:
+                    # No signal - fetch news directly for display (won't persist without signal)
+                    result = _fetch_news_for_ticker(ticker)
+
+                if result.get('success'):
+                    st.success(f"✅ {result.get('message', 'News fetched!')}")
+                    st.rerun()
+                else:
+                    st.error(f"❌ {result.get('error', 'Failed to fetch news')}")
+
+    with col1:
+        if news_data:
+            # Format analyzed timestamp
+            news_time_str = None
+            news_ago_str = None
+            analyzed_at = news_data.get('analyzed_at')
+            if analyzed_at:
+                if isinstance(analyzed_at, datetime):
+                    news_time_str = analyzed_at.strftime('%b %d, %Y %H:%M')
+                    now = datetime.now(analyzed_at.tzinfo) if analyzed_at.tzinfo else datetime.now()
+                    time_ago = now - analyzed_at
+                    if time_ago.days > 0:
+                        news_ago_str = f"{time_ago.days}d ago"
+                    elif time_ago.seconds >= 3600:
+                        news_ago_str = f"{time_ago.seconds // 3600}h ago"
+                    else:
+                        news_ago_str = f"{time_ago.seconds // 60}m ago"
+                else:
+                    news_time_str = str(analyzed_at)[:16]
+
+            # News sentiment colors
+            sentiment_colors = {
+                'very_bullish': '#28a745',
+                'bullish': '#5cb85c',
+                'neutral': '#6c757d',
+                'bearish': '#f0ad4e',
+                'very_bearish': '#dc3545'
+            }
+            sentiment_icons = {
+                'very_bullish': '🟢🟢',
+                'bullish': '🟢',
+                'neutral': '⚪',
+                'bearish': '🟠',
+                'very_bearish': '🔴🔴'
+            }
+
+            level = (news_data.get('level') or 'neutral').lower()
+            score = news_data.get('score', 0) or 0
+            count = news_data.get('count', 0) or 0
+            factors = news_data.get('factors', [])
+
+            sent_color = sentiment_colors.get(level, '#6c757d')
+            sent_icon = sentiment_icons.get(level, '⚪')
+            level_display = level.replace('_', ' ').title()
+
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 1rem; border-radius: 10px; border-left: 5px solid {sent_color};">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <div>
+                        <span style="font-size: 1.3rem;">{sent_icon}</span>
+                        <span style="font-size: 1.2rem; font-weight: bold; color: {sent_color}; margin-left: 0.5rem;">{level_display}</span>
+                        <span style="margin-left: 1rem; font-size: 0.9rem; color: #666;">Score: {score:.2f}</span>
+                    </div>
+                    <div style="font-size: 0.9rem; color: #666;">
+                        {count} articles analyzed
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Show factors
+            if factors:
+                factors_list = factors if isinstance(factors, list) else [factors]
+                if factors_list:
+                    with st.expander("📋 Key News Factors", expanded=False):
+                        for factor in factors_list[:5]:
+                            if level in ['very_bullish', 'bullish']:
+                                st.markdown(f"- :green[+] {factor}")
+                            elif level in ['very_bearish', 'bearish']:
+                                st.markdown(f"- :red[-] {factor}")
+                            else:
+                                st.markdown(f"- {factor}")
+
+            # Show timestamp
+            if news_time_str:
+                ago_text = f" ({news_ago_str})" if news_ago_str else ""
+                st.caption(f"📅 {news_time_str}{ago_text}")
+        else:
+            st.info("📰 No news sentiment data available. Click 'Fetch News' to analyze recent news for this stock.")
+
+    st.markdown("---")
+
+    # ==========================================================================
     # SECTION 3: Active Signal Card
     # ==========================================================================
     if active_signal:
@@ -1890,6 +2038,124 @@ def _run_claude_analysis(service, ticker, signal, metrics, fundamentals, candles
                 st.error("Analysis failed - no grade returned")
         except Exception as e:
             st.error(f"Analysis failed: {str(e)}")
+
+
+def _fetch_news_for_ticker(ticker: str) -> Dict[str, Any]:
+    """
+    Fetch and analyze news for a ticker without requiring a signal.
+    Results are stored in session state for display but not persisted to database.
+    """
+    import os
+    import requests
+    from datetime import datetime, timedelta
+
+    try:
+        # Get Finnhub API key
+        finnhub_api_key = os.getenv('FINNHUB_API_KEY', '')
+        if not finnhub_api_key:
+            return {'success': False, 'error': 'FINNHUB_API_KEY not configured'}
+
+        # Fetch news from Finnhub
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=7)
+
+        url = "https://finnhub.io/api/v1/company-news"
+        params = {
+            'symbol': ticker.upper(),
+            'from': from_date.strftime('%Y-%m-%d'),
+            'to': to_date.strftime('%Y-%m-%d'),
+            'token': finnhub_api_key
+        }
+
+        response = requests.get(url, params=params, timeout=30)
+        if response.status_code != 200:
+            return {'success': False, 'error': f'Finnhub API error: {response.status_code}'}
+
+        articles = response.json()
+
+        if not articles:
+            return {
+                'success': True,
+                'message': f'No news found for {ticker}',
+                'ticker': ticker,
+                'articles_count': 0
+            }
+
+        # Analyze sentiment using VADER
+        try:
+            from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+            analyzer = SentimentIntensityAnalyzer()
+
+            scores = []
+            for article in articles[:50]:
+                headline = article.get('headline', '')
+                summary = article.get('summary', '')
+                text = f"{headline} {summary}"
+
+                if text.strip():
+                    sentiment = analyzer.polarity_scores(text)
+                    scores.append(sentiment['compound'])
+
+            if scores:
+                avg_score = sum(scores) / len(scores)
+            else:
+                avg_score = 0.0
+
+            # Classify sentiment level
+            if avg_score >= 0.5:
+                level = 'very_bullish'
+            elif avg_score >= 0.15:
+                level = 'bullish'
+            elif avg_score <= -0.5:
+                level = 'very_bearish'
+            elif avg_score <= -0.15:
+                level = 'bearish'
+            else:
+                level = 'neutral'
+
+            # Build factors
+            factors = []
+            level_labels = {
+                'very_bullish': 'Strong positive',
+                'bullish': 'Positive',
+                'neutral': 'Neutral',
+                'bearish': 'Negative',
+                'very_bearish': 'Strong negative'
+            }
+            factors.append(f"{level_labels[level]} news sentiment ({avg_score:.2f})")
+            factors.append(f"{len(scores)} news articles analyzed")
+
+            if articles:
+                top_headline = articles[0].get('headline', '')[:80]
+                if top_headline:
+                    factors.append(f'Key: "{top_headline}..."')
+
+            # Store in session state for display
+            session_key = f"news_sentiment_{ticker}"
+            st.session_state[session_key] = {
+                'score': avg_score,
+                'level': level,
+                'count': len(scores),
+                'factors': factors,
+                'analyzed_at': datetime.now()
+            }
+
+            return {
+                'success': True,
+                'message': f'News analysis completed for {ticker}',
+                'ticker': ticker,
+                'sentiment_score': avg_score,
+                'sentiment_level': level,
+                'articles_count': len(scores)
+            }
+
+        except ImportError:
+            return {'success': False, 'error': 'VADER sentiment analyzer not installed'}
+
+    except requests.Timeout:
+        return {'success': False, 'error': 'Finnhub API request timed out'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 
 # =============================================================================
@@ -2610,6 +2876,14 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     claude_analyzed_at = signal.get('claude_analyzed_at')
     has_claude = claude_grade is not None
 
+    # News sentiment data
+    news_sentiment_score = signal.get('news_sentiment_score')
+    news_sentiment_level = signal.get('news_sentiment_level')
+    news_headlines_count = signal.get('news_headlines_count', 0)
+    news_factors = signal.get('news_factors', [])
+    news_analyzed_at = signal.get('news_analyzed_at')
+    has_news = news_sentiment_score is not None
+
     # Format claude_analyzed_at timestamp with staleness check
     analyzed_time_str = None
     analyzed_ago_str = None
@@ -2663,17 +2937,42 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
         'AVOID': 'red'
     }
 
+    # News sentiment colors
+    news_sentiment_colors = {
+        'very_bullish': 'green',
+        'bullish': 'blue',
+        'neutral': 'gray',
+        'bearish': 'orange',
+        'very_bearish': 'red'
+    }
+    news_sentiment_icons = {
+        'very_bullish': '📰🟢',
+        'bullish': '📰🔵',
+        'neutral': '📰⚪',
+        'bearish': '📰🟠',
+        'very_bearish': '📰🔴'
+    }
+
     # Build title with Claude info if available
     claude_badge = ""
     if has_claude:
         action_color = claude_action_colors.get(claude_action, 'gray')
         claude_badge = f" | 🤖 :{action_color}[{claude_action}] ({claude_grade})"
 
+    # Build news badge if available
+    news_badge = ""
+    if has_news:
+        news_level = news_sentiment_level or 'neutral'
+        news_color = news_sentiment_colors.get(news_level.lower(), 'gray')
+        news_icon = news_sentiment_icons.get(news_level.lower(), '📰')
+        news_label = news_level.replace('_', ' ').title()
+        news_badge = f" | {news_icon} :{news_color}[{news_label}]"
+
     # Build header with timestamp
     timestamp_part = f" | 📅 {signal_time_str}" if signal_time_str else ""
 
     # Use expander for each signal card (collapsed by default for easier browsing)
-    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{timestamp_part}", expanded=False):
+    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{news_badge}{timestamp_part}", expanded=False):
 
         # Metrics row
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -2755,20 +3054,94 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
             # Show pending analysis indicator
             st.caption("⏳ *Awaiting Claude AI analysis*")
 
+        # News Sentiment Section
+        st.markdown("---")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown("#### 📰 News Sentiment")
+        with col2:
+            # Enrich with News button
+            if signal_id and service:
+                button_label = "🔄 Refresh News" if has_news else "📰 Enrich with News"
+                if st.button(button_label, key=f"news_{signal_id}", help="Fetch and analyze recent news"):
+                    with st.spinner(f"Fetching news for {ticker}..."):
+                        result = service.enrich_signal_with_news(signal_id)
+                        if result.get('success'):
+                            st.success(f"✅ {result.get('message', 'News enrichment complete!')}")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {result.get('error', 'News enrichment failed')}")
+
+        if has_news:
+            # Format news_analyzed_at timestamp
+            news_time_str = None
+            news_ago_str = None
+            if news_analyzed_at:
+                if isinstance(news_analyzed_at, datetime):
+                    news_time_str = news_analyzed_at.strftime('%b %d, %Y %H:%M')
+                    now = datetime.now(news_analyzed_at.tzinfo) if news_analyzed_at.tzinfo else datetime.now()
+                    time_ago = now - news_analyzed_at
+                    if time_ago.days > 0:
+                        news_ago_str = f"{time_ago.days}d ago"
+                    elif time_ago.seconds >= 3600:
+                        news_ago_str = f"{time_ago.seconds // 3600}h ago"
+                    else:
+                        news_ago_str = f"{time_ago.seconds // 60}m ago"
+                else:
+                    news_time_str = str(news_analyzed_at)[:16]
+
+            if news_time_str:
+                ago_text = f" ({news_ago_str})" if news_ago_str else ""
+                st.caption(f"📅 {news_time_str}{ago_text}")
+
+            # News metrics row
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                news_level = news_sentiment_level or 'neutral'
+                news_color = news_sentiment_colors.get(news_level.lower(), 'gray')
+                news_label = news_level.replace('_', ' ').title()
+                st.markdown(f"**Sentiment:** :{news_color}[{news_label}]")
+            with col2:
+                score_display = f"{news_sentiment_score:.2f}" if news_sentiment_score else "N/A"
+                st.markdown(f"**Score:** {score_display}")
+            with col3:
+                st.markdown(f"**Articles:** {news_headlines_count or 0}")
+
+            # News factors
+            if news_factors:
+                if isinstance(news_factors, list):
+                    factors_display = news_factors
+                else:
+                    factors_display = [news_factors] if news_factors else []
+
+                if factors_display:
+                    st.markdown("**Key Factors:**")
+                    for factor in factors_display[:3]:
+                        # Color-code based on sentiment level
+                        if news_level.lower() in ['very_bullish', 'bullish']:
+                            st.markdown(f"- :green[+] {factor}")
+                        elif news_level.lower() in ['very_bearish', 'bearish']:
+                            st.markdown(f"- :red[-] {factor}")
+                        else:
+                            st.markdown(f"- :gray[•] {factor}")
+        else:
+            st.caption("📰 *No news data yet - click 'Enrich with News' to fetch*")
+
 
 def _signals_to_csv(signals: List[Dict]) -> str:
-    """Convert signals to CSV format including Claude analysis."""
+    """Convert signals to CSV format including Claude analysis and news sentiment."""
     import io
     import csv
 
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Header with Claude columns
+    # Header with Claude and News columns
     writer.writerow([
         'Symbol', 'Side', 'Entry', 'Stop', 'TP1', 'TP2',
         'Risk%', 'R:R', 'Score', 'Tier', 'Scanner', 'Setup',
-        'Claude_Grade', 'Claude_Score', 'Claude_Action', 'Claude_Conviction', 'Claude_Thesis'
+        'Claude_Grade', 'Claude_Score', 'Claude_Action', 'Claude_Conviction', 'Claude_Thesis',
+        'News_Sentiment', 'News_Score', 'News_Articles'
     ])
 
     # Data
@@ -2790,7 +3163,10 @@ def _signals_to_csv(signals: List[Dict]) -> str:
             s.get('claude_score', ''),
             s.get('claude_action', ''),
             s.get('claude_conviction', ''),
-            (s.get('claude_thesis', '') or '')[:100]
+            (s.get('claude_thesis', '') or '')[:100],
+            s.get('news_sentiment_level', ''),
+            s.get('news_sentiment_score', ''),
+            s.get('news_headlines_count', '')
         ])
 
     return output.getvalue()
