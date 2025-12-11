@@ -636,6 +636,51 @@ class OrderExecutor:
                     error_detail = response.json()
                     error_msg = f"Order failed: HTTP {response.status_code} - {error_detail}"
 
+                    # Special handling for HTTP 400 - protective blocks (not real errors)
+                    if response.status_code == 400:
+                        detail_obj = error_detail.get("detail", {}) if isinstance(error_detail, dict) else {}
+                        reason = detail_obj.get("reason", "") if isinstance(detail_obj, dict) else ""
+
+                        # Handle min_distance_too_large - this is a protective block, not an error
+                        if reason == "min_distance_too_large":
+                            broker_min = detail_obj.get("broker_min_distance", "?")
+                            max_allowed = detail_obj.get("max_allowed_min_distance", 4)
+                            self.logger.warning(
+                                f"🛡️ TRADE BLOCKED (Protective): {external_epic} - Broker min distance ({broker_min}pt) "
+                                f"exceeds max allowed ({max_allowed}pt). Market conditions unfavorable."
+                            )
+                            self.logger.info(f"   ℹ️ This is NOT an error - trade blocked to protect from poor market conditions (wide spreads/low liquidity)")
+                            return {
+                                "status": "blocked",
+                                "message": f"Trade blocked: broker min distance too large ({broker_min}pt > {max_allowed}pt)",
+                                "alert_id": alert_id,
+                                "status_code": 400,
+                                "response_time": response_time,
+                                "reason": "min_distance_too_large",
+                                "broker_min_distance": broker_min,
+                                "max_allowed": max_allowed
+                            }
+
+                        # Handle scalping conditions unfavorable
+                        if reason == "scalping_conditions_unfavorable":
+                            broker_min = detail_obj.get("broker_min_distance", "?")
+                            strategy_requested = detail_obj.get("strategy_requested", "?")
+                            self.logger.warning(
+                                f"🛡️ SCALPING BLOCKED (Protective): {external_epic} - Broker min distance ({broker_min}pt) "
+                                f"too large for scalping strategy ({strategy_requested}pt requested)."
+                            )
+                            self.logger.info(f"   ℹ️ This is NOT an error - scalping trade blocked due to unfavorable market conditions")
+                            return {
+                                "status": "blocked",
+                                "message": f"Scalping blocked: broker requires {broker_min}pt, strategy wants {strategy_requested}pt",
+                                "alert_id": alert_id,
+                                "status_code": 400,
+                                "response_time": response_time,
+                                "reason": "scalping_conditions_unfavorable",
+                                "broker_min_distance": broker_min,
+                                "strategy_requested": strategy_requested
+                            }
+
                     # Special handling for 500 errors to provide more context
                     if response.status_code == 500:
                         detail_obj = error_detail if isinstance(error_detail, dict) else {}
