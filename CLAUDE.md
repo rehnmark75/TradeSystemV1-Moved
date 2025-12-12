@@ -2,38 +2,123 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 📋 Documentation Structure
+## 🐳 CRITICAL: Docker Environment
 
-The TradeSystemV1 documentation has been organized into focused, specialized files for better navigation and maintainability:
+**ALL commands must run inside Docker containers. Never run Python/SQL directly on host.**
 
-### 🚀 Quick Start
-- **[Overview & Navigation](claude-overview.md)** - Start here for system overview and navigation hub
+```bash
+# Python scripts
+docker exec -it task-worker python /app/forex_scanner/script.py
 
-### 📖 Core Documentation
-- **[Commands & CLI](claude-commands.md)** - Docker services, CLI usage, optimization commands
-- **[Architecture Overview](claude-architecture.md)** - System design, services, and database models
+# Database queries
+docker exec -it postgres psql -U postgres -d trading -c "SELECT ..."
 
-### 🔧 Development
-- **[Strategy Development](claude-strategies.md)** - Trading strategy patterns and configuration guidelines
-- **[Development Best Practices](claude-development.md)** - Patterns, testing, and code organization
+# Interactive shell
+docker exec -it task-worker bash
+```
 
-### ⚡ Advanced Features
-- **[Dynamic Parameter Optimization](claude-optimization.md)** - Database-driven parameter system
-- **[Market Intelligence](claude-intelligence.md)** - Real-time market analysis and trade context
-- **[Trailing Stop System](claude-trailing-system.md)** - Progressive trailing stops and partial close
+**Path mapping**: `worker/app/` → `/app/` inside container
 
-## 🎯 Quick Navigation
+---
 
-| I want to... | Go to |
-|--------------|-------|
-| **Start the system** | [Commands & CLI](claude-commands.md#docker-services-management) |
-| **Run forex scanner** | [Commands & CLI](claude-commands.md#forex-scanner-cli) |
-| **Understand the architecture** | [Architecture Overview](claude-architecture.md) |
-| **Develop a new strategy** | [Strategy Development](claude-strategies.md) |
-| **Optimize parameters** | [Dynamic Parameter Optimization](claude-optimization.md) |
-| **Use market intelligence** | [Market Intelligence](claude-intelligence.md) |
-| **Modify trailing stops** | [Trailing Stop System](claude-trailing-system.md) |
-| **Follow best practices** | [Development Best Practices](claude-development.md) |
+## 🚀 Entry Points
+
+### Live Scanner
+```bash
+docker exec -it task-worker python /app/trade_scan.py              # Docker mode (default)
+docker exec -it task-worker python /app/trade_scan.py scan         # Single scan
+docker exec -it task-worker python /app/trade_scan.py live 120     # Live trading
+docker exec -it task-worker python /app/trade_scan.py status       # System status
+```
+
+### Backtesting
+```bash
+docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7              # 7 days
+docker exec -it task-worker python /app/forex_scanner/bt.py GBPUSD 14 MACD --show-signals
+```
+**Pair shortcuts**: EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY, GBPJPY
+**Strategy shortcuts**: EMA, MACD, BB, SMC, SMC_STRUCTURE, MOMENTUM, ICHIMOKU, KAMA, ZEROLAG
+
+---
+
+## 🏗️ Core Architecture
+
+### Signal Flow (Live Trading)
+```
+trade_scan.py (entry point)
+  └── TradingOrchestrator (core/trading/trading_orchestrator.py)
+        ├── IntelligentForexScanner (core/scanner.py) - signal detection + dedup
+        │     └── SignalDetector (core/signal_detector.py) - delegates to strategies
+        │           └── Strategies (core/strategies/*.py)
+        ├── DataFetcher (core/data_fetcher.py) - candles + indicators
+        ├── TradeValidator, RiskManager, OrderManager
+        ├── IntegrationManager - Claude AI analysis
+        └── AlertHistoryManager (alerts/alert_history.py) - database
+```
+
+### Key Files Quick Reference
+
+| Purpose | File |
+|---------|------|
+| **Live scanner entry** | `worker/app/trade_scan.py` |
+| **Backtest entry** | `worker/app/forex_scanner/bt.py` → `backtest_cli.py` |
+| **Main config** | `worker/app/forex_scanner/config.py` |
+| **Orchestrator** | `worker/app/forex_scanner/core/trading/trading_orchestrator.py` |
+| **Scanner** | `worker/app/forex_scanner/core/scanner.py` |
+| **Signal detector** | `worker/app/forex_scanner/core/signal_detector.py` |
+| **Data fetcher** | `worker/app/forex_scanner/core/data_fetcher.py` |
+| **Strategies** | `worker/app/forex_scanner/core/strategies/*.py` |
+| **Alert history** | `worker/app/forex_scanner/alerts/alert_history.py` |
+| **Order executor** | `worker/app/forex_scanner/alerts/order_executor.py` |
+| **Trailing stops** | `worker/app/forex_scanner/config_trailing_stops.py` |
+
+### Strategies Available
+| Strategy | File | Enable in config.py |
+|----------|------|---------------------|
+| EMA | `ema_strategy.py` | `EMA_STRATEGY_ENABLED` |
+| MACD | `macd_strategy.py` | `MACD_STRATEGY_ENABLED` |
+| SMC Structure | `smc_structure_strategy.py` | `SMC_STRUCTURE_STRATEGY_ENABLED` |
+| Bollinger+Supertrend | `bb_supertrend_strategy.py` | `BB_SUPERTREND_STRATEGY_ENABLED` |
+| Scalping | `scalping_strategy.py` | `SCALPING_STRATEGY_ENABLED` |
+| Momentum | `momentum_strategy.py` | `MOMENTUM_STRATEGY_ENABLED` |
+| KAMA | `kama_strategy.py` | `KAMA_STRATEGY` |
+| Zero Lag | `zero_lag_strategy.py` | `ZERO_LAG_STRATEGY_ENABLED` |
+| Ichimoku | `ichimoku_strategy.py` | `ICHIMOKU_STRATEGY_ENABLED` |
+
+---
+
+## 📊 Candle Data Flow
+
+```
+IG Markets API (Lightstreamer) → ig_candles table (5m base)
+                                       ↓
+                               DataFetcher resamples to 15m/1h/4h
+                                       ↓
+                               Adds technical indicators (EMA, MACD, RSI, etc.)
+                                       ↓
+                               Strategy analyzes enhanced DataFrame
+```
+
+**Database tables**: `ig_candles`, `preferred_forex_prices`
+**Resampling**: 5m → 15m (3 candles), 5m → 1h (12 candles), 5m → 4h (48 candles)
+
+---
+
+## 📋 Extended Documentation
+
+For detailed information, see these docs (read with Read tool when needed):
+
+| Topic | File |
+|-------|------|
+| Commands & CLI | `claude-commands.md` |
+| Full Architecture | `claude-architecture.md` |
+| Strategy Development | `claude-strategies.md` |
+| Parameter Optimization | `claude-optimization.md` |
+| Market Intelligence | `claude-intelligence.md` |
+| Trailing Stop System | `claude-trailing-system.md` |
+| Development Best Practices | `claude-development.md` |
+
+---
 
 ## ⚠️ Important Notes
 
