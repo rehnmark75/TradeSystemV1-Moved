@@ -567,13 +567,191 @@ class AlertHistoryManager:
                 self.logger.warning(f"⚠️ Failed to update Claude analysis summary: {e}")
             
             return alert_id
-            
+
         except Exception as e:
             epic = signal.get('epic', 'Unknown') if isinstance(signal, dict) else 'Unknown'
             self.logger.error(f"❌ Error saving alert for {epic}: {e}")
             import traceback
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
             return None
+
+    def save_claude_rejection(
+        self,
+        signal: Dict,
+        claude_result: Dict,
+        rejection_reason: str
+    ) -> Optional[int]:
+        """
+        Save a Claude-rejected signal to alert_history for analysis and auditing.
+
+        This method is called when Claude AI rejects a trade signal, allowing
+        for later analysis of rejected signals to improve strategy performance.
+
+        Args:
+            signal: Signal dictionary containing all signal data
+            claude_result: Claude analysis result with score, decision, reason, etc.
+            rejection_reason: Human-readable rejection reason string
+
+        Returns:
+            Alert ID if successful, None if failed
+        """
+        try:
+            epic = signal.get('epic', 'Unknown')
+            signal_type = signal.get('signal_type', signal.get('signal', 'Unknown'))
+
+            self.logger.info(f"🚫 Saving Claude rejection: {epic} {signal_type}")
+
+            # Mark signal as Claude rejected
+            signal['status'] = 'CLAUDE_REJECTED'
+            signal['claude_decision'] = claude_result.get('decision', 'REJECT')
+            signal['claude_approved'] = False
+            signal['claude_score'] = claude_result.get('score', 0)
+            signal['claude_reason'] = rejection_reason
+            signal['claude_raw_response'] = claude_result.get('raw_response', '')
+            signal['claude_mode'] = claude_result.get('mode', 'vision')
+
+            # Add metadata about the rejection
+            signal['rejection_timestamp'] = datetime.now().isoformat()
+            signal['rejection_type'] = 'claude_analysis'
+
+            # Determine if it was a score-based or decision-based rejection
+            score = claude_result.get('score', 0)
+            decision = claude_result.get('decision', 'UNKNOWN')
+
+            if decision == 'REJECT':
+                rejection_category = 'explicit_rejection'
+            elif score < 6:  # Assumes min_claude_score of 6
+                rejection_category = 'low_score'
+            else:
+                rejection_category = 'other'
+
+            signal['rejection_category'] = rejection_category
+
+            # Build alert message for the rejection
+            alert_message = (
+                f"🚫 CLAUDE REJECTED: {epic} {signal_type}\n"
+                f"Score: {score}/10 | Decision: {decision}\n"
+                f"Reason: {rejection_reason}"
+            )
+
+            # Save to database with REJECTED alert level for easy filtering
+            alert_id = self.save_alert(
+                signal=signal,
+                alert_message=alert_message,
+                alert_level='REJECTED',
+                claude_result=claude_result
+            )
+
+            if alert_id:
+                self.logger.info(f"✅ Claude rejection saved: alert_id={alert_id}, score={score}/10")
+            else:
+                self.logger.warning(f"⚠️ Failed to save Claude rejection for {epic}")
+
+            return alert_id
+
+        except Exception as e:
+            epic = signal.get('epic', 'Unknown') if isinstance(signal, dict) else 'Unknown'
+            self.logger.error(f"❌ Error saving Claude rejection for {epic}: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
+            return None
+
+    def get_claude_rejections(
+        self,
+        days: int = 7,
+        strategy: str = None,
+        min_score: int = None
+    ) -> List[Dict]:
+        """
+        Retrieve Claude-rejected signals for analysis.
+
+        Args:
+            days: Number of days to look back (default: 7)
+            strategy: Filter by strategy name (optional)
+            min_score: Only return rejections with score >= min_score (optional)
+
+        Returns:
+            List of rejection records
+        """
+        try:
+            def fetch_rejections_operation(conn, cursor):
+                query = '''
+                    SELECT
+                        id, epic, pair, signal_type, strategy, confidence_score,
+                        entry_price, stop_loss, take_profit,
+                        claude_score, claude_decision, claude_reason, claude_raw_response,
+                        alert_timestamp, alert_message
+                    FROM alert_history
+                    WHERE alert_level = 'REJECTED'
+                    AND alert_timestamp >= NOW() - INTERVAL '%s days'
+                '''
+                params = [days]
+
+                if strategy:
+                    query += ' AND strategy = %s'
+                    params.append(strategy)
+
+                if min_score is not None:
+                    query += ' AND claude_score >= %s'
+                    params.append(min_score)
+
+                query += ' ORDER BY alert_timestamp DESC'
+
+                cursor.execute(query, params)
+                columns = [desc[0] for desc in cursor.description]
+                rows = cursor.fetchall()
+
+                return [dict(zip(columns, row)) for row in rows]
+
+            return self._execute_with_connection(fetch_rejections_operation, "fetch Claude rejections") or []
+
+        except Exception as e:
+            self.logger.error(f"❌ Error fetching Claude rejections: {e}")
+            return []
+
+    def get_claude_rejection_stats(self, days: int = 30) -> Dict:
+        """
+        Get statistics about Claude rejections for analysis.
+
+        Args:
+            days: Number of days to analyze
+
+        Returns:
+            Dict with rejection statistics
+        """
+        try:
+            def fetch_stats_operation(conn, cursor):
+                cursor.execute('''
+                    SELECT
+                        COUNT(*) as total_rejections,
+                        AVG(claude_score) as avg_rejection_score,
+                        MIN(claude_score) as min_score,
+                        MAX(claude_score) as max_score,
+                        COUNT(DISTINCT epic) as unique_pairs_rejected,
+                        COUNT(DISTINCT strategy) as strategies_affected
+                    FROM alert_history
+                    WHERE alert_level = 'REJECTED'
+                    AND alert_timestamp >= NOW() - INTERVAL '%s days'
+                ''', [days])
+
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'total_rejections': row[0] or 0,
+                        'avg_rejection_score': float(row[1]) if row[1] else 0,
+                        'min_score': row[2] or 0,
+                        'max_score': row[3] or 0,
+                        'unique_pairs_rejected': row[4] or 0,
+                        'strategies_affected': row[5] or 0,
+                        'period_days': days
+                    }
+                return {'total_rejections': 0, 'period_days': days}
+
+            return self._execute_with_connection(fetch_stats_operation, "fetch rejection stats") or {}
+
+        except Exception as e:
+            self.logger.error(f"❌ Error fetching Claude rejection stats: {e}")
+            return {'error': str(e)}
 
     def _update_strategy_summary(self, signal: Dict, config_hash: str, claude_data: Dict):
         """Update daily strategy summary statistics with Claude analysis data"""

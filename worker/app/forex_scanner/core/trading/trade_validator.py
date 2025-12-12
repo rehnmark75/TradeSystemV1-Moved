@@ -319,30 +319,64 @@ class TradeValidator:
             self.logger.info("   News filtering: ❌ Disabled")
 
     def _initialize_claude_analyzer(self):
-        """Initialize Claude analyzer for signal filtering"""
+        """Initialize Claude analyzer for signal filtering with vision support"""
         try:
-            from alerts import ClaudeAnalyzer
+            # NEW: Import refactored API client with SDK support
+            from alerts.api.client import APIClient, ANTHROPIC_SDK_AVAILABLE
+            from alerts.analysis.prompt_builder import PromptBuilder
+            from alerts.analysis.response_parser import ResponseParser
+            from alerts.forex_chart_generator import ForexChartGenerator, MPLFINANCE_AVAILABLE
+
             api_key = getattr(config, 'CLAUDE_API_KEY', None)
-            
+
             if not api_key:
                 self.logger.warning("⚠️ CLAUDE_API_KEY not found - Claude filtering disabled")
                 return
-            
-            self.claude_analyzer = ClaudeAnalyzer(
-                api_key=api_key,
-                auto_save=False,  # Don't save during validation
-                save_directory="claude_validation"
-            )
-            
-            # Test the connection
-            if self.claude_analyzer.test_connection():
-                self.logger.info("✅ Claude analyzer initialized for trade filtering")
+
+            if not ANTHROPIC_SDK_AVAILABLE:
+                self.logger.error("❌ Anthropic SDK not installed - Claude filtering disabled")
+                return
+
+            # Initialize API client with SDK
+            self.claude_client = APIClient(api_key=api_key)
+
+            if not self.claude_client.is_available:
+                self.logger.warning("⚠️ Claude API client not available - filtering disabled")
+                self.claude_client = None
+                return
+
+            # Initialize prompt builder and response parser
+            self.prompt_builder = PromptBuilder()
+            self.response_parser = ResponseParser()
+
+            # Initialize chart generator for vision analysis
+            self.chart_generator = None
+            if getattr(config, 'CLAUDE_INCLUDE_CHART', True) and MPLFINANCE_AVAILABLE:
+                self.chart_generator = ForexChartGenerator(
+                    db_manager=self.db_manager,
+                    data_fetcher=self.data_fetcher
+                )
+                self.logger.info("✅ Chart generator initialized for vision analysis")
             else:
-                self.logger.warning("⚠️ Claude analyzer connection failed - filtering disabled")
-                self.claude_analyzer = None
-                
+                self.logger.info("📊 Chart generation disabled or mplfinance not available")
+
+            # Test the connection
+            if self.claude_client.test_connection():
+                self.logger.info("✅ Claude API client initialized with Anthropic SDK")
+                self.logger.info(f"   Model: {self.claude_client.model}")
+                self.logger.info(f"   Vision: {'✅ Enabled' if self.chart_generator else '❌ Disabled'}")
+            else:
+                self.logger.warning("⚠️ Claude API connection failed - filtering disabled")
+                self.claude_client = None
+
+            # Keep legacy reference for backwards compatibility
+            self.claude_analyzer = self.claude_client
+
         except Exception as e:
             self.logger.error(f"❌ Failed to initialize Claude analyzer: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
+            self.claude_client = None
             self.claude_analyzer = None
 
     def _initialize_news_filter(self):
@@ -408,68 +442,136 @@ class TradeValidator:
             else:
                 return True, f"News validation error (allowing signal): {str(e)}", None
 
-    def _validate_with_claude(self, signal: Dict) -> Tuple[bool, str, Optional[Dict]]:
+    def _validate_with_claude(self, signal: Dict, candles: Dict = None) -> Tuple[bool, str, Optional[Dict]]:
         """
-        Validate signal using Claude AI analysis
-        
+        Validate signal using Claude AI analysis with vision support.
+
+        FAIL-SECURE MODE: Blocks trades on any Claude error when CLAUDE_FAIL_SECURE=True
+
         Args:
             signal: Signal to validate
-            
+            candles: Optional dict of candle DataFrames {'4h': df, '15m': df, '5m': df}
+
         Returns:
             Tuple of (is_valid, validation_message, claude_result)
         """
-        if not self.claude_analyzer:
-            return True, "Claude filtering disabled", None
-        
+        # Check if client is available (using new SDK-based client)
+        if not hasattr(self, 'claude_client') or not self.claude_client:
+            # Fallback to legacy claude_analyzer
+            if not self.claude_analyzer:
+                return True, "Claude filtering disabled", None
+
+        # Skip Claude validation in backtest if configured
+        if self.backtest_mode and not getattr(config, 'CLAUDE_VALIDATE_IN_BACKTEST', False):
+            self.logger.debug("⏭️ Skipping Claude validation in backtest mode")
+            return True, "Claude validation skipped (backtest mode)", None
+
+        # Get fail-secure setting (default to True for trade safety)
+        fail_secure = getattr(config, 'CLAUDE_FAIL_SECURE', True)
+
         try:
             self.validation_stats['claude_analyzed'] += 1
-            
-            # Perform Claude analysis
-            claude_result = self.claude_analyzer.analyze_signal_minimal(signal, save_to_file=False)
-            
-            if not claude_result:
-                self.validation_stats['failed_claude_error'] += 1
-                self.logger.warning(f"⚠️ Claude analysis failed for {signal.get('epic', 'Unknown')}")
-                
-                # CONFIGURABLE: Fail safe vs fail secure
-                fail_secure = getattr(config, 'CLAUDE_FAIL_SECURE', False)
-                if fail_secure:
-                    return False, "Claude analysis failed (fail-secure mode)", None
+            epic = signal.get('epic', 'Unknown')
+
+            # Generate chart for vision analysis if available
+            chart_base64 = None
+            if hasattr(self, 'chart_generator') and self.chart_generator and candles:
+                try:
+                    chart_base64 = self.chart_generator.generate_signal_chart(
+                        epic=epic,
+                        candles=candles,
+                        signal=signal
+                    )
+                    if chart_base64:
+                        self.logger.debug(f"📊 Generated chart for {epic} ({len(chart_base64)} bytes)")
+                except Exception as chart_err:
+                    self.logger.warning(f"⚠️ Chart generation failed: {chart_err}")
+                    # Continue without chart - text-only analysis
+
+            # Build prompt (vision-enabled if chart available)
+            has_chart = chart_base64 is not None
+            prompt = self.prompt_builder.build_forex_vision_prompt(signal, has_chart=has_chart)
+
+            # Call Claude API (with or without image)
+            if has_chart and hasattr(self, 'claude_client'):
+                # Vision API call
+                api_result = self.claude_client.call_api_with_image(
+                    prompt=prompt,
+                    image_base64=chart_base64,
+                    max_tokens=400
+                )
+            else:
+                # Text-only API call
+                if hasattr(self, 'claude_client') and self.claude_client:
+                    content = self.claude_client.call_api(prompt, max_tokens=400)
+                    api_result = {'content': content, 'tokens': 0} if content else None
                 else:
-                    return True, "Claude analysis failed (allowing signal)", None
-            
-            # Check Claude approval
-            approved = claude_result.get('approved', False)
-            score = claude_result.get('score', 0)
-            decision = claude_result.get('decision', 'UNKNOWN')
-            reason = claude_result.get('reason', 'No reason provided')
-            
-            self.logger.debug(f"🤖 Claude analysis: {signal.get('epic', 'Unknown')} - Score: {score}/10, Decision: {decision}, Approved: {approved}")
-            
-            # Validate Claude approval
-            if not approved:
-                self.validation_stats['failed_claude_rejection'] += 1
-                return False, f"Claude rejected: {reason}", claude_result
-            
-            # Validate Claude score
-            if score < self.min_claude_score:
-                self.validation_stats['failed_claude_score'] += 1
-                return False, f"Claude score too low: {score}/{self.min_claude_score}", claude_result
-            
-            # Signal passed Claude validation
-            self.validation_stats['claude_approved'] += 1
-            return True, f"Claude approved (Score: {score}/10)", claude_result
-            
+                    # Legacy fallback
+                    claude_result = self.claude_analyzer.analyze_signal_minimal(signal, save_to_file=False)
+                    if claude_result:
+                        return self._process_claude_result(signal, claude_result, fail_secure)
+                    api_result = None
+
+            # Handle API failure
+            if not api_result or not api_result.get('content'):
+                self.validation_stats['failed_claude_error'] += 1
+                self.logger.warning(f"⚠️ Claude API call failed for {epic}")
+
+                if fail_secure:
+                    return False, "Claude API error - blocking trade (fail-secure mode)", {'error': 'api_failure'}
+                else:
+                    return True, "Claude API error (allowing signal)", None
+
+            # Parse Claude response
+            response_content = api_result.get('content', '')
+            claude_result = self.response_parser.parse_minimal_response(response_content)
+
+            # Add raw response and token usage
+            claude_result['raw_response'] = response_content
+            claude_result['tokens_used'] = api_result.get('tokens', 0)
+            claude_result['has_chart'] = has_chart
+
+            return self._process_claude_result(signal, claude_result, fail_secure)
+
         except Exception as e:
             self.validation_stats['failed_claude_error'] += 1
             self.logger.error(f"❌ Claude validation error: {e}")
-            
-            # CONFIGURABLE: Fail safe vs fail secure
-            fail_secure = getattr(config, 'CLAUDE_FAIL_SECURE', False)
+            import traceback
+            self.logger.debug(traceback.format_exc())
+
             if fail_secure:
-                return False, f"Claude validation error (fail-secure mode): {str(e)}", None
+                return False, f"Claude validation error - blocking trade: {str(e)}", {'error': str(e)}
             else:
                 return True, f"Claude validation error (allowing signal): {str(e)}", None
+
+    def _process_claude_result(self, signal: Dict, claude_result: Dict, fail_secure: bool) -> Tuple[bool, str, Dict]:
+        """Process Claude analysis result and determine approval status"""
+        epic = signal.get('epic', 'Unknown')
+
+        # Extract result fields
+        approved = claude_result.get('approved', False)
+        score = claude_result.get('score', 0)
+        decision = claude_result.get('decision', 'UNKNOWN')
+        reason = claude_result.get('reason', 'No reason provided')
+
+        self.logger.info(f"🤖 Claude analysis: {epic} - Score: {score}/10, Decision: {decision}")
+
+        # Check explicit rejection
+        if decision == 'REJECT' or not approved:
+            self.validation_stats['failed_claude_rejection'] += 1
+            self.logger.info(f"🚫 Claude REJECTED {epic}: {reason}")
+            return False, f"Claude rejected: {reason}", claude_result
+
+        # Check score threshold
+        if score < self.min_claude_score:
+            self.validation_stats['failed_claude_score'] += 1
+            self.logger.info(f"🚫 Claude score too low for {epic}: {score}/{self.min_claude_score}")
+            return False, f"Claude score too low: {score}/{self.min_claude_score}", claude_result
+
+        # Signal passed Claude validation
+        self.validation_stats['claude_approved'] += 1
+        self.logger.info(f"✅ Claude APPROVED {epic} (Score: {score}/10)")
+        return True, f"Claude approved (Score: {score}/10)", claude_result
 
     def _save_claude_rejection(self, signal: Dict, claude_result: Dict):
         """Save Claude rejection for analysis (optional)"""

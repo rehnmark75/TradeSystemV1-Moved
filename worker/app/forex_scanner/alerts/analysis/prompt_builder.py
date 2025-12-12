@@ -580,6 +580,164 @@ SCORE: 5
 DECISION: NEUTRAL
 REASON: Analysis error - neutral assessment"""
 
+    def build_forex_vision_prompt(self, signal: Dict, has_chart: bool = True) -> str:
+        """
+        Build a vision-enabled prompt for SMC strategy analysis.
+
+        This prompt is designed to work with chart images for comprehensive
+        multi-timeframe analysis of forex signals.
+
+        Args:
+            signal: Signal dictionary with all trading data
+            has_chart: Whether a chart image will be included
+
+        Returns:
+            Formatted prompt string for Claude vision analysis
+        """
+        try:
+            # Extract signal data
+            epic = signal.get('epic', 'Unknown')
+            pair = self._extract_pair(epic)
+            direction = signal.get('signal_type', signal.get('signal', 'Unknown'))
+            confidence = signal.get('confidence_score', 0)
+            strategy = signal.get('strategy', 'SMC_SIMPLE')
+
+            # Price levels
+            entry_price = signal.get('entry_price', signal.get('price', 0))
+            stop_loss = signal.get('stop_loss', 0)
+            take_profit = signal.get('take_profit', 0)
+
+            # Risk metrics
+            risk_pips = signal.get('risk_pips', 0)
+            reward_pips = signal.get('reward_pips', 0)
+            rr_ratio = signal.get('rr_ratio', 0)
+
+            # SMC-specific data
+            entry_type = signal.get('entry_type', 'PULLBACK')  # PULLBACK or MOMENTUM
+            swing_level = signal.get('swing_level', 0)
+            opposite_swing = signal.get('opposite_swing', 0)
+            pullback_depth = signal.get('pullback_depth', 0)
+            ema_value = signal.get('ema_value', 0)
+            ema_distance = signal.get('ema_distance_pips', 0)
+            in_optimal_zone = signal.get('in_optimal_zone', False)
+            volume_confirmed = signal.get('volume_confirmed', False)
+
+            # Build chart analysis instructions
+            chart_instruction = ""
+            if has_chart:
+                chart_instruction = """
+## CHART ANALYSIS (CRITICAL - EXAMINE CAREFULLY)
+
+The attached chart shows multi-timeframe forex analysis with the following elements:
+
+**Timeframes Displayed:**
+- 4H timeframe: Shows 50 EMA trend bias (purple line)
+- 15m timeframe: Shows swing break confirmation
+- 5m timeframe: Shows entry zone with Fibonacci levels
+
+**Key Visual Markers:**
+- GREEN dashed line: Entry price level
+- RED dashed line: Stop loss level (below opposite swing)
+- BLUE dashed line: Take profit target
+- YELLOW shaded zone: Fibonacci optimal entry zone (38.2%-61.8%)
+- ORANGE horizontal lines: Swing high levels
+- BLUE horizontal lines: Swing low levels
+
+**CRITICAL CHART ANALYSIS CHECKLIST:**
+1. ✓ Is price clearly respecting the 4H EMA trend direction?
+2. ✓ Is the swing break on 15m clean and confirmed (full candle close)?
+3. ✓ Is the entry within or near the optimal Fibonacci zone?
+4. ✓ Is stop loss placement below a valid structure low (for longs)?
+5. ✓ Does the price action show clean trend structure?
+6. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
+7. ✓ Is there sufficient distance to next resistance/support?
+"""
+
+            # Build SMC-specific analysis section
+            smc_analysis = f"""
+## SMC STRATEGY DATA (3-TIER VALIDATION)
+
+**TIER 1 - 4H Directional Bias:**
+- 50 EMA Value: {self._format_price(ema_value)}
+- Distance from EMA: {ema_distance:.1f} pips
+- Bias Direction: {direction}
+
+**TIER 2 - 15m Swing Break:**
+- Swing Level Broken: {self._format_price(swing_level)}
+- Opposite Swing (SL reference): {self._format_price(opposite_swing)}
+- Volume Confirmed: {'✅ Yes' if volume_confirmed else '❌ No'}
+
+**TIER 3 - 5m Entry Zone:**
+- Entry Type: {entry_type}
+- Pullback Depth: {pullback_depth:.1%}
+- In Optimal Zone (38.2%-61.8%): {'✅ Yes' if in_optimal_zone else '❌ No'}
+"""
+
+            # Build the complete prompt
+            prompt = f"""You are a SENIOR FOREX TECHNICAL ANALYST with 20+ years of institutional trading experience specializing in Smart Money Concepts (SMC) analysis.
+
+**YOUR ROLE:** Validate this forex trade signal with the expertise of a professional bank trader. Your decision directly impacts real capital allocation.
+
+═══════════════════════════════════════════════════════════════
+📊 SIGNAL OVERVIEW
+═══════════════════════════════════════════════════════════════
+• Pair: {pair}
+• Direction: {direction}
+• Strategy: {strategy}
+• System Confidence: {confidence:.1%}
+• Entry Type: {entry_type}
+
+═══════════════════════════════════════════════════════════════
+💰 TRADE LEVELS
+═══════════════════════════════════════════════════════════════
+• Entry Price: {self._format_price(entry_price)}
+• Stop Loss: {self._format_price(stop_loss)} ({risk_pips:.1f} pips risk)
+• Take Profit: {self._format_price(take_profit)} ({reward_pips:.1f} pips reward)
+• Risk:Reward Ratio: {rr_ratio:.2f}:1
+{chart_instruction}
+{smc_analysis}
+═══════════════════════════════════════════════════════════════
+📋 REQUIRED RESPONSE FORMAT
+═══════════════════════════════════════════════════════════════
+
+Analyze the signal (and chart if provided) then respond with EXACTLY these three lines:
+
+SCORE: [1-10]
+DECISION: [APPROVE/REJECT]
+REASON: [2-3 sentences explaining your professional assessment. Focus on: trend alignment, entry quality, R:R ratio, and any visual concerns from the chart]
+
+**SCORING GUIDELINES:**
+- 8-10: Strong setup, clear trend, optimal entry, good R:R
+- 6-7: Acceptable setup with minor concerns
+- 4-5: Marginal setup, consider passing
+- 1-3: Poor setup, clear rejection reasons
+
+**AUTOMATIC REJECTION CRITERIA:**
+- Counter-trend trades without strong reversal confirmation
+- R:R ratio below 1.5
+- Entry outside acceptable pullback zone
+- Insufficient distance from EMA (under 10 pips)
+- Obvious resistance/support blocking target
+
+Be concise but thorough. Your assessment determines if real money is risked."""
+
+            return prompt
+
+        except Exception as e:
+            self.logger.error(f"Error building vision prompt: {e}")
+            return self._build_fallback_prompt(signal, {})
+
+    def _extract_pair(self, epic: str) -> str:
+        """Extract currency pair from epic string"""
+        try:
+            # Format: CS.D.EURUSD.MINI.IP -> EURUSD
+            parts = epic.split('.')
+            if len(parts) >= 3:
+                return parts[2]
+            return epic
+        except Exception:
+            return epic
+
 
 # Factory function for easy integration (backwards compatible)
 def create_prompt_builder() -> PromptBuilder:

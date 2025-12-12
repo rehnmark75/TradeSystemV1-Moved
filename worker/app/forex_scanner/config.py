@@ -742,8 +742,8 @@ HEARTBEAT_DB_CHECK = True              # Enable DB health check in heartbeat
 
 # Enhanced Trading Configuration
 # MIN_CONFIDENCE_FOR_TRADING removed - use MIN_CONFIDENCE_FOR_ORDERS instead
-REQUIRE_CLAUDE_APPROVAL = False     # Require Claude to approve trades
-MIN_CLAUDE_QUALITY_SCORE = 6       # Minimum Claude score (1-10)
+# NOTE: REQUIRE_CLAUDE_APPROVAL and MIN_CLAUDE_QUALITY_SCORE moved to
+# "CLAUDE TRADE VALIDATION - FAIL SECURE MODE" section below (line ~1590)
 CLAUDE_MIN_CONFIDENCE_THRESHOLD = 0.8  # 80%+ confidence only
 MAX_SIGNALS_PER_DAY = 20           # Daily signal limit
 SIGNAL_COOLDOWN_MINUTES = 15       # Cooldown between signals per pair
@@ -854,9 +854,9 @@ DEDUPLICATION_RELAXED = {
 # Set the active deduplication preset
 DEDUPLICATION_PRESET = 'standard'  # Options: 'strict', 'standard', 'relaxed'
 
-# Claude Analysis Settings
+# Claude Analysis Settings (legacy - see CLAUDE TRADE VALIDATION section for main settings)
 CLAUDE_MIN_SCORE_THRESHOLD = 6
-MIN_CLAUDE_QUALITY_SCORE = 5
+# MIN_CLAUDE_QUALITY_SCORE moved to CLAUDE TRADE VALIDATION section
 
 # Add these configuration settings to your config.py file
 
@@ -1582,8 +1582,35 @@ LARGE_CANDLE_FILTER_PRESETS = {
 USE_ADVANCED_CLAUDE_PROMPTS = True  # Enable institutional-grade analysis
 CLAUDE_ANALYSIS_LEVEL = 'prop_trader'  # or 'hedge_fund', 'prop_trader', 'risk_manager'
 
-CLAUDE_FAIL_SECURE = False         # True: reject on Claude errors, False: allow on errors
-SAVE_CLAUDE_REJECTIONS = True      # Save rejected signals for analysis
+# =============================================================================
+# CLAUDE TRADE VALIDATION - FAIL SECURE MODE
+# =============================================================================
+# These settings control Claude AI trade validation behavior
+
+# Master switches
+REQUIRE_CLAUDE_APPROVAL = False         # Enable Claude validation (set True for production)
+CLAUDE_FAIL_SECURE = True               # CRITICAL: Block trades on ANY Claude error (fail-secure)
+
+# Model configuration
+CLAUDE_MODEL = 'sonnet'                 # Options: 'haiku', 'sonnet', 'sonnet-old', 'opus'
+
+# Vision analysis (chart-based)
+CLAUDE_INCLUDE_CHART = True             # Send chart image for vision analysis
+CLAUDE_CHART_TIMEFRAMES = ['4h', '1h', '15m']  # Timeframes to include in chart
+
+# Quality thresholds
+MIN_CLAUDE_QUALITY_SCORE = 6            # Minimum Claude score (1-10) to approve trade
+
+# Rejection logging
+SAVE_CLAUDE_REJECTIONS = True           # Log rejected signals to alert_history table
+
+# Backtest mode behavior
+CLAUDE_VALIDATE_IN_BACKTEST = False     # Skip Claude validation in backtest mode (saves API calls)
+
+# Rate limiting (built into API client, these are informational)
+CLAUDE_MAX_REQUESTS_PER_MINUTE = 50
+CLAUDE_MAX_REQUESTS_PER_DAY = 1000
+CLAUDE_MIN_CALL_INTERVAL = 1.2          # Seconds between API calls
 
 # Multi-Timeframe Analysis Configuration
 ENABLE_MTF_ANALYSIS = True  # Enable/disable MTF analysis
