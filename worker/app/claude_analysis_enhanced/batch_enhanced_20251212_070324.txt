@@ -1,0 +1,8 @@
+Claude Enhanced Batch Analysis
+Generated: 2025-12-12 07:03:24
+Total Signals: 2
+Technical Validation Passed: 2 (100.0%)
+Claude Approved: 0 (0.0%)
+Average Score: 3.0/10
+
+ 1. ✅ CS.D.EURUSD.CEEM.IP  BULL 
