@@ -20,6 +20,7 @@ AlphaSuite-adapted strategies:
 - SellingClimaxScanner: Capitulation bottoming with volume spike and reversal
 - RSIDivergenceScanner: Price/RSI divergence for reversal detection
 - WyckoffSpringScanner: Accumulation spring with support test
+- TrendReversalScanner: Downtrend-to-uptrend reversals with multi-day confirmation
 """
 
 from .trend_momentum import TrendMomentumScanner
@@ -40,6 +41,7 @@ from .macd_momentum import MACDMomentumScanner
 from .selling_climax import SellingClimaxScanner
 from .rsi_divergence import RSIDivergenceScanner
 from .wyckoff_spring import WyckoffSpringScanner
+from .trend_reversal import TrendReversalScanner
 
 __all__ = [
     'TrendMomentumScanner',
@@ -58,4 +60,5 @@ __all__ = [
     'SellingClimaxScanner',
     'RSIDivergenceScanner',
     'WyckoffSpringScanner',
+    'TrendReversalScanner',
 ]

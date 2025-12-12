@@ -35,6 +35,7 @@ from .strategies import (
     SellingClimaxScanner,
     RSIDivergenceScanner,
     WyckoffSpringScanner,
+    TrendReversalScanner,
 )
 
 # Claude analysis imports (lazy load to avoid circular imports)
@@ -101,6 +102,7 @@ class ScannerManager:
         'selling_climax': SellingClimaxScanner,
         'rsi_divergence': RSIDivergenceScanner,
         'wyckoff_spring': WyckoffSpringScanner,
+        'trend_reversal': TrendReversalScanner,
     }
 
     def __init__(
