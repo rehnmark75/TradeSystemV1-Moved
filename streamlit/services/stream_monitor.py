@@ -8,62 +8,37 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 import logging
+
+# Import centralized database utilities
+from services.db_utils import get_sqlalchemy_engine
 
 logger = logging.getLogger(__name__)
 
 class StreamMonitor:
     """Monitor streaming services and database health"""
-    
+
     def __init__(self):
         self.stream_api_base = "http://fastapi-stream:8000"  # Internal Docker port
-        self.main_api_base = "http://fastapi-dev:8000"       # Internal Docker port  
+        self.main_api_base = "http://fastapi-dev:8000"       # Internal Docker port
         self.db_engine = None
         self._init_database()
-    
+
     def _init_database(self):
-        """Initialize database connection"""
+        """Initialize database connection using shared connection pool."""
         try:
-            # Try to get connection string from Streamlit secrets
-            # Use trading_connection_string for candle data access
-            conn_str = None
-            if hasattr(st.secrets, 'database') and hasattr(st.secrets.database, 'trading_connection_string'):
-                conn_str = st.secrets.database.trading_connection_string
-                logger.info("Using database.trading_connection_string from secrets")
-            elif hasattr(st.secrets, 'database') and hasattr(st.secrets.database, 'config_connection_string'):
-                conn_str = st.secrets.database.config_connection_string
-                logger.info("Using database.config_connection_string from secrets")
-            elif hasattr(st.secrets, 'connection_string'):
-                conn_str = st.secrets.connection_string
-                logger.info("Using connection_string from secrets")
-            else:
-                logger.warning("No database configuration found in secrets")
-                return False
-            
-            # Log connection details (without password)
-            if conn_str:
-                # Hide password in logs
-                safe_conn_str = conn_str
-                if '@' in conn_str and ':' in conn_str:
-                    parts = conn_str.split('@')
-                    if len(parts) == 2:
-                        user_pass = parts[0].split('//')[-1]
-                        if ':' in user_pass:
-                            user = user_pass.split(':')[0]
-                            safe_conn_str = conn_str.replace(user_pass, f"{user}:***")
-                logger.info(f"Database connection string: {safe_conn_str}")
-            
-            self.db_engine = create_engine(conn_str)
-            
+            # Use centralized cached engine with connection pooling
+            self.db_engine = get_sqlalchemy_engine("trading")
+
             # Test the connection and log which database we're connected to
             with self.db_engine.connect() as test_conn:
                 db_name = test_conn.execute(text("SELECT current_database()")).fetchone()[0]
-                logger.info(f"Successfully connected to database: {db_name}")
-            
+                logger.info(f"StreamMonitor connected to database: {db_name}")
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
             return False

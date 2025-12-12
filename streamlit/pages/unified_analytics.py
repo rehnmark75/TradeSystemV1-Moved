@@ -16,6 +16,9 @@ import logging
 from dataclasses import dataclass
 import os
 
+# Import centralized database utilities for connection pooling
+from services.db_utils import DatabaseContextManager, get_connection_string
+
 # Configure page
 st.set_page_config(
     page_title="Trading Analytics Hub",
@@ -101,26 +104,7 @@ class UnifiedTradingDashboard:
     """Unified Trading Analytics Dashboard"""
 
     def __init__(self):
-        self.setup_database_connection()
         self.initialize_session_state()
-
-    def setup_database_connection(self):
-        """Setup database connection"""
-        try:
-            # Try Streamlit secrets first, then environment
-            if hasattr(st, 'secrets') and 'database' in st.secrets:
-                try:
-                    self.conn_string = st.secrets.database.trading_connection_string
-                except (AttributeError, KeyError):
-                    try:
-                        self.conn_string = st.secrets.database.config_connection_string
-                    except (AttributeError, KeyError):
-                        self.conn_string = st.secrets.database.connection_string
-            else:
-                self.conn_string = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/forex")
-        except Exception as e:
-            st.error(f"Database configuration error: {e}")
-            self.conn_string = None
 
     def initialize_session_state(self):
         """Initialize Streamlit session state"""
@@ -133,21 +117,20 @@ class UnifiedTradingDashboard:
         if 'active_tab' not in st.session_state:
             st.session_state.active_tab = "Overview"
 
-    def get_database_connection(self):
-        """Get database connection"""
-        if not self.conn_string:
-            try:
-                self.conn_string = st.secrets.database.trading_connection_string
-            except (AttributeError, KeyError):
-                try:
-                    self.conn_string = st.secrets.database.config_connection_string
-                except (AttributeError, KeyError):
-                    self.conn_string = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/forex")
+    def get_database_context(self):
+        """Get database connection context manager using pooled connections."""
+        return DatabaseContextManager("trading")
 
-        if not self.conn_string:
-            return None
+    def get_database_connection(self):
+        """
+        Get database connection from the connection pool.
+
+        Note: The returned connection should be closed when done to return it to the pool.
+        Prefer using get_database_context() for automatic connection management.
+        """
         try:
-            return psycopg2.connect(self.conn_string)
+            from services.db_utils import get_psycopg2_connection
+            return get_psycopg2_connection("trading")
         except Exception as e:
             st.error(f"Database connection failed: {e}")
             return None

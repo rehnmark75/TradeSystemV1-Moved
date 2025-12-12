@@ -164,7 +164,7 @@ services:
       - SYSTEM_MONITOR_URL=http://system-monitor:8095
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-d4thb4pr01qnn6lkv89gd4thb4pr01qnn6lkv8a0}
     volumes:
-      - ./streamlit:/app
+      - ./streamlit:/app:cached
       - ./logs:/logs:ro  # Read-only for safety
     working_dir: /app
     networks:

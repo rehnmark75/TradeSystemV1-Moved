@@ -29,14 +29,26 @@ except ImportError as e:
 try:
     from stream_monitor import StreamMonitor
     MONITOR_AVAILABLE = True
-    # Initialize the monitor
-    stream_monitor = StreamMonitor()
 except ImportError as e:
     MONITOR_AVAILABLE = False
-    stream_monitor = None
 except Exception as e:
     MONITOR_AVAILABLE = False
-    stream_monitor = None
+
+# Lazy initialization of StreamMonitor using cached singleton
+@st.cache_resource
+def get_stream_monitor():
+    """Get cached StreamMonitor singleton - avoids creating DB connection on every page load."""
+    if not MONITOR_AVAILABLE:
+        return None
+    try:
+        return StreamMonitor()
+    except Exception as e:
+        st.warning(f"StreamMonitor initialization failed: {e}")
+        return None
+
+def get_monitor():
+    """Helper to get the stream monitor instance."""
+    return get_stream_monitor()
 
 # Configuration
 STREAM_API_BASE = "http://fastapi-stream:8000"  # Docker service name with internal port
@@ -1851,11 +1863,12 @@ def render_stream_database_health():
     """Render database health section"""
     st.header("🗄️ Database Health")
 
-    if not MONITOR_AVAILABLE or not stream_monitor:
+    monitor = get_monitor()
+    if not MONITOR_AVAILABLE or not monitor:
         st.warning("⚠️ Stream monitor not available - using API-only mode")
         return
 
-    db_health = stream_monitor.get_database_health()
+    db_health = monitor.get_database_health()
 
     if "error" in db_health:
         st.error(f"❌ Database Error: {db_health['error']}")
@@ -1940,8 +1953,9 @@ def render_stream_candle_health():
         status_text.text(f"Checking {epic}...")
 
         # Get latest candle from database if monitor is available, otherwise use API
-        if MONITOR_AVAILABLE and stream_monitor:
-            db_health = stream_monitor.get_candle_health_from_db(epic, timeframe, hours_back=1)
+        monitor = get_monitor()
+        if MONITOR_AVAILABLE and monitor:
+            db_health = monitor.get_candle_health_from_db(epic, timeframe, hours_back=1)
             if "error" not in db_health and db_health.get("latest_candle"):
                 latest_candle = db_health["latest_candle"]
             else:
@@ -2183,7 +2197,8 @@ def render_detailed_gap_analysis(timeframe: int):
             for epic in selected_epics:
                 st.subheader(f"📊 {epic.replace('CS.D.', '').replace('.MINI.IP', '')}")
 
-                gaps_data = stream_monitor.get_data_gaps_from_db(epic, timeframe, hours_back)
+                monitor = get_monitor()
+                gaps_data = monitor.get_data_gaps_from_db(epic, timeframe, hours_back) if monitor else {"error": "Monitor not available"}
 
                 if "error" in gaps_data:
                     st.error(f"Error analyzing {epic}: {gaps_data['error']}")

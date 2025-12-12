@@ -52,9 +52,26 @@ def robust_clean_candle_data(df: pd.DataFrame) -> pd.DataFrame:
     df.reset_index(drop=True, inplace=True)
     return df
 
-# Database connection
-engine = create_engine(os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/forex"))
-epics = get_epics(engine)
+# Database connection - cached singleton with connection pooling
+@st.cache_resource
+def get_database_engine():
+    """Get cached database engine singleton with connection pooling."""
+    return create_engine(
+        os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/forex"),
+        pool_size=5,
+        max_overflow=10,
+        pool_pre_ping=True,
+        pool_recycle=3600
+    )
+
+@st.cache_data(ttl=300)
+def get_cached_epics(_engine):
+    """Get epics list with 5-minute caching."""
+    return get_epics(_engine)
+
+# Initialize using cached functions (no longer runs on every page import)
+engine = get_database_engine()
+epics = get_cached_epics(engine)
 
 # Sidebar controls
 st.sidebar.header("Chart Settings")
