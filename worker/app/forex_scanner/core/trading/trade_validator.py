@@ -2159,10 +2159,13 @@ class TradeValidator:
                         regime_modifiers = REGIME_STRATEGY_CONFIDENCE_MODIFIERS.get(dominant_regime, {})
 
                         # Find the best matching confidence modifier for this strategy
+                        # Sort by key length (longest first) to prefer more specific matches
+                        # e.g., 'ema_double' should match before 'ema'
                         confidence_modifier = None
-                        for strategy_key, modifier in regime_modifiers.items():
+                        sorted_keys = sorted(regime_modifiers.keys(), key=len, reverse=True)
+                        for strategy_key in sorted_keys:
                             if strategy_key in current_strategy_lower or current_strategy_lower in strategy_key:
-                                confidence_modifier = modifier
+                                confidence_modifier = regime_modifiers[strategy_key]
                                 break
 
                         # If no specific modifier found, use a conservative default
@@ -2212,14 +2215,14 @@ class TradeValidator:
 
                         # Legacy binary compatibility matrix (kept as fallback)
                         regime_strategy_compatibility = {
-                            'trending': ['ichimoku', 'ema', 'macd', 'kama', 'smart_money_ema', 'smart_money_macd', 'bb_supertrend'],
+                            'trending': ['ichimoku', 'ema', 'ema_double', 'macd', 'kama', 'smart_money_ema', 'smart_money_macd', 'bb_supertrend'],
                             'ranging': ['mean_reversion', 'bollinger', 'stochastic', 'ranging_market', 'smc', 'macd'],
-                            'breakout': ['bollinger', 'kama', 'momentum', 'momentum_bias', 'bb_supertrend', 'macd'],
+                            'breakout': ['bollinger', 'kama', 'momentum', 'momentum_bias', 'bb_supertrend', 'macd', 'ema_double'],
                             'consolidation': ['mean_reversion', 'stochastic', 'ranging_market', 'smc', 'macd'],
                             'scalping': ['scalping', 'zero_lag', 'momentum_bias'],
-                            'high_volatility': ['macd', 'zero_lag_squeeze', 'zero_lag', 'momentum', 'kama', 'ema', 'momentum_bias', 'bb_supertrend'],
-                            'low_volatility': ['mean_reversion', 'bollinger', 'stochastic', 'ema', 'ranging_market', 'smc', 'macd'],
-                            'medium_volatility': ['ichimoku', 'ema', 'macd', 'kama', 'zero_lag_squeeze', 'zero_lag', 'smart_money_ema', 'smart_money_macd']
+                            'high_volatility': ['macd', 'zero_lag_squeeze', 'zero_lag', 'momentum', 'kama', 'ema', 'ema_double', 'momentum_bias', 'bb_supertrend'],
+                            'low_volatility': ['mean_reversion', 'bollinger', 'stochastic', 'ema', 'ema_double', 'ranging_market', 'smc', 'macd'],
+                            'medium_volatility': ['ichimoku', 'ema', 'ema_double', 'macd', 'kama', 'zero_lag_squeeze', 'zero_lag', 'smart_money_ema', 'smart_money_macd']
                         }
 
                         current_strategy_lower = strategy.lower()
