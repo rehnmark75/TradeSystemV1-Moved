@@ -310,6 +310,24 @@ class SignalDetector:
             self.ema_double_confirmation_strategy = None
             self.logger.info("⚪ EMA Double Confirmation strategy disabled")
 
+        # Initialize Master Pattern (ICT Power of 3 / AMD) Strategy if enabled
+        if getattr(system_config, 'MASTER_PATTERN_STRATEGY', False):
+            try:
+                from .strategies.master_pattern_strategy import MasterPatternStrategy
+                self.master_pattern_strategy = MasterPatternStrategy(
+                    data_fetcher=self.data_fetcher
+                )
+                self.logger.info("✅ Master Pattern (ICT Power of 3) strategy initialized")
+            except ImportError as e:
+                self.logger.error(f"❌ Failed to import Master Pattern strategy: {e}")
+                self.master_pattern_strategy = None
+            except Exception as e:
+                self.logger.error(f"❌ Failed to initialize Master Pattern strategy: {e}")
+                self.master_pattern_strategy = None
+        else:
+            self.master_pattern_strategy = None
+            self.logger.info("⚪ Master Pattern strategy disabled")
+
         # Initialize analysis components
         self.backtest_engine = BacktestEngine(self.data_fetcher)
         self.performance_analyzer = PerformanceAnalyzer()
@@ -1324,6 +1342,25 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [EMA_DOUBLE] Error for {epic}: {e}")
                     individual_results['ema_double_confirmation'] = None
+
+            # 15. Master Pattern (ICT Power of 3 / AMD) Strategy (if enabled)
+            if getattr(system_config, 'MASTER_PATTERN_STRATEGY', False) and self.master_pattern_strategy:
+                try:
+                    self.logger.debug(f"🔍 [MASTER_PATTERN] Starting detection for {epic}")
+                    master_pattern_signal = self.detect_master_pattern_signals(epic, pair, spread_pips, timeframe)
+
+                    # Store result
+                    individual_results['master_pattern'] = master_pattern_signal
+
+                    if master_pattern_signal:
+                        all_signals.append(master_pattern_signal)
+                        self.logger.info(f"✅ [MASTER_PATTERN] Signal detected for {epic}: {master_pattern_signal.get('signal_type')} @ {master_pattern_signal.get('price', 0):.5f}")
+                    else:
+                        self.logger.debug(f"📊 [MASTER_PATTERN] No signal for {epic}")
+
+                except Exception as e:
+                    self.logger.error(f"❌ [MASTER_PATTERN] Error for {epic}: {e}")
+                    individual_results['master_pattern'] = None
 
             # ========== COMBINED STRATEGY REMOVED ==========
             # Combined strategy was disabled and unused, removed to clean up codebase
@@ -2566,6 +2603,82 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"Error detecting EMA Double Confirmation signals for {epic}: {e}")
+            import traceback
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
+
+    def detect_master_pattern_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '15m'
+    ) -> Optional[Dict]:
+        """
+        Detect Master Pattern (ICT Power of 3 / AMD) signals.
+
+        Strategy Logic (Session-based):
+        1. ACCUMULATION: Detect Asian session consolidation (00:00-08:00 UTC)
+        2. MANIPULATION: Detect Judas swing/liquidity sweep (08:00-10:00 UTC)
+        3. DISTRIBUTION: Enter on structure shift + FVG pullback
+
+        Args:
+            epic: Epic code
+            pair: Currency pair
+            spread_pips: Spread in pips
+            timeframe: Timeframe (default: 15m)
+
+        Returns:
+            Master Pattern signal or None
+        """
+        # Check if strategy is enabled
+        if not self.master_pattern_strategy:
+            self.logger.debug("Master Pattern strategy not initialized")
+            return None
+
+        try:
+            # Get multi-timeframe data for AMD pattern
+            # Need 12+ hours for Asian session + buffer
+            df_5m = self.data_fetcher.get_enhanced_data(
+                epic, pair,
+                timeframe='5m',
+                lookback_hours=16,  # Asian session (8h) + London (4h) + buffer
+                ema_strategy=self.ema_strategy if hasattr(self, 'ema_strategy') else None
+            )
+
+            df_15m = self.data_fetcher.get_enhanced_data(
+                epic, pair,
+                timeframe='15m',
+                lookback_hours=24,  # Full day for structure analysis
+                ema_strategy=self.ema_strategy if hasattr(self, 'ema_strategy') else None
+            )
+
+            if df_5m is None or len(df_5m) < 50:
+                self.logger.debug(f"Insufficient 5m data for Master Pattern: {len(df_5m) if df_5m is not None else 0} bars")
+                return None
+
+            if df_15m is None or len(df_15m) < 30:
+                self.logger.debug(f"Insufficient 15m data for Master Pattern: {len(df_15m) if df_15m is not None else 0} bars")
+                return None
+
+            # Detect signal using multi-timeframe approach
+            signal = self.master_pattern_strategy.detect_signal_multi_timeframe(
+                df_5m=df_5m,
+                df_15m=df_15m,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips
+            )
+
+            if signal:
+                # Add market context
+                signal = self._add_market_context(signal, df_15m)
+                self.logger.info(f"✅ [MASTER_PATTERN] Signal for {epic}: {signal['signal_type']}")
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"Error detecting Master Pattern signals for {epic}: {e}")
             import traceback
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
             return None
