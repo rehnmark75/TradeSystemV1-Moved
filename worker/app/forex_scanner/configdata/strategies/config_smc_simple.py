@@ -201,6 +201,60 @@ PAIR_PIP_VALUES = {
     'CS.D.NZDUSD.MINI.IP': 0.0001,
     'CS.D.EURJPY.MINI.IP': 0.01,
     'CS.D.GBPJPY.MINI.IP': 0.01,
+    'CS.D.AUDJPY.MINI.IP': 0.01,
+}
+
+# ============================================================================
+# v1.9.0: PAIR-SPECIFIC SL BUFFERS
+# ============================================================================
+# Override default SL_BUFFER_PIPS for specific pairs based on volatility
+# Analysis from trades 1548-1554: USDCHF (9 pips) and JPY crosses need more room
+
+PAIR_SL_BUFFERS = {
+    # Low volatility / low liquidity pairs need MORE buffer
+    'USDCHF': 12,           # v1.9.0: Increase from 8 (low liquidity, wider spreads)
+    'CS.D.USDCHF.MINI.IP': 12,
+
+    # JPY crosses are volatile - need extra room
+    'AUDJPY': 15,           # v1.9.0: Increase from 8 (JPY cross volatility)
+    'CS.D.AUDJPY.MINI.IP': 15,
+    'EURJPY': 18,           # v1.9.0: Increase from 8 (highest volatility cross)
+    'CS.D.EURJPY.MINI.IP': 18,
+    'GBPJPY': 18,           # v1.9.0: High volatility
+    'CS.D.GBPJPY.MINI.IP': 18,
+    'USDJPY': 12,           # v1.9.0: Major JPY pair
+    'CS.D.USDJPY.MINI.IP': 12,
+
+    # Commodity currencies
+    'USDCAD': 10,           # v1.9.0: Slight increase (oil correlation volatility)
+    'CS.D.USDCAD.MINI.IP': 10,
+
+    # Cable
+    'GBPUSD': 10,           # v1.9.0: GBP volatility
+    'CS.D.GBPUSD.MINI.IP': 10,
+
+    # Default for majors (EURUSD, AUDUSD, NZDUSD) = SL_BUFFER_PIPS (8)
+}
+
+# ============================================================================
+# v1.9.0: PAIR-SPECIFIC CONFIDENCE FLOORS
+# ============================================================================
+# Higher confidence required for volatile / difficult pairs
+
+PAIR_MIN_CONFIDENCE = {
+    # Volatile JPY crosses need higher confidence
+    'EURJPY': 0.72,
+    'CS.D.EURJPY.MINI.IP': 0.72,
+    'GBPJPY': 0.72,
+    'CS.D.GBPJPY.MINI.IP': 0.72,
+    'AUDJPY': 0.70,
+    'CS.D.AUDJPY.MINI.IP': 0.70,
+
+    # Low liquidity pairs
+    'USDCHF': 0.70,
+    'CS.D.USDCHF.MINI.IP': 0.70,
+
+    # Default for others = MIN_CONFIDENCE_THRESHOLD (0.60)
 }
 
 # ============================================================================

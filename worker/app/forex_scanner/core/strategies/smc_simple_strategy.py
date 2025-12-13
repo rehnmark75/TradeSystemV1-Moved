@@ -152,6 +152,12 @@ class SMCSimpleStrategy:
         self.min_breakout_atr_ratio = getattr(smc_config, 'MIN_BREAKOUT_ATR_RATIO', 0.5)
         self.min_body_percentage = getattr(smc_config, 'MIN_BODY_PERCENTAGE', 0.60)
 
+        # v1.9.0: Pair-specific SL buffers and confidence floors
+        self.pair_sl_buffers = getattr(smc_config, 'PAIR_SL_BUFFERS', {})
+        self.pair_min_confidence = getattr(smc_config, 'PAIR_MIN_CONFIDENCE', {})
+        self.sl_atr_multiplier = getattr(smc_config, 'SL_ATR_MULTIPLIER', 1.2)
+        self.use_atr_stop = getattr(smc_config, 'USE_ATR_STOP', True)
+
         # Debug
         self.debug_logging = getattr(smc_config, 'ENABLE_DEBUG_LOGGING', True)
 
@@ -308,14 +314,30 @@ class SMCSimpleStrategy:
             # ================================================================
             self.logger.info(f"\n🛑 STEP 4: Calculating SL/TP")
 
+            # v1.9.0: Get pair-specific SL buffer or use default
+            pair_sl_buffer = self.pair_sl_buffers.get(pair, self.pair_sl_buffers.get(epic, self.sl_buffer_pips))
+            buffer_sl_distance = pair_sl_buffer * pip_value
+
+            # v1.9.0: Calculate ATR-based SL distance if enabled
+            atr_sl_distance = 0
+            if self.use_atr_stop:
+                atr = self._calculate_atr(df_trigger)
+                if atr > 0:
+                    atr_sl_distance = atr * self.sl_atr_multiplier
+                    self.logger.info(f"   ATR: {atr:.5f}, ATR-based SL: {atr_sl_distance/pip_value:.1f} pips")
+
+            # v1.9.0: Use MAXIMUM of buffer OR ATR-based (whichever gives more room)
+            sl_distance = max(buffer_sl_distance, atr_sl_distance)
+            self.logger.info(f"   SL Distance: {sl_distance/pip_value:.1f} pips (buffer: {pair_sl_buffer}, ATR: {atr_sl_distance/pip_value:.1f})")
+
             # v1.7.0 FIX: Stop loss beyond OPPOSITE swing (not the broken swing)
             # For BULL: SL below the swing LOW (opposite_swing) - the level we DON'T want price to break
             # For BEAR: SL above the swing HIGH (opposite_swing) - the level we DON'T want price to break
             # Previous bug: Used swing_level (the breakout level) which gave unrealistic 0.6 pip stops
             if direction == 'BULL':
-                stop_loss = opposite_swing - (self.sl_buffer_pips * pip_value)
+                stop_loss = opposite_swing - sl_distance
             else:
-                stop_loss = opposite_swing + (self.sl_buffer_pips * pip_value)
+                stop_loss = opposite_swing + sl_distance
 
             risk_pips = abs(entry_price - stop_loss) / pip_value
 
@@ -362,11 +384,46 @@ class SMCSimpleStrategy:
                 confidence -= self.momentum_confidence_penalty
                 self.logger.info(f"   ⚠️  Momentum entry penalty: -{self.momentum_confidence_penalty*100:.0f}%")
 
-            if confidence < self.min_confidence:
-                self.logger.info(f"\n❌ Confidence too low: {confidence*100:.0f}% < {self.min_confidence*100:.0f}%")
+            # v1.9.0: Get pair-specific confidence floor or use default
+            pair_min_confidence = self.pair_min_confidence.get(pair, self.pair_min_confidence.get(epic, self.min_confidence))
+            if confidence < pair_min_confidence:
+                self.logger.info(f"\n❌ Confidence too low: {confidence*100:.0f}% < {pair_min_confidence*100:.0f}% (pair-specific)")
                 return None
 
             self.logger.info(f"\n📊 Confidence: {confidence*100:.0f}%")
+
+            # ================================================================
+            # STEP 6: Calculate Technical Indicators for Analytics
+            # ================================================================
+            # ATR for volatility context
+            atr = self._calculate_atr(df_trigger)
+
+            # Volume ratio (current volume vs SMA)
+            volume_ratio = 1.0
+            if 'volume' in df_trigger.columns or 'ltv' in df_trigger.columns:
+                vol_col = 'volume' if 'volume' in df_trigger.columns else 'ltv'
+                current_vol = df_trigger[vol_col].iloc[-1]
+                vol_sma = df_trigger[vol_col].iloc[-self.volume_sma_period:].mean()
+                if vol_sma > 0:
+                    volume_ratio = current_vol / vol_sma
+
+            # MACD indicators (if available in dataframe, otherwise calculate)
+            macd_line = 0.0
+            macd_signal = 0.0
+            macd_histogram = 0.0
+            if 'macd_line' in df_trigger.columns:
+                macd_line = float(df_trigger['macd_line'].iloc[-1]) if pd.notna(df_trigger['macd_line'].iloc[-1]) else 0.0
+                macd_signal = float(df_trigger['macd_signal'].iloc[-1]) if 'macd_signal' in df_trigger.columns and pd.notna(df_trigger['macd_signal'].iloc[-1]) else 0.0
+                macd_histogram = float(df_trigger['macd_histogram'].iloc[-1]) if 'macd_histogram' in df_trigger.columns and pd.notna(df_trigger['macd_histogram'].iloc[-1]) else 0.0
+            elif len(df_trigger) >= 26:
+                # Calculate MACD if not in dataframe
+                close = df_trigger['close']
+                ema_12 = close.ewm(span=12, adjust=False).mean()
+                ema_26 = close.ewm(span=26, adjust=False).mean()
+                macd_line = float(ema_12.iloc[-1] - ema_26.iloc[-1])
+                signal_line = (ema_12 - ema_26).ewm(span=9, adjust=False).mean()
+                macd_signal = float(signal_line.iloc[-1])
+                macd_histogram = macd_line - macd_signal
 
             # ================================================================
             # BUILD SIGNAL
@@ -401,6 +458,13 @@ class SMCSimpleStrategy:
                 'volume_confirmed': volume_confirmed,
                 'in_optimal_zone': in_optimal_zone,
                 'entry_type': entry_type,  # v1.8.0: PULLBACK or MOMENTUM
+
+                # Technical indicators for analytics (alert_history compatibility)
+                'atr': round(atr, 6) if atr else 0.0,
+                'volume_ratio': round(volume_ratio, 2),
+                'macd_line': round(macd_line, 6),
+                'macd_signal': round(macd_signal, 6),
+                'macd_histogram': round(macd_histogram, 6),
 
                 # Strategy indicators (for alert_history compatibility)
                 'strategy_indicators': {

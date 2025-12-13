@@ -371,7 +371,13 @@ async def get_trade_analysis(trade_id: int, db: Session = Depends(get_db)):
     sl_price = trade.sl_price or 0
     tp_price = trade.tp_price or 0
 
-    if "JPY" in trade.symbol:
+    # Determine multiplier based on epic type
+    # CEEM epics already have prices scaled (e.g., 11739.9 for EURUSD 1.17399)
+    # MINI epics have standard prices (e.g., 1.17399 for EURUSD)
+    if "CEEM" in trade.symbol:
+        # CEEM prices are already in points format, just need difference
+        multiplier = 1
+    elif "JPY" in trade.symbol:
         multiplier = 100
     else:
         multiplier = 10000
@@ -384,15 +390,20 @@ async def get_trade_analysis(trade_id: int, db: Session = Depends(get_db)):
         sl_distance = (entry_price - sl_price) * multiplier
         tp_distance = (entry_price - tp_price) * multiplier if tp_price else 0
 
+    # Normalize prices for display (CEEM prices need to be divided by 10000)
+    display_entry = entry_price / 10000 if "CEEM" in trade.symbol else entry_price
+    display_sl = sl_price / 10000 if "CEEM" in trade.symbol else sl_price
+    display_tp = tp_price / 10000 if "CEEM" in trade.symbol else tp_price
+
     # Build response
     response = {
         "trade_id": trade_id,
         "trade_details": {
             "symbol": trade.symbol,
             "direction": trade.direction,
-            "entry_price": entry_price,
-            "sl_price": sl_price,
-            "tp_price": tp_price,
+            "entry_price": display_entry,
+            "sl_price": display_sl,
+            "tp_price": display_tp,
             "status": trade.status,
             "deal_id": trade.deal_id,
             "ig_min_stop_distance": trade.min_stop_distance_points,

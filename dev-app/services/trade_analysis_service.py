@@ -19,8 +19,14 @@ from decimal import Decimal
 
 
 def get_pip_multiplier(symbol: str) -> int:
-    """Get pip multiplier based on currency pair"""
-    if symbol and 'JPY' in symbol.upper():
+    """Get pip multiplier based on currency pair/epic type"""
+    if not symbol:
+        return 10000
+    symbol_upper = symbol.upper()
+    # CEEM epics already have prices scaled (e.g., 11739.9 for EURUSD 1.17399)
+    if 'CEEM' in symbol_upper:
+        return 1
+    if 'JPY' in symbol_upper:
         return 100
     return 10000
 

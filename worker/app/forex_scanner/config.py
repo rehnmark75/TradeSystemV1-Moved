@@ -1588,7 +1588,7 @@ CLAUDE_ANALYSIS_LEVEL = 'prop_trader'  # or 'hedge_fund', 'prop_trader', 'risk_m
 # These settings control Claude AI trade validation behavior
 
 # Master switches
-REQUIRE_CLAUDE_APPROVAL = False         # Enable Claude validation (set True for production)
+REQUIRE_CLAUDE_APPROVAL = True          # Enable Claude validation (set True for production)
 CLAUDE_FAIL_SECURE = True               # CRITICAL: Block trades on ANY Claude error (fail-secure)
 
 # Model configuration

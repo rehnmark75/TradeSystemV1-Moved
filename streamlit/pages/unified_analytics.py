@@ -3445,7 +3445,7 @@ class UnifiedTradingDashboard:
             <div style='text-align: center; color: #666; font-size: 12px;'>
             Trading Analytics Hub v1.0 |
             Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M UTC")} |
-            Status: {'🟢 Online' if self.conn_string else '🔴 Offline'}
+            Status: {'🟢 Online' if self.get_database_connection() else '🔴 Offline'}
             </div>
             """,
             unsafe_allow_html=True
