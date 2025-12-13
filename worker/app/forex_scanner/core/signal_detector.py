@@ -292,6 +292,24 @@ class SignalDetector:
             self.volume_profile_strategy = None
             self.logger.info("⚪ Volume Profile strategy disabled")
 
+        # Initialize EMA Double Confirmation Strategy if enabled
+        if getattr(system_config, 'EMA_DOUBLE_CONFIRMATION_STRATEGY', False):
+            try:
+                from .strategies.ema_double_confirmation_strategy import EMADoubleConfirmationStrategy
+                self.ema_double_confirmation_strategy = EMADoubleConfirmationStrategy(
+                    data_fetcher=self.data_fetcher
+                )
+                self.logger.info("✅ EMA Double Confirmation strategy initialized (21/50 crossover with 2-confirm)")
+            except ImportError as e:
+                self.logger.error(f"❌ Failed to import EMA Double Confirmation strategy: {e}")
+                self.ema_double_confirmation_strategy = None
+            except Exception as e:
+                self.logger.error(f"❌ Failed to initialize EMA Double Confirmation strategy: {e}")
+                self.ema_double_confirmation_strategy = None
+        else:
+            self.ema_double_confirmation_strategy = None
+            self.logger.info("⚪ EMA Double Confirmation strategy disabled")
+
         # Initialize analysis components
         self.backtest_engine = BacktestEngine(self.data_fetcher)
         self.performance_analyzer = PerformanceAnalyzer()
@@ -1287,6 +1305,25 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [SMC SIMPLE] Error for {epic}: {e}")
                     individual_results['smc_simple'] = None
+
+            # 14. EMA Double Confirmation Strategy (if enabled) - 21/50 crossover with 2-confirm
+            if getattr(system_config, 'EMA_DOUBLE_CONFIRMATION_STRATEGY', False) and self.ema_double_confirmation_strategy:
+                try:
+                    self.logger.debug(f"🔍 [EMA_DOUBLE] Starting detection for {epic}")
+                    ema_double_signal = self.detect_ema_double_confirmation_signals(epic, pair, spread_pips, timeframe)
+
+                    # Store result for combined strategy
+                    individual_results['ema_double_confirmation'] = ema_double_signal
+
+                    if ema_double_signal:
+                        all_signals.append(ema_double_signal)
+                        self.logger.info(f"✅ [EMA_DOUBLE] Signal detected for {epic}: {ema_double_signal.get('signal_type')} @ {ema_double_signal.get('price', 0):.5f}")
+                    else:
+                        self.logger.debug(f"📊 [EMA_DOUBLE] No signal for {epic}")
+
+                except Exception as e:
+                    self.logger.error(f"❌ [EMA_DOUBLE] Error for {epic}: {e}")
+                    individual_results['ema_double_confirmation'] = None
 
             # ========== COMBINED STRATEGY REMOVED ==========
             # Combined strategy was disabled and unused, removed to clean up codebase
@@ -2468,6 +2505,70 @@ class SignalDetector:
         except Exception as e:
             self.logger.debug(f"Could not add Volume Profile context: {e}")
             return signal
+
+    def detect_ema_double_confirmation_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '15m'
+    ) -> Optional[Dict]:
+        """
+        Detect EMA Double Confirmation signals.
+
+        Strategy Logic:
+        1. Detect EMA 21/50 crossovers
+        2. Validate crossover "success" (price stays favorable for 4 candles)
+        3. After 2 successful crossovers in same direction within 48h,
+           take the 3rd crossover as entry signal
+
+        Args:
+            epic: Epic code
+            pair: Currency pair
+            spread_pips: Spread in pips
+            timeframe: Timeframe (default: 15m)
+
+        Returns:
+            EMA Double Confirmation signal or None
+        """
+        # Check if strategy is enabled
+        if not self.ema_double_confirmation_strategy:
+            self.logger.debug("EMA Double Confirmation strategy not initialized")
+            return None
+
+        try:
+            # Get enhanced data for the timeframe
+            # Need 48h for crossover lookback + buffer for EMAs + buffer for 4H EMA 50 filter
+            # 4H EMA 50 needs 50 * 8 = 400 bars of 15m (~100 hours)
+            # Using 120 hours to provide crossover lookback (48h) + HTF EMA warmup (72h)
+            df = self.data_fetcher.get_enhanced_data(
+                epic, pair,
+                timeframe=timeframe,
+                lookback_hours=120,  # 48h crossover lookback + 72h HTF EMA warmup
+                ema_strategy=self.ema_strategy if hasattr(self, 'ema_strategy') else None
+            )
+
+            if df is None or len(df) < 60:  # Need enough for EMA 50 + buffer
+                self.logger.debug(f"Insufficient data for EMA Double Confirmation: {len(df) if df is not None else 0} bars")
+                return None
+
+            # Detect signal using strategy
+            signal = self.ema_double_confirmation_strategy.detect_signal(
+                df, epic, spread_pips, timeframe
+            )
+
+            if signal:
+                # Add market context
+                signal = self._add_market_context(signal, df)
+                self.logger.info(f"✅ [EMA_DOUBLE] Signal for {epic}: {signal['signal_type']}")
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"Error detecting EMA Double Confirmation signals for {epic}: {e}")
+            import traceback
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
 
     def detect_signals_multi_timeframe(
         self, 

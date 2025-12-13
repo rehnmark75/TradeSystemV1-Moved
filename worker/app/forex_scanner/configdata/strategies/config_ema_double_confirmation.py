@@ -1,0 +1,267 @@
+# ============================================================================
+# EMA DOUBLE CONFIRMATION STRATEGY CONFIGURATION
+# ============================================================================
+# Version: 1.0.0
+# Description: EMA crossover strategy requiring 2 successful prior crossovers
+#              before taking the 3rd crossover as an entry signal.
+#
+# Strategy Logic:
+#   1. Detect EMA 21/50 crossovers on 15-minute timeframe
+#   2. Validate crossover "success" = price stays on favorable side of EMA 21
+#      for SUCCESS_CANDLES consecutive candles (default: 4 = 1 hour)
+#   3. After 2 successful crossovers in SAME direction within lookback window,
+#      take the 3rd crossover as entry signal
+#   4. Reset counter for that direction after trade is taken
+#
+# Rationale:
+#   - First crossover: Market testing direction
+#   - Second crossover: Confirms market respects EMA structure
+#   - Third crossover: High-probability entry with proven pattern
+# ============================================================================
+
+from datetime import time
+
+# ============================================================================
+# STRATEGY METADATA
+# ============================================================================
+STRATEGY_NAME = "EMA_DOUBLE_CONFIRMATION"
+STRATEGY_VERSION = "1.0.0"
+STRATEGY_DATE = "2025-12-13"
+STRATEGY_STATUS = "Initial Implementation"
+
+# ============================================================================
+# CORE PARAMETERS
+# ============================================================================
+
+# EMA Periods (optimized for 15m algo trading)
+EMA_FAST_PERIOD = 9           # Fast EMA for crossover detection
+EMA_SLOW_PERIOD = 21          # Slow EMA for crossover detection
+EMA_TREND_PERIOD = 200        # Trend EMA for additional confirmation
+
+# Success Validation
+# A crossover is "successful" if price stays on the favorable side of fast EMA
+# for this many consecutive candles after the crossover
+SUCCESS_CANDLES = 3           # 3 candles on 15m = 45 min (adjusted for faster EMA)
+
+# Lookback Window
+# How far back to look for prior successful crossovers
+LOOKBACK_HOURS = 48           # 48 hours = 192 candles on 15m timeframe
+
+# Signal Requirements
+MIN_SUCCESSFUL_CROSSOVERS = 1  # Need 1 successful crossover before entry on 2nd
+
+# ============================================================================
+# HIGHER TIMEFRAME TREND FILTER
+# ============================================================================
+
+# 4H EMA 21 Trend Filter
+# Bullish signals require price ABOVE 4H EMA 21
+# Bearish signals require price BELOW 4H EMA 21
+HTF_TREND_FILTER_ENABLED = True   # Enable/disable 4H trend filter
+HTF_TIMEFRAME = '4h'              # Higher timeframe to check
+HTF_EMA_PERIOD = 21               # EMA period on higher timeframe (21 = faster response)
+HTF_MIN_BARS = 30                 # Minimum bars needed on HTF
+
+# ============================================================================
+# FVG CONFIRMATION FILTER (NEW)
+# ============================================================================
+# Require a Fair Value Gap in the signal direction to confirm institutional momentum
+
+FVG_CONFIRMATION_ENABLED = True   # Enable FVG confirmation filter
+FVG_LOOKBACK_CANDLES = 10         # Look for FVG within last N candles
+FVG_MIN_SIZE_PIPS = 2             # Minimum FVG size in pips (lower = more FVGs detected)
+
+# ============================================================================
+# ADX TREND STRENGTH FILTER
+# ============================================================================
+# Only take signals when market is trending (ADX > threshold)
+# EMA crossovers perform poorly in ranging/choppy markets
+
+ADX_FILTER_ENABLED = True         # Enable ADX trend strength filter
+ADX_MIN_VALUE = 20                # Minimum ADX for valid signal (20 = weak trend, 25 = solid trend)
+ADX_PERIOD = 14                   # ADX calculation period
+
+# ============================================================================
+# CROSSOVER DETECTION
+# ============================================================================
+
+# Crossover Detection Settings
+CROSSOVER_EPSILON = 1e-8      # Numerical stability threshold
+MIN_SEPARATION_PIPS = 1       # Minimum EMA separation to confirm cross
+
+# Crossover direction detection:
+# Bullish: prev_ema_21 < prev_ema_50 AND curr_ema_21 > curr_ema_50
+# Bearish: prev_ema_21 > prev_ema_50 AND curr_ema_21 < curr_ema_50
+
+# ============================================================================
+# SUCCESS VALIDATION
+# ============================================================================
+
+# Maximum candles to wait before declaring crossover failed
+# If price crosses back within this window, crossover is marked as failed
+MAX_VALIDATION_CANDLES = 6    # 1.5 hours on 15m (give some buffer beyond SUCCESS_CANDLES)
+
+# Allow small wick violations during validation?
+# If True, only check close prices. If False, also check high/low.
+ALLOW_WICK_VIOLATIONS = True  # Only check close prices for simplicity
+
+# ============================================================================
+# CONFIDENCE SCORING
+# ============================================================================
+
+# Minimum confidence to generate signal
+MIN_CONFIDENCE = 0.50         # 50% minimum (lowered for initial testing)
+HIGH_CONFIDENCE = 0.75        # 75% = high quality signal
+
+# Base confidence (starting point)
+BASE_CONFIDENCE = 0.55
+
+# Scoring weights (must sum to 1.0)
+CONFIDENCE_WEIGHTS = {
+    'crossover_quality': 0.30,    # EMA separation at crossover
+    'prior_success_rate': 0.25,   # How convincing were the 2 prior crossovers
+    'trend_alignment': 0.25,      # Alignment with EMA 200 trend
+    'market_conditions': 0.20,    # RSI zone, ATR levels
+}
+
+# Bonus for extended success (crossover held longer than required)
+# If prior crossovers held for 6+ candles instead of just 4, add bonus
+EXTENDED_SUCCESS_BONUS = 0.05   # 5% confidence boost per extended crossover
+EXTENDED_SUCCESS_CANDLES = 6    # Candles required for extended bonus
+
+# ============================================================================
+# RISK MANAGEMENT
+# ============================================================================
+
+# ATR-based stop loss and take profit
+STOP_ATR_MULTIPLIER = 2.0       # SL = 2x ATR (provides breathing room)
+TARGET_ATR_MULTIPLIER = 4.0     # TP = 4x ATR (2:1 R:R minimum)
+
+# ATR calculation period
+ATR_PERIOD = 14
+
+# Minimum/Maximum stops (pips) - safety bounds
+MIN_STOP_PIPS = 15              # Never less than 15 pips SL
+MAX_STOP_PIPS = 50              # Never more than 50 pips SL
+MIN_TARGET_PIPS = 30            # Never less than 30 pips TP
+
+# Risk-Reward requirements
+MIN_RR_RATIO = 1.5              # Minimum 1.5:1 R:R
+OPTIMAL_RR_RATIO = 2.0          # Optimal R:R for full confidence
+
+# ============================================================================
+# SESSION FILTER
+# ============================================================================
+
+SESSION_FILTER_ENABLED = False  # Disabled for backtesting - enable for live trading
+
+# Session definitions (UTC times)
+LONDON_SESSION_START = time(7, 0)   # 07:00 UTC
+LONDON_SESSION_END = time(16, 0)    # 16:00 UTC
+NY_SESSION_START = time(12, 0)      # 12:00 UTC
+NY_SESSION_END = time(21, 0)        # 21:00 UTC
+
+# Allowed sessions
+ALLOWED_SESSIONS = ['london', 'new_york', 'overlap']
+BLOCK_ASIAN_SESSION = True          # Block 21:00-07:00 UTC
+
+# ============================================================================
+# SIGNAL LIMITS
+# ============================================================================
+
+MAX_SIGNALS_PER_PAIR_PER_DAY = 2    # Allow 2 signals per pair per day
+SIGNAL_COOLDOWN_HOURS = 2           # Hours between signals on same pair
+
+# ============================================================================
+# PAIR CONFIGURATION
+# ============================================================================
+
+# Enabled pairs (major forex pairs with good liquidity)
+ENABLED_PAIRS = [
+    'CS.D.EURUSD.CEEM.IP',
+    'CS.D.GBPUSD.MINI.IP',
+    'CS.D.USDJPY.MINI.IP',
+    'CS.D.USDCHF.MINI.IP',
+    'CS.D.AUDUSD.MINI.IP',
+    'CS.D.USDCAD.MINI.IP',
+    'CS.D.NZDUSD.MINI.IP',
+    'CS.D.EURJPY.MINI.IP',
+    'CS.D.GBPJPY.MINI.IP',
+]
+
+# Pair-specific pip values
+PAIR_PIP_VALUES = {
+    'CS.D.EURUSD.CEEM.IP': 1.0,     # CEEM uses scaled pricing
+    'CS.D.GBPUSD.MINI.IP': 0.0001,
+    'CS.D.USDJPY.MINI.IP': 0.01,
+    'CS.D.USDCHF.MINI.IP': 0.0001,
+    'CS.D.AUDUSD.MINI.IP': 0.0001,
+    'CS.D.USDCAD.MINI.IP': 0.0001,
+    'CS.D.NZDUSD.MINI.IP': 0.0001,
+    'CS.D.EURJPY.MINI.IP': 0.01,
+    'CS.D.GBPJPY.MINI.IP': 0.01,
+}
+
+# ============================================================================
+# STATE MANAGEMENT
+# ============================================================================
+
+# Currently using in-memory state tracking
+# Future: Set to True to use database-backed persistence
+USE_DATABASE_STATE = False
+
+# In-memory cache settings
+CACHE_MAX_CROSSOVERS_PER_PAIR = 20  # Max crossovers to keep per pair
+CACHE_CLEANUP_INTERVAL_HOURS = 24   # Clean old entries every 24 hours
+
+# ============================================================================
+# LOGGING & DEBUG
+# ============================================================================
+
+ENABLE_DEBUG_LOGGING = True         # Detailed logging for development
+LOG_CROSSOVER_DETECTION = True      # Log when crossovers are detected
+LOG_SUCCESS_VALIDATION = True       # Log crossover validation results
+LOG_SIGNAL_GENERATION = True        # Log signal generation details
+LOG_STATE_CHANGES = True            # Log state tracker changes
+
+# ============================================================================
+# BACKTEST SETTINGS
+# ============================================================================
+
+BACKTEST_SPREAD_PIPS = 1.5          # Assumed spread for backtesting
+BACKTEST_SLIPPAGE_PIPS = 0.5        # Assumed slippage for backtesting
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def get_pip_value(epic: str) -> float:
+    """Get pip value for a given epic."""
+    return PAIR_PIP_VALUES.get(epic, 0.0001)
+
+
+def get_lookback_candles(timeframe: str = '15m') -> int:
+    """Calculate lookback candles based on timeframe."""
+    tf_minutes = {
+        '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240
+    }
+    minutes = tf_minutes.get(timeframe, 15)
+    return int((LOOKBACK_HOURS * 60) / minutes)
+
+
+def get_success_duration_hours() -> float:
+    """Calculate hours required for success validation."""
+    return (SUCCESS_CANDLES * 15) / 60  # 15m timeframe
+
+
+def is_session_allowed(hour_utc: int) -> bool:
+    """Check if current hour is in allowed trading session."""
+    if not SESSION_FILTER_ENABLED:
+        return True
+
+    # Block Asian session: 21:00-07:00 UTC
+    if BLOCK_ASIAN_SESSION and (hour_utc >= 21 or hour_utc < 7):
+        return False
+
+    # Allow London open to NY close: 07:00-21:00 UTC
+    return 7 <= hour_utc <= 21

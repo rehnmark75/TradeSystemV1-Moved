@@ -54,7 +54,7 @@ def main():
                 # Don't add --epic, let it default to all
 
             # Handle strategy shortcuts (based on actual strategies in core/strategies/)
-            elif arg.upper() in ["EMA", "MACD", "BB", "SMC", "SMC_STRUCTURE", "SMC_PURE", "MOMENTUM", "ICHIMOKU", "KAMA", "ZEROLAG", "MEANREV", "RANGING", "SCALPING", "VP", "VOLUME_PROFILE"]:
+            elif arg.upper() in ["EMA", "MACD", "BB", "SMC", "SMC_STRUCTURE", "SMC_PURE", "MOMENTUM", "ICHIMOKU", "KAMA", "ZEROLAG", "MEANREV", "RANGING", "SCALPING", "VP", "VOLUME_PROFILE", "EMA_DOUBLE", "EDC"]:
                 strategy_mapping = {
                     "EMA": "EMA",
                     "MACD": "MACD",
@@ -70,7 +70,9 @@ def main():
                     "RANGING": "RANGING_MARKET",
                     "SCALPING": "SCALPING",
                     "VP": "VOLUME_PROFILE",
-                    "VOLUME_PROFILE": "VOLUME_PROFILE"
+                    "VOLUME_PROFILE": "VOLUME_PROFILE",
+                    "EMA_DOUBLE": "EMA_DOUBLE_CONFIRMATION",
+                    "EDC": "EMA_DOUBLE_CONFIRMATION"
                 }
                 strategy_name = strategy_mapping[arg.upper()]
                 processed_args.extend(["--strategy", strategy_name])

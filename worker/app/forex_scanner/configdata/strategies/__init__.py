@@ -16,6 +16,7 @@ from .config_kama_strategy import *
 from .config_scalping_strategy import *
 from .config_bb_supertrend_strategy import *
 from .config_volume_profile_strategy import *
+from .config_ema_double_confirmation import *
 
 # Import TradingView integration (optional)
 try:

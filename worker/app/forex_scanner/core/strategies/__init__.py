@@ -19,6 +19,7 @@ from .ichimoku_strategy import IchimokuStrategy
 from .ranging_market_strategy import RangingMarketStrategy
 from .scalping_strategy import ScalpingStrategy
 from .volume_profile_strategy import VolumeProfileStrategy
+from .ema_double_confirmation_strategy import EMADoubleConfirmationStrategy
 __all__ = [
     'BaseStrategy',
     'EMAStrategy',
@@ -38,5 +39,6 @@ __all__ = [
     'IchimokuStrategy',
     'RangingMarketStrategy',
     'ScalpingStrategy',
-    'VolumeProfileStrategy'
+    'VolumeProfileStrategy',
+    'EMADoubleConfirmationStrategy'
 ]

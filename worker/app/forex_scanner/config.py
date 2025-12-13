@@ -402,6 +402,9 @@ RANGING_MARKET_STRATEGY = False  # Multi-oscillator ranging market strategy - Re
 # Volume Profile Strategy
 VOLUME_PROFILE_STRATEGY = False  # Institutional Volume-by-Price analysis strategy
 
+# EMA Double Confirmation Strategy
+EMA_DOUBLE_CONFIRMATION_STRATEGY = True  # NEW: Wait for 2 successful EMA 21/50 crossovers before taking 3rd
+
 # KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
 
 

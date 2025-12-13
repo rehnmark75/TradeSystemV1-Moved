@@ -319,6 +319,12 @@ class BacktestScanner(IntelligentForexScanner):
                         strategy.use_optimized_parameters = True
                 self.logger.info(f"✅ {len(self.signal_detector.macd_strategies_cache)} cached MACD strategies configured for backtest mode")
 
+            # ADDED: Configure EMA Double Confirmation strategy for backtest mode
+            if hasattr(self.signal_detector, 'ema_double_confirmation_strategy') and self.signal_detector.ema_double_confirmation_strategy:
+                self.signal_detector.ema_double_confirmation_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.ema_double_confirmation_strategy.backtest_mode = True
+                self.logger.info("✅ EMA Double Confirmation strategy configured for backtest mode")
+
             self.logger.info("✅ Signal detector updated to use BacktestDataFetcher for historical data")
 
         except Exception as e:
@@ -596,7 +602,10 @@ class BacktestScanner(IntelligentForexScanner):
                 'SCALPING': 'detect_scalping_signals',  # ADDED: Scalping strategy support
                 'SCALP': 'detect_scalping_signals',  # ADDED: Short form
                 'VOLUME_PROFILE': 'detect_volume_profile_signals',  # ADDED: Volume Profile strategy
-                'VP': 'detect_volume_profile_signals'  # ADDED: Short form
+                'VP': 'detect_volume_profile_signals',  # ADDED: Short form
+                'EMA_DOUBLE_CONFIRMATION': 'detect_ema_double_confirmation_signals',  # EMA Double Confirmation
+                'EMA_DOUBLE': 'detect_ema_double_confirmation_signals',  # Short form
+                'EDC': 'detect_ema_double_confirmation_signals'  # Abbreviation
             }
 
             # Use specific strategy if requested, otherwise use all strategies
