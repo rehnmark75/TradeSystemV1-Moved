@@ -784,7 +784,39 @@ class TradeValidator:
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 9 PASSED - News filtering (disabled)")
 
-            # 10. ⭐ NEW: Claude filtering (if enabled) ⭐
+            # 10. Market Intelligence validation (if enabled) - fast rule-based filtering
+            self.logger.info(f"🧠 {epic}: Market Intelligence filtering enabled: {self.enable_market_intelligence_filtering}")
+            if self.enable_market_intelligence_filtering:
+                self.logger.info(f"🧠🎯 {epic}: CALLING MARKET INTELLIGENCE VALIDATION for {strategy} strategy")
+                valid, msg = self._validate_market_intelligence(signal)
+                if not valid:
+                    self.validation_stats['failed_other'] += 1
+                    if self.backtest_mode:
+                        self.logger.warning(f"🚫 BACKTEST STEP 10 FAILED - Market Intelligence: {msg}")
+                    self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY MARKET INTELLIGENCE: {msg}")
+                    return False, f"Market Intelligence: {msg}"
+                else:
+                    if self.backtest_mode:
+                        self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Market Intelligence")
+                    self.logger.info(f"🧠✅ {epic}: Market Intelligence validation PASSED: {msg}")
+            else:
+                if self.backtest_mode:
+                    self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Market Intelligence (disabled)")
+                self.logger.info(f"🧠⏭️ {epic}: Market Intelligence filtering DISABLED - skipping regime checks")
+
+            # 11. Trading suitability check
+            valid, msg = self.check_trading_suitability(signal)
+            if not valid:
+                self.validation_stats['failed_other'] += 1
+                if self.backtest_mode:
+                    self.logger.warning(f"🚫 BACKTEST STEP 11 FAILED - Trading suitability: {msg}")
+                return False, f"Trading: {msg}"
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 11 PASSED - Trading suitability")
+
+            # 12. ⭐ Claude AI filtering - FINAL VALIDATOR (if enabled) ⭐
+            # Claude is the most comprehensive and expensive check, so it runs last
+            # Only signals that pass all other filters get validated by Claude
             if self.enable_claude_filtering:
                 valid, msg, claude_result = self._validate_with_claude(signal)
                 if not valid:
@@ -792,7 +824,7 @@ class TradeValidator:
                     epic = signal.get('epic', 'Unknown')
                     signal_type = signal.get('signal_type', 'Unknown')
                     if self.backtest_mode:
-                        self.logger.warning(f"🚫 BACKTEST STEP 10 FAILED - Claude filtering: {msg}")
+                        self.logger.warning(f"🚫 BACKTEST STEP 12 FAILED - Claude filtering: {msg}")
                     self.logger.info(f"🚫 Claude REJECTED: {epic} {signal_type} - {msg}")
 
                     # OPTIONAL: Save rejected signals for analysis
@@ -806,46 +838,16 @@ class TradeValidator:
                     signal_type = signal.get('signal_type', 'Unknown')
                     score = claude_result.get('score', 'N/A') if claude_result else 'N/A'
                     if self.backtest_mode:
-                        self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Claude filtering approved")
+                        self.logger.info(f"✅ BACKTEST STEP 12 PASSED - Claude filtering approved")
                     self.logger.info(f"✅ Claude APPROVED: {epic} {signal_type} - Score: {score}/10")
 
                     # Add Claude result to signal for later use
                     if claude_result:
                         signal['claude_validation_result'] = claude_result
             elif self.backtest_mode:
-                self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Claude filtering (disabled)")
+                self.logger.info(f"✅ BACKTEST STEP 12 PASSED - Claude filtering (disabled)")
 
-            # 11. Market Intelligence validation (if enabled)
-            self.logger.info(f"🧠 {epic}: Market Intelligence filtering enabled: {self.enable_market_intelligence_filtering}")
-            if self.enable_market_intelligence_filtering:
-                self.logger.info(f"🧠🎯 {epic}: CALLING MARKET INTELLIGENCE VALIDATION for {strategy} strategy")
-                valid, msg = self._validate_market_intelligence(signal)
-                if not valid:
-                    self.validation_stats['failed_other'] += 1
-                    if self.backtest_mode:
-                        self.logger.warning(f"🚫 BACKTEST STEP 11 FAILED - Market Intelligence: {msg}")
-                    self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY MARKET INTELLIGENCE: {msg}")
-                    return False, f"Market Intelligence: {msg}"
-                else:
-                    if self.backtest_mode:
-                        self.logger.info(f"✅ BACKTEST STEP 11 PASSED - Market Intelligence")
-                    self.logger.info(f"🧠✅ {epic}: Market Intelligence validation PASSED: {msg}")
-            else:
-                if self.backtest_mode:
-                    self.logger.info(f"✅ BACKTEST STEP 11 PASSED - Market Intelligence (disabled)")
-                self.logger.info(f"🧠⏭️ {epic}: Market Intelligence filtering DISABLED - skipping regime checks")
-
-            # 12. Final trading suitability check
-            valid, msg = self.check_trading_suitability(signal)
-            if not valid:
-                self.validation_stats['failed_other'] += 1
-                if self.backtest_mode:
-                    self.logger.warning(f"🚫 BACKTEST STEP 12 FAILED - Trading suitability: {msg}")
-                return False, f"Trading: {msg}"
-            elif self.backtest_mode:
-                self.logger.info(f"✅ BACKTEST STEP 12 PASSED - Trading suitability")
-
-            # 13. ⭐ NEW: Universal Market Intelligence Capture ⭐
+            # 13. ⭐ Universal Market Intelligence Capture ⭐
             # Capture market intelligence for ALL validated signals, regardless of strategy
             if self.enable_market_intelligence_capture:
                 self._capture_market_intelligence_context(signal)
