@@ -534,39 +534,43 @@ class MasterPatternPhaseTracker:
 
         # 1. Accumulation Quality (20%)
         acc = state.accumulation
-        atr_score = max(0, 1.0 - acc.atr_ratio)  # Lower ATR ratio = better
-        duration_score = min(acc.candle_count / 16, 1.0)  # 16 candles = optimal
-        volume_score = 1.0 if acc.volume_profile_valid else 0.6
+        # ATR score: 0.85 threshold = 50% score, lower = better, max at 0.5 ATR ratio
+        atr_score = max(0, min(1.0, (0.90 - acc.atr_ratio) / 0.40))  # 0.50=100%, 0.90=0%
+        duration_score = min(acc.candle_count / 12, 1.0)  # 12 candles = optimal (60 min on 5m)
+        volume_score = 1.0 if acc.volume_profile_valid else 0.7
 
-        accumulation_score = (atr_score * 0.5 + duration_score * 0.3 + volume_score * 0.2)
+        accumulation_score = (atr_score * 0.4 + duration_score * 0.4 + volume_score * 0.2)
         confidence += accumulation_score * weights['accumulation_quality']
 
         # 2. Manipulation Clarity (25%)
         manip = state.manipulation
-        volume_spike_score = min((manip.volume_ratio - 1.0) / 1.0, 1.0)  # 2x = max
-        wick_score = min(manip.rejection_wick_ratio / 0.80, 1.0)  # 80% = max
+        # Volume spike: any spike above 0.8x gets partial credit, 1.5x = full
+        volume_spike_score = min(max(0, (manip.volume_ratio - 0.8) / 0.7), 1.0)
+        # Wick score: 50% wick gets partial credit, 75% = full
+        wick_score = min(max(0, (manip.rejection_wick_ratio - 0.50) / 0.25), 1.0)
 
-        manipulation_score = (volume_spike_score * 0.5 + wick_score * 0.5)
+        manipulation_score = (volume_spike_score * 0.4 + wick_score * 0.6)
         confidence += manipulation_score * weights['manipulation_clarity']
 
         # 3. Structure Shift Strength (25%)
         shift = state.structure_shift
-        shift_type_score = 1.0 if shift.break_type == 'BOS' else 0.7
-        shift_volume_score = min(shift.volume_ratio / 1.5, 1.0)
-        body_score = min(shift.body_ratio / 0.7, 1.0)
+        shift_type_score = 1.0 if shift.break_type == 'BOS' else 0.8  # ChoCH still valid
+        shift_volume_score = min(max(0, (shift.volume_ratio - 0.7) / 0.8), 1.0)  # 0.7x to 1.5x
+        body_score = min(max(0, (shift.body_ratio - 0.4) / 0.3), 1.0)  # 40% to 70%
 
         structure_score = (shift_type_score * 0.4 + shift_volume_score * 0.3 + body_score * 0.3)
         confidence += structure_score * weights['structure_shift_strength']
 
         # 4. Entry Zone Quality (15%)
         entry = state.entry_zone
-        zone_type_score = 1.0 if entry.zone_type == 'FVG' else 0.6
+        zone_type_score = 1.0 if entry.zone_type == 'FVG' else 0.75  # Mitigation still valid
 
-        entry_score = zone_type_score * entry.significance
+        entry_score = zone_type_score * max(entry.significance, 0.5)  # Min 50% significance
         confidence += entry_score * weights['entry_zone_quality']
 
         # 5. R:R Quality (15%)
-        rr_score = max(0, min((rr_ratio - 2.0) / 2.0, 1.0))  # 2.0-4.0 range
+        # R:R 2.0 = 50% score, 3.0 = 100% score
+        rr_score = max(0, min((rr_ratio - 1.5) / 1.5, 1.0))  # 1.5-3.0 range
         confidence += rr_score * weights['rr_quality']
 
         # Store and return

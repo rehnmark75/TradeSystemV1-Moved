@@ -19,7 +19,7 @@ Expected Performance:
 import logging
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
@@ -198,10 +198,11 @@ class MasterPatternStrategy(BaseStrategy):
             # Extract pair name
             pair = self._extract_pair_from_epic(epic)
 
-            # Get current timestamp
-            current_time = df.index[-1] if isinstance(df.index, pd.DatetimeIndex) else datetime.utcnow()
-            if isinstance(current_time, pd.Timestamp):
-                current_time = current_time.to_pydatetime()
+            # Get current timestamp - handle various index types
+            current_time = self._get_current_timestamp(df)
+            if current_time is None:
+                self.logger.warning(f"[{pair}] Could not determine timestamp from DataFrame")
+                return None
 
             # Check daily reset
             self.phase_tracker.check_daily_reset(pair, current_time.date())
@@ -269,16 +270,25 @@ class MasterPatternStrategy(BaseStrategy):
             Signal dictionary or None
         """
         try:
+            self.logger.info(f"[{self.name}] Multi-TF detection called for {pair}")
+
             # Validate data
             if df_5m is None or len(df_5m) < 50:
+                self.logger.debug(f"[{pair}] Insufficient 5m data: {len(df_5m) if df_5m is not None else 0}")
                 return None
             if df_15m is None or len(df_15m) < 30:
+                self.logger.debug(f"[{pair}] Insufficient 15m data: {len(df_15m) if df_15m is not None else 0}")
                 return None
 
-            # Get current timestamp
-            current_time = df_15m.index[-1]
-            if isinstance(current_time, pd.Timestamp):
-                current_time = current_time.to_pydatetime()
+            self.logger.info(f"[{pair}] Data validation passed: 5m={len(df_5m)}, 15m={len(df_15m)}")
+
+            # Get current timestamp - handle various index types
+            current_time = self._get_current_timestamp(df_15m)
+            if current_time is None:
+                self.logger.warning(f"[{pair}] Could not determine timestamp from DataFrame")
+                return None
+
+            self.logger.info(f"[{pair}] Current timestamp: {current_time}")
 
             # Check daily reset
             self.phase_tracker.check_daily_reset(pair, current_time.date())
@@ -291,7 +301,7 @@ class MasterPatternStrategy(BaseStrategy):
 
             # Get current phase
             current_phase = self.phase_tracker.get_phase(pair)
-            self.logger.debug(f"[{pair}] Current phase: {current_phase.value}")
+            self.logger.info(f"[{pair}] Current phase: {current_phase.value} at {current_time.strftime('%H:%M')} UTC")
 
             # Process based on current phase
             if current_phase == AMDPhase.WAITING:
@@ -343,16 +353,23 @@ class MasterPatternStrategy(BaseStrategy):
         """
         try:
             # Only check during Asian session
-            if not self.session_analyzer.is_asian_session(current_time):
+            is_asian = self.session_analyzer.is_asian_session(current_time)
+            self.logger.info(f"[{pair}] Checking accumulation at {current_time.strftime('%H:%M')} UTC - is_asian={is_asian}")
+
+            if not is_asian:
                 return False
 
             # Get Asian session range
             asian_range = self.session_analyzer.get_asian_session_range(df, current_time.date())
             if asian_range is None:
+                self.logger.info(f"[{pair}] No Asian range data found")
                 return False
+
+            self.logger.info(f"[{pair}] Asian range: candles={asian_range['candle_count']}, high={asian_range['high']:.5f}, low={asian_range['low']:.5f}")
 
             # Check minimum candles
             if asian_range['candle_count'] < self.min_accumulation_candles:
+                self.logger.info(f"[{pair}] Not enough accumulation candles: {asian_range['candle_count']} < {self.min_accumulation_candles}")
                 return False
 
             # Get pip value for range calculation
@@ -362,15 +379,17 @@ class MasterPatternStrategy(BaseStrategy):
             # Check range is not too wide
             max_range = self._get_pair_max_range(pair)
             if range_pips > max_range:
-                self.logger.debug(f"[{pair}] Accumulation range too wide: {range_pips:.1f} > {max_range}")
+                self.logger.info(f"[{pair}] Accumulation range too wide: {range_pips:.1f} > {max_range}")
                 return False
 
             # Check ATR compression
             atr_ratio = self._calculate_atr_ratio(df)
             threshold = self._get_pair_atr_threshold(pair)
 
+            self.logger.info(f"[{pair}] ATR ratio: {atr_ratio:.2f}, threshold: {threshold}")
+
             if atr_ratio > threshold:
-                self.logger.debug(f"[{pair}] ATR not compressed: {atr_ratio:.2f} > {threshold}")
+                self.logger.info(f"[{pair}] ATR not compressed: {atr_ratio:.2f} > {threshold}")
                 return False
 
             # Check volume profile (optional)
@@ -487,32 +506,43 @@ class MasterPatternStrategy(BaseStrategy):
         """
         try:
             # Only check during London open
-            if not self.session_analyzer.is_london_open(current_time):
+            is_london = self.session_analyzer.is_london_open(current_time)
+            self.logger.info(f"[{pair}] Checking manipulation at {current_time.strftime('%H:%M')} UTC - is_london_open={is_london}")
+
+            if not is_london:
                 return False
 
             # Get state with accumulation data
             state = self.phase_tracker.get_state(pair)
             if state.accumulation is None:
+                self.logger.info(f"[{pair}] No accumulation data in state")
                 return False
+
+            self.logger.info(f"[{pair}] Accumulation range: {state.accumulation.range_low:.5f} - {state.accumulation.range_high:.5f}")
 
             acc = state.accumulation
             pip_value = self.get_pip_value(epic)
 
             # Get recent candles for sweep detection
             london_data = self.session_analyzer.get_session_data(df, 'london_open', current_time.date())
+            self.logger.info(f"[{pair}] London candles found: {len(london_data)}")
             if len(london_data) == 0:
                 return False
 
             # Look for sweep in recent candles
+            self.logger.info(f"[{pair}] Checking for sweeps: acc_low={acc.range_low:.5f}, acc_high={acc.range_high:.5f}")
             for i in range(len(london_data)):
                 candle = london_data.iloc[i]
                 candle_time = london_data.index[i]
                 if isinstance(candle_time, pd.Timestamp):
                     candle_time = candle_time.to_pydatetime()
 
+                self.logger.info(f"[{pair}] London candle {i}: low={candle['low']:.5f}, high={candle['high']:.5f}")
+
                 # Check for sweep below lows (bullish setup)
                 if candle['low'] < acc.range_low:
                     sweep_pips = (acc.range_low - candle['low']) / pip_value
+                    self.logger.info(f"[{pair}] Potential SWEEP LOWS detected: candle_low={candle['low']:.5f}, sweep={sweep_pips:.1f} pips")
 
                     if self._validate_sweep(candle, df, sweep_pips, 'sweep_lows'):
                         manipulation = ManipulationEvent(
@@ -679,10 +709,29 @@ class MasterPatternStrategy(BaseStrategy):
             if isinstance(manipulation_time, datetime):
                 manipulation_time = pd.Timestamp(manipulation_time)
 
+            # Determine if DataFrame index is tz-aware
+            df_tz = None
+            if isinstance(df.index, pd.DatetimeIndex):
+                df_tz = df.index.tz
+
+            # Ensure manipulation_time is tz-aware if needed
+            if manipulation_time.tz is None and df_tz is not None:
+                manipulation_time = manipulation_time.tz_localize('UTC')
+            elif manipulation_time.tz is not None and df_tz is None:
+                manipulation_time = manipulation_time.tz_localize(None)
+
             # Get structure breaks from the analyzer
             for structure_break in self.smc_structure.structure_breaks:
+                # Normalize structure break timestamp for comparison
+                break_ts = structure_break.timestamp
+                if isinstance(break_ts, pd.Timestamp):
+                    if break_ts.tz is None and manipulation_time.tz is not None:
+                        break_ts = break_ts.tz_localize('UTC')
+                    elif break_ts.tz is not None and manipulation_time.tz is None:
+                        break_ts = break_ts.tz_localize(None)
+
                 # Check if break is after manipulation
-                if structure_break.timestamp < manipulation_time:
+                if break_ts < manipulation_time:
                     continue
 
                 # Check direction matches
@@ -730,9 +779,11 @@ class MasterPatternStrategy(BaseStrategy):
         4. Confidence meets threshold
         """
         try:
-            # Check entry cutoff time
-            if not self.session_analyzer.is_entry_allowed(current_time):
-                self.logger.debug(f"[{pair}] Entry time past cutoff")
+            self.logger.info(f"[{pair}] Checking entry conditions at {current_time.strftime('%H:%M')} UTC")
+
+            # Check entry cutoff time (default 10:00 UTC, extended to 12:00 for more opportunities)
+            if not self.session_analyzer.is_entry_allowed(current_time, cutoff=time(12, 0)):
+                self.logger.info(f"[{pair}] Entry time past cutoff (12:00 UTC)")
                 return None
 
             # Get state
@@ -753,21 +804,28 @@ class MasterPatternStrategy(BaseStrategy):
             current_price = latest['close']
             pip_value = self.get_pip_value(epic)
 
+            self.logger.info(f"[{pair}] Entry zone: {state.entry_zone.zone_low:.5f} - {state.entry_zone.zone_high:.5f}, current price: {current_price:.5f}")
+
             # Check if price is in entry zone
             if not (state.entry_zone.zone_low <= current_price <= state.entry_zone.zone_high):
+                self.logger.info(f"[{pair}] Price not in entry zone")
                 return None
 
             # Calculate SL and TP
             direction = state.get_signal_direction()
             sl, tp = self._calculate_sl_tp(state, current_price, pip_value, df)
 
+            self.logger.info(f"[{pair}] PRICE IN ZONE! direction={direction}, SL={sl:.5f}, TP={tp:.5f}")
+
             # Check R:R
             risk_pips = abs(current_price - sl) / pip_value
             reward_pips = abs(tp - current_price) / pip_value
             rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
 
+            self.logger.info(f"[{pair}] R:R calculation: risk={risk_pips:.1f}, reward={reward_pips:.1f}, ratio={rr_ratio:.2f}")
+
             if rr_ratio < self.min_rr_ratio:
-                self.logger.debug(f"[{pair}] R:R too low: {rr_ratio:.2f} < {self.min_rr_ratio}")
+                self.logger.info(f"[{pair}] R:R too low: {rr_ratio:.2f} < {self.min_rr_ratio}")
                 return None
 
             # Calculate confidence
@@ -776,7 +834,7 @@ class MasterPatternStrategy(BaseStrategy):
             # Check confidence threshold
             min_conf = self._get_pair_min_confidence(pair)
             if confidence < min_conf:
-                self.logger.debug(f"[{pair}] Confidence too low: {confidence:.2%} < {min_conf:.2%}")
+                self.logger.info(f"[{pair}] Confidence too low: {confidence:.2%} < {min_conf:.2%}")
                 return None
 
             # Generate signal
@@ -996,6 +1054,49 @@ class MasterPatternStrategy(BaseStrategy):
         signal = self.add_execution_prices(signal, spread_pips)
 
         return signal
+
+    def _get_current_timestamp(self, df: pd.DataFrame) -> Optional[datetime]:
+        """
+        Safely extract the current timestamp from a DataFrame.
+
+        Handles various index types:
+        - DatetimeIndex: directly extract timestamp
+        - RangeIndex: look for timestamp/start_time column
+        - Falls back to utcnow() if no timestamp found
+
+        Args:
+            df: DataFrame with OHLCV data
+
+        Returns:
+            datetime object or None if cannot determine
+        """
+        try:
+            # Case 1: DatetimeIndex
+            if isinstance(df.index, pd.DatetimeIndex):
+                current_time = df.index[-1]
+                if isinstance(current_time, pd.Timestamp):
+                    return current_time.to_pydatetime()
+                return current_time
+
+            # Case 2: Look for timestamp columns
+            timestamp_cols = ['timestamp', 'start_time', 'datetime', 'time', 'date']
+            for col in timestamp_cols:
+                if col in df.columns:
+                    ts_val = df[col].iloc[-1]
+                    if isinstance(ts_val, pd.Timestamp):
+                        return ts_val.to_pydatetime()
+                    elif isinstance(ts_val, datetime):
+                        return ts_val
+                    elif isinstance(ts_val, str):
+                        return pd.to_datetime(ts_val).to_pydatetime()
+
+            # Case 3: Fallback to current UTC time (for live trading)
+            self.logger.debug("No timestamp found in DataFrame, using utcnow()")
+            return datetime.utcnow()
+
+        except Exception as e:
+            self.logger.error(f"Error extracting timestamp: {e}")
+            return None
 
     def _extract_pair_from_epic(self, epic: str) -> str:
         """Extract pair name from epic code."""

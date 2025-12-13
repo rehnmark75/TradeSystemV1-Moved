@@ -147,27 +147,43 @@ class MasterPatternSessionAnalyzer:
                     self.logger.warning("No datetime index or timestamp column found")
                     return None
 
-            # Convert to UTC if needed
-            if df.index.tz is not None:
-                df = df.tz_convert('UTC')
+            # Track whether index is timezone-aware
+            is_tz_aware = df.index.tz is not None
 
             # Determine target date
             if target_date is None:
-                target_date = df.index[-1].date()
+                last_idx = df.index[-1]
+                if isinstance(last_idx, pd.Timestamp):
+                    target_date = last_idx.date()
+                else:
+                    target_date = datetime.utcnow().date()
 
             # Find the first candle of the day (closest to 00:00 UTC)
             day_start = datetime.combine(target_date, time(0, 0))
             day_end = datetime.combine(target_date, time(0, 30))  # Buffer for 5m/15m candles
 
-            mask = (df.index >= pd.Timestamp(day_start)) & (df.index < pd.Timestamp(day_end))
+            # Create timezone-aware timestamps if index is tz-aware
+            start_ts = pd.Timestamp(day_start)
+            end_ts = pd.Timestamp(day_end)
+            if is_tz_aware:
+                start_ts = start_ts.tz_localize('UTC')
+                end_ts = end_ts.tz_localize('UTC')
+
+            mask = (df.index >= start_ts) & (df.index < end_ts)
             day_open_candles = df[mask]
 
             if len(day_open_candles) > 0:
                 return float(day_open_candles.iloc[0]['open'])
 
-            # Fallback: get first candle of the day
-            mask = df.index.date == target_date
-            day_data = df[mask]
+            # Fallback: get first candle of the day by filtering on date
+            # Use string comparison if tz-aware to avoid comparison issues
+            if is_tz_aware:
+                # Convert to date strings for comparison
+                day_data = df[df.index.strftime('%Y-%m-%d') == str(target_date)]
+            else:
+                mask = df.index.date == target_date
+                day_data = df[mask]
+
             if len(day_data) > 0:
                 return float(day_data.iloc[0]['open'])
 
@@ -209,7 +225,11 @@ class MasterPatternSessionAnalyzer:
 
             # Determine target date
             if target_date is None:
-                target_date = df.index[-1].date()
+                last_idx = df.index[-1]
+                if isinstance(last_idx, pd.Timestamp):
+                    target_date = last_idx.date()
+                else:
+                    target_date = datetime.utcnow().date()
 
             # Build time range
             start_dt = datetime.combine(target_date, session['start'])
@@ -221,8 +241,17 @@ class MasterPatternSessionAnalyzer:
                 prev_date = target_date - timedelta(days=1)
                 start_dt = datetime.combine(prev_date, session['start'])
 
+            # Convert to pd.Timestamp and match timezone of the DataFrame index
+            start_ts = pd.Timestamp(start_dt)
+            end_ts = pd.Timestamp(end_dt)
+
+            # If index is timezone-aware, localize our timestamps
+            if df.index.tz is not None:
+                start_ts = start_ts.tz_localize('UTC')
+                end_ts = end_ts.tz_localize('UTC')
+
             # Filter data
-            mask = (df.index >= pd.Timestamp(start_dt)) & (df.index < pd.Timestamp(end_dt))
+            mask = (df.index >= start_ts) & (df.index < end_ts)
             return df[mask].copy()
 
         except Exception as e:

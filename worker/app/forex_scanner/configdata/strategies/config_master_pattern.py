@@ -67,7 +67,7 @@ USE_ATR_ACCUMULATION_VALIDATION = True
 ATR_ACCUMULATION_MULTIPLIER = 0.5       # Range must be < 50% of ATR-20
 
 # ATR compression threshold (key filter from trading analyst)
-ATR_COMPRESSION_THRESHOLD = 0.60        # ATR must be < 60% of baseline (was 70%)
+ATR_COMPRESSION_THRESHOLD = 0.85        # ATR must be < 85% of baseline (relaxed for real market conditions)
 ATR_BASELINE_PERIOD = 20                # Use 20-period ATR for baseline comparison
 
 # Volume profile during accumulation (should be declining)
@@ -166,8 +166,8 @@ RISK_PER_TRADE_PCT = 1.0                # 1% risk per trade
 # ============================================================================
 
 # Minimum thresholds
-MIN_CONFIDENCE_THRESHOLD = 0.65         # Minimum to take trade
-HIGH_CONFIDENCE_THRESHOLD = 0.80        # High-confidence setup
+MIN_CONFIDENCE_THRESHOLD = 0.45         # Minimum to take trade (lowered for real market conditions)
+HIGH_CONFIDENCE_THRESHOLD = 0.65        # High-confidence setup
 
 # Scoring weights (must sum to 1.0)
 CONFIDENCE_WEIGHTS = {
@@ -242,9 +242,9 @@ ENABLED_PAIRS = [
     'CS.D.GBPJPY.MINI.IP',
 ]
 
-# Pair-specific pip values
+# Pair-specific pip values (correct for IG Markets pricing)
 PAIR_PIP_VALUES = {
-    'CS.D.EURUSD.CEEM.IP': 1.0,         # CEEM uses scaled pricing
+    'CS.D.EURUSD.CEEM.IP': 0.0001,      # EURUSD = 0.0001 (4th decimal is pip)
     'CS.D.GBPUSD.MINI.IP': 0.0001,
     'CS.D.USDJPY.MINI.IP': 0.01,
     'CS.D.USDCHF.MINI.IP': 0.0001,
@@ -259,22 +259,22 @@ PAIR_PIP_VALUES = {
 # Pair-specific calibration (from trading analyst recommendations)
 PAIR_CALIBRATION = {
     'EURUSD': {
-        'atr_compression': 0.58,        # Tighter for low volatility
+        'atr_compression': 0.85,        # Relaxed for real market conditions
         'min_sweep_pips': 8,
         'max_sweep_pips': 15,
-        'max_range_pips': 25,
+        'max_range_pips': 30,           # Increased from 25
     },
     'GBPUSD': {
-        'atr_compression': 0.62,        # Looser for higher volatility
+        'atr_compression': 0.90,        # Looser for higher volatility
         'min_sweep_pips': 10,
         'max_sweep_pips': 18,
-        'max_range_pips': 30,
+        'max_range_pips': 35,           # Increased from 30
     },
     'USDJPY': {
-        'atr_compression': 0.60,
+        'atr_compression': 0.85,
         'min_sweep_pips': 12,
         'max_sweep_pips': 20,
-        'max_range_pips': 35,
+        'max_range_pips': 40,           # Increased from 35
     },
     # Default for others uses global settings
 }
