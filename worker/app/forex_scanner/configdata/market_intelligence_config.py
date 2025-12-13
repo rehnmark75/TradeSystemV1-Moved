@@ -110,6 +110,7 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         # PRIORITY: EMA - foundational trend strategy
         'ema': 1.0,             # PERFECT - EMA is THE trend indicator
         'smart_money_ema': 1.0, # PERFECT - EMA with smart money
+        'ema_double': 1.0,      # PERFECT - EMA with crossover confirmation + FVG + ADX
 
         # Trend-following strategies (excellent in trending markets)
         'macd': 1.0,            # Perfect - MACD follows trends excellently
@@ -131,6 +132,7 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         # PRIORITY: EMA - still important for range boundaries
         'ema': 0.8,             # GOOD - defines range boundaries effectively
         'smart_money_ema': 0.85, # Good - EMA with smart money context
+        'ema_double': 0.6,      # MODERATE - ADX filter helps avoid ranging markets
 
         # Range-specific strategies (excellent in ranging markets)
         'mean_reversion': 1.0,  # PERFECT - designed for ranges
@@ -152,6 +154,7 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         # PRIORITY: EMA - excellent for confirming breakouts
         'ema': 0.95,            # EXCELLENT - EMA crossovers confirm breakouts
         'smart_money_ema': 0.95, # Excellent - EMA with smart money confirmation
+        'ema_double': 0.95,     # EXCELLENT - FVG confirms breakout momentum
 
         # Breakout-specific strategies (excellent)
         'bb_supertrend': 1.0,   # PERFECT - designed for breakouts
@@ -175,6 +178,7 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         # PRIORITY: EMA - moderate performance in consolidation
         'ema': 0.7,             # GOOD - can define consolidation boundaries
         'smart_money_ema': 0.75, # Good - EMA with smart money insight
+        'ema_double': 0.5,      # POOR - ADX filters out but some false signals possible
 
         # Consolidation specialists (excellent)
         'mean_reversion': 1.0,  # PERFECT - consolidation = mean reversion
@@ -198,6 +202,7 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         # PRIORITY: EMA - excellent in high volatility
         'ema': 1.0,             # PERFECT - EMA handles volatility well
         'smart_money_ema': 1.0, # PERFECT - EMA with smart money
+        'ema_double': 0.9,      # EXCELLENT - confirmation filters help in volatile markets
 
         # High volatility specialists (excellent)
         'zero_lag': 1.0,        # PERFECT - designed for fast markets
@@ -221,6 +226,7 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         # PRIORITY: EMA - excellent in low volatility
         'ema': 1.0,             # PERFECT - smooth trends in low vol
         'smart_money_ema': 1.0, # PERFECT - EMA with smart money
+        'ema_double': 0.85,     # VERY GOOD - works well in smooth low-vol trends
 
         # Low volatility specialists (excellent)
         'mean_reversion': 1.0,  # PERFECT - low vol enables mean reversion
@@ -244,6 +250,7 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         # PRIORITY: EMA - perfect in medium volatility
         'ema': 1.0,             # PERFECT - ideal conditions for EMA
         'smart_money_ema': 1.0, # PERFECT - EMA with smart money
+        'ema_double': 1.0,      # PERFECT - ideal conditions for confirmed crossovers
 
         # All strategies perform well in medium volatility (Goldilocks zone)
         'macd': 1.0,            # PERFECT - ideal MACD conditions
@@ -263,6 +270,7 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         # PRIORITY: EMA - conservative defaults when regime unclear
         'ema': 0.8,             # GOOD - safe default for foundational strategy
         'smart_money_ema': 0.8, # Good - EMA with smart money
+        'ema_double': 0.75,     # GOOD - multiple confirmations help in uncertainty
 
         # Conservative defaults for all strategies when regime is uncertain
         'macd': 0.7,            # Good - proven versatile strategy

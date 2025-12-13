@@ -1165,9 +1165,11 @@ class TradeValidator:
             # - MACD: Can trade counter-trend (momentum reversals)
             # - ranging_market: Specifically designed for ranging/non-trending conditions
             # - SMC_STRUCTURE: Has its own HTF trend validation and structure-based entries
+            # - EMA_DOUBLE_CONFIRMATION: Has its own 4H EMA 21 HTF trend filter
             is_macd_strategy = 'MACD' in strategy
             is_ranging_strategy = 'ranging_market' in strategy.lower()
             is_smc_structure = 'SMC_STRUCTURE' in strategy or 'smc_structure' in strategy.lower()
+            is_ema_double = 'EMA_DOUBLE' in strategy or 'ema_double' in strategy.lower()
 
             # Apply trend filter logic with comprehensive logging
             self.logger.info(f"📊 EMA200 validation for {epic} {signal_type} ({strategy}): price={current_price:.5f}, ema200={ema_200:.5f}")
@@ -1187,6 +1189,9 @@ class TradeValidator:
                     elif is_smc_structure:
                         self.logger.info(f"✅ SMC_STRUCTURE BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (has own HTF trend validation)")
                         return True, f"SMC_STRUCTURE BUY valid: structure-based entry with HTF validation (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
+                    elif is_ema_double:
+                        self.logger.info(f"✅ EMA_DOUBLE BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (has own 4H EMA 21 HTF filter)")
+                        return True, f"EMA_DOUBLE BUY valid: 4H EMA 21 trend filter applied (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
                     else:
                         self.logger.warning(f"🚫 BUY signal REJECTED {epic}: {current_price:.5f} <= {ema_200:.5f} (price at/below EMA200)")
                         return False, f"BUY rejected: price {current_price:.5f} at/below EMA200 {ema_200:.5f}"
@@ -1206,6 +1211,9 @@ class TradeValidator:
                     elif is_smc_structure:
                         self.logger.info(f"✅ SMC_STRUCTURE SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (has own HTF trend validation)")
                         return True, f"SMC_STRUCTURE SELL valid: structure-based entry with HTF validation (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
+                    elif is_ema_double:
+                        self.logger.info(f"✅ EMA_DOUBLE SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (has own 4H EMA 21 HTF filter)")
+                        return True, f"EMA_DOUBLE SELL valid: 4H EMA 21 trend filter applied (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
                     else:
                         self.logger.warning(f"🚫 SELL signal REJECTED {epic}: {current_price:.5f} >= {ema_200:.5f} (price at/above EMA200)")
                         return False, f"SELL rejected: price {current_price:.5f} at/above EMA200 {ema_200:.5f}"
@@ -1380,9 +1388,10 @@ class TradeValidator:
         strategy_multipliers = {
             'zero_lag_ema': 1.5,      # Zero lag strategies can handle more pullback
             'combined_dynamic_all': 1.4,  # ADDED: Combined dynamic strategies
-            'combined': 1.3,          # Combined strategies get moderate flexibility  
+            'combined': 1.3,          # Combined strategies get moderate flexibility
             'momentum_bias': 1.4,     # Momentum strategies need pullback room
             'ema': 1.0,               # Standard EMA strategy baseline
+            'ema_double': 1.1,        # EMA Double Confirmation has built-in filters
             'macd': 1.2,              # MACD strategies get some flexibility
             'kama': 1.1               # KAMA gets slight flexibility
         }
@@ -1665,6 +1674,13 @@ class TradeValidator:
                 if confidence < smc_min_confidence:
                     return False, f"SMC_STRUCTURE confidence {confidence:.1%} below SMC minimum {smc_min_confidence:.1%}"
                 return True, f"SMC_STRUCTURE confidence {confidence:.1%} meets requirements (min: {smc_min_confidence:.1%})"
+
+            # EMA_DOUBLE_CONFIRMATION uses 50% minimum confidence with multi-filter validation
+            elif 'EMA_DOUBLE' in strategy or 'ema_double' in strategy.lower():
+                ema_double_min_confidence = 0.50  # Same as strategy's internal MIN_CONFIDENCE
+                if confidence < ema_double_min_confidence:
+                    return False, f"EMA_DOUBLE confidence {confidence:.1%} below minimum {ema_double_min_confidence:.1%}"
+                return True, f"EMA_DOUBLE confidence {confidence:.1%} meets requirements (min: {ema_double_min_confidence:.1%})"
 
             # Other strategy-specific thresholds
             elif strategy == 'swing' and confidence < 0.70:
