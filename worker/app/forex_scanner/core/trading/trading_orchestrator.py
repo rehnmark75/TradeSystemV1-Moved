@@ -259,11 +259,20 @@ class TradingOrchestrator:
         
         # ENHANCED: Initialize IntegrationManager with advanced Claude configuration
         try:
+            # Get data_fetcher from scanner's signal_detector for vision analysis
+            data_fetcher = None
+            if self.scanner and hasattr(self.scanner, 'signal_detector'):
+                signal_detector = self.scanner.signal_detector
+                if hasattr(signal_detector, 'data_fetcher'):
+                    data_fetcher = signal_detector.data_fetcher
+                    self.logger.info("📊 Vision analysis enabled: data_fetcher available")
+
             self.integration_manager = IntegrationManager(
                 db_manager=self.db_manager,
                 logger=self.logger,
                 enable_claude=self.enable_claude,
-                enable_notifications=getattr(config, 'NOTIFICATIONS_ENABLED', True)
+                enable_notifications=getattr(config, 'NOTIFICATIONS_ENABLED', True),
+                data_fetcher=data_fetcher
             )
         except (NameError, ImportError) as e:
             self.logger.warning(f"⚠️ IntegrationManager not available: {e}")

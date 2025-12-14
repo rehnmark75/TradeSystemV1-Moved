@@ -2,9 +2,13 @@
 Claude Analyzer - Main Orchestrator for Signal Analysis
 Modular refactor of the original claude_api.py for better maintainability
 CLEAN ARCHITECTURE: Uses enhanced PromptBuilder without duplicate classes
+ENHANCED: Vision API integration with chart generation for EMA_DOUBLE and other strategies
 """
 
 import logging
+import os
+import json
+import base64
 from typing import Dict, Optional, List
 from datetime import datetime
 import pandas as pd
@@ -20,6 +24,13 @@ except ImportError:
     from forex_scanner import config
 from .validation.timestamp_validator import TimestampValidator
 
+# Try to import chart generator
+try:
+    from .forex_chart_generator import ForexChartGenerator
+    CHART_GENERATOR_AVAILABLE = True
+except ImportError:
+    CHART_GENERATOR_AVAILABLE = False
+
 
 class ClaudeAnalyzer:
     """
@@ -28,11 +39,11 @@ class ClaudeAnalyzer:
     ENHANCED: Now uses the enhanced PromptBuilder for institutional-grade analysis
     """
     
-    def __init__(self, api_key: str = None, auto_save: bool = True, save_directory: str = "claude_analysis"):
+    def __init__(self, api_key: str = None, auto_save: bool = True, save_directory: str = "claude_analysis", data_fetcher=None):
         # Initialize API key
         if not api_key:
             api_key = getattr(config, 'CLAUDE_API_KEY', None)
-        
+
         # Initialize components
         self.api_client = APIClient(api_key)
         self.technical_validator = TechnicalValidator()
@@ -40,17 +51,36 @@ class ClaudeAnalyzer:
         self.prompt_builder = PromptBuilder()  # ENHANCED: Now includes advanced capabilities
         self.file_manager = FileManager(auto_save, save_directory)
         self.timestamp_validator = TimestampValidator()
-        
+        self.data_fetcher = data_fetcher
+
         # Configuration for analysis mode
         self.use_advanced_prompts = getattr(config, 'USE_ADVANCED_CLAUDE_PROMPTS', True)
         self.analysis_level = getattr(config, 'CLAUDE_ANALYSIS_LEVEL', 'institutional')  # institutional, hedge_fund, prop_trader, risk_manager
-        
+
+        # ENHANCED: Vision API configuration
+        self.use_vision_api = getattr(config, 'CLAUDE_VISION_ENABLED', True)
+        self.vision_strategies = getattr(config, 'CLAUDE_VISION_STRATEGIES', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
+        self.save_vision_artifacts = getattr(config, 'CLAUDE_SAVE_VISION_ARTIFACTS', True)
+
+        # ENHANCED: Chart generator initialization
+        self.chart_generator = None
+        if CHART_GENERATOR_AVAILABLE and self.use_vision_api:
+            try:
+                self.chart_generator = ForexChartGenerator(data_fetcher=data_fetcher)
+                self.logger.info("✅ Chart generator initialized for vision analysis")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to initialize chart generator: {e}")
+
+        # Save directory for analysis artifacts
+        self.save_directory = save_directory
+
         self.logger = logging.getLogger(__name__)
-        
+
         if not api_key:
             self.logger.warning("⚠️ No Claude API key provided")
-        
+
         self.logger.info(f"✅ Claude Analyzer initialized - Advanced prompts: {self.use_advanced_prompts}, Level: {self.analysis_level}")
+        self.logger.info(f"   Vision API: {'Enabled' if self.use_vision_api and self.chart_generator else 'Disabled'}")
     
     def analyze_signal_minimal(self, signal: Dict, save_to_file: bool = None) -> Optional[Dict]:
         """
@@ -244,7 +274,7 @@ class ClaudeAnalyzer:
                     'technical_validation_passed': True,
                     'error': 'parsing_failed'
                 }
-                
+
         except Exception as e:
             error_msg = str(e)
             self.logger.error(f"❌ Claude minimal analysis failed: {error_msg}")
@@ -257,7 +287,421 @@ class ClaudeAnalyzer:
                 'technical_validation_passed': False,
                 'error': 'general_analysis_failure'
             }
-    
+
+    def analyze_signal_with_vision(
+        self,
+        signal: Dict,
+        candles: Dict[str, pd.DataFrame] = None,
+        alert_id: int = None,
+        save_to_file: bool = True
+    ) -> Optional[Dict]:
+        """
+        ENHANCED: Analyze signal with vision API including chart generation.
+
+        This method:
+        1. Generates a multi-timeframe chart for the signal
+        2. Builds a vision-enabled prompt specific to the strategy
+        3. Sends both chart and prompt to Claude Vision API
+        4. Saves chart and analysis data to disk with alert_id prefix
+
+        Args:
+            signal: Signal dictionary with all trading data
+            candles: Dict of DataFrames {'4h': df_4h, '15m': df_15m, '5m': df_5m}
+                     If None and data_fetcher is available, will fetch candles
+            alert_id: Alert ID from database for file naming
+            save_to_file: Whether to save analysis artifacts to disk
+
+        Returns:
+            Analysis result dictionary with vision-specific fields
+        """
+        if not self.api_client.api_key:
+            self.logger.warning("No API key available for Claude vision analysis")
+            return None
+
+        try:
+            epic = signal.get('epic', 'Unknown')
+            strategy = signal.get('strategy', 'Unknown').upper()
+
+            self.logger.info(f"🎯 Starting vision analysis for {epic} ({strategy})")
+
+            # Check if strategy supports vision analysis
+            if not self._should_use_vision(signal):
+                self.logger.info(f"📝 Strategy {strategy} not configured for vision - using text-only analysis")
+                return self.analyze_signal_minimal(signal, save_to_file)
+
+            # Fetch candles if not provided and data_fetcher is available
+            if candles is None and self.data_fetcher:
+                candles = self._fetch_candles_for_chart(epic)
+
+            # Generate chart if possible
+            chart_base64 = None
+            chart_generated = False
+
+            if self.chart_generator and candles:
+                try:
+                    chart_base64 = self.chart_generator.generate_signal_chart(
+                        epic=epic,
+                        candles=candles,
+                        signal=signal,
+                        smc_data=signal.get('smc_data')
+                    )
+                    if chart_base64:
+                        chart_generated = True
+                        self.logger.info(f"📊 Chart generated: {len(chart_base64)} bytes (base64)")
+                except Exception as chart_error:
+                    self.logger.warning(f"⚠️ Chart generation failed: {chart_error}")
+
+            # Build vision-enabled prompt
+            has_chart = chart_base64 is not None
+            prompt = self.prompt_builder.build_forex_vision_prompt(signal, has_chart=has_chart)
+
+            # Call appropriate API (vision or text-only)
+            if chart_base64:
+                self.logger.info(f"🔮 Calling Claude Vision API with chart...")
+                response_data = self.api_client.call_api_with_image(
+                    prompt=prompt,
+                    image_base64=chart_base64,
+                    max_tokens=300
+                )
+                response = response_data.get('content') if response_data else None
+                tokens_used = response_data.get('tokens', 0) if response_data else 0
+            else:
+                self.logger.info(f"📝 Calling Claude text-only API (no chart available)...")
+                response = self.api_client.call_api(prompt, max_tokens=300)
+                tokens_used = 0
+
+            if not response:
+                self.logger.error("❌ No response from Claude API")
+                return {
+                    'score': 3,
+                    'decision': 'NEUTRAL',
+                    'reason': 'No API response received',
+                    'approved': False,
+                    'raw_response': 'No response from Claude API',
+                    'technical_validation_passed': True,
+                    'vision_used': False,
+                    'error': 'no_api_response'
+                }
+
+            # Parse response
+            parsed_result = self.response_parser.parse_minimal_response(response)
+
+            if parsed_result and parsed_result.get('score') is not None:
+                score_int = self._safe_convert_score(parsed_result.get('score'))
+                decision = parsed_result.get('decision', 'UNKNOWN')
+
+                self.logger.info(f"✅ Claude Vision analysis: {epic} - Score: {score_int}/10, Decision: {decision}")
+
+                result = {
+                    'score': score_int,
+                    'decision': decision,
+                    'reason': parsed_result.get('reason', 'Vision analysis completed'),
+                    'approved': parsed_result.get('approved', False),
+                    'raw_response': response,
+                    'mode': 'vision' if chart_generated else 'vision-text-only',
+                    'technical_validation_passed': True,
+                    'analysis_timestamp': datetime.now().isoformat(),
+                    'vision_used': chart_generated,
+                    'chart_generated': chart_generated,
+                    'tokens_used': tokens_used
+                }
+
+                # Save artifacts to disk with alert_id prefix
+                if save_to_file and self.save_vision_artifacts:
+                    self._save_vision_analysis_artifacts(
+                        signal=signal,
+                        result=result,
+                        chart_base64=chart_base64,
+                        prompt=prompt,
+                        alert_id=alert_id
+                    )
+
+                return result
+            else:
+                self.logger.error("❌ Failed to parse Claude Vision response")
+                return {
+                    'score': 3,
+                    'decision': 'NEUTRAL',
+                    'reason': 'Failed to parse Claude response',
+                    'approved': False,
+                    'raw_response': response,
+                    'technical_validation_passed': True,
+                    'vision_used': chart_generated,
+                    'error': 'parsing_failed'
+                }
+
+        except Exception as e:
+            error_msg = str(e)
+            self.logger.error(f"❌ Claude vision analysis failed: {error_msg}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
+            return {
+                'score': 2,
+                'decision': 'REJECT',
+                'reason': f'Vision analysis error: {error_msg}',
+                'approved': False,
+                'raw_response': f'Error: {error_msg}',
+                'technical_validation_passed': False,
+                'vision_used': False,
+                'error': 'vision_analysis_failure'
+            }
+
+    def _should_use_vision(self, signal: Dict) -> bool:
+        """
+        Determine if vision analysis should be used for this signal.
+
+        Vision is used for:
+        1. Strategies in the vision_strategies list (e.g., EMA_DOUBLE, SMC)
+        2. When chart generator is available
+        3. When vision API is enabled in config
+
+        Args:
+            signal: Signal dictionary
+
+        Returns:
+            True if vision should be used
+        """
+        if not self.use_vision_api or not self.chart_generator:
+            return False
+
+        strategy = signal.get('strategy', '').upper()
+
+        # Check if strategy matches any in the vision list
+        for vision_strategy in self.vision_strategies:
+            if vision_strategy.upper() in strategy:
+                return True
+
+        return False
+
+    def _fetch_candles_for_chart(self, epic: str) -> Optional[Dict[str, pd.DataFrame]]:
+        """
+        Fetch candle data for chart generation.
+
+        Fetches multi-timeframe data: 4H, 15m, and 5m for comprehensive chart.
+
+        Args:
+            epic: Currency pair epic code
+
+        Returns:
+            Dict of DataFrames {'4h': df_4h, '15m': df_15m, '5m': df_5m} or None
+        """
+        if not self.data_fetcher:
+            self.logger.warning("No data_fetcher available for candle retrieval")
+            return None
+
+        try:
+            # Extract pair name from epic
+            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+
+            candles = {}
+
+            # Fetch 4H data (for higher timeframe context)
+            try:
+                df_4h = self.data_fetcher.get_enhanced_data(
+                    epic=epic,
+                    pair=pair,
+                    timeframe='4h',
+                    lookback_hours=400  # ~100 bars
+                )
+                if df_4h is not None and len(df_4h) >= 20:
+                    candles['4h'] = df_4h
+                    self.logger.debug(f"📊 Fetched 4H data: {len(df_4h)} bars")
+            except Exception as e:
+                self.logger.debug(f"Could not fetch 4H data: {e}")
+
+            # Fetch 15m data (main analysis timeframe)
+            try:
+                df_15m = self.data_fetcher.get_enhanced_data(
+                    epic=epic,
+                    pair=pair,
+                    timeframe='15m',
+                    lookback_hours=100  # ~400 bars
+                )
+                if df_15m is not None and len(df_15m) >= 50:
+                    candles['15m'] = df_15m
+                    self.logger.debug(f"📊 Fetched 15m data: {len(df_15m)} bars")
+            except Exception as e:
+                self.logger.debug(f"Could not fetch 15m data: {e}")
+
+            # Fetch 5m data (entry timeframe)
+            try:
+                df_5m = self.data_fetcher.get_enhanced_data(
+                    epic=epic,
+                    pair=pair,
+                    timeframe='5m',
+                    lookback_hours=24  # ~288 bars
+                )
+                if df_5m is not None and len(df_5m) >= 50:
+                    candles['5m'] = df_5m
+                    self.logger.debug(f"📊 Fetched 5m data: {len(df_5m)} bars")
+            except Exception as e:
+                self.logger.debug(f"Could not fetch 5m data: {e}")
+
+            if not candles:
+                self.logger.warning(f"No candle data could be fetched for {epic}")
+                return None
+
+            self.logger.info(f"📊 Candles fetched for {epic}: {list(candles.keys())}")
+            return candles
+
+        except Exception as e:
+            self.logger.error(f"Error fetching candles for chart: {e}")
+            return None
+
+    def _save_vision_analysis_artifacts(
+        self,
+        signal: Dict,
+        result: Dict,
+        chart_base64: str,
+        prompt: str,
+        alert_id: int = None
+    ) -> None:
+        """
+        Save vision analysis artifacts to disk with alert_id prefix.
+
+        Saves:
+        1. Chart image as PNG file
+        2. Signal data as JSON file
+        3. Prompt text file
+        4. Analysis result as JSON file
+
+        Args:
+            signal: Signal dictionary
+            result: Analysis result dictionary
+            chart_base64: Base64-encoded chart image
+            prompt: Prompt text sent to Claude
+            alert_id: Alert ID for file naming prefix
+        """
+        try:
+            # Create vision analysis directory
+            vision_dir = os.path.join(self.save_directory, 'vision_analysis')
+            os.makedirs(vision_dir, exist_ok=True)
+
+            # Generate filename prefix
+            epic = signal.get('epic', 'unknown').replace('.', '_')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+            if alert_id:
+                prefix = f"{alert_id}_{epic}_{timestamp}"
+            else:
+                prefix = f"{epic}_{timestamp}"
+
+            # 1. Save chart image as PNG
+            if chart_base64:
+                chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
+                try:
+                    chart_bytes = base64.b64decode(chart_base64)
+                    with open(chart_path, 'wb') as f:
+                        f.write(chart_bytes)
+                    self.logger.info(f"📊 Chart saved: {chart_path}")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Failed to save chart: {e}")
+
+            # 2. Save signal data as JSON
+            signal_path = os.path.join(vision_dir, f"{prefix}_signal.json")
+            try:
+                # Create a serializable copy of signal
+                signal_data = self._make_json_serializable(signal)
+                with open(signal_path, 'w', encoding='utf-8') as f:
+                    json.dump(signal_data, f, indent=2, default=str)
+                self.logger.info(f"📝 Signal data saved: {signal_path}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to save signal data: {e}")
+
+            # 3. Save prompt text
+            prompt_path = os.path.join(vision_dir, f"{prefix}_prompt.txt")
+            try:
+                with open(prompt_path, 'w', encoding='utf-8') as f:
+                    f.write(f"═══════════════════════════════════════════════════════════════\n")
+                    f.write(f"CLAUDE VISION ANALYSIS PROMPT\n")
+                    f.write(f"═══════════════════════════════════════════════════════════════\n")
+                    f.write(f"Alert ID: {alert_id}\n")
+                    f.write(f"Epic: {signal.get('epic', 'Unknown')}\n")
+                    f.write(f"Strategy: {signal.get('strategy', 'Unknown')}\n")
+                    f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Chart Included: {chart_base64 is not None}\n")
+                    f.write(f"═══════════════════════════════════════════════════════════════\n\n")
+                    f.write(prompt)
+                self.logger.info(f"📝 Prompt saved: {prompt_path}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to save prompt: {e}")
+
+            # 4. Save analysis result as JSON
+            result_path = os.path.join(vision_dir, f"{prefix}_result.json")
+            try:
+                result_data = {
+                    'alert_id': alert_id,
+                    'epic': signal.get('epic'),
+                    'signal_type': signal.get('signal_type'),
+                    'strategy': signal.get('strategy'),
+                    'analysis_timestamp': result.get('analysis_timestamp'),
+                    'score': result.get('score'),
+                    'decision': result.get('decision'),
+                    'approved': result.get('approved'),
+                    'reason': result.get('reason'),
+                    'vision_used': result.get('vision_used'),
+                    'chart_generated': result.get('chart_generated'),
+                    'tokens_used': result.get('tokens_used'),
+                    'mode': result.get('mode'),
+                    'raw_response': result.get('raw_response'),
+                    'files': {
+                        'chart': f"{prefix}_chart.png" if chart_base64 else None,
+                        'signal': f"{prefix}_signal.json",
+                        'prompt': f"{prefix}_prompt.txt",
+                        'result': f"{prefix}_result.json"
+                    }
+                }
+                with open(result_path, 'w', encoding='utf-8') as f:
+                    json.dump(result_data, f, indent=2)
+                self.logger.info(f"📝 Analysis result saved: {result_path}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to save result: {e}")
+
+            self.logger.info(f"✅ Vision analysis artifacts saved with prefix: {prefix}")
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to save vision analysis artifacts: {e}")
+
+    def _make_json_serializable(self, obj: Dict) -> Dict:
+        """
+        Convert signal dictionary to JSON-serializable format.
+
+        Handles datetime objects, numpy types, pandas types, etc.
+
+        Args:
+            obj: Dictionary to convert
+
+        Returns:
+            JSON-serializable dictionary
+        """
+        import numpy as np
+
+        def convert(item):
+            if item is None:
+                return None
+            elif isinstance(item, (datetime,)):
+                return item.isoformat()
+            elif isinstance(item, pd.Timestamp):
+                return item.isoformat()
+            elif isinstance(item, (np.integer,)):
+                return int(item)
+            elif isinstance(item, (np.floating,)):
+                return float(item)
+            elif isinstance(item, (np.ndarray,)):
+                return item.tolist()
+            elif isinstance(item, pd.Series):
+                return item.to_dict()
+            elif isinstance(item, pd.DataFrame):
+                return item.to_dict('records')
+            elif isinstance(item, dict):
+                return {k: convert(v) for k, v in item.items()}
+            elif isinstance(item, (list, tuple)):
+                return [convert(i) for i in item]
+            else:
+                return item
+
+        return convert(obj)
+
     def analyze_signal(self, signal: Dict, save_to_file: bool = None) -> Optional[str]:
         """
         Full analysis with text output for backward compatibility

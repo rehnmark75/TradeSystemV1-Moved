@@ -27,14 +27,16 @@ class IntegrationManager:
     ENHANCED: Complete integration with modular Claude API and advanced features
     """
     
-    def __init__(self, 
+    def __init__(self,
                  db_manager=None,
                  logger: Optional[logging.Logger] = None,
                  enable_claude: bool = None,
-                 enable_notifications: bool = None):
-        
+                 enable_notifications: bool = None,
+                 data_fetcher=None):
+
         self.logger = logger or logging.getLogger(__name__)
         self.db_manager = db_manager
+        self.data_fetcher = data_fetcher  # For vision analysis chart generation
         
         # Configuration with proper defaults
         self.enable_claude = enable_claude if enable_claude is not None else getattr(config, 'CLAUDE_ANALYSIS_ENABLED', False)
@@ -90,6 +92,7 @@ class IntegrationManager:
         self.logger.info(f"   Claude analysis mode: {self.claude_analysis_mode}")
         self.logger.info(f"   Advanced prompts enabled: {self.use_advanced_prompts}")
         self.logger.info(f"   Claude analysis level: {self.claude_analysis_level}")
+        self.logger.info(f"   Vision analysis: {'Available' if self.data_fetcher else 'Disabled (no data_fetcher)'}")
         self.logger.info(f"   Notifications enabled: {self.enable_notifications}")
         self.logger.info(f"   Database available: {'Yes' if self.db_manager else 'No'}")
     
@@ -156,7 +159,8 @@ class IntegrationManager:
             self.claude_analyzer = ClaudeAnalyzer(
                 api_key=api_key,
                 auto_save=getattr(config, 'CLAUDE_AUTO_SAVE', True),
-                save_directory=getattr(config, 'CLAUDE_SAVE_DIRECTORY', "claude_analysis")
+                save_directory=getattr(config, 'CLAUDE_SAVE_DIRECTORY', "claude_analysis"),
+                data_fetcher=self.data_fetcher  # For vision analysis chart generation
             )
             
             # ENHANCED: Check which implementation was loaded
@@ -431,11 +435,37 @@ class IntegrationManager:
         self.logger.info("🔄 Falling back to single signal analysis")
         return self.analyze_signals_with_claude(signals)
     
-    def _perform_enhanced_claude_analysis(self, signal: Dict) -> Optional[Any]:
+    def _perform_enhanced_claude_analysis(self, signal: Dict, candles: Dict = None, alert_id: int = None) -> Optional[Any]:
         """
-        ENHANCED: Perform Claude analysis with modular features
+        ENHANCED: Perform Claude analysis with modular features and vision support.
+
+        Args:
+            signal: Signal dictionary
+            candles: Optional dict of DataFrames for chart generation {'4h': df, '15m': df, '5m': df}
+            alert_id: Optional alert ID for file naming
+
+        Returns:
+            Analysis result dictionary
         """
         try:
+            # Check if vision analysis should be used
+            strategy = signal.get('strategy', '').upper()
+            use_vision = hasattr(self.claude_analyzer, 'analyze_signal_with_vision')
+
+            # Check if this strategy supports vision
+            if use_vision:
+                vision_strategies = getattr(self.claude_analyzer, 'vision_strategies', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
+                strategy_supports_vision = any(vs.upper() in strategy for vs in vision_strategies)
+
+                if strategy_supports_vision:
+                    self.logger.info(f"🔮 Using vision analysis for {strategy} strategy")
+                    return self.claude_analyzer.analyze_signal_with_vision(
+                        signal=signal,
+                        candles=candles,
+                        alert_id=alert_id,
+                        save_to_file=True
+                    )
+
             # Choose analysis method based on mode and availability
             if self.claude_analysis_mode == 'minimal':
                 # Try enhanced minimal analysis first
@@ -444,21 +474,21 @@ class IntegrationManager:
                 # Fallback to basic for compatibility
                 elif hasattr(self.claude_analyzer, 'analyze_signal_basic'):
                     return self.claude_analyzer.analyze_signal_basic(signal)
-            
+
             elif self.claude_analysis_mode == 'full':
                 # Use full analysis method
                 if hasattr(self.claude_analyzer, 'analyze_signal'):
                     return self.claude_analyzer.analyze_signal(signal)
-            
+
             # Final fallback - try any available method
             available_method = self.integration_status['claude']['method_available']
             if available_method and hasattr(self.claude_analyzer, available_method):
                 method = getattr(self.claude_analyzer, available_method)
                 return method(signal)
-            
+
             self.logger.warning(f"⚠️ No compatible Claude method found for mode: {self.claude_analysis_mode}")
             return None
-            
+
         except Exception as e:
             self.logger.error(f"❌ Enhanced Claude analysis method error: {e}")
             return None
