@@ -17,13 +17,16 @@ from typing import Optional, List
 import pandas as pd
 import psycopg2
 
-# Set up logging
+# Set up logging - use WARNING to reduce noise
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+# Suppress noisy loggers
+logging.getLogger('forex_scanner').setLevel(logging.WARNING)
+logging.getLogger('forex_scanner.core.strategies').setLevel(logging.WARNING)
 
 
 def get_db_connection():
@@ -252,25 +255,29 @@ def run_master_pattern_backtest(epic: str, pair: str, days: int = 30):
 
 def main():
     """Main entry point."""
+    # Epic map for all pairs
+    epic_map = {
+        'EURUSD': 'CS.D.EURUSD.CEEM.IP',
+        'GBPUSD': 'CS.D.GBPUSD.MINI.IP',
+        'USDJPY': 'CS.D.USDJPY.MINI.IP',
+        'AUDUSD': 'CS.D.AUDUSD.MINI.IP',
+        'USDCAD': 'CS.D.USDCAD.MINI.IP',
+        'USDCHF': 'CS.D.USDCHF.MINI.IP',
+        'NZDUSD': 'CS.D.NZDUSD.MINI.IP',
+        'EURJPY': 'CS.D.EURJPY.MINI.IP',
+        'GBPJPY': 'CS.D.GBPJPY.MINI.IP',
+    }
+
     # Default settings
-    pair = 'EURUSD'
-    epic = 'CS.D.EURUSD.CEEM.IP'
     days = 30
+    pairs_to_test = ['EURUSD']  # Default single pair
 
     # Parse command line args
     if len(sys.argv) > 1:
-        pair = sys.argv[1].upper()
-        epic_map = {
-            'EURUSD': 'CS.D.EURUSD.CEEM.IP',
-            'GBPUSD': 'CS.D.GBPUSD.MINI.IP',
-            'USDJPY': 'CS.D.USDJPY.MINI.IP',
-            'AUDUSD': 'CS.D.AUDUSD.MINI.IP',
-            'USDCAD': 'CS.D.USDCAD.MINI.IP',
-            'NZDUSD': 'CS.D.NZDUSD.MINI.IP',
-            'EURJPY': 'CS.D.EURJPY.MINI.IP',
-            'GBPJPY': 'CS.D.GBPJPY.MINI.IP',
-        }
-        epic = epic_map.get(pair, f'CS.D.{pair}.MINI.IP')
+        if sys.argv[1].upper() == 'ALL':
+            pairs_to_test = list(epic_map.keys())
+        else:
+            pairs_to_test = [sys.argv[1].upper()]
 
     if len(sys.argv) > 2:
         try:
@@ -278,10 +285,45 @@ def main():
         except ValueError:
             pass
 
-    # Run backtest
-    signals = run_master_pattern_backtest(epic, pair, days)
+    # Run backtest for each pair
+    all_signals = []
+    results_summary = []
 
-    return 0 if signals else 1
+    for pair in pairs_to_test:
+        epic = epic_map.get(pair, f'CS.D.{pair}.MINI.IP')
+        signals = run_master_pattern_backtest(epic, pair, days)
+        all_signals.extend(signals)
+
+        bull_count = sum(1 for s in signals if s['direction'] == 'BULL')
+        bear_count = sum(1 for s in signals if s['direction'] == 'BEAR')
+        avg_conf = sum(s['confidence'] for s in signals) / len(signals) if signals else 0
+
+        results_summary.append({
+            'pair': pair,
+            'signals': len(signals),
+            'bull': bull_count,
+            'bear': bear_count,
+            'avg_conf': avg_conf
+        })
+
+    # Print overall summary
+    if len(pairs_to_test) > 1:
+        print()
+        print("=" * 70)
+        print("OVERALL SUMMARY - ALL PAIRS")
+        print("=" * 70)
+        print(f"{'Pair':<10} {'Signals':>8} {'Bull':>6} {'Bear':>6} {'Avg Conf':>10}")
+        print("-" * 70)
+        for r in results_summary:
+            print(f"{r['pair']:<10} {r['signals']:>8} {r['bull']:>6} {r['bear']:>6} {r['avg_conf']:>9.1%}")
+        print("-" * 70)
+        total_signals = sum(r['signals'] for r in results_summary)
+        total_bull = sum(r['bull'] for r in results_summary)
+        total_bear = sum(r['bear'] for r in results_summary)
+        overall_conf = sum(s['confidence'] for s in all_signals) / len(all_signals) if all_signals else 0
+        print(f"{'TOTAL':<10} {total_signals:>8} {total_bull:>6} {total_bear:>6} {overall_conf:>9.1%}")
+
+    return 0 if all_signals else 1
 
 
 if __name__ == '__main__':

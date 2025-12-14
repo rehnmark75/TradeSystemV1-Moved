@@ -668,6 +668,8 @@ class MasterPatternStrategy(BaseStrategy):
         3. Body close beyond structure level
         """
         try:
+            self.logger.info(f"[{pair}] 🔍 Checking structure shift at {current_time.strftime('%H:%M')} UTC")
+
             if not self.require_structure_shift:
                 # If structure shift not required, skip to entry
                 state = self.phase_tracker.get_state(pair)
@@ -704,6 +706,10 @@ class MasterPatternStrategy(BaseStrategy):
 
             df_analyzed = self.smc_structure.analyze_market_structure(df.copy(), smc_config, epic)
 
+            # Log structure breaks found
+            num_breaks = len(self.smc_structure.structure_breaks) if self.smc_structure.structure_breaks else 0
+            self.logger.info(f"[{pair}] SMC found {num_breaks} structure breaks, expected direction: {expected_direction}")
+
             # Look for structure breaks after manipulation
             manipulation_time = state.manipulation.timestamp
             if isinstance(manipulation_time, datetime):
@@ -721,6 +727,7 @@ class MasterPatternStrategy(BaseStrategy):
                 manipulation_time = manipulation_time.tz_localize(None)
 
             # Get structure breaks from the analyzer
+            matching_breaks = 0
             for structure_break in self.smc_structure.structure_breaks:
                 # Normalize structure break timestamp for comparison
                 break_ts = structure_break.timestamp
@@ -732,29 +739,90 @@ class MasterPatternStrategy(BaseStrategy):
 
                 # Check if break is after manipulation
                 if break_ts < manipulation_time:
+                    self.logger.info(f"[{pair}] Structure break at {break_ts} is BEFORE manipulation at {manipulation_time}, skipping")
                     continue
 
                 # Check direction matches
                 if structure_break.direction != expected_direction:
+                    self.logger.info(f"[{pair}] Structure break direction {structure_break.direction} != expected {expected_direction}, skipping")
                     continue
 
-                # Found valid structure shift
+                matching_breaks += 1
+                self.logger.info(f"[{pair}] Found potential structure break #{matching_breaks}: {structure_break.break_type} {structure_break.direction}")
+
+                # Calculate actual volume and body ratios for structure shift quality
+                # Note: structure_break.index might be a positional index into the analyzed data
+                break_idx = structure_break.index
+                if break_idx >= len(df):
+                    break_idx = len(df) - 1
+
+                break_candle = df.iloc[break_idx]
+
+                # Calculate volume ratio vs average
+                # Note: Forex data from IG Markets often has no/minimal volume data
+                volume_ratio = 1.0
+                has_valid_volume = False
+                if 'volume' in df.columns:
+                    # Check if volume data is meaningful (not all zeros or constant)
+                    volume_data = df['volume'].iloc[max(0, break_idx-20):break_idx]
+                    if volume_data.std() > 0:  # Volume has variation
+                        avg_volume = volume_data.mean()
+                        if avg_volume > 0:
+                            volume_ratio = break_candle['volume'] / avg_volume
+                            has_valid_volume = True
+
+                # If no valid volume data, use candle range as proxy for conviction
+                if not has_valid_volume:
+                    # Use price range as volume proxy - larger moves = more conviction
+                    recent_ranges = (df['high'].iloc[max(0, break_idx-20):break_idx] -
+                                   df['low'].iloc[max(0, break_idx-20):break_idx])
+                    avg_range = recent_ranges.mean()
+                    current_range = break_candle['high'] - break_candle['low']
+                    if avg_range > 0:
+                        volume_ratio = current_range / avg_range
+                    self.logger.info(f"[{pair}] Using range-based volume proxy: {volume_ratio:.2f}x")
+
+                # Calculate body ratio (body size / total range)
+                candle_range = break_candle['high'] - break_candle['low']
+                body_size = abs(break_candle['close'] - break_candle['open'])
+                body_ratio = body_size / candle_range if candle_range > 0 else 0.5
+
+                # Validate structure shift quality
+                min_volume_ratio = getattr(config, 'MIN_BOS_VOLUME_MULTIPLIER', 1.4) if config else 1.4
+                min_body_ratio = getattr(config, 'MIN_BOS_CANDLE_BODY_RATIO', 0.60) if config else 0.60
+
+                # Check if structure shift meets quality requirements
+                if volume_ratio < min_volume_ratio:
+                    self.logger.info(f"[{pair}] ❌ Structure shift volume too low: {volume_ratio:.2f}x < {min_volume_ratio}x required")
+                    continue  # Check next structure break
+
+                if body_ratio < min_body_ratio:
+                    self.logger.info(f"[{pair}] ❌ Structure shift body ratio too low: {body_ratio:.1%} < {min_body_ratio:.0%} required")
+                    continue  # Check next structure break
+
+                self.logger.info(f"[{pair}] ✅ Valid structure shift: {structure_break.break_type} {structure_break.direction} "
+                               f"(volume: {volume_ratio:.2f}x, body: {body_ratio:.1%})")
+
+                # Found valid structure shift with quality confirmation
                 structure_shift = StructureShiftEvent(
                     direction=structure_break.direction,
                     break_type=structure_break.break_type,
                     break_candle_index=structure_break.index,
                     break_price=structure_break.break_price,
                     timestamp=structure_break.timestamp,
-                    volume_ratio=1.0,  # TODO: Calculate from data
-                    body_ratio=0.7    # TODO: Calculate from data
+                    volume_ratio=volume_ratio,
+                    body_ratio=body_ratio
                 )
 
                 return self.phase_tracker.update_structure_shift(pair, structure_shift, current_time)
 
+            self.logger.info(f"[{pair}] ⚠️ No valid structure shift found after {matching_breaks} potential breaks checked")
             return False
 
         except Exception as e:
             self.logger.error(f"[{pair}] Structure shift check error: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return False
 
     # =========================================================================
@@ -781,9 +849,10 @@ class MasterPatternStrategy(BaseStrategy):
         try:
             self.logger.info(f"[{pair}] Checking entry conditions at {current_time.strftime('%H:%M')} UTC")
 
-            # Check entry cutoff time (default 10:00 UTC, extended to 12:00 for more opportunities)
-            if not self.session_analyzer.is_entry_allowed(current_time, cutoff=time(12, 0)):
-                self.logger.info(f"[{pair}] Entry time past cutoff (12:00 UTC)")
+            # Check entry cutoff time (use config value, default 16:00 UTC)
+            entry_cutoff = getattr(config, 'ENTRY_CUTOFF_TIME', time(16, 0)) if config else time(16, 0)
+            if not self.session_analyzer.is_entry_allowed(current_time, cutoff=entry_cutoff):
+                self.logger.info(f"[{pair}] Entry time past cutoff ({entry_cutoff.strftime('%H:%M')} UTC)")
                 return None
 
             # Get state
@@ -806,10 +875,23 @@ class MasterPatternStrategy(BaseStrategy):
 
             self.logger.info(f"[{pair}] Entry zone: {state.entry_zone.zone_low:.5f} - {state.entry_zone.zone_high:.5f}, current price: {current_price:.5f}")
 
-            # Check if price is in entry zone
-            if not (state.entry_zone.zone_low <= current_price <= state.entry_zone.zone_high):
-                self.logger.info(f"[{pair}] Price not in entry zone")
+            # Determine expected direction from structure shift
+            direction = state.get_signal_direction()
+
+            # Check if price is in or approaching entry zone
+            # For BEAR: we want to sell when price pulls UP into/near the zone
+            # For BULL: we want to buy when price pulls DOWN into/near the zone
+            zone_buffer = 5 * pip_value  # 5 pip buffer for entry zone
+
+            in_zone = state.entry_zone.zone_low <= current_price <= state.entry_zone.zone_high
+            at_zone_for_bear = direction == 'BEAR' and current_price >= state.entry_zone.zone_low - zone_buffer
+            at_zone_for_bull = direction == 'BULL' and current_price <= state.entry_zone.zone_high + zone_buffer
+
+            if not (in_zone or at_zone_for_bear or at_zone_for_bull):
+                self.logger.info(f"[{pair}] Price not in entry zone (direction={direction})")
                 return None
+
+            self.logger.info(f"[{pair}] Price acceptable for {direction} entry (in_zone={in_zone}, at_zone_bear={at_zone_for_bear}, at_zone_bull={at_zone_for_bull})")
 
             # Calculate SL and TP
             direction = state.get_signal_direction()
@@ -940,9 +1022,13 @@ class MasterPatternStrategy(BaseStrategy):
         pip_value: float,
         df: pd.DataFrame
     ) -> Tuple[float, float]:
-        """Calculate stop loss and take profit."""
+        """Calculate stop loss and take profit with minimum stop distance validation."""
         direction = state.get_signal_direction()
         manip = state.manipulation
+
+        # Minimum stop distance (15 pips for standard pairs, 30 for JPY crosses)
+        # This prevents tight stops that get easily stopped out by noise
+        min_stop_pips = getattr(config, 'MIN_STOP_DISTANCE_PIPS', 15) if config else 15
 
         # Calculate ATR for dynamic buffer
         atr = df['atr'].iloc[-1] if 'atr' in df.columns else None
@@ -953,13 +1039,37 @@ class MasterPatternStrategy(BaseStrategy):
         if direction == 'BULL':
             # SL below manipulation sweep level
             sl = manip.sweep_level - buffer
-            # TP at session high or R:R based
+            # Ensure SL is below entry (validate direction)
+            if sl >= entry_price:
+                # Use minimum stop distance instead
+                sl = entry_price - (min_stop_pips * pip_value)
+                self.logger.warning(f"SL above entry for BULL, using min stop: {sl:.5f}")
+
+            # Ensure minimum stop distance
+            risk_pips = (entry_price - sl) / pip_value
+            if risk_pips < min_stop_pips:
+                sl = entry_price - (min_stop_pips * pip_value)
+                self.logger.info(f"Adjusted SL to meet min stop: {min_stop_pips} pips")
+
+            # TP at R:R based
             risk = entry_price - sl
             tp = entry_price + (risk * self.min_rr_ratio)
         else:
             # SL above manipulation sweep level
             sl = manip.sweep_level + buffer
-            # TP at session low or R:R based
+            # Ensure SL is above entry (validate direction)
+            if sl <= entry_price:
+                # Use minimum stop distance instead
+                sl = entry_price + (min_stop_pips * pip_value)
+                self.logger.warning(f"SL below entry for BEAR, using min stop: {sl:.5f}")
+
+            # Ensure minimum stop distance
+            risk_pips = (sl - entry_price) / pip_value
+            if risk_pips < min_stop_pips:
+                sl = entry_price + (min_stop_pips * pip_value)
+                self.logger.info(f"Adjusted SL to meet min stop: {min_stop_pips} pips")
+
+            # TP at R:R based
             risk = sl - entry_price
             tp = entry_price - (risk * self.min_rr_ratio)
 

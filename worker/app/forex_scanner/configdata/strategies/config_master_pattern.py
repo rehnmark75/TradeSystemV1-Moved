@@ -45,29 +45,29 @@ LONDON_OPEN_END = time(10, 0)           # 10:00 UTC
 
 # Distribution Window (Entry Phase)
 DISTRIBUTION_START = time(8, 0)         # 08:00 UTC (can enter after sweep)
-DISTRIBUTION_END = time(12, 0)          # 12:00 UTC
+DISTRIBUTION_END = time(16, 0)          # 16:00 UTC (extended for pullback)
 
 # Hard cutoff for entries
-ENTRY_CUTOFF_TIME = time(10, 0)         # 10:00 UTC - no entries after this
+ENTRY_CUTOFF_TIME = time(16, 0)         # 16:00 UTC - extended to allow pullback entries
 
 # ============================================================================
 # PHASE 1: ACCUMULATION DETECTION
 # ============================================================================
 # Looking for tight consolidation during Asian session
 
-# Minimum duration for valid accumulation
-MIN_ACCUMULATION_CANDLES_5M = 10        # 50 minutes minimum on 5m
-MIN_ACCUMULATION_CANDLES_15M = 4        # ~1 hour on 15m
+# Minimum duration for valid accumulation (tightened for quality)
+MIN_ACCUMULATION_CANDLES_5M = 15        # 75 minutes minimum on 5m (was 10)
+MIN_ACCUMULATION_CANDLES_15M = 6        # ~1.5 hours on 15m (was 4)
 
 # Maximum range for consolidation
-MAX_ACCUMULATION_RANGE_PIPS = 30        # Default max (overridden by ATR)
+MAX_ACCUMULATION_RANGE_PIPS = 40        # Default max (overridden by ATR) - relaxed from 30
 
 # ATR-based range validation (adaptive to pair volatility)
 USE_ATR_ACCUMULATION_VALIDATION = True
 ATR_ACCUMULATION_MULTIPLIER = 0.5       # Range must be < 50% of ATR-20
 
-# ATR compression threshold (key filter from trading analyst)
-ATR_COMPRESSION_THRESHOLD = 0.85        # ATR must be < 85% of baseline (relaxed for real market conditions)
+# ATR compression threshold (tightened for quality signals)
+ATR_COMPRESSION_THRESHOLD = 0.75        # ATR must be < 75% of baseline (was 85% - tightened)
 ATR_BASELINE_PERIOD = 20                # Use 20-period ATR for baseline comparison
 
 # Volume profile during accumulation (should be declining)
@@ -108,8 +108,8 @@ STRUCTURE_SHIFT_LOOKBACK_BARS = 10      # Candles to look for shift after sweep
 STRUCTURE_SHIFT_TIMEFRAME = "15m"       # Timeframe for structure analysis
 
 # Structure shift quality requirements
-MIN_BOS_CANDLE_BODY_RATIO = 0.60        # BOS candle body > 60% of range
-MIN_BOS_VOLUME_MULTIPLIER = 1.4         # BOS volume > 1.4x average
+MIN_BOS_CANDLE_BODY_RATIO = 0.50        # BOS candle body > 50% of range (relaxed from 60%)
+MIN_BOS_VOLUME_MULTIPLIER = 1.2         # BOS volume > 1.2x average (relaxed from 1.4x)
 
 # ChoCH vs BOS scoring
 BOS_CONFIDENCE_BONUS = 0.10             # BOS gets 10% confidence boost over ChoCH
@@ -143,6 +143,7 @@ MAX_ENTRY_WAIT_BARS = 15                # Max bars to wait for entry after shift
 SL_BUFFER_PIPS = 3                      # Buffer beyond manipulation wick
 USE_ATR_STOP = True
 SL_ATR_MULTIPLIER = 0.5                 # SL = max(buffer, 0.5 * ATR)
+MIN_STOP_DISTANCE_PIPS = 15             # Minimum stop distance to avoid noise stops
 
 # Take Profit (R:R based)
 MIN_RR_RATIO = 2.0                      # Minimum risk-reward
@@ -256,25 +257,25 @@ PAIR_PIP_VALUES = {
     'CS.D.AUDJPY.MINI.IP': 0.01,
 }
 
-# Pair-specific calibration (from trading analyst recommendations)
+# Pair-specific calibration (balanced for quality + realistic market conditions)
 PAIR_CALIBRATION = {
     'EURUSD': {
-        'atr_compression': 0.85,        # Relaxed for real market conditions
-        'min_sweep_pips': 8,
-        'max_sweep_pips': 15,
-        'max_range_pips': 30,           # Increased from 25
+        'atr_compression': 0.80,        # Balanced
+        'min_sweep_pips': 3,            # Accept small sweeps (3+ pips)
+        'max_sweep_pips': 20,           # Allow larger sweeps
+        'max_range_pips': 35,
     },
     'GBPUSD': {
-        'atr_compression': 0.90,        # Looser for higher volatility
-        'min_sweep_pips': 10,
-        'max_sweep_pips': 18,
-        'max_range_pips': 35,           # Increased from 30
+        'atr_compression': 0.82,
+        'min_sweep_pips': 4,            # Accept small sweeps (4+ pips)
+        'max_sweep_pips': 25,
+        'max_range_pips': 40,
     },
     'USDJPY': {
-        'atr_compression': 0.85,
-        'min_sweep_pips': 12,
-        'max_sweep_pips': 20,
-        'max_range_pips': 40,           # Increased from 35
+        'atr_compression': 0.80,
+        'min_sweep_pips': 5,            # JPY pairs have larger pip values
+        'max_sweep_pips': 30,
+        'max_range_pips': 45,
     },
     # Default for others uses global settings
 }

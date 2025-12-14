@@ -2637,29 +2637,44 @@ class SignalDetector:
             return None
 
         try:
-            # Get multi-timeframe data for AMD pattern
-            # Need 12+ hours for Asian session + buffer
+            # Check if we're in backtest mode
+            is_backtest = hasattr(self.data_fetcher, 'current_backtest_time') and self.data_fetcher.current_backtest_time is not None
+            backtest_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+
+            if backtest_time:
+                self.logger.debug(f"[MASTER_PATTERN] Backtest mode - timestamp: {backtest_time}")
+
+            # BACKTEST FIX: Use larger lookback in backtest mode to cover full historical period
+            # In backtest mode, the data fetcher filters by current_backtest_time anyway
+            # 5m: 2000 hours = ~24000 bars (covers full backtest range)
+            # 15m: 2000 hours = ~8000 bars
+            lookback_5m = 2000 if is_backtest else 16  # Asian session (8h) + London (4h) + buffer
+            lookback_15m = 2000 if is_backtest else 24  # Full day for structure analysis
+
             df_5m = self.data_fetcher.get_enhanced_data(
                 epic, pair,
                 timeframe='5m',
-                lookback_hours=16,  # Asian session (8h) + London (4h) + buffer
+                lookback_hours=lookback_5m,
                 ema_strategy=self.ema_strategy if hasattr(self, 'ema_strategy') else None
             )
 
             df_15m = self.data_fetcher.get_enhanced_data(
                 epic, pair,
                 timeframe='15m',
-                lookback_hours=24,  # Full day for structure analysis
+                lookback_hours=lookback_15m,
                 ema_strategy=self.ema_strategy if hasattr(self, 'ema_strategy') else None
             )
 
             if df_5m is None or len(df_5m) < 50:
-                self.logger.debug(f"Insufficient 5m data for Master Pattern: {len(df_5m) if df_5m is not None else 0} bars")
+                self.logger.debug(f"Insufficient 5m data for Master Pattern: {len(df_5m) if df_5m is not None else 0} bars (need 50+)")
                 return None
 
             if df_15m is None or len(df_15m) < 30:
-                self.logger.debug(f"Insufficient 15m data for Master Pattern: {len(df_15m) if df_15m is not None else 0} bars")
+                self.logger.debug(f"Insufficient 15m data for Master Pattern: {len(df_15m) if df_15m is not None else 0} bars (need 30+)")
                 return None
+
+            # Log data range for debugging
+            self.logger.info(f"🔍 [MASTER_PATTERN] Data: 5m({len(df_5m)} bars), 15m({len(df_15m)} bars)")
 
             # Detect signal using multi-timeframe approach
             signal = self.master_pattern_strategy.detect_signal_multi_timeframe(

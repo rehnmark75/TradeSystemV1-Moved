@@ -605,7 +605,11 @@ class BacktestScanner(IntelligentForexScanner):
                 'VP': 'detect_volume_profile_signals',  # ADDED: Short form
                 'EMA_DOUBLE_CONFIRMATION': 'detect_ema_double_confirmation_signals',  # EMA Double Confirmation
                 'EMA_DOUBLE': 'detect_ema_double_confirmation_signals',  # Short form
-                'EDC': 'detect_ema_double_confirmation_signals'  # Abbreviation
+                'EDC': 'detect_ema_double_confirmation_signals',  # Abbreviation
+                'MASTER_PATTERN': 'detect_master_pattern_signals',  # Master Pattern (ICT Power of 3 / AMD)
+                'MASTER': 'detect_master_pattern_signals',  # Short form
+                'AMD': 'detect_master_pattern_signals',  # Alternative name (Accumulation-Manipulation-Distribution)
+                'POWER_OF_3': 'detect_master_pattern_signals',  # ICT naming
             }
 
             # Use specific strategy if requested, otherwise use all strategies
@@ -620,8 +624,15 @@ class BacktestScanner(IntelligentForexScanner):
                     if method_name in ['detect_signals_mid_prices']:
                         signals = method(epic, pair_name, self.timeframe)
                     else:
-                        # 🔒 HARD-CODED: MACD and SMC strategies always use 1H timeframe
-                        strategy_timeframe = '1h' if strategy_name in ['MACD', 'MACD_EMA', 'SMC_STRUCTURE', 'SMC_PURE', 'SMC_SIMPLE', 'SMC_EMA'] else self.timeframe
+                        # 🔒 HARD-CODED: Strategy-specific timeframes
+                        # MACD and SMC strategies always use 1H timeframe
+                        # Master Pattern uses 5m timeframe (session-based)
+                        if strategy_name in ['MACD', 'MACD_EMA', 'SMC_STRUCTURE', 'SMC_PURE', 'SMC_SIMPLE', 'SMC_EMA']:
+                            strategy_timeframe = '1h'
+                        elif strategy_name in ['MASTER_PATTERN', 'MASTER', 'AMD', 'POWER_OF_3']:
+                            strategy_timeframe = '5m'  # Master Pattern uses 5m for session analysis
+                        else:
+                            strategy_timeframe = self.timeframe
                         signals = method(epic, pair_name, self.spread_pips, strategy_timeframe)
 
                     # Some methods return a single signal dict, others return lists
