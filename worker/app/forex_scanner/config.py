@@ -405,9 +405,6 @@ VOLUME_PROFILE_STRATEGY = False  # Institutional Volume-by-Price analysis strate
 # EMA Double Confirmation Strategy
 EMA_DOUBLE_CONFIRMATION_STRATEGY = True  # NEW: Wait for 2 successful EMA 21/50 crossovers before taking 3rd
 
-# Master Pattern (ICT Power of 3 / AMD) Strategy
-MASTER_PATTERN_STRATEGY = True  # ICT Power of 3: Accumulation → Manipulation → Distribution
-
 # KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
 
 

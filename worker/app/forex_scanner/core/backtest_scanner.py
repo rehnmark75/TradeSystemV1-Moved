@@ -325,12 +325,6 @@ class BacktestScanner(IntelligentForexScanner):
                 self.signal_detector.ema_double_confirmation_strategy.backtest_mode = True
                 self.logger.info("✅ EMA Double Confirmation strategy configured for backtest mode")
 
-            # ADDED: Configure Master Pattern (ICT Power of 3 / AMD) strategy for backtest mode
-            if hasattr(self.signal_detector, 'master_pattern_strategy') and self.signal_detector.master_pattern_strategy:
-                self.signal_detector.master_pattern_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.master_pattern_strategy.backtest_mode = True
-                self.logger.info("✅ Master Pattern (ICT Power of 3) strategy configured for backtest mode")
-
             self.logger.info("✅ Signal detector updated to use BacktestDataFetcher for historical data")
 
         except Exception as e:
@@ -612,10 +606,6 @@ class BacktestScanner(IntelligentForexScanner):
                 'EMA_DOUBLE_CONFIRMATION': 'detect_ema_double_confirmation_signals',  # EMA Double Confirmation
                 'EMA_DOUBLE': 'detect_ema_double_confirmation_signals',  # Short form
                 'EDC': 'detect_ema_double_confirmation_signals',  # Abbreviation
-                'MASTER_PATTERN': 'detect_master_pattern_signals',  # Master Pattern (ICT Power of 3 / AMD)
-                'MASTER': 'detect_master_pattern_signals',  # Short form
-                'AMD': 'detect_master_pattern_signals',  # Alternative name (Accumulation-Manipulation-Distribution)
-                'POWER_OF_3': 'detect_master_pattern_signals',  # ICT naming
             }
 
             # Use specific strategy if requested, otherwise use all strategies
@@ -632,11 +622,8 @@ class BacktestScanner(IntelligentForexScanner):
                     else:
                         # 🔒 HARD-CODED: Strategy-specific timeframes
                         # MACD and SMC strategies always use 1H timeframe
-                        # Master Pattern uses 5m timeframe (session-based)
                         if strategy_name in ['MACD', 'MACD_EMA', 'SMC_STRUCTURE', 'SMC_PURE', 'SMC_SIMPLE', 'SMC_EMA']:
                             strategy_timeframe = '1h'
-                        elif strategy_name in ['MASTER_PATTERN', 'MASTER', 'AMD', 'POWER_OF_3']:
-                            strategy_timeframe = '5m'  # Master Pattern uses 5m for session analysis
                         else:
                             strategy_timeframe = self.timeframe
                         signals = method(epic, pair_name, self.spread_pips, strategy_timeframe)
