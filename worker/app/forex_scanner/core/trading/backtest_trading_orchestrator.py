@@ -85,6 +85,16 @@ class BacktestTradingOrchestrator:
         self.data_fetcher = BacktestDataFetcher(self.db_manager, config.USER_TIMEZONE)
         self.signal_detector = SignalDetector(self.db_manager, config.USER_TIMEZONE)
 
+        # Force-initialize the requested strategy for backtest (regardless of config flags)
+        # This allows testing any strategy without modifying config.py
+        strategy_name = backtest_config.get('strategy_name', 'EMA_CROSSOVER')
+        if strategy_name and strategy_name.upper() not in ['EMA', 'EMA_CROSSOVER', 'ALL', '']:
+            success, message = self.signal_detector.force_initialize_strategy(strategy_name)
+            if not success:
+                self.logger.error(f"❌ Failed to initialize strategy '{strategy_name}': {message}")
+                raise ValueError(f"Cannot run backtest: {message}")
+            self.logger.info(f"✅ Backtest strategy '{strategy_name}' force-initialized: {message}")
+
         # Pipeline mode: Use SAME TradeValidator as live trading with backtest mode enabled
         # Basic mode: Skip TradeValidator to improve performance for parameter optimization
         if self.pipeline_mode:

@@ -651,35 +651,44 @@ class BacktestScanner(IntelligentForexScanner):
                         signal['validation_message'] = 'Basic mode - no validation applied'
                         self.logger.debug(f"🚀 BASIC MODE: Skipping trade validator for {strategy_name} signal on {epic}")
 
+                    # FIXED: Return result even if None - don't fallback to all strategies
                     return signal
                 else:
-                    self.logger.warning(f"⚠️ Strategy method {method_name} not found, falling back to all strategies")
+                    # FIXED: Strategy was requested but method doesn't exist
+                    # This should not happen if force_initialize_strategy was called
+                    self.logger.error(f"❌ Strategy '{strategy_name}' method '{method_name}' not available - strategy not initialized?")
+                    return None  # Don't fallback to all strategies
 
-            # Default: use all strategies (original behavior)
-            if hasattr(self.signal_detector, 'detect_signals_all_strategies'):
-                self.logger.debug(f"🔄 Running all strategies for {epic}")
-                signals = self.signal_detector.detect_signals_all_strategies(
-                    epic, pair_name, self.spread_pips, self.timeframe
-                )
-            else:
-                # Fallback to single strategy
-                signals = self.signal_detector.detect_signals_mid_prices(
-                    epic, pair_name, self.timeframe
-                )
-
-            # Pipeline mode: Run through full validation and processing for fallback signals
-            if signals and self.pipeline_mode:
-                self.logger.info(f"🔄 PIPELINE MODE ACTIVE: Processing fallback signals for {epic} through full validation pipeline")
-                # For multiple signals, process each one
-                if isinstance(signals, list):
-                    signals = [self._apply_full_pipeline(signal, epic, timestamp) for signal in signals if signal]
-                    signals = [s for s in signals if s]  # Remove None results
+            # Only run all strategies if explicitly requested or no strategy specified
+            if strategy_name in ['ALL', 'ALL_STRATEGIES', ''] or not strategy_name:
+                if hasattr(self.signal_detector, 'detect_signals_all_strategies'):
+                    self.logger.debug(f"🔄 Running all strategies for {epic}")
+                    signals = self.signal_detector.detect_signals_all_strategies(
+                        epic, pair_name, self.spread_pips, self.timeframe
+                    )
                 else:
-                    signals = self._apply_full_pipeline(signals, epic, timestamp)
-            elif signals:
-                self.logger.info(f"🚀 BASIC MODE: Skipping trade validator and market intelligence for fallback signals on {epic}")
+                    # Fallback to single strategy
+                    signals = self.signal_detector.detect_signals_mid_prices(
+                        epic, pair_name, self.timeframe
+                    )
 
-            return signals
+                # Pipeline mode: Run through full validation and processing for fallback signals
+                if signals and self.pipeline_mode:
+                    self.logger.info(f"🔄 PIPELINE MODE ACTIVE: Processing all-strategies signals for {epic} through full validation pipeline")
+                    # For multiple signals, process each one
+                    if isinstance(signals, list):
+                        signals = [self._apply_full_pipeline(signal, epic, timestamp) for signal in signals if signal]
+                        signals = [s for s in signals if s]  # Remove None results
+                    else:
+                        signals = self._apply_full_pipeline(signals, epic, timestamp)
+                elif signals:
+                    self.logger.info(f"🚀 BASIC MODE: Skipping trade validator and market intelligence for all-strategies signals on {epic}")
+
+                return signals
+
+            # Unknown strategy name that's not in the mapping
+            self.logger.error(f"❌ Unknown strategy: '{strategy_name}' - not found in strategy_methods mapping")
+            return None
 
         except Exception as e:
             self.logger.error(f"Error detecting signals for {epic} at {timestamp}: {e}")

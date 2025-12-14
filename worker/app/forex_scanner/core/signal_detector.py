@@ -332,7 +332,273 @@ class SignalDetector:
         self.backtest_engine = BacktestEngine(self.data_fetcher)
         self.performance_analyzer = PerformanceAnalyzer()
         self.signal_analyzer = SignalAnalyzer()
-    
+
+    # =========================================================================
+    # BACKTEST FORCE-INITIALIZATION METHODS
+    # These methods allow backtests to initialize strategies regardless of config flags
+    # =========================================================================
+
+    def force_initialize_strategy(self, strategy_name: str) -> Tuple[bool, str]:
+        """
+        Force-initialize a specific strategy for backtesting, regardless of config flags.
+
+        This allows backtests to test any strategy without modifying config.py,
+        which would otherwise affect the live system.
+
+        Args:
+            strategy_name: Strategy name (e.g., 'MACD', 'KAMA', 'MOMENTUM')
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        strategy_name = strategy_name.upper()
+
+        # Strategy initialization mapping
+        init_map = {
+            # EMA strategies are always available
+            'EMA': lambda: (True, "EMA strategy always available"),
+            'EMA_CROSSOVER': lambda: (True, "EMA strategy always available"),
+            # MACD
+            'MACD': self._force_init_macd,
+            'MACD_EMA': self._force_init_macd,
+            # KAMA
+            'KAMA': self._force_init_kama,
+            # Bollinger + Supertrend
+            'BOLLINGER_SUPERTREND': self._force_init_bb_supertrend,
+            'BB_SUPERTREND': self._force_init_bb_supertrend,
+            'BB': self._force_init_bb_supertrend,
+            # Zero Lag
+            'ZERO_LAG': self._force_init_zero_lag,
+            'ZEROLAG': self._force_init_zero_lag,
+            'ZL': self._force_init_zero_lag,
+            # Momentum
+            'MOMENTUM': self._force_init_momentum,
+            # SMC variants
+            'SMC_FAST': self._force_init_smc_fast,
+            'SMC': self._force_init_smc_fast,
+            'SMC_STRUCTURE': self._force_init_smc_structure,
+            'SMC_PURE': self._force_init_smc_structure,
+            'SMC_SIMPLE': self._force_init_smc_simple,
+            'SMC_EMA': self._force_init_smc_simple,
+            # Ichimoku
+            'ICHIMOKU': self._force_init_ichimoku,
+            'ICHIMOKU_CLOUD': self._force_init_ichimoku,
+            # Mean Reversion
+            'MEAN_REVERSION': self._force_init_mean_reversion,
+            'MEANREV': self._force_init_mean_reversion,
+            # Ranging Market
+            'RANGING_MARKET': self._force_init_ranging_market,
+            'RANGING': self._force_init_ranging_market,
+            # Scalping
+            'SCALPING': self._force_init_scalping,
+            'SCALP': self._force_init_scalping,
+            # Volume Profile
+            'VOLUME_PROFILE': self._force_init_volume_profile,
+            'VP': self._force_init_volume_profile,
+            # EMA Double Confirmation
+            'EMA_DOUBLE_CONFIRMATION': self._force_init_ema_double_confirmation,
+            'EMA_DOUBLE': self._force_init_ema_double_confirmation,
+            'EDC': self._force_init_ema_double_confirmation,
+            # Master Pattern
+            'MASTER_PATTERN': self._force_init_master_pattern,
+            'MASTER': self._force_init_master_pattern,
+            'AMD': self._force_init_master_pattern,
+            'POWER_OF_3': self._force_init_master_pattern,
+        }
+
+        if strategy_name not in init_map:
+            return False, f"Unknown strategy: {strategy_name}"
+
+        return init_map[strategy_name]()
+
+    def _force_init_macd(self) -> Tuple[bool, str]:
+        """Force-initialize MACD strategy for backtest"""
+        try:
+            # MACD uses lazy-loading per epic, just ensure cache is ready
+            self.macd_strategy = None
+            self.macd_strategies_cache = {}
+            self.logger.info("🔧 Force-initialized MACD strategy (lazy-load per epic)")
+            return True, "MACD strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init MACD: {e}"
+
+    def _force_init_kama(self) -> Tuple[bool, str]:
+        """Force-initialize KAMA strategy for backtest"""
+        try:
+            from .strategies.kama_strategy import KAMAStrategy
+            self.kama_strategy = KAMAStrategy()
+            self.logger.info("🔧 Force-initialized KAMA strategy")
+            return True, "KAMA strategy force-initialized"
+        except ImportError as e:
+            return False, f"Failed to import KAMA strategy: {e}"
+        except Exception as e:
+            return False, f"Failed to force-init KAMA: {e}"
+
+    def _force_init_bb_supertrend(self) -> Tuple[bool, str]:
+        """Force-initialize Bollinger + Supertrend strategy for backtest"""
+        try:
+            bb_config = getattr(config, 'DEFAULT_BB_SUPERTREND_CONFIG', 'default')
+            self.bb_supertrend_strategy = BollingerSupertrendStrategy(config_name=bb_config)
+            self.logger.info(f"🔧 Force-initialized BB+Supertrend strategy (config: {bb_config})")
+            return True, "BB+Supertrend strategy force-initialized"
+        except ImportError as e:
+            return False, f"Failed to import BB+Supertrend strategy: {e}"
+        except Exception as e:
+            return False, f"Failed to force-init BB+Supertrend: {e}"
+
+    def _force_init_zero_lag(self) -> Tuple[bool, str]:
+        """Force-initialize Zero Lag strategy for backtest"""
+        try:
+            self.zero_lag_strategy = ZeroLagStrategy()
+            self.logger.info("🔧 Force-initialized Zero Lag EMA strategy")
+            return True, "Zero Lag strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init Zero Lag: {e}"
+
+    def _force_init_momentum(self) -> Tuple[bool, str]:
+        """Force-initialize Momentum strategy for backtest"""
+        try:
+            self.momentum_strategy = MomentumStrategy(data_fetcher=self.data_fetcher)
+            self.logger.info("🔧 Force-initialized Advanced Momentum strategy")
+            return True, "Momentum strategy force-initialized"
+        except ImportError as e:
+            return False, f"Failed to import Momentum strategy: {e}"
+        except Exception as e:
+            return False, f"Failed to force-init Momentum: {e}"
+
+    def _force_init_smc_fast(self) -> Tuple[bool, str]:
+        """Force-initialize SMC Fast strategy for backtest"""
+        try:
+            from .strategies.smc_strategy_fast import SMCStrategyFast
+            try:
+                from configdata.strategies.config_smc_strategy import ACTIVE_SMC_CONFIG
+                active_smc_config = ACTIVE_SMC_CONFIG
+            except ImportError:
+                active_smc_config = 'default'
+
+            self.smc_strategy = SMCStrategyFast(
+                smc_config_name=active_smc_config,
+                data_fetcher=self.data_fetcher
+            )
+            self.logger.info(f"🔧 Force-initialized SMC Fast strategy (config: {active_smc_config})")
+            return True, "SMC Fast strategy force-initialized"
+        except ImportError as e:
+            return False, f"Failed to import SMC Fast strategy: {e}"
+        except Exception as e:
+            return False, f"Failed to force-init SMC Fast: {e}"
+
+    def _force_init_smc_structure(self) -> Tuple[bool, str]:
+        """Force-initialize SMC Structure strategy for backtest"""
+        try:
+            # SMC Structure uses lazy loading, just enable the flag
+            self.smc_structure_enabled = True
+            self.smc_structure_strategy = None  # Will be lazy-loaded on first use
+            self.logger.info("🔧 Force-initialized SMC Structure strategy (lazy-load)")
+            return True, "SMC Structure strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init SMC Structure: {e}"
+
+    def _force_init_smc_simple(self) -> Tuple[bool, str]:
+        """Force-initialize SMC Simple strategy for backtest"""
+        try:
+            # SMC Simple uses lazy loading, just enable the flag
+            self.smc_simple_enabled = True
+            self.smc_simple_strategy = None  # Will be lazy-loaded on first use
+            self.logger.info("🔧 Force-initialized SMC Simple strategy (lazy-load)")
+            return True, "SMC Simple strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init SMC Simple: {e}"
+
+    def _force_init_ichimoku(self) -> Tuple[bool, str]:
+        """Force-initialize Ichimoku strategy for backtest"""
+        try:
+            from .strategies.ichimoku_strategy import IchimokuStrategy
+            self.ichimoku_strategy = IchimokuStrategy(data_fetcher=self.data_fetcher)
+            self.logger.info("🔧 Force-initialized Ichimoku Cloud strategy")
+            return True, "Ichimoku strategy force-initialized"
+        except ImportError as e:
+            return False, f"Failed to import Ichimoku strategy: {e}"
+        except Exception as e:
+            return False, f"Failed to force-init Ichimoku: {e}"
+
+    def _force_init_mean_reversion(self) -> Tuple[bool, str]:
+        """Force-initialize Mean Reversion strategy for backtest"""
+        try:
+            self.mean_reversion_strategy = MeanReversionStrategy()
+            self.logger.info("🔧 Force-initialized Mean Reversion strategy")
+            return True, "Mean Reversion strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init Mean Reversion: {e}"
+
+    def _force_init_ranging_market(self) -> Tuple[bool, str]:
+        """Force-initialize Ranging Market strategy for backtest"""
+        try:
+            self.ranging_market_strategy = RangingMarketStrategy(data_fetcher=self.data_fetcher)
+            self.logger.info("🔧 Force-initialized Ranging Market strategy")
+            return True, "Ranging Market strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init Ranging Market: {e}"
+
+    def _force_init_scalping(self) -> Tuple[bool, str]:
+        """Force-initialize Scalping strategy for backtest"""
+        try:
+            try:
+                from configdata.strategies.config_scalping_strategy import SCALPING_MODE
+                scalping_mode = SCALPING_MODE
+            except ImportError:
+                try:
+                    from forex_scanner.configdata.strategies.config_scalping_strategy import SCALPING_MODE
+                    scalping_mode = SCALPING_MODE
+                except ImportError:
+                    scalping_mode = 'linda_raschke'
+
+            self.scalping_strategy = ScalpingStrategy(scalping_mode=scalping_mode)
+            self.logger.info(f"🔧 Force-initialized Scalping strategy (mode: {scalping_mode})")
+            return True, "Scalping strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init Scalping: {e}"
+
+    def _force_init_volume_profile(self) -> Tuple[bool, str]:
+        """Force-initialize Volume Profile strategy for backtest"""
+        try:
+            self.volume_profile_strategy = VolumeProfileStrategy(data_fetcher=self.data_fetcher)
+            self.logger.info("🔧 Force-initialized Volume Profile strategy")
+            return True, "Volume Profile strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init Volume Profile: {e}"
+
+    def _force_init_ema_double_confirmation(self) -> Tuple[bool, str]:
+        """Force-initialize EMA Double Confirmation strategy for backtest"""
+        try:
+            from .strategies.ema_double_confirmation_strategy import EMADoubleConfirmationStrategy
+            self.ema_double_confirmation_strategy = EMADoubleConfirmationStrategy(
+                data_fetcher=self.data_fetcher
+            )
+            self.logger.info("🔧 Force-initialized EMA Double Confirmation strategy")
+            return True, "EMA Double Confirmation strategy force-initialized"
+        except ImportError as e:
+            return False, f"Failed to import EMA Double Confirmation strategy: {e}"
+        except Exception as e:
+            return False, f"Failed to force-init EMA Double Confirmation: {e}"
+
+    def _force_init_master_pattern(self) -> Tuple[bool, str]:
+        """Force-initialize Master Pattern (ICT Power of 3) strategy for backtest"""
+        try:
+            from .strategies.master_pattern_strategy import MasterPatternStrategy
+            self.master_pattern_strategy = MasterPatternStrategy(
+                data_fetcher=self.data_fetcher
+            )
+            self.logger.info("🔧 Force-initialized Master Pattern (ICT Power of 3) strategy")
+            return True, "Master Pattern strategy force-initialized"
+        except ImportError as e:
+            return False, f"Failed to import Master Pattern strategy: {e}"
+        except Exception as e:
+            return False, f"Failed to force-init Master Pattern: {e}"
+
+    # =========================================================================
+    # END BACKTEST FORCE-INITIALIZATION METHODS
+    # =========================================================================
+
     def _get_default_timeframe(self, timeframe: str = None) -> str:
         """Get default timeframe from config if not specified"""
         if timeframe is None:
