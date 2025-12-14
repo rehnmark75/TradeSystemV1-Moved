@@ -53,6 +53,12 @@ except ImportError:
     SMCMarketStructure = None
     SMCFairValueGaps = None
 
+# Import HTF validator for trend alignment
+try:
+    from .helpers.master_pattern_htf_validator import MasterPatternHTFValidator
+except ImportError:
+    MasterPatternHTFValidator = None
+
 # Import configuration
 try:
     from configdata.strategies import config_master_pattern as config
@@ -92,6 +98,12 @@ class MasterPatternStrategy(BaseStrategy):
         # Initialize SMC helpers
         self.smc_structure = SMCMarketStructure(logger=self.logger) if SMCMarketStructure else None
         self.fvg_detector = SMCFairValueGaps(logger=self.logger) if SMCFairValueGaps else None
+
+        # Initialize HTF validator for trend alignment (CRITICAL filter)
+        self.htf_validator = MasterPatternHTFValidator(
+            data_fetcher=data_fetcher,
+            logger=self.logger
+        ) if MasterPatternHTFValidator else None
 
         # Load configuration
         self._load_config()
@@ -382,13 +394,14 @@ class MasterPatternStrategy(BaseStrategy):
                 self.logger.info(f"[{pair}] Accumulation range too wide: {range_pips:.1f} > {max_range}")
                 return False
 
-            # Check ATR compression
+            # Check ATR compression (optional - can be disabled if too restrictive)
+            use_atr_compression = getattr(config, 'USE_ATR_COMPRESSION_CHECK', True) if config else True
             atr_ratio = self._calculate_atr_ratio(df)
             threshold = self._get_pair_atr_threshold(pair)
 
-            self.logger.info(f"[{pair}] ATR ratio: {atr_ratio:.2f}, threshold: {threshold}")
+            self.logger.info(f"[{pair}] ATR ratio: {atr_ratio:.2f}, threshold: {threshold}, check_enabled: {use_atr_compression}")
 
-            if atr_ratio > threshold:
+            if use_atr_compression and atr_ratio > threshold:
                 self.logger.info(f"[{pair}] ATR not compressed: {atr_ratio:.2f} > {threshold}")
                 return False
 
@@ -910,6 +923,26 @@ class MasterPatternStrategy(BaseStrategy):
                 self.logger.info(f"[{pair}] R:R too low: {rr_ratio:.2f} < {self.min_rr_ratio}")
                 return None
 
+            # CRITICAL: HTF Trend Alignment Check
+            # This filter prevents counter-trend entries which cause most losses
+            if self.htf_validator and getattr(config, 'REQUIRE_HTF_ALIGNMENT', True):
+                df_4h = self._get_htf_data(epic, current_time, '4h')
+                if df_4h is None:
+                    self.logger.warning(f"[{pair}] HTF check skipped - no 4H data available")
+                elif len(df_4h) < 20:
+                    self.logger.warning(f"[{pair}] HTF check skipped - insufficient 4H data ({len(df_4h)} bars)")
+                if df_4h is not None and len(df_4h) >= 20:
+                    htf_aligned, htf_details = self.htf_validator.validate_htf_alignment(
+                        signal_direction=direction,
+                        df_4h=df_4h,
+                        epic=epic,
+                        min_strength=getattr(config, 'MIN_HTF_STRENGTH', 0.40)
+                    )
+                    if not htf_aligned:
+                        self.logger.info(f"[{pair}] HTF ALIGNMENT REJECTED: {htf_details['reason']}")
+                        return None
+                    self.logger.info(f"[{pair}] HTF alignment PASSED: {htf_details['htf_trend']} ({htf_details['htf_strength']:.0%})")
+
             # Calculate confidence
             confidence = self.phase_tracker.calculate_confidence(pair, rr_ratio)
 
@@ -1080,6 +1113,43 @@ class MasterPatternStrategy(BaseStrategy):
         if config and hasattr(config, 'get_pair_min_confidence'):
             return config.get_pair_min_confidence(pair)
         return self.min_confidence
+
+    def _get_htf_data(self, epic: str, current_time: datetime, timeframe: str = '4h') -> Optional[pd.DataFrame]:
+        """
+        Fetch higher timeframe data for trend validation.
+
+        Args:
+            epic: The epic/instrument identifier
+            current_time: Current timestamp (for backtest mode)
+            timeframe: Timeframe to fetch (default '4h')
+
+        Returns:
+            DataFrame with HTF OHLC data or None if unavailable
+        """
+        try:
+            if self.data_fetcher is None:
+                return None
+
+            # Set current time for backtest mode
+            if hasattr(self.data_fetcher, 'current_backtest_time'):
+                self.data_fetcher.current_backtest_time = current_time
+
+            pair = self._extract_pair_from_epic(epic)
+            # Calculate lookback hours based on timeframe
+            # 100 bars of 4H = 400 hours (~17 days)
+            htf_lookback_bars = getattr(config, 'HTF_LOOKBACK_BARS', 50)
+            hours_per_bar = 4 if timeframe == '4h' else 1
+            lookback_hours = htf_lookback_bars * hours_per_bar
+
+            return self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=timeframe,
+                lookback_hours=lookback_hours
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch {timeframe} data for HTF validation: {e}")
+            return None
 
     def _create_signal(
         self,

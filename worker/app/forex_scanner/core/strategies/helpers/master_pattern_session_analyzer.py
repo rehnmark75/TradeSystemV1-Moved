@@ -59,7 +59,7 @@ class MasterPatternSessionAnalyzer:
         },
         'distribution': {
             'start': time(8, 0),
-            'end': time(12, 0),
+            'end': time(16, 0),  # Fixed: Was 12:00, should match config DISTRIBUTION_END
             'description': 'Distribution Window (Entry)',
         },
     }

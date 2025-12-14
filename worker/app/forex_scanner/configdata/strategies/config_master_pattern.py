@@ -60,14 +60,17 @@ MIN_ACCUMULATION_CANDLES_5M = 15        # 75 minutes minimum on 5m (was 10)
 MIN_ACCUMULATION_CANDLES_15M = 6        # ~1.5 hours on 15m (was 4)
 
 # Maximum range for consolidation
-MAX_ACCUMULATION_RANGE_PIPS = 40        # Default max (overridden by ATR) - relaxed from 30
+MAX_ACCUMULATION_RANGE_PIPS = 30        # Default max (overridden by ATR) - tightened for quality setups
 
 # ATR-based range validation (adaptive to pair volatility)
 USE_ATR_ACCUMULATION_VALIDATION = True
 ATR_ACCUMULATION_MULTIPLIER = 0.5       # Range must be < 50% of ATR-20
 
-# ATR compression threshold (tightened for quality signals)
-ATR_COMPRESSION_THRESHOLD = 0.75        # ATR must be < 75% of baseline (was 85% - tightened)
+# ATR compression threshold (realistic for forex markets)
+# Note: Ratio = current_atr / baseline_atr. Values > 1.0 mean HIGHER volatility.
+# Asian session may not always be quieter, so use a realistic threshold.
+USE_ATR_COMPRESSION_CHECK = False       # DISABLED - ATR ratios in real data are too high (1.5-2.5x)
+ATR_COMPRESSION_THRESHOLD = 0.90        # ATR must be < 90% of baseline (if enabled)
 ATR_BASELINE_PERIOD = 20                # Use 20-period ATR for baseline comparison
 
 # Volume profile during accumulation (should be declining)
@@ -163,12 +166,29 @@ PARTIAL_CLOSE_PERCENT = 50              # Percentage to close
 RISK_PER_TRADE_PCT = 1.0                # 1% risk per trade
 
 # ============================================================================
+# HTF (HIGHER TIMEFRAME) TREND ALIGNMENT - CRITICAL FILTER
+# ============================================================================
+# This is the MOST IMPORTANT filter for preventing counter-trend entries
+# which are the primary cause of poor win rates in the Master Pattern strategy.
+
+REQUIRE_HTF_ALIGNMENT = True            # Enable 4H trend direction check (CRITICAL!)
+HTF_TIMEFRAME = '4h'                    # Primary HTF timeframe for validation
+HTF_LOOKBACK_BARS = 50                  # Bars for HH/HL/LH/LL pattern detection
+MIN_HTF_STRENGTH = 0.40                 # Minimum trend strength to filter (0.0-1.0)
+HTF_STRONG_ALIGNMENT_BONUS = 0.10       # +10% confidence if HTF > 60% strength
+
+# HTF trend validation:
+# - BULL signals require 4H showing HH/HL (bullish structure)
+# - BEAR signals require 4H showing LH/LL (bearish structure)
+# - Signals against strong 4H trend (>40% strength) are REJECTED
+
+# ============================================================================
 # CONFIDENCE SCORING
 # ============================================================================
 
 # Minimum thresholds
-MIN_CONFIDENCE_THRESHOLD = 0.45         # Minimum to take trade (lowered for real market conditions)
-HIGH_CONFIDENCE_THRESHOLD = 0.65        # High-confidence setup
+MIN_CONFIDENCE_THRESHOLD = 0.55         # Minimum to take trade (lowered to allow signals while other filters validate)
+HIGH_CONFIDENCE_THRESHOLD = 0.70        # High-confidence setup
 
 # Scoring weights (must sum to 1.0)
 CONFIDENCE_WEIGHTS = {
@@ -257,25 +277,26 @@ PAIR_PIP_VALUES = {
     'CS.D.AUDJPY.MINI.IP': 0.01,
 }
 
-# Pair-specific calibration (balanced for quality + realistic market conditions)
+# Pair-specific calibration (realistic thresholds based on ATR ratio behavior)
+# Note: ATR ratio = current/baseline. Values must be < threshold (below baseline volatility)
 PAIR_CALIBRATION = {
     'EURUSD': {
-        'atr_compression': 0.80,        # Balanced
+        'atr_compression': 0.85,        # Current ATR must be < 85% of baseline
         'min_sweep_pips': 3,            # Accept small sweeps (3+ pips)
         'max_sweep_pips': 20,           # Allow larger sweeps
-        'max_range_pips': 35,
+        'max_range_pips': 25,           # Tight accumulation range
     },
     'GBPUSD': {
-        'atr_compression': 0.82,
+        'atr_compression': 0.90,        # GBP more volatile, looser threshold
         'min_sweep_pips': 4,            # Accept small sweeps (4+ pips)
         'max_sweep_pips': 25,
-        'max_range_pips': 40,
+        'max_range_pips': 30,
     },
     'USDJPY': {
-        'atr_compression': 0.80,
+        'atr_compression': 0.90,
         'min_sweep_pips': 5,            # JPY pairs have larger pip values
         'max_sweep_pips': 30,
-        'max_range_pips': 45,
+        'max_range_pips': 35,
     },
     # Default for others uses global settings
 }

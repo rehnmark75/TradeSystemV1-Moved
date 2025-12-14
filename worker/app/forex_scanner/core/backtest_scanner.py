@@ -325,6 +325,12 @@ class BacktestScanner(IntelligentForexScanner):
                 self.signal_detector.ema_double_confirmation_strategy.backtest_mode = True
                 self.logger.info("✅ EMA Double Confirmation strategy configured for backtest mode")
 
+            # ADDED: Configure Master Pattern (ICT Power of 3 / AMD) strategy for backtest mode
+            if hasattr(self.signal_detector, 'master_pattern_strategy') and self.signal_detector.master_pattern_strategy:
+                self.signal_detector.master_pattern_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.master_pattern_strategy.backtest_mode = True
+                self.logger.info("✅ Master Pattern (ICT Power of 3) strategy configured for backtest mode")
+
             self.logger.info("✅ Signal detector updated to use BacktestDataFetcher for historical data")
 
         except Exception as e:
