@@ -89,18 +89,33 @@ USE_DAILY_OPEN_BIAS = True              # Accumulation below open = bullish setu
 MIN_SWEEP_EXTENSION_PIPS = 3            # Minimum pips beyond range
 MAX_SWEEP_EXTENSION_PIPS = 15           # Maximum pips beyond range
 
-# Volume spike requirement (key filter from trading analyst)
-SWEEP_VOLUME_MULTIPLIER = 1.5           # 1.5x average (was 1.3x)
+# Volume spike requirement (DISABLED - IG Markets has no volume data)
+# Instead, we use range expansion as a proxy for institutional activity
+USE_VOLUME_FOR_SWEEP = False            # DISABLED - IG has no volume
+SWEEP_VOLUME_MULTIPLIER = 1.5           # 1.5x average (unused when disabled)
 SWEEP_VOLUME_LOOKBACK = 20              # Compare to 20-candle average
+
+# Range expansion proxy (replaces volume for IG Markets)
+USE_RANGE_EXPANSION_PROXY = True        # Use candle range as volume proxy
+MIN_RANGE_EXPANSION_RATIO = 1.3         # Sweep candle range >= 1.3x avg range
 
 # Rejection wick requirement (key filter from trading analyst)
 MIN_REJECTION_WICK_RATIO = 0.65         # 65%+ wick of candle range (was 60%)
+
+# Post-sweep momentum confirmation (Phase 3 enhancement)
+REQUIRE_POST_SWEEP_MOMENTUM = True      # Require follow-through after sweep
+POST_SWEEP_MOMENTUM_CANDLES = 3         # Check next 3 candles for momentum
+POST_SWEEP_MOMENTUM_MIN_ALIGNED = 2     # At least 2 of 3 candles in direction
+
+# Sweep close-back validation (must close back into accumulation range)
+REQUIRE_CLOSE_IN_RANGE = True           # Sweep must close back in range
+CLOSE_IN_RANGE_PERCENT = 0.50           # Close must be in 50%+ of accumulation range
 
 # Manipulation timing
 MAX_SWEEP_WAIT_MINUTES = 60             # Max time to wait for sweep after Asian close
 
 # ============================================================================
-# PHASE 3: STRUCTURE SHIFT VALIDATION
+# PHASE 3: STRUCTURE SHIFT VALIDATION (TIGHTENED - Phase 4)
 # ============================================================================
 # Require BOS or ChoCH after manipulation to confirm direction
 
@@ -110,9 +125,14 @@ REQUIRE_STRUCTURE_SHIFT = True          # Must have BOS/ChoCH to confirm
 STRUCTURE_SHIFT_LOOKBACK_BARS = 10      # Candles to look for shift after sweep
 STRUCTURE_SHIFT_TIMEFRAME = "15m"       # Timeframe for structure analysis
 
-# Structure shift quality requirements
-MIN_BOS_CANDLE_BODY_RATIO = 0.50        # BOS candle body > 50% of range (relaxed from 60%)
-MIN_BOS_VOLUME_MULTIPLIER = 1.2         # BOS volume > 1.2x average (relaxed from 1.4x)
+# Structure shift quality requirements (BALANCED - not too strict, not too loose)
+MIN_BOS_CANDLE_BODY_RATIO = 0.55        # BOS candle body > 55% of range (balanced from 50%/60%)
+MIN_BOS_VOLUME_MULTIPLIER = 1.3         # BOS volume/range > 1.3x average (balanced from 1.2x/1.4x)
+
+# ATR-based structure shift validation (Phase 4 enhancement)
+USE_ATR_BOS_VALIDATION = True           # BOS candle range must exceed ATR
+MIN_BOS_RANGE_VS_ATR = 1.2              # BOS candle range >= 1.2x ATR
+REQUIRE_BODY_CLOSE_BEYOND_LEVEL = True  # Body (not just wick) must close beyond structure level
 
 # ChoCH vs BOS scoring
 BOS_CONFIDENCE_BONUS = 0.10             # BOS gets 10% confidence boost over ChoCH

@@ -432,6 +432,28 @@ class MasterPatternStrategy(BaseStrategy):
             self.logger.error(f"[{pair}] Accumulation check error: {e}")
             return False
 
+    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
+        """Calculate current ATR value."""
+        try:
+            if 'atr' in df.columns and not df['atr'].isna().all():
+                return df['atr'].iloc[-1]
+
+            # Calculate ATR manually
+            high = df['high']
+            low = df['low']
+            close = df['close'].shift(1)
+
+            tr1 = high - low
+            tr2 = abs(high - close)
+            tr3 = abs(low - close)
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+            return tr.rolling(window=period).mean().iloc[-1]
+
+        except Exception as e:
+            self.logger.debug(f"ATR calculation error: {e}")
+            return 0.0
+
     def _calculate_atr_ratio(self, df: pd.DataFrame, period: int = 14, baseline_period: int = 100) -> float:
         """Calculate current ATR ratio vs baseline."""
         try:
@@ -552,12 +574,20 @@ class MasterPatternStrategy(BaseStrategy):
 
                 self.logger.info(f"[{pair}] London candle {i}: low={candle['low']:.5f}, high={candle['high']:.5f}")
 
+                # Build accumulation range dict for sweep validation
+                accumulation_range = {
+                    'high': acc.range_high,
+                    'low': acc.range_low,
+                }
+
                 # Check for sweep below lows (bullish setup)
                 if candle['low'] < acc.range_low:
                     sweep_pips = (acc.range_low - candle['low']) / pip_value
                     self.logger.info(f"[{pair}] Potential SWEEP LOWS detected: candle_low={candle['low']:.5f}, sweep={sweep_pips:.1f} pips")
 
-                    if self._validate_sweep(candle, df, sweep_pips, 'sweep_lows'):
+                    is_valid, sweep_quality = self._validate_sweep(candle, df, sweep_pips, 'sweep_lows', accumulation_range)
+                    if is_valid:
+                        self.logger.info(f"[{pair}] ✅ Sweep validated with quality score: {sweep_quality:.2f}")
                         manipulation = ManipulationEvent(
                             sweep_direction=SweepDirection.SWEEP_LOWS,
                             sweep_level=candle['low'],
@@ -566,7 +596,7 @@ class MasterPatternStrategy(BaseStrategy):
                             sweep_candle_close=candle['close'],
                             sweep_candle_volume=candle.get('volume', 0),
                             timestamp=candle_time,
-                            volume_ratio=self._calculate_volume_ratio(df, i),
+                            volume_ratio=self._calculate_range_expansion_ratio(df, candle),  # Use range proxy
                             rejection_wick_ratio=self._calculate_wick_ratio(candle, 'lower'),
                             extension_pips=sweep_pips
                         )
@@ -576,7 +606,9 @@ class MasterPatternStrategy(BaseStrategy):
                 if candle['high'] > acc.range_high:
                     sweep_pips = (candle['high'] - acc.range_high) / pip_value
 
-                    if self._validate_sweep(candle, df, sweep_pips, 'sweep_highs'):
+                    is_valid, sweep_quality = self._validate_sweep(candle, df, sweep_pips, 'sweep_highs', accumulation_range)
+                    if is_valid:
+                        self.logger.info(f"[{pair}] ✅ Sweep validated with quality score: {sweep_quality:.2f}")
                         manipulation = ManipulationEvent(
                             sweep_direction=SweepDirection.SWEEP_HIGHS,
                             sweep_level=candle['high'],
@@ -585,7 +617,7 @@ class MasterPatternStrategy(BaseStrategy):
                             sweep_candle_close=candle['close'],
                             sweep_candle_volume=candle.get('volume', 0),
                             timestamp=candle_time,
-                            volume_ratio=self._calculate_volume_ratio(df, i),
+                            volume_ratio=self._calculate_range_expansion_ratio(df, candle),  # Use range proxy
                             rejection_wick_ratio=self._calculate_wick_ratio(candle, 'upper'),
                             extension_pips=sweep_pips
                         )
@@ -602,30 +634,104 @@ class MasterPatternStrategy(BaseStrategy):
         candle: pd.Series,
         df: pd.DataFrame,
         sweep_pips: float,
-        sweep_type: str
-    ) -> bool:
-        """Validate sweep meets criteria."""
+        sweep_type: str,
+        accumulation_range: Optional[Dict] = None
+    ) -> Tuple[bool, float]:
+        """
+        Validate sweep meets criteria with enhanced quality scoring.
+
+        Returns:
+            Tuple of (is_valid: bool, quality_score: float)
+        """
+        quality_score = 0.0
+
         # Check sweep extension is within bounds
         if sweep_pips < self.min_sweep_pips or sweep_pips > self.max_sweep_pips:
-            return False
+            return False, 0.0
 
         # Check rejection wick
         wick_type = 'lower' if sweep_type == 'sweep_lows' else 'upper'
         wick_ratio = self._calculate_wick_ratio(candle, wick_type)
         if wick_ratio < self.min_rejection_wick_ratio:
-            return False
+            return False, 0.0
+
+        # Score the wick quality (higher wick = better rejection)
+        quality_score += min(wick_ratio / 0.80, 1.0) * 0.30  # Up to 30% for wick
 
         # Check price rejected back into range
         if sweep_type == 'sweep_lows':
             # For bullish sweep, close should be above the low
             if candle['close'] <= candle['low']:
-                return False
+                return False, 0.0
         else:
             # For bearish sweep, close should be below the high
             if candle['close'] >= candle['high']:
-                return False
+                return False, 0.0
 
-        return True
+        # Phase 2: Range expansion validation (replaces unreliable volume)
+        use_range_expansion = getattr(config, 'USE_RANGE_EXPANSION_PROXY', True) if config else True
+        if use_range_expansion:
+            range_ratio = self._calculate_range_expansion_ratio(df, candle)
+            min_ratio = getattr(config, 'MIN_RANGE_EXPANSION_RATIO', 1.3) if config else 1.3
+            if range_ratio >= min_ratio:
+                quality_score += 0.25  # 25% for range expansion
+            else:
+                # Don't reject, but note lower quality
+                quality_score += (range_ratio / min_ratio) * 0.15
+
+        # Phase 3: Close-back into accumulation range validation
+        if accumulation_range and getattr(config, 'REQUIRE_CLOSE_IN_RANGE', True):
+            close_in_range_pct = getattr(config, 'CLOSE_IN_RANGE_PERCENT', 0.50) if config else 0.50
+
+            range_high = accumulation_range.get('high', candle['high'])
+            range_low = accumulation_range.get('low', candle['low'])
+            range_size = range_high - range_low
+
+            if range_size > 0:
+                if sweep_type == 'sweep_lows':
+                    # For bullish sweep, close should be in upper portion of range
+                    close_position = (candle['close'] - range_low) / range_size
+                    if close_position >= close_in_range_pct:
+                        quality_score += 0.25  # 25% for good close-back
+                    elif close_position > 0:
+                        quality_score += close_position * 0.15
+                else:
+                    # For bearish sweep, close should be in lower portion of range
+                    close_position = (range_high - candle['close']) / range_size
+                    if close_position >= close_in_range_pct:
+                        quality_score += 0.25
+                    elif close_position > 0:
+                        quality_score += close_position * 0.15
+        else:
+            quality_score += 0.20  # Default score if no range check
+
+        # Base quality for passing basic criteria
+        quality_score += 0.20
+
+        return True, min(quality_score, 1.0)
+
+    def _calculate_range_expansion_ratio(self, df: pd.DataFrame, candle: pd.Series, lookback: int = 20) -> float:
+        """
+        Calculate candle range vs average range (volume proxy for IG Markets).
+
+        Larger range indicates more institutional activity.
+        """
+        try:
+            # Get recent candle ranges
+            if len(df) < lookback + 1:
+                return 1.0
+
+            # Calculate current candle range
+            current_range = candle['high'] - candle['low']
+
+            # Calculate average range of previous candles
+            recent_df = df.tail(lookback + 1).iloc[:-1]  # Exclude current candle
+            avg_range = (recent_df['high'] - recent_df['low']).mean()
+
+            return current_range / avg_range if avg_range > 0 else 1.0
+
+        except Exception:
+            return 1.0
 
     def _calculate_wick_ratio(self, candle: pd.Series, wick_type: str) -> float:
         """Calculate wick ratio (wick size / total candle range)."""
@@ -806,15 +912,45 @@ class MasterPatternStrategy(BaseStrategy):
 
                 # Check if structure shift meets quality requirements
                 if volume_ratio < min_volume_ratio:
-                    self.logger.info(f"[{pair}] ❌ Structure shift volume too low: {volume_ratio:.2f}x < {min_volume_ratio}x required")
+                    self.logger.info(f"[{pair}] ❌ Structure shift range/volume too low: {volume_ratio:.2f}x < {min_volume_ratio}x required")
                     continue  # Check next structure break
 
                 if body_ratio < min_body_ratio:
                     self.logger.info(f"[{pair}] ❌ Structure shift body ratio too low: {body_ratio:.1%} < {min_body_ratio:.0%} required")
                     continue  # Check next structure break
 
+                # Phase 4: ATR-based range validation
+                use_atr_validation = getattr(config, 'USE_ATR_BOS_VALIDATION', True) if config else True
+                if use_atr_validation:
+                    atr = self._calculate_atr(df, period=14)
+                    if atr > 0:
+                        min_range_vs_atr = getattr(config, 'MIN_BOS_RANGE_VS_ATR', 1.2) if config else 1.2
+                        range_vs_atr = candle_range / atr
+                        if range_vs_atr < min_range_vs_atr:
+                            self.logger.info(f"[{pair}] ❌ Structure shift range vs ATR too low: {range_vs_atr:.2f}x < {min_range_vs_atr}x required")
+                            continue  # Check next structure break
+                        self.logger.info(f"[{pair}] ✅ BOS range vs ATR: {range_vs_atr:.2f}x (>= {min_range_vs_atr}x)")
+
+                # Phase 4: Body close beyond level validation
+                require_body_close = getattr(config, 'REQUIRE_BODY_CLOSE_BEYOND_LEVEL', True) if config else True
+                if require_body_close:
+                    body_high = max(break_candle['open'], break_candle['close'])
+                    body_low = min(break_candle['open'], break_candle['close'])
+                    break_price = structure_break.break_price
+
+                    if expected_direction == 'bullish':
+                        # Body close must be above structure level
+                        if body_low < break_price:
+                            self.logger.info(f"[{pair}] ❌ Bullish BOS body low ({body_low:.5f}) below break level ({break_price:.5f})")
+                            continue
+                    else:  # bearish
+                        # Body close must be below structure level
+                        if body_high > break_price:
+                            self.logger.info(f"[{pair}] ❌ Bearish BOS body high ({body_high:.5f}) above break level ({break_price:.5f})")
+                            continue
+
                 self.logger.info(f"[{pair}] ✅ Valid structure shift: {structure_break.break_type} {structure_break.direction} "
-                               f"(volume: {volume_ratio:.2f}x, body: {body_ratio:.1%})")
+                               f"(range/vol: {volume_ratio:.2f}x, body: {body_ratio:.1%})")
 
                 # Found valid structure shift with quality confirmation
                 structure_shift = StructureShiftEvent(
