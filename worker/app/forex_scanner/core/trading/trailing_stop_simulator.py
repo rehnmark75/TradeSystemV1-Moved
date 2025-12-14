@@ -594,7 +594,23 @@ class TrailingStopSimulator:
                     is_loser = True
                     final_profit = 0
                     final_loss = abs(exit_pnl)
-            elif exit_reason in ["STOP_LOSS", "TRAILING_STOP"]:
+            elif exit_reason in ["STOP_LOSS", "TRAILING_STOP", "MFE_PROTECTION"]:
+                # Handle all stop-based exits: regular SL, trailing stop, or MFE protection
+                if exit_pnl > 0:
+                    trade_outcome = "WIN"
+                    is_winner = True
+                    is_loser = False
+                    final_profit = exit_pnl
+                    final_loss = 0
+                else:
+                    trade_outcome = "LOSE"
+                    is_winner = False
+                    is_loser = True
+                    final_profit = 0
+                    final_loss = abs(exit_pnl)
+            else:
+                # Fallback for any unknown exit reason - classify based on P&L
+                self.logger.warning(f"Unknown exit_reason '{exit_reason}', classifying by P&L")
                 if exit_pnl > 0:
                     trade_outcome = "WIN"
                     is_winner = True

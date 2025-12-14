@@ -59,6 +59,12 @@ try:
 except ImportError:
     MasterPatternHTFValidator = None
 
+# Import candlestick pattern detector for entry confirmation
+try:
+    from .helpers.smc_candlestick_patterns import SMCCandlestickPatterns
+except ImportError:
+    SMCCandlestickPatterns = None
+
 # Import configuration
 try:
     from configdata.strategies import config_master_pattern as config
@@ -104,6 +110,9 @@ class MasterPatternStrategy(BaseStrategy):
             data_fetcher=data_fetcher,
             logger=self.logger
         ) if MasterPatternHTFValidator else None
+
+        # Initialize candlestick pattern detector for entry confirmation (Phase 5)
+        self.pattern_detector = SMCCandlestickPatterns(logger=self.logger) if SMCCandlestickPatterns else None
 
         # Load configuration
         self._load_config()
@@ -1079,8 +1088,49 @@ class MasterPatternStrategy(BaseStrategy):
                         return None
                     self.logger.info(f"[{pair}] HTF alignment PASSED: {htf_details['htf_trend']} ({htf_details['htf_strength']:.0%})")
 
+            # Phase 6: Session Momentum Filter
+            # Confirms post-sweep price momentum aligns with expected direction
+            if getattr(config, 'REQUIRE_SESSION_MOMENTUM', False):
+                momentum_candles = getattr(config, 'SESSION_MOMENTUM_CANDLES', 5)
+                min_aligned = getattr(config, 'SESSION_MOMENTUM_MIN_ALIGNED', 2)
+
+                momentum = self.session_analyzer.analyze_session_momentum(
+                    df=df,
+                    direction=direction,
+                    lookback_candles=momentum_candles
+                )
+
+                if not momentum['confirmed']:
+                    self.logger.info(f"[{pair}] ❌ SESSION MOMENTUM REJECTED: {momentum['details']} "
+                                   f"(aligned: {momentum['aligned_count']}/{momentum_candles}, need: {min_aligned})")
+                    return None
+                self.logger.info(f"[{pair}] ✅ Session momentum confirmed: {momentum['details']}")
+
+            # Phase 5: Entry Confirmation Pattern Check (optional)
+            # Adds confidence bonus/penalty based on candlestick pattern at entry
+            pattern_bonus = 0.0
+            require_pattern = getattr(config, 'REQUIRE_ENTRY_CANDLE_PATTERN', False) if config else False
+            if self.pattern_detector and require_pattern:
+                # Look for rejection patterns confirming our direction
+                recent_df = df.tail(10)  # Last 10 candles for pattern detection
+                pattern = self.pattern_detector.detect_rejection_pattern(
+                    recent_df,
+                    direction,
+                    min_strength=0.60  # Lower threshold to allow more patterns
+                )
+                if pattern:
+                    pattern_bonus = 0.05 if pattern['strength'] >= 0.80 else 0.02
+                    self.logger.info(f"[{pair}] ✅ Entry pattern detected: {pattern['pattern_type']} "
+                                   f"(strength: {pattern['strength']:.0%}, bonus: +{pattern_bonus:.0%})")
+                else:
+                    # No pattern found - apply small penalty but don't reject
+                    pattern_bonus = -0.03
+                    self.logger.info(f"[{pair}] ⚠️ No entry pattern detected (penalty: {pattern_bonus:.0%})")
+
             # Calculate confidence
             confidence = self.phase_tracker.calculate_confidence(pair, rr_ratio)
+            confidence += pattern_bonus  # Apply pattern bonus/penalty
+            confidence = max(0.0, min(1.0, confidence))  # Clamp to 0-1
 
             # Check confidence threshold
             min_conf = self._get_pair_min_confidence(pair)

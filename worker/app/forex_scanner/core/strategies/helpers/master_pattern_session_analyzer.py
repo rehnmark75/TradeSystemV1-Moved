@@ -497,6 +497,78 @@ class MasterPatternSessionAnalyzer:
 
         return True, "Valid AMD sequence"
 
+    def analyze_session_momentum(
+        self,
+        df: pd.DataFrame,
+        direction: str,
+        lookback_candles: int = 5
+    ) -> Dict:
+        """
+        Analyze recent price momentum after sweep to confirm direction.
+
+        Phase 6 enhancement: Ensures price is actually moving in expected direction
+        after manipulation sweep, not just consolidating or reversing.
+
+        Args:
+            df: OHLCV DataFrame
+            direction: 'BULL' or 'BEAR' - expected direction
+            lookback_candles: Number of recent candles to analyze
+
+        Returns:
+            Dict with 'confirmed': bool, 'aligned_count': int, 'details': str
+        """
+        try:
+            if len(df) < lookback_candles + 1:
+                return {
+                    'confirmed': True,  # Allow if insufficient data
+                    'aligned_count': 0,
+                    'details': 'Insufficient data for momentum check'
+                }
+
+            # Get recent candles (excluding current)
+            recent = df.iloc[-(lookback_candles + 1):-1]
+
+            # Count candles aligned with direction
+            aligned_count = 0
+            for i in range(len(recent)):
+                candle = recent.iloc[i]
+                is_bullish = candle['close'] > candle['open']
+
+                if direction == 'BULL' and is_bullish:
+                    aligned_count += 1
+                elif direction == 'BEAR' and not is_bullish:
+                    aligned_count += 1
+
+            # Check overall momentum (price movement)
+            first_close = recent.iloc[0]['close']
+            last_close = recent.iloc[-1]['close']
+
+            momentum_direction = 'BULL' if last_close > first_close else 'BEAR'
+            momentum_aligned = momentum_direction == direction
+
+            # Require at least 2 of last 5 candles aligned AND momentum aligned
+            min_aligned = 2  # Can be configured
+            confirmed = aligned_count >= min_aligned and momentum_aligned
+
+            details = (f"Candles aligned: {aligned_count}/{lookback_candles}, "
+                      f"Momentum: {momentum_direction}, "
+                      f"Expected: {direction}")
+
+            return {
+                'confirmed': confirmed,
+                'aligned_count': aligned_count,
+                'momentum_aligned': momentum_aligned,
+                'details': details
+            }
+
+        except Exception as e:
+            self.logger.error(f"Momentum analysis error: {e}")
+            return {
+                'confirmed': True,  # Allow on error
+                'aligned_count': 0,
+                'details': f'Error: {str(e)}'
+            }
+
 
 # Module-level instance for convenience
 session_analyzer = MasterPatternSessionAnalyzer()

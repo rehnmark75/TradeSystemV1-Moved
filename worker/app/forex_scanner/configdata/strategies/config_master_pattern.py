@@ -155,6 +155,11 @@ MITIGATION_ZONE_WIDTH_PIPS = 5          # Width of mitigation zone
 REQUIRE_ENTRY_CANDLE_PATTERN = True     # Require bullish/bearish candle pattern
 ALLOWED_ENTRY_PATTERNS = ['engulfing', 'pin_bar', 'inside_bar_break']
 
+# Phase 6: Session momentum filter
+REQUIRE_SESSION_MOMENTUM = True         # Check post-sweep momentum
+SESSION_MOMENTUM_CANDLES = 5            # Candles to analyze for momentum
+SESSION_MOMENTUM_MIN_ALIGNED = 2        # Minimum aligned candles required
+
 # Entry timing
 MAX_ENTRY_WAIT_BARS = 15                # Max bars to wait for entry after shift
 
