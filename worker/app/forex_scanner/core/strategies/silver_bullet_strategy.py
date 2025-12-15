@@ -72,8 +72,8 @@ class SilverBulletStrategy:
         # Load configuration
         self._load_config()
 
-        # Initialize helpers
-        self.time_windows = SilverBulletTimeWindows(self.logger)
+        # Initialize helpers - pass config to time_windows for dynamic window sizes
+        self.time_windows = SilverBulletTimeWindows(self.logger, config=self._config_module)
         self.liquidity_detector = SilverBulletLiquidity(self.logger)
         self.fvg_detector = SMCFairValueGaps(self.logger)
 
@@ -99,6 +99,9 @@ class SilverBulletStrategy:
                 from configdata.strategies import config_silver_bullet as sb_config
             except ImportError:
                 from forex_scanner.configdata.strategies import config_silver_bullet as sb_config
+
+        # Store config module reference for time_windows helper
+        self._config_module = sb_config
 
         # Strategy metadata
         self.strategy_version = getattr(sb_config, 'STRATEGY_VERSION', '1.0.0')
@@ -289,6 +292,22 @@ class SilverBulletStrategy:
                 self.logger.info(f"   ❌ Sweep too deep ({sweep.sweep_pips:.1f} pips) - likely breakout")
                 return None
 
+            # QUALITY FILTER: Prefer CLEAN sweeps, but allow PARTIAL with conditions
+            # PENDING sweeps (< 3 bars old) have very low win rate - reject them
+            if sweep.status == SweepStatus.PENDING:
+                self.logger.info(f"   ❌ PENDING sweep ({sweep.rejection_candles} bars) - too fresh, waiting for confirmation...")
+                return None
+
+            # PARTIAL sweeps: allow if they've had time to mature (>= 8 bars old)
+            # OR if they have rejection confirmed
+            if sweep.status == SweepStatus.PARTIAL:
+                if not sweep.rejection_confirmed and sweep.rejection_candles < 8:
+                    self.logger.info(f"   ❌ PARTIAL sweep ({sweep.rejection_candles} bars) - waiting for maturity or rejection")
+                    return None
+                # Allow mature PARTIAL sweeps (>= 8 bars) even without explicit rejection
+                # The sweep itself may have caused the price to pause/reverse slightly
+                self.logger.info(f"   ✅ PARTIAL sweep accepted ({sweep.rejection_candles} bars old, rejection: {sweep.rejection_confirmed})")
+
             self.logger.info(f"   ✅ {sweep.liquidity_level.liquidity_type.value} Sweep: {sweep.sweep_pips:.1f} pips")
             self.logger.info(f"   ✅ Status: {sweep.status.value}")
             self.logger.info(f"   ✅ Rejection: {'Yes' if sweep.rejection_confirmed else 'Pending'}")
@@ -300,10 +319,15 @@ class SilverBulletStrategy:
             else:
                 trade_direction = 'BEAR'
 
-            # Verify sweep aligns with HTF bias
+            # QUALITY FILTER: Require HTF alignment for high-quality entries
+            # Counter-trend entries have significantly lower win rate
             if trade_direction != htf_bias['direction']:
-                self.logger.info(f"   ⚠️  Sweep direction ({trade_direction}) doesn't align with HTF bias ({htf_bias['direction']})")
-                # Continue but reduce confidence later
+                # Only allow counter-trend if HTF trend is weak (< 60% strength)
+                if htf_bias['strength'] >= 0.60:
+                    self.logger.info(f"   ❌ Counter-trend entry rejected: {trade_direction} vs HTF {htf_bias['direction']} (strength: {htf_bias['strength']:.0%})")
+                    return None
+                else:
+                    self.logger.info(f"   ⚠️  Weak HTF trend ({htf_bias['strength']:.0%}) - allowing counter-trend entry")
 
             # ================================================================
             # STEP 5: MARKET STRUCTURE SHIFT (MSS)
@@ -445,6 +469,37 @@ class SilverBulletStrategy:
 
                 # Timestamp
                 'timestamp': candle_timestamp,
+
+                # Metadata for Claude prompt builder
+                'metadata': {
+                    # Session information
+                    'session': session.value,
+                    'session_quality': session_quality,
+
+                    # Liquidity sweep data
+                    'sweep_type': sweep.liquidity_level.liquidity_type.value,
+                    'sweep_status': sweep.status.value,
+                    'sweep_pips': round(sweep.sweep_pips, 1),
+                    'sweep_age_bars': sweep.rejection_candles,
+                    'liquidity_level': sweep.liquidity_level.price,
+                    'rejection_confirmed': sweep.rejection_confirmed,
+
+                    # Market Structure Shift data
+                    'mss_confirmed': True,
+                    'mss_break_pips': mss_result.get('break_pips', 0),
+                    'mss_direction': trade_direction,
+
+                    # FVG data
+                    'fvg_type': 'BULLISH_FVG' if trade_direction == 'BULL' else 'BEARISH_FVG',
+                    'fvg_size_pips': round(fvg_entry['fvg_size_pips'], 1),
+                    'fvg_fill_percentage': fvg_entry.get('fvg_fill_pct', 0),
+                    'entry_type': fvg_entry.get('entry_type', 'IMMEDIATE'),
+
+                    # HTF alignment
+                    'htf_direction': htf_bias['direction'],
+                    'htf_strength': htf_bias['strength'],
+                    'htf_aligned': htf_bias['direction'] == trade_direction
+                },
 
                 # Strategy indicators for compatibility
                 'strategy_indicators': {
@@ -663,30 +718,40 @@ class SilverBulletStrategy:
 
             # Filter FVGs by direction and status
             valid_fvgs = []
-            for fvg in fvgs:
+            for i, fvg in enumerate(fvgs):
+                fvg_info = f"FVG#{i+1}: {fvg.gap_type.value if hasattr(fvg.gap_type, 'value') else fvg.gap_type}, size={fvg.gap_size_pips:.1f}pips"
+
                 # Check direction alignment
                 if direction == 'BULL' and fvg.gap_type != FVGType.BULLISH:
+                    self.logger.debug(f"   ❌ {fvg_info} - REJECTED: direction mismatch (need BULLISH)")
                     continue
                 if direction == 'BEAR' and fvg.gap_type != FVGType.BEARISH:
+                    self.logger.debug(f"   ❌ {fvg_info} - REJECTED: direction mismatch (need BEARISH)")
                     continue
 
                 # Check if active or partially filled
                 if fvg.status not in [FVGStatus.ACTIVE, FVGStatus.PARTIALLY_FILLED]:
+                    age_info = f"age={current_idx - fvg.start_index}bars" if hasattr(fvg, 'start_index') else ""
+                    self.logger.debug(f"   ❌ {fvg_info} - REJECTED: status={fvg.status} {age_info} (need ACTIVE/PARTIALLY_FILLED)")
                     continue
 
                 # Check age
                 fvg.age_bars = current_idx - fvg.start_index
                 if fvg.age_bars > self.fvg_max_age:
+                    self.logger.debug(f"   ❌ {fvg_info} - REJECTED: age={fvg.age_bars} bars (max={self.fvg_max_age})")
                     continue
 
                 # Check fill percentage
                 if fvg.fill_percentage > self.fvg_max_fill:
+                    self.logger.debug(f"   ❌ {fvg_info} - REJECTED: fill={fvg.fill_percentage:.0%} (max={self.fvg_max_fill:.0%})")
                     continue
 
                 # Check minimum size
                 if fvg.gap_size_pips < self.fvg_min_size_pips:
+                    self.logger.debug(f"   ❌ {fvg_info} - REJECTED: size={fvg.gap_size_pips:.1f} pips (min={self.fvg_min_size_pips})")
                     continue
 
+                self.logger.debug(f"   ✅ {fvg_info} - PASSED all filters")
                 valid_fvgs.append(fvg)
 
             if not valid_fvgs:
@@ -699,11 +764,20 @@ class SilverBulletStrategy:
             valid_fvgs.sort(key=lambda f: (f.significance, -f.age_bars), reverse=True)
 
             # Check if current price is in any FVG
+            self.logger.debug(f"   Current price: {current_price:.5f}, checking FVG zones...")
             for fvg in valid_fvgs:
+                self.logger.debug(f"   FVG zone: {fvg.low_price:.5f} - {fvg.high_price:.5f}")
                 if fvg.low_price <= current_price <= fvg.high_price:
-                    # Price is in FVG - valid entry
+                    # Price is in FVG - use optimal FVG edge for best R:R
+                    # For BULL: enter at FVG low (bottom) for better entry
+                    # For BEAR: enter at FVG high (top) for better entry
+                    if direction == 'BULL':
+                        optimal_entry = fvg.low_price
+                    else:  # BEAR
+                        optimal_entry = fvg.high_price
+
                     return {
-                        'entry_price': current_price,
+                        'entry_price': optimal_entry,
                         'fvg_high': fvg.high_price,
                         'fvg_low': fvg.low_price,
                         'fvg_size_pips': fvg.gap_size_pips,
@@ -713,16 +787,21 @@ class SilverBulletStrategy:
                     }
 
             # Price not in FVG - check if approaching one
+            # NOTE: For approaching FVGs, we set entry at optimal FVG edge for best R:R
+            # BULL: Enter at FVG low (bottom) - wait for pullback
+            # BEAR: Enter at FVG high (top) - wait for rally
+            self.logger.debug(f"   Price not in any FVG, checking if approaching...")
             for fvg in valid_fvgs:
                 distance_to_fvg = 0
                 if direction == 'BULL':
                     # For bullish, we want FVG below current price (to enter on pullback)
                     if current_price > fvg.high_price:
                         distance_to_fvg = (current_price - fvg.high_price) / pip_value
-                        if distance_to_fvg <= 5:  # Within 5 pips
-                            # Use FVG high as entry (top of zone for bullish)
+                        self.logger.debug(f"   BULL: Price above FVG, distance={distance_to_fvg:.1f} pips")
+                        if distance_to_fvg <= 35:
+                            # Use FVG LOW as entry (optimal for bullish - better R:R)
                             return {
-                                'entry_price': fvg.high_price,
+                                'entry_price': fvg.low_price,  # FIXED: was fvg.high_price (worst entry)
                                 'fvg_high': fvg.high_price,
                                 'fvg_low': fvg.low_price,
                                 'fvg_size_pips': fvg.gap_size_pips,
@@ -731,13 +810,17 @@ class SilverBulletStrategy:
                                 'in_fvg': False,
                                 'distance_pips': distance_to_fvg
                             }
+                    else:
+                        self.logger.debug(f"   BULL: Price below FVG high - wrong for bullish")
                 else:  # BEAR
                     # For bearish, we want FVG above current price
                     if current_price < fvg.low_price:
                         distance_to_fvg = (fvg.low_price - current_price) / pip_value
-                        if distance_to_fvg <= 5:
+                        self.logger.debug(f"   BEAR: Price below FVG, distance={distance_to_fvg:.1f} pips")
+                        if distance_to_fvg <= 35:
+                            # Use FVG HIGH as entry (optimal for bearish - better R:R)
                             return {
-                                'entry_price': fvg.low_price,
+                                'entry_price': fvg.high_price,  # FIXED: was fvg.low_price (worst entry)
                                 'fvg_high': fvg.high_price,
                                 'fvg_low': fvg.low_price,
                                 'fvg_size_pips': fvg.gap_size_pips,
@@ -746,7 +829,10 @@ class SilverBulletStrategy:
                                 'in_fvg': False,
                                 'distance_pips': distance_to_fvg
                             }
+                    else:
+                        self.logger.debug(f"   BEAR: Price above FVG low - wrong for bearish")
 
+            self.logger.debug(f"   No valid FVG entry - price not in zone and not approaching within 35 pips")
             return None
 
         except Exception as e:
@@ -780,28 +866,30 @@ class SilverBulletStrategy:
             sl_buffer = self.sl_buffer_pips * pip_value
 
             if direction == 'BULL':
-                # SL below FVG low or sweep low
+                # SL below FVG low or sweep low - use the LOWER for safer stop
                 fvg_sl = fvg['fvg_low'] - sl_buffer
                 sweep_sl = sweep.liquidity_level.price - sl_buffer
 
-                # Use the higher (closer) of the two for tighter risk
-                stop_loss = max(fvg_sl, sweep_sl)
+                # Use the lower (further) of the two for safer risk management
+                stop_loss = min(fvg_sl, sweep_sl)
 
-                # But ensure minimum ATR distance
+                # Ensure MINIMUM ATR distance - use max() to widen SL if needed
                 if atr_sl > 0:
                     min_sl_price = entry_price - atr_sl
-                    stop_loss = min(stop_loss, min_sl_price)
+                    stop_loss = min(stop_loss, min_sl_price)  # Take the lower (wider) SL
 
             else:  # BEAR
-                # SL above FVG high or sweep high
+                # SL above FVG high or sweep high - use the HIGHER for safer stop
                 fvg_sl = fvg['fvg_high'] + sl_buffer
                 sweep_sl = sweep.liquidity_level.price + sl_buffer
 
-                stop_loss = min(fvg_sl, sweep_sl)
+                # Use the higher (further) of the two for safer risk management
+                stop_loss = max(fvg_sl, sweep_sl)
 
+                # Ensure MINIMUM ATR distance - use max() to widen SL if needed
                 if atr_sl > 0:
                     max_sl_price = entry_price + atr_sl
-                    stop_loss = max(stop_loss, max_sl_price)
+                    stop_loss = max(stop_loss, max_sl_price)  # Take the higher (wider) SL
 
             # Calculate risk
             risk_pips = abs(entry_price - stop_loss) / pip_value
@@ -813,18 +901,28 @@ class SilverBulletStrategy:
                     'reason': f'SL too large ({risk_pips:.1f} pips > {max_sl} max)'
                 }
 
+            # Calculate volatility-adjusted minimum TP
+            # ATR-based dynamic TP targets better profit in different conditions
+            atr_pips = (atr_sl / self.sl_atr_multiplier) / pip_value if atr_sl > 0 else 0
+            if atr_pips < 8:  # Low volatility
+                dynamic_min_tp = 12  # Lower but achievable target
+            elif atr_pips < 15:  # Normal volatility
+                dynamic_min_tp = min_tp  # Use pair-specific default
+            else:  # High volatility
+                dynamic_min_tp = min_tp + 5  # Higher target, more room
+
             # Calculate take profit
             # Primary: Target opposite liquidity
             target_price, target_pips = self.liquidity_detector.get_sweep_target(sweep, pip_value)
 
-            if target_pips >= min_tp:
+            if target_pips >= dynamic_min_tp:
                 take_profit = target_price
                 reward_pips = target_pips
             else:
-                # Fallback: Use R:R ratio
+                # Fallback: Use R:R ratio with dynamic min TP
                 reward_pips = risk_pips * self.optimal_rr_ratio
-                if reward_pips < min_tp:
-                    reward_pips = min_tp
+                if reward_pips < dynamic_min_tp:
+                    reward_pips = dynamic_min_tp
 
                 if direction == 'BULL':
                     take_profit = entry_price + (reward_pips * pip_value)

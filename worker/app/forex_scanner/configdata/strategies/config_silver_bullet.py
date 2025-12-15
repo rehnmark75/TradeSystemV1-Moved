@@ -17,9 +17,9 @@ Time Windows (New York Time):
 # STRATEGY METADATA
 # =============================================================================
 STRATEGY_NAME = "SILVER_BULLET"
-STRATEGY_VERSION = "1.0.0"
+STRATEGY_VERSION = "1.2.0"
 STRATEGY_DATE = "2025-12-15"
-STRATEGY_STATUS = "Development"
+STRATEGY_STATUS = "Testing - Phase 2 Quality Filters"
 
 # =============================================================================
 # TIME WINDOWS (UTC Hours)
@@ -27,19 +27,19 @@ STRATEGY_STATUS = "Development"
 # NY Time to UTC conversion:
 # - EST (Nov-Mar): NY + 5 hours = UTC
 # - EDT (Mar-Nov): NY + 4 hours = UTC
-# We use wider windows to cover both EST and EDT
+# EXPANDED WINDOWS for more opportunities (ICT recommends 1-hour, we use 2-3 hours)
 
-# London Open: 03:00-04:00 NY = 07:00-09:00 UTC (covers both)
-LONDON_OPEN_WINDOW_START = 7
-LONDON_OPEN_WINDOW_END = 9
+# London Open: 02:00-05:00 NY = 06:00-10:00 UTC (expanded from 1 to 3 hours)
+LONDON_OPEN_WINDOW_START = 6
+LONDON_OPEN_WINDOW_END = 10
 
-# NY AM Session: 10:00-11:00 NY = 14:00-16:00 UTC (covers both)
-NY_AM_WINDOW_START = 14
-NY_AM_WINDOW_END = 16
+# NY AM Session: 09:00-12:00 NY = 13:00-17:00 UTC (expanded from 1 to 3 hours)
+NY_AM_WINDOW_START = 13
+NY_AM_WINDOW_END = 17
 
-# NY PM Session: 14:00-15:00 NY = 18:00-20:00 UTC (covers both)
-NY_PM_WINDOW_START = 18
-NY_PM_WINDOW_END = 20
+# NY PM Session: 13:00-16:00 NY = 17:00-21:00 UTC (expanded from 1 to 3 hours)
+NY_PM_WINDOW_START = 17
+NY_PM_WINDOW_END = 21
 
 # Session configuration
 ENABLED_SESSIONS = ['LONDON_OPEN', 'NY_AM', 'NY_PM']
@@ -55,43 +55,43 @@ SESSION_QUALITY = {
 # LIQUIDITY DETECTION
 # =============================================================================
 # Lookback for finding liquidity levels (swing highs/lows)
-LIQUIDITY_LOOKBACK_BARS = 20
+LIQUIDITY_LOOKBACK_BARS = 30  # Increased for more liquidity levels
 
 # Minimum swing strength (bars on each side to confirm swing)
-SWING_STRENGTH_BARS = 2  # Reduced from 3 for more liquidity levels
+SWING_STRENGTH_BARS = 1  # Reduced from 2 for more liquidity levels
 
 # Minimum sweep beyond liquidity level (pips)
-LIQUIDITY_SWEEP_MIN_PIPS = 1.5  # Reduced from 3 for more sweeps in testing
+LIQUIDITY_SWEEP_MIN_PIPS = 1.0  # Lowered: catch smaller sweeps (was 2.0)
 
 # Maximum sweep - beyond this it's a breakout, not a sweep (pips)
-LIQUIDITY_SWEEP_MAX_PIPS = 20  # Increased from 15 for more flexibility
+LIQUIDITY_SWEEP_MAX_PIPS = 25  # Increased: allow larger sweeps (was 15)
 
 # Require price to return after sweep (confirms it's a sweep not breakout)
-REQUIRE_SWEEP_REJECTION = False  # Relaxed for initial testing
+REQUIRE_SWEEP_REJECTION = False  # Relaxed for more signals
 
 # Maximum bars after sweep to still consider it valid
-SWEEP_MAX_AGE_BARS = 15  # Increased from 10 for more opportunities
+SWEEP_MAX_AGE_BARS = 40  # Increased: allow older sweeps (was 25)
 
 # =============================================================================
 # MARKET STRUCTURE SHIFT (MSS)
 # =============================================================================
 # Look for MSS within N bars after liquidity sweep
-MSS_LOOKBACK_BARS = 15
+MSS_LOOKBACK_BARS = 25  # Increased: allow more time for MSS to form (was 15)
 
 # Minimum break beyond swing to confirm MSS (pips)
-MSS_MIN_BREAK_PIPS = 2
+MSS_MIN_BREAK_PIPS = 1  # Reduced: catch smaller structure shifts (was 2)
 
 # Require body close beyond swing (not just wick)
-MSS_REQUIRE_BODY_CLOSE = True
+MSS_REQUIRE_BODY_CLOSE = False  # Relaxed: wick breaks count too (was True)
 
 # =============================================================================
 # FAIR VALUE GAP (FVG) PARAMETERS
 # =============================================================================
 # Minimum FVG size to be tradeable (pips)
-FVG_MIN_SIZE_PIPS = 0.5  # Reduced from 2 for initial testing
+FVG_MIN_SIZE_PIPS = 1.0  # Lowered: catch smaller FVGs (was 1.5)
 
 # Maximum age of FVG to consider for entry (bars)
-FVG_MAX_AGE_BARS = 10
+FVG_MAX_AGE_BARS = 80  # Increased: FVGs can remain valid for ~7 hours on 5m (allows for sweep/MSS timing)
 
 # FVG entry zone (0.0 = far edge, 1.0 = near edge)
 # For bullish FVG: 0.0 = top of gap, 1.0 = bottom
@@ -100,13 +100,13 @@ FVG_ENTRY_ZONE_MIN = 0.0
 FVG_ENTRY_ZONE_MAX = 0.5
 
 # Only use unfilled FVGs (partially filled OK)
-FVG_MAX_FILL_PERCENTAGE = 0.5
+FVG_MAX_FILL_PERCENTAGE = 0.90  # 90% fill still tradeable (was 75%)
 
 # =============================================================================
 # RISK MANAGEMENT
 # =============================================================================
 # Minimum Risk:Reward ratio
-MIN_RR_RATIO = 2.0
+MIN_RR_RATIO = 1.5  # More realistic target
 
 # Optimal R:R for fallback TP calculation
 OPTIMAL_RR_RATIO = 2.5
@@ -121,11 +121,11 @@ MIN_TP_PIPS = 15
 MAX_SL_PIPS = 20
 
 # Stop loss buffer beyond FVG/swing (pips)
-SL_BUFFER_PIPS = 2
+SL_BUFFER_PIPS = 5  # Account for market noise
 
 # Use ATR for dynamic SL calculation
 USE_ATR_STOP = True
-SL_ATR_MULTIPLIER = 1.5
+SL_ATR_MULTIPLIER = 2.5  # Wider volatility buffer
 
 # ATR period for calculations
 ATR_PERIOD = 14
@@ -134,7 +134,7 @@ ATR_PERIOD = 14
 # CONFIDENCE THRESHOLDS
 # =============================================================================
 # Minimum confidence to generate signal
-MIN_CONFIDENCE_THRESHOLD = 0.55
+MIN_CONFIDENCE_THRESHOLD = 0.45  # Allow more setups
 
 # Confidence weights
 CONFIDENCE_WEIGHTS = {

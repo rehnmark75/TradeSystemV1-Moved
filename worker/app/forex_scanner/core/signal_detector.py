@@ -2906,6 +2906,10 @@ class SignalDetector:
             return None
 
         try:
+            # Debug: Check if backtest time is set
+            if hasattr(self.data_fetcher, 'current_backtest_time'):
+                self.logger.debug(f"🔧 SB: Backtest time set to: {self.data_fetcher.current_backtest_time}")
+
             # Get entry timeframe data (5m)
             df_entry = self.data_fetcher.get_enhanced_data(
                 epic, pair,
@@ -2917,6 +2921,11 @@ class SignalDetector:
             if df_entry is None or len(df_entry) < 50:
                 self.logger.debug(f"Insufficient 5m data for Silver Bullet: {len(df_entry) if df_entry is not None else 0} bars")
                 return None
+
+            # Debug: Log the actual timestamp from the data
+            if 'start_time' in df_entry.columns:
+                last_ts = df_entry['start_time'].iloc[-1]
+                self.logger.debug(f"🔧 SB: Last 5m candle timestamp: {last_ts}")
 
             # Get HTF data for bias (1h)
             df_htf = self.data_fetcher.get_enhanced_data(

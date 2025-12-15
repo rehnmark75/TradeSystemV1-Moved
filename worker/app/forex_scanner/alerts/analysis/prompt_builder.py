@@ -598,6 +598,8 @@ REASON: Analysis error - neutral assessment"""
         # Route to strategy-specific prompt builders
         if 'EMA_DOUBLE' in strategy:
             return self._build_ema_double_prompt(signal, has_chart)
+        elif 'SILVER_BULLET' in strategy:
+            return self._build_silver_bullet_prompt(signal, has_chart)
         elif 'SMC' in strategy:
             return self._build_smc_prompt(signal, has_chart)
         else:
@@ -751,6 +753,208 @@ Be concise but thorough. This strategy relies on CONFIRMATION - reject if confir
 
         except Exception as e:
             self.logger.error(f"Error building EMA double prompt: {e}")
+            return self._build_fallback_prompt(signal, {})
+
+    def _build_silver_bullet_prompt(self, signal: Dict, has_chart: bool = True) -> str:
+        """
+        Build a prompt specifically for ICT Silver Bullet strategy analysis.
+
+        The Silver Bullet strategy uses:
+        - Time-based entry windows (London Open, NY AM, NY PM)
+        - Liquidity sweeps (BSL/SSL) for setup trigger
+        - Market Structure Shift (MSS) for direction confirmation
+        - Fair Value Gap (FVG) for precise entry
+        - HTF trend alignment filter
+        """
+        try:
+            # Extract signal data
+            epic = signal.get('epic', 'Unknown')
+            pair = self._extract_pair(epic)
+            direction = signal.get('signal_type', signal.get('signal', 'Unknown'))
+            confidence = signal.get('confidence_score', 0)
+
+            # Price levels
+            entry_price = signal.get('entry_price', signal.get('price', 0))
+            stop_loss = signal.get('stop_loss', 0)
+            take_profit = signal.get('take_profit', 0)
+
+            # Risk metrics
+            risk_pips = signal.get('risk_pips', 0)
+            reward_pips = signal.get('reward_pips', 0)
+            rr_ratio = signal.get('rr_ratio', 0)
+
+            # Silver Bullet specific data - from metadata
+            metadata = signal.get('metadata', {})
+
+            # Session information
+            session = metadata.get('session', 'Unknown')
+            session_quality = metadata.get('session_quality', 0)
+
+            # Liquidity sweep data
+            sweep_type = metadata.get('sweep_type', 'Unknown')  # BSL or SSL
+            sweep_status = metadata.get('sweep_status', 'Unknown')  # CLEAN, PARTIAL, PENDING
+            sweep_pips = metadata.get('sweep_pips', 0)
+            sweep_age_bars = metadata.get('sweep_age_bars', 0)
+            liquidity_level = metadata.get('liquidity_level', 0)
+            rejection_confirmed = metadata.get('rejection_confirmed', False)
+
+            # Market Structure Shift data
+            mss_confirmed = metadata.get('mss_confirmed', False)
+            mss_break_pips = metadata.get('mss_break_pips', 0)
+            mss_direction = metadata.get('mss_direction', 'Unknown')
+
+            # FVG data
+            fvg_type = metadata.get('fvg_type', 'Unknown')  # BULLISH_FVG or BEARISH_FVG
+            fvg_size_pips = metadata.get('fvg_size_pips', 0)
+            fvg_fill_pct = metadata.get('fvg_fill_percentage', 0)
+            entry_type = metadata.get('entry_type', 'Unknown')  # IMMEDIATE or APPROACHING
+
+            # HTF alignment
+            htf_direction = metadata.get('htf_direction', 'Unknown')
+            htf_strength = metadata.get('htf_strength', 0)
+            htf_aligned = metadata.get('htf_aligned', False)
+
+            # Build chart analysis instructions
+            chart_instruction = ""
+            if has_chart:
+                chart_instruction = """
+## CHART ANALYSIS (ICT SILVER BULLET SETUP)
+
+The attached chart shows the Silver Bullet setup with the following elements:
+
+**Key Visual Markers:**
+- GREEN dashed line: Entry price level (FVG entry zone)
+- RED dashed line: Stop loss level (beyond sweep/FVG)
+- BLUE dashed line: Take profit target (opposite liquidity)
+- ORANGE horizontal lines: Liquidity levels (swing highs)
+- BLUE horizontal lines: Liquidity levels (swing lows)
+- YELLOW shaded zone: Fair Value Gap (FVG) entry zone
+
+**CRITICAL CHART ANALYSIS CHECKLIST:**
+1. ✓ Is the liquidity sweep clearly visible (price wicked beyond level)?
+2. ✓ Did price reject from the sweep level (not a breakout)?
+3. ✓ Is the Market Structure Shift (MSS) confirmed by a clear break?
+4. ✓ Is there a valid FVG formed after the MSS?
+5. ✓ Is the entry at an optimal FVG level (not chasing)?
+6. ✓ Is stop loss beyond the sweep low/high for protection?
+7. ✓ Is there clear path to take profit target (opposite liquidity)?
+"""
+
+            # Session display with quality
+            session_display = {
+                'NY_AM': 'NY AM Session (10:00-11:00 NY) - BEST SESSION',
+                'NY_PM': 'NY PM Session (14:00-15:00 NY) - Good Session',
+                'LONDON_OPEN': 'London Open (03:00-04:00 NY) - Good for EUR/GBP'
+            }.get(session, session)
+
+            # Sweep status display with quality indicators
+            sweep_status_display = {
+                'CLEAN': '✅ CLEAN (Confirmed reversal)',
+                'PARTIAL': '⚠️ PARTIAL (Possible reversal)',
+                'PENDING': '❌ PENDING (Unconfirmed - high risk)',
+                'BREAKOUT': '❌ BREAKOUT (Not a sweep)'
+            }.get(sweep_status, sweep_status)
+
+            # Build Silver Bullet specific analysis
+            silver_bullet_analysis = f"""
+## ICT SILVER BULLET STRATEGY DATA
+
+**SESSION TIMING:**
+- Active Session: {session_display}
+- Session Quality Score: {session_quality:.0%}
+
+**LIQUIDITY SWEEP (Setup Trigger):**
+- Sweep Type: {sweep_type} ({'Buy-Side Liquidity' if sweep_type == 'BSL' else 'Sell-Side Liquidity' if sweep_type == 'SSL' else 'Unknown'})
+- Sweep Status: {sweep_status_display}
+- Sweep Depth: {sweep_pips:.1f} pips beyond level
+- Liquidity Level: {self._format_price(liquidity_level)}
+- Sweep Age: {sweep_age_bars} bars ago
+- Rejection Confirmed: {'✅ Yes' if rejection_confirmed else '❌ No'}
+
+**MARKET STRUCTURE SHIFT (MSS):**
+- MSS Confirmed: {'✅ Yes' if mss_confirmed else '❌ No'}
+- MSS Direction: {mss_direction}
+- MSS Break Strength: {mss_break_pips:.1f} pips
+
+**FAIR VALUE GAP (Entry Zone):**
+- FVG Type: {fvg_type}
+- FVG Size: {fvg_size_pips:.1f} pips
+- FVG Fill: {fvg_fill_pct:.0%}
+- Entry Type: {entry_type} {'(Price in FVG now)' if entry_type == 'IMMEDIATE' else '(Price approaching FVG)'}
+
+**HIGHER TIMEFRAME ALIGNMENT:**
+- HTF Direction: {htf_direction}
+- HTF Trend Strength: {htf_strength:.0%}
+- HTF Aligned: {'✅ Yes - WITH trend' if htf_aligned else '⚠️ No - COUNTER trend'}
+
+**SILVER BULLET STRATEGY LOGIC:**
+This signal was generated because:
+1. Current time is within a Silver Bullet window ({session})
+2. Liquidity sweep detected ({sweep_type}) with {sweep_status} status
+3. Market Structure Shift confirmed direction change
+4. Fair Value Gap provides optimal entry zone
+5. HTF trend {'supports' if htf_aligned else 'OPPOSES'} trade direction
+"""
+
+            # Build the complete prompt
+            prompt = f"""You are a SENIOR FOREX TECHNICAL ANALYST specializing in ICT (Inner Circle Trader) Smart Money Concepts with expertise in the Silver Bullet time-based strategy.
+
+**YOUR ROLE:** Validate this ICT Silver Bullet signal. This strategy targets specific one-hour windows where institutional order flow creates high-probability setups through liquidity sweeps followed by FVG entries.
+
+═══════════════════════════════════════════════════════════════
+📊 SIGNAL OVERVIEW
+═══════════════════════════════════════════════════════════════
+• Pair: {pair}
+• Direction: {direction}
+• Strategy: SILVER_BULLET
+• System Confidence: {confidence:.1%}
+
+═══════════════════════════════════════════════════════════════
+💰 TRADE LEVELS
+═══════════════════════════════════════════════════════════════
+• Entry Price: {self._format_price(entry_price)}
+• Stop Loss: {self._format_price(stop_loss)} ({risk_pips:.1f} pips risk)
+• Take Profit: {self._format_price(take_profit)} ({reward_pips:.1f} pips reward)
+• Risk:Reward Ratio: {rr_ratio:.2f}:1
+{chart_instruction}
+{silver_bullet_analysis}
+═══════════════════════════════════════════════════════════════
+📋 REQUIRED RESPONSE FORMAT
+═══════════════════════════════════════════════════════════════
+
+Analyze the Silver Bullet setup then respond with EXACTLY these three lines:
+
+SCORE: [1-10]
+DECISION: [APPROVE/REJECT]
+REASON: [2-3 sentences explaining your assessment. Focus on: sweep quality, MSS confirmation, FVG entry timing, and HTF alignment]
+
+**SCORING GUIDELINES:**
+- 8-10: CLEAN sweep with confirmed rejection, strong MSS, fresh FVG, HTF aligned
+- 6-7: Valid setup with minor concerns (e.g., PARTIAL sweep, older FVG)
+- 4-5: Setup present but quality issues (weak MSS, unfavorable session)
+- 1-3: Setup failure (PENDING sweep, no MSS, counter-trend without confirmation)
+
+**AUTOMATIC REJECTION CRITERIA:**
+- PENDING or BREAKOUT sweep status (unconfirmed reversal)
+- No clear Market Structure Shift after sweep
+- FVG too small (<1 pip) or too filled (>90%)
+- Counter-trend against strong HTF trend (>70% strength)
+- R:R ratio below 1.5
+- Outside valid Silver Bullet time window
+- Sweep too old (>40 bars) - setup expired
+
+**SILVER BULLET BEST PRACTICES:**
+- NY AM session (10:00-11:00 NY) has highest win rate
+- CLEAN sweeps with rejection are most reliable
+- FVG should be entered at optimal edge (not middle)
+- Stop loss should be beyond the sweep level for protection
+
+Be concise but thorough. The Silver Bullet strategy is TIME-SENSITIVE - quality setups in the right window are key."""
+
+            return prompt
+
+        except Exception as e:
+            self.logger.error(f"Error building Silver Bullet prompt: {e}")
             return self._build_fallback_prompt(signal, {})
 
     def _build_smc_prompt(self, signal: Dict, has_chart: bool = True) -> str:

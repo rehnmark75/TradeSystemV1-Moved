@@ -483,35 +483,47 @@ class SilverBulletLiquidity:
         Calculate the quality score of a sweep (0.0 to 1.0).
 
         Quality factors:
+        - Sweep status (CLEAN > PARTIAL > PENDING)
         - Clean rejection after sweep
         - Sweep depth (not too shallow, not too deep)
         - Recency of sweep
         - Level strength
         """
         try:
-            quality = 0.5  # Base quality
+            # START with sweep status-based score (critical for quality)
+            # PENDING sweeps haven't confirmed reversal yet - very risky
+            if sweep.status == SweepStatus.PENDING:
+                quality = 0.10  # Only 10% - not confirmed yet!
+            elif sweep.status == SweepStatus.PARTIAL:
+                quality = 0.40  # 40% - partial confirmation
+            elif sweep.status == SweepStatus.CLEAN:
+                quality = 0.60  # 60% - confirmed reversal
+            elif sweep.status == SweepStatus.BREAKOUT:
+                quality = 0.0  # 0% - not a sweep at all
+            else:
+                quality = 0.30  # Unknown status
 
-            # Rejection confirmation (+30%)
+            # Additional rejection confirmation bonus (+20%)
             if sweep.rejection_confirmed:
-                quality += 0.30
+                quality += 0.20
 
             # Sweep depth (optimal is 5-10 pips)
             if 5 <= sweep.sweep_pips <= 10:
-                quality += 0.15
-            elif 3 <= sweep.sweep_pips <= 15:
                 quality += 0.10
+            elif 3 <= sweep.sweep_pips <= 15:
+                quality += 0.05
 
             # Recency (fresher is better)
             if sweep.rejection_candles <= 3:
-                quality += 0.10
-            elif sweep.rejection_candles <= 6:
                 quality += 0.05
+            elif sweep.rejection_candles <= 6:
+                quality += 0.03
 
             # Level strength
             if sweep.liquidity_level.strength >= 4:
-                quality += 0.10
-            elif sweep.liquidity_level.strength >= 3:
                 quality += 0.05
+            elif sweep.liquidity_level.strength >= 3:
+                quality += 0.03
 
             return min(quality, 1.0)
 
