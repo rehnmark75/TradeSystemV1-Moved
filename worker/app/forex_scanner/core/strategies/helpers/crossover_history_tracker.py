@@ -65,6 +65,9 @@ class PairCrossoverState:
     pending_bear_crossover: Optional[CrossoverEvent] = None
     last_trade_direction: Optional[str] = None
     last_trade_timestamp: Optional[datetime] = None
+    # Track the timestamp of the last seen crossover to avoid re-detecting
+    last_bull_crossover_timestamp: Optional[datetime] = None
+    last_bear_crossover_timestamp: Optional[datetime] = None
 
     def get_successful_count(self, direction: str) -> int:
         """Get count of successful crossovers for a direction"""
@@ -240,6 +243,25 @@ class CrossoverHistoryTracker:
             if direction is None:
                 return None
 
+            # Check if we already have a pending crossover for this same timestamp
+            # This prevents re-detecting the same crossover on every scan cycle
+            state = self._get_or_create_state(epic)
+
+            # Check if this crossover timestamp has already been processed
+            last_crossover_ts = state.last_bull_crossover_timestamp if direction == 'BULL' else state.last_bear_crossover_timestamp
+            if last_crossover_ts is not None:
+                # Compare timestamps - if same, skip detection
+                if str(last_crossover_ts)[:16] == str(timestamp)[:16]:
+                    # Already processed this crossover - check if we have a pending one to return
+                    existing_pending = state.pending_bull_crossover if direction == 'BULL' else state.pending_bear_crossover
+                    if existing_pending is not None:
+                        # Return existing pending for continued validation
+                        return existing_pending
+                    else:
+                        # Crossover was already validated (success or fail), don't re-detect
+                        return None
+
+            # This is a genuinely new crossover
             # Create crossover event
             event = CrossoverEvent(
                 timestamp=timestamp,
@@ -250,12 +272,13 @@ class CrossoverHistoryTracker:
                 candle_index=len(df) - 1
             )
 
-            # Store as pending for validation
-            state = self._get_or_create_state(epic)
+            # Store as pending for validation and track the timestamp
             if direction == 'BULL':
                 state.pending_bull_crossover = event
+                state.last_bull_crossover_timestamp = timestamp
             else:
                 state.pending_bear_crossover = event
+                state.last_bear_crossover_timestamp = timestamp
 
             self.logger.info(f"[{epic}] New {direction} crossover detected at {timestamp}")
             self.logger.debug(f"  EMA Fast: {curr_ema_fast:.5f}, EMA Slow: {curr_ema_slow:.5f}")
@@ -356,8 +379,33 @@ class CrossoverHistoryTracker:
             True if validated successful, False if failed, None if still pending
         """
         try:
+            # Find the crossover candle by timestamp instead of index
+            # This fixes the issue where candle_index becomes stale across scan cycles
+            crossover_ts = event.timestamp
+            crossover_idx = None
+
+            # Search for the candle matching the crossover timestamp
+            for i in range(len(df)):
+                row = df.iloc[i]
+                row_ts = row.get('start_time') or row.name
+                if isinstance(row_ts, str):
+                    row_ts = pd.to_datetime(row_ts)
+
+                # Compare timestamps (up to minutes)
+                if str(row_ts)[:16] == str(crossover_ts)[:16]:
+                    crossover_idx = i
+                    break
+
+            if crossover_idx is None:
+                # Crossover candle not in current DataFrame - likely scrolled out
+                # Mark as failed since we can't validate
+                self.logger.debug(f"[{epic}] Crossover candle not found in DataFrame, marking as failed")
+                event.success = False
+                event.validation_timestamp = datetime.now()
+                return False
+
             # Find candles since crossover
-            candles_since = len(df) - 1 - event.candle_index
+            candles_since = len(df) - 1 - crossover_idx
 
             if candles_since < 1:
                 return None  # Not enough candles yet
@@ -365,7 +413,7 @@ class CrossoverHistoryTracker:
             # Check each candle since crossover
             favorable_count = 0
 
-            for i in range(event.candle_index + 1, len(df)):
+            for i in range(crossover_idx + 1, len(df)):
                 row = df.iloc[i]
                 close = row.get('close', 0)
                 ema_fast, _ = self._get_ema_values(row)
@@ -387,6 +435,7 @@ class CrossoverHistoryTracker:
                     event.success = False
                     event.candles_validated = candles_since
                     event.validation_timestamp = datetime.now()
+                    self.logger.debug(f"[{epic}] {event.direction} crossover FAILED - price crossed back after {favorable_count} candles")
                     return False
 
             event.candles_validated = candles_since
@@ -396,15 +445,18 @@ class CrossoverHistoryTracker:
             if favorable_count >= self.success_candles:
                 event.success = True
                 event.validation_timestamp = datetime.now()
+                self.logger.info(f"[{epic}] {event.direction} crossover VALIDATED - held {favorable_count} candles")
                 return True
 
             # Check if we've waited too long
             if candles_since >= self.max_validation_candles:
                 event.success = False
                 event.validation_timestamp = datetime.now()
+                self.logger.debug(f"[{epic}] {event.direction} crossover FAILED - max validation time exceeded")
                 return False
 
             # Still pending
+            self.logger.debug(f"[{epic}] {event.direction} crossover still pending - {favorable_count}/{self.success_candles} candles held")
             return None
 
         except Exception as e:

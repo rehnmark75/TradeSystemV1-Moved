@@ -248,8 +248,9 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
             direction = crossover_event.direction
             timestamp = crossover_event.timestamp
 
+            # Only log if this is a genuinely new crossover (not a re-detection of pending)
+            # The tracker handles logging for new crossovers, so we just log the state
             if self.log_crossovers:
-                self.logger.info(f"{log_prefix} New {direction} crossover detected at {timestamp}")
                 # Log current successful crossover counts
                 state_summary = self.crossover_tracker.get_state_summary(epic)
                 self.logger.info(f"{log_prefix} State: successful_BULL={state_summary.get('successful_bull_count', 0)}, successful_BEAR={state_summary.get('successful_bear_count', 0)}")
