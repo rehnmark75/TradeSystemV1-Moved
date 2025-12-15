@@ -53,7 +53,7 @@ class EMAStrategy(BaseStrategy):
                  data_fetcher=None,
                  backtest_mode: bool = False,
                  epic: str = None,
-                 use_optimal_parameters: bool = True,
+                 use_optimal_parameters: bool = False,  # Disabled - ema_best_parameters table removed
                  pipeline_mode: bool = True):
         # Initialize parent but skip the enhanced validator setup
         self.name = 'ema'

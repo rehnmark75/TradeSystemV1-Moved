@@ -804,6 +804,48 @@ class StockScheduler:
         except Exception as e:
             logger.error(f"Failed to log pipeline run: {e}")
 
+    async def check_and_run_missed_tasks(self):
+        """
+        Check if any daily tasks were missed today and run them if needed.
+
+        This handles the case where the scheduler starts after the scheduled time
+        (e.g., after a weekend or restart). If the task hasn't run today, run it now.
+        """
+        now = datetime.now(self.ET)
+        today = now.date()
+        is_weekday = now.weekday() < 5  # Mon-Fri
+
+        if not is_weekday:
+            logger.info("Weekend - skipping missed task check")
+            return
+
+        # Check if full_pipeline has run today
+        query = """
+            SELECT COUNT(*) FROM stock_pipeline_log
+            WHERE pipeline_name = 'daily_pipeline'
+            AND execution_date = $1
+        """
+        try:
+            count = await self.db.fetchval(query, today)
+
+            if count == 0:
+                # Check if we're past the scheduled time for full_pipeline
+                pipeline_time = self.SCHEDULE['full_pipeline']['time']
+                scheduled = datetime.combine(today, pipeline_time)
+                scheduled = self.ET.localize(scheduled)
+
+                if now > scheduled:
+                    logger.info("=" * 60)
+                    logger.info("MISSED TASK DETECTED - Running full_pipeline now")
+                    logger.info(f"Scheduled time was: {scheduled.strftime('%H:%M %Z')}")
+                    logger.info("=" * 60)
+                    await self.run_pipeline()
+                    return True
+        except Exception as e:
+            logger.warning(f"Could not check for missed tasks: {e}")
+
+        return False
+
     def get_next_scheduled_task(self) -> tuple:
         """
         Get the next scheduled task and its time.
@@ -853,6 +895,10 @@ class StockScheduler:
             utc_hour = (config['time'].hour + 5) % 24  # Approximate UTC
             logger.info(f"  {et_time} ET ({utc_hour:02d}:00 UTC) - {task_name}: {config['description']}")
         logger.info(f"  Sunday {self.WEEKLY_SYNC_TIME} ET - weekly_sync: Instrument and fundamentals refresh")
+
+        # Check for missed tasks on startup (e.g., after weekend or restart)
+        logger.info("Checking for missed tasks...")
+        await self.check_and_run_missed_tasks()
 
         try:
             while self.running:
