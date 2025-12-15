@@ -337,6 +337,10 @@ class SilverBulletStrategy:
 
             df_with_fvg = self.fvg_detector.detect_fair_value_gaps(df_entry, fvg_config)
 
+            # Debug: Log FVGs found
+            fvg_count = len(self.fvg_detector.fair_value_gaps) if self.fvg_detector.fair_value_gaps else 0
+            self.logger.info(f"   📊 FVGs detected: {fvg_count}")
+
             # Find valid FVG for entry
             fvg_entry = self._find_fvg_entry(
                 df=df_with_fvg,
@@ -500,7 +504,9 @@ class SilverBulletStrategy:
     def _get_htf_bias(self, df_htf: pd.DataFrame, pip_value: float) -> Optional[Dict]:
         """Get higher timeframe directional bias"""
         try:
-            if len(df_htf) < 50:
+            # Minimum 20 bars for EMA calculation (was 50, reduced for backtest compatibility)
+            if len(df_htf) < 20:
+                self.logger.debug(f"   ⚠️ Insufficient HTF data: {len(df_htf)} bars (need 20)")
                 return None
 
             # Calculate EMAs for bias
@@ -650,7 +656,10 @@ class SilverBulletStrategy:
             fvgs = self.fvg_detector.fair_value_gaps
 
             if not fvgs:
+                self.logger.debug(f"   No FVGs detected by detector")
                 return None
+
+            self.logger.debug(f"   Found {len(fvgs)} FVGs, looking for {direction} entry")
 
             # Filter FVGs by direction and status
             valid_fvgs = []
@@ -681,7 +690,10 @@ class SilverBulletStrategy:
                 valid_fvgs.append(fvg)
 
             if not valid_fvgs:
+                self.logger.debug(f"   No FVGs passed filter criteria (direction, status, age, fill, size)")
                 return None
+
+            self.logger.debug(f"   {len(valid_fvgs)} FVGs passed filters")
 
             # Sort by recency and significance
             valid_fvgs.sort(key=lambda f: (f.significance, -f.age_bars), reverse=True)

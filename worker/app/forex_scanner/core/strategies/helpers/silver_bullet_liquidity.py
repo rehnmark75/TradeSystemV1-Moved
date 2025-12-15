@@ -279,12 +279,14 @@ class SilverBulletLiquidity:
 
             # No sweep found
             if sweep_idx is None:
+                self.logger.debug(f"   No sweep of {level.liquidity_type.value} at {level.price:.5f}")
                 return None
 
             sweep_pips = sweep_distance / pip_value
 
             # Check if sweep is within valid range
             if sweep_pips < min_sweep_pips:
+                self.logger.debug(f"   Sweep too small: {sweep_pips:.1f} pips < {min_sweep_pips} min")
                 return None  # Too small to be meaningful
 
             # Determine sweep status

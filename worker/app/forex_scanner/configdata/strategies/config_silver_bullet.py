@@ -58,19 +58,19 @@ SESSION_QUALITY = {
 LIQUIDITY_LOOKBACK_BARS = 20
 
 # Minimum swing strength (bars on each side to confirm swing)
-SWING_STRENGTH_BARS = 3
+SWING_STRENGTH_BARS = 2  # Reduced from 3 for more liquidity levels
 
 # Minimum sweep beyond liquidity level (pips)
-LIQUIDITY_SWEEP_MIN_PIPS = 3
+LIQUIDITY_SWEEP_MIN_PIPS = 1.5  # Reduced from 3 for more sweeps in testing
 
 # Maximum sweep - beyond this it's a breakout, not a sweep (pips)
-LIQUIDITY_SWEEP_MAX_PIPS = 15
+LIQUIDITY_SWEEP_MAX_PIPS = 20  # Increased from 15 for more flexibility
 
 # Require price to return after sweep (confirms it's a sweep not breakout)
-REQUIRE_SWEEP_REJECTION = True
+REQUIRE_SWEEP_REJECTION = False  # Relaxed for initial testing
 
 # Maximum bars after sweep to still consider it valid
-SWEEP_MAX_AGE_BARS = 10
+SWEEP_MAX_AGE_BARS = 15  # Increased from 10 for more opportunities
 
 # =============================================================================
 # MARKET STRUCTURE SHIFT (MSS)
@@ -88,7 +88,7 @@ MSS_REQUIRE_BODY_CLOSE = True
 # FAIR VALUE GAP (FVG) PARAMETERS
 # =============================================================================
 # Minimum FVG size to be tradeable (pips)
-FVG_MIN_SIZE_PIPS = 2
+FVG_MIN_SIZE_PIPS = 0.5  # Reduced from 2 for initial testing
 
 # Maximum age of FVG to consider for entry (bars)
 FVG_MAX_AGE_BARS = 10
