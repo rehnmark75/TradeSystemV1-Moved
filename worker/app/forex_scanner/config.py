@@ -405,6 +405,11 @@ VOLUME_PROFILE_STRATEGY = False  # Institutional Volume-by-Price analysis strate
 # EMA Double Confirmation Strategy
 EMA_DOUBLE_CONFIRMATION_STRATEGY = True  # NEW: Wait for 2 successful EMA 21/50 crossovers before taking 3rd
 
+# ICT Silver Bullet Strategy
+# Time-based SMC strategy trading during specific windows (3-4AM, 10-11AM, 2-3PM NY)
+# Looks for liquidity sweeps + FVG entries
+SILVER_BULLET_STRATEGY = False  # ICT Silver Bullet - disabled by default for testing
+
 # KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
 
 
