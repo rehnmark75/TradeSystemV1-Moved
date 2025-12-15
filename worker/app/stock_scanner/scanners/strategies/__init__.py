@@ -42,6 +42,7 @@ from .selling_climax import SellingClimaxScanner
 from .rsi_divergence import RSIDivergenceScanner
 from .wyckoff_spring import WyckoffSpringScanner
 from .trend_reversal import TrendReversalScanner
+from .ema_pullback import EMAPullbackScanner
 
 __all__ = [
     'TrendMomentumScanner',
@@ -61,4 +62,6 @@ __all__ = [
     'RSIDivergenceScanner',
     'WyckoffSpringScanner',
     'TrendReversalScanner',
+    # EMA Pullback strategy
+    'EMAPullbackScanner',
 ]

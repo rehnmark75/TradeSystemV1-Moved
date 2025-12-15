@@ -36,6 +36,8 @@ from .strategies import (
     RSIDivergenceScanner,
     WyckoffSpringScanner,
     TrendReversalScanner,
+    # EMA Pullback strategy
+    EMAPullbackScanner,
 )
 
 # Claude analysis imports (lazy load to avoid circular imports)
@@ -103,6 +105,8 @@ class ScannerManager:
         'rsi_divergence': RSIDivergenceScanner,
         'wyckoff_spring': WyckoffSpringScanner,
         'trend_reversal': TrendReversalScanner,
+        # EMA Pullback strategy
+        'ema_pullback': EMAPullbackScanner,
     }
 
     def __init__(
