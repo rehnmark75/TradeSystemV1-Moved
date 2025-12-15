@@ -80,8 +80,9 @@ vector-db/vectordb/32cb61c2-d8ab-4295-b0ed-f764a453d8a2/length.bin
 worker/app/stock_scanner/logs/
 
 # Claude analysis output files (generated runtime data)
-worker/app/claude_analysis_enhanced/minimal_analysis_*.txt
-worker/app/claude_analysis_enhanced/*.txt
+worker/app/claude_analysis_enhanced/
+worker/app/claude_rejections/
+worker/app/forex_scanner/scripts/claude_analysis/
 
 # Vector DB runtime files
 vector-db/vectordb/*/
