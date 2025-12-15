@@ -68,7 +68,16 @@ class SMCMarketStructure:
         self.structure_breaks: List[StructureBreak] = []
         self.current_structure = StructureType.NEUTRAL
         self.data_fetcher = data_fetcher  # For multi-timeframe analysis
-        
+
+    def _get_pip_value(self, config: Dict) -> float:
+        """Get pip value from config or default based on pair"""
+        if 'pip_value' in config:
+            return config['pip_value']
+        pair = config.get('pair', config.get('epic', ''))
+        if 'JPY' in str(pair).upper():
+            return 0.01
+        return 0.0001
+
     def analyze_market_structure(
         self, 
         df: pd.DataFrame, 
@@ -361,7 +370,9 @@ class SMCMarketStructure:
         """Analyze breaks of structure and changes of character"""
         try:
             confirmation_bars = config.get('structure_confirmation', 3)
-            bos_threshold = config.get('bos_threshold', 0.0001)
+            # Use dynamic pip value for default bos_threshold (JPY pairs use 0.01)
+            pip_value = self._get_pip_value(config)
+            bos_threshold = config.get('bos_threshold', pip_value)  # Default to 1 pip
             min_structure_significance = config.get('min_structure_significance', 0.3)
 
             # Initialize structure columns

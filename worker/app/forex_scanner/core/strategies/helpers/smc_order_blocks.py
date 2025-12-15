@@ -57,11 +57,20 @@ class OrderBlock:
 
 class SMCOrderBlocks:
     """Smart Money Concepts Order Block Detector Enhanced with Fair Value Gap Analysis"""
-    
+
     def __init__(self, logger: logging.Logger = None):
         self.logger = logger or logging.getLogger(__name__)
         self.order_blocks: List[OrderBlock] = []
         self.fvg_analyzer = SMCFairValueGaps(logger=self.logger)
+
+    def _get_pip_value(self, config: Dict) -> float:
+        """Get pip value from config or default based on pair"""
+        if 'pip_value' in config:
+            return config['pip_value']
+        pair = config.get('pair', config.get('epic', ''))
+        if 'JPY' in str(pair).upper():
+            return 0.01
+        return 0.0001
         
     def detect_order_blocks(
         self, 
@@ -148,7 +157,7 @@ class SMCOrderBlocks:
             self.logger.error(f"Enhanced order block scanning failed: {e}")
     
     def _validate_order_block_with_fvg(
-        self, 
+        self,
         df: pd.DataFrame,
         consolidation_start: int,
         consolidation_end: int,
@@ -159,7 +168,7 @@ class SMCOrderBlocks:
     ) -> Tuple[bool, float, List[FairValueGap], float]:
         """
         Validate order block with Fair Value Gap analysis
-        
+
         Returns:
             (has_fvg_support, fvg_confluence_score, associated_fvgs, alignment_strength)
         """
@@ -167,31 +176,34 @@ class SMCOrderBlocks:
             associated_fvgs = []
             fvg_confluence_score = 0.0
             alignment_strength = 0.0
-            
+
+            # Get pip value for correct conversions (JPY pairs use 0.01)
+            pip_value = self._get_pip_value(config)
+
             # Check for FVGs in the move period and surrounding areas
             search_start = max(0, consolidation_start - 5)
             search_end = min(len(df), move_end + 5)
-            
+
             # Look for FVGs that align with the order block direction
             for i in range(search_start, search_end):
                 if i >= len(df):
                     continue
-                    
+
                 row = df.iloc[i]
-                
+
                 # Check for bullish FVG support for bullish order block
-                if (block_type == OrderBlockType.BULLISH and 
+                if (block_type == OrderBlockType.BULLISH and
                     row.get('fvg_bullish', False)):
-                    
+
                     fvg_high = row.get('fvg_high', 0)
                     fvg_low = row.get('fvg_low', 0)
-                    
+
                     if fvg_high > 0 and fvg_low > 0:
                         # Check if FVG overlaps with consolidation area
                         consolidation_data = df.iloc[consolidation_start:consolidation_end + 1]
                         consolidation_low = consolidation_data['low'].min()
                         consolidation_high = consolidation_data['high'].max()
-                        
+
                         # FVG provides support if it's below or within consolidation
                         if (fvg_low <= consolidation_high and fvg_high >= consolidation_low):
                             fvg_gap = FairValueGap(
@@ -199,7 +211,7 @@ class SMCOrderBlocks:
                                 high_price=fvg_high,
                                 low_price=fvg_low,
                                 gap_type=FVGType.BULLISH,
-                                gap_size_pips=(fvg_high - fvg_low) * 10000,
+                                gap_size_pips=(fvg_high - fvg_low) / pip_value,
                                 volume_confirmation=row.get('volume', 1),
                                 timestamp=df.index[i] if hasattr(df.index, 'to_pydatetime') else pd.Timestamp.now(),
                                 significance=row.get('fvg_significance', 0.5)
@@ -212,18 +224,18 @@ class SMCOrderBlocks:
                             fvg_confluence_score += proximity_score * size_score * fvg_gap.significance
                 
                 # Check for bearish FVG support for bearish order block
-                elif (block_type == OrderBlockType.BEARISH and 
+                elif (block_type == OrderBlockType.BEARISH and
                       row.get('fvg_bearish', False)):
-                    
+
                     fvg_high = row.get('fvg_high', 0)
                     fvg_low = row.get('fvg_low', 0)
-                    
+
                     if fvg_high > 0 and fvg_low > 0:
                         # Check if FVG overlaps with consolidation area
                         consolidation_data = df.iloc[consolidation_start:consolidation_end + 1]
                         consolidation_low = consolidation_data['low'].min()
                         consolidation_high = consolidation_data['high'].max()
-                        
+
                         # FVG provides resistance if it's above or within consolidation
                         if (fvg_high >= consolidation_low and fvg_low <= consolidation_high):
                             fvg_gap = FairValueGap(
@@ -231,7 +243,7 @@ class SMCOrderBlocks:
                                 high_price=fvg_high,
                                 low_price=fvg_low,
                                 gap_type=FVGType.BEARISH,
-                                gap_size_pips=(fvg_high - fvg_low) * 10000,
+                                gap_size_pips=(fvg_high - fvg_low) / pip_value,
                                 volume_confirmation=row.get('volume', 1),
                                 timestamp=df.index[i] if hasattr(df.index, 'to_pydatetime') else pd.Timestamp.now(),
                                 significance=row.get('fvg_significance', 0.5)
@@ -354,18 +366,21 @@ class SMCOrderBlocks:
                                 move_range > consolidation_range * 0.5)
             
             if basic_criteria_met:
+                # Get pip value for correct conversions (JPY pairs use 0.01)
+                pip_value = self._get_pip_value(config)
+
                 # Enhanced FVG validation
                 has_fvg_support, fvg_confluence_score, associated_fvgs, alignment_strength = \
                     self._validate_order_block_with_fvg(
                         df, consolidation_start, consolidation_end, move_start, move_end,
                         OrderBlockType.BULLISH, config
                     )
-                
+
                 # Calculate enhanced order block strength (including FVG)
                 base_strength = self._calculate_order_block_strength(
-                    price_movement, volume_confirmation, move_range, consolidation_range
+                    price_movement, volume_confirmation, move_range, consolidation_range, pip_value
                 )
-                
+
                 # Enhance strength with FVG support
                 if has_fvg_support:
                     if base_strength == OrderBlockStrength.WEAK:
@@ -376,10 +391,10 @@ class SMCOrderBlocks:
                         enhanced_strength = OrderBlockStrength.VERY_STRONG
                 else:
                     enhanced_strength = base_strength
-                
+
                 # Enhanced confidence calculation (including FVG)
                 base_confidence = self._calculate_order_block_confidence(
-                    volume_confirmation, price_movement, enhanced_strength, 'bullish'
+                    volume_confirmation, price_movement, enhanced_strength, 'bullish', pip_value
                 )
                 
                 # Boost confidence with FVG support
@@ -483,18 +498,21 @@ class SMCOrderBlocks:
                                 move_range > consolidation_range * 0.5)
             
             if basic_criteria_met:
+                # Get pip value for correct conversions (JPY pairs use 0.01)
+                pip_value = self._get_pip_value(config)
+
                 # Enhanced FVG validation
                 has_fvg_support, fvg_confluence_score, associated_fvgs, alignment_strength = \
                     self._validate_order_block_with_fvg(
                         df, consolidation_start, consolidation_end, move_start, move_end,
                         OrderBlockType.BEARISH, config
                     )
-                
+
                 # Calculate enhanced order block strength (including FVG)
                 base_strength = self._calculate_order_block_strength(
-                    price_movement, volume_confirmation, move_range, consolidation_range
+                    price_movement, volume_confirmation, move_range, consolidation_range, pip_value
                 )
-                
+
                 # Enhance strength with FVG support
                 if has_fvg_support:
                     if base_strength == OrderBlockStrength.WEAK:
@@ -505,10 +523,10 @@ class SMCOrderBlocks:
                         enhanced_strength = OrderBlockStrength.VERY_STRONG
                 else:
                     enhanced_strength = base_strength
-                
+
                 # Enhanced confidence calculation (including FVG)
                 base_confidence = self._calculate_order_block_confidence(
-                    volume_confirmation, price_movement, enhanced_strength, 'bearish'
+                    volume_confirmation, price_movement, enhanced_strength, 'bearish', pip_value
                 )
                 
                 # Boost confidence with FVG support
@@ -612,20 +630,23 @@ class SMCOrderBlocks:
             volume_confirmation = move_avg_volume / avg_volume
             
             # Check criteria
-            if (volume_confirmation >= volume_factor and 
+            if (volume_confirmation >= volume_factor and
                 price_movement >= config.get('bos_threshold', 0.0001) and
                 move_range > consolidation_range * 0.5):  # Move should be significant
-                
+
+                # Get pip value for correct conversions (JPY pairs use 0.01)
+                pip_value = self._get_pip_value(config)
+
                 # Calculate order block strength
                 strength = self._calculate_order_block_strength(
-                    price_movement, volume_confirmation, move_range, consolidation_range
+                    price_movement, volume_confirmation, move_range, consolidation_range, pip_value
                 )
-                
+
                 # Calculate confidence
                 confidence = self._calculate_order_block_confidence(
-                    volume_confirmation, price_movement, strength, 'bullish'
+                    volume_confirmation, price_movement, strength, 'bullish', pip_value
                 )
-                
+
                 # Create order block
                 order_block = OrderBlock(
                     start_index=consolidation_start,
@@ -639,9 +660,9 @@ class SMCOrderBlocks:
                     timestamp=df.index[current_index] if hasattr(df.index, 'to_pydatetime') else pd.Timestamp.now(),
                     confidence=confidence
                 )
-                
+
                 self.order_blocks.append(order_block)
-                
+
         except Exception as e:
             self.logger.error(f"Bullish order block check failed: {e}")
     
@@ -711,20 +732,23 @@ class SMCOrderBlocks:
             volume_confirmation = move_avg_volume / avg_volume
             
             # Check criteria
-            if (volume_confirmation >= volume_factor and 
+            if (volume_confirmation >= volume_factor and
                 price_movement >= config.get('bos_threshold', 0.0001) and
                 move_range > consolidation_range * 0.5):  # Move should be significant
-                
+
+                # Get pip value for correct conversions (JPY pairs use 0.01)
+                pip_value = self._get_pip_value(config)
+
                 # Calculate order block strength
                 strength = self._calculate_order_block_strength(
-                    price_movement, volume_confirmation, move_range, consolidation_range
+                    price_movement, volume_confirmation, move_range, consolidation_range, pip_value
                 )
-                
+
                 # Calculate confidence
                 confidence = self._calculate_order_block_confidence(
-                    volume_confirmation, price_movement, strength, 'bearish'
+                    volume_confirmation, price_movement, strength, 'bearish', pip_value
                 )
-                
+
                 # Create order block
                 order_block = OrderBlock(
                     start_index=consolidation_start,
@@ -738,29 +762,31 @@ class SMCOrderBlocks:
                     timestamp=df.index[current_index] if hasattr(df.index, 'to_pydatetime') else pd.Timestamp.now(),
                     confidence=confidence
                 )
-                
+
                 self.order_blocks.append(order_block)
-                
+
         except Exception as e:
             self.logger.error(f"Bearish order block check failed: {e}")
     
     def _calculate_order_block_strength(
-        self, 
-        price_movement: float, 
-        volume_factor: float, 
-        move_range: float, 
-        consolidation_range: float
+        self,
+        price_movement: float,
+        volume_factor: float,
+        move_range: float,
+        consolidation_range: float,
+        pip_value: float = 0.0001
     ) -> OrderBlockStrength:
         """Calculate the strength of an order block"""
         try:
             # Combine multiple factors for strength assessment
             volume_score = min(volume_factor / 3.0, 1.0)  # Normalize to 0-1
-            price_score = min(price_movement * 10000, 1.0)  # Convert to pips and normalize
+            # Convert to pips using correct pip value and normalize
+            price_score = min(price_movement / pip_value, 1.0)
             range_ratio = move_range / consolidation_range if consolidation_range > 0 else 1.0
             range_score = min(range_ratio / 3.0, 1.0)
-            
+
             overall_score = (volume_score * 0.4 + price_score * 0.4 + range_score * 0.2)
-            
+
             if overall_score >= 0.8:
                 return OrderBlockStrength.VERY_STRONG
             elif overall_score >= 0.6:
@@ -769,28 +795,30 @@ class SMCOrderBlocks:
                 return OrderBlockStrength.MEDIUM
             else:
                 return OrderBlockStrength.WEAK
-                
+
         except Exception as e:
             self.logger.error(f"Order block strength calculation failed: {e}")
             return OrderBlockStrength.MEDIUM
     
     def _calculate_order_block_confidence(
-        self, 
-        volume_factor: float, 
-        price_movement: float, 
+        self,
+        volume_factor: float,
+        price_movement: float,
         strength: OrderBlockStrength,
-        block_type: str
+        block_type: str,
+        pip_value: float = 0.0001
     ) -> float:
         """Calculate confidence score for order block"""
         try:
             base_confidence = 0.5
-            
+
             # Volume factor contribution
             volume_contribution = min((volume_factor - 1.0) * 0.2, 0.3)
-            
-            # Price movement contribution
-            price_contribution = min(price_movement * 10000 * 0.05, 0.2)  # Convert to pips
-            
+
+            # Price movement contribution (convert to pips using correct pip value)
+            price_pips = price_movement / pip_value
+            price_contribution = min(price_pips * 0.05, 0.2)
+
             # Strength contribution
             strength_map = {
                 OrderBlockStrength.WEAK: 0.0,
@@ -799,11 +827,11 @@ class SMCOrderBlocks:
                 OrderBlockStrength.VERY_STRONG: 0.3
             }
             strength_contribution = strength_map.get(strength, 0.1)
-            
+
             total_confidence = base_confidence + volume_contribution + price_contribution + strength_contribution
-            
+
             return min(max(total_confidence, 0.1), 0.95)
-            
+
         except Exception as e:
             self.logger.error(f"Order block confidence calculation failed: {e}")
             return 0.5
@@ -836,23 +864,26 @@ class SMCOrderBlocks:
     def _add_order_block_zones(self, df: pd.DataFrame, config: Dict) -> pd.DataFrame:
         """Add order block zone analysis"""
         try:
+            # Get pip value for correct conversions (JPY pairs use 0.01)
+            pip_value = self._get_pip_value(config)
+
             buffer_pips = config.get('order_block_buffer', 2)
-            buffer = buffer_pips / 10000  # Convert to price
-            
+            buffer = buffer_pips * pip_value  # Convert pips to price
+
             df['in_bullish_order_block'] = False
             df['in_bearish_order_block'] = False
             df['distance_to_nearest_ob'] = np.nan
-            
+
             for i, row in df.iterrows():
                 current_price = row['close']
-                
+
                 # Check if price is in any order block zone
                 nearest_distance = float('inf')
-                
+
                 for order_block in self.order_blocks:
                     ob_high = order_block.high_price + buffer
                     ob_low = order_block.low_price - buffer
-                    
+
                     # Calculate distance to order block
                     if current_price > ob_high:
                         distance = current_price - ob_high
@@ -860,43 +891,44 @@ class SMCOrderBlocks:
                         distance = ob_low - current_price
                     else:
                         distance = 0  # Inside the zone
-                        
+
                         # Mark as inside order block
                         if order_block.block_type == OrderBlockType.BULLISH:
                             df.at[i, 'in_bullish_order_block'] = True
                         else:
                             df.at[i, 'in_bearish_order_block'] = True
-                    
+
                     nearest_distance = min(nearest_distance, distance)
-                
+
                 if nearest_distance != float('inf'):
-                    df.at[i, 'distance_to_nearest_ob'] = nearest_distance * 10000  # Convert to pips
-            
+                    df.at[i, 'distance_to_nearest_ob'] = nearest_distance / pip_value  # Convert price to pips
+
             return df
-            
+
         except Exception as e:
             self.logger.error(f"Order block zones addition failed: {e}")
             return df
     
     def get_order_blocks_near_price(
-        self, 
-        price: float, 
-        max_distance_pips: float = 10.0
+        self,
+        price: float,
+        max_distance_pips: float = 10.0,
+        pip_value: float = 0.0001
     ) -> List[OrderBlock]:
         """Get order blocks near a specific price"""
         try:
-            max_distance = max_distance_pips / 10000
+            max_distance = max_distance_pips * pip_value  # Convert pips to price
             nearby_blocks = []
-            
+
             for order_block in self.order_blocks:
                 if not order_block.still_valid:
                     continue
-                
+
                 # Check distance to order block
-                if (price >= order_block.low_price - max_distance and 
+                if (price >= order_block.low_price - max_distance and
                     price <= order_block.high_price + max_distance):
                     nearby_blocks.append(order_block)
-            
+
             # Sort by distance to price
             def distance_to_price(ob):
                 if price < ob.low_price:
@@ -905,28 +937,32 @@ class SMCOrderBlocks:
                     return price - ob.high_price
                 else:
                     return 0
-            
+
             nearby_blocks.sort(key=distance_to_price)
             return nearby_blocks
-            
+
         except Exception as e:
             self.logger.error(f"Order blocks near price search failed: {e}")
             return []
     
     def get_order_block_signals(
-        self, 
-        df: pd.DataFrame, 
-        current_index: int, 
+        self,
+        df: pd.DataFrame,
+        current_index: int,
         config: Dict
     ) -> Dict:
         """Get order block-based trading signals"""
         try:
             if current_index >= len(df):
                 return {}
-            
+
+            # Get pip value for correct conversions (JPY pairs use 0.01)
+            pip_value = self._get_pip_value(config)
+
             current_price = df.iloc[current_index]['close']
-            max_distance = config.get('max_distance_to_zone', 10) / 10000
-            
+            max_distance_pips = config.get('max_distance_to_zone', 10)
+            max_distance = max_distance_pips * pip_value  # Convert pips to price
+
             signals = {
                 'bullish_ob_signal': False,
                 'bearish_ob_signal': False,
@@ -935,16 +971,16 @@ class SMCOrderBlocks:
                 'nearest_ob_distance': float('inf'),
                 'confluence_factors': []
             }
-            
-            nearby_blocks = self.get_order_blocks_near_price(current_price, config.get('max_distance_to_zone', 10))
-            
+
+            nearby_blocks = self.get_order_blocks_near_price(current_price, max_distance_pips, pip_value)
+
             for order_block in nearby_blocks:
                 distance = self._get_distance_to_order_block(current_price, order_block)
-                
+
                 if distance <= max_distance:
                     signals['supporting_ob_count'] += 1
-                    signals['nearest_ob_distance'] = min(signals['nearest_ob_distance'], distance * 10000)
-                    
+                    signals['nearest_ob_distance'] = min(signals['nearest_ob_distance'], distance / pip_value)
+
                     # Check for potential reversal at order block
                     if order_block.block_type == OrderBlockType.BULLISH:
                         # Price approaching bullish order block from above = potential buy
@@ -952,16 +988,16 @@ class SMCOrderBlocks:
                             signals['bullish_ob_signal'] = True
                             signals['signal_strength'] = max(signals['signal_strength'], order_block.confidence)
                             signals['confluence_factors'].append(f"bullish_ob_{order_block.strength.value}")
-                    
+
                     elif order_block.block_type == OrderBlockType.BEARISH:
                         # Price approaching bearish order block from below = potential sell
                         if current_price >= order_block.low_price and current_price <= order_block.high_price:
                             signals['bearish_ob_signal'] = True
                             signals['signal_strength'] = max(signals['signal_strength'], order_block.confidence)
                             signals['confluence_factors'].append(f"bearish_ob_{order_block.strength.value}")
-            
+
             return signals
-            
+
         except Exception as e:
             self.logger.error(f"Order block signals generation failed: {e}")
             return {}
