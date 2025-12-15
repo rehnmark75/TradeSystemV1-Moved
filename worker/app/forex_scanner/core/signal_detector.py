@@ -310,6 +310,25 @@ class SignalDetector:
             self.ema_double_confirmation_strategy = None
             self.logger.info("⚪ EMA Double Confirmation strategy disabled")
 
+        # Initialize ICT Silver Bullet Strategy if enabled
+        if getattr(system_config, 'SILVER_BULLET_STRATEGY', False):
+            try:
+                from .strategies.silver_bullet_strategy import SilverBulletStrategy
+                self.silver_bullet_strategy = SilverBulletStrategy(
+                    config=config,
+                    logger=self.logger
+                )
+                self.logger.info("✅ ICT Silver Bullet strategy initialized (time-based SMC)")
+            except ImportError as e:
+                self.logger.error(f"❌ Failed to import Silver Bullet strategy: {e}")
+                self.silver_bullet_strategy = None
+            except Exception as e:
+                self.logger.error(f"❌ Failed to initialize Silver Bullet strategy: {e}")
+                self.silver_bullet_strategy = None
+        else:
+            self.silver_bullet_strategy = None
+            self.logger.info("⚪ Silver Bullet strategy disabled")
+
         # Initialize analysis components
         self.backtest_engine = BacktestEngine(self.data_fetcher)
         self.performance_analyzer = PerformanceAnalyzer()
@@ -381,6 +400,10 @@ class SignalDetector:
             'EMA_DOUBLE_CONFIRMATION': self._force_init_ema_double_confirmation,
             'EMA_DOUBLE': self._force_init_ema_double_confirmation,
             'EDC': self._force_init_ema_double_confirmation,
+            # ICT Silver Bullet
+            'SILVER_BULLET': self._force_init_silver_bullet,
+            'SB': self._force_init_silver_bullet,
+            'ICT_SILVER_BULLET': self._force_init_silver_bullet,
         }
 
         if strategy_name not in init_map:
@@ -557,6 +580,21 @@ class SignalDetector:
             return False, f"Failed to import EMA Double Confirmation strategy: {e}"
         except Exception as e:
             return False, f"Failed to force-init EMA Double Confirmation: {e}"
+
+    def _force_init_silver_bullet(self) -> Tuple[bool, str]:
+        """Force-initialize ICT Silver Bullet strategy for backtest"""
+        try:
+            from .strategies.silver_bullet_strategy import SilverBulletStrategy
+            self.silver_bullet_strategy = SilverBulletStrategy(
+                config=config,
+                logger=self.logger
+            )
+            self.logger.info("🔧 Force-initialized ICT Silver Bullet strategy")
+            return True, "Silver Bullet strategy force-initialized"
+        except ImportError as e:
+            return False, f"Failed to import Silver Bullet strategy: {e}"
+        except Exception as e:
+            return False, f"Failed to force-init Silver Bullet: {e}"
 
     # =========================================================================
     # END BACKTEST FORCE-INITIALIZATION METHODS
@@ -1571,6 +1609,25 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [EMA_DOUBLE] Error for {epic}: {e}")
                     individual_results['ema_double_confirmation'] = None
+
+            # 15. ICT Silver Bullet Strategy (if enabled) - Time-based SMC
+            if getattr(system_config, 'SILVER_BULLET_STRATEGY', False) and self.silver_bullet_strategy:
+                try:
+                    self.logger.debug(f"🔍 [SILVER_BULLET] Starting detection for {epic}")
+                    silver_bullet_signal = self.detect_silver_bullet_signals(epic, pair, spread_pips, timeframe)
+
+                    # Store result for combined strategy
+                    individual_results['silver_bullet'] = silver_bullet_signal
+
+                    if silver_bullet_signal:
+                        all_signals.append(silver_bullet_signal)
+                        self.logger.info(f"✅ [SILVER_BULLET] Signal detected for {epic}: {silver_bullet_signal.get('signal')} @ {silver_bullet_signal.get('entry_price', 0):.5f}")
+                    else:
+                        self.logger.debug(f"📊 [SILVER_BULLET] No signal for {epic}")
+
+                except Exception as e:
+                    self.logger.error(f"❌ [SILVER_BULLET] Error for {epic}: {e}")
+                    individual_results['silver_bullet'] = None
 
             # ========== COMBINED STRATEGY REMOVED ==========
             # Combined strategy was disabled and unused, removed to clean up codebase
@@ -2813,6 +2870,101 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"Error detecting EMA Double Confirmation signals for {epic}: {e}")
+            import traceback
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
+
+    def detect_silver_bullet_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '5m'
+    ) -> Optional[Dict]:
+        """
+        Detect ICT Silver Bullet signals.
+
+        Strategy Logic:
+        1. Check if in Silver Bullet time window (3-4AM, 10-11AM, 2-3PM NY)
+        2. Detect liquidity sweep (BSL for shorts, SSL for longs)
+        3. Confirm Market Structure Shift
+        4. Find Fair Value Gap entry
+        5. Generate signal with SL/TP
+
+        Args:
+            epic: Epic code
+            pair: Currency pair
+            spread_pips: Spread in pips
+            timeframe: Timeframe (default: 5m for entry precision)
+
+        Returns:
+            Silver Bullet signal or None
+        """
+        # Check if strategy is initialized
+        if not self.silver_bullet_strategy:
+            self.logger.debug("Silver Bullet strategy not initialized")
+            return None
+
+        try:
+            # Debug: Check if backtest time is set
+            if hasattr(self.data_fetcher, 'current_backtest_time'):
+                self.logger.debug(f"🔧 SB: Backtest time set to: {self.data_fetcher.current_backtest_time}")
+
+            # Get entry timeframe data (5m)
+            df_entry = self.data_fetcher.get_enhanced_data(
+                epic, pair,
+                timeframe='5m',
+                lookback_hours=24,  # 24h for liquidity detection
+                ema_strategy=self.ema_strategy if hasattr(self, 'ema_strategy') else None
+            )
+
+            if df_entry is None or len(df_entry) < 50:
+                self.logger.debug(f"Insufficient 5m data for Silver Bullet: {len(df_entry) if df_entry is not None else 0} bars")
+                return None
+
+            # Debug: Log the actual timestamp from the data
+            if 'start_time' in df_entry.columns:
+                last_ts = df_entry['start_time'].iloc[-1]
+                self.logger.debug(f"🔧 SB: Last 5m candle timestamp: {last_ts}")
+
+            # Get HTF data for bias (1h)
+            df_htf = self.data_fetcher.get_enhanced_data(
+                epic, pair,
+                timeframe='1h',
+                lookback_hours=72,  # 72h for trend context
+                ema_strategy=self.ema_strategy if hasattr(self, 'ema_strategy') else None
+            )
+
+            if df_htf is None or len(df_htf) < 20:
+                self.logger.debug(f"Insufficient 1h data for Silver Bullet: {len(df_htf) if df_htf is not None else 0} bars")
+                return None
+
+            # Optional: Get trigger timeframe data (15m)
+            df_trigger = self.data_fetcher.get_enhanced_data(
+                epic, pair,
+                timeframe='15m',
+                lookback_hours=48,
+                ema_strategy=self.ema_strategy if hasattr(self, 'ema_strategy') else None
+            )
+
+            # Detect signal using strategy
+            signal = self.silver_bullet_strategy.detect_signal(
+                df_entry=df_entry,
+                df_htf=df_htf,
+                epic=epic,
+                pair=pair,
+                df_trigger=df_trigger
+            )
+
+            if signal:
+                # Add market context
+                signal = self._add_market_context(signal, df_entry)
+                self.logger.info(f"✅ [SILVER_BULLET] Signal for {epic}: {signal['signal_type']} during {signal.get('session', 'unknown')}")
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"Error detecting Silver Bullet signals for {epic}: {e}")
             import traceback
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
             return None

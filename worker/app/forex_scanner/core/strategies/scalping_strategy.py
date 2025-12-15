@@ -639,18 +639,21 @@ class ScalpingStrategy(BaseStrategy):
             # Calculate efficiency ratio for scalping
             efficiency_ratio = self._calculate_efficiency_ratio(df)
             
+            # Determine pip multiplier based on pair
+            pip_multiplier = 100 if 'JPY' in epic.upper() else 10000
+
             return {
                 'signal_type': signal_type,
                 'price': current_price,
                 'epic': epic,
                 'timeframe': timeframe,
-                
+
                 # EMA data for scalping
                 'ema_short': ema_fast,
                 'ema_long': ema_slow,
                 'ema_trend': ema_filter,
                 'ema_separation': abs(ema_fast - ema_slow),
-                'ema_separation_pips': abs(ema_fast - ema_slow) * 10000,
+                'ema_separation_pips': abs(ema_fast - ema_slow) * pip_multiplier,
                 
                 # Volume data
                 'volume': volume,
@@ -1226,7 +1229,8 @@ class ScalpingStrategy(BaseStrategy):
             
             # strategy_indicators - all technical indicator values for scalping
             ema_separation = abs(signal['ema_short'] - signal['ema_long'])
-            ema_separation_pips = signal.get('ema_separation_pips', ema_separation * 10000)
+            pip_multiplier = 100 if epic and 'JPY' in epic.upper() else 10000
+            ema_separation_pips = signal.get('ema_separation_pips', ema_separation * pip_multiplier)
             
             signal['strategy_indicators'] = {
                 'primary_indicator': 'fast_ema_crossover',
@@ -1862,9 +1866,10 @@ class ScalpingStrategy(BaseStrategy):
         
         fast_ema_prev = previous[f'ema_{self._fast_ema_period}']
         slow_ema_prev = previous[f'ema_{self._slow_ema_period}']
-        
+
         # Check EMA separation (avoid choppy markets)
-        ema_separation_pips = abs(fast_ema - slow_ema) * 10000
+        pip_multiplier = 100 if 'JPY' in epic.upper() else 10000
+        ema_separation_pips = abs(fast_ema - slow_ema) * pip_multiplier
         if ema_separation_pips < self.min_separation_pips:
             return None
         
@@ -2795,7 +2800,9 @@ class ScalpingStrategy(BaseStrategy):
         }
         
         target_pips = profit_targets.get(self.scalping_mode, 5)
-        target_price_diff = target_pips / 10000
+        epic = entry_signal.get('epic', '')
+        pip_value = 0.01 if epic and 'JPY' in epic.upper() else 0.0001
+        target_price_diff = target_pips * pip_value
         
         if signal_type == 'BULL':
             if current_price >= entry_price + target_price_diff:

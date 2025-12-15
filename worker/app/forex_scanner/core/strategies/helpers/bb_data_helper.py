@@ -572,7 +572,7 @@ class BBDataHelper:
             }
             
             # Add stop loss and take profit calculations
-            signal.update(self._calculate_sl_tp(current, signal_type))
+            signal.update(self._calculate_sl_tp(current, signal_type, epic))
             
             # Add previous bar data for analysis
             signal['previous_close'] = float(previous['close'])
@@ -617,7 +617,13 @@ class BBDataHelper:
         except:
             return 0.02
 
-    def _calculate_sl_tp(self, current: pd.Series, signal_type: str) -> Dict:
+    def _get_pip_value(self, epic: str = '') -> float:
+        """Get pip value based on currency pair (JPY pairs use 0.01, others use 0.0001)"""
+        if epic and 'JPY' in str(epic).upper():
+            return 0.01
+        return 0.0001
+
+    def _calculate_sl_tp(self, current: pd.Series, signal_type: str, epic: str = '') -> Dict:
         """Calculate stop loss and take profit levels"""
         try:
             atr = current.get('atr', current['close'] * 0.01)
@@ -631,11 +637,12 @@ class BBDataHelper:
                 sl = current['bb_upper'] + (atr * 0.5)
                 tp = current['bb_lower']
             
+            pip_value = self._get_pip_value(epic)
             return {
                 'stop_loss': float(sl),
                 'take_profit': float(tp),
-                'sl_pips': float(abs(current['close'] - sl) / 0.0001),  # Assuming 4-digit pairs
-                'tp_pips': float(abs(tp - current['close']) / 0.0001),
+                'sl_pips': float(abs(current['close'] - sl) / pip_value),
+                'tp_pips': float(abs(tp - current['close']) / pip_value),
                 'risk_reward_ratio': float(abs(tp - current['close']) / abs(current['close'] - sl)) if abs(current['close'] - sl) > 0 else 1.0
             }
             

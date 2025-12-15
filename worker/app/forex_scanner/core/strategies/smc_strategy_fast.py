@@ -55,7 +55,7 @@ class SMCStrategyFast(BaseStrategy):
         self.swing_length = self.smc_config.get('swing_length', 5)
         self.confluence_required = self.smc_config.get('confluence_required', 2)
         self.min_risk_reward = self.smc_config.get('min_risk_reward', 1.5)
-        self.fvg_min_size = self.smc_config.get('fvg_min_size', 3) / 10000  # Convert to price
+        self.fvg_min_size_pips = self.smc_config.get('fvg_min_size', 3)  # Store in pips, convert dynamically
 
         # Enable/disable expensive features based on pipeline mode
         self.enhanced_validation = pipeline_mode and getattr(config, 'SMC_ENHANCED_VALIDATION', True)
@@ -150,7 +150,13 @@ class SMCStrategyFast(BaseStrategy):
             'open', 'high', 'low', 'close',  # Basic OHLC
             'volume', 'ltv'                  # Volume data
         ]
-    
+
+    def _get_pip_value(self, epic: str) -> float:
+        """Get pip value based on pair (JPY pairs use 0.01, others use 0.0001)"""
+        if 'JPY' in str(epic).upper():
+            return 0.01
+        return 0.0001
+
     def detect_signal(
         self, 
         df: pd.DataFrame, 
@@ -168,7 +174,7 @@ class SMCStrategyFast(BaseStrategy):
                 return None
             
             # Fast SMC analysis
-            df_smc = self._fast_smc_analysis(df.copy())
+            df_smc = self._fast_smc_analysis(df.copy(), epic)
 
             # Check latest row for signals
             latest_row = df_smc.iloc[-1]
@@ -305,7 +311,7 @@ class SMCStrategyFast(BaseStrategy):
             self.logger.error(f"Fast SMC signal detection error: {e}")
             return None
     
-    def _fast_smc_analysis(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _fast_smc_analysis(self, df: pd.DataFrame, epic: str = '') -> pd.DataFrame:
         """
         Fast SMC analysis using vectorized operations
         """
@@ -318,7 +324,7 @@ class SMCStrategyFast(BaseStrategy):
 
             if self.enhanced_validation:
                 # 3. Enhanced analysis: Fair value gaps (expensive in basic mode)
-                df = self._detect_fvgs_fast(df)
+                df = self._detect_fvgs_fast(df, epic)
 
                 # 4. Enhanced analysis: Order block approximation (expensive in basic mode)
                 df = self._detect_order_blocks_fast(df)
@@ -330,7 +336,7 @@ class SMCStrategyFast(BaseStrategy):
                 df['order_block_bearish'] = False
 
             return df
-            
+
         except Exception as e:
             self.logger.error(f"Fast SMC analysis failed: {e}")
             return df
@@ -403,24 +409,28 @@ class SMCStrategyFast(BaseStrategy):
             self.logger.error(f"Fast structure break detection failed: {e}")
             return df
     
-    def _detect_fvgs_fast(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _detect_fvgs_fast(self, df: pd.DataFrame, epic: str = '') -> pd.DataFrame:
         """Fast Fair Value Gap detection"""
         try:
             # Initialize columns
             df['fvg_bullish'] = False
             df['fvg_bearish'] = False
-            
+
+            # Calculate FVG min size in price units using correct pip value for pair
+            pip_value = self._get_pip_value(epic)
+            fvg_min_size = self.fvg_min_size_pips * pip_value
+
             # Vectorized FVG detection
             # Bullish FVG: current low > 2 candles ago high
-            bullish_fvg = (df['low'] > df['high'].shift(2)) & ((df['low'] - df['high'].shift(2)) >= self.fvg_min_size)
+            bullish_fvg = (df['low'] > df['high'].shift(2)) & ((df['low'] - df['high'].shift(2)) >= fvg_min_size)
             df['fvg_bullish'] = bullish_fvg
-            
-            # Bearish FVG: current high < 2 candles ago low  
-            bearish_fvg = (df['high'] < df['low'].shift(2)) & ((df['low'].shift(2) - df['high']) >= self.fvg_min_size)
+
+            # Bearish FVG: current high < 2 candles ago low
+            bearish_fvg = (df['high'] < df['low'].shift(2)) & ((df['low'].shift(2) - df['high']) >= fvg_min_size)
             df['fvg_bearish'] = bearish_fvg
-            
+
             return df
-            
+
         except Exception as e:
             self.logger.error(f"Fast FVG detection failed: {e}")
             return df
@@ -827,13 +837,14 @@ class SMCStrategyFast(BaseStrategy):
                 stop_distance_points = int(stop_distance * 10000)
                 target_distance_points = int(target_distance * 10000)
 
+            pip_multiplier = 100 if 'JPY' in epic else 10000
             signal.update({
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
                 'stop_distance': stop_distance_points,  # For order API
                 'limit_distance': target_distance_points,  # For order API
-                'stop_distance_pips': stop_distance * 10000,  # Keep for compatibility
-                'target_distance_pips': target_distance * 10000,  # Keep for compatibility
+                'stop_distance_pips': stop_distance * pip_multiplier,  # Keep for compatibility
+                'target_distance_pips': target_distance * pip_multiplier,  # Keep for compatibility
                 'risk_reward_ratio': self.min_risk_reward
             })
             

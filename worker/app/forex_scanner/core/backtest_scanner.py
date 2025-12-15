@@ -171,6 +171,16 @@ class BacktestScanner(IntelligentForexScanner):
             from .signal_detector import SignalDetector
             from .backtest_data_fetcher import BacktestDataFetcher
 
+            # CRITICAL: Force-initialize the requested strategy for backtest
+            # This ensures the strategy is available even if config flag is False
+            strategy_name = self.strategy_name.upper()
+            if strategy_name and strategy_name not in ['EMA', 'EMA_CROSSOVER', 'ALL', '']:
+                success, message = self.signal_detector.force_initialize_strategy(strategy_name)
+                if success:
+                    self.logger.info(f"✅ BacktestScanner: Strategy '{strategy_name}' force-initialized: {message}")
+                else:
+                    self.logger.warning(f"⚠️ BacktestScanner: Could not force-init '{strategy_name}': {message}")
+
             # Create a new signal detector but replace its data_fetcher with BacktestDataFetcher
             backtest_data_fetcher = BacktestDataFetcher(self.db_manager, getattr(config, 'USER_TIMEZONE', 'Europe/Stockholm'))
 
@@ -324,6 +334,14 @@ class BacktestScanner(IntelligentForexScanner):
                 self.signal_detector.ema_double_confirmation_strategy.data_fetcher = backtest_data_fetcher
                 self.signal_detector.ema_double_confirmation_strategy.backtest_mode = True
                 self.logger.info("✅ EMA Double Confirmation strategy configured for backtest mode")
+
+            # ADDED: Configure Silver Bullet strategy for backtest mode
+            if hasattr(self.signal_detector, 'silver_bullet_strategy') and self.signal_detector.silver_bullet_strategy:
+                self.signal_detector.silver_bullet_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.silver_bullet_strategy.backtest_mode = True
+                # Reset cooldowns for fresh backtest
+                self.signal_detector.silver_bullet_strategy.reset_cooldowns()
+                self.logger.info("✅ Silver Bullet strategy configured for backtest mode")
 
             self.logger.info("✅ Signal detector updated to use BacktestDataFetcher for historical data")
 
@@ -606,6 +624,9 @@ class BacktestScanner(IntelligentForexScanner):
                 'EMA_DOUBLE_CONFIRMATION': 'detect_ema_double_confirmation_signals',  # EMA Double Confirmation
                 'EMA_DOUBLE': 'detect_ema_double_confirmation_signals',  # Short form
                 'EDC': 'detect_ema_double_confirmation_signals',  # Abbreviation
+                'SILVER_BULLET': 'detect_silver_bullet_signals',  # ICT Silver Bullet strategy
+                'SB': 'detect_silver_bullet_signals',  # Short form
+                'ICT_SILVER_BULLET': 'detect_silver_bullet_signals',  # Full name
             }
 
             # Use specific strategy if requested, otherwise use all strategies
