@@ -20,6 +20,17 @@ try:
 except ImportError:
     from forex_scanner import config
 
+# Market hours validation
+try:
+    from utils.timezone_utils import is_market_hours
+except ImportError:
+    try:
+        from forex_scanner.utils.timezone_utils import is_market_hours
+    except ImportError:
+        # Fallback if import fails
+        def is_market_hours():
+            return True
+
 
 class IntegrationManager:
     """
@@ -280,18 +291,23 @@ class IntegrationManager:
     def analyze_signals_with_claude(self, signals: List[Dict]) -> List[Dict]:
         """
         ENHANCED: Analyze signals using modular Claude API with advanced features
-        
+
         Args:
             signals: List of signals to analyze
-            
+
         Returns:
             List of signals with enhanced Claude analysis
         """
         if not self.claude_analyzer or not self.enable_claude:
             self.logger.debug("Claude analysis disabled or unavailable")
             return signals
-        
+
         if not signals:
+            return signals
+
+        # Guard: Skip Claude API calls when market is closed (weekends)
+        if not is_market_hours():
+            self.logger.info("🚫 Market closed - skipping Claude analysis to save API costs")
             return signals
         
         analyzed_signals = []
