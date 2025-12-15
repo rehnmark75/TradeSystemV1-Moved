@@ -279,15 +279,17 @@ class BaseStrategy(ABC):
     def add_execution_prices(self, signal: Dict, spread_pips: float) -> Dict:
         """
         Add execution prices for BID-adjusted signals
-        
+
         Args:
             signal: Signal dictionary
             spread_pips: Spread in pips
-            
+
         Returns:
             Updated signal with execution prices
         """
-        spread = spread_pips / 10000  # Convert to decimal
+        epic = signal.get('epic', '')
+        pip_value = 0.01 if epic and 'JPY' in epic.upper() else 0.0001
+        spread = spread_pips * pip_value  # Convert pips to price units
         current_price_mid = signal['price']
         
         if signal['signal_type'] == 'BULL':

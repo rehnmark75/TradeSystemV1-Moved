@@ -933,7 +933,8 @@ class MomentumStrategy(BaseStrategy):
             }
 
             # Pricing and execution data
-            spread_adjustment = spread_pips / 10000
+            pip_value = 0.01 if epic and 'JPY' in epic.upper() else 0.0001
+            spread_adjustment = spread_pips * pip_value
             signal.update({
                 'spread_pips': spread_pips,
                 'bid_price': current_price - spread_adjustment,

@@ -837,13 +837,14 @@ class SMCStrategyFast(BaseStrategy):
                 stop_distance_points = int(stop_distance * 10000)
                 target_distance_points = int(target_distance * 10000)
 
+            pip_multiplier = 100 if 'JPY' in epic else 10000
             signal.update({
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
                 'stop_distance': stop_distance_points,  # For order API
                 'limit_distance': target_distance_points,  # For order API
-                'stop_distance_pips': stop_distance * 10000,  # Keep for compatibility
-                'target_distance_pips': target_distance * 10000,  # Keep for compatibility
+                'stop_distance_pips': stop_distance * pip_multiplier,  # Keep for compatibility
+                'target_distance_pips': target_distance * pip_multiplier,  # Keep for compatibility
                 'risk_reward_ratio': self.min_risk_reward
             })
             
