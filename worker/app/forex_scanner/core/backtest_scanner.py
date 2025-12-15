@@ -606,6 +606,9 @@ class BacktestScanner(IntelligentForexScanner):
                 'EMA_DOUBLE_CONFIRMATION': 'detect_ema_double_confirmation_signals',  # EMA Double Confirmation
                 'EMA_DOUBLE': 'detect_ema_double_confirmation_signals',  # Short form
                 'EDC': 'detect_ema_double_confirmation_signals',  # Abbreviation
+                'SILVER_BULLET': 'detect_silver_bullet_signals',  # ICT Silver Bullet strategy
+                'SB': 'detect_silver_bullet_signals',  # Short form
+                'ICT_SILVER_BULLET': 'detect_silver_bullet_signals',  # Full name
             }
 
             # Use specific strategy if requested, otherwise use all strategies
