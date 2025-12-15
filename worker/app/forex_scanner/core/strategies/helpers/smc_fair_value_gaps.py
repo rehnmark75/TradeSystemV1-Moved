@@ -51,14 +51,25 @@ class FairValueGap:
 
 class SMCFairValueGaps:
     """Smart Money Concepts Fair Value Gap Detector"""
-    
+
     def __init__(self, logger: logging.Logger = None):
         self.logger = logger or logging.getLogger(__name__)
         self.fair_value_gaps: List[FairValueGap] = []
-        
+
+    def _get_pip_value(self, config: Dict) -> float:
+        """Get pip value from config or default based on pair"""
+        # Check if pip_value is explicitly provided
+        if 'pip_value' in config:
+            return config['pip_value']
+        # Check pair/epic for JPY
+        pair = config.get('pair', config.get('epic', ''))
+        if 'JPY' in str(pair).upper():
+            return 0.01
+        return 0.0001
+
     def detect_fair_value_gaps(
-        self, 
-        df: pd.DataFrame, 
+        self,
+        df: pd.DataFrame,
         config: Dict
     ) -> pd.DataFrame:
         """
@@ -108,24 +119,25 @@ class SMCFairValueGaps:
         """Scan DataFrame for Fair Value Gap patterns"""
         try:
             min_gap_size_pips = config.get('fvg_min_size', 3)
-            min_gap_size = min_gap_size_pips / 10000  # Convert to price
+            pip_value = self._get_pip_value(config)
+            min_gap_size = min_gap_size_pips * pip_value  # Convert pips to price
             
             # Need at least 3 candles to detect FVG
             for i in range(2, len(df)):
                 current_candle = df.iloc[i]
                 previous_candle = df.iloc[i-1]
                 prev_prev_candle = df.iloc[i-2]
-                
+
                 # Check for bullish FVG
                 bullish_fvg = self._check_bullish_fvg(
-                    prev_prev_candle, previous_candle, current_candle, min_gap_size
+                    prev_prev_candle, previous_candle, current_candle, min_gap_size, pip_value
                 )
                 if bullish_fvg:
                     self.fair_value_gaps.append(bullish_fvg)
-                
+
                 # Check for bearish FVG
                 bearish_fvg = self._check_bearish_fvg(
-                    prev_prev_candle, previous_candle, current_candle, min_gap_size
+                    prev_prev_candle, previous_candle, current_candle, min_gap_size, pip_value
                 )
                 if bearish_fvg:
                     self.fair_value_gaps.append(bearish_fvg)
@@ -134,99 +146,101 @@ class SMCFairValueGaps:
             self.logger.error(f"FVG scanning failed: {e}")
     
     def _check_bullish_fvg(
-        self, 
-        candle1: pd.Series, 
-        candle2: pd.Series, 
-        candle3: pd.Series, 
-        min_gap_size: float
+        self,
+        candle1: pd.Series,
+        candle2: pd.Series,
+        candle3: pd.Series,
+        min_gap_size: float,
+        pip_value: float = 0.0001
     ) -> Optional[FairValueGap]:
         """Check for bullish Fair Value Gap pattern"""
         try:
             # Bullish FVG: candle3.low > candle1.high (gap between candle1 and candle3)
             # candle2 is the middle candle that creates the gap
-            
+
             gap_low = candle3['low']
             gap_high = candle1['high']
-            
+
             # Check if there's a valid gap
             if gap_low <= gap_high:
                 return None
-            
+
             gap_size = gap_low - gap_high
-            
+
             # Check minimum gap size
             if gap_size < min_gap_size:
                 return None
-            
+
             # Volume confirmation (middle candle should have good volume)
             volume = candle2.get('volume', candle2.get('ltv', 1))
             volume_confirmation = self._calculate_volume_confirmation(volume, [candle1, candle2, candle3])
-            
+
             # Calculate significance
             significance = self._calculate_fvg_significance(
-                gap_size, volume_confirmation, 'bullish', [candle1, candle2, candle3]
+                gap_size, volume_confirmation, 'bullish', [candle1, candle2, candle3], pip_value
             )
-            
+
             return FairValueGap(
                 start_index=candle3.name if hasattr(candle3, 'name') else 0,
                 high_price=gap_low,  # Top of the gap
                 low_price=gap_high,  # Bottom of the gap
                 gap_type=FVGType.BULLISH,
-                gap_size_pips=gap_size * 10000,
+                gap_size_pips=gap_size / pip_value,  # Convert price to pips
                 volume_confirmation=volume_confirmation,
                 timestamp=candle3.get('start_time', pd.Timestamp.now()) if hasattr(candle3, 'get') else pd.Timestamp.now(),
                 significance=significance
             )
-            
+
         except Exception as e:
             self.logger.error(f"Bullish FVG check failed: {e}")
             return None
     
     def _check_bearish_fvg(
-        self, 
-        candle1: pd.Series, 
-        candle2: pd.Series, 
-        candle3: pd.Series, 
-        min_gap_size: float
+        self,
+        candle1: pd.Series,
+        candle2: pd.Series,
+        candle3: pd.Series,
+        min_gap_size: float,
+        pip_value: float = 0.0001
     ) -> Optional[FairValueGap]:
         """Check for bearish Fair Value Gap pattern"""
         try:
             # Bearish FVG: candle3.high < candle1.low (gap between candle1 and candle3)
             # candle2 is the middle candle that creates the gap
-            
+
             gap_high = candle3['high']
             gap_low = candle1['low']
-            
+
             # Check if there's a valid gap
             if gap_high >= gap_low:
                 return None
-            
+
             gap_size = gap_low - gap_high
-            
+
             # Check minimum gap size
             if gap_size < min_gap_size:
                 return None
-            
+
             # Volume confirmation (middle candle should have good volume)
             volume = candle2.get('volume', candle2.get('ltv', 1))
             volume_confirmation = self._calculate_volume_confirmation(volume, [candle1, candle2, candle3])
-            
+
             # Calculate significance
             significance = self._calculate_fvg_significance(
-                gap_size, volume_confirmation, 'bearish', [candle1, candle2, candle3]
+                gap_size, volume_confirmation, 'bearish', [candle1, candle2, candle3], pip_value
             )
-            
+
             return FairValueGap(
                 start_index=candle3.name if hasattr(candle3, 'name') else 0,
                 high_price=gap_low,   # Top of the gap
                 low_price=gap_high,   # Bottom of the gap
                 gap_type=FVGType.BEARISH,
-                gap_size_pips=gap_size * 10000,
+                gap_size_pips=gap_size / pip_value,  # Convert price to pips
                 volume_confirmation=volume_confirmation,
                 timestamp=candle3.get('start_time', pd.Timestamp.now()) if hasattr(candle3, 'get') else pd.Timestamp.now(),
                 significance=significance
             )
-            
+
         except Exception as e:
             self.logger.error(f"Bearish FVG check failed: {e}")
             return None
@@ -259,16 +273,17 @@ class SMCFairValueGaps:
             return 0.5
     
     def _calculate_fvg_significance(
-        self, 
-        gap_size: float, 
-        volume_confirmation: float, 
+        self,
+        gap_size: float,
+        volume_confirmation: float,
         gap_type: str,
-        candles: List[pd.Series]
+        candles: List[pd.Series],
+        pip_value: float = 0.0001
     ) -> float:
         """Calculate the significance of a Fair Value Gap"""
         try:
             # Gap size factor (larger gaps are more significant)
-            gap_size_pips = gap_size * 10000
+            gap_size_pips = gap_size / pip_value  # Convert to pips using correct pip value
             size_factor = min(gap_size_pips / 10.0, 1.0)  # Normalize to 0-1 (10 pips = max)
             
             # Volume factor
@@ -418,23 +433,25 @@ class SMCFairValueGaps:
     def _add_fvg_zones(self, df: pd.DataFrame, config: Dict) -> pd.DataFrame:
         """Add FVG zone analysis to DataFrame"""
         try:
+            pip_value = self._get_pip_value(config)
+
             df['in_bullish_fvg'] = False
             df['in_bearish_fvg'] = False
             df['nearest_fvg_distance'] = np.nan
             df['active_fvg_count'] = 0
-            
+
             for i, row in df.iterrows():
                 current_price = row['close']
-                
+
                 nearest_distance = float('inf')
                 active_fvg_count = 0
-                
+
                 for fvg in self.fair_value_gaps:
                     if fvg.status not in [FVGStatus.ACTIVE, FVGStatus.PARTIALLY_FILLED]:
                         continue
-                    
+
                     active_fvg_count += 1
-                    
+
                     # Check if price is in FVG zone
                     if fvg.low_price <= current_price <= fvg.high_price:
                         if fvg.gap_type == FVGType.BULLISH:
@@ -448,13 +465,13 @@ class SMCFairValueGaps:
                             distance = fvg.low_price - current_price
                         else:
                             distance = current_price - fvg.high_price
-                        
+
                         nearest_distance = min(nearest_distance, distance)
-                
+
                 df.at[i, 'active_fvg_count'] = active_fvg_count
                 if nearest_distance != float('inf'):
-                    df.at[i, 'nearest_fvg_distance'] = nearest_distance * 10000  # Convert to pips
-            
+                    df.at[i, 'nearest_fvg_distance'] = nearest_distance / pip_value  # Convert to pips
+
             return df
             
         except Exception as e:
@@ -462,14 +479,15 @@ class SMCFairValueGaps:
             return df
     
     def get_fvgs_near_price(
-        self, 
-        price: float, 
+        self,
+        price: float,
         max_distance_pips: float = 10.0,
-        only_active: bool = True
+        only_active: bool = True,
+        pip_value: float = 0.0001
     ) -> List[FairValueGap]:
         """Get Fair Value Gaps near a specific price"""
         try:
-            max_distance = max_distance_pips / 10000
+            max_distance = max_distance_pips * pip_value  # Convert pips to price
             nearby_fvgs = []
             
             for fvg in self.fair_value_gaps:
@@ -489,18 +507,19 @@ class SMCFairValueGaps:
             return []
     
     def get_fvg_signals(
-        self, 
-        df: pd.DataFrame, 
-        current_index: int, 
+        self,
+        df: pd.DataFrame,
+        current_index: int,
         config: Dict
     ) -> Dict:
         """Get FVG-based trading signals"""
         try:
             if current_index >= len(df):
                 return {}
-            
+
+            pip_value = self._get_pip_value(config)
             current_price = df.iloc[current_index]['close']
-            
+
             signals = {
                 'bullish_fvg_signal': False,
                 'bearish_fvg_signal': False,
@@ -509,9 +528,11 @@ class SMCFairValueGaps:
                 'fvg_strength': 0.0,
                 'confluence_factors': []
             }
-            
-            nearby_fvgs = self.get_fvgs_near_price(current_price, config.get('max_distance_to_zone', 10))
-            
+
+            nearby_fvgs = self.get_fvgs_near_price(
+                current_price, config.get('max_distance_to_zone', 10), pip_value=pip_value
+            )
+
             for fvg in nearby_fvgs:
                 # Check if price is approaching or in FVG
                 if fvg.low_price <= current_price <= fvg.high_price:
@@ -519,7 +540,7 @@ class SMCFairValueGaps:
                     signals['fvg_confluence_count'] += 1
                     signals['fvg_strength'] = max(signals['fvg_strength'], fvg.significance)
                     signals['nearest_fvg_distance'] = 0
-                    
+
                     if fvg.gap_type == FVGType.BULLISH:
                         signals['bullish_fvg_signal'] = True
                         signals['confluence_factors'].append(f"bullish_fvg_{fvg.gap_size_pips:.1f}pips")
@@ -527,14 +548,14 @@ class SMCFairValueGaps:
                         signals['bearish_fvg_signal'] = True
                         signals['confluence_factors'].append(f"bearish_fvg_{fvg.gap_size_pips:.1f}pips")
                 else:
-                    # Calculate distance
+                    # Calculate distance in pips
                     if current_price < fvg.low_price:
-                        distance = (fvg.low_price - current_price) * 10000
+                        distance = (fvg.low_price - current_price) / pip_value
                     else:
-                        distance = (current_price - fvg.high_price) * 10000
-                    
+                        distance = (current_price - fvg.high_price) / pip_value
+
                     signals['nearest_fvg_distance'] = min(signals['nearest_fvg_distance'], distance)
-            
+
             return signals
             
         except Exception as e:
