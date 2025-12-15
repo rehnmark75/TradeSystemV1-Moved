@@ -40,6 +40,9 @@ class ClaudeAnalyzer:
     """
     
     def __init__(self, api_key: str = None, auto_save: bool = True, save_directory: str = "claude_analysis", data_fetcher=None):
+        # Initialize logger FIRST (required by other initialization steps)
+        self.logger = logging.getLogger(__name__)
+
         # Initialize API key
         if not api_key:
             api_key = getattr(config, 'CLAUDE_API_KEY', None)
@@ -73,8 +76,6 @@ class ClaudeAnalyzer:
 
         # Save directory for analysis artifacts
         self.save_directory = save_directory
-
-        self.logger = logging.getLogger(__name__)
 
         if not api_key:
             self.logger.warning("⚠️ No Claude API key provided")
