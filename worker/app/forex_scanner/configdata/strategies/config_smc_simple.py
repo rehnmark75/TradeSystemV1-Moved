@@ -1,12 +1,19 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 1.8.0 (Phase 2 Logic Enhancements)
+# Version: 2.0.0 (Phase 3 - Limit Orders)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback OR momentum continuation entry
+#
+# v2.0.0 PHASE 3 LIMIT ORDERS:
+#   - NEW: Limit order support with intelligent price offsets
+#   - PULLBACK entries: ATR-based offset (3-8 pips, adapts to volatility)
+#   - MOMENTUM entries: Fixed offset (4 pips)
+#   - 6-minute auto-expiry for unfilled orders
+#   - Expected improvement: Win rate 39%→52-55%, Profit Factor 1.24→1.6-1.8
 #
 # v1.8.0 PHASE 2 LOGIC ENHANCEMENTS:
 #   - NEW: Momentum continuation entry mode (price beyond break = valid)
@@ -25,9 +32,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "1.8.0"
-STRATEGY_DATE = "2025-12-04"
-STRATEGY_STATUS = "Phase 2 Logic Enhancements - Momentum Mode + ATR Validation"
+STRATEGY_VERSION = "2.0.0"
+STRATEGY_DATE = "2025-12-16"
+STRATEGY_STATUS = "Phase 3 - Limit Orders for Better Entry Timing"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -119,6 +126,29 @@ FALLBACK_MIN_SWING_PIPS = 5              # Absolute minimum if ATR unavailable
 MOMENTUM_QUALITY_ENABLED = True          # v1.8.0: NEW - filter weak breakouts
 MIN_BREAKOUT_ATR_RATIO = 0.5             # Breakout candle range > 50% of ATR
 MIN_BODY_PERCENTAGE = 0.60               # Body must be > 60% of candle range
+
+# ============================================================================
+# v2.0.0: LIMIT ORDER CONFIGURATION
+# ============================================================================
+# Use limit orders (pending orders) instead of market orders for better entries
+# Place orders at OFFSET from current price to get better fill prices
+# Auto-expire unfilled orders after configured time
+
+LIMIT_ORDER_ENABLED = True               # v2.0.0: Enable limit orders
+LIMIT_EXPIRY_MINUTES = 6                 # v2.0.0: Auto-cancel after 6 min (3 scanner cycles)
+
+# Entry offset configuration (place orders at better prices)
+# PULLBACK entries: ATR-based offset adapts to volatility
+PULLBACK_OFFSET_ATR_FACTOR = 0.3         # Offset = 30% of ATR
+PULLBACK_OFFSET_MIN_PIPS = 3.0           # Minimum offset: 3 pips
+PULLBACK_OFFSET_MAX_PIPS = 8.0           # Maximum offset: 8 pips
+
+# MOMENTUM entries: Fixed offset (trend is strong, don't wait too long)
+MOMENTUM_OFFSET_PIPS = 4.0               # Fixed 4 pip offset for momentum entries
+
+# Risk sanity checks after offset
+MIN_RISK_AFTER_OFFSET_PIPS = 5.0         # Reject if SL too close after offset
+MAX_RISK_AFTER_OFFSET_PIPS = 40.0        # Reject if SL too far after offset
 
 # ============================================================================
 # RISK MANAGEMENT

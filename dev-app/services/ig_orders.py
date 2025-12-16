@@ -414,13 +414,184 @@ def is_valid_deal_reference(deal_reference: str) -> bool:
     """
     if not deal_reference:
         return False
-    
+
     # Basic validation - IG deal references are usually 12-20 characters
     if len(deal_reference) < 10 or len(deal_reference) > 25:
         return False
-        
+
     # Should be alphanumeric
     if not deal_reference.isalnum():
         return False
-        
+
     return True
+
+
+# =============================================================================
+# WORKING ORDERS (LIMIT ORDERS) - NEW FUNCTIONALITY
+# =============================================================================
+
+async def place_working_order(
+    auth_headers: dict,
+    epic: str,
+    direction: str,
+    level: float,
+    stop_distance: int,
+    limit_distance: int,
+    expiry_minutes: int,
+    currency_code: str,
+    size: float = 1.0
+) -> dict:
+    """
+    Place a working order (limit order) at a specified price level.
+
+    Unlike market orders that execute immediately at current price,
+    working orders wait until price reaches the specified level.
+
+    Args:
+        auth_headers: IG API authentication headers
+        epic: Market epic (e.g., 'CS.D.EURUSD.MINI.IP')
+        direction: 'BUY' or 'SELL'
+        level: Entry price level for the limit order
+        stop_distance: Stop loss distance in points
+        limit_distance: Take profit distance in points
+        expiry_minutes: Minutes until order expires (auto-cancelled)
+        currency_code: Currency code (e.g., 'GBP')
+        size: Position size (default 1.0)
+
+    Returns:
+        dict: Response containing dealReference for the working order
+
+    Raises:
+        httpx.HTTPStatusError: If the API request fails
+    """
+    from datetime import datetime, timedelta
+
+    # Calculate expiry time in UTC
+    expiry_time = datetime.utcnow() + timedelta(minutes=expiry_minutes)
+    good_till_date = expiry_time.strftime("%Y/%m/%d %H:%M:%S")
+
+    payload = {
+        "epic": epic,
+        "expiry": "-",
+        "direction": direction.upper(),
+        "size": size,
+        "type": "LIMIT",
+        "level": level,
+        "currencyCode": currency_code,
+        "timeInForce": "GOOD_TILL_DATE",
+        "goodTillDate": good_till_date,
+        "guaranteedStop": False,
+        "stopDistance": stop_distance,
+        "limitDistance": limit_distance
+    }
+
+    logger.info(f"📤 [WORKING ORDER] Placing LIMIT order: {epic} {direction} at {level}")
+    logger.info(f"   Stop: {stop_distance}pts, Limit: {limit_distance}pts, Expiry: {good_till_date} UTC")
+    logger.info(f"   Payload: {json.dumps(payload, indent=2)}")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{API_BASE_URL}/workingorders/otc",
+            headers=auth_headers,
+            data=json.dumps(payload)
+        )
+
+        if response.status_code in [200, 201]:
+            result = response.json()
+            logger.info(f"✅ [WORKING ORDER] Successfully placed: {result.get('dealReference', 'unknown')}")
+            return result
+        else:
+            error_text = response.text
+            logger.error(f"❌ [WORKING ORDER] Failed: HTTP {response.status_code} - {error_text}")
+            response.raise_for_status()
+
+
+async def delete_working_order(auth_headers: dict, deal_id: str) -> dict:
+    """
+    Cancel/delete a working order (limit order).
+
+    Args:
+        auth_headers: IG API authentication headers
+        deal_id: The deal ID of the working order to cancel
+
+    Returns:
+        dict: Response containing dealReference for the cancellation
+
+    Raises:
+        httpx.HTTPStatusError: If the API request fails
+    """
+    logger.info(f"🗑️ [WORKING ORDER] Cancelling order: {deal_id}")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.delete(
+            f"{API_BASE_URL}/workingorders/otc/{deal_id}",
+            headers=auth_headers
+        )
+
+        if response.status_code in [200, 201]:
+            result = response.json()
+            logger.info(f"✅ [WORKING ORDER] Successfully cancelled: {deal_id}")
+            return result
+        else:
+            error_text = response.text
+            logger.error(f"❌ [WORKING ORDER] Cancel failed: HTTP {response.status_code} - {error_text}")
+            response.raise_for_status()
+
+
+async def get_working_orders(auth_headers: dict) -> dict:
+    """
+    Get all pending working orders (limit orders).
+
+    Args:
+        auth_headers: IG API authentication headers
+
+    Returns:
+        dict: Response containing list of working orders
+
+    Raises:
+        httpx.HTTPStatusError: If the API request fails
+    """
+    logger.info("📋 [WORKING ORDER] Fetching all pending working orders")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            f"{API_BASE_URL}/workingorders",
+            headers=auth_headers
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            orders = result.get("workingOrders", [])
+            logger.info(f"✅ [WORKING ORDER] Found {len(orders)} pending orders")
+            return result
+        else:
+            error_text = response.text
+            logger.error(f"❌ [WORKING ORDER] Fetch failed: HTTP {response.status_code} - {error_text}")
+            response.raise_for_status()
+
+
+async def has_working_order_for_epic(auth_headers: dict, epic: str) -> bool:
+    """
+    Check if there's already a pending working order for a specific epic.
+
+    Args:
+        auth_headers: IG API authentication headers
+        epic: Market epic to check
+
+    Returns:
+        bool: True if a working order exists for this epic
+    """
+    try:
+        result = await get_working_orders(auth_headers)
+        orders = result.get("workingOrders", [])
+
+        for order in orders:
+            if order.get("marketData", {}).get("epic") == epic:
+                logger.info(f"⚠️ [WORKING ORDER] Existing order found for {epic}")
+                return True
+
+        return False
+
+    except Exception as e:
+        logger.warning(f"⚠️ [WORKING ORDER] Error checking existing orders: {e}")
+        return False

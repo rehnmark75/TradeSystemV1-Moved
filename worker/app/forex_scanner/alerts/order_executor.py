@@ -1,12 +1,13 @@
 # /app/forex_scanner/alerts/order_executor.py
 """
-Order Execution Module - ENHANCED WITH RETRY LOGIC
+Order Execution Module - ENHANCED WITH RETRY LOGIC AND LIMIT ORDER SUPPORT
 Integrates your existing send_order function with the forex scanner
 Now includes performance tracking for dynamic EMA configuration
 FIXED: Epic mapping now works with REVERSE_EPIC_MAP and auto-creates from config
 FIXED: API request format matches working dev-app implementation
 ENHANCED: Added robust retry logic with exponential backoff and circuit breaker
 ENHANCED: Comprehensive timeout handling for HTTPConnectionPool errors
+v2.0.0: Added limit order (working order) support for SMC_SIMPLE strategy
 """
 
 import requests
@@ -327,11 +328,24 @@ class OrderExecutor:
                 custom_label = f"forex_scanner_alert_{alert_id}_{external_epic}_{direction}"
             else:
                 custom_label = f"forex_scanner_{external_epic}_{direction}_{int(datetime.now().timestamp())}"
-            
-            self.logger.info(f"📊 Order parameters: Stop={stop_distance}pips, Limit={limit_distance}pips ({confidence:.1%})")
-            
-            # ENHANCED: Execute with retry logic
-            result = self._execute_with_retry(signal, external_epic, direction, stop_distance, limit_distance, custom_label, alert_id)
+
+            # v2.0.0: Check order type for limit order routing
+            order_type = signal.get('order_type', 'market')
+            entry_level = signal.get('entry_price')  # For limit orders, this is the offset price
+            limit_expiry_minutes = signal.get('limit_expiry_minutes', 6)
+            limit_offset_pips = signal.get('limit_offset_pips', 0)
+
+            if order_type == 'limit' and entry_level:
+                self.logger.info(f"📊 LIMIT Order: Entry={entry_level:.5f}, Stop={stop_distance}pips, TP={limit_distance}pips ({confidence:.1%})")
+                self.logger.info(f"   Offset: {limit_offset_pips:.1f} pips, Expiry: {limit_expiry_minutes} min")
+            else:
+                self.logger.info(f"📊 MARKET Order: Stop={stop_distance}pips, TP={limit_distance}pips ({confidence:.1%})")
+
+            # v2.0.0: Execute with retry logic (now supports both market and limit orders)
+            result = self._execute_with_retry(
+                signal, external_epic, direction, stop_distance, limit_distance,
+                custom_label, alert_id, order_type, entry_level, limit_expiry_minutes
+            )
             
             # Record success with circuit breaker
             self.circuit_breaker.record_success()
@@ -360,32 +374,66 @@ class OrderExecutor:
                 "circuit_breaker_state": self.circuit_breaker.state
             }
     
-    def _execute_with_retry(self, signal: Dict, external_epic: str, direction: str, 
-                           stop_distance: int, limit_distance: int, custom_label: str, alert_id: int) -> Dict:
-        """ENHANCED: Execute order with retry logic and exponential backoff"""
+    def _execute_with_retry(self, signal: Dict, external_epic: str, direction: str,
+                           stop_distance: int, limit_distance: int, custom_label: str, alert_id: int,
+                           order_type: str = 'market', entry_level: float = None,
+                           limit_expiry_minutes: int = 6) -> Dict:
+        """
+        ENHANCED: Execute order with retry logic and exponential backoff
+        v2.0.0: Added limit order support
+
+        Args:
+            signal: Original signal dict
+            external_epic: External epic format (e.g., 'EURUSD')
+            direction: 'BUY' or 'SELL'
+            stop_distance: Stop loss distance in pips
+            limit_distance: Take profit distance in pips
+            custom_label: Custom order label
+            alert_id: Alert ID from database
+            order_type: 'market' or 'limit' (v2.0.0)
+            entry_level: Entry price for limit orders (v2.0.0)
+            limit_expiry_minutes: Minutes until limit order expires (v2.0.0)
+        """
         last_exception = None
-        
+
         for attempt in range(self.retry_config.max_retries + 1):
             try:
                 self.request_stats['total_requests'] += 1
-                
+
                 if attempt > 0:
                     self.request_stats['retry_requests'] += 1
                     delay = self._calculate_delay(attempt - 1)
                     self.logger.info(f"🔄 Retry attempt {attempt}/{self.retry_config.max_retries} for {external_epic} in {delay:.1f}s")
                     time.sleep(delay)
-                
-                # Execute the order using the existing send_order method
-                result = self.send_order(
-                    external_epic=external_epic,
-                    direction=direction,
-                    stop_distance=stop_distance,
-                    limit_distance=limit_distance,
-                    size=self.position_size,
-                    custom_label=custom_label,
-                    risk_reward=self.default_risk_reward,
-                    alert_id=alert_id
-                )
+
+                # v2.0.0: Route based on order type
+                if order_type == 'limit' and entry_level:
+                    # Execute limit order
+                    result = self.send_order(
+                        external_epic=external_epic,
+                        direction=direction,
+                        stop_distance=stop_distance,
+                        limit_distance=limit_distance,
+                        size=self.position_size,
+                        custom_label=custom_label,
+                        risk_reward=self.default_risk_reward,
+                        alert_id=alert_id,
+                        order_type='limit',
+                        entry_level=entry_level,
+                        limit_expiry_minutes=limit_expiry_minutes
+                    )
+                else:
+                    # Execute market order (default)
+                    result = self.send_order(
+                        external_epic=external_epic,
+                        direction=direction,
+                        stop_distance=stop_distance,
+                        limit_distance=limit_distance,
+                        size=self.position_size,
+                        custom_label=custom_label,
+                        risk_reward=self.default_risk_reward,
+                        alert_id=alert_id
+                    )
 
                 # Check if order was successful or skipped (both are valid outcomes)
                 status = result.get('status') if result else None
@@ -456,12 +504,15 @@ class OrderExecutor:
         # Clamp to max delay
         return min(delay, self.retry_config.max_delay)
     
-    def send_order(self, external_epic: str, direction: str, stop_distance: int = None, 
+    def send_order(self, external_epic: str, direction: str, stop_distance: int = None,
                limit_distance: int = None, size: float = None, custom_label: str = None,
-               risk_reward: float = None, alert_id: int = None):
+               risk_reward: float = None, alert_id: int = None,
+               order_type: str = 'market', entry_level: float = None,
+               limit_expiry_minutes: int = 6):
         """
         ENHANCED: Send order to your trading platform via API using correct format with timeout handling
-        
+        v2.0.0: Added limit order support
+
         Args:
             external_epic: Trading symbol (e.g., 'EURUSD')
             direction: 'BUY' or 'SELL'
@@ -471,7 +522,10 @@ class OrderExecutor:
             custom_label: Custom label for the trade
             risk_reward: Risk/reward ratio
             alert_id: Optional ID from alert_history table for tracking
-        
+            order_type: 'market' or 'limit' (v2.0.0)
+            entry_level: Entry price for limit orders (v2.0.0)
+            limit_expiry_minutes: Minutes until limit order expires (v2.0.0)
+
         Returns:
             API response or None if failed
         """
@@ -502,13 +556,23 @@ class OrderExecutor:
             "risk_reward": risk_reward or self.default_risk_reward
         }
 
+        # v2.0.0: Add limit order fields if this is a limit order
+        if order_type == 'limit' and entry_level is not None:
+            order_data["order_type"] = "limit"
+            order_data["entry_level"] = entry_level
+            order_data["limit_expiry_minutes"] = limit_expiry_minutes
+            self.logger.info(f"📋 Limit order fields: entry_level={entry_level:.5f}, expiry={limit_expiry_minutes}min")
+        else:
+            order_data["order_type"] = "market"
+
         # Include alert_id in the request if provided
         if alert_id is not None:
             order_data["alert_id"] = alert_id  # Add to request body
             self.logger.info(f"📊 Sending order with alert_id: {alert_id}")
 
         # Log SL/TP being sent
-        self.logger.info(f"📤 Sending order with strategy SL/TP: {stop_distance}/{limit_distance} for {external_epic}")
+        order_type_label = "LIMIT" if order_type == 'limit' else "MARKET"
+        self.logger.info(f"📤 Sending {order_type_label} order with strategy SL/TP: {stop_distance}/{limit_distance} for {external_epic}")
         
         # FIXED: Use the correct headers format that works in dev-app
         headers = {
@@ -556,8 +620,15 @@ class OrderExecutor:
                 result = response.json()
                 result["alert_id"] = alert_id
                 result["response_time"] = response_time
+                result["order_type"] = order_type  # v2.0.0: Track order type in result
 
-                self.logger.info(f"✅ Order sent successfully: {external_epic} (took {response_time:.2f}s)")
+                # v2.0.0: Log success with order type distinction
+                if order_type == 'limit':
+                    status_msg = result.get('status', 'pending')
+                    self.logger.info(f"✅ LIMIT order sent: {external_epic} at {entry_level:.5f} ({status_msg}) (took {response_time:.2f}s)")
+                else:
+                    self.logger.info(f"✅ MARKET order executed: {external_epic} (took {response_time:.2f}s)")
+
                 if alert_id:
                     self.logger.info(f"✅ Order linked to alert_id: {alert_id}")
 

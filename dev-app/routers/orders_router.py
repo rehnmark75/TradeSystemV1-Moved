@@ -5,7 +5,15 @@ from datetime import datetime, timedelta
 import json
 import traceback
 from services.ig_auth import ig_login
-from services.ig_orders import has_open_position, place_market_order, get_deal_confirmation, get_deal_confirmation_and_details, calculate_stop_distance, get_deal_confirmation_simple, get_deal_confirmation_with_fallback, get_deal_confirmation_with_retry
+from services.ig_orders import (
+    has_open_position, place_market_order, get_deal_confirmation,
+    get_deal_confirmation_and_details, calculate_stop_distance,
+    get_deal_confirmation_simple, get_deal_confirmation_with_fallback,
+    get_deal_confirmation_with_retry,
+    # NEW: Working order (limit order) functions
+    place_working_order, delete_working_order, get_working_orders,
+    has_working_order_for_epic
+)
 from services.sl_tp_calculator import calculate_trade_levels, validate_sl_tp_levels
 from services.ig_market import get_current_bid_price
 from sqlalchemy.orm import Session
@@ -46,10 +54,15 @@ class TradeRequest(BaseModel):
     size: Optional[float] = None
     stop_distance: Optional[int] = None
     limit_distance: Optional[int] = None
-    use_provided_sl_tp: Optional[bool] = False  # NEW: Use scanner-provided SL/TP values
+    use_provided_sl_tp: Optional[bool] = False  # Use scanner-provided SL/TP values
     custom_label: Optional[str] = None
     risk_reward: Optional[float] = 2.0  # Default RR
-    alert_id: Optional[int] = None  # NEW: Include alert_id in request body
+    alert_id: Optional[int] = None  # Include alert_id in request body
+
+    # NEW: Limit order (working order) fields
+    order_type: Optional[str] = "market"  # "market" or "limit"
+    entry_level: Optional[float] = None   # Required for limit orders - the entry price
+    limit_expiry_minutes: Optional[int] = 6  # Minutes until limit order expires (default 6)
 
 # Simple in-memory cache for positions
 _cached_positions = {"data": None, "timestamp": 0}
@@ -518,8 +531,84 @@ async def ig_place_order(
 
         logger.info(f"✅ Safety check passed: SL={sl_limit}/{max_allowed_sl}, TP={limit_distance}/{max_allowed_tp}")
 
-        # Place the market order with calculated SL and TP
-        logger.info(f"📤 Placing market order: {symbol} {direction} with SL: {sl_limit}, TP: {limit_distance}")
+        # =================================================================
+        # ORDER TYPE ROUTING: Market vs Limit (Working) Orders
+        # =================================================================
+        is_limit_order = body.order_type == "limit" and body.entry_level is not None
+
+        if is_limit_order:
+            # LIMIT ORDER: Place working order at specified entry level
+            logger.info(f"📤 Placing LIMIT order: {symbol} {direction} at entry level {body.entry_level}")
+            logger.info(f"   SL: {sl_limit}pts, TP: {limit_distance}pts, Expiry: {body.limit_expiry_minutes} min")
+
+            # Check if there's already a working order for this epic
+            try:
+                has_existing_order = await has_working_order_for_epic(trading_headers, symbol)
+                if has_existing_order:
+                    logger.info(f"ℹ️ Working order already exists for {symbol}")
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "status": "skipped",
+                            "message": f"Working order already exists for {symbol}",
+                            "epic": symbol,
+                            "alert_id": alert_id,
+                            "reason": "duplicate_working_order"
+                        }
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.warning(f"⚠️ Could not check existing working orders: {e}")
+
+            try:
+                result = await place_working_order(
+                    auth_headers=trading_headers,
+                    epic=symbol,
+                    direction=direction,
+                    level=body.entry_level,
+                    stop_distance=sl_limit,
+                    limit_distance=limit_distance,
+                    expiry_minutes=body.limit_expiry_minutes,
+                    currency_code=currency_code,
+                    size=body.size or 1.0
+                )
+                # For limit orders, we return early with a different response
+                # since the order is pending, not immediately filled
+                deal_reference = result.get("dealReference")
+                logger.info(f"✅ Limit order placed successfully: {deal_reference}")
+
+                return {
+                    "status": "pending",
+                    "order_type": "limit",
+                    "dealReference": deal_reference,
+                    "entry_level": body.entry_level,
+                    "stop_distance": sl_limit,
+                    "limit_distance": limit_distance,
+                    "expiry_minutes": body.limit_expiry_minutes,
+                    "epic": symbol,
+                    "direction": direction,
+                    "alert_id": alert_id,
+                    "message": f"Limit order placed at {body.entry_level}, expires in {body.limit_expiry_minutes} minutes"
+                }
+
+            except httpx.HTTPStatusError as broker_error:
+                error_text = broker_error.response.text if hasattr(broker_error.response, 'text') else str(broker_error)
+                logger.error(f"❌ Limit order failed: {error_text}")
+                raise HTTPException(
+                    status_code=broker_error.response.status_code if hasattr(broker_error, 'response') else 500,
+                    detail={
+                        "error": "Limit order placement failed",
+                        "message": error_text[:500],
+                        "epic": symbol,
+                        "alert_id": alert_id
+                    }
+                )
+
+        # =================================================================
+        # MARKET ORDER: Original logic (unchanged)
+        # =================================================================
+        logger.info(f"📤 Placing MARKET order: {symbol} {direction} with SL: {sl_limit}, TP: {limit_distance}")
 
         # FIXED: Catch broker duplicate position rejection and convert to HTTP 409
         # 🛡️ SCALPING FAILSAFE: If broker rejects tight SL/TP, retry with 10pt minimum
@@ -1092,3 +1181,91 @@ async def adjust_stop_price(
     except Exception as e:
         logger.exception("Unhandled exception in /adjust-stop")
         raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
+
+
+# =============================================================================
+# WORKING ORDERS (LIMIT ORDERS) ENDPOINTS
+# =============================================================================
+
+@router.get("/working-orders")
+async def list_working_orders(
+    trading_headers: dict = Depends(get_ig_auth_headers)
+):
+    """
+    List all pending working orders (limit orders).
+
+    Returns a list of all limit orders that have been placed but not yet filled.
+    """
+    try:
+        result = await get_working_orders(trading_headers)
+        orders = result.get("workingOrders", [])
+
+        logger.info(f"📋 [WORKING ORDERS] Retrieved {len(orders)} pending orders")
+
+        return {
+            "status": "success",
+            "count": len(orders),
+            "workingOrders": orders
+        }
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"❌ [WORKING ORDERS] Failed to fetch: {e}")
+        raise HTTPException(
+            status_code=e.response.status_code if hasattr(e, 'response') else 500,
+            detail=f"Failed to fetch working orders: {str(e)}"
+        )
+    except Exception as e:
+        logger.exception("Unhandled exception in /working-orders")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch working orders: {str(e)}")
+
+
+@router.delete("/cancel-working-order/{deal_id}")
+async def cancel_working_order_endpoint(
+    deal_id: str,
+    trading_headers: dict = Depends(get_ig_auth_headers)
+):
+    """
+    Cancel a pending working order (limit order).
+
+    Args:
+        deal_id: The deal ID of the working order to cancel
+
+    Returns:
+        Confirmation of the cancellation
+    """
+    try:
+        logger.info(f"🗑️ [WORKING ORDER] Cancellation requested for: {deal_id}")
+
+        result = await delete_working_order(trading_headers, deal_id)
+
+        logger.info(f"✅ [WORKING ORDER] Successfully cancelled: {deal_id}")
+
+        return {
+            "status": "cancelled",
+            "dealId": deal_id,
+            "dealReference": result.get("dealReference"),
+            "message": f"Working order {deal_id} has been cancelled"
+        }
+
+    except httpx.HTTPStatusError as e:
+        error_text = e.response.text if hasattr(e.response, 'text') else str(e)
+        logger.error(f"❌ [WORKING ORDER] Cancel failed for {deal_id}: {error_text}")
+
+        # Check if order doesn't exist
+        if e.response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "Working order not found",
+                    "message": f"No working order found with deal ID: {deal_id}",
+                    "dealId": deal_id
+                }
+            )
+
+        raise HTTPException(
+            status_code=e.response.status_code if hasattr(e, 'response') else 500,
+            detail=f"Failed to cancel working order: {error_text}"
+        )
+    except Exception as e:
+        logger.exception(f"Unhandled exception cancelling working order {deal_id}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel working order: {str(e)}")

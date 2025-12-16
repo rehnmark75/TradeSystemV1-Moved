@@ -2,9 +2,19 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 1.8.0
-DATE: 2025-12-04
-STATUS: Phase 2 Logic Enhancements - Momentum Mode + ATR Validation
+VERSION: 2.0.0
+DATE: 2025-12-16
+STATUS: Phase 3 - Limit Orders for Better Entry Timing
+
+v2.0.0 CHANGES (Phase 3 - Limit Orders):
+    - NEW: Limit order support with intelligent price offsets
+    - NEW: ATR-based offset for PULLBACK entries (3-8 pips, adapts to volatility)
+    - NEW: Fixed offset for MOMENTUM entries (4 pips)
+    - NEW: 6-minute auto-expiry for unfilled limit orders
+    - NEW: Risk sanity checks after offset calculation
+    - BUY orders placed BELOW market (buy cheaper)
+    - SELL orders placed ABOVE market (sell higher)
+    - Expected improvement: Win rate 39%→52-55%, better entry timing
 
 v1.8.0 CHANGES (Phase 2):
     - NEW: Momentum continuation entry mode (price beyond break = valid entry)
@@ -158,6 +168,16 @@ class SMCSimpleStrategy:
         self.sl_atr_multiplier = getattr(smc_config, 'SL_ATR_MULTIPLIER', 1.2)
         self.use_atr_stop = getattr(smc_config, 'USE_ATR_STOP', True)
 
+        # v2.0.0: Limit Order Configuration
+        self.limit_order_enabled = getattr(smc_config, 'LIMIT_ORDER_ENABLED', True)
+        self.limit_expiry_minutes = getattr(smc_config, 'LIMIT_EXPIRY_MINUTES', 6)
+        self.pullback_offset_atr_factor = getattr(smc_config, 'PULLBACK_OFFSET_ATR_FACTOR', 0.3)
+        self.pullback_offset_min_pips = getattr(smc_config, 'PULLBACK_OFFSET_MIN_PIPS', 3.0)
+        self.pullback_offset_max_pips = getattr(smc_config, 'PULLBACK_OFFSET_MAX_PIPS', 8.0)
+        self.momentum_offset_pips = getattr(smc_config, 'MOMENTUM_OFFSET_PIPS', 4.0)
+        self.min_risk_after_offset_pips = getattr(smc_config, 'MIN_RISK_AFTER_OFFSET_PIPS', 5.0)
+        self.max_risk_after_offset_pips = getattr(smc_config, 'MAX_RISK_AFTER_OFFSET_PIPS', 40.0)
+
         # Debug
         self.debug_logging = getattr(smc_config, 'ENABLE_DEBUG_LOGGING', True)
 
@@ -294,7 +314,7 @@ class SMCSimpleStrategy:
                 self.logger.info(f"   ❌ {pullback_result['reason']}")
                 return None
 
-            entry_price = pullback_result['entry_price']
+            market_price = pullback_result['entry_price']  # Current close (market price)
             pullback_depth = pullback_result['pullback_depth']
             in_optimal_zone = pullback_result['in_optimal_zone']
             entry_type = pullback_result.get('entry_type', 'PULLBACK')  # v1.8.0
@@ -306,8 +326,19 @@ class SMCSimpleStrategy:
             else:
                 self.logger.info(f"   ✅ Entry Type: PULLBACK (retracement)")
                 self.logger.info(f"   ✅ Pullback Depth: {pullback_depth*100:.1f}%")
-            self.logger.info(f"   ✅ Entry Price: {entry_price:.5f}")
             self.logger.info(f"   {'✅' if in_optimal_zone else '⚠️ '} Optimal Zone: {'Yes' if in_optimal_zone else 'No'}")
+
+            # ================================================================
+            # v2.0.0: Calculate Limit Entry Price with Offset
+            # ================================================================
+            self.logger.info(f"\n📊 LIMIT ORDER: Calculating Entry Offset")
+            entry_price, limit_offset_pips = self._calculate_limit_entry(
+                market_price, direction, entry_type, pip_value, entry_df
+            )
+
+            # Determine order type based on config
+            order_type = 'limit' if self.limit_order_enabled and limit_offset_pips > 0 else 'market'
+            self.logger.info(f"   📋 Order Type: {order_type.upper()}")
 
             # ================================================================
             # STEP 4: Calculate Stop Loss and Take Profit
@@ -340,6 +371,15 @@ class SMCSimpleStrategy:
                 stop_loss = opposite_swing + sl_distance
 
             risk_pips = abs(entry_price - stop_loss) / pip_value
+
+            # v2.0.0: Risk sanity check for limit orders with offset
+            if order_type == 'limit':
+                if risk_pips < self.min_risk_after_offset_pips:
+                    self.logger.info(f"   ❌ Risk too small after offset ({risk_pips:.1f} < {self.min_risk_after_offset_pips} pips)")
+                    return None
+                if risk_pips > self.max_risk_after_offset_pips:
+                    self.logger.info(f"   ❌ Risk too large after offset ({risk_pips:.1f} > {self.max_risk_after_offset_pips} pips)")
+                    return None
 
             # Find take profit (next swing structure)
             tp_result = self._calculate_take_profit(
@@ -459,6 +499,12 @@ class SMCSimpleStrategy:
                 'in_optimal_zone': in_optimal_zone,
                 'entry_type': entry_type,  # v1.8.0: PULLBACK or MOMENTUM
 
+                # v2.0.0: Limit order fields
+                'order_type': order_type,  # 'limit' or 'market'
+                'market_price': market_price,  # Current market price (before offset)
+                'limit_offset_pips': round(limit_offset_pips, 1),  # Offset from market price
+                'limit_expiry_minutes': self.limit_expiry_minutes if order_type == 'limit' else None,
+
                 # Technical indicators for analytics (alert_history compatibility)
                 'atr': round(atr, 6) if atr else 0.0,
                 'volume_ratio': round(volume_ratio, 2),
@@ -484,10 +530,14 @@ class SMCSimpleStrategy:
                     'tier3_entry': {
                         'timeframe': self.entry_tf,
                         'entry_price': entry_price,
+                        'market_price': market_price,
                         'pullback_depth': pullback_depth,
                         'fib_zone': f"{self.fib_min*100:.1f}%-{self.fib_max*100:.1f}%",
                         'in_optimal_zone': in_optimal_zone,
-                        'entry_type': entry_type  # v1.8.0: PULLBACK or MOMENTUM
+                        'entry_type': entry_type,  # v1.8.0: PULLBACK or MOMENTUM
+                        'order_type': order_type,  # v2.0.0: 'limit' or 'market'
+                        'limit_offset_pips': limit_offset_pips if order_type == 'limit' else 0.0,
+                        'limit_expiry_minutes': self.limit_expiry_minutes if order_type == 'limit' else None
                     },
                     'risk_management': {
                         'stop_loss': stop_loss,
@@ -516,7 +566,13 @@ class SMCSimpleStrategy:
 
             self.logger.info(f"\n📋 Signal Summary:")
             self.logger.info(f"   Direction: {signal['signal']}")
-            self.logger.info(f"   Entry: {signal['entry_price']:.5f}")
+            self.logger.info(f"   Order Type: {signal['order_type'].upper()}")
+            if signal['order_type'] == 'limit':
+                self.logger.info(f"   Market Price: {signal['market_price']:.5f}")
+                self.logger.info(f"   Limit Entry: {signal['entry_price']:.5f} ({signal['limit_offset_pips']:.1f} pips offset)")
+                self.logger.info(f"   Expiry: {signal['limit_expiry_minutes']} minutes")
+            else:
+                self.logger.info(f"   Entry: {signal['entry_price']:.5f}")
             self.logger.info(f"   Stop Loss: {signal['stop_loss']:.5f} ({signal['risk_pips']:.1f} pips)")
             self.logger.info(f"   Take Profit: {signal['take_profit']:.5f} ({signal['reward_pips']:.1f} pips)")
             self.logger.info(f"   R:R Ratio: {signal['rr_ratio']:.2f}")
@@ -1153,6 +1209,72 @@ class SMCSimpleStrategy:
         atr = np.mean(true_range[-period:])
 
         return atr
+
+    def _calculate_limit_entry(
+        self,
+        current_close: float,
+        direction: str,
+        entry_type: str,
+        pip_value: float,
+        df: pd.DataFrame
+    ) -> Tuple[float, float]:
+        """
+        Calculate optimal limit entry price with offset for better fills.
+
+        v2.0.0: Implements intelligent price offset for limit orders:
+        - PULLBACK entries: ATR-based offset (adapts to volatility) - 3 to 8 pips
+        - MOMENTUM entries: Fixed offset (4 pips) - trend is strong, don't wait
+
+        The offset places orders at BETTER prices than current market:
+        - BUY orders placed BELOW current price (buy cheaper)
+        - SELL orders placed ABOVE current price (sell higher)
+
+        Args:
+            current_close: Current market price
+            direction: Trade direction ('BULL' or 'BEAR')
+            entry_type: Entry type ('PULLBACK' or 'MOMENTUM')
+            pip_value: Pip value for the pair (e.g., 0.0001 for EURUSD)
+            df: DataFrame for ATR calculation
+
+        Returns:
+            Tuple of (limit_entry_price, offset_pips)
+        """
+        if not self.limit_order_enabled:
+            # Limit orders disabled - return current price (market order behavior)
+            return current_close, 0.0
+
+        if entry_type == 'PULLBACK':
+            # ATR-based offset for pullback entries (adapts to volatility)
+            atr = self._calculate_atr(df)
+            if atr > 0:
+                atr_pips = atr / pip_value
+                # Calculate offset as percentage of ATR, clamped to min/max
+                offset_pips = atr_pips * self.pullback_offset_atr_factor
+                offset_pips = min(max(offset_pips, self.pullback_offset_min_pips), self.pullback_offset_max_pips)
+            else:
+                # Fallback if ATR unavailable
+                offset_pips = self.pullback_offset_min_pips
+            self.logger.info(f"   📉 Limit offset (PULLBACK): {offset_pips:.1f} pips (ATR-based)")
+        else:
+            # Fixed offset for momentum entries (trend is strong)
+            offset_pips = self.momentum_offset_pips
+            self.logger.info(f"   📉 Limit offset (MOMENTUM): {offset_pips:.1f} pips (fixed)")
+
+        # Calculate offset in price terms
+        offset = offset_pips * pip_value
+
+        # Apply offset based on direction
+        if direction == 'BULL':
+            # BUY: Place limit order BELOW current price (buy cheaper)
+            limit_entry = current_close - offset
+        else:
+            # SELL: Place limit order ABOVE current price (sell higher)
+            limit_entry = current_close + offset
+
+        self.logger.info(f"   📍 Market price: {current_close:.5f}")
+        self.logger.info(f"   📍 Limit entry: {limit_entry:.5f} ({offset_pips:.1f} pips better)")
+
+        return limit_entry, offset_pips
 
     def _check_session(self, timestamp) -> Tuple[bool, str]:
         """Check if current time is in allowed trading session"""

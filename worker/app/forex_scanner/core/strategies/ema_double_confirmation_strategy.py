@@ -1,6 +1,10 @@
 """
 EMA Double Confirmation Strategy
 ================================
+VERSION: 2.0.0
+DATE: 2025-12-16
+STATUS: Phase 2 - Limit Orders for Better Entry Timing
+
 A trading strategy that waits for two successful EMA 21/50 crossovers before
 taking the third crossover as an entry signal.
 
@@ -16,6 +20,14 @@ Rationale:
 - First crossover: Market testing direction
 - Second crossover: Confirms market respects EMA structure
 - Third crossover: High-probability entry with proven pattern
+
+v2.0.0 CHANGES (Limit Orders):
+    - NEW: Limit order support with ATR-based price offsets
+    - NEW: ATR-based offset (25% of ATR, clamped 2-6 pips)
+    - NEW: 6-minute auto-expiry for unfilled limit orders
+    - NEW: Risk sanity checks after offset calculation
+    - BUY orders placed BELOW market (buy cheaper)
+    - SELL orders placed ABOVE market (sell higher)
 """
 
 import pandas as pd
@@ -169,6 +181,15 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
 
         # HTF data cache (for backtesting efficiency)
         self._htf_cache = {}
+
+        # v2.0.0: Limit Order Configuration
+        self.limit_order_enabled = getattr(strategy_config, 'LIMIT_ORDER_ENABLED', True) if strategy_config else True
+        self.limit_expiry_minutes = getattr(strategy_config, 'LIMIT_EXPIRY_MINUTES', 6) if strategy_config else 6
+        self.limit_offset_atr_factor = getattr(strategy_config, 'LIMIT_OFFSET_ATR_FACTOR', 0.25) if strategy_config else 0.25
+        self.limit_offset_min_pips = getattr(strategy_config, 'LIMIT_OFFSET_MIN_PIPS', 2.0) if strategy_config else 2.0
+        self.limit_offset_max_pips = getattr(strategy_config, 'LIMIT_OFFSET_MAX_PIPS', 6.0) if strategy_config else 6.0
+        self.min_risk_after_offset_pips = getattr(strategy_config, 'MIN_RISK_AFTER_OFFSET_PIPS', 5.0) if strategy_config else 5.0
+        self.max_risk_after_offset_pips = getattr(strategy_config, 'MAX_RISK_AFTER_OFFSET_PIPS', 45.0) if strategy_config else 45.0
 
     def _log_initialization(self):
         """Log strategy initialization details"""
@@ -774,10 +795,42 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
             # Add execution prices using parent class method
             signal = self.add_execution_prices(signal, spread_pips)
 
-            # Calculate SL/TP
+            # Get the current market price before limit order calculation
+            market_price = signal.get('entry_price', latest_row.get('close', 0))
+
+            # v2.0.0: Calculate limit entry with offset
+            self.logger.info(f"\n📊 LIMIT ORDER: Calculating Entry Offset")
+            entry_price, limit_offset_pips = self._calculate_limit_entry(
+                market_price, signal_type, latest_row, epic
+            )
+
+            # Determine order type based on config
+            order_type = 'limit' if self.limit_order_enabled and limit_offset_pips > 0 else 'market'
+            self.logger.info(f"   📋 Order Type: {order_type.upper()}")
+
+            # Update entry price with limit entry
+            signal['entry_price'] = entry_price
+            signal['market_price'] = market_price
+
+            # Calculate SL/TP (using the new entry price)
             sl_tp = self._calculate_sl_tp(signal, epic, latest_row, spread_pips)
             signal['stop_distance'] = sl_tp['stop_distance']
             signal['limit_distance'] = sl_tp['limit_distance']
+
+            # v2.0.0: Risk sanity check for limit orders with offset
+            if order_type == 'limit':
+                risk_pips = sl_tp['stop_distance']
+                if risk_pips < self.min_risk_after_offset_pips:
+                    self.logger.info(f"   ❌ Risk too small after offset ({risk_pips:.1f} < {self.min_risk_after_offset_pips} pips)")
+                    return None
+                if risk_pips > self.max_risk_after_offset_pips:
+                    self.logger.info(f"   ❌ Risk too large after offset ({risk_pips:.1f} > {self.max_risk_after_offset_pips} pips)")
+                    return None
+
+            # v2.0.0: Add limit order fields
+            signal['order_type'] = order_type
+            signal['limit_offset_pips'] = round(limit_offset_pips, 1)
+            signal['limit_expiry_minutes'] = self.limit_expiry_minutes if order_type == 'limit' else None
 
             # Add strategy-specific metadata
             signal['trigger_reason'] = f"EMA {self.ema_fast}/{self.ema_slow} crossover (3rd after 2 successful)"
@@ -785,7 +838,10 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
                 'prior_successful_crossovers': metadata.get('successful_count', 0),
                 'lookback_hours': self.lookback_hours,
                 'success_candles_required': self.success_candles,
-                'crossover_history': metadata.get('crossover_history', [])
+                'crossover_history': metadata.get('crossover_history', []),
+                'order_type': order_type,
+                'limit_offset_pips': limit_offset_pips if order_type == 'limit' else 0.0,
+                'limit_expiry_minutes': self.limit_expiry_minutes if order_type == 'limit' else None
             }
 
             return signal
@@ -853,6 +909,71 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
             'stop_distance': stop_distance,
             'limit_distance': limit_distance
         }
+
+    def _calculate_limit_entry(
+        self,
+        current_close: float,
+        direction: str,
+        latest_row: pd.Series,
+        epic: str
+    ) -> tuple:
+        """
+        Calculate optimal limit entry price with offset for better fills.
+
+        v2.0.0: Implements intelligent price offset for limit orders:
+        - Uses ATR-based offset that adapts to volatility
+        - Offset range: 2-6 pips (tighter than SMC since crossovers are momentum entries)
+
+        The offset places orders at BETTER prices than current market:
+        - BUY orders placed BELOW current price (buy cheaper)
+        - SELL orders placed ABOVE current price (sell higher)
+
+        Args:
+            current_close: Current market price
+            direction: Trade direction ('BULL' or 'BEAR')
+            latest_row: DataFrame row with indicator data
+            epic: Currency pair identifier
+
+        Returns:
+            Tuple of (limit_entry_price, offset_pips)
+        """
+        if not self.limit_order_enabled:
+            # Limit orders disabled - return current price (market order behavior)
+            return current_close, 0.0
+
+        # Determine pip value for the pair
+        pair = self._extract_pair_from_epic(epic)
+        pip_value = 0.01 if 'JPY' in pair else 0.0001
+
+        # Get ATR for offset calculation
+        atr = latest_row.get('atr', 0)
+        if atr and atr > 0:
+            # Convert ATR to pips
+            atr_pips = atr / pip_value
+            # Calculate offset as percentage of ATR, clamped to min/max
+            offset_pips = atr_pips * self.limit_offset_atr_factor
+            offset_pips = min(max(offset_pips, self.limit_offset_min_pips), self.limit_offset_max_pips)
+        else:
+            # Fallback if ATR unavailable
+            offset_pips = self.limit_offset_min_pips
+
+        self.logger.info(f"   📉 Limit offset: {offset_pips:.1f} pips (ATR-based)")
+
+        # Calculate offset in price terms
+        offset = offset_pips * pip_value
+
+        # Apply offset based on direction
+        if direction == 'BULL':
+            # BUY: Place limit order BELOW current price (buy cheaper)
+            limit_entry = current_close - offset
+        else:
+            # SELL: Place limit order ABOVE current price (sell higher)
+            limit_entry = current_close + offset
+
+        self.logger.info(f"   📍 Market price: {current_close:.5f}")
+        self.logger.info(f"   📍 Limit entry: {limit_entry:.5f} ({offset_pips:.1f} pips better)")
+
+        return limit_entry, offset_pips
 
     def _extract_pair_from_epic(self, epic: str) -> str:
         """Extract pair name from epic code (e.g., CS.D.GBPUSD.MINI.IP -> GBPUSD)"""

@@ -1,7 +1,7 @@
 # ============================================================================
 # EMA DOUBLE CONFIRMATION STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 1.0.0
+# Version: 2.0.0
 # Description: EMA crossover strategy requiring 2 successful prior crossovers
 #              before taking the 3rd crossover as an entry signal.
 #
@@ -17,6 +17,12 @@
 #   - First crossover: Market testing direction
 #   - Second crossover: Confirms market respects EMA structure
 #   - Third crossover: High-probability entry with proven pattern
+#
+# v2.0.0 CHANGES (Limit Orders):
+#   - NEW: Limit order support with ATR-based price offsets
+#   - BUY orders placed BELOW current price (buy cheaper)
+#   - SELL orders placed ABOVE current price (sell higher)
+#   - 6-minute auto-expiry for unfilled orders
 # ============================================================================
 
 from datetime import time
@@ -25,9 +31,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "EMA_DOUBLE_CONFIRMATION"
-STRATEGY_VERSION = "1.0.0"
-STRATEGY_DATE = "2025-12-13"
-STRATEGY_STATUS = "Initial Implementation"
+STRATEGY_VERSION = "2.0.0"
+STRATEGY_DATE = "2025-12-16"
+STRATEGY_STATUS = "Phase 2 - Limit Orders for Better Entry Timing"
 
 # ============================================================================
 # CORE PARAMETERS
@@ -148,6 +154,26 @@ MIN_TARGET_PIPS = 30            # Never less than 30 pips TP
 # Risk-Reward requirements
 MIN_RR_RATIO = 1.5              # Minimum 1.5:1 R:R
 OPTIMAL_RR_RATIO = 2.0          # Optimal R:R for full confidence
+
+# ============================================================================
+# v2.0.0: LIMIT ORDER CONFIGURATION
+# ============================================================================
+# Use limit orders (pending orders) instead of market orders for better entries
+# Place orders at OFFSET from current price to get better fill prices
+# Auto-expire unfilled orders after configured time
+
+LIMIT_ORDER_ENABLED = True               # v2.0.0: Enable limit orders
+LIMIT_EXPIRY_MINUTES = 6                 # v2.0.0: Auto-cancel after 6 min (3 scanner cycles)
+
+# Entry offset configuration (place orders at better prices)
+# EMA crossover strategy uses ATR-based offset (adapts to volatility)
+LIMIT_OFFSET_ATR_FACTOR = 0.25           # Offset = 25% of ATR (crossovers need tighter entry)
+LIMIT_OFFSET_MIN_PIPS = 2.0              # Minimum offset: 2 pips
+LIMIT_OFFSET_MAX_PIPS = 6.0              # Maximum offset: 6 pips
+
+# Risk sanity checks after offset
+MIN_RISK_AFTER_OFFSET_PIPS = 5.0         # Reject if SL too close after offset
+MAX_RISK_AFTER_OFFSET_PIPS = 45.0        # Reject if SL too far after offset
 
 # ============================================================================
 # SESSION FILTER
