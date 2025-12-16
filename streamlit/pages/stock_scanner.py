@@ -903,17 +903,33 @@ def render_deep_dive_tab(service):
         st.session_state.deep_dive_claude_analysis = {}
 
     # Check if we have a ticker from navigation (e.g., from Top Picks table)
+    # or a currently active deep dive ticker
     navigated_ticker = st.session_state.get('deep_dive_ticker', None)
+    current_deep_dive = st.session_state.get('current_deep_dive_ticker', None)
+
     if navigated_ticker:
-        # Clear it after use to prevent sticky behavior
-        st.session_state.deep_dive_ticker = None
+        # New navigation - use this ticker and persist it
+        st.session_state.current_deep_dive_ticker = navigated_ticker
+        st.session_state.deep_dive_ticker = None  # Clear navigation flag
         ticker = navigated_ticker
         st.info(f"Analyzing **{ticker}** from Top Picks")
+    elif current_deep_dive:
+        # Continue viewing the same ticker (e.g., after Fetch News rerun)
+        ticker = current_deep_dive
     else:
         ticker = None
 
-    # Search (only show if no navigated ticker)
-    if not ticker:
+    # Search section - show if no ticker OR if user wants to search for another
+    show_search = not ticker
+    if ticker:
+        # Show a "Search Another" button to allow searching for different stock
+        col_ticker, col_clear = st.columns([4, 1])
+        with col_clear:
+            if st.button("🔍 Search Another", key="clear_deep_dive"):
+                st.session_state.current_deep_dive_ticker = None
+                st.rerun()
+
+    if show_search:
         col1, col2 = st.columns([2, 1])
 
         with col1:
@@ -929,6 +945,8 @@ def render_deep_dive_tab(service):
                     selected = st.selectbox("Select stock", options, label_visibility="collapsed")
                     if selected:
                         ticker = selected.split(" - ")[0]
+                        # Persist ticker for actions like Fetch News that trigger rerun
+                        st.session_state.current_deep_dive_ticker = ticker
             else:
                 st.warning("No stocks found matching your search.")
 
@@ -944,6 +962,7 @@ def render_deep_dive_tab(service):
                 with cols[i % 8]:
                     if st.button(f"{row['ticker']}\nT{row['tier']}", key=f"quick_{row['ticker']}"):
                         ticker = row['ticker']
+                        st.session_state.current_deep_dive_ticker = ticker
                         st.rerun()
         return
 

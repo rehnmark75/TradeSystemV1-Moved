@@ -89,10 +89,12 @@ class TradeValidator:
     def __init__(self,
                  logger: Optional[logging.Logger] = None,
                  db_manager: Optional[object] = None,  # NEW: Optional db_manager for S/R validation
-                 backtest_mode: bool = False):  # NEW: Backtest mode parameter
+                 backtest_mode: bool = False,  # NEW: Backtest mode parameter
+                 alert_history_manager: Optional[object] = None):  # NEW: For saving Claude rejections to DB
 
         self.logger = logger or logging.getLogger(__name__)
         self.backtest_mode = backtest_mode
+        self.alert_history_manager = alert_history_manager  # Store for Claude rejection saving
 
         # Validation rules - UNIVERSAL FIX: Confidence format handling for all strategies
         raw_confidence = float(getattr(config, 'MIN_CONFIDENCE', 0.6))
@@ -473,6 +475,15 @@ class TradeValidator:
             self.validation_stats['claude_analyzed'] += 1
             epic = signal.get('epic', 'Unknown')
 
+            # Fetch candles if not provided and data_fetcher is available
+            if candles is None and hasattr(self, 'data_fetcher') and self.data_fetcher:
+                try:
+                    candles = self._fetch_candles_for_vision(epic)
+                    if candles:
+                        self.logger.debug(f"📊 Fetched candles for {epic}: {list(candles.keys())}")
+                except Exception as fetch_err:
+                    self.logger.warning(f"⚠️ Failed to fetch candles for chart: {fetch_err}")
+
             # Generate chart for vision analysis if available
             chart_base64 = None
             if hasattr(self, 'chart_generator') and self.chart_generator and candles:
@@ -530,6 +541,17 @@ class TradeValidator:
             claude_result['raw_response'] = response_content
             claude_result['tokens_used'] = api_result.get('tokens', 0)
             claude_result['has_chart'] = has_chart
+            claude_result['vision_used'] = has_chart
+            claude_result['mode'] = 'vision' if has_chart else 'text-only'
+
+            # Save vision analysis artifacts (chart, prompt, result) if configured
+            if getattr(config, 'CLAUDE_SAVE_VISION_ARTIFACTS', True) and not self.backtest_mode:
+                self._save_vision_artifacts(
+                    signal=signal,
+                    result=claude_result,
+                    chart_base64=chart_base64,
+                    prompt=prompt
+                )
 
             return self._process_claude_result(signal, claude_result, fail_secure)
 
@@ -573,21 +595,46 @@ class TradeValidator:
         self.logger.info(f"✅ Claude APPROVED {epic} (Score: {score}/10)")
         return True, f"Claude approved (Score: {score}/10)", claude_result
 
-    def _save_claude_rejection(self, signal: Dict, claude_result: Dict):
-        """Save Claude rejection for analysis (optional)"""
+    def _save_claude_rejection(self, signal: Dict, claude_result: Dict, rejection_reason: str = None):
+        """Save Claude rejection for analysis - to both file and database"""
+        epic = signal.get('epic', 'unknown')
+
+        # Build rejection reason if not provided
+        if not rejection_reason:
+            score = claude_result.get('score', 0)
+            decision = claude_result.get('decision', 'UNKNOWN')
+            reason = claude_result.get('reason', 'No reason provided')
+            rejection_reason = f"Score: {score}/10, Decision: {decision}, Reason: {reason}"
+
+        # 1. Save to DATABASE (primary storage for analysis)
+        if self.alert_history_manager and not self.backtest_mode:
+            try:
+                alert_id = self.alert_history_manager.save_claude_rejection(
+                    signal=signal,
+                    claude_result=claude_result,
+                    rejection_reason=rejection_reason
+                )
+                if alert_id:
+                    self.logger.info(f"💾 Claude rejection saved to DB: {epic} (alert_id={alert_id})")
+                else:
+                    self.logger.warning(f"⚠️ Failed to save Claude rejection to DB for {epic}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Error saving Claude rejection to DB: {e}")
+
+        # 2. Save to FILE (optional backup)
         try:
             import os
             from datetime import datetime
-            
+
             # Create rejections directory
             rejection_dir = "claude_rejections"
             os.makedirs(rejection_dir, exist_ok=True)
-            
+
             # Create filename
-            epic = signal.get('epic', 'unknown').replace('.', '_')
+            epic_safe = epic.replace('.', '_')
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"{rejection_dir}/rejected_{epic}_{timestamp}.txt"
-            
+            filename = f"{rejection_dir}/rejected_{epic_safe}_{timestamp}.txt"
+
             # Save rejection details
             with open(filename, 'w') as f:
                 f.write(f"Claude Signal Rejection Analysis\n")
@@ -602,11 +649,175 @@ class TradeValidator:
                 f.write(f"Decision: {claude_result.get('decision', 'N/A')}\n")
                 f.write(f"Reason: {claude_result.get('reason', 'N/A')}\n")
                 f.write(f"\nRaw Response:\n{claude_result.get('raw_response', 'N/A')}\n")
-            
-            self.logger.debug(f"📁 Claude rejection saved: {filename}")
-            
+
+            self.logger.debug(f"📁 Claude rejection file saved: {filename}")
+
         except Exception as e:
-            self.logger.warning(f"⚠️ Failed to save Claude rejection: {e}")
+            self.logger.warning(f"⚠️ Failed to save Claude rejection file: {e}")
+
+    def _fetch_candles_for_vision(self, epic: str) -> Optional[Dict]:
+        """
+        Fetch candle data for vision analysis chart generation.
+
+        Args:
+            epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
+
+        Returns:
+            Dictionary of DataFrames {'4h': df, '15m': df, '5m': df} or None
+        """
+        try:
+            if not hasattr(self, 'data_fetcher') or not self.data_fetcher:
+                return None
+
+            candles = {}
+
+            # Fetch multiple timeframes for comprehensive chart
+            timeframes = [
+                ('4h', 100),   # 4-hour for trend context
+                ('15m', 200),  # 15-minute for entry analysis
+                ('5m', 300),   # 5-minute for precision
+            ]
+
+            for timeframe, num_candles in timeframes:
+                try:
+                    df = self.data_fetcher.get_candles(
+                        epic=epic,
+                        timeframe=timeframe,
+                        num_candles=num_candles
+                    )
+                    if df is not None and len(df) > 0:
+                        candles[timeframe] = df
+                except Exception as tf_err:
+                    self.logger.debug(f"Could not fetch {timeframe} candles: {tf_err}")
+
+            if candles:
+                self.logger.info(f"📊 Fetched candles for vision: {list(candles.keys())}")
+                return candles
+
+            return None
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Error fetching candles for vision: {e}")
+            return None
+
+    def _save_vision_artifacts(
+        self,
+        signal: Dict,
+        result: Dict,
+        chart_base64: str,
+        prompt: str,
+        alert_id: int = None
+    ) -> None:
+        """
+        Save vision analysis artifacts (chart, prompt, result) to disk.
+
+        Args:
+            signal: Signal dictionary
+            result: Claude analysis result
+            chart_base64: Base64-encoded chart image (or None)
+            prompt: Prompt text sent to Claude
+            alert_id: Optional alert ID for file naming
+        """
+        try:
+            import base64
+            import json
+
+            # Create vision analysis directory
+            vision_dir = getattr(config, 'CLAUDE_VISION_SAVE_DIRECTORY', 'claude_analysis/vision_analysis')
+            os.makedirs(vision_dir, exist_ok=True)
+
+            # Generate filename prefix
+            epic = signal.get('epic', 'unknown').replace('.', '_')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+            if alert_id:
+                prefix = f"{alert_id}_{epic}_{timestamp}"
+            else:
+                prefix = f"{epic}_{timestamp}"
+
+            files_saved = []
+
+            # 1. Save chart image as PNG
+            if chart_base64:
+                chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
+                try:
+                    chart_bytes = base64.b64decode(chart_base64)
+                    with open(chart_path, 'wb') as f:
+                        f.write(chart_bytes)
+                    files_saved.append(f"{prefix}_chart.png")
+                    self.logger.info(f"📊 Chart saved: {chart_path}")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Failed to save chart: {e}")
+
+            # 2. Save signal data as JSON
+            signal_path = os.path.join(vision_dir, f"{prefix}_signal.json")
+            try:
+                # Create serializable copy
+                signal_data = {}
+                for k, v in signal.items():
+                    try:
+                        json.dumps(v)
+                        signal_data[k] = v
+                    except (TypeError, ValueError):
+                        signal_data[k] = str(v)
+
+                with open(signal_path, 'w', encoding='utf-8') as f:
+                    json.dump(signal_data, f, indent=2, default=str)
+                files_saved.append(f"{prefix}_signal.json")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to save signal data: {e}")
+
+            # 3. Save prompt text
+            prompt_path = os.path.join(vision_dir, f"{prefix}_prompt.txt")
+            try:
+                with open(prompt_path, 'w', encoding='utf-8') as f:
+                    f.write(f"═══════════════════════════════════════════════════════════════\n")
+                    f.write(f"CLAUDE VISION ANALYSIS PROMPT\n")
+                    f.write(f"═══════════════════════════════════════════════════════════════\n")
+                    f.write(f"Epic: {signal.get('epic', 'Unknown')}\n")
+                    f.write(f"Strategy: {signal.get('strategy', 'Unknown')}\n")
+                    f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Chart Included: {chart_base64 is not None}\n")
+                    f.write(f"═══════════════════════════════════════════════════════════════\n\n")
+                    f.write(prompt)
+                files_saved.append(f"{prefix}_prompt.txt")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to save prompt: {e}")
+
+            # 4. Save analysis result as JSON
+            result_path = os.path.join(vision_dir, f"{prefix}_result.json")
+            try:
+                result_data = {
+                    'epic': signal.get('epic'),
+                    'signal_type': signal.get('signal_type'),
+                    'strategy': signal.get('strategy'),
+                    'analysis_timestamp': datetime.now().isoformat(),
+                    'score': result.get('score'),
+                    'decision': result.get('decision'),
+                    'approved': result.get('approved'),
+                    'reason': result.get('reason'),
+                    'vision_used': result.get('vision_used', chart_base64 is not None),
+                    'tokens_used': result.get('tokens_used'),
+                    'mode': result.get('mode'),
+                    'raw_response': result.get('raw_response'),
+                    'files': {
+                        'chart': f"{prefix}_chart.png" if chart_base64 else None,
+                        'signal': f"{prefix}_signal.json",
+                        'prompt': f"{prefix}_prompt.txt",
+                        'result': f"{prefix}_result.json"
+                    }
+                }
+                with open(result_path, 'w', encoding='utf-8') as f:
+                    json.dump(result_data, f, indent=2)
+                files_saved.append(f"{prefix}_result.json")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to save result: {e}")
+
+            if files_saved:
+                self.logger.info(f"✅ Vision artifacts saved: {', '.join(files_saved)}")
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to save vision artifacts: {e}")
 
     def _normalize_confidence_threshold(self, threshold: float) -> float:
         """
@@ -827,9 +1038,12 @@ class TradeValidator:
                         self.logger.warning(f"🚫 BACKTEST STEP 12 FAILED - Claude filtering: {msg}")
                     self.logger.info(f"🚫 Claude REJECTED: {epic} {signal_type} - {msg}")
 
-                    # OPTIONAL: Save rejected signals for analysis
-                    if getattr(config, 'SAVE_CLAUDE_REJECTIONS', False) and claude_result:
-                        self._save_claude_rejection(signal, claude_result)
+                    # Save rejected signals for analysis (database + optional file)
+                    if claude_result:
+                        # Always save to DB if alert_history_manager available
+                        # Also save to file if SAVE_CLAUDE_REJECTIONS is True
+                        if self.alert_history_manager or getattr(config, 'SAVE_CLAUDE_REJECTIONS', False):
+                            self._save_claude_rejection(signal, claude_result, rejection_reason=msg)
 
                     return False, f"Claude filtering: {msg}"
                 else:

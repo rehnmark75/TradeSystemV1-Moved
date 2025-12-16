@@ -232,7 +232,8 @@ class TradingOrchestrator:
         try:
             self.trade_validator = TradeValidator(
                 logger=self.logger,
-                db_manager=self.db_manager  # NEW: Pass db_manager for S/R validation
+                db_manager=self.db_manager,  # NEW: Pass db_manager for S/R validation
+                alert_history_manager=self.alert_history  # NEW: For saving Claude rejections to DB
                 # REMOVED: enable_duplicate_check, cooldown_minutes, duplicate_sensitivity
                 # These are no longer used in the new TradeValidator
             )
