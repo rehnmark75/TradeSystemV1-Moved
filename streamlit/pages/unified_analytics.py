@@ -3499,9 +3499,9 @@ class UnifiedTradingDashboard:
 
         # Vision artifacts directory (check both local and Docker paths)
         vision_dirs = [
-            "claude_analysis/vision_analysis",
-            "/app/claude_analysis/vision_analysis",
-            "../worker/app/claude_analysis/vision_analysis"
+            "claude_analysis_enhanced/vision_analysis",
+            "/app/claude_analysis_enhanced/vision_analysis",
+            "../worker/app/claude_analysis_enhanced/vision_analysis"
         ]
 
         # Clean epic for filename matching

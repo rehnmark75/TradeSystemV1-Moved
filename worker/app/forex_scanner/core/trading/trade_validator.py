@@ -19,6 +19,7 @@ UPDATED CHANGES:
 """
 
 import logging
+import os
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, time as datetime_time, timezone, timedelta
 try:
@@ -544,14 +545,13 @@ class TradeValidator:
             claude_result['vision_used'] = has_chart
             claude_result['mode'] = 'vision' if has_chart else 'text-only'
 
-            # Save vision analysis artifacts (chart, prompt, result) if configured
+            # Store vision artifacts in result for later saving with alert_id
+            # Don't save here - orchestrator will save after alert_id is obtained
             if getattr(config, 'CLAUDE_SAVE_VISION_ARTIFACTS', True) and not self.backtest_mode:
-                self._save_vision_artifacts(
-                    signal=signal,
-                    result=claude_result,
-                    chart_base64=chart_base64,
-                    prompt=prompt
-                )
+                claude_result['_vision_artifacts'] = {
+                    'chart_base64': chart_base64,
+                    'prompt': prompt
+                }
 
             return self._process_claude_result(signal, claude_result, fail_secure)
 

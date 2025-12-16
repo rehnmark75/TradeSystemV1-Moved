@@ -698,14 +698,22 @@ class TradingOrchestrator:
             if alert_id:
                 # ADD: Store alert_id in original signal for order execution (preserve existing functionality)
                 signal['alert_id'] = alert_id
-                
+
+                # Save vision artifacts with alert_id prefix (if available)
+                if processed_claude_result and processed_claude_result.get('_vision_artifacts'):
+                    self._save_vision_artifacts_with_alert_id(
+                        alert_id=alert_id,
+                        signal=signal,
+                        claude_result=processed_claude_result
+                    )
+
                 # Enhanced logging with Claude status
                 claude_status = "No Claude"
                 if processed_claude_result:
                     decision = processed_claude_result.get('decision', 'Unknown')
                     score = processed_claude_result.get('score', 'N/A')
                     claude_status = f"Claude: {decision} ({score}/10)"
-                
+
                 self.logger.info(f"✅ Signal saved to alert_history table (ID: {alert_id}) - {claude_status}")
                 return alert_id
             else:
@@ -718,6 +726,125 @@ class TradingOrchestrator:
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
             return None
 
+    def _save_vision_artifacts_with_alert_id(
+        self,
+        alert_id: int,
+        signal: Dict,
+        claude_result: Dict
+    ) -> None:
+        """
+        Save vision analysis artifacts (chart, prompt, result) to disk with alert_id prefix.
+
+        Args:
+            alert_id: Database alert ID for file naming
+            signal: Signal dictionary
+            claude_result: Claude analysis result containing _vision_artifacts
+        """
+        try:
+            import base64
+
+            # Get vision artifacts from claude_result
+            artifacts = claude_result.get('_vision_artifacts', {})
+            chart_base64 = artifacts.get('chart_base64')
+            prompt = artifacts.get('prompt', '')
+
+            # Get save directory from config
+            vision_dir = getattr(config, 'CLAUDE_VISION_SAVE_DIRECTORY', 'claude_analysis_enhanced/vision_analysis')
+            os.makedirs(vision_dir, exist_ok=True)
+
+            # Generate filename prefix with alert_id
+            epic = signal.get('epic', 'unknown').replace('.', '_')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            prefix = f"{alert_id}_{epic}_{timestamp}"
+
+            files_saved = []
+
+            # 1. Save chart image as PNG
+            if chart_base64:
+                chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
+                try:
+                    chart_bytes = base64.b64decode(chart_base64)
+                    with open(chart_path, 'wb') as f:
+                        f.write(chart_bytes)
+                    files_saved.append(f"{prefix}_chart.png")
+                    self.logger.info(f"📊 Chart saved: {chart_path}")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Failed to save chart: {e}")
+
+            # 2. Save signal data as JSON
+            signal_path = os.path.join(vision_dir, f"{prefix}_signal.json")
+            try:
+                signal_data = {}
+                for k, v in signal.items():
+                    try:
+                        json.dumps(v)
+                        signal_data[k] = v
+                    except (TypeError, ValueError):
+                        signal_data[k] = str(v)
+
+                with open(signal_path, 'w', encoding='utf-8') as f:
+                    json.dump(signal_data, f, indent=2, default=str)
+                files_saved.append(f"{prefix}_signal.json")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to save signal data: {e}")
+
+            # 3. Save prompt text
+            prompt_path = os.path.join(vision_dir, f"{prefix}_prompt.txt")
+            try:
+                with open(prompt_path, 'w', encoding='utf-8') as f:
+                    f.write(f"═══════════════════════════════════════════════════════════════\n")
+                    f.write(f"CLAUDE VISION ANALYSIS PROMPT\n")
+                    f.write(f"═══════════════════════════════════════════════════════════════\n")
+                    f.write(f"Alert ID: {alert_id}\n")
+                    f.write(f"Epic: {signal.get('epic', 'Unknown')}\n")
+                    f.write(f"Strategy: {signal.get('strategy', 'Unknown')}\n")
+                    f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Chart Included: {chart_base64 is not None}\n")
+                    f.write(f"═══════════════════════════════════════════════════════════════\n\n")
+                    f.write(prompt)
+                files_saved.append(f"{prefix}_prompt.txt")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to save prompt: {e}")
+
+            # 4. Save analysis result as JSON
+            result_path = os.path.join(vision_dir, f"{prefix}_result.json")
+            try:
+                result_data = {
+                    'alert_id': alert_id,
+                    'epic': signal.get('epic'),
+                    'signal_type': signal.get('signal_type'),
+                    'strategy': signal.get('strategy'),
+                    'analysis_timestamp': datetime.now().isoformat(),
+                    'score': claude_result.get('score'),
+                    'decision': claude_result.get('decision'),
+                    'approved': claude_result.get('approved'),
+                    'reason': claude_result.get('reason'),
+                    'vision_used': claude_result.get('vision_used', chart_base64 is not None),
+                    'tokens_used': claude_result.get('tokens_used'),
+                    'mode': claude_result.get('mode'),
+                    'raw_response': claude_result.get('raw_response'),
+                    'files': {
+                        'chart': f"{prefix}_chart.png" if chart_base64 else None,
+                        'signal': f"{prefix}_signal.json",
+                        'prompt': f"{prefix}_prompt.txt",
+                        'result': f"{prefix}_result.json"
+                    }
+                }
+                with open(result_path, 'w', encoding='utf-8') as f:
+                    json.dump(result_data, f, indent=2)
+                files_saved.append(f"{prefix}_result.json")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to save result: {e}")
+
+            if files_saved:
+                self.logger.info(f"✅ Vision artifacts saved: {', '.join(files_saved)}")
+
+            # Clean up _vision_artifacts from claude_result to save memory
+            if '_vision_artifacts' in claude_result:
+                del claude_result['_vision_artifacts']
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to save vision artifacts: {e}")
 
     def _parse_claude_string_response(self, claude_string: str) -> Dict:
         """

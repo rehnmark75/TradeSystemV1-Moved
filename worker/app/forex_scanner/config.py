@@ -1610,7 +1610,7 @@ CLAUDE_CHART_TIMEFRAMES = ['4h', '1h', '15m']  # Timeframes to include in chart
 CLAUDE_VISION_ENABLED = True            # Enable vision API for chart analysis
 CLAUDE_VISION_STRATEGIES = ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']  # Strategies that use vision
 CLAUDE_SAVE_VISION_ARTIFACTS = True     # Save chart, prompt, signal data to disk
-CLAUDE_VISION_SAVE_DIRECTORY = 'claude_analysis/vision_analysis'  # Vision artifacts directory
+CLAUDE_VISION_SAVE_DIRECTORY = 'claude_analysis_enhanced/vision_analysis'  # Vision artifacts directory
 
 # Quality thresholds
 MIN_CLAUDE_QUALITY_SCORE = 6            # Minimum Claude score (1-10) to approve trade

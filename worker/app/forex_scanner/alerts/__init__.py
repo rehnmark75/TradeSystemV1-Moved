@@ -67,33 +67,35 @@ class ClaudeAnalyzer:
     Unified Claude Analyzer Interface
     Automatically uses modular implementation if available, falls back to legacy
     """
-    
-    def __init__(self, api_key: str = None, auto_save: bool = True, save_directory: str = "claude_analysis"):
+
+    def __init__(self, api_key: str = None, auto_save: bool = True, save_directory: str = "claude_analysis", data_fetcher=None):
         self.api_key = api_key
         self.auto_save = auto_save
         self.save_directory = save_directory
+        self.data_fetcher = data_fetcher
         self.logger = logging.getLogger(__name__)
-        
+
         # Initialize the appropriate implementation
         if MODULAR_AVAILABLE:
             self._init_modular_implementation()
         else:
             self._init_legacy_implementation()
-    
+
     def _init_modular_implementation(self):
         """Initialize new modular implementation"""
         try:
             self.analyzer = ModularClaudeAnalyzer(
                 api_key=self.api_key,
                 auto_save=self.auto_save,
-                save_directory=self.save_directory
+                save_directory=self.save_directory,
+                data_fetcher=self.data_fetcher
             )
             self.implementation = "modular"
             self.logger.info("🚀 Using modular Claude API implementation")
         except Exception as e:
             self.logger.error(f"❌ Modular initialization failed: {e}")
             self._init_legacy_implementation()
-    
+
     def _init_legacy_implementation(self):
         """Initialize legacy implementation"""
         try:

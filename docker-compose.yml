@@ -166,6 +166,7 @@ services:
     volumes:
       - ./streamlit:/app:cached
       - ./logs:/logs:ro  # Read-only for safety
+      - ./worker/app/claude_analysis_enhanced:/app/claude_analysis_enhanced:ro  # Vision analysis charts
     working_dir: /app
     networks:
       - lab-net
