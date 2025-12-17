@@ -40,9 +40,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.1.0"
+STRATEGY_VERSION = "2.1.2"
 STRATEGY_DATE = "2025-12-17"
-STRATEGY_STATUS = "R:R Root Cause Fixes - Tighter SL for Better R:R"
+STRATEGY_STATUS = "Relaxed Filters for Forward Testing - More Signals"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -57,7 +57,7 @@ EMA_BUFFER_PIPS = 3                      # Buffer zone around EMA
 
 # Price position requirements
 REQUIRE_CLOSE_BEYOND_EMA = True          # Candle must CLOSE beyond EMA (not just wick)
-MIN_DISTANCE_FROM_EMA_PIPS = 6           # v2.0.1: REDUCED from 10 - allow trading closer to EMA
+MIN_DISTANCE_FROM_EMA_PIPS = 3           # v2.1.2: REDUCED from 6 - allow entries 3.5-4.5 pips from EMA
 
 # ============================================================================
 # TIER 2: 15M ENTRY TRIGGER (Intermediate Timeframe)
@@ -121,7 +121,7 @@ PULLBACK_CONFIRMATION_BARS = 2           # Bars to confirm pullback
 # In strong trends, price often doesn't pull back - momentum continuation is valid
 
 MOMENTUM_MODE_ENABLED = True             # v1.8.0: NEW - allow momentum entries
-MOMENTUM_MIN_DEPTH = -0.20               # Allow up to 20% beyond break point
+MOMENTUM_MIN_DEPTH = -0.35               # v2.1.2: RELAXED from -0.20 - allow up to 35% beyond break point
 MOMENTUM_MAX_DEPTH = 0.0                 # 0% = at break point (no pullback yet)
 MOMENTUM_CONFIDENCE_PENALTY = 0.05       # Reduce confidence by 5% for momentum entries
 
@@ -166,7 +166,7 @@ MOMENTUM_OFFSET_PIPS = 4.0               # Fixed 4 pip offset for momentum entri
 
 # Risk sanity checks after offset
 MIN_RISK_AFTER_OFFSET_PIPS = 5.0         # Reject if SL too close after offset
-MAX_RISK_AFTER_OFFSET_PIPS = 20.0        # v2.0.1: REDUCED from 40 - max 20 pip SL for better R:R
+MAX_RISK_AFTER_OFFSET_PIPS = 55.0        # v2.1.2: INCREASED from 20 - allow JPY pairs with larger SL
 
 # ============================================================================
 # RISK MANAGEMENT
@@ -292,21 +292,25 @@ PAIR_SL_BUFFERS = {
 # v1.9.0: PAIR-SPECIFIC CONFIDENCE FLOORS
 # ============================================================================
 # Higher confidence required for volatile / difficult pairs
+# v2.1.2: REDUCED for forward testing - use strategy's MIN_CONFIDENCE_THRESHOLD (50%)
 
 PAIR_MIN_CONFIDENCE = {
-    # Volatile JPY crosses need higher confidence
-    'EURJPY': 0.72,
-    'CS.D.EURJPY.MINI.IP': 0.72,
-    'GBPJPY': 0.72,
-    'CS.D.GBPJPY.MINI.IP': 0.72,
-    'AUDJPY': 0.70,
-    'CS.D.AUDJPY.MINI.IP': 0.70,
+    # v2.1.2: REDUCED from 70-72% to 50% for forward testing
+    # Re-raise after collecting live performance data
 
-    # Low liquidity pairs
-    'USDCHF': 0.70,
-    'CS.D.USDCHF.MINI.IP': 0.70,
+    # Volatile JPY crosses - reduced for forward testing
+    'EURJPY': 0.50,
+    'CS.D.EURJPY.MINI.IP': 0.50,
+    'GBPJPY': 0.50,
+    'CS.D.GBPJPY.MINI.IP': 0.50,
+    'AUDJPY': 0.50,
+    'CS.D.AUDJPY.MINI.IP': 0.50,
 
-    # Default for others = MIN_CONFIDENCE_THRESHOLD (0.60)
+    # Low liquidity pairs - reduced for forward testing
+    'USDCHF': 0.50,
+    'CS.D.USDCHF.MINI.IP': 0.50,
+
+    # Default for others = MIN_CONFIDENCE_THRESHOLD (0.50)
 }
 
 # ============================================================================
@@ -318,7 +322,7 @@ PAIR_MIN_CONFIDENCE = {
 # v1.7.0: REDUCED confidence threshold - 80% was too restrictive
 # Analysis: With wider Fib zones and better R:R, lower confidence is acceptable
 # The tight 80% threshold combined with tight Fib zones left almost no signals
-MIN_CONFIDENCE_THRESHOLD = 0.60          # v1.7.0: REDUCED from 0.80 - allow more signals
+MIN_CONFIDENCE_THRESHOLD = 0.50         # v1.7.0: REDUCED from 0.80 - allow more signals
 HIGH_CONFIDENCE_THRESHOLD = 0.75         # v1.7.0: REDUCED from 0.90 - achievable premium tier
 
 # Scoring weights (must sum to 1.0)

@@ -403,14 +403,23 @@ class OrderManager:
         
         # Check confidence threshold
         # 🔥 SCALPING BYPASS: Use lower threshold for scalping strategies (45%)
+        # 🔥 SMC_SIMPLE/EMA_DOUBLE BYPASS: These strategies have internal confidence thresholds (50%)
         strategy = signal.get('strategy', '')
         scalping_mode = signal.get('scalping_mode', '')
         is_scalping = ('scalping' in strategy.lower() or
                       scalping_mode in ['linda_raschke', 'ranging_momentum', 'linda_macd_zero_cross',
                                        'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern'])
 
+        # SMC_SIMPLE and EMA_DOUBLE have their own internal confidence checks (50% threshold)
+        is_self_validated_strategy = (
+            'SMC_SIMPLE' in strategy or 'smc_simple' in strategy.lower() or
+            'EMA_DOUBLE' in strategy or 'ema_double' in strategy.lower()
+        )
+
         if is_scalping:
             min_confidence = getattr(config, 'SCALPING_MIN_CONFIDENCE', 0.45)
+        elif is_self_validated_strategy:
+            min_confidence = 0.50  # SMC_SIMPLE/EMA_DOUBLE use 50% internal threshold
         else:
             min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
 

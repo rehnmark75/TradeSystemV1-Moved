@@ -18,6 +18,12 @@
 #   - FIX: Reduced ADX threshold 20→15 (allow medium-strength trends)
 #   - Analysis: Strategy was generating 0 signals due to state reset + tight filters
 #
+# v2.2.0 CHANGES (Database Persistence):
+#   - NEW: USE_DATABASE_STATE = True (persists crossover history to database)
+#   - REVERTED: MIN_SUCCESSFUL_CROSSOVERS back to 1 (now works with DB persistence)
+#   - FIXED: "Chicken and egg" problem where state was lost on restart
+#   - State now survives scanner restarts, enabling original strategy design
+#
 # v2.0.0 CHANGES (Limit Orders):
 #   - NEW: Limit order support with ATR-based price offsets
 #   - BUY orders placed BELOW current price (buy cheaper)
@@ -31,9 +37,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "EMA_DOUBLE_CONFIRMATION"
-STRATEGY_VERSION = "2.1.0"
+STRATEGY_VERSION = "2.2.0"
 STRATEGY_DATE = "2025-12-17"
-STRATEGY_STATUS = "Signal Generation Fixes - Remove State Dependency"
+STRATEGY_STATUS = "Database Persistence - Original Strategy Design Restored"
 
 # ============================================================================
 # CORE PARAMETERS
@@ -54,11 +60,11 @@ SUCCESS_CANDLES = 3           # 3 candles on 15m = 45 min (adjusted for faster E
 LOOKBACK_HOURS = 48           # 48 hours = 192 candles on 15m timeframe
 
 # Signal Requirements
-# v2.1.0: REDUCED from 1 to 0 - Allow immediate signals without prior crossover history
-# The prior confirmation requirement caused a "chicken and egg" problem:
-# - State was in-memory only, reset on every restart
-# - Counter never built up, blocking ALL signals
-MIN_SUCCESSFUL_CROSSOVERS = 0  # v2.1.0: REDUCED from 1 - immediate entry on first valid crossover
+# v2.2.0: RESTORED to 1 - Database persistence fixes the "chicken and egg" problem
+# Prior issue: State was in-memory only, reset on every restart
+# Solution: State now persisted to database (survives restarts)
+# Strategy logic: Wait for 1 successful crossover before taking entry signal
+MIN_SUCCESSFUL_CROSSOVERS = 1  # v2.2.0: RESTORED from 0 - now works with DB persistence
 
 # ============================================================================
 # HIGHER TIMEFRAME TREND FILTER
@@ -237,9 +243,10 @@ PAIR_PIP_VALUES = {
 # STATE MANAGEMENT
 # ============================================================================
 
-# Currently using in-memory state tracking
-# Future: Set to True to use database-backed persistence
-USE_DATABASE_STATE = False
+# v2.2.0: Database persistence for crossover state
+# Enables the original strategy design with MIN_SUCCESSFUL_CROSSOVERS >= 1
+# State survives scanner restarts and container recreations
+USE_DATABASE_STATE = True  # v2.2.0: ENABLED - persistent crossover state
 
 # In-memory cache settings
 CACHE_MAX_CROSSOVERS_PER_PAIR = 20  # Max crossovers to keep per pair

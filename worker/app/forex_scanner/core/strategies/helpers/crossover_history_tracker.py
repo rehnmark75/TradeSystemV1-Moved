@@ -1,7 +1,7 @@
 """
 Crossover History Tracker
 =========================
-In-memory state tracking for EMA crossover success patterns.
+State tracking for EMA crossover success patterns with optional database persistence.
 
 This module tracks EMA 21/50 crossovers and validates their "success" by
 checking if price stays on the favorable side of EMA 21 for a configurable
@@ -9,8 +9,26 @@ number of candles.
 
 Pattern follows AlertDeduplicationManager for state management architecture.
 
+v2.0.0 CHANGES (Database Persistence):
+    - NEW: Database persistence for crossover state (survives restarts)
+    - NEW: USE_DATABASE_STATE config option to enable/disable persistence
+    - NEW: Automatic table creation on initialization
+    - NEW: Load state from database on startup
+    - NEW: Save state to database on changes (successful crossovers, trades)
+    - FIXED: "Chicken and egg" problem where MIN_SUCCESSFUL_CROSSOVERS=1
+             would never trigger because state was lost on restart
+
 Usage:
+    # In-memory mode (original behavior):
     tracker = CrossoverHistoryTracker(success_candles=4, lookback_hours=48)
+
+    # Database persistence mode:
+    tracker = CrossoverHistoryTracker(
+        success_candles=4,
+        lookback_hours=48,
+        db_manager=db_manager,
+        use_database_state=True
+    )
 
     # On each candle:
     tracker.validate_pending_crossovers(df, epic)
@@ -26,7 +44,8 @@ Usage:
 
 import pandas as pd
 import numpy as np
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 import logging
@@ -126,7 +145,9 @@ class CrossoverHistoryTracker:
         extended_success_bonus: float = 0.05,
         ema_fast_period: int = 21,
         ema_slow_period: int = 50,
-        logger: logging.Logger = None
+        logger: logging.Logger = None,
+        db_manager=None,
+        use_database_state: bool = False
     ):
         """
         Initialize the crossover history tracker.
@@ -141,6 +162,8 @@ class CrossoverHistoryTracker:
             ema_fast_period: Fast EMA period (for column naming)
             ema_slow_period: Slow EMA period (for column naming)
             logger: Optional logger instance
+            db_manager: Optional DatabaseManager for persistence
+            use_database_state: Whether to persist state to database
         """
         self.success_candles = success_candles
         self.lookback_hours = lookback_hours
@@ -153,12 +176,21 @@ class CrossoverHistoryTracker:
 
         self.logger = logger or logging.getLogger(__name__)
 
+        # Database persistence settings
+        self.db_manager = db_manager
+        self.use_database_state = use_database_state and db_manager is not None
+
         # In-memory state storage: {epic: PairCrossoverState}
         self._pair_states: Dict[str, PairCrossoverState] = {}
 
         # Column names for EMAs
         self._ema_fast_col = f'ema_{ema_fast_period}'
         self._ema_slow_col = f'ema_{ema_slow_period}'
+
+        # Initialize database table if using persistence
+        if self.use_database_state:
+            self._initialize_database_table()
+            self._load_all_states_from_db()
 
         self.logger.info("=" * 60)
         self.logger.info("CrossoverHistoryTracker initialized")
@@ -167,6 +199,7 @@ class CrossoverHistoryTracker:
         self.logger.info(f"  Success validation: {success_candles} candles")
         self.logger.info(f"  Lookback window: {lookback_hours} hours")
         self.logger.info(f"  Required crossovers for signal: {min_crossovers_for_signal}")
+        self.logger.info(f"  Database persistence: {'ENABLED' if self.use_database_state else 'DISABLED'}")
         self.logger.info("=" * 60)
 
     def _get_or_create_state(self, epic: str) -> PairCrossoverState:
@@ -316,6 +349,7 @@ class CrossoverHistoryTracker:
         validated = []
 
         # Validate bullish pending crossover
+        state_changed = False
         if state.pending_bull_crossover and state.pending_bull_crossover.is_pending():
             result = self._validate_single_crossover(df, state.pending_bull_crossover, epic)
             if result is not None:
@@ -323,6 +357,7 @@ class CrossoverHistoryTracker:
                     validated.append(state.pending_bull_crossover)
                     state.add_successful_crossover(state.pending_bull_crossover)
                     self.logger.info(f"[{epic}] BULL crossover VALIDATED as SUCCESS (held {state.pending_bull_crossover.candles_held} candles)")
+                    state_changed = True
                 else:
                     self.logger.info(f"[{epic}] BULL crossover FAILED validation")
                 state.pending_bull_crossover = None
@@ -335,6 +370,7 @@ class CrossoverHistoryTracker:
                     validated.append(state.pending_bear_crossover)
                     state.add_successful_crossover(state.pending_bear_crossover)
                     self.logger.info(f"[{epic}] BEAR crossover VALIDATED as SUCCESS (held {state.pending_bear_crossover.candles_held} candles)")
+                    state_changed = True
                 else:
                     self.logger.info(f"[{epic}] BEAR crossover FAILED validation")
                 state.pending_bear_crossover = None
@@ -343,6 +379,10 @@ class CrossoverHistoryTracker:
         # This is critical for backtesting to work correctly
         current_simulation_time = self._get_latest_timestamp(df)
         self._cleanup_expired_crossovers(epic, current_simulation_time)
+
+        # Save state to database if changed (successful crossover validated)
+        if state_changed and self.use_database_state:
+            self._save_state_to_db(epic)
 
         return validated
 
@@ -565,6 +605,10 @@ class CrossoverHistoryTracker:
         self.logger.info(f"[{epic}] Trade taken: {direction} at {timestamp}")
         self.logger.info(f"  Counter reset for {direction} direction")
 
+        # Save state to database after trade is recorded
+        if self.use_database_state:
+            self._save_state_to_db(epic)
+
     def _cleanup_expired_crossovers(self, epic: str, current_time: datetime = None):
         """Remove crossovers outside the lookback window
 
@@ -663,6 +707,326 @@ class CrossoverHistoryTracker:
             if epic in self._pair_states:
                 del self._pair_states[epic]
                 self.logger.info(f"[{epic}] State reset")
+                # Also reset in database if using persistence
+                if self.use_database_state:
+                    self._delete_state_from_db(epic)
         else:
             self._pair_states = {}
             self.logger.info("All states reset")
+            # Also reset all in database if using persistence
+            if self.use_database_state:
+                self._delete_all_states_from_db()
+
+    # =========================================================================
+    # DATABASE PERSISTENCE METHODS (v2.0.0)
+    # =========================================================================
+
+    def _initialize_database_table(self):
+        """Create the ema_double_crossover_state table if it doesn't exist"""
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            # Create main state table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS ema_double_crossover_state (
+                    id SERIAL PRIMARY KEY,
+                    epic VARCHAR(50) NOT NULL UNIQUE,
+
+                    -- Successful crossover history (JSON arrays)
+                    successful_bull_crossovers JSON DEFAULT '[]',
+                    successful_bear_crossovers JSON DEFAULT '[]',
+
+                    -- Pending crossovers (JSON objects or null)
+                    pending_bull_crossover JSON DEFAULT NULL,
+                    pending_bear_crossover JSON DEFAULT NULL,
+
+                    -- Last trade info
+                    last_trade_direction VARCHAR(10),
+                    last_trade_timestamp TIMESTAMP,
+
+                    -- Last crossover timestamps (to avoid re-detection)
+                    last_bull_crossover_timestamp TIMESTAMP,
+                    last_bear_crossover_timestamp TIMESTAMP,
+
+                    -- Metadata
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Create indexes for fast lookups
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_ema_crossover_epic
+                ON ema_double_crossover_state(epic)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_ema_crossover_updated
+                ON ema_double_crossover_state(updated_at)
+            ''')
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            self.logger.info("✅ Database table 'ema_double_crossover_state' initialized")
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize database table: {e}")
+            raise
+
+    def _load_all_states_from_db(self):
+        """Load all crossover states from database on startup"""
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT epic, successful_bull_crossovers, successful_bear_crossovers,
+                       pending_bull_crossover, pending_bear_crossover,
+                       last_trade_direction, last_trade_timestamp,
+                       last_bull_crossover_timestamp, last_bear_crossover_timestamp
+                FROM ema_double_crossover_state
+            ''')
+
+            rows = cursor.fetchall()
+            loaded_count = 0
+
+            for row in rows:
+                epic = row[0]
+                state = self._deserialize_state_from_row(row)
+                if state:
+                    self._pair_states[epic] = state
+                    loaded_count += 1
+
+            cursor.close()
+            conn.close()
+
+            self.logger.info(f"✅ Loaded {loaded_count} crossover states from database")
+
+            # Log summary of loaded states
+            for epic, state in self._pair_states.items():
+                bull_count = len(state.successful_bull_crossovers)
+                bear_count = len(state.successful_bear_crossovers)
+                if bull_count > 0 or bear_count > 0:
+                    self.logger.info(f"   [{epic}] Bull: {bull_count}, Bear: {bear_count} successful crossovers")
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to load states from database: {e}")
+            # Don't raise - fall back to empty state
+
+    def _save_state_to_db(self, epic: str):
+        """Save a single pair's state to database"""
+        if not self.use_database_state:
+            return
+
+        try:
+            state = self._pair_states.get(epic)
+            if not state:
+                return
+
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            # Serialize crossover lists and pending crossovers
+            bull_crossovers_json = json.dumps([
+                self._serialize_crossover_event(c) for c in state.successful_bull_crossovers
+            ])
+            bear_crossovers_json = json.dumps([
+                self._serialize_crossover_event(c) for c in state.successful_bear_crossovers
+            ])
+            pending_bull_json = json.dumps(
+                self._serialize_crossover_event(state.pending_bull_crossover)
+            ) if state.pending_bull_crossover else None
+            pending_bear_json = json.dumps(
+                self._serialize_crossover_event(state.pending_bear_crossover)
+            ) if state.pending_bear_crossover else None
+
+            # Upsert state
+            cursor.execute('''
+                INSERT INTO ema_double_crossover_state
+                (epic, successful_bull_crossovers, successful_bear_crossovers,
+                 pending_bull_crossover, pending_bear_crossover,
+                 last_trade_direction, last_trade_timestamp,
+                 last_bull_crossover_timestamp, last_bear_crossover_timestamp,
+                 updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (epic) DO UPDATE SET
+                    successful_bull_crossovers = EXCLUDED.successful_bull_crossovers,
+                    successful_bear_crossovers = EXCLUDED.successful_bear_crossovers,
+                    pending_bull_crossover = EXCLUDED.pending_bull_crossover,
+                    pending_bear_crossover = EXCLUDED.pending_bear_crossover,
+                    last_trade_direction = EXCLUDED.last_trade_direction,
+                    last_trade_timestamp = EXCLUDED.last_trade_timestamp,
+                    last_bull_crossover_timestamp = EXCLUDED.last_bull_crossover_timestamp,
+                    last_bear_crossover_timestamp = EXCLUDED.last_bear_crossover_timestamp,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (
+                epic,
+                bull_crossovers_json,
+                bear_crossovers_json,
+                pending_bull_json,
+                pending_bear_json,
+                state.last_trade_direction,
+                state.last_trade_timestamp,
+                state.last_bull_crossover_timestamp,
+                state.last_bear_crossover_timestamp
+            ))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            self.logger.debug(f"💾 Saved state to DB for {epic}")
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to save state to database for {epic}: {e}")
+
+    def _delete_state_from_db(self, epic: str):
+        """Delete a single pair's state from database"""
+        if not self.use_database_state:
+            return
+
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                'DELETE FROM ema_double_crossover_state WHERE epic = %s',
+                (epic,)
+            )
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            self.logger.info(f"🗑️ Deleted state from DB for {epic}")
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to delete state from database for {epic}: {e}")
+
+    def _delete_all_states_from_db(self):
+        """Delete all states from database"""
+        if not self.use_database_state:
+            return
+
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute('DELETE FROM ema_double_crossover_state')
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            self.logger.info("🗑️ Deleted all states from DB")
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to delete all states from database: {e}")
+
+    def _serialize_crossover_event(self, event: CrossoverEvent) -> Optional[Dict]:
+        """Serialize a CrossoverEvent to a JSON-compatible dictionary"""
+        if event is None:
+            return None
+
+        return {
+            'timestamp': event.timestamp.isoformat() if event.timestamp else None,
+            'direction': event.direction,
+            'price_at_crossover': event.price_at_crossover,
+            'ema_fast': event.ema_fast,
+            'ema_slow': event.ema_slow,
+            'candle_index': event.candle_index,
+            'success': event.success,
+            'validation_timestamp': event.validation_timestamp.isoformat() if event.validation_timestamp else None,
+            'candles_validated': event.candles_validated,
+            'candles_held': event.candles_held
+        }
+
+    def _deserialize_crossover_event(self, data: Dict) -> Optional[CrossoverEvent]:
+        """Deserialize a dictionary to a CrossoverEvent"""
+        if data is None:
+            return None
+
+        try:
+            timestamp = None
+            if data.get('timestamp'):
+                timestamp = datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00'))
+
+            validation_timestamp = None
+            if data.get('validation_timestamp'):
+                validation_timestamp = datetime.fromisoformat(
+                    data['validation_timestamp'].replace('Z', '+00:00')
+                )
+
+            return CrossoverEvent(
+                timestamp=timestamp,
+                direction=data.get('direction', 'BULL'),
+                price_at_crossover=float(data.get('price_at_crossover', 0)),
+                ema_fast=float(data.get('ema_fast', 0)),
+                ema_slow=float(data.get('ema_slow', 0)),
+                candle_index=int(data.get('candle_index', -1)),
+                success=data.get('success'),
+                validation_timestamp=validation_timestamp,
+                candles_validated=int(data.get('candles_validated', 0)),
+                candles_held=int(data.get('candles_held', 0))
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to deserialize crossover event: {e}")
+            return None
+
+    def _deserialize_state_from_row(self, row: tuple) -> Optional[PairCrossoverState]:
+        """Deserialize a database row to PairCrossoverState"""
+        try:
+            epic = row[0]
+            bull_json = row[1] if row[1] else '[]'
+            bear_json = row[2] if row[2] else '[]'
+            pending_bull_json = row[3]
+            pending_bear_json = row[4]
+            last_trade_direction = row[5]
+            last_trade_timestamp = row[6]
+            last_bull_ts = row[7]
+            last_bear_ts = row[8]
+
+            # Parse JSON arrays
+            bull_data = json.loads(bull_json) if isinstance(bull_json, str) else bull_json
+            bear_data = json.loads(bear_json) if isinstance(bear_json, str) else bear_json
+
+            # Parse pending crossovers
+            pending_bull_data = None
+            if pending_bull_json:
+                pending_bull_data = json.loads(pending_bull_json) if isinstance(pending_bull_json, str) else pending_bull_json
+
+            pending_bear_data = None
+            if pending_bear_json:
+                pending_bear_data = json.loads(pending_bear_json) if isinstance(pending_bear_json, str) else pending_bear_json
+
+            # Deserialize crossover events
+            successful_bull = [
+                self._deserialize_crossover_event(c) for c in bull_data
+                if self._deserialize_crossover_event(c) is not None
+            ]
+            successful_bear = [
+                self._deserialize_crossover_event(c) for c in bear_data
+                if self._deserialize_crossover_event(c) is not None
+            ]
+
+            pending_bull = self._deserialize_crossover_event(pending_bull_data)
+            pending_bear = self._deserialize_crossover_event(pending_bear_data)
+
+            return PairCrossoverState(
+                epic=epic,
+                successful_bull_crossovers=successful_bull,
+                successful_bear_crossovers=successful_bear,
+                pending_bull_crossover=pending_bull,
+                pending_bear_crossover=pending_bear,
+                last_trade_direction=last_trade_direction,
+                last_trade_timestamp=last_trade_timestamp,
+                last_bull_crossover_timestamp=last_bull_ts,
+                last_bear_crossover_timestamp=last_bear_ts
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to deserialize state from row: {e}")
+            return None

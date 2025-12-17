@@ -1891,6 +1891,13 @@ class TradeValidator:
                     return False, f"SMC_STRUCTURE confidence {confidence:.1%} below SMC minimum {smc_min_confidence:.1%}"
                 return True, f"SMC_STRUCTURE confidence {confidence:.1%} meets requirements (min: {smc_min_confidence:.1%})"
 
+            # SMC_SIMPLE uses its own internal confidence threshold (50%) with 3-tier validation
+            elif 'SMC_SIMPLE' in strategy or 'smc_simple' in strategy.lower():
+                smc_simple_min_confidence = 0.50  # Same as SMC_SIMPLE strategy's MIN_CONFIDENCE_THRESHOLD
+                if confidence < smc_simple_min_confidence:
+                    return False, f"SMC_SIMPLE confidence {confidence:.1%} below minimum {smc_simple_min_confidence:.1%}"
+                return True, f"SMC_SIMPLE confidence {confidence:.1%} meets requirements (min: {smc_simple_min_confidence:.1%})"
+
             # EMA_DOUBLE_CONFIRMATION uses 50% minimum confidence with multi-filter validation
             elif 'EMA_DOUBLE' in strategy or 'ema_double' in strategy.lower():
                 ema_double_min_confidence = 0.50  # Same as strategy's internal MIN_CONFIDENCE

@@ -2,9 +2,15 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.1.0
+VERSION: 2.1.1
 DATE: 2025-12-17
-STATUS: R:R Root Cause Fixes - Tighter SL for Better R:R
+STATUS: Volume Fix - Use LTV for Confidence Scoring
+
+v2.1.1 CHANGES (Volume Data Fix):
+    - FIX: Use 'ltv' column instead of 'volume' for volume confirmation
+    - Analysis: IG provides actual data in 'ltv' (Last Traded Volume), 'volume' is always 0
+    - Impact: +10% confidence boost when volume spike detected (0.05 → 0.15)
+    - Expected: More signals passing 60% confidence threshold
 
 v2.1.0 CHANGES (R:R Root Cause Fixes):
     - FIX: Reduced SL_ATR_MULTIPLIER 1.2→1.0 (tighter stops = better R:R)
@@ -732,7 +738,13 @@ class SMCSimpleStrategy:
         lows = df['low'].values
         closes = df['close'].values
         opens = df['open'].values
-        volumes = df['volume'].values if 'volume' in df.columns else None
+        # v2.1.1: Prefer 'ltv' (Last Traded Volume) over 'volume' - IG provides actual data in ltv
+        if 'ltv' in df.columns:
+            volumes = df['ltv'].values
+        elif 'volume' in df.columns:
+            volumes = df['volume'].values
+        else:
+            volumes = None
 
         swing_highs = []
         swing_lows = []

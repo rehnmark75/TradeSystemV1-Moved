@@ -297,9 +297,10 @@ class SignalDetector:
             try:
                 from .strategies.ema_double_confirmation_strategy import EMADoubleConfirmationStrategy
                 self.ema_double_confirmation_strategy = EMADoubleConfirmationStrategy(
-                    data_fetcher=self.data_fetcher
+                    data_fetcher=self.data_fetcher,
+                    db_manager=self.db_manager  # v2.2.0: Pass db_manager for persistent crossover state
                 )
-                self.logger.info("✅ EMA Double Confirmation strategy initialized (21/50 crossover with 2-confirm)")
+                self.logger.info("✅ EMA Double Confirmation strategy initialized (9/21 crossover with DB persistence)")
             except ImportError as e:
                 self.logger.error(f"❌ Failed to import EMA Double Confirmation strategy: {e}")
                 self.ema_double_confirmation_strategy = None
@@ -572,9 +573,10 @@ class SignalDetector:
         try:
             from .strategies.ema_double_confirmation_strategy import EMADoubleConfirmationStrategy
             self.ema_double_confirmation_strategy = EMADoubleConfirmationStrategy(
-                data_fetcher=self.data_fetcher
+                data_fetcher=self.data_fetcher,
+                db_manager=self.db_manager  # v2.2.0: Pass db_manager for persistent crossover state
             )
-            self.logger.info("🔧 Force-initialized EMA Double Confirmation strategy")
+            self.logger.info("🔧 Force-initialized EMA Double Confirmation strategy (with DB persistence)")
             return True, "EMA Double Confirmation strategy force-initialized"
         except ImportError as e:
             return False, f"Failed to import EMA Double Confirmation strategy: {e}"

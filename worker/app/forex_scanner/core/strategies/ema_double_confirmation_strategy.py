@@ -72,7 +72,8 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
         data_fetcher=None,
         backtest_mode: bool = False,
         epic: str = None,
-        pipeline_mode: bool = True
+        pipeline_mode: bool = True,
+        db_manager=None
     ):
         """
         Initialize the EMA Double Confirmation Strategy.
@@ -82,6 +83,7 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
             backtest_mode: Whether running in backtest mode
             epic: Optional specific epic for initialization
             pipeline_mode: Whether running in live pipeline mode
+            db_manager: Optional DatabaseManager for persistent state (v2.0.0)
         """
         # Initialize base strategy
         super().__init__('ema_double_confirmation')
@@ -89,12 +91,14 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
         self.data_fetcher = data_fetcher
         self.backtest_mode = backtest_mode
         self.epic = epic
+        self.db_manager = db_manager
         self.price_adjuster = PriceAdjuster()
 
         # Load configuration
         self._load_config()
 
-        # Initialize crossover tracker (in-memory state)
+        # Initialize crossover tracker with optional database persistence
+        # v2.0.0: Database persistence fixes "chicken and egg" problem with MIN_SUCCESSFUL_CROSSOVERS
         self.crossover_tracker = CrossoverHistoryTracker(
             success_candles=self.success_candles,
             lookback_hours=self.lookback_hours,
@@ -104,7 +108,9 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
             extended_success_bonus=self.extended_success_bonus,
             ema_fast_period=self.ema_fast,
             ema_slow_period=self.ema_slow,
-            logger=self.logger
+            logger=self.logger,
+            db_manager=db_manager,
+            use_database_state=self.use_database_state
         )
 
         # Optimal params (for base class compatibility)
@@ -191,6 +197,10 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
         self.min_risk_after_offset_pips = getattr(strategy_config, 'MIN_RISK_AFTER_OFFSET_PIPS', 5.0) if strategy_config else 5.0
         self.max_risk_after_offset_pips = getattr(strategy_config, 'MAX_RISK_AFTER_OFFSET_PIPS', 45.0) if strategy_config else 45.0
 
+        # v2.0.0: Database Persistence for Crossover State
+        # Fixes "chicken and egg" problem with MIN_SUCCESSFUL_CROSSOVERS requirement
+        self.use_database_state = getattr(strategy_config, 'USE_DATABASE_STATE', False) if strategy_config else False
+
     def _log_initialization(self):
         """Log strategy initialization details"""
         self.logger.info("=" * 60)
@@ -204,6 +214,7 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
         self.logger.info(f"  HTF Trend Filter: {self.htf_timeframe} EMA {self.htf_ema_period} ({'enabled' if self.htf_trend_filter_enabled else 'disabled'})")
         self.logger.info(f"  FVG Confirmation: {'enabled' if self.fvg_confirmation_enabled else 'disabled'} (lookback={self.fvg_lookback_candles}, min_size={self.fvg_min_size_pips}pips)")
         self.logger.info(f"  ADX Filter: {'enabled' if self.adx_filter_enabled else 'disabled'} (min={self.adx_min_value})")
+        self.logger.info(f"  Database State: {'ENABLED' if self.use_database_state else 'DISABLED'} (persistence for crossover history)")
         self.logger.info(f"  Backtest mode: {self.backtest_mode}")
         self.logger.info("=" * 60)
 

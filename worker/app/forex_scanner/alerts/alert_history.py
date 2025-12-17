@@ -882,9 +882,17 @@ class AlertHistoryManager:
             # Extract market intelligence data from signal
             market_intelligence = signal.get('market_intelligence', {})
 
-            # If no market intelligence data, return existing metadata
+            # If no market intelligence data, serialize and return existing metadata
             if not market_intelligence:
-                return {'strategy_metadata': existing_metadata}
+                # Must serialize to JSON string for PostgreSQL JSON column
+                if existing_metadata and isinstance(existing_metadata, dict):
+                    try:
+                        from forex_scanner.utils.scanner_utils import make_json_serializable
+                        cleaned = make_json_serializable(existing_metadata)
+                        return {'strategy_metadata': json.dumps(cleaned) if cleaned else None}
+                    except Exception:
+                        return {'strategy_metadata': json.dumps(str(existing_metadata)) if existing_metadata else None}
+                return {'strategy_metadata': None}
 
             # Create enhanced metadata with market intelligence
             enhanced_metadata = existing_metadata.copy() if existing_metadata else {}
