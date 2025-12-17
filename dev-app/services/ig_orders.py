@@ -439,24 +439,38 @@ async def place_working_order(
     limit_distance: int,
     expiry_minutes: int,
     currency_code: str,
-    size: float = 1.0
+    size: float = 1.0,
+    order_type: str = "STOP"
 ) -> dict:
     """
-    Place a working order (limit order) at a specified price level.
+    Place a working order (STOP or LIMIT order) at a specified price level.
 
     Unlike market orders that execute immediately at current price,
     working orders wait until price reaches the specified level.
+
+    Order Types (IG API):
+        - STOP: Entry triggered when price BREAKS THROUGH the level
+          * STOP BUY: Triggered when price rises TO or ABOVE level (momentum confirmation)
+          * STOP SELL: Triggered when price falls TO or BELOW level (momentum confirmation)
+        - LIMIT: Entry triggered when price REACHES the level from the opposite side
+          * LIMIT BUY: Triggered when price falls TO or BELOW level (better price entry)
+          * LIMIT SELL: Triggered when price rises TO or ABOVE level (better price entry)
+
+    For stop-entry style (momentum confirmation):
+        - BUY above current price → use STOP
+        - SELL below current price → use STOP
 
     Args:
         auth_headers: IG API authentication headers
         epic: Market epic (e.g., 'CS.D.EURUSD.MINI.IP')
         direction: 'BUY' or 'SELL'
-        level: Entry price level for the limit order
+        level: Entry price level for the order
         stop_distance: Stop loss distance in points
         limit_distance: Take profit distance in points
         expiry_minutes: Minutes until order expires (auto-cancelled)
         currency_code: Currency code (e.g., 'GBP')
         size: Position size (default 1.0)
+        order_type: 'STOP' (momentum confirmation) or 'LIMIT' (better price). Default: STOP
 
     Returns:
         dict: Response containing dealReference for the working order
@@ -470,12 +484,18 @@ async def place_working_order(
     expiry_time = datetime.utcnow() + timedelta(minutes=expiry_minutes)
     good_till_date = expiry_time.strftime("%Y/%m/%d %H:%M:%S")
 
+    # Validate order type
+    order_type = order_type.upper()
+    if order_type not in ["STOP", "LIMIT"]:
+        logger.warning(f"⚠️ Invalid order type '{order_type}', defaulting to STOP")
+        order_type = "STOP"
+
     payload = {
         "epic": epic,
         "expiry": "-",
         "direction": direction.upper(),
         "size": size,
-        "type": "LIMIT",
+        "type": order_type,
         "level": level,
         "currencyCode": currency_code,
         "timeInForce": "GOOD_TILL_DATE",
@@ -485,7 +505,7 @@ async def place_working_order(
         "limitDistance": limit_distance
     }
 
-    logger.info(f"📤 [WORKING ORDER] Placing LIMIT order: {epic} {direction} at {level}")
+    logger.info(f"📤 [WORKING ORDER] Placing {order_type} order: {epic} {direction} at {level}")
     logger.info(f"   Stop: {stop_distance}pts, Limit: {limit_distance}pts, Expiry: {good_till_date} UTC")
     logger.info(f"   Payload: {json.dumps(payload, indent=2)}")
 

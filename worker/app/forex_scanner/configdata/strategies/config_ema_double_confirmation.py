@@ -26,9 +26,10 @@
 #
 # v2.0.0 CHANGES (Limit Orders):
 #   - NEW: Limit order support with ATR-based price offsets
-#   - BUY orders placed BELOW current price (buy cheaper)
-#   - SELL orders placed ABOVE current price (sell higher)
-#   - 6-minute auto-expiry for unfilled orders
+#   - v2.3.0: CHANGED to stop-entry style (momentum confirmation)
+#   - BUY orders placed ABOVE current price (enter when price breaks up)
+#   - SELL orders placed BELOW current price (enter when price breaks down)
+#   - Max offset reduced to 3 pips, 15-minute auto-expiry
 # ============================================================================
 
 from datetime import time
@@ -174,13 +175,14 @@ OPTIMAL_RR_RATIO = 2.0          # Optimal R:R for full confidence
 # Auto-expire unfilled orders after configured time
 
 LIMIT_ORDER_ENABLED = True               # v2.0.0: Enable limit orders
-LIMIT_EXPIRY_MINUTES = 6                 # v2.0.0: Auto-cancel after 6 min (3 scanner cycles)
+LIMIT_EXPIRY_MINUTES = 15                # v2.3.0: Auto-cancel after 15 min (1 candle on 15m TF)
 
-# Entry offset configuration (place orders at better prices)
+# Entry offset configuration (stop-entry style: confirm direction continuation)
+# BUY limit ABOVE price, SELL limit BELOW price (momentum confirmation)
 # EMA crossover strategy uses ATR-based offset (adapts to volatility)
-LIMIT_OFFSET_ATR_FACTOR = 0.25           # Offset = 25% of ATR (crossovers need tighter entry)
+LIMIT_OFFSET_ATR_FACTOR = 0.2            # Offset = 20% of ATR (reduced for tighter entry)
 LIMIT_OFFSET_MIN_PIPS = 2.0              # Minimum offset: 2 pips
-LIMIT_OFFSET_MAX_PIPS = 6.0              # Maximum offset: 6 pips
+LIMIT_OFFSET_MAX_PIPS = 3.0              # Maximum offset: 3 pips (user request: reduced from 6)
 
 # Risk sanity checks after offset
 MIN_RISK_AFTER_OFFSET_PIPS = 5.0         # Reject if SL too close after offset

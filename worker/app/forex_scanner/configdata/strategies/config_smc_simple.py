@@ -18,10 +18,10 @@
 #
 # v2.0.0 PHASE 3 LIMIT ORDERS:
 #   - NEW: Limit order support with intelligent price offsets
-#   - PULLBACK entries: ATR-based offset (3-8 pips, adapts to volatility)
-#   - MOMENTUM entries: Fixed offset (4 pips)
-#   - 6-minute auto-expiry for unfilled orders
-#   - Expected improvement: Win rate 39%→52-55%, Profit Factor 1.24→1.6-1.8
+#   - v2.2.0: CHANGED to stop-entry style (momentum confirmation)
+#   - BUY orders placed ABOVE current price (enter when price breaks up)
+#   - SELL orders placed BELOW current price (enter when price breaks down)
+#   - Max offset reduced to 3 pips, 15-minute auto-expiry
 #
 # v1.8.0 PHASE 2 LOGIC ENHANCEMENTS:
 #   - NEW: Momentum continuation entry mode (price beyond break = valid)
@@ -153,16 +153,17 @@ MIN_BODY_PERCENTAGE = 0.45               # v2.0.1: REDUCED from 0.60 - allow mor
 # Auto-expire unfilled orders after configured time
 
 LIMIT_ORDER_ENABLED = True               # v2.0.0: Enable limit orders
-LIMIT_EXPIRY_MINUTES = 6                 # v2.0.0: Auto-cancel after 6 min (3 scanner cycles)
+LIMIT_EXPIRY_MINUTES = 15                # v2.3.0: Auto-cancel after 15 min (1 candle on 15m TF)
 
-# Entry offset configuration (place orders at better prices)
+# Entry offset configuration (stop-entry style: confirm direction continuation)
+# BUY limit ABOVE price, SELL limit BELOW price (momentum confirmation)
 # PULLBACK entries: ATR-based offset adapts to volatility
-PULLBACK_OFFSET_ATR_FACTOR = 0.3         # Offset = 30% of ATR
-PULLBACK_OFFSET_MIN_PIPS = 3.0           # Minimum offset: 3 pips
-PULLBACK_OFFSET_MAX_PIPS = 8.0           # Maximum offset: 8 pips
+PULLBACK_OFFSET_ATR_FACTOR = 0.2         # Offset = 20% of ATR (reduced for tighter entry)
+PULLBACK_OFFSET_MIN_PIPS = 2.0           # Minimum offset: 2 pips
+PULLBACK_OFFSET_MAX_PIPS = 3.0           # Maximum offset: 3 pips (user request: reduced from 8)
 
 # MOMENTUM entries: Fixed offset (trend is strong, don't wait too long)
-MOMENTUM_OFFSET_PIPS = 4.0               # Fixed 4 pip offset for momentum entries
+MOMENTUM_OFFSET_PIPS = 3.0               # Fixed 3 pip offset for momentum entries (reduced from 4)
 
 # Risk sanity checks after offset
 MIN_RISK_AFTER_OFFSET_PIPS = 5.0         # Reject if SL too close after offset
@@ -295,20 +296,21 @@ PAIR_SL_BUFFERS = {
 # v2.1.2: REDUCED for forward testing - use strategy's MIN_CONFIDENCE_THRESHOLD (50%)
 
 PAIR_MIN_CONFIDENCE = {
-    # v2.1.2: REDUCED from 70-72% to 50% for forward testing
+    # v2.1.2: REDUCED from 70-72% to 49% for forward testing
+    # Using 49% to allow signals at exactly 50% to pass (< comparison)
     # Re-raise after collecting live performance data
 
     # Volatile JPY crosses - reduced for forward testing
-    'EURJPY': 0.50,
-    'CS.D.EURJPY.MINI.IP': 0.50,
-    'GBPJPY': 0.50,
-    'CS.D.GBPJPY.MINI.IP': 0.50,
-    'AUDJPY': 0.50,
-    'CS.D.AUDJPY.MINI.IP': 0.50,
+    'EURJPY': 0.49,
+    'CS.D.EURJPY.MINI.IP': 0.49,
+    'GBPJPY': 0.49,
+    'CS.D.GBPJPY.MINI.IP': 0.49,
+    'AUDJPY': 0.49,
+    'CS.D.AUDJPY.MINI.IP': 0.49,
 
     # Low liquidity pairs - reduced for forward testing
-    'USDCHF': 0.50,
-    'CS.D.USDCHF.MINI.IP': 0.50,
+    'USDCHF': 0.49,
+    'CS.D.USDCHF.MINI.IP': 0.49,
 
     # Default for others = MIN_CONFIDENCE_THRESHOLD (0.50)
 }
