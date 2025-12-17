@@ -173,7 +173,7 @@ LIMIT_OFFSET_MAX_PIPS = 6.0              # Maximum offset: 6 pips
 
 # Risk sanity checks after offset
 MIN_RISK_AFTER_OFFSET_PIPS = 5.0         # Reject if SL too close after offset
-MAX_RISK_AFTER_OFFSET_PIPS = 45.0        # Reject if SL too far after offset
+MAX_RISK_AFTER_OFFSET_PIPS = 20.0        # v2.0.1: REDUCED from 45 - max 20 pip SL for better R:R
 
 # ============================================================================
 # SESSION FILTER

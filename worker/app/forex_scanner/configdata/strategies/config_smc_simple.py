@@ -49,7 +49,7 @@ EMA_BUFFER_PIPS = 3                      # Buffer zone around EMA
 
 # Price position requirements
 REQUIRE_CLOSE_BEYOND_EMA = True          # Candle must CLOSE beyond EMA (not just wick)
-MIN_DISTANCE_FROM_EMA_PIPS = 10          # v1.4.0: INCREASED from 3 - avoid noise near EMA
+MIN_DISTANCE_FROM_EMA_PIPS = 6           # v2.0.1: REDUCED from 10 - allow trading closer to EMA
 
 # ============================================================================
 # TIER 2: 15M ENTRY TRIGGER (Intermediate Timeframe)
@@ -125,7 +125,7 @@ FALLBACK_MIN_SWING_PIPS = 5              # Absolute minimum if ATR unavailable
 
 MOMENTUM_QUALITY_ENABLED = True          # v1.8.0: NEW - filter weak breakouts
 MIN_BREAKOUT_ATR_RATIO = 0.5             # Breakout candle range > 50% of ATR
-MIN_BODY_PERCENTAGE = 0.60               # Body must be > 60% of candle range
+MIN_BODY_PERCENTAGE = 0.45               # v2.0.1: REDUCED from 0.60 - allow more breakout candles
 
 # ============================================================================
 # v2.0.0: LIMIT ORDER CONFIGURATION
