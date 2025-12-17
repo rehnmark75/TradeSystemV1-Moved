@@ -3540,7 +3540,14 @@ class UnifiedTradingDashboard:
 
     def render_alert_history_tab(self):
         """Render Alert History tab with Claude Vision analysis status"""
-        st.header("📋 Alert History")
+        # Header with refresh button
+        header_col1, header_col2 = st.columns([6, 1])
+        with header_col1:
+            st.header("📋 Alert History")
+        with header_col2:
+            if st.button("🔄 Refresh", key="alert_history_refresh", help="Refresh alert data"):
+                st.rerun()
+
         st.markdown("View all trading signals with Claude AI analysis status")
 
         # Get unique strategies and pairs for filters
