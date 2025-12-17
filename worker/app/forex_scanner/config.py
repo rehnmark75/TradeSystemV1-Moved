@@ -645,8 +645,8 @@ from configdata.market_intelligence_config import *
 # Enable/disable automatic order execution
 AUTO_TRADING_ENABLED = True  # Set to True to enable live trading #
 SIGNAL_COOLDOWN_MINUTES = 15  
-# Position sizing
-DEFAULT_POSITION_SIZE = 0.1  # Fixed position size (optional)
+# Position sizing - ALWAYS use 1.0 for live trading
+DEFAULT_POSITION_SIZE = 1.0  # Fixed position size: 1 mini lot
 ACCOUNT_BALANCE = 10000      # Account balance for risk calculation
 RISK_PER_TRADE = 0.02        # 2% risk per trade
 MAX_POSITION_SIZE = 1.0      # Maximum position size
@@ -705,9 +705,9 @@ ORDER_LABEL_PREFIX = "ForexScanner"  # Prefix for order labels
 # POSITION SIZING METHOD (choose one)
 # ------------------------------------
 
-# Method 1: Fixed Position Size (simplest)
-FIXED_POSITION_SIZE = None  # Set to 0.1 for fixed 0.1 lots, or None to disable
-DEFAULT_POSITION_SIZE = 0.1  # Fallback if other methods fail
+# Method 1: Fixed Position Size (simplest) - ALWAYS use 1.0
+FIXED_POSITION_SIZE = 1.0   # Fixed: 1 mini lot
+# Note: DEFAULT_POSITION_SIZE is defined above at line 649 as 1.0
 
 # Method 2: Risk-Based Position Sizing (RECOMMENDED)
 RISK_PER_TRADE_PERCENT = 0.02  # Risk 2% of account per trade
@@ -715,8 +715,8 @@ ACCOUNT_BALANCE = 10000        # Your account balance in account currency
 PIP_VALUE = 1.0               # Value per pip (depends on broker/pair)
 
 # Method 3: Confidence-Based Position Sizing
-CONFIDENCE_BASED_SIZING = True  # Enable confidence-based sizing
-BASE_POSITION_SIZE = 0.1       # Base size, adjusted by confidence
+CONFIDENCE_BASED_SIZING = False  # DISABLED - always use fixed 1.0
+BASE_POSITION_SIZE = 1.0         # Base size: 1 mini lot
 
 # STOP LOSS MANAGEMENT
 # --------------------

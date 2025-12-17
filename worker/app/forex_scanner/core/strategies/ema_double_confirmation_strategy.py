@@ -23,11 +23,10 @@ Rationale:
 
 v2.0.0 CHANGES (Limit Orders):
     - NEW: Limit order support with ATR-based price offsets
-    - NEW: ATR-based offset (25% of ATR, clamped 2-6 pips)
-    - NEW: 6-minute auto-expiry for unfilled limit orders
-    - NEW: Risk sanity checks after offset calculation
-    - BUY orders placed BELOW market (buy cheaper)
-    - SELL orders placed ABOVE market (sell higher)
+    - v2.3.0: CHANGED to stop-entry style (momentum confirmation)
+    - BUY orders placed ABOVE market (enter when price breaks up)
+    - SELL orders placed BELOW market (enter when price breaks down)
+    - Max offset: 3 pips, 6-minute auto-expiry
 """
 
 import pandas as pd
@@ -929,15 +928,12 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
         epic: str
     ) -> tuple:
         """
-        Calculate optimal limit entry price with offset for better fills.
+        Calculate limit entry price with offset for momentum confirmation.
 
-        v2.0.0: Implements intelligent price offset for limit orders:
-        - Uses ATR-based offset that adapts to volatility
-        - Offset range: 2-6 pips (tighter than SMC since crossovers are momentum entries)
-
-        The offset places orders at BETTER prices than current market:
-        - BUY orders placed BELOW current price (buy cheaper)
-        - SELL orders placed ABOVE current price (sell higher)
+        v2.3.0: Stop-entry style - confirm price is moving in intended direction:
+        - BUY orders placed ABOVE current price (enter when price breaks up)
+        - SELL orders placed BELOW current price (enter when price breaks down)
+        - Max offset: 3 pips (user request)
 
         Args:
             current_close: Current market price
@@ -973,16 +969,16 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
         # Calculate offset in price terms
         offset = offset_pips * pip_value
 
-        # Apply offset based on direction
+        # Apply offset based on direction (stop-entry style: confirm direction continuation)
         if direction == 'BULL':
-            # BUY: Place limit order BELOW current price (buy cheaper)
-            limit_entry = current_close - offset
-        else:
-            # SELL: Place limit order ABOVE current price (sell higher)
+            # BUY: Place limit order ABOVE current price (enter when price breaks up)
             limit_entry = current_close + offset
+        else:
+            # SELL: Place limit order BELOW current price (enter when price breaks down)
+            limit_entry = current_close - offset
 
         self.logger.info(f"   📍 Market price: {current_close:.5f}")
-        self.logger.info(f"   📍 Limit entry: {limit_entry:.5f} ({offset_pips:.1f} pips better)")
+        self.logger.info(f"   📍 Limit entry: {limit_entry:.5f} ({offset_pips:.1f} pips momentum confirmation)")
 
         return limit_entry, offset_pips
 

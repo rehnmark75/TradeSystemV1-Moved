@@ -438,9 +438,10 @@ class OrderExecutor:
                 # Check if order was successful or skipped (both are valid outcomes)
                 status = result.get('status') if result else None
 
-                if status in ['success', 'skipped', 'blocked']:
-                    # Success, duplicate position, or blacklisted - all valid non-error outcomes
-                    if attempt > 0 and status == 'success':
+                # v2.0.0: 'pending' is valid for limit orders (order placed, waiting for fill)
+                if status in ['success', 'skipped', 'blocked', 'pending']:
+                    # Success, duplicate position, blacklisted, or pending limit - all valid non-error outcomes
+                    if attempt > 0 and status in ['success', 'pending']:
                         self.logger.info(f"✅ Order succeeded on retry attempt {attempt} for {external_epic}")
                     return result
                 elif status == 'error':

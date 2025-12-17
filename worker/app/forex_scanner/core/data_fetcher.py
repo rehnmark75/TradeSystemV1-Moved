@@ -188,8 +188,7 @@ class DataFetcher:
             if self.cache_enabled:
                 self._cache_data(cache_key, df_enhanced)
             
-            self.logger.info(f"✅ Enhanced data for {epic}: {len(df_enhanced)} bars")
-            self.logger.info(f"   Latest candle: {df_enhanced.iloc[-1]['start_time'].strftime('%Y-%m-%d %H:%M %Z')}")
+            self.logger.debug(f"✅ Enhanced data for {epic}: {len(df_enhanced)} bars")
             
             return df_enhanced
             
@@ -1321,10 +1320,7 @@ class DataFetcher:
             complete_candles = len(df_15m_reset[df_15m_reset['is_complete']])
             high_confidence = len(df_15m_reset[df_15m_reset['trading_confidence'] >= 90])
             
-            self.logger.info(f"✅ 15m synthesis quality:")
-            self.logger.info(f"   Total 15m candles: {total_candles}")
-            self.logger.info(f"   Complete candles: {complete_candles}/{total_candles} ({complete_candles/total_candles*100:.1f}%)")
-            self.logger.info(f"   High confidence (90%+): {high_confidence}/{total_candles} ({high_confidence/total_candles*100:.1f}%)")
+            self.logger.debug(f"✅ 15m synthesis quality: {complete_candles}/{total_candles} complete ({complete_candles/total_candles*100:.1f}%), {high_confidence} high-confidence")
             
             # Warning for recent incomplete data
             try:
@@ -1340,8 +1336,7 @@ class DataFetcher:
                 incomplete_recent = recent_candles[~recent_candles['is_complete']]
                 
                 if len(incomplete_recent) > 0:
-                    self.logger.warning(f"⚠️ {len(incomplete_recent)} incomplete 15m candles in last 2 hours")
-                    self.logger.warning("   Consider waiting for complete data before trading signals")
+                    self.logger.debug(f"⚠️ {len(incomplete_recent)} incomplete 15m candles in last 2 hours")
             except Exception as e:
                 self.logger.debug(f"Could not check recent incomplete candles: {e}")
             
@@ -1498,10 +1493,7 @@ class DataFetcher:
             complete_candles = len(df_60m_reset[df_60m_reset['is_complete']])
             high_confidence = len(df_60m_reset[df_60m_reset['trading_confidence'] >= 90])
 
-            self.logger.info(f"✅ 60m synthesis quality:")
-            self.logger.info(f"   Total 60m candles: {total_candles}")
-            self.logger.info(f"   Complete candles: {complete_candles}/{total_candles} ({complete_candles/total_candles*100:.1f}%)")
-            self.logger.info(f"   High confidence (90%+): {high_confidence}/{total_candles} ({high_confidence/total_candles*100:.1f}%)")
+            self.logger.debug(f"✅ 60m synthesis quality: {complete_candles}/{total_candles} complete ({complete_candles/total_candles*100:.1f}%), {high_confidence} high-confidence")
 
             # Warning for recent incomplete data
             try:
@@ -1517,8 +1509,7 @@ class DataFetcher:
                 incomplete_recent = recent_candles[~recent_candles['is_complete']]
 
                 if len(incomplete_recent) > 0:
-                    self.logger.warning(f"⚠️ {len(incomplete_recent)} incomplete 60m candles in last 4 hours")
-                    self.logger.warning("   Consider waiting for complete data before trading signals")
+                    self.logger.debug(f"⚠️ {len(incomplete_recent)} incomplete 60m candles in last 4 hours")
             except Exception as e:
                 self.logger.debug(f"Could not check recent incomplete candles: {e}")
 
@@ -1628,9 +1619,7 @@ class DataFetcher:
             total_candles = len(df_4h_reset)
             complete_candles = len(df_4h_reset[df_4h_reset['is_complete']])
 
-            self.logger.info(f"✅ 4h synthesis quality:")
-            self.logger.info(f"   Total 4h candles: {total_candles}")
-            self.logger.info(f"   Complete candles: {complete_candles}/{total_candles} ({complete_candles/total_candles*100:.1f}%)")
+            self.logger.debug(f"✅ 4h synthesis quality: {complete_candles}/{total_candles} complete ({complete_candles/total_candles*100:.1f}%)")
 
             return df_4h_reset
 
@@ -1865,7 +1854,7 @@ class DataFetcher:
             """
         
         try:
-            self.logger.info(f"🔍 Fetching {epic} data since {tz_manager.format_time_for_display(since_utc)}")
+            self.logger.debug(f"🔍 Fetching {epic} data since {tz_manager.format_time_for_display(since_utc)}")
             
             df = self.db_manager.execute_query(query, {
                 "epic": epic,
@@ -1897,7 +1886,7 @@ class DataFetcher:
                         min_quality = df['quality_score'].min()
                         min_quality_threshold = getattr(config, 'MIN_QUALITY_SCORE_FOR_TRADING', 0.5)
                         
-                        self.logger.info(f"📊 Data quality for {epic}: avg={avg_quality:.3f}, min={min_quality:.3f}")
+                        self.logger.debug(f"📊 Data quality for {epic}: avg={avg_quality:.3f}, min={min_quality:.3f}")
                         
                         if min_quality < min_quality_threshold:
                             self.logger.warning(f"⚠️ Low quality data detected for {epic} (min: {min_quality:.3f} < threshold: {min_quality_threshold})")
@@ -1919,21 +1908,21 @@ class DataFetcher:
             
             # FIXED: Complete 15m, 60m, and 4H resampling implementation
             if timeframe == '15m' and source_tf == 5:
-                self.logger.info(f"🔄 Resampling 5m data to 15m for {epic}")
+                self.logger.debug(f"🔄 Resampling 5m data to 15m for {epic}")
                 df = self._resample_to_15m_optimized(df)
 
                 if df is None or len(df) == 0:
                     self.logger.error(f"❌ 15m resampling failed for {epic}")
                     return None
             elif timeframe == '1h' and source_tf == 5:
-                self.logger.info(f"🔄 Resampling 5m data to 60m for {epic}")
+                self.logger.debug(f"🔄 Resampling 5m data to 60m for {epic}")
                 df = self._resample_to_60m_optimized(df)
 
                 if df is None or len(df) == 0:
                     self.logger.error(f"❌ 60m resampling failed for {epic}")
                     return None
             elif timeframe == '4h' and source_tf == 5:
-                self.logger.info(f"🔄 Resampling 5m data to 4h for {epic}")
+                self.logger.debug(f"🔄 Resampling 5m data to 4h for {epic}")
                 df = self._resample_to_4h_optimized(df)
 
                 if df is None or len(df) == 0:
@@ -2141,10 +2130,7 @@ class DataFetcher:
             
             # Log validation results
             if not missing_periods and not missing_semantic:
-                self.logger.debug(f"✅ EMA validation passed for {epic}")
-                self.logger.debug(f"   Configuration: {config_source}")
-                self.logger.debug(f"   Periods calculated: {ema_periods}")
-                self.logger.info(f"   Semantic mapping: ✅")
+                self.logger.debug(f"✅ EMA validation passed for {epic} (semantic mapping: ✅)")
                 
                 # Log actual EMA values for verification
                 if len(df) > 0:

@@ -1381,10 +1381,12 @@ class TradeValidator:
             # - MACD: Can trade counter-trend (momentum reversals)
             # - ranging_market: Specifically designed for ranging/non-trending conditions
             # - SMC_STRUCTURE: Has its own HTF trend validation and structure-based entries
+            # - SMC_SIMPLE: Has its own HTF trend validation
             # - EMA_DOUBLE_CONFIRMATION: Has its own 4H EMA 21 HTF trend filter
             is_macd_strategy = 'MACD' in strategy
             is_ranging_strategy = 'ranging_market' in strategy.lower()
             is_smc_structure = 'SMC_STRUCTURE' in strategy or 'smc_structure' in strategy.lower()
+            is_smc_simple = 'SMC_SIMPLE' in strategy or 'smc_simple' in strategy.lower()
             is_ema_double = 'EMA_DOUBLE' in strategy or 'ema_double' in strategy.lower()
 
             # Apply trend filter logic with comprehensive logging
@@ -1405,6 +1407,9 @@ class TradeValidator:
                     elif is_smc_structure:
                         self.logger.info(f"✅ SMC_STRUCTURE BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (has own HTF trend validation)")
                         return True, f"SMC_STRUCTURE BUY valid: structure-based entry with HTF validation (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
+                    elif is_smc_simple:
+                        self.logger.info(f"✅ SMC_SIMPLE BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (has own HTF trend validation)")
+                        return True, f"SMC_SIMPLE BUY valid: SMC-based entry with HTF validation (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
                     elif is_ema_double:
                         self.logger.info(f"✅ EMA_DOUBLE BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (has own 4H EMA 21 HTF filter)")
                         return True, f"EMA_DOUBLE BUY valid: 4H EMA 21 trend filter applied (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
@@ -1427,6 +1432,9 @@ class TradeValidator:
                     elif is_smc_structure:
                         self.logger.info(f"✅ SMC_STRUCTURE SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (has own HTF trend validation)")
                         return True, f"SMC_STRUCTURE SELL valid: structure-based entry with HTF validation (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
+                    elif is_smc_simple:
+                        self.logger.info(f"✅ SMC_SIMPLE SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (has own HTF trend validation)")
+                        return True, f"SMC_SIMPLE SELL valid: SMC-based entry with HTF validation (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
                     elif is_ema_double:
                         self.logger.info(f"✅ EMA_DOUBLE SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (has own 4H EMA 21 HTF filter)")
                         return True, f"EMA_DOUBLE SELL valid: 4H EMA 21 trend filter applied (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"

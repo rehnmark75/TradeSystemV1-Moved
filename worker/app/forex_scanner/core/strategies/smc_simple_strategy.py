@@ -22,13 +22,10 @@ v2.1.0 CHANGES (R:R Root Cause Fixes):
 
 v2.0.0 CHANGES (Phase 3 - Limit Orders):
     - NEW: Limit order support with intelligent price offsets
-    - NEW: ATR-based offset for PULLBACK entries (3-8 pips, adapts to volatility)
-    - NEW: Fixed offset for MOMENTUM entries (4 pips)
-    - NEW: 6-minute auto-expiry for unfilled limit orders
-    - NEW: Risk sanity checks after offset calculation
-    - BUY orders placed BELOW market (buy cheaper)
-    - SELL orders placed ABOVE market (sell higher)
-    - Expected improvement: Win rate 39%→52-55%, better entry timing
+    - v2.2.0: CHANGED to stop-entry style (momentum confirmation)
+    - BUY orders placed ABOVE market (enter when price breaks up)
+    - SELL orders placed BELOW market (enter when price breaks down)
+    - Max offset: 3 pips, 6-minute auto-expiry
 
 v1.8.0 CHANGES (Phase 2):
     - NEW: Momentum continuation entry mode (price beyond break = valid entry)
@@ -1294,15 +1291,12 @@ class SMCSimpleStrategy:
         df: pd.DataFrame
     ) -> Tuple[float, float]:
         """
-        Calculate optimal limit entry price with offset for better fills.
+        Calculate limit entry price with offset for momentum confirmation.
 
-        v2.0.0: Implements intelligent price offset for limit orders:
-        - PULLBACK entries: ATR-based offset (adapts to volatility) - 3 to 8 pips
-        - MOMENTUM entries: Fixed offset (4 pips) - trend is strong, don't wait
-
-        The offset places orders at BETTER prices than current market:
-        - BUY orders placed BELOW current price (buy cheaper)
-        - SELL orders placed ABOVE current price (sell higher)
+        v2.2.0: Stop-entry style - confirm price is moving in intended direction:
+        - BUY orders placed ABOVE current price (enter when price breaks up)
+        - SELL orders placed BELOW current price (enter when price breaks down)
+        - Max offset: 3 pips (user request)
 
         Args:
             current_close: Current market price
@@ -1338,16 +1332,16 @@ class SMCSimpleStrategy:
         # Calculate offset in price terms
         offset = offset_pips * pip_value
 
-        # Apply offset based on direction
+        # Apply offset based on direction (stop-entry style: confirm direction continuation)
         if direction == 'BULL':
-            # BUY: Place limit order BELOW current price (buy cheaper)
-            limit_entry = current_close - offset
-        else:
-            # SELL: Place limit order ABOVE current price (sell higher)
+            # BUY: Place limit order ABOVE current price (enter when price breaks up)
             limit_entry = current_close + offset
+        else:
+            # SELL: Place limit order BELOW current price (enter when price breaks down)
+            limit_entry = current_close - offset
 
         self.logger.info(f"   📍 Market price: {current_close:.5f}")
-        self.logger.info(f"   📍 Limit entry: {limit_entry:.5f} ({offset_pips:.1f} pips better)")
+        self.logger.info(f"   📍 Limit entry: {limit_entry:.5f} ({offset_pips:.1f} pips momentum confirmation)")
 
         return limit_entry, offset_pips
 

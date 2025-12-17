@@ -528,13 +528,14 @@ class OrderManager:
         converted_signal = signal.copy()
 
         # DEBUG: Log signal keys before conversion
-        has_stop = 'stop_distance' in signal
-        has_limit = 'limit_distance' in signal
+        # Check for both IG API format (stop_distance/limit_distance) and strategy format (stop_loss/take_profit)
+        has_stop = 'stop_distance' in signal or 'stop_loss' in signal
+        has_limit = 'limit_distance' in signal or 'take_profit' in signal
         if has_stop and has_limit:
-            self.logger.debug(f"✅ Signal has SL/TP: stop_distance={signal['stop_distance']}, limit_distance={signal['limit_distance']}")
+            self.logger.debug(f"✅ Signal has SL/TP data")
         else:
-            self.logger.warning(f"⚠️ Signal missing SL/TP keys: has_stop={has_stop}, has_limit={has_limit}")
-            self.logger.warning(f"   Signal keys: {list(signal.keys())[:15]}")  # Show first 15 keys
+            self.logger.debug(f"⚠️ Signal may be missing SL/TP keys: has_stop={has_stop}, has_limit={has_limit}")
+            self.logger.debug(f"   Signal keys: {list(signal.keys())[:15]}")  # Show first 15 keys
 
         # Convert signal_type to format expected by OrderExecutor
         signal_type = signal.get('signal_type', '').upper()
