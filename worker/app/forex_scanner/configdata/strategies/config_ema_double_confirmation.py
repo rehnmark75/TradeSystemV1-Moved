@@ -1,22 +1,22 @@
 # ============================================================================
 # EMA DOUBLE CONFIRMATION STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.0.0
-# Description: EMA crossover strategy requiring 2 successful prior crossovers
-#              before taking the 3rd crossover as an entry signal.
+# Version: 2.1.0
+# Description: EMA crossover strategy with optional prior confirmation requirement
 #
 # Strategy Logic:
-#   1. Detect EMA 21/50 crossovers on 15-minute timeframe
-#   2. Validate crossover "success" = price stays on favorable side of EMA 21
-#      for SUCCESS_CANDLES consecutive candles (default: 4 = 1 hour)
-#   3. After 2 successful crossovers in SAME direction within lookback window,
-#      take the 3rd crossover as entry signal
-#   4. Reset counter for that direction after trade is taken
+#   1. Detect EMA 9/21 crossovers on 15-minute timeframe
+#   2. Validate crossover "success" = price stays on favorable side of EMA 9
+#      for SUCCESS_CANDLES consecutive candles (default: 3 = 45 min)
+#   3. Optionally require prior successful crossovers before entry
+#   4. Apply HTF trend filter, ADX filter for trending markets
 #
-# Rationale:
-#   - First crossover: Market testing direction
-#   - Second crossover: Confirms market respects EMA structure
-#   - Third crossover: High-probability entry with proven pattern
+# v2.1.0 CHANGES (Signal Generation Fixes):
+#   - FIX: Reduced MIN_SUCCESSFUL_CROSSOVERS 1→0 (immediate signals, no state dependency)
+#   - FIX: Increased MAX_RISK_AFTER_OFFSET_PIPS 20→35 (allow volatile pairs)
+#   - FIX: Disabled FVG filter (was blocking 40% of valid signals)
+#   - FIX: Reduced ADX threshold 20→15 (allow medium-strength trends)
+#   - Analysis: Strategy was generating 0 signals due to state reset + tight filters
 #
 # v2.0.0 CHANGES (Limit Orders):
 #   - NEW: Limit order support with ATR-based price offsets
@@ -31,9 +31,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "EMA_DOUBLE_CONFIRMATION"
-STRATEGY_VERSION = "2.0.0"
-STRATEGY_DATE = "2025-12-16"
-STRATEGY_STATUS = "Phase 2 - Limit Orders for Better Entry Timing"
+STRATEGY_VERSION = "2.1.0"
+STRATEGY_DATE = "2025-12-17"
+STRATEGY_STATUS = "Signal Generation Fixes - Remove State Dependency"
 
 # ============================================================================
 # CORE PARAMETERS
@@ -54,7 +54,11 @@ SUCCESS_CANDLES = 3           # 3 candles on 15m = 45 min (adjusted for faster E
 LOOKBACK_HOURS = 48           # 48 hours = 192 candles on 15m timeframe
 
 # Signal Requirements
-MIN_SUCCESSFUL_CROSSOVERS = 1  # Need 1 successful crossover before entry on 2nd
+# v2.1.0: REDUCED from 1 to 0 - Allow immediate signals without prior crossover history
+# The prior confirmation requirement caused a "chicken and egg" problem:
+# - State was in-memory only, reset on every restart
+# - Counter never built up, blocking ALL signals
+MIN_SUCCESSFUL_CROSSOVERS = 0  # v2.1.0: REDUCED from 1 - immediate entry on first valid crossover
 
 # ============================================================================
 # HIGHER TIMEFRAME TREND FILTER
@@ -69,11 +73,12 @@ HTF_EMA_PERIOD = 21               # EMA period on higher timeframe (21 = faster 
 HTF_MIN_BARS = 30                 # Minimum bars needed on HTF
 
 # ============================================================================
-# FVG CONFIRMATION FILTER (NEW)
+# FVG CONFIRMATION FILTER
 # ============================================================================
 # Require a Fair Value Gap in the signal direction to confirm institutional momentum
+# v2.1.0: DISABLED - Was blocking 40% of valid signals in ranging markets
 
-FVG_CONFIRMATION_ENABLED = True   # Enable FVG confirmation filter
+FVG_CONFIRMATION_ENABLED = False  # v2.1.0: DISABLED - too restrictive for intraday
 FVG_LOOKBACK_CANDLES = 10         # Look for FVG within last N candles
 FVG_MIN_SIZE_PIPS = 2             # Minimum FVG size in pips (lower = more FVGs detected)
 
@@ -84,7 +89,7 @@ FVG_MIN_SIZE_PIPS = 2             # Minimum FVG size in pips (lower = more FVGs 
 # EMA crossovers perform poorly in ranging/choppy markets
 
 ADX_FILTER_ENABLED = True         # Enable ADX trend strength filter
-ADX_MIN_VALUE = 20                # Minimum ADX for valid signal (20 = weak trend, 25 = solid trend)
+ADX_MIN_VALUE = 15                # v2.1.0: REDUCED from 20 - allow medium-strength trends
 ADX_PERIOD = 14                   # ADX calculation period
 
 # ============================================================================
@@ -173,7 +178,7 @@ LIMIT_OFFSET_MAX_PIPS = 6.0              # Maximum offset: 6 pips
 
 # Risk sanity checks after offset
 MIN_RISK_AFTER_OFFSET_PIPS = 5.0         # Reject if SL too close after offset
-MAX_RISK_AFTER_OFFSET_PIPS = 20.0        # v2.0.1: REDUCED from 45 - max 20 pip SL for better R:R
+MAX_RISK_AFTER_OFFSET_PIPS = 35.0        # v2.1.0: INCREASED from 20 - allow volatile pairs (GBP, JPY crosses)
 
 # ============================================================================
 # SESSION FILTER
