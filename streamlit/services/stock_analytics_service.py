@@ -208,7 +208,10 @@ class StockAnalyticsService:
 
     @st.cache_data(ttl=300)
     def get_recent_signals(_self, hours: int = 24) -> pd.DataFrame:
-        """Get signals from the last N hours."""
+        """Get signals from the last N hours from stock_scanner_signals table.
+
+        Includes Claude AI analysis fields (grade, action, thesis) and news sentiment when available.
+        """
         query = """
             SELECT
                 s.signal_timestamp,
@@ -218,21 +221,34 @@ class StockAnalyticsService:
                 s.entry_price,
                 s.stop_loss,
                 s.take_profit,
-                s.confidence,
+                s.composite_score as confidence,
+                s.scanner_name,
+                s.quality_tier,
+                s.claude_grade,
+                s.claude_action,
+                s.claude_score,
+                s.claude_thesis,
+                s.news_sentiment_score,
+                s.news_sentiment_level,
+                s.news_headlines_count,
                 CASE
-                    WHEN s.signal_type = 'BUY' THEN
-                        ROUND(((s.take_profit - s.entry_price) / (s.entry_price - s.stop_loss))::numeric, 1)
-                    ELSE
-                        ROUND(((s.entry_price - s.take_profit) / (s.stop_loss - s.entry_price))::numeric, 1)
+                    WHEN s.signal_type = 'BUY' AND s.stop_loss > 0 AND s.entry_price > s.stop_loss THEN
+                        ROUND(((s.take_profit - s.entry_price) / NULLIF(s.entry_price - s.stop_loss, 0))::numeric, 1)
+                    WHEN s.signal_type = 'SELL' AND s.stop_loss > 0 AND s.stop_loss > s.entry_price THEN
+                        ROUND(((s.entry_price - s.take_profit) / NULLIF(s.stop_loss - s.entry_price, 0))::numeric, 1)
+                    ELSE NULL
                 END as risk_reward,
                 w.tier,
                 w.score
-            FROM stock_zlma_signals s
-            JOIN stock_instruments i ON s.ticker = i.ticker
+            FROM stock_scanner_signals s
+            LEFT JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN stock_watchlist w ON s.ticker = w.ticker
                 AND w.calculation_date = (SELECT MAX(calculation_date) FROM stock_watchlist)
             WHERE s.signal_timestamp > NOW() - INTERVAL '%s hours'
-            ORDER BY s.signal_timestamp DESC
+            AND s.status = 'active'
+            ORDER BY
+                CASE WHEN s.claude_grade IS NOT NULL THEN 0 ELSE 1 END,
+                s.signal_timestamp DESC
         """
         results = _self._execute_query(query % hours, ())
         return pd.DataFrame(results) if results else pd.DataFrame()
@@ -1574,6 +1590,9 @@ Analyze and respond in this exact JSON format:
 
         # Use a subquery to get only the latest signal per ticker/scanner combination
         # This prevents showing stale signals when a new scan has been run
+        # Also inherit news sentiment from most recent analyzed signal for the same ticker
+        # Note: We explicitly list columns (excluding news_*) to avoid duplicate column names
+        # when using COALESCE for inherited news data
         query = f"""
             WITH latest_signals AS (
                 SELECT DISTINCT ON (ticker, scanner_name)
@@ -1581,12 +1600,43 @@ Analyze and respond in this exact JSON format:
                 FROM stock_scanner_signals
                 WHERE {where_clause}
                 ORDER BY ticker, scanner_name, signal_timestamp DESC
+            ),
+            latest_news AS (
+                SELECT DISTINCT ON (ticker)
+                    ticker,
+                    news_sentiment_score as inherited_news_score,
+                    news_sentiment_level as inherited_news_level,
+                    news_headlines_count as inherited_news_count,
+                    news_factors as inherited_news_factors,
+                    news_analyzed_at as inherited_news_analyzed_at
+                FROM stock_scanner_signals
+                WHERE news_sentiment_score IS NOT NULL
+                ORDER BY ticker, news_analyzed_at DESC
             )
             SELECT
-                s.*,
-                i.name as company_name
+                s.id, s.signal_timestamp, s.scanner_name, s.ticker, s.signal_type,
+                s.entry_price, s.stop_loss, s.take_profit_1, s.take_profit_2,
+                s.risk_reward_ratio, s.risk_percent, s.composite_score, s.quality_tier,
+                s.trend_score, s.momentum_score, s.volume_score, s.pattern_score,
+                s.confluence_score, s.setup_description, s.confluence_factors,
+                s.timeframe, s.market_regime, s.suggested_position_size_pct,
+                s.max_risk_per_trade_pct, s.status, s.trigger_timestamp,
+                s.close_timestamp, s.close_price, s.realized_pnl_pct,
+                s.realized_r_multiple, s.exit_reason, s.created_at, s.updated_at,
+                s.claude_grade, s.claude_score, s.claude_conviction, s.claude_action,
+                s.claude_thesis, s.claude_key_strengths, s.claude_key_risks,
+                s.claude_position_rec, s.claude_stop_adjustment, s.claude_time_horizon,
+                s.claude_raw_response, s.claude_analyzed_at, s.claude_tokens_used,
+                s.claude_latency_ms, s.claude_model,
+                i.name as company_name,
+                COALESCE(s.news_sentiment_score, n.inherited_news_score) as news_sentiment_score,
+                COALESCE(s.news_sentiment_level, n.inherited_news_level) as news_sentiment_level,
+                COALESCE(s.news_headlines_count, n.inherited_news_count) as news_headlines_count,
+                COALESCE(s.news_factors, n.inherited_news_factors) as news_factors,
+                COALESCE(s.news_analyzed_at, n.inherited_news_analyzed_at) as news_analyzed_at
             FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
+            LEFT JOIN latest_news n ON s.ticker = n.ticker
             ORDER BY
                 CASE WHEN s.claude_analyzed_at IS NOT NULL THEN 0 ELSE 1 END,
                 COALESCE(s.claude_score, 0) DESC,

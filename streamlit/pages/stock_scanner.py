@@ -277,14 +277,56 @@ def render_overview_tab(service):
                 timestamp = row['signal_timestamp']
                 time_str = timestamp.strftime('%H:%M') if isinstance(timestamp, datetime) else str(timestamp)[:5]
 
+                # Claude analysis badge
+                claude_grade = row.get('claude_grade')
+                claude_action = row.get('claude_action')
+                claude_badge = ""
+                if claude_grade:
+                    grade_colors = {'A+': '#28a745', 'A': '#17a2b8', 'B': '#ffc107', 'C': '#fd7e14', 'D': '#dc3545'}
+                    grade_color = grade_colors.get(claude_grade, '#6c757d')
+                    claude_badge = f'<span style="background-color: {grade_color}; color: white; padding: 1px 6px; border-radius: 3px; font-size: 0.75rem; margin-left: 5px;">{claude_grade}</span>'
+
+                # Scanner name (short form)
+                scanner_name = row.get('scanner_name', '')
+                scanner_short = scanner_name.replace('_', ' ').title()[:12] if scanner_name else ''
+
+                # Quality tier badge
+                quality_tier = row.get('quality_tier', '')
+                tier_badge = f'<span style="color: #666; font-size: 0.75rem;">{quality_tier}</span>' if quality_tier else ''
+
+                # News sentiment badge
+                news_level = row.get('news_sentiment_level')
+                news_badge = ""
+                if news_level:
+                    news_colors = {
+                        'very_bullish': '#28a745',
+                        'bullish': '#5cb85c',
+                        'neutral': '#6c757d',
+                        'bearish': '#f0ad4e',
+                        'very_bearish': '#dc3545'
+                    }
+                    news_icons = {
+                        'very_bullish': '++',
+                        'bullish': '+',
+                        'neutral': '~',
+                        'bearish': '-',
+                        'very_bearish': '--'
+                    }
+                    news_color = news_colors.get(news_level, '#6c757d')
+                    news_icon = news_icons.get(news_level, '~')
+                    news_badge = f'<span style="color: {news_color}; font-size: 0.75rem;" title="News: {news_level.replace("_", " ").title()}">News{news_icon}</span>'
+
                 st.markdown(f"""
                 <div class="signal-card {sig_class}">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span><b>{row['ticker']}</b> <span style="color: {sig_color};">{sig_type}</span></span>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span><b>{row['ticker']}</b> <span style="color: {sig_color};">{sig_type}</span>{claude_badge}</span>
                         <span style="color: #666; font-size: 0.85rem;">{time_str}</span>
                     </div>
                     <div style="font-size: 0.85rem; color: #555;">
-                        Entry: ${row['entry_price']:.2f} | Conf: {row['confidence']:.0f}%
+                        Entry: ${row['entry_price']:.2f} | Score: {row['confidence']:.0f} {tier_badge}
+                    </div>
+                    <div style="font-size: 0.75rem; color: #888;">
+                        {scanner_short}{f' | {claude_action}' if claude_action else ''}{f' | {news_badge}' if news_badge else ''}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -2765,11 +2807,10 @@ def render_scanner_signals_tab(service):
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        # Default to last 7 days
-        default_from = datetime.now().date() - timedelta(days=7)
+        # Default to today
         date_from = st.date_input(
             "Signal Date From",
-            value=default_from,
+            value=datetime.now().date(),
             help="Filter signals detected from this date"
         )
 
