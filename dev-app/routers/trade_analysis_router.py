@@ -231,6 +231,9 @@ def analyze_stage_activation(trade: TradeLog, log_events: Dict[str, Any], pair_c
     - Stage 2: Second profit lock
     - Stage 3: ATR-based trailing
 
+    IMPORTANT: Uses database fields as primary source of truth, not just log parsing.
+    The moved_to_breakeven flag and trade status are authoritative.
+
     Returns:
         Dictionary with stage analysis
     """
@@ -263,13 +266,6 @@ def analyze_stage_activation(trade: TradeLog, log_events: Dict[str, Any], pair_c
         }
     }
 
-    # Calculate max profit from updates FIRST
-    if log_events["profit_updates"]:
-        max_profit = max(event["profit_pts"] for event in log_events["profit_updates"])
-        analysis["breakeven"]["max_profit_reached"] = max_profit
-    else:
-        max_profit = 0
-
     # Helper function to calculate lock distance in points
     def calculate_lock_points(stop_price: float, entry_price: float, symbol: str, direction: str) -> float:
         """Calculate how many points profit the stop is locking in"""
@@ -289,48 +285,85 @@ def analyze_stage_activation(trade: TradeLog, log_events: Dict[str, Any], pair_c
     if trade.entry_price and trade.sl_price:
         final_lock_pts = calculate_lock_points(trade.sl_price, trade.entry_price, trade.symbol, trade.direction)
 
-    # Check Break-even activation and find when it was triggered
-    if max_profit >= analysis["breakeven"]["trigger_threshold"]:
+    # ✅ PRIMARY SOURCE OF TRUTH: Use database fields, NOT log parsing
+    # The moved_to_breakeven flag is set by the trailing stop system when BE is actually executed
+    breakeven_activated_db = getattr(trade, 'moved_to_breakeven', False) or False
+
+    # Check trade status for stage indicators
+    trade_status = getattr(trade, 'status', '') or ''
+    stage1_activated_db = 'stage1' in trade_status.lower() or 'profit_lock' in trade_status.lower()
+    stage2_activated_db = 'stage2' in trade_status.lower() or 'profit_protected' in trade_status.lower()
+    stage3_activated_db = 'stage3' in trade_status.lower() or 'trailing' in trade_status.lower()
+
+    # ✅ FIXED: Only consider POSITIVE profit values from logs (filter out bug where losses showed as profits)
+    # This handles historical logs that had the abs() bug
+    positive_profit_updates = [
+        event for event in log_events.get("profit_updates", [])
+        if event.get("profit_pts", 0) >= 0
+    ]
+
+    # Calculate max profit from POSITIVE updates only
+    if positive_profit_updates:
+        max_profit = max(event["profit_pts"] for event in positive_profit_updates)
+    else:
+        max_profit = 0
+
+    analysis["breakeven"]["max_profit_reached"] = max_profit
+
+    # ✅ Break-even: Use DB flag as primary, log max_profit as secondary validation
+    # Only mark as activated if BOTH the DB flag is set OR stop adjustments show it happened
+    if breakeven_activated_db:
         analysis["breakeven"]["activated"] = True
-        # Find when it was triggered
-        for event in log_events["profit_updates"]:
+        # Find activation time from logs if available
+        for event in positive_profit_updates:
             if event["profit_pts"] >= analysis["breakeven"]["trigger_threshold"]:
                 analysis["breakeven"]["activation_time"] = event["timestamp"]
                 break
+    elif log_events.get("break_even_triggers"):
+        # Check if there's an actual break-even trigger event in logs
+        analysis["breakeven"]["activated"] = True
+        analysis["breakeven"]["activation_time"] = log_events["break_even_triggers"][0].get("timestamp")
+    elif log_events.get("stop_adjustments"):
+        # Check if stop was actually moved to protect profit
+        for adj in log_events["stop_adjustments"]:
+            if adj.get("type") == "break_even":
+                analysis["breakeven"]["activated"] = True
+                analysis["breakeven"]["activation_time"] = adj.get("timestamp")
+                break
 
-    # Check Stage 1
-    if max_profit >= analysis["stage1"]["trigger_threshold"]:
+    # ✅ Stage 1: Use DB status or log triggers
+    if stage1_activated_db:
         analysis["stage1"]["activated"] = True
-        for event in log_events["profit_updates"]:
-            if event["profit_pts"] >= analysis["stage1"]["trigger_threshold"]:
-                analysis["stage1"]["activation_time"] = event["timestamp"]
-                break
+    elif any("STAGE1" in str(event.get("line", "")).upper() or "STAGE 1" in str(event.get("line", "")).upper()
+             for event in log_events.get("stage2_triggers", [])):  # stage2_triggers includes stage1 in current code
+        analysis["stage1"]["activated"] = True
 
-    # Check Stage 2
-    if max_profit >= analysis["stage2"]["trigger_threshold"]:
+    # ✅ Stage 2: Use DB status or log triggers
+    if stage2_activated_db:
         analysis["stage2"]["activated"] = True
-        for event in log_events["profit_updates"]:
-            if event["profit_pts"] >= analysis["stage2"]["trigger_threshold"]:
-                analysis["stage2"]["activation_time"] = event["timestamp"]
-                break
+    elif any(event.get("stage") == 2 for event in log_events.get("stage2_triggers", [])):
+        analysis["stage2"]["activated"] = True
 
-    # Check Stage 3
-    if max_profit >= analysis["stage3"]["trigger_threshold"]:
+    # ✅ Stage 3: Use DB status or log triggers
+    if stage3_activated_db:
         analysis["stage3"]["activated"] = True
-        for event in log_events["profit_updates"]:
-            if event["profit_pts"] >= analysis["stage3"]["trigger_threshold"]:
-                analysis["stage3"]["activation_time"] = event["timestamp"]
-                break
+    elif any(event.get("stage") == 3 for event in log_events.get("stage3_triggers", [])):
+        analysis["stage3"]["activated"] = True
 
     # Set final lock from actual trade SL (the real protection level)
     analysis["breakeven"]["final_lock"] = final_lock_pts
 
     # Add stop adjustment history for transparency
-    if log_events["stop_adjustments"]:
+    if log_events.get("stop_adjustments"):
         # Get the last stop adjustment (most recent protection level)
         last_stop_adj = log_events["stop_adjustments"][-1]
-        last_lock = calculate_lock_points(last_stop_adj["new_stop"], trade.entry_price, trade.symbol, trade.direction)
-        analysis["breakeven"]["last_logged_lock"] = last_lock
+        if trade.entry_price:
+            last_lock = calculate_lock_points(last_stop_adj["new_stop"], trade.entry_price, trade.symbol, trade.direction)
+            analysis["breakeven"]["last_logged_lock"] = last_lock
+
+    # ✅ Add warning if log data seems inconsistent with DB
+    if max_profit > 0 and not breakeven_activated_db and max_profit >= analysis["breakeven"]["trigger_threshold"]:
+        analysis["breakeven"]["warning"] = f"Log shows max profit {max_profit}pts but moved_to_breakeven=False in DB"
 
     return analysis
 

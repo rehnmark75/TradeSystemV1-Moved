@@ -1521,21 +1521,23 @@ class EnhancedTradeProcessor:
             safe_trail_distance = self.calculate_safe_trail_distance(trade)
             safe_trail_distance_price = safe_trail_distance * point_value
 
-            # ✅ CRITICAL FIX: Calculate current profit correctly
+            # ✅ CRITICAL FIX: Calculate current profit correctly (NO abs() - show actual profit/loss)
             if trade.direction.upper() == "BUY":
                 moved_in_favor = current_price - trade.entry_price
-                profit_points = int(abs(moved_in_favor) / point_value)
+                # ✅ FIX: Remove abs() - profit_points should be SIGNED (negative = loss)
+                profit_points = int(moved_in_favor / point_value)
                 is_profitable_for_breakeven = moved_in_favor >= break_even_trigger
-                
+
                 self.logger.info(f"📊 [PROFIT] Trade {trade.id} {trade.symbol} BUY: "
                             f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
                             f"profit={profit_points}pts, trigger={break_even_trigger_points}pts")
-                
+
             elif trade.direction.upper() == "SELL":
                 moved_in_favor = trade.entry_price - current_price
-                profit_points = int(abs(moved_in_favor) / point_value)
+                # ✅ FIX: Remove abs() - profit_points should be SIGNED (negative = loss)
+                profit_points = int(moved_in_favor / point_value)
                 is_profitable_for_breakeven = moved_in_favor >= break_even_trigger
-                
+
                 self.logger.info(f"📊 [PROFIT] Trade {trade.id} {trade.symbol} SELL: "
                             f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
                             f"profit={profit_points}pts, trigger={break_even_trigger_points}pts")

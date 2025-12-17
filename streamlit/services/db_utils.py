@@ -88,7 +88,7 @@ def get_sqlalchemy_engine(db_type: str = "trading"):
 
 
 @st.cache_resource
-def get_psycopg2_pool(db_type: str = "trading", minconn: int = 2, maxconn: int = 10):
+def get_psycopg2_pool(db_type: str = "trading", minconn: int = 5, maxconn: int = 20):
     """
     Get a cached psycopg2 connection pool.
 
@@ -136,6 +136,10 @@ class PooledConnection:
     def close(self):
         """Return connection to pool instead of closing it."""
         if not self._closed:
+            try:
+                self._conn.rollback()  # Clear any pending transaction
+            except Exception:
+                pass
             self._pool.putconn(self._conn)
             self._closed = True
 
@@ -162,9 +166,13 @@ def get_psycopg2_connection(db_type: str = "trading"):
     Returns:
         PooledConnection wrapping a psycopg2 connection
     """
-    pool = get_psycopg2_pool(db_type)
-    conn = pool.getconn()
-    return PooledConnection(conn, pool, db_type)
+    try:
+        pool = get_psycopg2_pool(db_type)
+        conn = pool.getconn()
+        return PooledConnection(conn, pool, db_type)
+    except Exception as e:
+        logger.error(f"Failed to get connection from pool: {e}")
+        raise ConnectionError(f"connection pool exhausted: {e}")
 
 
 def return_psycopg2_connection(conn, db_type: str = "trading"):

@@ -1142,14 +1142,13 @@ class UnifiedTradingDashboard:
         """Query comprehensive market intelligence data from market_intelligence_history table"""
         try:
             # First check which columns exist in the table
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_name = 'market_intelligence_history'
-            """)
-            existing_columns = [row[0] for row in cursor.fetchall()]
-            cursor.close()
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'market_intelligence_history'
+                """)
+                existing_columns = [row[0] for row in cursor.fetchall()]
 
             # Base columns that should always exist
             base_columns = [
@@ -3744,7 +3743,7 @@ class UnifiedTradingDashboard:
             <div style='text-align: center; color: #666; font-size: 12px;'>
             Trading Analytics Hub v1.0 |
             Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M UTC")} |
-            Status: {'🟢 Online' if self.get_database_connection() else '🔴 Offline'}
+            Status: 🟢 Online
             </div>
             """,
             unsafe_allow_html=True

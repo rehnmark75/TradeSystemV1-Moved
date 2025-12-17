@@ -30,11 +30,12 @@ class StockAnalyticsService:
             return "postgresql://postgres:postgres@postgres:5432/stocks"
 
     def _get_connection(self):
-        """Get a database connection."""
+        """Get a database connection from pool."""
         try:
-            return psycopg2.connect(self._get_connection_string())
+            from services.db_utils import get_psycopg2_connection
+            return get_psycopg2_connection("stocks")
         except Exception as e:
-            logger.error(f"Failed to connect to stocks database: {e}")
+            logger.error(f"Failed to get connection from pool: {e}")
             return None
 
     def _execute_query(self, query: str, params: tuple = None) -> List[Dict]:
@@ -220,7 +221,7 @@ class StockAnalyticsService:
                 s.signal_type,
                 s.entry_price,
                 s.stop_loss,
-                s.take_profit,
+                s.take_profit_1 as take_profit,
                 s.composite_score as confidence,
                 s.scanner_name,
                 s.quality_tier,
@@ -233,9 +234,9 @@ class StockAnalyticsService:
                 s.news_headlines_count,
                 CASE
                     WHEN s.signal_type = 'BUY' AND s.stop_loss > 0 AND s.entry_price > s.stop_loss THEN
-                        ROUND(((s.take_profit - s.entry_price) / NULLIF(s.entry_price - s.stop_loss, 0))::numeric, 1)
+                        ROUND(((s.take_profit_1 - s.entry_price) / NULLIF(s.entry_price - s.stop_loss, 0))::numeric, 1)
                     WHEN s.signal_type = 'SELL' AND s.stop_loss > 0 AND s.stop_loss > s.entry_price THEN
-                        ROUND(((s.entry_price - s.take_profit) / NULLIF(s.stop_loss - s.entry_price, 0))::numeric, 1)
+                        ROUND(((s.entry_price - s.take_profit_1) / NULLIF(s.stop_loss - s.entry_price, 0))::numeric, 1)
                     ELSE NULL
                 END as risk_reward,
                 w.tier,
