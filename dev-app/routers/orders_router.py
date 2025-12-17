@@ -345,13 +345,16 @@ async def ig_place_order(
     cooldown_result = check_trade_cooldown(symbol, db)
     if not cooldown_result["allowed"]:
         logger.info(f"🛑 Trade blocked by cooldown: {cooldown_result['message']}")
+        # Convert datetime to string for JSON serialization
+        last_closed = cooldown_result.get("last_trade_closed_at")
+        last_closed_str = last_closed.isoformat() if last_closed else None
         raise HTTPException(
             status_code=429,  # Too Many Requests
             detail={
                 "error": "Trade cooldown active",
                 "message": cooldown_result["message"],
                 "cooldown_remaining_minutes": cooldown_result.get("cooldown_remaining_minutes", 0),
-                "last_trade_closed_at": cooldown_result.get("last_trade_closed_at"),
+                "last_trade_closed_at": last_closed_str,
                 "epic": symbol
             }
         )
@@ -577,6 +580,48 @@ async def ig_place_order(
                 # since the order is pending, not immediately filled
                 deal_reference = result.get("dealReference")
                 logger.info(f"✅ Limit order placed successfully: {deal_reference}")
+
+                # =================================================================
+                # LOG LIMIT ORDER TO DATABASE (for tracking and analytics)
+                # =================================================================
+                try:
+                    # Calculate actual stop/limit prices from entry level
+                    actual_stop_price = convert_stop_distance_to_price(
+                        body.entry_level, sl_limit, direction, symbol
+                    )
+                    actual_limit_price = convert_limit_distance_to_price(
+                        body.entry_level, limit_distance, direction, symbol
+                    )
+
+                    # Calculate expiry time
+                    expiry_time = datetime.utcnow() + timedelta(minutes=body.limit_expiry_minutes or 6)
+
+                    trade_log = TradeLog(
+                        symbol=symbol,
+                        entry_price=body.entry_level,  # Limit entry price
+                        direction=direction.upper(),
+                        limit_price=actual_limit_price,
+                        sl_price=actual_stop_price,
+                        deal_reference=deal_reference,
+                        endpoint="dev-limit",  # Identify as limit order
+                        status="pending_limit",  # New status for limit orders
+                        alert_id=alert_id,
+                        monitor_until=expiry_time  # Use monitor_until for expiry tracking
+                    )
+
+                    db.add(trade_log)
+                    db.commit()
+                    logger.info(f"✅ Limit order logged to database: {symbol} @ {body.entry_level}")
+                    logger.info(f"   Deal Ref: {deal_reference}, Expiry: {expiry_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+                    if alert_id:
+                        logger.info(f"   Linked to alert_id: {alert_id}")
+
+                except SQLAlchemyError as db_error:
+                    db.rollback()
+                    logger.error(f"❌ Failed to log limit order to DB: {str(db_error)}")
+                    # Don't fail the request - order was placed successfully
+                finally:
+                    db.close()
 
                 return {
                     "status": "pending",
