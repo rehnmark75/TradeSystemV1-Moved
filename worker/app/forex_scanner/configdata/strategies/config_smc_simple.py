@@ -1,12 +1,20 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.0.0 (Phase 3 - Limit Orders)
+# Version: 2.1.0 (R:R Root Cause Fixes)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback OR momentum continuation entry
+#
+# v2.1.0 R:R ROOT CAUSE FIXES:
+#   - FIX: Reduced SL_ATR_MULTIPLIER 1.2→1.0 (tighter stops = better R:R)
+#   - FIX: Reduced SL_BUFFER_PIPS 8→6 (less buffer = better R:R)
+#   - FIX: Reduced pair-specific SL buffers proportionally
+#   - FIX: Increased R:R weight in confidence scoring 10%→15%
+#   - NEW: Dynamic swing lookback based on ATR volatility
+#   - Analysis: 451 R:R rejections were due to inflated SL, not bad setups
 #
 # v2.0.0 PHASE 3 LIMIT ORDERS:
 #   - NEW: Limit order support with intelligent price offsets
@@ -32,9 +40,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.0.0"
-STRATEGY_DATE = "2025-12-16"
-STRATEGY_STATUS = "Phase 3 - Limit Orders for Better Entry Timing"
+STRATEGY_VERSION = "2.1.0"
+STRATEGY_DATE = "2025-12-17"
+STRATEGY_STATUS = "R:R Root Cause Fixes - Tighter SL for Better R:R"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -59,8 +67,18 @@ MIN_DISTANCE_FROM_EMA_PIPS = 6           # v2.0.1: REDUCED from 10 - allow tradi
 # 15m gives 4x more candles than 1H = 4x more break opportunities
 
 TRIGGER_TIMEFRAME = "15m"                # Trigger timeframe (was 1h - too slow)
-SWING_LOOKBACK_BARS = 20                 # Bars to look back for swing detection
+SWING_LOOKBACK_BARS = 20                 # Base bars to look back for swing detection
 SWING_STRENGTH_BARS = 2                  # Bars on each side to confirm swing
+
+# v2.1.0: Dynamic swing lookback based on volatility
+# In quiet markets, swings are closer together = use shorter lookback
+# In volatile markets, swings are further apart = use longer lookback
+# This improves R:R by finding better-spaced swing structures
+USE_DYNAMIC_SWING_LOOKBACK = True        # v2.1.0: NEW - adapt lookback to volatility
+SWING_LOOKBACK_ATR_LOW = 8               # ATR threshold for low volatility (pips)
+SWING_LOOKBACK_ATR_HIGH = 15             # ATR threshold for high volatility (pips)
+SWING_LOOKBACK_MIN = 15                  # Minimum lookback bars (quiet market)
+SWING_LOOKBACK_MAX = 30                  # Maximum lookback bars (volatile market)
 
 # Body-close confirmation
 # NOTE: On 15m timeframe, body-close is too strict - price rarely closes beyond swings
@@ -162,10 +180,13 @@ OPTIMAL_RR_RATIO = 2.5                   # v1.7.0: REDUCED from 3.5 - achievable
 MAX_RR_RATIO = 5.0                       # v1.7.0: REDUCED from 6.0 - reasonable cap
 
 # Stop Loss
-# v1.7.0: INCREASED buffer - 6 pips was too tight, causing premature stops
-# Analysis: Need more breathing room for volatility, especially on JPY pairs
-SL_BUFFER_PIPS = 8                       # v1.7.0: INCREASED from 6 - more breathing room
-SL_ATR_MULTIPLIER = 1.2                  # v1.7.0: INCREASED from 1.0 - better volatility adaptation
+# v2.1.0: REDUCED buffer and ATR multiplier to improve R:R ratios
+# Analysis: 451 R:R rejections (0.01-0.56) were caused by inflated SL distances
+# Root cause: SL_BUFFER + ATR_MULTIPLIER combined created 25-30 pip stops
+# With tight swings (20 pips), this destroyed R:R (10 reward / 30 risk = 0.33)
+# Solution: Tighter stops allow more signals while maintaining edge
+SL_BUFFER_PIPS = 6                       # v2.1.0: REDUCED from 8 - tighter stops for better R:R
+SL_ATR_MULTIPLIER = 1.0                  # v2.1.0: REDUCED from 1.2 - less ATR inflation
 USE_ATR_STOP = True                      # Keep ATR-based adaptive stops
 
 # Take Profit
@@ -235,35 +256,36 @@ PAIR_PIP_VALUES = {
 }
 
 # ============================================================================
-# v1.9.0: PAIR-SPECIFIC SL BUFFERS
+# v2.1.0: PAIR-SPECIFIC SL BUFFERS (REDUCED)
 # ============================================================================
 # Override default SL_BUFFER_PIPS for specific pairs based on volatility
-# Analysis from trades 1548-1554: USDCHF (9 pips) and JPY crosses need more room
+# v2.1.0: REDUCED all buffers by ~25% to improve R:R ratios
+# Analysis: Large buffers were main cause of R:R rejections (0.01-0.56 values)
 
 PAIR_SL_BUFFERS = {
-    # Low volatility / low liquidity pairs need MORE buffer
-    'USDCHF': 12,           # v1.9.0: Increase from 8 (low liquidity, wider spreads)
-    'CS.D.USDCHF.MINI.IP': 12,
+    # Low volatility / low liquidity pairs
+    'USDCHF': 9,            # v2.1.0: REDUCED from 12 (still accounts for spreads)
+    'CS.D.USDCHF.MINI.IP': 9,
 
-    # JPY crosses are volatile - need extra room
-    'AUDJPY': 15,           # v1.9.0: Increase from 8 (JPY cross volatility)
-    'CS.D.AUDJPY.MINI.IP': 15,
-    'EURJPY': 18,           # v1.9.0: Increase from 8 (highest volatility cross)
-    'CS.D.EURJPY.MINI.IP': 18,
-    'GBPJPY': 18,           # v1.9.0: High volatility
-    'CS.D.GBPJPY.MINI.IP': 18,
-    'USDJPY': 12,           # v1.9.0: Major JPY pair
-    'CS.D.USDJPY.MINI.IP': 12,
+    # JPY crosses are volatile - but tighter stops improve R:R
+    'AUDJPY': 12,           # v2.1.0: REDUCED from 15
+    'CS.D.AUDJPY.MINI.IP': 12,
+    'EURJPY': 14,           # v2.1.0: REDUCED from 18
+    'CS.D.EURJPY.MINI.IP': 14,
+    'GBPJPY': 14,           # v2.1.0: REDUCED from 18
+    'CS.D.GBPJPY.MINI.IP': 14,
+    'USDJPY': 9,            # v2.1.0: REDUCED from 12
+    'CS.D.USDJPY.MINI.IP': 9,
 
     # Commodity currencies
-    'USDCAD': 10,           # v1.9.0: Slight increase (oil correlation volatility)
-    'CS.D.USDCAD.MINI.IP': 10,
+    'USDCAD': 8,            # v2.1.0: REDUCED from 10
+    'CS.D.USDCAD.MINI.IP': 8,
 
     # Cable
-    'GBPUSD': 10,           # v1.9.0: GBP volatility
-    'CS.D.GBPUSD.MINI.IP': 10,
+    'GBPUSD': 8,            # v2.1.0: REDUCED from 10
+    'CS.D.GBPUSD.MINI.IP': 8,
 
-    # Default for majors (EURUSD, AUDUSD, NZDUSD) = SL_BUFFER_PIPS (8)
+    # Default for majors (EURUSD, AUDUSD, NZDUSD) = SL_BUFFER_PIPS (6)
 }
 
 # ============================================================================
@@ -300,12 +322,13 @@ MIN_CONFIDENCE_THRESHOLD = 0.60          # v1.7.0: REDUCED from 0.80 - allow mor
 HIGH_CONFIDENCE_THRESHOLD = 0.75         # v1.7.0: REDUCED from 0.90 - achievable premium tier
 
 # Scoring weights (must sum to 1.0)
+# v2.1.0: Increased R:R weight since it directly impacts profitability
 CONFIDENCE_WEIGHTS = {
     'ema_alignment': 0.25,               # 4H EMA alignment strength
-    'swing_break_quality': 0.30,         # How clean was the 1H break
+    'swing_break_quality': 0.25,         # v2.1.0: REDUCED from 0.30 - How clean was the break
     'pullback_depth': 0.20,              # Pullback to optimal Fib zone
     'volume_confirmation': 0.15,         # Volume spike on break
-    'rr_ratio': 0.10,                    # Risk-reward quality
+    'rr_ratio': 0.15,                    # v2.1.0: INCREASED from 0.10 - R:R directly affects profit
 }
 
 # ============================================================================

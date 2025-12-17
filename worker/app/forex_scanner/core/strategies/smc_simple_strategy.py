@@ -2,9 +2,17 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.0.0
-DATE: 2025-12-16
-STATUS: Phase 3 - Limit Orders for Better Entry Timing
+VERSION: 2.1.0
+DATE: 2025-12-17
+STATUS: R:R Root Cause Fixes - Tighter SL for Better R:R
+
+v2.1.0 CHANGES (R:R Root Cause Fixes):
+    - FIX: Reduced SL_ATR_MULTIPLIER 1.2→1.0 (tighter stops = better R:R)
+    - FIX: Reduced SL_BUFFER_PIPS 8→6 (less buffer = better R:R)
+    - FIX: Reduced pair-specific SL buffers by ~25%
+    - FIX: Increased R:R weight in confidence scoring 10%→15%
+    - NEW: Dynamic swing lookback based on ATR volatility
+    - Analysis: 451 R:R rejections (0.01-0.56) were due to inflated SL distances
 
 v2.0.0 CHANGES (Phase 3 - Limit Orders):
     - NEW: Limit order support with intelligent price offsets
@@ -37,10 +45,10 @@ Entry Types:
     - PULLBACK: Price retraces 23.6%-70% of swing (classic Fib entry)
     - MOMENTUM: Price continues beyond break point (trend continuation)
 
-Target Performance (v1.8.0):
-    - Win Rate: 45%+
-    - Profit Factor: 1.4+
-    - Improved over v1.7.0: 39.4% WR, 1.24 PF
+Target Performance (v2.1.0):
+    - Win Rate: 50%+ (improved with better R:R filtering)
+    - Profit Factor: 1.5+
+    - More signals passing R:R filter due to tighter SL
 """
 
 import pandas as pd
@@ -177,6 +185,13 @@ class SMCSimpleStrategy:
         self.momentum_offset_pips = getattr(smc_config, 'MOMENTUM_OFFSET_PIPS', 4.0)
         self.min_risk_after_offset_pips = getattr(smc_config, 'MIN_RISK_AFTER_OFFSET_PIPS', 5.0)
         self.max_risk_after_offset_pips = getattr(smc_config, 'MAX_RISK_AFTER_OFFSET_PIPS', 40.0)
+
+        # v2.1.0: Dynamic Swing Lookback Configuration
+        self.use_dynamic_swing_lookback = getattr(smc_config, 'USE_DYNAMIC_SWING_LOOKBACK', True)
+        self.swing_lookback_atr_low = getattr(smc_config, 'SWING_LOOKBACK_ATR_LOW', 8)
+        self.swing_lookback_atr_high = getattr(smc_config, 'SWING_LOOKBACK_ATR_HIGH', 15)
+        self.swing_lookback_min = getattr(smc_config, 'SWING_LOOKBACK_MIN', 15)
+        self.swing_lookback_max = getattr(smc_config, 'SWING_LOOKBACK_MAX', 30)
 
         # Debug
         self.debug_logging = getattr(smc_config, 'ENABLE_DEBUG_LOGGING', True)
@@ -652,6 +667,45 @@ class SMCSimpleStrategy:
             'reason': f"{direction} bias confirmed"
         }
 
+    def _get_dynamic_swing_lookback(self, df: pd.DataFrame, pip_value: float) -> int:
+        """
+        v2.1.0: Calculate dynamic swing lookback based on current ATR volatility.
+
+        In quiet markets (low ATR): Use shorter lookback to find tighter swings
+        In volatile markets (high ATR): Use longer lookback to find stronger swings
+
+        This improves R:R by finding better-spaced swing structures that match
+        current market conditions.
+
+        Returns:
+            int: Number of bars to look back for swing detection
+        """
+        if not self.use_dynamic_swing_lookback:
+            return self.swing_lookback
+
+        # Calculate current ATR in pips
+        atr = self._calculate_atr(df)
+        atr_pips = atr / pip_value if atr > 0 else 10  # Default to 10 pips if ATR unavailable
+
+        # Interpolate lookback based on ATR
+        if atr_pips <= self.swing_lookback_atr_low:
+            # Low volatility: use minimum lookback (tighter swings)
+            lookback = self.swing_lookback_min
+        elif atr_pips >= self.swing_lookback_atr_high:
+            # High volatility: use maximum lookback (stronger swings)
+            lookback = self.swing_lookback_max
+        else:
+            # Linear interpolation between min and max
+            atr_range = self.swing_lookback_atr_high - self.swing_lookback_atr_low
+            lookback_range = self.swing_lookback_max - self.swing_lookback_min
+            atr_ratio = (atr_pips - self.swing_lookback_atr_low) / atr_range
+            lookback = int(self.swing_lookback_min + (atr_ratio * lookback_range))
+
+        if self.debug_logging:
+            self.logger.debug(f"   v2.1.0 Dynamic lookback: ATR={atr_pips:.1f} pips → {lookback} bars")
+
+        return lookback
+
     def _check_swing_break(self, df: pd.DataFrame, direction: str, pip_value: float) -> Dict:
         """
         TIER 2: Check swing break with body-close confirmation on trigger timeframe
@@ -659,13 +713,18 @@ class SMCSimpleStrategy:
         IMPROVED: Now checks for RECENT breaks within lookback, not just current candle
         This allows detecting entries after a break has occurred and price is continuing
 
+        v2.1.0: Uses dynamic swing lookback based on ATR volatility
+
         Returns:
             Dict with: valid, swing_level, break_candle, volume_confirmed, reason
         """
-        if len(df) < self.swing_lookback + 1:
+        # v2.1.0: Get dynamic lookback based on volatility
+        effective_lookback = self._get_dynamic_swing_lookback(df, pip_value)
+
+        if len(df) < effective_lookback + 1:
             return {
                 'valid': False,
-                'reason': f"Insufficient {self.trigger_tf} data ({len(df)} < {self.swing_lookback + 1} bars)"
+                'reason': f"Insufficient {self.trigger_tf} data ({len(df)} < {effective_lookback + 1} bars)"
             }
 
         # Find swing points
@@ -706,7 +765,8 @@ class SMCSimpleStrategy:
 
         # v1.3.0: Expanded lookback window - check ANY swing break in full lookback
         # This allows for pullback entries even when price has retraced from break
-        break_check_bars = self.swing_lookback  # Use full lookback (20 bars on 15m)
+        # v2.1.0: Use dynamic effective_lookback based on volatility
+        break_check_bars = effective_lookback
 
         if direction == 'BULL':
             # For bullish, need ANY swing high to have been broken within lookback
@@ -714,8 +774,9 @@ class SMCSimpleStrategy:
                 return {'valid': False, 'reason': "No swing highs found"}
 
             # Get swing highs within lookback, sorted by time (oldest first)
+            # v2.1.0: Use effective_lookback instead of fixed self.swing_lookback
             recent_highs = sorted(
-                [sh for sh in swing_highs if current_idx - sh[0] <= self.swing_lookback],
+                [sh for sh in swing_highs if current_idx - sh[0] <= effective_lookback],
                 key=lambda x: x[0]
             )
             if not recent_highs:
@@ -766,8 +827,9 @@ class SMCSimpleStrategy:
                 return {'valid': False, 'reason': "No swing lows found"}
 
             # Get swing lows within lookback, sorted by time (oldest first)
+            # v2.1.0: Use effective_lookback instead of fixed self.swing_lookback
             recent_lows = sorted(
-                [sl for sl in swing_lows if current_idx - sl[0] <= self.swing_lookback],
+                [sl for sl in swing_lows if current_idx - sl[0] <= effective_lookback],
                 key=lambda x: x[0]
             )
             if not recent_lows:
@@ -845,6 +907,7 @@ class SMCSimpleStrategy:
         # v1.6.0: Find the opposite swing for Fib calculation
         # For BULL: Need the swing LOW before the broken swing HIGH
         # For BEAR: Need the swing HIGH before the broken swing LOW
+        # v2.1.0: Use effective_lookback for consistency
         opposite_swing = None
         if direction == 'BULL':
             # Find swing lows BEFORE the broken swing high
@@ -854,7 +917,7 @@ class SMCSimpleStrategy:
                 opposite_swing = max(prior_lows, key=lambda x: x[0])[1]
             else:
                 # Fallback: use the lowest low in the range before the swing
-                opposite_swing = min(lows[max(0, best_swing_idx - self.swing_lookback):best_swing_idx])
+                opposite_swing = min(lows[max(0, best_swing_idx - effective_lookback):best_swing_idx])
         else:  # BEAR
             # Find swing highs BEFORE the broken swing low
             prior_highs = [sh for sh in swing_highs if sh[0] < best_swing_idx]
@@ -863,7 +926,7 @@ class SMCSimpleStrategy:
                 opposite_swing = max(prior_highs, key=lambda x: x[0])[1]
             else:
                 # Fallback: use the highest high in the range before the swing
-                opposite_swing = max(highs[max(0, best_swing_idx - self.swing_lookback):best_swing_idx])
+                opposite_swing = max(highs[max(0, best_swing_idx - effective_lookback):best_swing_idx])
 
         return {
             'valid': True,
