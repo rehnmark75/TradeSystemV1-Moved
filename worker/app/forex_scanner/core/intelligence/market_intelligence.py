@@ -45,7 +45,7 @@ class MarketIntelligenceEngine:
         Comprehensive market regime analysis - FIXED VERSION
         Returns: trending, ranging, breakout, reversal, high_vol, low_vol
         """
-        self.logger.info(f"🧠 Analyzing market regime for {len(epic_list)} pairs: {[e.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '') for e in epic_list]}")
+        self.logger.debug(f"🧠 Analyzing market regime for {len(epic_list)} pairs: {[e.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '') for e in epic_list]}")
         
         regime_scores = {
             'trending': 0,
@@ -883,7 +883,7 @@ class MarketIntelligenceEngine:
 
     def generate_market_intelligence_report(self, epic_list: List[str]) -> Dict:
         """Generate comprehensive market intelligence report - FIXED VERSION"""
-        self.logger.info("📊 Generating comprehensive market intelligence report...")
+        self.logger.debug("📊 Generating comprehensive market intelligence report...")
         
         try:
             # Gather all intelligence with error handling
