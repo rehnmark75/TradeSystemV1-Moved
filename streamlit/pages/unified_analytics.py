@@ -4123,9 +4123,13 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
         )
 
     def _render_scanner_efficiency(self, days: int):
-        """Render scanner efficiency analysis sub-tab"""
-        st.subheader("Scanner Efficiency Analysis")
-        st.caption("Analyze scanner frequency vs candle timeframe to optimize scan intervals")
+        """Render scanner redundancy analysis sub-tab
+
+        Analyzes how often the same candle is scanned multiple times and whether
+        the rejection decision changes between scans (indicating edge cases worth investigating).
+        """
+        st.subheader("Scan Redundancy Analysis")
+        st.caption("Understand how often candles are re-scanned and whether decisions change")
 
         conn = self.get_database_connection()
         if not conn:
@@ -4133,124 +4137,216 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
             return
 
         try:
-            # Query for efficiency metrics
-            efficiency_query = """
-            SELECT
-                scan_timestamp,
-                created_at,
-                EXTRACT(EPOCH FROM (created_at - scan_timestamp)) / 60 as latency_minutes,
-                epic,
-                pair,
-                rejection_stage
-            FROM smc_simple_rejections
-            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
-            ORDER BY scan_timestamp DESC
+            # Query for redundancy analysis - group by candle+pair and track state changes
+            redundancy_query = """
+            WITH candle_scans AS (
+                SELECT
+                    scan_timestamp,
+                    epic,
+                    pair,
+                    rejection_stage,
+                    rejection_reason,
+                    created_at,
+                    ROW_NUMBER() OVER (PARTITION BY scan_timestamp, epic ORDER BY created_at ASC) as scan_num,
+                    COUNT(*) OVER (PARTITION BY scan_timestamp, epic) as total_scans,
+                    -- Check if stage changed from previous scan of same candle
+                    LAG(rejection_stage) OVER (PARTITION BY scan_timestamp, epic ORDER BY created_at) as prev_stage
+                FROM smc_simple_rejections
+                WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            )
+            SELECT * FROM candle_scans
+            ORDER BY scan_timestamp DESC, epic, created_at
             """
-            df = pd.read_sql_query(efficiency_query, conn, params=[days])
+            df = pd.read_sql_query(redundancy_query, conn, params=[days])
 
             if df.empty:
-                st.info("No data available for scanner efficiency analysis.")
+                st.info("No data available for redundancy analysis.")
                 return
 
+            # Calculate key metrics
+            unique_candles = df.groupby(['scan_timestamp', 'epic']).ngroups
+            total_scans = len(df)
+            redundant_scans = total_scans - unique_candles
+
+            # State changes: scans where rejection_stage differs from prev_stage
+            df['stage_changed'] = (df['rejection_stage'] != df['prev_stage']) & df['prev_stage'].notna()
+            state_changes = df['stage_changed'].sum()
+            candles_with_changes = df[df['stage_changed']].groupby(['scan_timestamp', 'epic']).ngroups
+
+            # Average scans per candle
+            scans_per_candle = df.groupby(['scan_timestamp', 'epic'])['total_scans'].first()
+            avg_scans = scans_per_candle.mean()
+            max_scans = scans_per_candle.max()
+
             # Summary metrics
-            col1, col2, col3, col4 = st.columns(4)
+            st.markdown("### Summary")
+            col1, col2, col3, col4, col5 = st.columns(5)
 
             with col1:
-                avg_latency = df['latency_minutes'].mean()
-                st.metric("Avg Scan Latency", f"{avg_latency:.1f} min", help="Time between candle close and scan")
+                st.metric(
+                    "Unique Candles",
+                    f"{unique_candles:,}",
+                    help="Number of distinct candle+pair combinations analyzed"
+                )
 
             with col2:
-                # Scans per unique candle
-                scans_per_candle = df.groupby(['scan_timestamp', 'epic']).size()
-                avg_scans = scans_per_candle.mean()
-                st.metric("Avg Scans/Candle", f"{avg_scans:.1f}", help="How many times each candle is scanned")
+                st.metric(
+                    "Avg Scans/Candle",
+                    f"{avg_scans:.1f}",
+                    help="How many times each candle is scanned on average (2-min scanner + 15-min candles = ~7 expected)"
+                )
 
             with col3:
-                unique_candles = df.groupby(['scan_timestamp', 'epic']).ngroups
-                st.metric("Unique Candles", f"{unique_candles:,}")
+                redundant_pct = (redundant_scans / total_scans * 100) if total_scans > 0 else 0
+                st.metric(
+                    "Redundant Scans",
+                    f"{redundant_pct:.0f}%",
+                    help="% of scans that re-analyzed the same candle"
+                )
 
             with col4:
-                total_scans = len(df)
-                redundant_pct = ((total_scans - unique_candles) / total_scans * 100) if total_scans > 0 else 0
-                st.metric("Redundant Scans", f"{redundant_pct:.1f}%", help="% of scans that re-analyzed same candle")
+                st.metric(
+                    "State Changes",
+                    f"{state_changes:,}",
+                    delta=f"{candles_with_changes} candles" if candles_with_changes > 0 else None,
+                    delta_color="normal",
+                    help="Times the rejection stage changed between scans of the same candle"
+                )
+
+            with col5:
+                change_rate = (candles_with_changes / unique_candles * 100) if unique_candles > 0 else 0
+                st.metric(
+                    "Change Rate",
+                    f"{change_rate:.1f}%",
+                    help="% of candles where the rejection decision changed during the candle's lifetime"
+                )
 
             st.markdown("---")
 
-            # Charts
+            # Two columns for charts
             col1, col2 = st.columns(2)
 
             with col1:
-                # Latency distribution
-                st.markdown("#### Scan Latency Distribution")
-                fig_latency = px.histogram(
-                    df,
-                    x='latency_minutes',
-                    nbins=30,
-                    title="Time from Candle Close to Scan (minutes)",
-                    labels={'latency_minutes': 'Latency (minutes)'}
-                )
-                fig_latency.add_vline(x=avg_latency, line_dash="dash", line_color="red",
-                                      annotation_text=f"Avg: {avg_latency:.1f} min")
-                st.plotly_chart(fig_latency, use_container_width=True)
-
-            with col2:
-                # Scans per candle distribution
                 st.markdown("#### Scans Per Candle Distribution")
                 scans_df = scans_per_candle.reset_index(name='scan_count')
+                scans_df.columns = ['scan_timestamp', 'epic', 'scan_count']
+
                 fig_scans = px.histogram(
                     scans_df,
                     x='scan_count',
-                    nbins=20,
-                    title="How Many Times Each Candle Was Scanned",
-                    labels={'scan_count': 'Scans per Candle'}
+                    nbins=min(int(max_scans) + 1, 20),
+                    title="How Many Times Each Candle Was Re-Scanned",
+                    labels={'scan_count': 'Scans per Candle', 'count': 'Number of Candles'}
+                )
+                fig_scans.add_vline(
+                    x=avg_scans,
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text=f"Avg: {avg_scans:.1f}"
+                )
+                # Add expected line for 15-min strategy with 2-min scanner
+                expected_scans = 7  # 15 / 2 ≈ 7
+                fig_scans.add_vline(
+                    x=expected_scans,
+                    line_dash="dot",
+                    line_color="green",
+                    annotation_text=f"Expected: ~{expected_scans}"
                 )
                 st.plotly_chart(fig_scans, use_container_width=True)
 
-            # Detailed table: Most re-scanned candles
-            st.markdown("#### Most Re-Scanned Candles")
-            st.caption("Candles that were analyzed multiple times with the same rejection result")
+            with col2:
+                st.markdown("#### State Changes by Stage")
+                if state_changes > 0:
+                    changes_df = df[df['stage_changed']].groupby('rejection_stage').size().reset_index(name='changes')
+                    fig_changes = px.bar(
+                        changes_df,
+                        x='rejection_stage',
+                        y='changes',
+                        title="Which Stages Had Decision Changes",
+                        labels={'rejection_stage': 'New Stage', 'changes': 'Number of Changes'}
+                    )
+                    st.plotly_chart(fig_changes, use_container_width=True)
+                else:
+                    st.info("No state changes detected - rejection decisions are stable within candles.")
 
-            rescan_df = scans_per_candle.reset_index(name='scan_count')
-            rescan_df = rescan_df.sort_values('scan_count', ascending=False).head(20)
-            rescan_df.columns = ['Candle Time', 'Epic', 'Scan Count']
+            # State Changes Detail Table (most interesting data)
+            if state_changes > 0:
+                st.markdown("---")
+                st.markdown("#### Candles with State Changes")
+                st.caption("These are edge cases where market conditions changed during a candle's lifetime")
 
-            st.dataframe(
-                rescan_df,
-                use_container_width=True,
-                hide_index=True
-            )
+                # Get details of candles that had state changes
+                change_details = df[df['stage_changed']][
+                    ['scan_timestamp', 'epic', 'pair', 'prev_stage', 'rejection_stage', 'rejection_reason', 'created_at']
+                ].copy()
+                change_details.columns = ['Candle Time', 'Epic', 'Pair', 'Previous Stage', 'New Stage', 'New Reason', 'Changed At']
+                change_details = change_details.sort_values('Changed At', ascending=False).head(50)
 
-            # Recommendation
+                st.dataframe(
+                    change_details,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            # Interpretation
             st.markdown("---")
-            st.markdown("#### Optimization Recommendations")
+            st.markdown("#### Interpretation")
 
-            if avg_scans > 5:
-                st.warning(f"""
-                **High redundancy detected**: Each candle is scanned ~{avg_scans:.0f} times on average.
-
-                **Recommendation**: Consider:
-                - Increasing scan interval from 2 min to 5-10 min
-                - Adding candle-close detection to only scan on new candles
-                - Caching rejection decisions for the same candle timestamp
+            # Redundancy analysis
+            if avg_scans <= 1.5:
+                st.success(f"""
+                **Low redundancy** ({avg_scans:.1f} scans/candle): Most candles are only scanned once.
+                This suggests the scanner may be running less frequently than expected, or rejections
+                occur early (SESSION/COOLDOWN) before the candle analysis.
                 """)
-            elif avg_scans > 2:
+            elif avg_scans <= 4:
                 st.info(f"""
-                **Moderate redundancy**: Each candle is scanned ~{avg_scans:.0f} times on average.
+                **Moderate redundancy** ({avg_scans:.1f} scans/candle): Candles are re-scanned a few times.
+                This is normal for a 2-minute scanner with early-stage rejections.
+                """)
+            elif avg_scans <= 8:
+                st.warning(f"""
+                **Expected redundancy** ({avg_scans:.1f} scans/candle): Close to the theoretical maximum
+                of ~7 scans for a 2-min scanner on 15-min candles.
 
-                This is acceptable for a 15-min strategy with 2-min scanning, but there's room for optimization.
+                Most rejections are happening at later stages (TIER2, TIER3, RISK) where the full
+                candle data is analyzed each time.
+                """)
+            else:
+                st.error(f"""
+                **High redundancy** ({avg_scans:.1f} scans/candle): More scans than expected.
+
+                Possible causes:
+                - Scanner running more frequently than 2 minutes
+                - Multiple rejection points being hit per scan cycle
+                - Data issue with timestamps
+                """)
+
+            # State change analysis
+            if change_rate > 10:
+                st.warning(f"""
+                **High state change rate** ({change_rate:.1f}%): Many candles changed rejection stage
+                during their lifetime. This indicates:
+                - Market conditions are volatile
+                - Strategy parameters may be at edge-case boundaries
+                - Worth investigating specific pairs/times with high change rates
+                """)
+            elif change_rate > 2:
+                st.info(f"""
+                **Normal state change rate** ({change_rate:.1f}%): Some edge cases where conditions
+                changed during the candle. These are good candidates for strategy tuning.
                 """)
             else:
                 st.success(f"""
-                **Good efficiency**: Each candle is scanned ~{avg_scans:.0f} times on average.
-
-                Scanner frequency is well-matched to the strategy timeframe.
+                **Stable decisions** ({change_rate:.1f}%): Rejection decisions are consistent within
+                candles. The strategy parameters are well away from edge-case boundaries.
                 """)
 
         except Exception as e:
             if "does not exist" in str(e):
-                st.info("Scanner efficiency data not yet available.")
+                st.info("Redundancy data not yet available. Run the scanner to collect data.")
             else:
-                st.error(f"Error fetching scanner efficiency data: {e}")
+                st.error(f"Error fetching redundancy data: {e}")
         finally:
             conn.close()
 
