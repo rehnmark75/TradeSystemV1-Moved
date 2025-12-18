@@ -161,11 +161,10 @@ class TradeValidator:
         self.db_manager = db_manager
         self.data_fetcher = None
         self.sr_validator = None
-        
-        # NEW: Initialize Claude analyzer for filtering if enabled
+
+        # NOTE: Claude analyzer initialization moved after data_fetcher setup
+        # to ensure chart generator has access to data_fetcher for vision analysis
         self.claude_analyzer = None
-        if self.enable_claude_filtering:
-            self._initialize_claude_analyzer()
 
         # NEW: Initialize economic news filter
         self.news_filter = None
@@ -241,6 +240,15 @@ class TradeValidator:
         self.sr_data_cache = {}
         self.sr_cache_expiry = {}
         self.sr_cache_duration_minutes = getattr(config, 'SR_CACHE_DURATION_MINUTES', 10)
+
+        # FIXED: Initialize Claude analyzer AFTER data_fetcher is available
+        # This ensures chart generator can access data_fetcher for vision analysis
+        if self.enable_claude_filtering:
+            self._initialize_claude_analyzer()
+            if self.data_fetcher:
+                self.logger.info("📊 Vision analysis enabled: data_fetcher available")
+            else:
+                self.logger.warning("⚠️ Vision analysis limited: data_fetcher not available")
 
         # NEW: Market Intelligence for universal signal context capture
         self.market_intelligence_engine = None
@@ -479,29 +487,54 @@ class TradeValidator:
             # Fetch candles if not provided and data_fetcher is available
             if candles is None and hasattr(self, 'data_fetcher') and self.data_fetcher:
                 try:
+                    self.logger.info(f"📊 Fetching candles for vision analysis: {epic}")
                     candles = self._fetch_candles_for_vision(epic)
                     if candles:
-                        self.logger.debug(f"📊 Fetched candles for {epic}: {list(candles.keys())}")
+                        self.logger.info(f"📊 Fetched candles for {epic}: {list(candles.keys())}")
+                    else:
+                        self.logger.warning(f"⚠️ No candles returned for {epic}")
                 except Exception as fetch_err:
                     self.logger.warning(f"⚠️ Failed to fetch candles for chart: {fetch_err}")
+            else:
+                # Log why we're not fetching candles
+                if candles is not None:
+                    self.logger.debug(f"📊 Using provided candles for {epic}")
+                elif not hasattr(self, 'data_fetcher'):
+                    self.logger.warning(f"⚠️ No data_fetcher attribute - cannot fetch candles for {epic}")
+                elif not self.data_fetcher:
+                    self.logger.warning(f"⚠️ data_fetcher is None - cannot fetch candles for {epic}")
 
             # Generate chart for vision analysis if available
             chart_base64 = None
             if hasattr(self, 'chart_generator') and self.chart_generator and candles:
                 try:
+                    self.logger.info(f"📊 Generating chart for {epic}...")
                     chart_base64 = self.chart_generator.generate_signal_chart(
                         epic=epic,
                         candles=candles,
                         signal=signal
                     )
                     if chart_base64:
-                        self.logger.debug(f"📊 Generated chart for {epic} ({len(chart_base64)} bytes)")
+                        self.logger.info(f"📊 Chart generated for {epic}: {len(chart_base64)} bytes")
+                    else:
+                        self.logger.warning(f"⚠️ Chart generation returned None for {epic}")
                 except Exception as chart_err:
                     self.logger.warning(f"⚠️ Chart generation failed: {chart_err}")
+                    import traceback
+                    self.logger.debug(traceback.format_exc())
                     # Continue without chart - text-only analysis
+            else:
+                # Log why chart is not being generated
+                if not hasattr(self, 'chart_generator'):
+                    self.logger.warning(f"⚠️ No chart_generator attribute for {epic}")
+                elif not self.chart_generator:
+                    self.logger.warning(f"⚠️ chart_generator is None for {epic}")
+                elif not candles:
+                    self.logger.warning(f"⚠️ No candles available for chart generation: {epic}")
 
             # Build prompt (vision-enabled if chart available)
             has_chart = chart_base64 is not None
+            self.logger.info(f"🔮 Claude analysis mode for {epic}: {'VISION' if has_chart else 'TEXT-ONLY'}")
             prompt = self.prompt_builder.build_forex_vision_prompt(signal, has_chart=has_chart)
 
             # Call Claude API (with or without image)
@@ -667,26 +700,36 @@ class TradeValidator:
         """
         try:
             if not hasattr(self, 'data_fetcher') or not self.data_fetcher:
+                self.logger.debug("No data_fetcher available for vision candles")
+                return None
+
+            # Extract pair from epic (e.g., 'CS.D.EURUSD.CEEM.IP' -> 'EURUSD')
+            pair = self._extract_pair_from_epic(epic)
+            if not pair:
+                self.logger.warning(f"⚠️ Could not extract pair from epic: {epic}")
                 return None
 
             candles = {}
 
             # Fetch multiple timeframes for comprehensive chart
+            # Using lookback_hours instead of num_candles (DataFetcher uses get_enhanced_data)
             timeframes = [
-                ('4h', 100),   # 4-hour for trend context
-                ('15m', 200),  # 15-minute for entry analysis
-                ('5m', 300),   # 5-minute for precision
+                ('4h', 400),   # 400 hours = ~16 days of 4h candles (~100 candles)
+                ('1h', 200),   # 200 hours = ~8 days of 1h candles
+                ('15m', 50),   # 50 hours = ~200 15m candles
             ]
 
-            for timeframe, num_candles in timeframes:
+            for timeframe, lookback_hours in timeframes:
                 try:
-                    df = self.data_fetcher.get_candles(
+                    df = self.data_fetcher.get_enhanced_data(
                         epic=epic,
+                        pair=pair,
                         timeframe=timeframe,
-                        num_candles=num_candles
+                        lookback_hours=lookback_hours
                     )
                     if df is not None and len(df) > 0:
                         candles[timeframe] = df
+                        self.logger.debug(f"📊 Fetched {timeframe}: {len(df)} candles")
                 except Exception as tf_err:
                     self.logger.debug(f"Could not fetch {timeframe} candles: {tf_err}")
 
@@ -698,6 +741,36 @@ class TradeValidator:
 
         except Exception as e:
             self.logger.warning(f"⚠️ Error fetching candles for vision: {e}")
+            return None
+
+    def _extract_pair_from_epic(self, epic: str) -> Optional[str]:
+        """
+        Extract the currency pair from an epic string.
+
+        Args:
+            epic: Epic string like 'CS.D.EURUSD.CEEM.IP' or 'CS.D.AUDUSD.MINI.IP'
+
+        Returns:
+            Pair string like 'EURUSD' or 'AUDUSD', or None if extraction fails
+        """
+        try:
+            # Handle common IG epic formats
+            # CS.D.EURUSD.CEEM.IP -> EURUSD
+            # CS.D.AUDUSD.MINI.IP -> AUDUSD
+            # CS.D.GBPUSD.MINI.IP -> GBPUSD
+            parts = epic.split('.')
+            if len(parts) >= 3:
+                # The pair is usually the 3rd part
+                pair_part = parts[2]
+                # Remove common suffixes
+                for suffix in ['CEEM', 'MINI', 'CFD', 'TODAY', 'MARGIN']:
+                    pair_part = pair_part.replace(suffix, '')
+                # Clean up any remaining dots or spaces
+                pair = pair_part.strip().upper()
+                if len(pair) == 6:  # Valid forex pair like EURUSD
+                    return pair
+            return None
+        except Exception:
             return None
 
     def _save_vision_artifacts(

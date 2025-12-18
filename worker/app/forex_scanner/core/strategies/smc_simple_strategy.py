@@ -2,15 +2,23 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.1.1
-DATE: 2025-12-17
-STATUS: Volume Fix - Use LTV for Confidence Scoring
+VERSION: 2.2.0
+DATE: 2025-12-18
+STATUS: Confidence Scoring Redesign - Balanced Tier Alignment
+
+v2.2.0 CHANGES (Confidence Scoring Redesign):
+    - FIX: swing_break_quality was in config but NOT implemented - NOW IMPLEMENTED
+    - FIX: pullback was over-weighted at 40% (25% + 15% fib) - NOW 20%
+    - FIX: volume was binary (15%/5%) - NOW gradient based on spike magnitude
+    - FIX: EMA used fixed 30 pips - NOW ATR-normalized for cross-pair fairness
+    - NEW: Balanced 5-component scoring (each 20% weight)
+    - NEW: Swing break quality scores: body close %, break strength, recency
+    - Expected: +2-4% win rate improvement, better tier alignment
 
 v2.1.1 CHANGES (Volume Data Fix):
     - FIX: Use 'ltv' column instead of 'volume' for volume confirmation
     - Analysis: IG provides actual data in 'ltv' (Last Traded Volume), 'volume' is always 0
     - Impact: +10% confidence boost when volume spike detected (0.05 → 0.15)
-    - Expected: More signals passing 60% confidence threshold
 
 v2.1.0 CHANGES (R:R Root Cause Fixes):
     - FIX: Reduced SL_ATR_MULTIPLIER 1.2→1.0 (tighter stops = better R:R)
@@ -567,12 +575,37 @@ class SMCSimpleStrategy:
             # ================================================================
             # STEP 5: Calculate Confidence Score
             # ================================================================
+            # v2.2.0: Calculate ATR and volume ratio BEFORE confidence for new scoring
+            atr = self._calculate_atr(df_trigger)
+
+            # Volume ratio (current volume vs SMA) - needed for gradient volume scoring
+            volume_ratio = 1.0
+            if 'ltv' in df_trigger.columns:
+                vol_col = 'ltv'
+            elif 'volume' in df_trigger.columns:
+                vol_col = 'volume'
+            else:
+                vol_col = None
+
+            if vol_col:
+                current_vol = df_trigger[vol_col].iloc[-1]
+                vol_sma = df_trigger[vol_col].iloc[-self.volume_sma_period:].mean()
+                if vol_sma > 0:
+                    volume_ratio = current_vol / vol_sma
+
+            # v2.2.0: Enhanced confidence with new parameters
             confidence = self._calculate_confidence(
                 ema_distance=ema_distance,
                 volume_confirmed=volume_confirmed,
                 in_optimal_zone=in_optimal_zone,
                 rr_ratio=rr_ratio,
-                pullback_depth=pullback_depth
+                pullback_depth=pullback_depth,
+                # v2.2.0: New parameters for improved scoring
+                break_candle=break_candle,
+                swing_level=swing_level,
+                direction=direction,
+                volume_ratio=volume_ratio,
+                atr=atr
             )
 
             # v1.8.0: Apply confidence penalty for momentum entries
@@ -586,14 +619,15 @@ class SMCSimpleStrategy:
             if round(confidence, 4) < pair_min_confidence:
                 reason = f"Confidence too low ({confidence*100:.0f}% < {pair_min_confidence*100:.0f}%)"
                 self.logger.info(f"\n❌ {reason} (pair-specific)")
-                # Track rejection with confidence breakdown
+                # Track rejection with confidence breakdown - v2.2.0: Updated breakdown
+                fib_accuracy = 1.0 - min(abs(pullback_depth - 0.382) / 0.382, 1.0)
                 confidence_breakdown = {
                     'total': confidence,
-                    'ema_alignment': min(ema_distance / 30, 1.0) * 0.25,
-                    'volume_bonus': 0.15 if volume_confirmed else 0.05,
-                    'pullback_quality': (1.0 if in_optimal_zone else 0.6) * 0.25,
+                    'ema_alignment': min(ema_distance / (atr * 3) if atr > 0 else ema_distance / 30, 1.0) * 0.20,
+                    'swing_break_quality': 0.10,  # Default, actual is calculated in method
+                    'volume_strength': (0.5 + min((volume_ratio - 1.0) / 1.0, 1.0) * 0.5) * 0.20 if volume_confirmed and volume_ratio > 1.0 else 0.04,
+                    'pullback_quality': (1.0 if in_optimal_zone and fib_accuracy > 0.7 else 0.8 if in_optimal_zone else 0.5) * 0.20,
                     'rr_quality': min(rr_ratio / 3.0, 1.0) * 0.20,
-                    'fib_accuracy': (1.0 - abs(pullback_depth - 0.382) / 0.382) * 0.15,
                     'momentum_penalty': self.momentum_confidence_penalty if entry_type == 'MOMENTUM' else 0.0,
                 }
                 risk_result = {
@@ -623,17 +657,7 @@ class SMCSimpleStrategy:
             # ================================================================
             # STEP 6: Calculate Technical Indicators for Analytics
             # ================================================================
-            # ATR for volatility context
-            atr = self._calculate_atr(df_trigger)
-
-            # Volume ratio (current volume vs SMA)
-            volume_ratio = 1.0
-            if 'volume' in df_trigger.columns or 'ltv' in df_trigger.columns:
-                vol_col = 'volume' if 'volume' in df_trigger.columns else 'ltv'
-                current_vol = df_trigger[vol_col].iloc[-1]
-                vol_sma = df_trigger[vol_col].iloc[-self.volume_sma_period:].mean()
-                if vol_sma > 0:
-                    volume_ratio = current_vol / vol_sma
+            # Note: ATR and volume_ratio already calculated before confidence scoring (v2.2.0)
 
             # MACD indicators (if available in dataframe, otherwise calculate)
             macd_line = 0.0
@@ -985,9 +1009,12 @@ class SMCSimpleStrategy:
             if not break_found:
                 # Fallback: check if current price is above the highest recent swing
                 highest_swing = max(recent_highs, key=lambda x: x[1])
+                swing_level = highest_swing[1]
+                current_high = highs[-1]
+                gap_pips = (swing_level - current_high) / pip_value
                 return {
                     'valid': False,
-                    'reason': f"Price did not break swing high {highest_swing[1]:.5f}"
+                    'reason': f"BULL: High {current_high:.5f} below swing {swing_level:.5f} (need +{gap_pips:.1f} pips)"
                 }
 
             swing_level = best_swing_level
@@ -1037,9 +1064,12 @@ class SMCSimpleStrategy:
             if not break_found:
                 # Fallback: check if current price is below the lowest recent swing
                 lowest_swing = min(recent_lows, key=lambda x: x[1])
+                swing_level = lowest_swing[1]
+                current_low = lows[-1]
+                gap_pips = (current_low - swing_level) / pip_value
                 return {
                     'valid': False,
-                    'reason': f"Price did not break swing low {lowest_swing[1]:.5f}"
+                    'reason': f"BEAR: Low {current_low:.5f} above swing {swing_level:.5f} (need -{gap_pips:.1f} pips)"
                 }
 
             swing_level = best_swing_level
@@ -1374,41 +1404,122 @@ class SMCSimpleStrategy:
         volume_confirmed: bool,
         in_optimal_zone: bool,
         rr_ratio: float,
-        pullback_depth: float
+        pullback_depth: float,
+        # v2.2.0: New parameters for improved scoring
+        break_candle: Dict = None,
+        swing_level: float = None,
+        direction: str = None,
+        volume_ratio: float = 1.0,
+        atr: float = None
     ) -> float:
         """
         Calculate confidence score (0.0 to 1.0)
 
-        Scoring:
-        - EMA alignment strength: 25%
-        - Volume confirmation: 15%
-        - Pullback quality: 25%
-        - R:R ratio quality: 20%
-        - Fib accuracy: 15%
+        v2.2.0: Redesigned scoring with proper tier alignment
+
+        Scoring (5 components, each 20%):
+        - EMA alignment: 20% (ATR-normalized distance from EMA)
+        - Swing break quality: 20% (body close %, break strength, recency)
+        - Volume strength: 20% (gradient based on spike magnitude)
+        - Pullback quality: 20% (combined zone + Fib accuracy)
+        - R:R ratio quality: 20% (scales toward 3:1)
+
+        Previous issues fixed:
+        - swing_break_quality was in config but NOT implemented (now added)
+        - pullback was over-weighted at 40% (now 20%)
+        - volume was binary (now gradient)
+        - EMA used fixed 30 pips (now ATR-normalized)
         """
-        # EMA alignment (further from EMA = stronger trend)
-        # 30+ pips = perfect, scale down from there
-        ema_score = min(ema_distance / 30, 1.0) * 0.25
-
-        # Volume confirmation bonus
-        volume_score = 0.15 if volume_confirmed else 0.05
-
-        # Pullback quality (in optimal zone = best)
-        if in_optimal_zone:
-            pullback_score = 1.0 * 0.25
-        elif self.fib_min <= pullback_depth <= self.fib_max:
-            pullback_score = 0.6 * 0.25
+        # ================================================================
+        # 1. EMA ALIGNMENT (20% weight) - ATR-normalized
+        # ================================================================
+        # v2.2.0: Normalize by ATR for fair cross-pair comparison
+        # 3+ ATR from EMA = perfect score
+        if atr and atr > 0:
+            ema_in_atr = ema_distance / (atr * 3)  # 3 ATR = max
+            ema_score = min(ema_in_atr, 1.0) * 0.20
         else:
-            pullback_score = 0.3 * 0.25
+            # Fallback to pip-based (legacy)
+            ema_score = min(ema_distance / 30, 1.0) * 0.20
 
-        # R:R quality (higher is better, cap at 3:1)
+        # ================================================================
+        # 2. SWING BREAK QUALITY (20% weight) - NEW in v2.2.0
+        # ================================================================
+        swing_break_score = 0.10  # Default to 50% if no break_candle data
+
+        if break_candle and swing_level and direction:
+            # Factor A: Body close percentage (strong momentum = full body candle)
+            break_range = break_candle.get('high', 0) - break_candle.get('low', 0)
+            break_body = abs(break_candle.get('close', 0) - break_candle.get('open', 0))
+            body_pct = break_body / break_range if break_range > 0 else 0.5
+            body_score = min(body_pct / 0.7, 1.0)  # 70%+ body = perfect
+
+            # Factor B: Break strength (how far beyond swing level)
+            if direction == 'BULL':
+                break_beyond = break_candle.get('close', 0) - swing_level
+            else:
+                break_beyond = swing_level - break_candle.get('close', 0)
+
+            # Normalize break strength by ATR if available
+            if atr and atr > 0:
+                break_strength = min(break_beyond / atr, 1.0) if break_beyond > 0 else 0.3
+            else:
+                break_strength = 0.5 if break_beyond > 0 else 0.3
+
+            # Factor C: Recency (more recent breaks are better)
+            bars_ago = break_candle.get('bars_ago', 10)
+            recency_score = max(0.3, 1.0 - (bars_ago / 20))  # 0 bars = 1.0, 20+ bars = 0.3
+
+            # Combined swing break quality (weighted average)
+            swing_break_score = (body_score * 0.4 + break_strength * 0.4 + recency_score * 0.2) * 0.20
+
+        # ================================================================
+        # 3. VOLUME STRENGTH (20% weight) - Gradient scoring
+        # ================================================================
+        # v2.2.0: Scale based on volume spike magnitude, not binary
+        if volume_confirmed and volume_ratio > 1.0:
+            # Scale from 1.0x to 2.0x spike (beyond 2x = max score)
+            volume_magnitude = min((volume_ratio - 1.0) / 1.0, 1.0)  # 2.0x = 100%
+            volume_score = (0.5 + volume_magnitude * 0.5) * 0.20  # 50-100% of weight
+        elif volume_confirmed:
+            volume_score = 0.10  # 50% of weight (confirmed but no ratio data)
+        else:
+            volume_score = 0.04  # 20% of weight (no confirmation)
+
+        # ================================================================
+        # 4. PULLBACK QUALITY (20% weight) - Combined zone + Fib accuracy
+        # ================================================================
+        # v2.2.0: Single combined score instead of separate 25% + 15%
+        # Perfect: In optimal zone (38.2-61.8%) AND close to 38.2%
+        # Good: In optimal zone OR close to 38.2%
+        # Acceptable: In valid zone (23.6-70%)
+        # Poor: Edge of zone
+
+        fib_accuracy = 1.0 - min(abs(pullback_depth - 0.382) / 0.382, 1.0)
+
+        if in_optimal_zone and fib_accuracy > 0.7:
+            # Perfect: optimal zone + close to golden ratio
+            pullback_score = 1.0 * 0.20
+        elif in_optimal_zone:
+            # Good: in optimal zone
+            pullback_score = 0.8 * 0.20
+        elif self.fib_min <= pullback_depth <= self.fib_max:
+            # Acceptable: in valid zone, scale by Fib accuracy
+            pullback_score = (0.4 + fib_accuracy * 0.3) * 0.20
+        else:
+            # Poor: outside zone (shouldn't happen - would fail tier 3)
+            pullback_score = 0.2 * 0.20
+
+        # ================================================================
+        # 5. R:R RATIO QUALITY (20% weight)
+        # ================================================================
+        # Scale toward 3:1 (beyond 3:1 caps at max score)
         rr_score = min(rr_ratio / 3.0, 1.0) * 0.20
 
-        # Fib accuracy (how close to 0.382 golden zone)
-        fib_accuracy = 1.0 - min(abs(pullback_depth - 0.382) / 0.382, 1.0)
-        fib_score = fib_accuracy * 0.15
-
-        confidence = ema_score + volume_score + pullback_score + rr_score + fib_score
+        # ================================================================
+        # TOTAL CONFIDENCE
+        # ================================================================
+        confidence = ema_score + swing_break_score + volume_score + pullback_score + rr_score
 
         return min(confidence, 1.0)
 

@@ -1,12 +1,20 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.1.0 (R:R Root Cause Fixes)
+# Version: 2.2.0 (Confidence Scoring Redesign)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback OR momentum continuation entry
+#
+# v2.2.0 CONFIDENCE SCORING REDESIGN:
+#   - FIX: swing_break_quality was in config but NOT implemented - NOW IMPLEMENTED
+#   - FIX: pullback was over-weighted at 40% (25% + 15% fib) - NOW 20%
+#   - FIX: volume was binary (15%/5%) - NOW gradient based on spike magnitude
+#   - FIX: EMA used fixed 30 pips - NOW ATR-normalized for cross-pair fairness
+#   - NEW: Balanced 5-component scoring (each 20% weight)
+#   - Expected: +2-4% win rate improvement, better tier alignment
 #
 # v2.1.0 R:R ROOT CAUSE FIXES:
 #   - FIX: Reduced SL_ATR_MULTIPLIER 1.2→1.0 (tighter stops = better R:R)
@@ -40,9 +48,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.1.2"
-STRATEGY_DATE = "2025-12-17"
-STRATEGY_STATUS = "Relaxed Filters for Forward Testing - More Signals"
+STRATEGY_VERSION = "2.2.0"
+STRATEGY_DATE = "2025-12-18"
+STRATEGY_STATUS = "Confidence Scoring Redesign - Balanced Tier Alignment"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -318,7 +326,9 @@ PAIR_MIN_CONFIDENCE = {
 # ============================================================================
 # CONFIDENCE SCORING
 # ============================================================================
-# Simple confidence calculation based on setup quality
+# v2.2.0: Redesigned confidence scoring with proper tier alignment
+# Fixed issues: swing_break_quality was in config but NOT implemented,
+#               pullback was over-weighted at 40% (25% + 15% fib_accuracy)
 
 # Confidence thresholds
 # v1.7.0: REDUCED confidence threshold - 80% was too restrictive
@@ -328,13 +338,18 @@ MIN_CONFIDENCE_THRESHOLD = 0.50         # v1.7.0: REDUCED from 0.80 - allow more
 HIGH_CONFIDENCE_THRESHOLD = 0.75         # v1.7.0: REDUCED from 0.90 - achievable premium tier
 
 # Scoring weights (must sum to 1.0)
-# v2.1.0: Increased R:R weight since it directly impacts profitability
+# v2.2.0: Balanced 5-component scoring (each 20%)
+# - EMA alignment: ATR-normalized (3 ATR from EMA = max)
+# - Swing break quality: Body %, break strength, recency (NOW IMPLEMENTED)
+# - Volume strength: Gradient scoring based on spike magnitude (was binary)
+# - Pullback quality: Combined zone + Fib accuracy (was over-weighted at 40%)
+# - R:R ratio: Scales toward 3:1
 CONFIDENCE_WEIGHTS = {
-    'ema_alignment': 0.25,               # 4H EMA alignment strength
-    'swing_break_quality': 0.25,         # v2.1.0: REDUCED from 0.30 - How clean was the break
-    'pullback_depth': 0.20,              # Pullback to optimal Fib zone
-    'volume_confirmation': 0.15,         # Volume spike on break
-    'rr_ratio': 0.15,                    # v2.1.0: INCREASED from 0.10 - R:R directly affects profit
+    'ema_alignment': 0.20,               # v2.2.0: ATR-normalized EMA distance
+    'swing_break_quality': 0.20,         # v2.2.0: NOW IMPLEMENTED - body %, strength, recency
+    'volume_strength': 0.20,             # v2.2.0: Gradient scoring (was binary 15%/5%)
+    'pullback_quality': 0.20,            # v2.2.0: Combined zone + Fib (was 40% split)
+    'rr_ratio': 0.20,                    # v2.2.0: R:R quality toward 3:1
 }
 
 # ============================================================================

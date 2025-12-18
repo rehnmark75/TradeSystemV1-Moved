@@ -297,7 +297,16 @@ class IntegrationManager:
 
         Returns:
             List of signals with enhanced Claude analysis
+
+        NOTE: This method should NOT be called if REQUIRE_CLAUDE_APPROVAL=True
+        because TradeValidator already handles Claude analysis in that case.
         """
+        # CRITICAL GUARD: Prevent duplicate Claude calls
+        # If TradeValidator handles Claude (REQUIRE_CLAUDE_APPROVAL=True), skip this entirely
+        if getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False):
+            self.logger.debug("🚫 IntegrationManager Claude BLOCKED: TradeValidator handles Claude analysis")
+            return signals
+
         if not self.claude_analyzer or not self.enable_claude:
             self.logger.debug("Claude analysis disabled or unavailable")
             return signals
@@ -462,7 +471,15 @@ class IntegrationManager:
 
         Returns:
             Analysis result dictionary
+
+        NOTE: This method should NOT be called if REQUIRE_CLAUDE_APPROVAL=True
+        because TradeValidator already handles Claude analysis in that case.
         """
+        # CRITICAL GUARD: Prevent duplicate Claude calls
+        if getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False):
+            self.logger.debug("🚫 IntegrationManager analysis BLOCKED: TradeValidator handles Claude")
+            return None
+
         try:
             # Check if vision analysis should be used
             strategy = signal.get('strategy', '').upper()
@@ -512,48 +529,38 @@ class IntegrationManager:
     def test_claude_integration(self) -> bool:
         """
         ENHANCED: Test modular Claude integration with health monitoring
+
+        NOTE: This test ONLY checks connection, it does NOT make analysis API calls
+        to avoid wasting API tokens during initialization/restarts.
         """
         try:
             if not self.claude_analyzer:
                 return False
-            
+
             # Test API health if available
             if hasattr(self.claude_analyzer, 'get_health_status'):
                 health_status = self.claude_analyzer.get_health_status()
                 self.logger.info(f"🏥 Claude API health: {health_status}")
-            
-            # Test basic connection
+
+            # Test basic connection - this is sufficient to verify API is working
+            # FIXED: Removed actual analysis call to avoid wasting API tokens
             if hasattr(self.claude_analyzer, 'test_connection'):
                 connection_test = self.claude_analyzer.test_connection()
                 if not connection_test:
                     self.logger.error("❌ Claude connection test failed")
                     return False
-            
-            # Test with sample signal
-            test_signal = {
-                'epic': 'CS.D.EURUSD.CEEM.IP',
-                'signal_type': 'BUY',
-                'confidence_score': 0.85,
-                'entry_price': 1.1234,
-                'stop_loss': 1.1200,
-                'take_profit': 1.1300,
-                'strategy': 'TEST',
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            # Test enhanced analysis
-            analysis = self._perform_enhanced_claude_analysis(test_signal)
-            
-            if analysis:
+
+                # Connection test passed - that's enough for initialization
                 self.integration_status['claude']['last_test'] = datetime.now()
                 self.integration_status['claude']['error_count'] = 0
-                self.logger.info("✅ Enhanced Claude integration test passed")
+                self.logger.info("✅ Claude connection test passed (no analysis API call)")
                 return True
-            else:
-                self.integration_status['claude']['error_count'] += 1
-                self.logger.error("❌ Enhanced Claude test failed - no valid response")
-                return False
-            
+
+            # No test_connection method available, assume it's working
+            self.integration_status['claude']['last_test'] = datetime.now()
+            self.logger.info("✅ Claude analyzer available (no connection test method)")
+            return True
+
         except Exception as e:
             self.integration_status['claude']['error_count'] += 1
             self.logger.error(f"❌ Enhanced Claude test failed: {e}")

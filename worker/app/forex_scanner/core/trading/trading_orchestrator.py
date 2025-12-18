@@ -1148,15 +1148,30 @@ class TradingOrchestrator:
 
             
             # 5. ENHANCED: Apply Claude analysis with modular features
+            # FIXED: Skip IntegrationManager Claude if TradeValidator already did Claude analysis
+            # This prevents duplicate API calls and wasted tokens
             claude_results = {}
-            if self.enable_claude and self.integration_manager:
+            trade_validator_did_claude = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
+
+            if trade_validator_did_claude:
+                # TradeValidator already did Claude analysis - use its results, skip IntegrationManager
+                self.logger.info("🤖 Skipping IntegrationManager Claude (TradeValidator already analyzed)")
+                analyzed_signals = risk_filtered_signals
+
+                # Extract Claude results from TradeValidator's analysis
+                for i, signal in enumerate(risk_filtered_signals):
+                    if signal.get('claude_validation_result'):
+                        claude_results[i] = signal.get('claude_validation_result')
+
+            elif self.enable_claude and self.integration_manager:
+                # No TradeValidator Claude - use IntegrationManager with vision
                 self.logger.info(f"🤖 Starting enhanced Claude analysis...")
                 self.logger.info(f"   Analysis mode: {self.claude_analysis_mode}")
                 self.logger.info(f"   Analysis level: {self.claude_analysis_level}")
                 self.logger.info(f"   Advanced prompts: {self.use_advanced_claude_prompts}")
-                
+
                 analyzed_signals = self.integration_manager.analyze_signals_with_claude(risk_filtered_signals)
-                
+
                 # Extract Claude results for database storage
                 for i, signal in enumerate(analyzed_signals):
                     if signal.get('claude_analysis'):
@@ -1171,18 +1186,17 @@ class TradingOrchestrator:
                             'technical_validation_passed': signal.get('claude_technical_validation', False)
                         }
                         claude_results[i] = claude_result
-                        
+
                         # ENHANCED: Log modular Claude features
                         if claude_result.get('claude_analysis_level'):
                             self.logger.debug(f"   Signal #{i+1} analyzed with {claude_result['claude_analysis_level']} level")
-                
+
                 self.logger.info(f"🤖 Enhanced Claude analysis complete")
+
             else:
+                # Claude disabled entirely
                 analyzed_signals = risk_filtered_signals
-                if not self.enable_claude:
-                    self.logger.info("🤖 Claude analysis disabled")
-                else:
-                    self.logger.warning("⚠️ Claude analysis enabled but IntegrationManager not available")
+                self.logger.info("🤖 Claude analysis disabled")
             
             # 6. CRITICAL: Save ALL signals to alert_history table
             self.logger.info("💾 Saving all signals to alert_history table...")

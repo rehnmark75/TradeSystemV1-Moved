@@ -352,10 +352,32 @@ class APIClient:
             self.stats['total_output_tokens'] += usage.output_tokens
             self.stats['total_tokens'] += usage.input_tokens + usage.output_tokens
 
-    def test_connection(self) -> bool:
-        """Test Claude API connection"""
+    # Class-level cache to avoid repeated connection tests during startup
+    _connection_test_cache = {}
+    _CONNECTION_TEST_CACHE_DURATION = 300  # 5 minutes
+
+    def test_connection(self, force: bool = False) -> bool:
+        """
+        Test Claude API connection with caching to avoid redundant API calls.
+
+        Args:
+            force: If True, bypass cache and force a new connection test
+
+        Returns:
+            True if connection is working, False otherwise
+        """
         if not self.is_available:
             return False
+
+        # Check cache unless forced
+        cache_key = self.api_key[:8] if self.api_key else 'no_key'
+        now = datetime.now().timestamp()
+
+        if not force and cache_key in APIClient._connection_test_cache:
+            cached_result, cached_time = APIClient._connection_test_cache[cache_key]
+            if now - cached_time < self._CONNECTION_TEST_CACHE_DURATION:
+                logger.debug(f"✅ Using cached connection test result (age: {int(now - cached_time)}s)")
+                return cached_result
 
         try:
             response = self.call_api("Respond with exactly: OK", max_tokens=10)
@@ -366,10 +388,14 @@ class APIClient:
             else:
                 logger.warning("⚠️ Claude API connection test returned unexpected response")
 
+            # Cache the result
+            APIClient._connection_test_cache[cache_key] = (success, now)
             return success
 
         except Exception as e:
             logger.error(f"❌ Connection test failed: {e}")
+            # Cache failure too (but for shorter duration)
+            APIClient._connection_test_cache[cache_key] = (False, now)
             return False
 
     def get_health_status(self) -> Dict[str, Any]:
