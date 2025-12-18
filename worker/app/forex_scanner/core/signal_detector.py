@@ -1110,7 +1110,7 @@ class SignalDetector:
             if not hasattr(self, 'smc_simple_strategy') or self.smc_simple_strategy is None:
                 from .strategies.smc_simple_strategy import create_smc_simple_strategy
 
-                self.smc_simple_strategy = create_smc_simple_strategy(config, logger=self.logger)
+                self.smc_simple_strategy = create_smc_simple_strategy(config, logger=self.logger, db_manager=self.db_manager)
                 self.logger.info(f"✅ SMC Simple strategy initialized (htf={htf_tf}, trigger={trigger_tf}, entry={entry_tf})")
 
             # Check if data_fetcher is in backtest mode (needed for lookback calculations)
@@ -1193,6 +1193,10 @@ class SignalDetector:
                 self.logger.info(f"✅ [SMC_SIMPLE] Signal detected for {epic}: {signal['signal']} @ {signal['entry_price']:.5f}")
                 # Add market context if available
                 signal = self._add_market_context(signal, df_trigger)
+
+            # Flush any pending rejections to database
+            if hasattr(self, 'smc_simple_strategy') and self.smc_simple_strategy is not None:
+                self.smc_simple_strategy.flush_rejections()
 
             return signal
 

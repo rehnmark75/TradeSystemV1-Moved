@@ -56,9 +56,9 @@ Target Performance (v2.1.0):
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 class SMCSimpleStrategy:
@@ -71,18 +71,35 @@ class SMCSimpleStrategy:
     3. TIER 3: 15m price pulls back to Fibonacci zone (entry timing)
     """
 
-    def __init__(self, config, logger=None):
-        """Initialize SMC Simple Strategy"""
+    def __init__(self, config, logger=None, db_manager=None):
+        """Initialize SMC Simple Strategy
+
+        Args:
+            config: Main config module
+            logger: Logger instance (optional)
+            db_manager: DatabaseManager for rejection tracking (optional)
+        """
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
+        self._db_manager = db_manager  # Store for later initialization
 
-        # Load configuration
+        # Load configuration (sets self.rejection_tracking_enabled)
         self._load_config()
 
         # State tracking
         self.pair_cooldowns = {}  # {pair: last_signal_time}
         self.recent_signals = {}  # {pair: [(timestamp, price), ...]}
         self.pending_entries = {}  # {pair: pending_entry_data}
+
+        # Rejection tracking (v2.2.0) - initialized after config is loaded
+        self.rejection_manager = None
+        if self._db_manager is not None and self.rejection_tracking_enabled:
+            try:
+                from forex_scanner.alerts.smc_rejection_history import SMCRejectionHistoryManager
+                self.rejection_manager = SMCRejectionHistoryManager(db_manager)
+                self.logger.info("   Rejection tracking: ENABLED")
+            except Exception as e:
+                self.logger.warning(f"   Rejection tracking: DISABLED (failed to init: {e})")
 
         self.logger.info("=" * 60)
         self.logger.info("✅ SMC Simple Strategy v1.0.0 initialized")
@@ -199,6 +216,10 @@ class SMCSimpleStrategy:
         # Debug
         self.debug_logging = getattr(smc_config, 'ENABLE_DEBUG_LOGGING', True)
 
+        # v2.2.0: Rejection Tracking
+        self.rejection_tracking_enabled = getattr(smc_config, 'REJECTION_TRACKING_ENABLED', False)
+        self.rejection_log_to_console = getattr(smc_config, 'REJECTION_LOG_TO_CONSOLE', False)
+
     def detect_signal(
         self,
         df_trigger: pd.DataFrame,
@@ -247,6 +268,15 @@ class SMCSimpleStrategy:
                 session_valid, session_reason = self._check_session(candle_timestamp)
                 if not session_valid:
                     self.logger.info(f"\n🕐 SESSION FILTER: {session_reason}")
+                    # Track rejection
+                    self._track_rejection(
+                        stage='SESSION',
+                        reason=session_reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value)
+                    )
                     return None
                 self.logger.info(f"\n🕐 SESSION: {session_reason}")
 
@@ -265,6 +295,15 @@ class SMCSimpleStrategy:
             cooldown_valid, cooldown_reason = self._check_cooldown(pair, candle_dt)
             if not cooldown_valid:
                 self.logger.info(f"\n⏱️  COOLDOWN: {cooldown_reason}")
+                # Track rejection
+                self._track_rejection(
+                    stage='COOLDOWN',
+                    reason=cooldown_reason,
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value)
+                )
                 return None
 
             # ================================================================
@@ -276,6 +315,15 @@ class SMCSimpleStrategy:
 
             if not ema_result['valid']:
                 self.logger.info(f"   ❌ {ema_result['reason']}")
+                # Track rejection
+                self._track_rejection(
+                    stage='TIER1_EMA',
+                    reason=ema_result['reason'],
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result)
+                )
                 return None
 
             direction = ema_result['direction']  # 'BULL' or 'BEAR'
@@ -295,6 +343,16 @@ class SMCSimpleStrategy:
 
             if not swing_result['valid']:
                 self.logger.info(f"   ❌ {swing_result['reason']}")
+                # Track rejection
+                self._track_rejection(
+                    stage='TIER2_SWING',
+                    reason=swing_result['reason'],
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    direction=direction,
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result)
+                )
                 return None
 
             swing_level = swing_result['swing_level']
@@ -330,6 +388,16 @@ class SMCSimpleStrategy:
 
             if not pullback_result['valid']:
                 self.logger.info(f"   ❌ {pullback_result['reason']}")
+                # Track rejection
+                self._track_rejection(
+                    stage='TIER3_PULLBACK',
+                    reason=pullback_result['reason'],
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    direction=direction,
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result)
+                )
                 return None
 
             market_price = pullback_result['entry_price']  # Current close (market price)
@@ -393,10 +461,42 @@ class SMCSimpleStrategy:
             # v2.0.0: Risk sanity check for limit orders with offset
             if order_type == 'limit':
                 if risk_pips < self.min_risk_after_offset_pips:
-                    self.logger.info(f"   ❌ Risk too small after offset ({risk_pips:.1f} < {self.min_risk_after_offset_pips} pips)")
+                    reason = f"Risk too small after offset ({risk_pips:.1f} < {self.min_risk_after_offset_pips} pips)"
+                    self.logger.info(f"   ❌ {reason}")
+                    # Track rejection
+                    risk_context = {
+                        'potential_entry': entry_price,
+                        'potential_stop_loss': stop_loss,
+                        'potential_risk_pips': risk_pips,
+                    }
+                    self._track_rejection(
+                        stage='RISK_LIMIT',
+                        reason=reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context={**self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result), **risk_context}
+                    )
                     return None
                 if risk_pips > self.max_risk_after_offset_pips:
-                    self.logger.info(f"   ❌ Risk too large after offset ({risk_pips:.1f} > {self.max_risk_after_offset_pips} pips)")
+                    reason = f"Risk too large after offset ({risk_pips:.1f} > {self.max_risk_after_offset_pips} pips)"
+                    self.logger.info(f"   ❌ {reason}")
+                    # Track rejection
+                    risk_context = {
+                        'potential_entry': entry_price,
+                        'potential_stop_loss': stop_loss,
+                        'potential_risk_pips': risk_pips,
+                    }
+                    self._track_rejection(
+                        stage='RISK_LIMIT',
+                        reason=reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context={**self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result), **risk_context}
+                    )
                     return None
 
             # Find take profit (next swing structure)
@@ -414,14 +514,52 @@ class SMCSimpleStrategy:
 
             # Validate R:R
             if rr_ratio < self.min_rr_ratio:
-                self.logger.info(f"   ❌ R:R too low ({rr_ratio:.2f} < {self.min_rr_ratio})")
+                reason = f"R:R too low ({rr_ratio:.2f} < {self.min_rr_ratio})"
+                self.logger.info(f"   ❌ {reason}")
+                # Track rejection
+                risk_result = {
+                    'entry_price': entry_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'risk_pips': risk_pips,
+                    'reward_pips': reward_pips,
+                    'rr_ratio': rr_ratio,
+                }
+                self._track_rejection(
+                    stage='RISK_RR',
+                    reason=reason,
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    direction=direction,
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                )
                 return None
 
             self.logger.info(f"   ✅ R:R meets minimum ({rr_ratio:.2f} >= {self.min_rr_ratio})")
 
             # Validate minimum TP
             if reward_pips < self.min_tp_pips:
-                self.logger.info(f"   ❌ TP too small ({reward_pips:.1f} < {self.min_tp_pips} pips)")
+                reason = f"TP too small ({reward_pips:.1f} < {self.min_tp_pips} pips)"
+                self.logger.info(f"   ❌ {reason}")
+                # Track rejection
+                risk_result = {
+                    'entry_price': entry_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'risk_pips': risk_pips,
+                    'reward_pips': reward_pips,
+                    'rr_ratio': rr_ratio,
+                }
+                self._track_rejection(
+                    stage='RISK_TP',
+                    reason=reason,
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    direction=direction,
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                )
                 return None
 
             self.logger.info(f"   ✅ TP meets minimum ({reward_pips:.1f} >= {self.min_tp_pips} pips)")
@@ -446,7 +584,38 @@ class SMCSimpleStrategy:
             pair_min_confidence = self.pair_min_confidence.get(pair, self.pair_min_confidence.get(epic, self.min_confidence))
             # Use round() to avoid floating-point precision issues (e.g., 0.4999 displaying as 50%)
             if round(confidence, 4) < pair_min_confidence:
-                self.logger.info(f"\n❌ Confidence too low: {confidence*100:.0f}% < {pair_min_confidence*100:.0f}% (pair-specific)")
+                reason = f"Confidence too low ({confidence*100:.0f}% < {pair_min_confidence*100:.0f}%)"
+                self.logger.info(f"\n❌ {reason} (pair-specific)")
+                # Track rejection with confidence breakdown
+                confidence_breakdown = {
+                    'total': confidence,
+                    'ema_alignment': min(ema_distance / 30, 1.0) * 0.25,
+                    'volume_bonus': 0.15 if volume_confirmed else 0.05,
+                    'pullback_quality': (1.0 if in_optimal_zone else 0.6) * 0.25,
+                    'rr_quality': min(rr_ratio / 3.0, 1.0) * 0.20,
+                    'fib_accuracy': (1.0 - abs(pullback_depth - 0.382) / 0.382) * 0.15,
+                    'momentum_penalty': self.momentum_confidence_penalty if entry_type == 'MOMENTUM' else 0.0,
+                }
+                risk_result = {
+                    'entry_price': entry_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'risk_pips': risk_pips,
+                    'reward_pips': reward_pips,
+                    'rr_ratio': rr_ratio,
+                }
+                context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                context['confidence_score'] = confidence
+                context['confidence_breakdown'] = confidence_breakdown
+                self._track_rejection(
+                    stage='CONFIDENCE',
+                    reason=reason,
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    direction=direction,
+                    context=context
+                )
                 return None
 
             self.logger.info(f"\n📊 Confidence: {confidence*100:.0f}%")
@@ -1435,7 +1604,209 @@ class SMCSimpleStrategy:
 
         return ", ".join(parts).capitalize()
 
+    # =========================================================================
+    # REJECTION TRACKING (v2.2.0)
+    # =========================================================================
 
-def create_smc_simple_strategy(config, logger=None):
+    def _track_rejection(
+        self,
+        stage: str,
+        reason: str,
+        epic: str,
+        pair: str,
+        candle_timestamp: Any,
+        direction: Optional[str] = None,
+        context: Optional[Dict] = None
+    ) -> None:
+        """
+        Track a rejection for later analysis.
+
+        Args:
+            stage: Rejection stage (SESSION, COOLDOWN, TIER1_EMA, etc.)
+            reason: Human-readable rejection reason
+            epic: IG Markets epic code
+            pair: Currency pair name
+            candle_timestamp: Timestamp of the candle being analyzed
+            direction: Attempted direction (BULL/BEAR) if known
+            context: Additional context data (prices, indicators, etc.)
+        """
+        if self.rejection_manager is None:
+            return
+
+        try:
+            # Convert timestamp to datetime
+            if hasattr(candle_timestamp, 'to_pydatetime'):
+                scan_ts = candle_timestamp.to_pydatetime()
+            elif isinstance(candle_timestamp, (int, np.integer)):
+                scan_ts = pd.Timestamp(candle_timestamp).to_pydatetime()
+            else:
+                scan_ts = candle_timestamp if candle_timestamp else datetime.now(timezone.utc)
+
+            # Ensure timezone-aware
+            if scan_ts.tzinfo is None:
+                scan_ts = scan_ts.replace(tzinfo=timezone.utc)
+
+            # Build rejection data
+            rejection_data = {
+                'scan_timestamp': scan_ts,
+                'epic': epic,
+                'pair': pair,
+                'rejection_stage': stage,
+                'rejection_reason': reason,
+                'attempted_direction': direction,
+                'strategy_version': self.strategy_version,
+            }
+
+            # Add context if provided
+            if context:
+                rejection_data.update(context)
+
+            # Determine market hour and session
+            if 'market_hour' not in rejection_data:
+                rejection_data['market_hour'] = scan_ts.hour
+
+            # Save rejection
+            self.rejection_manager.save_rejection(rejection_data)
+
+        except Exception as e:
+            if self.debug_logging:
+                self.logger.debug(f"Failed to track rejection: {e}")
+
+    def _collect_market_context(
+        self,
+        df_trigger: Optional[pd.DataFrame] = None,
+        df_4h: Optional[pd.DataFrame] = None,
+        df_entry: Optional[pd.DataFrame] = None,
+        pip_value: float = 0.0001,
+        ema_result: Optional[Dict] = None,
+        swing_result: Optional[Dict] = None,
+        pullback_result: Optional[Dict] = None,
+        risk_result: Optional[Dict] = None
+    ) -> Dict:
+        """
+        Collect market context at the point of rejection.
+
+        Returns a dictionary with all available market state data.
+        """
+        context = {}
+
+        # Get current price from entry df or trigger df
+        current_df = df_entry if df_entry is not None and len(df_entry) > 0 else df_trigger
+        if current_df is not None and len(current_df) > 0:
+            context['current_price'] = float(current_df['close'].iloc[-1])
+            if 'bid' in current_df.columns:
+                context['bid_price'] = float(current_df['bid'].iloc[-1])
+            if 'ask' in current_df.columns:
+                context['ask_price'] = float(current_df['ask'].iloc[-1])
+            if 'spread' in current_df.columns:
+                context['spread_pips'] = float(current_df['spread'].iloc[-1])
+
+        # EMA context (Tier 1)
+        if ema_result:
+            context['ema_4h_value'] = ema_result.get('ema_value')
+            context['ema_distance_pips'] = ema_result.get('distance_pips')
+            direction = ema_result.get('direction')
+            if direction:
+                if ema_result.get('valid'):
+                    context['price_position_vs_ema'] = 'above' if direction == 'BULL' else 'below'
+                else:
+                    context['price_position_vs_ema'] = 'in_buffer'
+
+        # ATR from trigger timeframe
+        if df_trigger is not None and len(df_trigger) > 0:
+            atr = self._calculate_atr(df_trigger)
+            if atr > 0:
+                context['atr_15m'] = atr
+
+        # ATR from entry timeframe
+        if df_entry is not None and len(df_entry) > 0:
+            atr_entry = self._calculate_atr(df_entry)
+            if atr_entry > 0:
+                context['atr_5m'] = atr_entry
+
+        # Volume context
+        if df_trigger is not None and len(df_trigger) > 0:
+            vol_col = 'ltv' if 'ltv' in df_trigger.columns else 'volume' if 'volume' in df_trigger.columns else None
+            if vol_col and df_trigger[vol_col].iloc[-1] > 0:
+                context['current_volume'] = float(df_trigger[vol_col].iloc[-1])
+                vol_sma = df_trigger[vol_col].iloc[-min(self.volume_sma_period, len(df_trigger)):].mean()
+                if vol_sma > 0:
+                    context['volume_sma'] = float(vol_sma)
+                    context['volume_ratio'] = float(df_trigger[vol_col].iloc[-1] / vol_sma)
+
+        # Swing context (Tier 2)
+        if swing_result:
+            if swing_result.get('swing_level'):
+                # Determine which is high/low based on direction
+                if ema_result and ema_result.get('direction') == 'BULL':
+                    context['swing_high_level'] = swing_result.get('swing_level')
+                    context['swing_low_level'] = swing_result.get('opposite_swing')
+                else:
+                    context['swing_low_level'] = swing_result.get('swing_level')
+                    context['swing_high_level'] = swing_result.get('opposite_swing')
+            context['swings_found_count'] = swing_result.get('swings_found', 0)
+
+        # Pullback/Entry context (Tier 3)
+        if pullback_result:
+            context['pullback_depth'] = pullback_result.get('pullback_depth')
+            context['swing_range_pips'] = pullback_result.get('swing_range_pips')
+            in_optimal = pullback_result.get('in_optimal_zone', False)
+            depth = pullback_result.get('pullback_depth', 0)
+            if depth < 0:
+                context['fib_zone'] = 'beyond_break'
+            elif in_optimal:
+                context['fib_zone'] = 'optimal'
+            elif self.fib_min <= depth <= self.fib_max:
+                context['fib_zone'] = 'valid'
+            else:
+                context['fib_zone'] = 'outside'
+
+        # Risk/Reward context
+        if risk_result:
+            context['potential_entry'] = risk_result.get('entry_price')
+            context['potential_stop_loss'] = risk_result.get('stop_loss')
+            context['potential_take_profit'] = risk_result.get('take_profit')
+            context['potential_risk_pips'] = risk_result.get('risk_pips')
+            context['potential_reward_pips'] = risk_result.get('reward_pips')
+            context['potential_rr_ratio'] = risk_result.get('rr_ratio')
+
+        # OHLCV snapshots
+        if df_entry is not None and len(df_entry) > 0:
+            context['candle_5m_open'] = float(df_entry['open'].iloc[-1])
+            context['candle_5m_high'] = float(df_entry['high'].iloc[-1])
+            context['candle_5m_low'] = float(df_entry['low'].iloc[-1])
+            context['candle_5m_close'] = float(df_entry['close'].iloc[-1])
+            vol_col = 'ltv' if 'ltv' in df_entry.columns else 'volume' if 'volume' in df_entry.columns else None
+            if vol_col:
+                context['candle_5m_volume'] = float(df_entry[vol_col].iloc[-1])
+
+        if df_trigger is not None and len(df_trigger) > 0:
+            context['candle_15m_open'] = float(df_trigger['open'].iloc[-1])
+            context['candle_15m_high'] = float(df_trigger['high'].iloc[-1])
+            context['candle_15m_low'] = float(df_trigger['low'].iloc[-1])
+            context['candle_15m_close'] = float(df_trigger['close'].iloc[-1])
+            vol_col = 'ltv' if 'ltv' in df_trigger.columns else 'volume' if 'volume' in df_trigger.columns else None
+            if vol_col:
+                context['candle_15m_volume'] = float(df_trigger[vol_col].iloc[-1])
+
+        if df_4h is not None and len(df_4h) > 0:
+            context['candle_4h_open'] = float(df_4h['open'].iloc[-1])
+            context['candle_4h_high'] = float(df_4h['high'].iloc[-1])
+            context['candle_4h_low'] = float(df_4h['low'].iloc[-1])
+            context['candle_4h_close'] = float(df_4h['close'].iloc[-1])
+            vol_col = 'ltv' if 'ltv' in df_4h.columns else 'volume' if 'volume' in df_4h.columns else None
+            if vol_col:
+                context['candle_4h_volume'] = float(df_4h[vol_col].iloc[-1])
+
+        return context
+
+    def flush_rejections(self) -> bool:
+        """Flush any pending rejections to database. Call this at end of scan cycle."""
+        if self.rejection_manager is not None:
+            return self.rejection_manager.flush()
+        return True
+
+
+def create_smc_simple_strategy(config, logger=None, db_manager=None):
     """Factory function to create SMC Simple Strategy instance"""
-    return SMCSimpleStrategy(config, logger)
+    return SMCSimpleStrategy(config, logger, db_manager)

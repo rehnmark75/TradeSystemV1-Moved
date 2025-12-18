@@ -3538,6 +3538,722 @@ class UnifiedTradingDashboard:
 
         return None
 
+    # =========================================================================
+    # SMC REJECTIONS TAB (v2.2.0)
+    # =========================================================================
+
+    def fetch_smc_rejections(self, days: int, stage_filter: str, pair_filter: str, session_filter: str) -> pd.DataFrame:
+        """
+        Fetch SMC Simple strategy rejection data from database.
+
+        Args:
+            days: Number of days to look back
+            stage_filter: Rejection stage or 'All'
+            pair_filter: Currency pair or 'All'
+            session_filter: Market session or 'All'
+
+        Returns:
+            DataFrame with rejection data
+        """
+        conn = self.get_database_connection()
+        if not conn:
+            return pd.DataFrame()
+
+        try:
+            query = """
+            SELECT
+                id,
+                scan_timestamp,
+                epic,
+                pair,
+                rejection_stage,
+                rejection_reason,
+                attempted_direction,
+                current_price,
+                market_hour,
+                market_session,
+                ema_4h_value,
+                ema_distance_pips,
+                price_position_vs_ema,
+                atr_15m,
+                atr_percentile,
+                volume_ratio,
+                swing_high_level,
+                swing_low_level,
+                pullback_depth,
+                fib_zone,
+                swing_range_pips,
+                potential_entry,
+                potential_stop_loss,
+                potential_take_profit,
+                potential_risk_pips,
+                potential_reward_pips,
+                potential_rr_ratio,
+                confidence_score,
+                strategy_version
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            """
+
+            params = [days]
+
+            # Add stage filter
+            if stage_filter != "All":
+                query += " AND rejection_stage = %s"
+                params.append(stage_filter)
+
+            # Add pair filter
+            if pair_filter != "All":
+                query += " AND (pair = %s OR epic LIKE %s)"
+                params.append(pair_filter)
+                params.append(f"%{pair_filter}%")
+
+            # Add session filter
+            if session_filter != "All":
+                query += " AND market_session = %s"
+                params.append(session_filter)
+
+            query += " ORDER BY scan_timestamp DESC LIMIT 1000"
+
+            df = pd.read_sql_query(query, conn, params=params)
+            return df
+
+        except Exception as e:
+            # Table might not exist yet
+            if "does not exist" in str(e):
+                st.info("SMC Rejections table not yet created. Run the database migration first.")
+            else:
+                st.error(f"Error fetching SMC rejections: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
+
+    def fetch_smc_rejection_stats(self, days: int) -> dict:
+        """
+        Fetch aggregated SMC rejection statistics.
+
+        Args:
+            days: Number of days to look back
+
+        Returns:
+            Dictionary with aggregated statistics
+        """
+        conn = self.get_database_connection()
+        if not conn:
+            return {}
+
+        try:
+            # Total and by-stage counts
+            query = """
+            SELECT
+                COUNT(*) as total,
+                COUNT(DISTINCT epic) as unique_pairs,
+                rejection_stage,
+                COUNT(*) as stage_count
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            GROUP BY rejection_stage
+            ORDER BY stage_count DESC
+            """
+
+            df = pd.read_sql_query(query, conn, params=[days])
+
+            if df.empty:
+                return {'total': 0, 'unique_pairs': 0, 'by_stage': {}}
+
+            stats = {
+                'total': df['total'].iloc[0] if not df.empty else 0,
+                'unique_pairs': df['unique_pairs'].iloc[0] if not df.empty else 0,
+                'by_stage': dict(zip(df['rejection_stage'], df['stage_count']))
+            }
+
+            # Near-miss count (high confidence rejects)
+            near_miss_query = """
+            SELECT COUNT(*) as near_misses
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            AND rejection_stage = 'CONFIDENCE'
+            AND confidence_score >= 0.45
+            """
+            near_miss_df = pd.read_sql_query(near_miss_query, conn, params=[days])
+            stats['near_misses'] = near_miss_df['near_misses'].iloc[0] if not near_miss_df.empty else 0
+
+            # Most rejected pair
+            pair_query = """
+            SELECT pair, COUNT(*) as count
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            GROUP BY pair
+            ORDER BY count DESC
+            LIMIT 1
+            """
+            pair_df = pd.read_sql_query(pair_query, conn, params=[days])
+            stats['most_rejected_pair'] = pair_df['pair'].iloc[0] if not pair_df.empty else 'N/A'
+
+            return stats
+
+        except Exception as e:
+            if "does not exist" not in str(e):
+                st.error(f"Error fetching SMC rejection stats: {e}")
+            return {'total': 0, 'unique_pairs': 0, 'by_stage': {}, 'near_misses': 0, 'most_rejected_pair': 'N/A'}
+        finally:
+            conn.close()
+
+    def render_smc_rejections_tab(self):
+        """Render SMC Simple Rejection Analysis tab"""
+        # Header with refresh button
+        header_col1, header_col2 = st.columns([6, 1])
+        with header_col1:
+            st.header("🚫 SMC Simple Rejection Analysis")
+        with header_col2:
+            if st.button("🔄 Refresh", key="smc_rejections_refresh", help="Refresh rejection data"):
+                st.rerun()
+
+        st.markdown("Analyze why SMC Simple strategy signals were rejected to improve strategy parameters")
+
+        # Check if table exists by trying to fetch data
+        conn = self.get_database_connection()
+        stages = ["All"]
+        pairs = ["All"]
+        sessions = ["All"]
+
+        if conn:
+            try:
+                # Check table exists
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_name = 'smc_simple_rejections'
+                    )
+                """)
+                table_exists = cursor.fetchone()[0]
+
+                if not table_exists:
+                    st.warning("⚠️ SMC Rejections table not yet created. Run the database migration:")
+                    st.code("""
+docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simple_rejections_table.sql
+                    """)
+                    conn.close()
+                    return
+
+                # Get unique stages
+                stage_df = pd.read_sql_query(
+                    "SELECT DISTINCT rejection_stage FROM smc_simple_rejections ORDER BY rejection_stage",
+                    conn
+                )
+                stages.extend(stage_df['rejection_stage'].tolist())
+
+                # Get unique pairs
+                pair_df = pd.read_sql_query(
+                    "SELECT DISTINCT pair FROM smc_simple_rejections WHERE pair IS NOT NULL ORDER BY pair",
+                    conn
+                )
+                pairs.extend(pair_df['pair'].tolist())
+
+                # Get unique sessions
+                session_df = pd.read_sql_query(
+                    "SELECT DISTINCT market_session FROM smc_simple_rejections WHERE market_session IS NOT NULL ORDER BY market_session",
+                    conn
+                )
+                sessions.extend(session_df['market_session'].tolist())
+
+            except Exception as e:
+                if "does not exist" in str(e):
+                    st.warning("⚠️ SMC Rejections table not yet created. Run the database migration first.")
+                    return
+                st.warning(f"Could not load filter options: {e}")
+            finally:
+                conn.close()
+
+        # Filters row
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            days_filter = st.selectbox("Time Period", [7, 14, 30, 60, 90], index=2, key="smc_rej_days")
+        with col2:
+            stage_filter = st.selectbox("Rejection Stage", stages, key="smc_rej_stage")
+        with col3:
+            pair_filter = st.selectbox("Pair", pairs, key="smc_rej_pair")
+        with col4:
+            session_filter = st.selectbox("Session", sessions, key="smc_rej_session")
+
+        # Fetch statistics
+        stats = self.fetch_smc_rejection_stats(days_filter)
+
+        # Summary metrics
+        st.markdown("---")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Total Rejections", f"{stats.get('total', 0):,}")
+        with col2:
+            st.metric("Unique Pairs", stats.get('unique_pairs', 0))
+        with col3:
+            top_stage = max(stats.get('by_stage', {'N/A': 0}).items(), key=lambda x: x[1])[0] if stats.get('by_stage') else 'N/A'
+            st.metric("Top Rejection Stage", top_stage)
+        with col4:
+            st.metric("Near-Misses", stats.get('near_misses', 0), help="Signals that reached confidence stage but were rejected")
+        with col5:
+            st.metric("Most Rejected Pair", stats.get('most_rejected_pair', 'N/A'))
+
+        st.markdown("---")
+
+        # Sub-tabs for different analysis views
+        sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5 = st.tabs([
+            "📊 Stage Breakdown", "⏰ Time Analysis", "💹 Market Context", "🎯 Near-Misses", "⚡ Scanner Efficiency"
+        ])
+
+        # Fetch data
+        df = self.fetch_smc_rejections(days_filter, stage_filter, pair_filter, session_filter)
+
+        if df.empty:
+            st.info("No rejections found for the selected filters.")
+            return
+
+        with sub_tab1:
+            self._render_stage_breakdown(df, stats)
+
+        with sub_tab2:
+            self._render_time_analysis(df)
+
+        with sub_tab3:
+            self._render_market_context(df)
+
+        with sub_tab4:
+            self._render_near_misses(df, days_filter)
+
+        with sub_tab5:
+            self._render_scanner_efficiency(days_filter)
+
+    def _render_stage_breakdown(self, df: pd.DataFrame, stats: dict):
+        """Render stage breakdown sub-tab"""
+        st.subheader("Rejections by Stage")
+
+        if df.empty:
+            st.info("No rejection data available.")
+            return
+
+        # Pie chart for stage distribution
+        stage_counts = df['rejection_stage'].value_counts().reset_index()
+        stage_counts.columns = ['Stage', 'Count']
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            fig_pie = px.pie(
+                stage_counts,
+                values='Count',
+                names='Stage',
+                title="Rejection Distribution by Stage",
+                color_discrete_sequence=px.colors.qualitative.Set2
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with col2:
+            # Bar chart
+            fig_bar = px.bar(
+                stage_counts,
+                x='Stage',
+                y='Count',
+                title="Rejection Counts by Stage",
+                color='Count',
+                color_continuous_scale='Reds'
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        # Detailed reason breakdown
+        st.subheader("Top Rejection Reasons")
+        reason_counts = df.groupby(['rejection_stage', 'rejection_reason']).size().reset_index(name='Count')
+        reason_counts = reason_counts.sort_values('Count', ascending=False).head(20)
+
+        st.dataframe(
+            reason_counts,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "rejection_stage": st.column_config.TextColumn("Stage"),
+                "rejection_reason": st.column_config.TextColumn("Reason"),
+                "Count": st.column_config.NumberColumn("Count", format="%d")
+            }
+        )
+
+    def _render_time_analysis(self, df: pd.DataFrame):
+        """Render time analysis sub-tab"""
+        st.subheader("Rejection Patterns Over Time")
+
+        if df.empty or 'market_hour' not in df.columns:
+            st.info("No time data available.")
+            return
+
+        # Heatmap: Hour vs Stage
+        if 'market_hour' in df.columns and df['market_hour'].notna().any():
+            st.markdown("#### Rejections by Hour and Stage")
+            pivot = df.groupby(['market_hour', 'rejection_stage']).size().unstack(fill_value=0)
+
+            fig_heat = px.imshow(
+                pivot.values,
+                x=pivot.columns.tolist(),
+                y=pivot.index.tolist(),
+                labels=dict(x="Rejection Stage", y="Hour (UTC)", color="Count"),
+                title="Rejection Heatmap: Hour vs Stage",
+                color_continuous_scale='YlOrRd'
+            )
+            st.plotly_chart(fig_heat, use_container_width=True)
+
+        # Rejections by hour
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if 'market_hour' in df.columns:
+                hour_counts = df['market_hour'].value_counts().sort_index().reset_index()
+                hour_counts.columns = ['Hour', 'Count']
+
+                fig_hour = px.bar(
+                    hour_counts,
+                    x='Hour',
+                    y='Count',
+                    title="Rejections by Hour (UTC)",
+                    color='Count',
+                    color_continuous_scale='Blues'
+                )
+                st.plotly_chart(fig_hour, use_container_width=True)
+
+        with col2:
+            # By session
+            if 'market_session' in df.columns and df['market_session'].notna().any():
+                session_counts = df['market_session'].value_counts().reset_index()
+                session_counts.columns = ['Session', 'Count']
+
+                fig_session = px.bar(
+                    session_counts,
+                    x='Session',
+                    y='Count',
+                    title="Rejections by Market Session",
+                    color='Session',
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                st.plotly_chart(fig_session, use_container_width=True)
+
+        # Rejections over time (daily trend)
+        st.markdown("#### Daily Rejection Trend")
+        if 'scan_timestamp' in df.columns:
+            df['date'] = pd.to_datetime(df['scan_timestamp']).dt.date
+            daily_counts = df.groupby(['date', 'rejection_stage']).size().reset_index(name='Count')
+
+            fig_trend = px.line(
+                daily_counts,
+                x='date',
+                y='Count',
+                color='rejection_stage',
+                title="Daily Rejections by Stage",
+                markers=True
+            )
+            st.plotly_chart(fig_trend, use_container_width=True)
+
+    def _render_market_context(self, df: pd.DataFrame):
+        """Render market context sub-tab"""
+        st.subheader("Market Context Analysis")
+
+        if df.empty:
+            st.info("No market context data available.")
+            return
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # ATR distribution by stage
+            if 'atr_15m' in df.columns and df['atr_15m'].notna().any():
+                st.markdown("#### ATR at Rejection Points")
+                fig_atr = px.box(
+                    df[df['atr_15m'].notna()],
+                    x='rejection_stage',
+                    y='atr_15m',
+                    title="ATR Distribution by Rejection Stage",
+                    color='rejection_stage'
+                )
+                st.plotly_chart(fig_atr, use_container_width=True)
+
+        with col2:
+            # EMA distance distribution
+            if 'ema_distance_pips' in df.columns and df['ema_distance_pips'].notna().any():
+                st.markdown("#### EMA Distance at Rejection Points")
+                fig_ema = px.histogram(
+                    df[df['ema_distance_pips'].notna()],
+                    x='ema_distance_pips',
+                    color='rejection_stage',
+                    title="EMA Distance Distribution (pips)",
+                    nbins=30
+                )
+                st.plotly_chart(fig_ema, use_container_width=True)
+
+        # Volume ratio analysis
+        if 'volume_ratio' in df.columns and df['volume_ratio'].notna().any():
+            st.markdown("#### Volume Ratio at Rejection Points")
+            fig_vol = px.scatter(
+                df[df['volume_ratio'].notna()],
+                x='ema_distance_pips' if 'ema_distance_pips' in df.columns else 'market_hour',
+                y='volume_ratio',
+                color='rejection_stage',
+                title="Volume Ratio vs EMA Distance",
+                hover_data=['pair', 'rejection_reason']
+            )
+            st.plotly_chart(fig_vol, use_container_width=True)
+
+        # Pullback depth analysis
+        if 'pullback_depth' in df.columns and df['pullback_depth'].notna().any():
+            st.markdown("#### Pullback Depth Distribution")
+            pullback_df = df[df['pullback_depth'].notna()].copy()
+            pullback_df['pullback_pct'] = pullback_df['pullback_depth'] * 100
+
+            fig_pb = px.histogram(
+                pullback_df,
+                x='pullback_pct',
+                color='rejection_stage',
+                title="Pullback Depth Distribution (%)",
+                nbins=40,
+                labels={'pullback_pct': 'Pullback Depth (%)'}
+            )
+            st.plotly_chart(fig_pb, use_container_width=True)
+
+    def _render_near_misses(self, df: pd.DataFrame, days: int):
+        """Render near-misses sub-tab"""
+        st.subheader("Near-Miss Signals")
+        st.caption("Signals that almost passed - reached the confidence stage but were rejected")
+
+        # Filter to confidence stage rejections
+        near_miss_df = df[df['rejection_stage'] == 'CONFIDENCE'].copy()
+
+        if near_miss_df.empty:
+            st.info("No near-miss signals (confidence-stage rejections) found for the selected period.")
+            return
+
+        # Sort by confidence score descending
+        if 'confidence_score' in near_miss_df.columns:
+            near_miss_df = near_miss_df.sort_values('confidence_score', ascending=False)
+
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Near-Misses", len(near_miss_df))
+        with col2:
+            avg_conf = near_miss_df['confidence_score'].mean() * 100 if 'confidence_score' in near_miss_df.columns and near_miss_df['confidence_score'].notna().any() else 0
+            st.metric("Avg Confidence", f"{avg_conf:.1f}%")
+        with col3:
+            avg_rr = near_miss_df['potential_rr_ratio'].mean() if 'potential_rr_ratio' in near_miss_df.columns and near_miss_df['potential_rr_ratio'].notna().any() else 0
+            st.metric("Avg R:R", f"{avg_rr:.2f}")
+        with col4:
+            bull_count = len(near_miss_df[near_miss_df['attempted_direction'] == 'BULL']) if 'attempted_direction' in near_miss_df.columns else 0
+            bear_count = len(near_miss_df[near_miss_df['attempted_direction'] == 'BEAR']) if 'attempted_direction' in near_miss_df.columns else 0
+            st.metric("Direction Split", f"{bull_count} Bull / {bear_count} Bear")
+
+        st.markdown("---")
+
+        # Display near-misses with expandable details
+        for idx, row in near_miss_df.iterrows():
+            timestamp = row.get('scan_timestamp', '')
+            if isinstance(timestamp, pd.Timestamp):
+                timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M')
+            else:
+                timestamp_str = str(timestamp)[:16] if timestamp else 'N/A'
+
+            pair = row.get('pair', 'N/A')
+            direction = row.get('attempted_direction', 'N/A')
+            direction_icon = "📈" if direction == 'BULL' else "📉" if direction == 'BEAR' else "⚪"
+            confidence = row.get('confidence_score', 0)
+            conf_str = f"{confidence*100:.0f}%" if confidence else 'N/A'
+            rr = row.get('potential_rr_ratio', 0)
+            rr_str = f"{rr:.2f}" if rr else 'N/A'
+            session = row.get('market_session', 'N/A')
+            reason = row.get('rejection_reason', 'N/A')
+
+            expander_title = f"{direction_icon} {timestamp_str} | {pair} | {direction} | Conf: {conf_str} | R:R: {rr_str} | {session}"
+
+            with st.expander(expander_title, expanded=False):
+                detail_col1, detail_col2 = st.columns(2)
+
+                with detail_col1:
+                    st.markdown("**Signal Details:**")
+                    st.write(f"- **Pair:** {pair}")
+                    st.write(f"- **Direction:** {direction}")
+                    st.write(f"- **Confidence:** {conf_str}")
+                    st.write(f"- **Session:** {session}")
+                    entry = row.get('potential_entry', None)
+                    if entry:
+                        st.write(f"- **Entry:** {entry:.5f}")
+                    sl = row.get('potential_stop_loss', None)
+                    if sl:
+                        st.write(f"- **Stop Loss:** {sl:.5f}")
+                    tp = row.get('potential_take_profit', None)
+                    if tp:
+                        st.write(f"- **Take Profit:** {tp:.5f}")
+
+                with detail_col2:
+                    st.markdown("**Risk/Reward:**")
+                    risk_pips = row.get('potential_risk_pips', None)
+                    reward_pips = row.get('potential_reward_pips', None)
+                    if risk_pips:
+                        st.write(f"- **Risk:** {risk_pips:.1f} pips")
+                    if reward_pips:
+                        st.write(f"- **Reward:** {reward_pips:.1f} pips")
+                    st.write(f"- **R:R Ratio:** {rr_str}")
+
+                    st.markdown("**Market Context:**")
+                    ema_dist = row.get('ema_distance_pips', None)
+                    if ema_dist:
+                        st.write(f"- **EMA Distance:** {ema_dist:.1f} pips")
+                    pullback = row.get('pullback_depth', None)
+                    if pullback:
+                        st.write(f"- **Pullback Depth:** {pullback*100:.1f}%")
+                    fib_zone = row.get('fib_zone', None)
+                    if fib_zone:
+                        st.write(f"- **Fib Zone:** {fib_zone}")
+
+                # Rejection reason
+                st.markdown("**Rejection Reason:**")
+                st.warning(reason)
+
+        # Export button
+        st.markdown("---")
+        csv = near_miss_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Export Near-Misses to CSV",
+            data=csv,
+            file_name=f"smc_near_misses_{days}days.csv",
+            mime="text/csv"
+        )
+
+    def _render_scanner_efficiency(self, days: int):
+        """Render scanner efficiency analysis sub-tab"""
+        st.subheader("Scanner Efficiency Analysis")
+        st.caption("Analyze scanner frequency vs candle timeframe to optimize scan intervals")
+
+        conn = self.get_database_connection()
+        if not conn:
+            st.error("Database connection failed")
+            return
+
+        try:
+            # Query for efficiency metrics
+            efficiency_query = """
+            SELECT
+                scan_timestamp,
+                created_at,
+                EXTRACT(EPOCH FROM (created_at - scan_timestamp)) / 60 as latency_minutes,
+                epic,
+                pair,
+                rejection_stage
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            ORDER BY scan_timestamp DESC
+            """
+            df = pd.read_sql_query(efficiency_query, conn, params=[days])
+
+            if df.empty:
+                st.info("No data available for scanner efficiency analysis.")
+                return
+
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                avg_latency = df['latency_minutes'].mean()
+                st.metric("Avg Scan Latency", f"{avg_latency:.1f} min", help="Time between candle close and scan")
+
+            with col2:
+                # Scans per unique candle
+                scans_per_candle = df.groupby(['scan_timestamp', 'epic']).size()
+                avg_scans = scans_per_candle.mean()
+                st.metric("Avg Scans/Candle", f"{avg_scans:.1f}", help="How many times each candle is scanned")
+
+            with col3:
+                unique_candles = df.groupby(['scan_timestamp', 'epic']).ngroups
+                st.metric("Unique Candles", f"{unique_candles:,}")
+
+            with col4:
+                total_scans = len(df)
+                redundant_pct = ((total_scans - unique_candles) / total_scans * 100) if total_scans > 0 else 0
+                st.metric("Redundant Scans", f"{redundant_pct:.1f}%", help="% of scans that re-analyzed same candle")
+
+            st.markdown("---")
+
+            # Charts
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # Latency distribution
+                st.markdown("#### Scan Latency Distribution")
+                fig_latency = px.histogram(
+                    df,
+                    x='latency_minutes',
+                    nbins=30,
+                    title="Time from Candle Close to Scan (minutes)",
+                    labels={'latency_minutes': 'Latency (minutes)'}
+                )
+                fig_latency.add_vline(x=avg_latency, line_dash="dash", line_color="red",
+                                      annotation_text=f"Avg: {avg_latency:.1f} min")
+                st.plotly_chart(fig_latency, use_container_width=True)
+
+            with col2:
+                # Scans per candle distribution
+                st.markdown("#### Scans Per Candle Distribution")
+                scans_df = scans_per_candle.reset_index(name='scan_count')
+                fig_scans = px.histogram(
+                    scans_df,
+                    x='scan_count',
+                    nbins=20,
+                    title="How Many Times Each Candle Was Scanned",
+                    labels={'scan_count': 'Scans per Candle'}
+                )
+                st.plotly_chart(fig_scans, use_container_width=True)
+
+            # Detailed table: Most re-scanned candles
+            st.markdown("#### Most Re-Scanned Candles")
+            st.caption("Candles that were analyzed multiple times with the same rejection result")
+
+            rescan_df = scans_per_candle.reset_index(name='scan_count')
+            rescan_df = rescan_df.sort_values('scan_count', ascending=False).head(20)
+            rescan_df.columns = ['Candle Time', 'Epic', 'Scan Count']
+
+            st.dataframe(
+                rescan_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # Recommendation
+            st.markdown("---")
+            st.markdown("#### Optimization Recommendations")
+
+            if avg_scans > 5:
+                st.warning(f"""
+                **High redundancy detected**: Each candle is scanned ~{avg_scans:.0f} times on average.
+
+                **Recommendation**: Consider:
+                - Increasing scan interval from 2 min to 5-10 min
+                - Adding candle-close detection to only scan on new candles
+                - Caching rejection decisions for the same candle timestamp
+                """)
+            elif avg_scans > 2:
+                st.info(f"""
+                **Moderate redundancy**: Each candle is scanned ~{avg_scans:.0f} times on average.
+
+                This is acceptable for a 15-min strategy with 2-min scanning, but there's room for optimization.
+                """)
+            else:
+                st.success(f"""
+                **Good efficiency**: Each candle is scanned ~{avg_scans:.0f} times on average.
+
+                Scanner frequency is well-matched to the strategy timeframe.
+                """)
+
+        except Exception as e:
+            if "does not exist" in str(e):
+                st.info("Scanner efficiency data not yet available.")
+            else:
+                st.error(f"Error fetching scanner efficiency data: {e}")
+        finally:
+            conn.close()
+
     def render_alert_history_tab(self):
         """Render Alert History tab with Claude Vision analysis status"""
         # Header with refresh button
@@ -3716,10 +4432,10 @@ class UnifiedTradingDashboard:
         st.markdown("*Unified dashboard for comprehensive trading analysis*")
 
         # Tab navigation
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
             "📊 Overview", "🎯 Strategy Analysis", "💰 Trade Performance",
             "🧠 Market Intelligence", "🔍 Trade Analysis", "🔧 Settings & Debug",
-            "📋 Alert History"
+            "📋 Alert History", "🚫 SMC Rejections"
         ])
 
         with tab1:
@@ -3742,6 +4458,9 @@ class UnifiedTradingDashboard:
 
         with tab7:
             self.render_alert_history_tab()
+
+        with tab8:
+            self.render_smc_rejections_tab()
 
         # Footer
         st.markdown("---")

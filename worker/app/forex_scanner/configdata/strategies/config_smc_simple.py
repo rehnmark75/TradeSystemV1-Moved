@@ -347,6 +347,18 @@ LOG_SWING_DETECTION = False              # Log swing point detection (verbose)
 LOG_EMA_CHECKS = False                   # Log EMA alignment checks (verbose)
 
 # ============================================================================
+# REJECTION TRACKING (for strategy improvement analysis)
+# ============================================================================
+# Store rejection data to database for later analysis in Streamlit dashboard
+# Captures market state at each rejection point to identify improvement areas
+# Storage: ~1-2 MB/day (~500-900 rejections/day across 9 pairs)
+
+REJECTION_TRACKING_ENABLED = True        # Toggle to enable/disable DB storage
+REJECTION_BATCH_SIZE = 50                # Batch inserts for performance
+REJECTION_LOG_TO_CONSOLE = False         # Also log rejections to console (verbose)
+REJECTION_RETENTION_DAYS = 90            # Auto-cleanup data older than this
+
+# ============================================================================
 # BACKTEST SETTINGS
 # ============================================================================
 
