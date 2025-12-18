@@ -444,7 +444,8 @@ class SMCSimpleStrategy:
 
             # v1.9.0: Get pair-specific confidence floor or use default
             pair_min_confidence = self.pair_min_confidence.get(pair, self.pair_min_confidence.get(epic, self.min_confidence))
-            if confidence < pair_min_confidence:
+            # Use round() to avoid floating-point precision issues (e.g., 0.4999 displaying as 50%)
+            if round(confidence, 4) < pair_min_confidence:
                 self.logger.info(f"\n❌ Confidence too low: {confidence*100:.0f}% < {pair_min_confidence*100:.0f}% (pair-specific)")
                 return None
 
