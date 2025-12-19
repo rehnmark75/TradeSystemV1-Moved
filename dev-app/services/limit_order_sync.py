@@ -69,8 +69,9 @@ class LimitOrderSyncService:
         stats = {
             "checked": 0,
             "filled": 0,
-            "expired": 0,
-            "cancelled": 0,
+            "not_filled": 0,  # Price never reached before expiry
+            "cancelled": 0,   # User cancelled
+            "rejected": 0,    # Broker rejected
             "still_pending": 0,
             "errors": 0
         }
@@ -113,10 +114,12 @@ class LimitOrderSyncService:
 
                         if result == "filled":
                             stats["filled"] += 1
-                        elif result == "expired":
-                            stats["expired"] += 1
-                        elif result == "cancelled":
+                        elif result == "limit_not_filled":
+                            stats["not_filled"] += 1
+                        elif result == "limit_cancelled":
                             stats["cancelled"] += 1
+                        elif result == "limit_rejected":
+                            stats["rejected"] += 1
                         elif result == "pending":
                             stats["still_pending"] += 1
                         else:
@@ -129,8 +132,8 @@ class LimitOrderSyncService:
                 # Commit all changes
                 db.commit()
 
-            self.logger.info(f"✅ [LIMIT SYNC] Complete: {stats['filled']} filled, {stats['expired']} expired, "
-                           f"{stats['cancelled']} cancelled, {stats['still_pending']} still pending")
+            self.logger.info(f"✅ [LIMIT SYNC] Complete: {stats['filled']} filled, {stats['not_filled']} not filled, "
+                           f"{stats['cancelled']} cancelled, {stats['rejected']} rejected, {stats['still_pending']} still pending")
 
             return stats
 
@@ -326,15 +329,15 @@ class LimitOrderSyncService:
         4. API timing issue (rare)
         """
 
-        # Check if past expiry time
+        # Check if past expiry time - limit order wasn't filled before expiry
         if order.monitor_until and datetime.utcnow() > order.monitor_until:
-            order.status = "expired"
+            order.status = "limit_not_filled"
             order.trigger_time = datetime.utcnow()
             self.logger.info(
-                f"⏰ [LIMIT EXPIRED] Order {order.id} ({order.symbol}) expired. "
+                f"⏰ [LIMIT NOT FILLED] Order {order.id} ({order.symbol}) - price never reached. "
                 f"monitor_until={order.monitor_until}"
             )
-            return "expired"
+            return "limit_not_filled"
 
         # Check activity/confirms endpoint to see what happened
         outcome = await self._check_deal_outcome(order.deal_reference)
@@ -344,32 +347,32 @@ class LimitOrderSyncService:
             reason = outcome.get("reason", "")
 
             if status == "REJECTED":
-                order.status = "rejected"
+                order.status = "limit_rejected"
                 order.trigger_time = datetime.utcnow()
                 self.logger.warning(
                     f"❌ [LIMIT REJECTED] Order {order.id} ({order.symbol}) rejected: {reason}"
                 )
-                return "cancelled"
+                return "limit_rejected"
 
             elif status == "DELETED" or "CANCELLED" in status.upper():
-                order.status = "cancelled"
+                order.status = "limit_cancelled"
                 order.trigger_time = datetime.utcnow()
                 self.logger.info(
-                    f"🚫 [LIMIT CANCELLED] Order {order.id} ({order.symbol}) cancelled"
+                    f"🚫 [LIMIT CANCELLED] Order {order.id} ({order.symbol}) cancelled by user"
                 )
-                return "cancelled"
+                return "limit_cancelled"
 
-        # If we can't determine what happened, mark as expired if old enough
+        # If we can't determine what happened, mark as not filled if old enough
         age = datetime.utcnow() - order.timestamp if order.timestamp else timedelta(days=0)
 
         if age > timedelta(hours=24):
-            order.status = "expired"
+            order.status = "limit_not_filled"
             order.trigger_time = datetime.utcnow()
             self.logger.warning(
-                f"⏰ [LIMIT EXPIRED] Order {order.id} ({order.symbol}) not found and >24h old. "
-                f"Marking as expired."
+                f"⏰ [LIMIT NOT FILLED] Order {order.id} ({order.symbol}) not found and >24h old. "
+                f"Price was never reached."
             )
-            return "expired"
+            return "limit_not_filled"
 
         # Order is missing but relatively new - could be API timing issue
         self.logger.warning(
