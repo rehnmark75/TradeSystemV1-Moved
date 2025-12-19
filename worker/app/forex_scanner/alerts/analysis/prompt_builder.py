@@ -690,7 +690,7 @@ The attached chart shows EMA crossover analysis with the following elements:
 **FILTER CONFIRMATIONS:**
 - 4H EMA 21 HTF Filter: {'✅ ALIGNED' if htf_aligned else '❌ NOT ALIGNED'}
 - FVG Confirmation: {'✅ CONFIRMED' if fvg_confirmed else '❌ NOT CONFIRMED'}
-- ADX Trend Strength: {adx:.1f if adx else 'N/A'} {'✅ (Trending)' if adx and float(adx) >= 20 else '⚠️ (Weak/Ranging)' if adx else ''}
+- ADX Trend Strength: {f'{adx:.1f}' if adx else 'N/A'} {'✅ (Trending)' if adx and float(adx) >= 20 else '⚠️ (Weak/Ranging)' if adx else ''}
 
 **STRATEGY LOGIC:**
 This signal was generated because:
@@ -959,10 +959,12 @@ Be concise but thorough. The Silver Bullet strategy is TIME-SENSITIVE - quality 
 
     def _build_smc_prompt(self, signal: Dict, has_chart: bool = True) -> str:
         """
-        Build a vision-enabled prompt for SMC strategy analysis.
+        Build a vision-enabled prompt for SMC Simple v2.3.0 strategy analysis.
 
         This prompt is designed to work with chart images for comprehensive
         multi-timeframe analysis of forex signals.
+
+        Updated for v2.3.0 relaxed thresholds based on rejection analysis.
         """
         try:
             # Extract signal data
@@ -992,10 +994,25 @@ Be concise but thorough. The Silver Bullet strategy is TIME-SENSITIVE - quality 
             in_optimal_zone = signal.get('in_optimal_zone', False)
             volume_confirmed = signal.get('volume_confirmed', False)
 
+            # v2.3.0: Extract confidence breakdown if available
+            strategy_indicators = signal.get('strategy_indicators', {})
+            confidence_breakdown = strategy_indicators.get('confidence_breakdown', {})
+
             # Build chart analysis instructions
             chart_instruction = ""
             if has_chart:
-                chart_instruction = """
+                # v2.3.0: Updated chart instructions for both entry types
+                momentum_note = ""
+                if entry_type == 'MOMENTUM':
+                    momentum_note = """
+**⚡ MOMENTUM ENTRY NOTE:**
+This is a MOMENTUM continuation trade (price beyond swing break).
+- Entry is AFTER the swing break, riding momentum
+- Higher risk but captures strong directional moves
+- Look for: Clean breakout, no immediate reversal signs, volume confirmation
+"""
+
+                chart_instruction = f"""
 ## CHART ANALYSIS (CRITICAL - EXAMINE CAREFULLY)
 
 The attached chart shows multi-timeframe forex analysis with the following elements:
@@ -1012,24 +1029,53 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 - YELLOW shaded zone: Fibonacci optimal entry zone (38.2%-61.8%)
 - ORANGE horizontal lines: Swing high levels
 - BLUE horizontal lines: Swing low levels
-
+{momentum_note}
 **CRITICAL CHART ANALYSIS CHECKLIST:**
 1. ✓ Is price clearly respecting the 4H EMA trend direction?
 2. ✓ Is the swing break on 15m clean and confirmed (full candle close)?
-3. ✓ Is the entry within or near the optimal Fibonacci zone?
-4. ✓ Is stop loss placement below a valid structure low (for longs)?
-5. ✓ Does the price action show clean trend structure?
-6. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
-7. ✓ Is there sufficient distance to next resistance/support?
+3. ✓ For PULLBACK: Is entry within or near the optimal Fibonacci zone?
+4. ✓ For MOMENTUM: Is breakout clean with strong directional candles?
+5. ✓ Is stop loss placement below a valid structure low (for longs)?
+6. ✓ Does the price action show clean trend structure?
+7. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
+8. ✓ Is there sufficient distance to next resistance/support?
+"""
+
+            # v2.3.0: Enhanced entry type explanation
+            entry_type_detail = ""
+            if entry_type == 'PULLBACK':
+                zone_status = "✅ OPTIMAL (38.2%-61.8%)" if in_optimal_zone else "⚠️ OUTSIDE OPTIMAL"
+                entry_type_detail = f"""
+- Entry Style: PULLBACK (waiting for retracement)
+- Pullback Depth: {pullback_depth:.1%} into swing range
+- Fibonacci Zone: {zone_status}
+- Risk Profile: Lower risk, better R:R potential"""
+            else:  # MOMENTUM
+                entry_type_detail = f"""
+- Entry Style: MOMENTUM (riding continuation)
+- Position: {abs(pullback_depth):.1%} beyond swing break point
+- Momentum Quality: {'Strong' if abs(pullback_depth) < 0.35 else 'Extended'}
+- Risk Profile: Higher risk, captures strong moves"""
+
+            # v2.3.0: Add confidence breakdown to prompt
+            confidence_detail = ""
+            if confidence_breakdown:
+                confidence_detail = f"""
+**CONFIDENCE SCORE BREAKDOWN ({confidence:.1%} total):**
+- EMA Alignment: {confidence_breakdown.get('ema_alignment', 0)*100:.1f}%
+- Volume Bonus: {confidence_breakdown.get('volume_bonus', 0)*100:.1f}%
+- Pullback Quality: {confidence_breakdown.get('pullback_quality', 0)*100:.1f}%
+- R:R Quality: {confidence_breakdown.get('rr_quality', 0)*100:.1f}%
+- Fib Accuracy: {confidence_breakdown.get('fib_accuracy', 0)*100:.1f}%
 """
 
             # Build SMC-specific analysis section
             smc_analysis = f"""
-## SMC STRATEGY DATA (3-TIER VALIDATION)
+## SMC SIMPLE v2.3.0 STRATEGY DATA (3-TIER VALIDATION)
 
 **TIER 1 - 4H Directional Bias:**
 - 50 EMA Value: {self._format_price(ema_value)}
-- Distance from EMA: {ema_distance:.1f} pips
+- Distance from EMA: {ema_distance:.1f} pips {'✅' if ema_distance >= 2.5 else '⚠️ Close to EMA'}
 - Bias Direction: {direction}
 
 **TIER 2 - 15m Swing Break:**
@@ -1037,23 +1083,22 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 - Opposite Swing (SL reference): {self._format_price(opposite_swing)}
 - Volume Confirmed: {'✅ Yes' if volume_confirmed else '❌ No'}
 
-**TIER 3 - 5m Entry Zone:**
-- Entry Type: {entry_type}
-- Pullback Depth: {pullback_depth:.1%}
-- In Optimal Zone (38.2%-61.8%): {'✅ Yes' if in_optimal_zone else '❌ No'}
+**TIER 3 - Entry Analysis:**
+{entry_type_detail}
+{confidence_detail}
 """
 
             # Build the complete prompt
             prompt = f"""You are a SENIOR FOREX TECHNICAL ANALYST with 20+ years of institutional trading experience specializing in Smart Money Concepts (SMC) analysis.
 
-**YOUR ROLE:** Validate this forex trade signal with the expertise of a professional bank trader. Your decision directly impacts real capital allocation.
+**YOUR ROLE:** Validate this SMC Simple v2.3.0 signal. This strategy uses relaxed entry thresholds to capture more opportunities while maintaining trend alignment discipline.
 
 ═══════════════════════════════════════════════════════════════
 📊 SIGNAL OVERVIEW
 ═══════════════════════════════════════════════════════════════
 • Pair: {pair}
 • Direction: {direction}
-• Strategy: {strategy}
+• Strategy: {strategy} v2.3.0
 • System Confidence: {confidence:.1%}
 • Entry Type: {entry_type}
 
@@ -1076,18 +1121,22 @@ SCORE: [1-10]
 DECISION: [APPROVE/REJECT]
 REASON: [2-3 sentences explaining your professional assessment. Focus on: trend alignment, entry quality, R:R ratio, and any visual concerns from the chart]
 
-**SCORING GUIDELINES:**
-- 8-10: Strong setup, clear trend, optimal entry, good R:R
-- 6-7: Acceptable setup with minor concerns
-- 4-5: Marginal setup, consider passing
-- 1-3: Poor setup, clear rejection reasons
+**SCORING GUIDELINES FOR v2.3.0:**
+- 8-10: Strong trend alignment, clean entry (pullback in zone OR strong momentum), R:R ≥ 2.0
+- 6-7: Good setup with minor concerns (e.g., momentum slightly extended, volume not confirmed)
+- 4-5: Marginal setup - weak trend or entry quality issues
+- 1-3: Poor setup - counter-trend, bad R:R, or technical breakdown
+
+**ENTRY TYPE EVALUATION:**
+- PULLBACK entries: Prefer entries in 38.2%-61.8% Fib zone. Outside zone = lower score but not automatic rejection
+- MOMENTUM entries: Accept up to 50% beyond break point. Look for strong directional candles, reject if showing exhaustion
 
 **AUTOMATIC REJECTION CRITERIA:**
-- Counter-trend trades without strong reversal confirmation
+- Counter-trend trades (price on wrong side of 4H EMA)
 - R:R ratio below 1.5
-- Entry outside acceptable pullback zone
-- Insufficient distance from EMA (under 10 pips)
-- Obvious resistance/support blocking target
+- MOMENTUM entry showing reversal candles (engulfing, pin bars against direction)
+- Price too close to EMA (<2.5 pips) - buffer zone violation
+- Clear resistance/support blocking path to target
 
 Be concise but thorough. Your assessment determines if real money is risked."""
 

@@ -48,9 +48,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.2.0"
+STRATEGY_VERSION = "2.3.0"
 STRATEGY_DATE = "2025-12-18"
-STRATEGY_STATUS = "Confidence Scoring Redesign - Balanced Tier Alignment"
+STRATEGY_STATUS = "Production Baseline - Relaxed Thresholds from Rejection Analysis"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -61,7 +61,7 @@ STRATEGY_STATUS = "Confidence Scoring Redesign - Balanced Tier Alignment"
 
 HTF_TIMEFRAME = "4h"                    # Higher timeframe for bias
 EMA_PERIOD = 50                          # 50-period EMA (institutional standard)
-EMA_BUFFER_PIPS = 3                      # Buffer zone around EMA
+EMA_BUFFER_PIPS = 2.5                    # v2.3.0: REDUCED from 3 - rejection analysis shows 38 signals lost at 2.0-2.9 pips
 
 # Price position requirements
 REQUIRE_CLOSE_BEYOND_EMA = True          # Candle must CLOSE beyond EMA (not just wick)
@@ -129,7 +129,7 @@ PULLBACK_CONFIRMATION_BARS = 2           # Bars to confirm pullback
 # In strong trends, price often doesn't pull back - momentum continuation is valid
 
 MOMENTUM_MODE_ENABLED = True             # v1.8.0: NEW - allow momentum entries
-MOMENTUM_MIN_DEPTH = -0.35               # v2.1.2: RELAXED from -0.20 - allow up to 35% beyond break point
+MOMENTUM_MIN_DEPTH = -0.50               # v2.3.0: RELAXED from -0.35 - rejection analysis shows many at -40% to -60%
 MOMENTUM_MAX_DEPTH = 0.0                 # 0% = at break point (no pullback yet)
 MOMENTUM_CONFIDENCE_PENALTY = 0.05       # Reduce confidence by 5% for momentum entries
 
@@ -151,7 +151,7 @@ FALLBACK_MIN_SWING_PIPS = 5              # Absolute minimum if ATR unavailable
 
 MOMENTUM_QUALITY_ENABLED = True          # v1.8.0: NEW - filter weak breakouts
 MIN_BREAKOUT_ATR_RATIO = 0.5             # Breakout candle range > 50% of ATR
-MIN_BODY_PERCENTAGE = 0.45               # v2.0.1: REDUCED from 0.60 - allow more breakout candles
+MIN_BODY_PERCENTAGE = 0.35               # v2.3.0: REDUCED from 0.45 - rejection analysis: 234 signals lost at 35-44%
 
 # ============================================================================
 # v2.0.0: LIMIT ORDER CONFIGURATION
@@ -231,7 +231,7 @@ BLOCK_ASIAN_SESSION = True               # Block 21:00-07:00 UTC
 
 MAX_SIGNALS_PER_PAIR_PER_DAY = 1         # Maximum 1 signal per pair per day
 MAX_CONCURRENT_SIGNALS = 3               # Maximum concurrent open signals
-SIGNAL_COOLDOWN_HOURS = 4                # Hours between signals on same pair
+SIGNAL_COOLDOWN_HOURS = 3                # v2.3.0: REDUCED from 4 - allow more opportunities in active markets
 
 # ============================================================================
 # PAIR CONFIGURATION

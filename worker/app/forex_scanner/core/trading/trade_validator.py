@@ -639,6 +639,8 @@ class TradeValidator:
             reason = claude_result.get('reason', 'No reason provided')
             rejection_reason = f"Score: {score}/10, Decision: {decision}, Reason: {reason}"
 
+        alert_id = None
+
         # 1. Save to DATABASE (primary storage for analysis)
         if self.alert_history_manager and not self.backtest_mode:
             try:
@@ -649,6 +651,16 @@ class TradeValidator:
                 )
                 if alert_id:
                     self.logger.info(f"💾 Claude rejection saved to DB: {epic} (alert_id={alert_id})")
+
+                    # Save vision artifacts for rejected signals too
+                    if claude_result.get('_vision_artifacts'):
+                        self._save_vision_artifacts(
+                            signal=signal,
+                            result=claude_result,
+                            chart_base64=claude_result['_vision_artifacts'].get('chart_base64'),
+                            prompt=claude_result['_vision_artifacts'].get('prompt', ''),
+                            alert_id=alert_id
+                        )
                 else:
                     self.logger.warning(f"⚠️ Failed to save Claude rejection to DB for {epic}")
             except Exception as e:
