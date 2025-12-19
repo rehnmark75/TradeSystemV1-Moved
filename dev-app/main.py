@@ -48,6 +48,7 @@ import os
 import time
 import asyncio
 from services.trade_sync import periodic_trade_sync
+from services.limit_order_sync import periodic_limit_order_sync, LimitOrderSyncService
 from services.db import get_db
 from sqlalchemy.orm import Session
 
@@ -598,6 +599,15 @@ async def startup_coordinator():
             asyncio.create_task(periodic_trade_sync())
             logger.info("✅ IG trade sync scheduled (every 5 minutes)")
 
+            # Schedule limit order sync (for pending_limit orders)
+            async def limit_order_sync_wrapper():
+                """Wrapper to get trading headers for limit order sync"""
+                from dependencies import get_ig_auth_headers
+                await periodic_limit_order_sync(get_ig_auth_headers, interval_seconds=60)
+
+            asyncio.create_task(limit_order_sync_wrapper())
+            logger.info("✅ Limit order sync scheduled (every 60 seconds)")
+
             # Schedule enhanced trading automation if available
             if ANALYTICS_AVAILABLE:
                 try:
@@ -635,6 +645,7 @@ async def startup_coordinator():
             logger.info("   • Enhanced trade monitoring ❌")
 
         logger.info("   • IG trade sync ✅ (FAST)")
+        logger.info("   • Limit order sync ✅ (every 60s)")
 
         if ANALYTICS_AVAILABLE:
             logger.info("   • Trading analytics ✅ (FAST)")

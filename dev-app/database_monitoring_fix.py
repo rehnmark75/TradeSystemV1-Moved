@@ -49,7 +49,7 @@ class DatabaseMonitoringFix:
         are missed due to database connection issues or race conditions.
         """
         active_statuses = ["pending", "tracking", "break_even", "trailing",
-                          "ema_exit_pending", "profit_protected"]
+                          "ema_exit_pending", "profit_protected", "partial_closed"]
 
         # Primary query - the standard approach
         try:

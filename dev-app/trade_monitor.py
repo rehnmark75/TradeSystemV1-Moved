@@ -417,7 +417,7 @@ class OrderSender:
                     # ✅ PREFERRED: Mark specific trade by deal_id
                     updated_count = (db.query(TradeLog)
                                 .filter(TradeLog.deal_id == deal_id,
-                                        TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected"]))
+                                        TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected", "partial_closed"]))
                                 .update({
                                     TradeLog.status: "closed",
                                     TradeLog.trigger_time: datetime.utcnow(),
@@ -445,7 +445,7 @@ class OrderSender:
                     
                     updated_count = (db.query(TradeLog)
                                 .filter(TradeLog.symbol == epic,
-                                        TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending"]))
+                                        TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "partial_closed"]))
                                 .update({
                                     TradeLog.status: "closed",
                                     TradeLog.trigger_time: datetime.utcnow(),
@@ -674,7 +674,7 @@ class TradeMonitor:
                             final_status = await self.enhanced_status_manager.verify_and_update_trade_status(trade, db)
                             
                             # Count by final status
-                            if final_status in ["tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected"]:
+                            if final_status in ["tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected", "partial_closed"]:
                                 validation_stats["still_active"] += 1
                             elif final_status == "closed":
                                 validation_stats["closed"] += 1

@@ -564,9 +564,9 @@ async def sync_trades_with_ig():
         with SessionLocal() as db:
             # Get active trades with deal_ids
             open_trades = db.query(TradeLog).filter(
-                TradeLog.status.in_(["pending", "tracking", "break_even", "trailing"]),
+                TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected", "partial_closed"]),
                 TradeLog.deal_id.isnot(None),  # Only trades with deal_ids
-                TradeLog.endpoint == "dev"
+                TradeLog.endpoint.in_(["dev", "dev-limit"])  # Include limit orders that have filled
             ).all()
             
             if not open_trades:
