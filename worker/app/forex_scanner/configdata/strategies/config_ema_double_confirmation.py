@@ -255,6 +255,16 @@ CACHE_MAX_CROSSOVERS_PER_PAIR = 20  # Max crossovers to keep per pair
 CACHE_CLEANUP_INTERVAL_HOURS = 24   # Clean old entries every 24 hours
 
 # ============================================================================
+# REJECTION TRACKING (v2.3.0)
+# ============================================================================
+# Track why signals were rejected for later analysis and strategy improvement
+# Data stored in ema_double_rejections table
+
+REJECTION_TRACKING_ENABLED = True   # Enable/disable rejection tracking to database
+REJECTION_LOG_TO_CONSOLE = False    # Log rejections to console (verbose)
+REJECTION_BATCH_SIZE = 50           # Batch size before flushing to database
+
+# ============================================================================
 # LOGGING & DEBUG
 # ============================================================================
 

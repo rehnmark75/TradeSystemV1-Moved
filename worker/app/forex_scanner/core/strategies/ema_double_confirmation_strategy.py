@@ -115,6 +115,16 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
         # Optimal params (for base class compatibility)
         self.optimal_params = None
 
+        # v2.3.0: Rejection tracking
+        self.rejection_manager = None
+        if db_manager is not None and self.rejection_tracking_enabled:
+            try:
+                from forex_scanner.alerts.ema_double_rejection_history import EMADoubleRejectionHistoryManager
+                self.rejection_manager = EMADoubleRejectionHistoryManager(db_manager)
+                self.logger.info("   Rejection tracking: ENABLED")
+            except Exception as e:
+                self.logger.warning(f"   Rejection tracking: DISABLED (failed to init: {e})")
+
         self._log_initialization()
 
     def _load_config(self):
@@ -200,6 +210,13 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
         # Fixes "chicken and egg" problem with MIN_SUCCESSFUL_CROSSOVERS requirement
         self.use_database_state = getattr(strategy_config, 'USE_DATABASE_STATE', False) if strategy_config else False
 
+        # v2.3.0: Rejection Tracking
+        self.rejection_tracking_enabled = getattr(strategy_config, 'REJECTION_TRACKING_ENABLED', False) if strategy_config else False
+        self.rejection_log_to_console = getattr(strategy_config, 'REJECTION_LOG_TO_CONSOLE', False) if strategy_config else False
+
+        # Strategy version for rejection tracking
+        self.strategy_version = getattr(strategy_config, 'STRATEGY_VERSION', '2.3.0') if strategy_config else '2.3.0'
+
     def _log_initialization(self):
         """Log strategy initialization details"""
         self.logger.info("=" * 60)
@@ -258,6 +275,12 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
 
             # Validate data requirements
             if not self._validate_data(df, epic):
+                self._track_rejection(
+                    stage='DATA_VALIDATION',
+                    reason=f"Insufficient data: {len(df) if df is not None else 0} bars (need {self.min_bars})",
+                    epic=epic,
+                    df=df
+                )
                 return None
 
             # Step 1: Ensure EMAs are calculated
@@ -293,12 +316,28 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
 
             if not should_signal:
                 self.logger.info(f"{log_prefix} Not enough prior confirmations: {metadata.get('successful_count', 0)}/{self.min_successful_crossovers} required")
+                self._track_rejection(
+                    stage='INSUFFICIENT_CONFIRMATIONS',
+                    reason=f"Only {metadata.get('successful_count', 0)}/{self.min_successful_crossovers} successful crossovers in lookback",
+                    epic=epic,
+                    df=df_enhanced,
+                    direction=direction,
+                    context={'successful_crossover_count': metadata.get('successful_count', 0)}
+                )
                 return None
 
             # Step 5: Check session filter (skip in backtest mode)
             if not self.backtest_mode and self.session_filter_enabled:
                 if not self._is_session_allowed(timestamp):
                     self.logger.info(f"{log_prefix} Signal filtered: Outside trading session")
+                    self._track_rejection(
+                        stage='SESSION_FILTER',
+                        reason=f"Outside trading session (hour={timestamp.hour if hasattr(timestamp, 'hour') else 'unknown'})",
+                        epic=epic,
+                        df=df_enhanced,
+                        direction=direction,
+                        context={'is_market_hours': False}
+                    )
                     return None
 
             # Step 5b: Check 4H EMA 50 trend filter
@@ -307,6 +346,14 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
                 if not htf_aligned:
                     self.logger.info(f"{log_prefix} Signal filtered: {direction} not aligned with {self.htf_timeframe} EMA {self.htf_ema_period}")
                     self.logger.info(f"  {htf_details}")
+                    self._track_rejection(
+                        stage='HTF_TREND',
+                        reason=f"{direction} not aligned with {self.htf_timeframe} EMA {self.htf_ema_period}: {htf_details}",
+                        epic=epic,
+                        df=df_enhanced,
+                        direction=direction,
+                        context={'rejection_details': {'htf_details': htf_details}}
+                    )
                     return None
 
             # Step 5c: Check FVG confirmation filter
@@ -315,6 +362,14 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
                 if not fvg_confirmed:
                     self.logger.info(f"{log_prefix} Signal filtered: No confirming FVG for {direction}")
                     self.logger.info(f"  {fvg_details}")
+                    self._track_rejection(
+                        stage='FVG_FILTER',
+                        reason=f"No confirming FVG for {direction}: {fvg_details}",
+                        epic=epic,
+                        df=df_enhanced,
+                        direction=direction,
+                        context={'rejection_details': {'fvg_details': fvg_details}}
+                    )
                     return None
 
             # Step 5d: Check ADX trend strength filter
@@ -323,6 +378,14 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
                 if not adx_ok:
                     self.logger.info(f"{log_prefix} Signal filtered: Market not trending")
                     self.logger.info(f"  {adx_details}")
+                    self._track_rejection(
+                        stage='ADX_FILTER',
+                        reason=f"Market not trending: {adx_details}",
+                        epic=epic,
+                        df=df_enhanced,
+                        direction=direction,
+                        context={'adx_trending': False, 'rejection_details': {'adx_details': adx_details}}
+                    )
                     return None
 
             # Step 6: Generate signal
@@ -343,6 +406,20 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
             # Check confidence threshold
             if signal.get('confidence', 0) < self.min_confidence:
                 self.logger.info(f"{log_prefix} Signal rejected: Confidence {signal['confidence']:.1%} < {self.min_confidence:.1%}")
+                self._track_rejection(
+                    stage='CONFIDENCE',
+                    reason=f"Confidence {signal['confidence']:.1%} < {self.min_confidence:.1%} threshold",
+                    epic=epic,
+                    df=df_enhanced,
+                    direction=direction,
+                    context={
+                        'confidence_score': signal.get('confidence'),
+                        'potential_entry': signal.get('entry_price'),
+                        'potential_stop_loss': signal.get('stop_distance'),
+                        'potential_take_profit': signal.get('limit_distance'),
+                        'potential_rr_ratio': signal.get('limit_distance', 0) / signal.get('stop_distance', 1) if signal.get('stop_distance') else None
+                    }
+                )
                 return None
 
             # Record that we're taking this trade
@@ -832,9 +909,35 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
                 risk_pips = sl_tp['stop_distance']
                 if risk_pips < self.min_risk_after_offset_pips:
                     self.logger.info(f"   ❌ Risk too small after offset ({risk_pips:.1f} < {self.min_risk_after_offset_pips} pips)")
+                    # Track rejection - create minimal df from latest_row for context
+                    self._track_rejection(
+                        stage='RISK_VALIDATION',
+                        reason=f"Risk too small after limit offset ({risk_pips:.1f} < {self.min_risk_after_offset_pips} pips)",
+                        epic=epic,
+                        df=pd.DataFrame([latest_row]),
+                        direction=signal_type,
+                        context={
+                            'potential_risk_pips': risk_pips,
+                            'limit_offset_pips': limit_offset_pips,
+                            'order_type': order_type
+                        }
+                    )
                     return None
                 if risk_pips > self.max_risk_after_offset_pips:
                     self.logger.info(f"   ❌ Risk too large after offset ({risk_pips:.1f} > {self.max_risk_after_offset_pips} pips)")
+                    # Track rejection
+                    self._track_rejection(
+                        stage='RISK_VALIDATION',
+                        reason=f"Risk too large after limit offset ({risk_pips:.1f} > {self.max_risk_after_offset_pips} pips)",
+                        epic=epic,
+                        df=pd.DataFrame([latest_row]),
+                        direction=signal_type,
+                        context={
+                            'potential_risk_pips': risk_pips,
+                            'limit_offset_pips': limit_offset_pips,
+                            'order_type': order_type
+                        }
+                    )
                     return None
 
             # v2.0.0: Add limit order fields
@@ -997,3 +1100,190 @@ class EMADoubleConfirmationStrategy(BaseStrategy):
     def reset_tracker(self, epic: str = None):
         """Reset tracker state (useful for testing)"""
         self.crossover_tracker.reset_state(epic)
+
+    # =========================================================================
+    # REJECTION TRACKING (v2.3.0)
+    # =========================================================================
+
+    def _track_rejection(
+        self,
+        stage: str,
+        reason: str,
+        epic: str,
+        df: pd.DataFrame,
+        direction: Optional[str] = None,
+        context: Optional[Dict] = None
+    ) -> None:
+        """
+        Track a rejection for later analysis.
+
+        Args:
+            stage: Rejection stage (DATA_VALIDATION, NO_CROSSOVER, etc.)
+            reason: Human-readable rejection reason
+            epic: IG Markets epic code
+            df: DataFrame with market data
+            direction: Attempted direction (BULL/BEAR) if known
+            context: Additional context data
+        """
+        if self.rejection_manager is None:
+            return
+
+        try:
+            # Get timestamp from DataFrame
+            if df is not None and len(df) > 0:
+                if 'start_time' in df.columns:
+                    candle_timestamp = df['start_time'].iloc[-1]
+                elif 'timestamp' in df.columns:
+                    candle_timestamp = df['timestamp'].iloc[-1]
+                else:
+                    candle_timestamp = df.index[-1] if hasattr(df.index[-1], 'to_pydatetime') else None
+            else:
+                candle_timestamp = None
+
+            # Convert timestamp to datetime
+            if candle_timestamp is not None:
+                if hasattr(candle_timestamp, 'to_pydatetime'):
+                    scan_ts = candle_timestamp.to_pydatetime()
+                elif isinstance(candle_timestamp, (int, np.integer)):
+                    scan_ts = pd.Timestamp(candle_timestamp).to_pydatetime()
+                else:
+                    scan_ts = candle_timestamp
+            else:
+                from datetime import datetime, timezone
+                scan_ts = datetime.now(timezone.utc)
+
+            # Ensure timezone-aware
+            if scan_ts.tzinfo is None:
+                from datetime import timezone
+                scan_ts = scan_ts.replace(tzinfo=timezone.utc)
+
+            # Extract pair from epic
+            pair = self._extract_pair_from_epic(epic)
+
+            # Build rejection data
+            rejection_data = {
+                'scan_timestamp': scan_ts,
+                'epic': epic,
+                'pair': pair,
+                'rejection_stage': stage,
+                'rejection_reason': reason,
+                'attempted_direction': direction,
+                'strategy_version': self.strategy_version,
+                'market_hour': scan_ts.hour,
+            }
+
+            # Collect market context
+            market_context = self._collect_market_context(df, epic)
+            rejection_data.update(market_context)
+
+            # Add additional context if provided
+            if context:
+                rejection_data.update(context)
+
+            # Save rejection
+            self.rejection_manager.save_rejection(rejection_data)
+
+        except Exception as e:
+            if self.debug_logging:
+                self.logger.debug(f"Failed to track rejection: {e}")
+
+    def _collect_market_context(
+        self,
+        df: Optional[pd.DataFrame] = None,
+        epic: str = None
+    ) -> Dict:
+        """
+        Collect market context at the point of rejection.
+
+        Returns a dictionary with all available market state data.
+        """
+        context = {}
+
+        if df is None or len(df) == 0:
+            return context
+
+        try:
+            latest_row = df.iloc[-1]
+            pair = self._extract_pair_from_epic(epic) if epic else 'UNKNOWN'
+            pip_value = 0.01 if 'JPY' in pair else 0.0001
+
+            # Current price
+            context['current_price'] = float(latest_row.get('close', 0))
+            if 'bid' in df.columns:
+                context['bid_price'] = float(latest_row.get('bid', 0))
+            if 'ask' in df.columns:
+                context['ask_price'] = float(latest_row.get('ask', 0))
+            if 'spread' in df.columns:
+                context['spread_pips'] = float(latest_row.get('spread', 0))
+
+            # EMA values
+            ema_fast_col = f'ema_{self.ema_fast}'
+            ema_slow_col = f'ema_{self.ema_slow}'
+            ema_trend_col = f'ema_{self.ema_trend}'
+
+            if ema_fast_col in df.columns or 'ema_fast' in df.columns:
+                ema_fast = latest_row.get(ema_fast_col) or latest_row.get('ema_fast')
+                if ema_fast is not None and not pd.isna(ema_fast):
+                    context['ema_fast_value'] = float(ema_fast)
+
+            if ema_slow_col in df.columns or 'ema_slow' in df.columns:
+                ema_slow = latest_row.get(ema_slow_col) or latest_row.get('ema_slow')
+                if ema_slow is not None and not pd.isna(ema_slow):
+                    context['ema_slow_value'] = float(ema_slow)
+
+            if ema_trend_col in df.columns or 'ema_trend' in df.columns:
+                ema_trend = latest_row.get(ema_trend_col) or latest_row.get('ema_trend')
+                if ema_trend is not None and not pd.isna(ema_trend):
+                    context['ema_trend_value'] = float(ema_trend)
+
+            # EMA separation
+            if 'ema_fast_value' in context and 'ema_slow_value' in context:
+                separation = abs(context['ema_fast_value'] - context['ema_slow_value'])
+                context['ema_fast_slow_separation_pips'] = separation / pip_value
+
+            # ATR
+            if 'atr' in df.columns:
+                atr = latest_row.get('atr')
+                if atr is not None and not pd.isna(atr):
+                    context['atr_15m'] = float(atr)
+                    context['atr_pips'] = float(atr) / pip_value
+
+            # RSI
+            if 'rsi' in df.columns:
+                rsi = latest_row.get('rsi')
+                if rsi is not None and not pd.isna(rsi):
+                    context['rsi_value'] = float(rsi)
+
+            # ADX if available
+            if 'adx' in df.columns:
+                adx = latest_row.get('adx')
+                if adx is not None and not pd.isna(adx):
+                    context['adx_value'] = float(adx)
+                    context['adx_trending'] = float(adx) >= self.adx_min_value
+
+            # Crossover state
+            state_summary = self.crossover_tracker.get_state_summary(epic)
+            if state_summary:
+                context['successful_crossover_count'] = state_summary.get('successful_bull_count', 0) + state_summary.get('successful_bear_count', 0)
+                context['pending_crossover_count'] = state_summary.get('pending_count', 0)
+
+            # OHLCV snapshot (15m)
+            context['candle_15m_open'] = float(latest_row.get('open', 0))
+            context['candle_15m_high'] = float(latest_row.get('high', 0))
+            context['candle_15m_low'] = float(latest_row.get('low', 0))
+            context['candle_15m_close'] = float(latest_row.get('close', 0))
+
+            vol_col = 'ltv' if 'ltv' in df.columns else 'volume' if 'volume' in df.columns else None
+            if vol_col and latest_row.get(vol_col, 0) > 0:
+                context['candle_15m_volume'] = float(latest_row.get(vol_col, 0))
+
+        except Exception as e:
+            self.logger.debug(f"Error collecting market context: {e}")
+
+        return context
+
+    def flush_rejections(self) -> bool:
+        """Flush any pending rejections to database. Call this at end of scan cycle."""
+        if self.rejection_manager is not None:
+            return self.rejection_manager.flush()
+        return True
