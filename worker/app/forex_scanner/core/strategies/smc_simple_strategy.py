@@ -459,10 +459,31 @@ class SMCSimpleStrategy:
             # For BULL: SL below the swing LOW (opposite_swing) - the level we DON'T want price to break
             # For BEAR: SL above the swing HIGH (opposite_swing) - the level we DON'T want price to break
             # Previous bug: Used swing_level (the breakout level) which gave unrealistic 0.6 pip stops
+            #
+            # v2.3.0 FIX: CAPPED STRUCTURAL STOPS
+            # Problem: On 15m timeframe, swing structures can span 100+ pips (especially on
+            # volatile pairs like USDJPY, GBPJPY). Placing SL beyond opposite_swing created
+            # excessive risk (89 rejections/week, avg 111.5 pips USDJPY, 76.0 pips GBPUSD).
+            #
+            # Solution: Cap structural stops at max_risk_after_offset_pips while maintaining
+            # SMC philosophy. When swing structure is tight (<55 pips), use structural stop.
+            # When swing structure is wide (>55 pips), cap at max allowed risk.
+            #
+            # This recovers valid signals that were rejected for excessive risk while keeping
+            # risk bounded. The trade-off: some capped trades may have SL inside swing structure,
+            # but this is acceptable for algo trading on 15m timeframe where speed matters.
             if direction == 'BULL':
-                stop_loss = opposite_swing - sl_distance
+                structural_stop = opposite_swing - sl_distance
+                max_risk_stop = entry_price - (self.max_risk_after_offset_pips * pip_value)
+                stop_loss = max(structural_stop, max_risk_stop)  # Higher value = tighter stop
+                if stop_loss != structural_stop:
+                    self.logger.info(f"   ⚠️ Structural SL capped: {(entry_price - structural_stop)/pip_value:.1f} → {self.max_risk_after_offset_pips:.1f} pips")
             else:
-                stop_loss = opposite_swing + sl_distance
+                structural_stop = opposite_swing + sl_distance
+                max_risk_stop = entry_price + (self.max_risk_after_offset_pips * pip_value)
+                stop_loss = min(structural_stop, max_risk_stop)  # Lower value = tighter stop
+                if stop_loss != structural_stop:
+                    self.logger.info(f"   ⚠️ Structural SL capped: {(structural_stop - entry_price)/pip_value:.1f} → {self.max_risk_after_offset_pips:.1f} pips")
 
             risk_pips = abs(entry_price - stop_loss) / pip_value
 

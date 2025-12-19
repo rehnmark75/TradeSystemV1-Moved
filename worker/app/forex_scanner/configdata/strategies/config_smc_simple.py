@@ -1,12 +1,21 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.2.0 (Confidence Scoring Redesign)
+# Version: 2.3.1 (Capped Structural Stops)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback OR momentum continuation entry
+#
+# v2.3.1 CAPPED STRUCTURAL STOPS:
+#   - FIX: Structural stops were creating 100+ pip risk on 15m timeframe
+#   - ANALYSIS: 89 risk rejections/week (USDJPY avg 111.5 pips, GBPUSD 76.0 pips)
+#   - ROOT CAUSE: On 15m, swing structures span wider than on higher TFs
+#   - SOLUTION: Cap structural stop at max_risk_after_offset_pips (55 pips)
+#   - LOGIC: Use max(structural_stop, max_risk_stop) for BULL, min() for BEAR
+#   - TRADE-OFF: Some SLs may be inside swing structure (acceptable for 15m algo)
+#   - BENEFIT: Recovers ~90 valid signals/week that were rejected for excess risk
 #
 # v2.2.0 CONFIDENCE SCORING REDESIGN:
 #   - FIX: swing_break_quality was in config but NOT implemented - NOW IMPLEMENTED
@@ -48,9 +57,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.3.0"
-STRATEGY_DATE = "2025-12-18"
-STRATEGY_STATUS = "Production Baseline - Relaxed Thresholds from Rejection Analysis"
+STRATEGY_VERSION = "2.3.1"
+STRATEGY_DATE = "2025-12-19"
+STRATEGY_STATUS = "Capped Structural Stops - Recovers 90 Valid Signals/Week"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
