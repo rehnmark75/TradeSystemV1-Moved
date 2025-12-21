@@ -341,6 +341,14 @@ ENABLE_MARKET_INTELLIGENCE_FILTERING = True   # RE-ENABLED with lower threshold
 MARKET_INTELLIGENCE_MIN_CONFIDENCE = 0.45    # Lowered from 0.55 to 0.45 (regime was 52.1%)
 MARKET_INTELLIGENCE_BLOCK_UNSUITABLE_REGIMES = True   # RE-ENABLED for quality filtering
 
+# v2.3.2: Market Bias Filter - Block counter-trend trades when directional consensus is high
+# Trade 1586 analysis: BUY in bearish market (1.0 consensus) hit SL immediately
+# This filter BLOCKS trades that go against strong market momentum
+MARKET_BIAS_FILTER_ENABLED = True             # Enable blocking counter-trend trades
+MARKET_BIAS_MIN_CONSENSUS = 0.70              # Block when directional_consensus >= 70%
+                                               # Lower = more aggressive filtering
+                                               # Higher = only block very strong trends
+
 # =============================================================================
 # INTELLIGENCE ANALYSIS CONFIGURATION
 # =============================================================================

@@ -57,9 +57,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.3.1"
-STRATEGY_DATE = "2025-12-19"
-STRATEGY_STATUS = "Capped Structural Stops - Recovers 90 Valid Signals/Week"
+STRATEGY_VERSION = "2.3.2"
+STRATEGY_DATE = "2025-12-21"
+STRATEGY_STATUS = "Market Bias Filter - Prevents Counter-Trend Entries"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)

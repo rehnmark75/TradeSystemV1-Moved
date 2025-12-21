@@ -265,6 +265,11 @@ class TradeValidator:
         self.market_intelligence_min_confidence = getattr(config, 'MARKET_INTELLIGENCE_MIN_CONFIDENCE', 0.7)
         self.market_intelligence_block_unsuitable_regimes = getattr(config, 'MARKET_INTELLIGENCE_BLOCK_UNSUITABLE_REGIMES', True)
 
+        # v2.3.2: Market Bias Filter - Block counter-trend trades when consensus is high
+        # Trade 1586 analysis: BUY in bearish market with 1.0 consensus = immediate loss
+        self.market_bias_filter_enabled = getattr(config, 'MARKET_BIAS_FILTER_ENABLED', True)
+        self.market_bias_min_consensus = getattr(config, 'MARKET_BIAS_MIN_CONSENSUS', 0.70)
+
         if self.enable_market_intelligence_capture:
             try:
                 # Initialize market intelligence engine
@@ -277,6 +282,9 @@ class TradeValidator:
                 if self.enable_market_intelligence_filtering:
                     self.logger.info(f"🔍 Market Intelligence filtering enabled - Min confidence: {self.market_intelligence_min_confidence:.1%}, "
                                    f"Block unsuitable regimes: {self.market_intelligence_block_unsuitable_regimes}")
+                    # v2.3.2: Log market bias filter status
+                    if self.market_bias_filter_enabled:
+                        self.logger.info(f"🧠 Market Bias Filter enabled - Block counter-trend when consensus >= {self.market_bias_min_consensus:.0%}")
             except Exception as e:
                 self.logger.warning(f"⚠️ Failed to initialize Market Intelligence Engine: {e}")
                 self.market_intelligence_engine = None
@@ -308,7 +316,9 @@ class TradeValidator:
             'claude_analyzed': 0,
             # NEW: News filtering stats
             'failed_news_filtering': 0,
-            'news_confidence_reductions': 0
+            'news_confidence_reductions': 0,
+            # v2.3.2: Market bias filter stats
+            'failed_market_bias_filter': 0
         }
         
         self.logger.info("✅ TradeValidator initialized (duplicate detection handled by Scanner)")
@@ -1587,7 +1597,14 @@ class TradeValidator:
                 'sr_failure_rate': f"{(self.validation_stats['failed_sr_validation'] / total) * 100:.1f}%",
                 'news_failure_rate': f"{(self.validation_stats['failed_news_filtering'] / total) * 100:.1f}%",
                 'claude_failure_rate': f"{(self.validation_stats['failed_claude_rejection'] + self.validation_stats['failed_claude_score']) / total * 100:.1f}%",
-                'risk_failure_rate': f"{(self.validation_stats['failed_risk_management'] / total) * 100:.1f}%"
+                'risk_failure_rate': f"{(self.validation_stats['failed_risk_management'] / total) * 100:.1f}%",
+                'market_bias_filter_rate': f"{(self.validation_stats['failed_market_bias_filter'] / total) * 100:.1f}%"
+            },
+            # v2.3.2: Market Bias Filter metrics
+            'market_bias_filter_metrics': {
+                'enabled': self.market_bias_filter_enabled,
+                'min_consensus_threshold': self.market_bias_min_consensus,
+                'signals_blocked': self.validation_stats.get('failed_market_bias_filter', 0)
             },
             'claude_metrics': {
                 'enabled': self.enable_claude_filtering,
@@ -2501,24 +2518,40 @@ class TradeValidator:
                         # This could be used later to adjust the final signal confidence
                         signal['market_intelligence_confidence_modifier'] = confidence_modifier
 
-                        # CRITICAL FIX #5: MARKET BIAS ALIGNMENT PENALTY
-                        # Counter-trend signals get additional confidence reduction
+                        # CRITICAL FIX #5: MARKET BIAS ALIGNMENT - BLOCK OR PENALTY
+                        # v2.3.2: Enhanced to BLOCK counter-trend signals when consensus is high
+                        # Trade 1586 analysis: BUY in bearish market with 1.0 consensus = immediate SL hit
                         market_context = intelligence_report.get('market_context', {})
                         market_strength = market_context.get('market_strength', {})
                         market_bias = market_strength.get('market_bias', 'neutral')
+                        directional_consensus = float(market_strength.get('directional_consensus', 0.5))
 
+                        # Check for counter-trend condition
+                        is_counter_trend = False
                         if market_bias == 'bearish' and signal_type in ['BUY', 'BULL']:
-                            bias_penalty = 0.8  # 20% confidence reduction for counter-trend
-                            signal['market_intelligence_confidence_modifier'] *= bias_penalty
-                            self.logger.warning(
-                                f"🧠⚠️ {epic}: BULL signal in BEARISH market - "
-                                f"Confidence modifier reduced by 20% (now {signal['market_intelligence_confidence_modifier']:.1%})"
-                            )
+                            is_counter_trend = True
+                            counter_trend_desc = f"BULL signal in BEARISH market"
                         elif market_bias == 'bullish' and signal_type in ['SELL', 'BEAR']:
+                            is_counter_trend = True
+                            counter_trend_desc = f"BEAR signal in BULLISH market"
+
+                        if is_counter_trend:
+                            # v2.3.2: BLOCK if market bias filter is enabled and consensus is high
+                            if self.market_bias_filter_enabled and directional_consensus >= self.market_bias_min_consensus:
+                                # Use clear, trackable reason format: "Market Bias Filter: <details>"
+                                reason = (
+                                    f"Market Bias Filter: {counter_trend_desc} "
+                                    f"(consensus: {directional_consensus:.0%}, threshold: {self.market_bias_min_consensus:.0%})"
+                                )
+                                self.validation_stats['failed_market_bias_filter'] += 1
+                                self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY MARKET BIAS FILTER: {reason}")
+                                return False, reason
+
+                            # If consensus below threshold, apply penalty instead of blocking
                             bias_penalty = 0.8  # 20% confidence reduction for counter-trend
                             signal['market_intelligence_confidence_modifier'] *= bias_penalty
                             self.logger.warning(
-                                f"🧠⚠️ {epic}: BEAR signal in BULLISH market - "
+                                f"🧠⚠️ {epic}: {counter_trend_desc} (consensus: {directional_consensus:.0%} < {self.market_bias_min_consensus:.0%}) - "
                                 f"Confidence modifier reduced by 20% (now {signal['market_intelligence_confidence_modifier']:.1%})"
                             )
 
