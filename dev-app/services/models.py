@@ -18,13 +18,36 @@ class Candle(Base):
     volume = Column(Integer, nullable=False)
 
 class TradeLog(Base):
+    """
+    Trade execution and monitoring log.
+
+    IMPORTANT - Column Naming Clarification:
+    ----------------------------------------
+    - entry_price: The actual ORDER ENTRY level (for limit/stop orders, this is the
+                   stop-entry price, NOT the market price at signal time)
+    - limit_price: The TAKE PROFIT level (broker terminology: "limit" = profit target)
+                   NOT the limit order entry price! This stores the TP absolute price.
+    - sl_price:    The STOP LOSS level (absolute price)
+    - tp_price:    Alternative TP storage (used by some flows, same as limit_price concept)
+
+    For stop-entry orders (momentum confirmation style):
+    - BUY stop: entry_price is ABOVE market (enter when price breaks up)
+    - SELL stop: entry_price is BELOW market (enter when price breaks down)
+
+    The offset between signal generation price and entry_price is typically 2-3 pips
+    per strategy config (LIMIT_OFFSET_MAX_PIPS / MOMENTUM_OFFSET_PIPS).
+    """
     __tablename__ = "trade_log"
 
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String, nullable=False)
+    # Order entry level (for stop-entry orders: the momentum confirmation price)
     entry_price = Column(Float, nullable=False)
+    # Take profit level (NOT the limit order entry - this is the TP target price!)
     limit_price = Column(Float, nullable=True)
+    # Stop loss level (absolute price)
     sl_price = Column(Float, nullable=True)
+    # Alternative TP storage (same concept as limit_price)
     tp_price = Column(Float, nullable=True)
     direction = Column(String, nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)

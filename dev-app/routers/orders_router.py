@@ -596,12 +596,16 @@ async def ig_place_order(
                     # Calculate expiry time
                     expiry_time = datetime.utcnow() + timedelta(minutes=body.limit_expiry_minutes or 6)
 
+                    # NOTE on column naming (see TradeLog model docstring for details):
+                    # - entry_price = stop-entry level (momentum confirmation price)
+                    # - limit_price = TAKE PROFIT level (not the limit order entry!)
+                    # - sl_price = stop loss level
                     trade_log = TradeLog(
                         symbol=symbol,
-                        entry_price=body.entry_level,  # Limit entry price
+                        entry_price=body.entry_level,  # Stop-entry price (momentum confirmation)
                         direction=direction.upper(),
-                        limit_price=actual_limit_price,
-                        sl_price=actual_stop_price,
+                        limit_price=actual_limit_price,  # Take profit price (NOT entry!)
+                        sl_price=actual_stop_price,  # Stop loss price
                         deal_reference=deal_reference,
                         endpoint="dev-limit",  # Identify as limit order
                         status="pending_limit",  # New status for limit orders
