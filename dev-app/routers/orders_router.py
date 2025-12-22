@@ -62,7 +62,7 @@ class TradeRequest(BaseModel):
     # NEW: Limit order (working order) fields
     order_type: Optional[str] = "market"  # "market" or "limit"
     entry_level: Optional[float] = None   # Required for limit orders - the entry price
-    limit_expiry_minutes: Optional[int] = 6  # Minutes until limit order expires (default 6)
+    limit_expiry_minutes: Optional[int] = 35  # Minutes until limit order expires (default 35)
 
 # Simple in-memory cache for positions
 _cached_positions = {"data": None, "timestamp": 0}
@@ -594,7 +594,7 @@ async def ig_place_order(
                     )
 
                     # Calculate expiry time
-                    expiry_time = datetime.utcnow() + timedelta(minutes=body.limit_expiry_minutes or 6)
+                    expiry_time = datetime.utcnow() + timedelta(minutes=body.limit_expiry_minutes or 35)
 
                     # NOTE on column naming (see TradeLog model docstring for details):
                     # - entry_price = stop-entry level (momentum confirmation price)
