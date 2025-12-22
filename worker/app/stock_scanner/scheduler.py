@@ -855,24 +855,25 @@ class StockScheduler:
         """
         now = datetime.now(self.ET)
         today = now.date()
-        is_weekday = now.weekday() < 5  # Mon-Fri
 
         candidates = []
 
-        # Add daily scans if weekday
-        if is_weekday:
-            for task_name, config in self.SCHEDULE.items():
-                target = datetime.combine(today, config['time'])
-                target = self.ET.localize(target)
+        # Always add daily scans - they run Mon-Fri
+        # If today is a weekend, schedule for next Monday
+        for task_name, config in self.SCHEDULE.items():
+            target = datetime.combine(today, config['time'])
+            target = self.ET.localize(target)
 
+            # If it's a weekend or we've passed the time, find next valid slot
+            if now >= target or now.weekday() >= 5:
+                # Schedule for tomorrow (or today if weekend and time hasn't passed)
                 if now >= target:
-                    # Schedule for tomorrow
                     target += timedelta(days=1)
-                    # Skip weekends
-                    while target.weekday() >= 5:
-                        target += timedelta(days=1)
+                # Skip weekends
+                while target.weekday() >= 5:
+                    target += timedelta(days=1)
 
-                candidates.append((task_name, target))
+            candidates.append((task_name, target))
 
         # Add weekly sync
         next_weekly = self.get_next_weekly_sync()
