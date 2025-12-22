@@ -8,6 +8,14 @@
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback OR momentum continuation entry
 #
+# v2.4.0 ATR-BASED SL CAP:
+#   - PROBLEM: Fixed 55 pip cap was still 7x ATR on low-volatility pairs
+#   - ANALYSIS: Trade 1594 (GBPUSD) had 48 pip SL with 7.4 pip ATR = massive risk
+#   - ROOT CAUSE: Structural stops + fixed cap ignored current volatility
+#   - SOLUTION: Dynamic cap = min(3x ATR, 30 pips absolute)
+#   - BENEFIT: SL now proportional to market conditions (22 pips for GBPUSD)
+#   - IMPACT: Win rate needed drops from 70%+ to ~50% for breakeven
+#
 # v2.3.1 CAPPED STRUCTURAL STOPS:
 #   - FIX: Structural stops were creating 100+ pip risk on 15m timeframe
 #   - ANALYSIS: 89 risk rejections/week (USDJPY avg 111.5 pips, GBPUSD 76.0 pips)
@@ -57,9 +65,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.3.2"
-STRATEGY_DATE = "2025-12-21"
-STRATEGY_STATUS = "Market Bias Filter - Prevents Counter-Trend Entries"
+STRATEGY_VERSION = "2.4.0"
+STRATEGY_DATE = "2025-12-22"
+STRATEGY_STATUS = "ATR-Based SL Cap - Prevents Oversized Stops"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -184,7 +192,16 @@ MOMENTUM_OFFSET_PIPS = 3.0               # Fixed 3 pip offset for momentum entri
 
 # Risk sanity checks after offset
 MIN_RISK_AFTER_OFFSET_PIPS = 5.0         # Reject if SL too close after offset
-MAX_RISK_AFTER_OFFSET_PIPS = 55.0        # v2.1.2: INCREASED from 20 - allow JPY pairs with larger SL
+
+# v2.4.0: ATR-BASED SL CAP
+# Problem: Fixed 55 pip cap was still too large (7x ATR on some pairs)
+# Analysis: Trade 1594 had 48 pip SL with only 7.4 pip ATR - massive risk
+# Solution: Cap SL at ATR multiple, with hard absolute cap
+# Expected: Better risk/reward, ~50% win rate needed vs 70%+ before
+MAX_SL_ATR_MULTIPLIER = 3.0              # Maximum SL = 3x ATR (dynamic per pair)
+MAX_SL_ABSOLUTE_PIPS = 30.0              # Hard cap regardless of ATR
+# Legacy parameter kept for backwards compatibility
+MAX_RISK_AFTER_OFFSET_PIPS = 55.0        # Fallback if ATR unavailable
 
 # ============================================================================
 # RISK MANAGEMENT

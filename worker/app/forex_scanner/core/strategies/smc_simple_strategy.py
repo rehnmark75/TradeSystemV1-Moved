@@ -2,9 +2,16 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.2.0
-DATE: 2025-12-18
-STATUS: Confidence Scoring Redesign - Balanced Tier Alignment
+VERSION: 2.4.0
+DATE: 2025-12-22
+STATUS: ATR-Based SL Cap - Prevents Oversized Stops
+
+v2.4.0 CHANGES (ATR-Based SL Cap):
+    - FIX: Fixed 55 pip cap was still 7x ATR on low-volatility pairs
+    - ANALYSIS: Trade 1594 (GBPUSD) had 48 pip SL with only 7.4 pip ATR
+    - SOLUTION: Dynamic cap = min(ATR × 3, 30 pips absolute)
+    - BENEFIT: SL now proportional to volatility (22 pips for GBPUSD vs 48)
+    - IMPACT: Win rate needed drops from 70%+ to ~50% for breakeven
 
 v2.2.0 CHANGES (Confidence Scoring Redesign):
     - FIX: swing_break_quality was in config but NOT implemented - NOW IMPLEMENTED
@@ -213,6 +220,10 @@ class SMCSimpleStrategy:
         self.momentum_offset_pips = getattr(smc_config, 'MOMENTUM_OFFSET_PIPS', 4.0)
         self.min_risk_after_offset_pips = getattr(smc_config, 'MIN_RISK_AFTER_OFFSET_PIPS', 5.0)
         self.max_risk_after_offset_pips = getattr(smc_config, 'MAX_RISK_AFTER_OFFSET_PIPS', 40.0)
+
+        # v2.4.0: ATR-based SL cap (dynamic max risk based on volatility)
+        self.max_sl_atr_multiplier = getattr(smc_config, 'MAX_SL_ATR_MULTIPLIER', 3.0)
+        self.max_sl_absolute_pips = getattr(smc_config, 'MAX_SL_ABSOLUTE_PIPS', 30.0)
 
         # v2.1.0: Dynamic Swing Lookback Configuration
         self.use_dynamic_swing_lookback = getattr(smc_config, 'USE_DYNAMIC_SWING_LOOKBACK', True)
@@ -460,30 +471,38 @@ class SMCSimpleStrategy:
             # For BEAR: SL above the swing HIGH (opposite_swing) - the level we DON'T want price to break
             # Previous bug: Used swing_level (the breakout level) which gave unrealistic 0.6 pip stops
             #
-            # v2.3.0 FIX: CAPPED STRUCTURAL STOPS
-            # Problem: On 15m timeframe, swing structures can span 100+ pips (especially on
-            # volatile pairs like USDJPY, GBPJPY). Placing SL beyond opposite_swing created
-            # excessive risk (89 rejections/week, avg 111.5 pips USDJPY, 76.0 pips GBPUSD).
+            # v2.4.0 FIX: ATR-BASED DYNAMIC SL CAP
+            # Problem: Fixed 55 pip cap (v2.3.0) was still 7x ATR on low-volatility pairs
+            # Analysis: Trade 1594 (GBPUSD) had 48 pip SL with only 7.4 pip ATR = massive risk
+            # Solution: Dynamic cap = min(ATR * multiplier, absolute_max)
+            # Example: GBPUSD with 7.4 pip ATR → cap = min(7.4 * 3, 30) = 22 pips
             #
-            # Solution: Cap structural stops at max_risk_after_offset_pips while maintaining
-            # SMC philosophy. When swing structure is tight (<55 pips), use structural stop.
-            # When swing structure is wide (>55 pips), cap at max allowed risk.
-            #
-            # This recovers valid signals that were rejected for excessive risk while keeping
-            # risk bounded. The trade-off: some capped trades may have SL inside swing structure,
-            # but this is acceptable for algo trading on 15m timeframe where speed matters.
+            # v2.3.0 (superseded): Fixed cap at max_risk_after_offset_pips (55 pips)
+            # v2.4.0: Now uses ATR-proportional cap for better risk management
+
+            # Calculate dynamic max risk based on ATR
+            atr_pips = atr / pip_value if atr > 0 else 0
+            if atr_pips > 0:
+                atr_max_risk_pips = atr_pips * self.max_sl_atr_multiplier
+                dynamic_max_risk_pips = min(atr_max_risk_pips, self.max_sl_absolute_pips)
+                self.logger.info(f"   Dynamic SL cap: {dynamic_max_risk_pips:.1f} pips (ATR×{self.max_sl_atr_multiplier}={atr_max_risk_pips:.1f}, abs_max={self.max_sl_absolute_pips})")
+            else:
+                # Fallback to legacy fixed cap if ATR unavailable
+                dynamic_max_risk_pips = self.max_risk_after_offset_pips
+                self.logger.info(f"   Dynamic SL cap: {dynamic_max_risk_pips:.1f} pips (fallback, no ATR)")
+
             if direction == 'BULL':
                 structural_stop = opposite_swing - sl_distance
-                max_risk_stop = entry_price - (self.max_risk_after_offset_pips * pip_value)
+                max_risk_stop = entry_price - (dynamic_max_risk_pips * pip_value)
                 stop_loss = max(structural_stop, max_risk_stop)  # Higher value = tighter stop
                 if stop_loss != structural_stop:
-                    self.logger.info(f"   ⚠️ Structural SL capped: {(entry_price - structural_stop)/pip_value:.1f} → {self.max_risk_after_offset_pips:.1f} pips")
+                    self.logger.info(f"   ⚠️ Structural SL capped: {(entry_price - structural_stop)/pip_value:.1f} → {dynamic_max_risk_pips:.1f} pips")
             else:
                 structural_stop = opposite_swing + sl_distance
-                max_risk_stop = entry_price + (self.max_risk_after_offset_pips * pip_value)
+                max_risk_stop = entry_price + (dynamic_max_risk_pips * pip_value)
                 stop_loss = min(structural_stop, max_risk_stop)  # Lower value = tighter stop
                 if stop_loss != structural_stop:
-                    self.logger.info(f"   ⚠️ Structural SL capped: {(structural_stop - entry_price)/pip_value:.1f} → {self.max_risk_after_offset_pips:.1f} pips")
+                    self.logger.info(f"   ⚠️ Structural SL capped: {(structural_stop - entry_price)/pip_value:.1f} → {dynamic_max_risk_pips:.1f} pips")
 
             risk_pips = abs(entry_price - stop_loss) / pip_value
 
