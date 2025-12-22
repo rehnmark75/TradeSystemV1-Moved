@@ -82,6 +82,20 @@ class EnhancedTradeStatusManager:
                 self.logger.info(f"📋 [TRANSACTION FOUND] Trade {trade.id} found in transaction history")
                 return self._handle_transaction_result(trade, transaction_result, db)
 
+            # Step 3b: Check activity history for close events
+            # The close activity has a DIFFERENT deal_id, so we need to search by position reference
+            self.logger.info(f"📋 [ACTIVITY CHECK] Trade {trade.id} - Checking activity history for close events")
+            activity_result = await self._check_activity_for_close(trade)
+
+            if activity_result and activity_result.get("closed"):
+                self.logger.info(f"📋 [ACTIVITY CLOSE FOUND] Trade {trade.id} was closed via activity: {activity_result.get('description')}")
+                return self._update_trade_status(
+                    trade, "closed",
+                    f"closed_via_activity_{activity_result.get('close_deal_id', 'unknown')}",
+                    db,
+                    activity_close_data=activity_result
+                )
+
             # Step 4: Now check deal confirmation outcome
             # Only use this for ACCEPTED/REJECTED status, NOT for NOT_FOUND
             self.logger.info(f"🔎 [DEAL OUTCOME] Trade {trade.id} - Investigating deal confirmation")
@@ -250,7 +264,7 @@ class EnhancedTradeStatusManager:
             # Get all trades marked as missing
             missing_trades = db.query(TradeLog).filter(
                 TradeLog.status == "missing_on_ig",
-                TradeLog.endpoint == "dev"
+                TradeLog.endpoint.in_(["dev", "dev-limit"])  # Include limit orders
             ).all()
             
             if not missing_trades:
@@ -447,11 +461,80 @@ class EnhancedTradeStatusManager:
                 
                 self.logger.info(f"📋 [NO TRANSACTION] No transaction found for deal {deal_id}")
                 return {"found": False}
-                
+
         except Exception as e:
             self.logger.error(f"❌ [TRANSACTION CHECK ERROR] {deal_id}: {e}")
             return None
-    
+
+    async def _check_activity_for_close(self, trade: TradeLog) -> Optional[Dict]:
+        """
+        Check activity history for close events using position reference.
+
+        The close activity has a DIFFERENT deal_id than the open, so we need to:
+        1. Extract position reference from the original deal_id (last 8 chars after DIAAAAV3)
+        2. Search activities for "stängd" (closed) descriptions containing that reference
+        """
+        try:
+            # Extract position reference from deal_id
+            # Format: DIAAAAV3TABV7AF -> position ref is TABV7AF (or 3TABV7AF)
+            if not trade.deal_id or len(trade.deal_id) < 10:
+                return None
+
+            # The position reference is typically the last 7-8 characters
+            position_ref = trade.deal_id[-7:]  # e.g., "TABV7AF" from "DIAAAAV3TABV7AF"
+
+            # Get activities from last 2 days
+            end_date = datetime.utcnow()
+            start_date = end_date - timedelta(days=2)
+
+            url = f"{API_BASE_URL}/history/activity"
+            headers = {
+                "X-IG-API-KEY": self.trading_headers["X-IG-API-KEY"],
+                "CST": self.trading_headers["CST"],
+                "X-SECURITY-TOKEN": self.trading_headers["X-SECURITY-TOKEN"],
+                "Accept": "application/json",
+                "Version": "3"
+            }
+
+            params = {
+                "from": start_date.strftime("%Y-%m-%dT00:00:00"),
+                "to": end_date.strftime("%Y-%m-%dT23:59:59"),
+            }
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers=headers, params=params)
+                response.raise_for_status()
+                activities = response.json().get("activities", [])
+
+                # Look for close activities containing our position reference
+                for act in activities:
+                    description = act.get("description", "")
+                    epic = act.get("epic", "")
+
+                    # Check if this is a close activity for our position
+                    # Swedish: "Position(er) stängd(a): 3TABV7AF"
+                    # English: "Position(s) closed: 3TABV7AF"
+                    if ("stängd" in description.lower() or "closed" in description.lower()):
+                        # Check if our position reference is in the description
+                        if position_ref in description or f"3{position_ref}" in description:
+                            # Verify it's the same symbol
+                            if epic == trade.symbol:
+                                self.logger.info(f"📋 [ACTIVITY CLOSE] Found close activity for {trade.deal_id}: {description}")
+                                return {
+                                    "closed": True,
+                                    "close_deal_id": act.get("dealId"),
+                                    "close_date": act.get("date"),
+                                    "description": description,
+                                    "epic": epic
+                                }
+
+                self.logger.debug(f"📋 [NO ACTIVITY CLOSE] No close activity found for position ref {position_ref}")
+                return {"closed": False}
+
+        except Exception as e:
+            self.logger.error(f"❌ [ACTIVITY CHECK ERROR] Trade {trade.id}: {e}")
+            return None
+
     async def _verify_deal_validity(self, deal_reference: str) -> Dict:
         """Final check to see if deal was ever valid"""
         if not deal_reference or len(deal_reference) < 10:
@@ -526,31 +609,47 @@ class EnhancedTradeStatusManager:
         # This could indicate a temporary IG API issue or genuine missing trade
         return self._update_trade_status(trade, "missing_on_ig", "valid_deal_but_not_found", db)
     
-    def _update_trade_status(self, trade: TradeLog, status: str, exit_reason: str, db: Session, ig_position_data: dict = None) -> str:
+    def _update_trade_status(self, trade: TradeLog, status: str, exit_reason: str, db: Session, ig_position_data: dict = None, activity_close_data: dict = None) -> str:
         """Update trade status with detailed reasoning and sync position data"""
         old_status = trade.status
         trade.status = status
         trade.exit_reason = exit_reason
         trade.trigger_time = datetime.utcnow()
-        
+
         # NEW: Sync position data from IG if provided
         if ig_position_data and status in ["tracking", "break_even", "trailing"]:
             position = ig_position_data.get("position", {})
-            
+
             # Update stop level if different
             ig_stop_level = position.get("stopLevel")
             if ig_stop_level and abs(float(ig_stop_level) - (trade.sl_price or 0)) > 0.0001:
                 old_sl = trade.sl_price
                 trade.sl_price = float(ig_stop_level)
                 self.logger.info(f"🔄 [SYNC SL] Trade {trade.id}: SL {old_sl} → {trade.sl_price}")
-            
+
             # Update take profit if different
             ig_limit_level = position.get("limitLevel")
             if ig_limit_level and abs(float(ig_limit_level) - (trade.tp_price or 0)) > 0.0001:
                 old_tp = trade.tp_price
                 trade.tp_price = float(ig_limit_level)
                 self.logger.info(f"🔄 [SYNC TP] Trade {trade.id}: TP {old_tp} → {trade.tp_price}")
-        
+
+        # Store activity close data for P/L correlation
+        if activity_close_data and status == "closed":
+            close_deal_id = activity_close_data.get("close_deal_id")
+            if close_deal_id:
+                trade.activity_close_deal_id = close_deal_id
+                self.logger.info(f"📋 [CLOSE DEAL ID] Trade {trade.id}: activity_close_deal_id = {close_deal_id}")
+
+            # Extract and store position reference from deal_id
+            if trade.deal_id and len(trade.deal_id) >= 8:
+                position_ref = trade.deal_id[-8:]  # e.g., "3TABV7AF"
+                trade.position_reference = position_ref
+                self.logger.info(f"📋 [POSITION REF] Trade {trade.id}: position_reference = {position_ref}")
+
+            # Set closed_at timestamp
+            trade.closed_at = datetime.utcnow()
+
         # Don't commit here - let the caller handle it
         self.logger.info(f"📊 [STATUS UPDATE] Trade {trade.id}: {old_status} → {status} (reason: {exit_reason})")
         return status
@@ -616,6 +715,19 @@ async def sync_trades_with_ig():
                     db.commit()
                     logger.info(f"[✅ ENHANCED SYNC] {validated} validated, {investigated} investigated")
                     logger.info(f"   Results: {still_active} active, {closed} closed, {rejected} rejected, {missing} missing, {errors} errors")
+
+                    # Auto-correlate P/L for newly closed trades
+                    if closed > 0:
+                        try:
+                            from services.trade_pnl_correlator import TradePnLCorrelator
+                            logger.info(f"[P/L CORRELATION] Running P/L correlator for {closed} newly closed trades...")
+                            pnl_correlator = TradePnLCorrelator(db_session=db)
+                            pnl_result = await pnl_correlator.correlate_and_update_pnl(trading_headers, days_back=7)
+                            updated_count = pnl_result.get("summary", {}).get("updated_count", 0)
+                            if updated_count > 0:
+                                logger.info(f"[✅ P/L UPDATED] Updated P/L for {updated_count} trades")
+                        except Exception as pnl_error:
+                            logger.error(f"[P/L CORRELATION ERROR] {pnl_error}")
                 else:
                     logger.info(f"[✅ SYNC] All trades processed successfully")
             
