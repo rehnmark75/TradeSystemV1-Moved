@@ -311,9 +311,9 @@ SMC_BLACKLIST_PAIRS = []  # Re-test all pairs with fixed strategy
 
 # Stop loss buffer (pips)
 # Additional pips beyond structure invalidation point
-# Phase 3.0: Widened from 6 to 10 pips to avoid noise stops
-# Analysis: 6 pips < 1 ATR on 15m, causing premature stop-outs on winners
-SMC_SL_BUFFER_PIPS = 10
+# v2.5.0: Reduced from 10 to 6 pips to improve R:R ratio
+# Combined with delayed trailing stops, tighter SL improves avg win vs avg loss
+SMC_SL_BUFFER_PIPS = 6
 
 # Minimum Risk:Reward ratio
 # Trade must offer at least this R:R to be valid
@@ -621,7 +621,7 @@ SMC_OB_REQUIRE_REJECTION = True  # Require rejection signal at OB
 SMC_OB_REJECTION_MIN_WICK_RATIO = 0.60  # Min wick ratio for wick rejection (60%)
 
 # Stop loss placement
-SMC_OB_SL_BUFFER_PIPS = 8  # Phase 3.0: Widened from 5 to 8 pips for OB-based stops
+SMC_OB_SL_BUFFER_PIPS = 5  # v2.5.0: Reduced from 8 to 5 pips to improve R:R ratio
 
 # ============================================================================
 # PULLBACK DEPTH FILTER (Phase 3 - Entry Timing Optimization)
