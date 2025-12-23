@@ -33,7 +33,11 @@ class OrderFlowAnalyzer:
         self.max_fvgs = 10           # Limit number of FVGs to track
         self.skip_supply_demand = True  # Skip expensive S/D zone calculation
         self.displacement_factor = 1.5  # ATR multiplier for displacement
-        
+
+        # OB Proximity Scoring Configuration
+        self.ob_proximity_enabled = True
+        self.ob_proximity_threshold_pips = 20  # Max distance for scoring
+
         self.logger.info("📊 OrderFlowAnalyzer initialized (Enhanced)")
         self.logger.debug(f"   Min OB size: {self.min_ob_size_pips} pips")
         self.logger.debug(f"   Min FVG size: {self.min_fvg_size_pips} pips")
@@ -62,18 +66,25 @@ class OrderFlowAnalyzer:
             
             # Enhanced bias calculation with proximity weighting
             order_flow_bias = self._determine_order_flow_bias_weighted(order_blocks, fvgs, current_price)
-            
+
+            # Calculate OB proximity scoring for signal enrichment
+            pip_size = self._get_pip_size(epic)
+            ob_proximity = self._calculate_ob_proximity_score(
+                current_price, order_blocks, fvgs, pip_size
+            ) if self.ob_proximity_enabled else {}
+
             elapsed = time.time() - start_time
             self.logger.debug(f"📊 Enhanced order flow analysis for {epic} completed in {elapsed:.2f}s")
-            
+
             return {
                 'order_blocks': order_blocks[:self.max_order_blocks],
                 'fair_value_gaps': fvgs[:self.max_fvgs],
                 'supply_demand_zones': supply_demand_zones,
                 'order_flow_bias': order_flow_bias,
+                'ob_proximity': ob_proximity,
                 'analysis_time_seconds': elapsed,
                 'current_price': current_price,
-                'pip_size': self._get_pip_size(epic)
+                'pip_size': pip_size
             }
             
         except Exception as e:
@@ -500,8 +511,154 @@ class OrderFlowAnalyzer:
             
             # Sort by proximity
             nearby_levels.sort(key=lambda x: x['distance_pips'])
-            
+
         except Exception as e:
             self.logger.error(f"Failed to find nearby levels: {e}")
-        
+
         return nearby_levels
+
+    def _calculate_ob_proximity_score(
+        self,
+        current_price: float,
+        order_blocks: List[Dict],
+        fvgs: List[Dict],
+        pip_size: float
+    ) -> Dict:
+        """
+        Calculate proximity scores for order blocks and FVGs relative to current price.
+        Returns detailed scoring for analytics and confluence.
+
+        Scoring: 1.0 at level, decays to 0 at threshold distance
+        """
+        try:
+            threshold_distance = self.ob_proximity_threshold_pips * pip_size
+
+            # Find nearest bullish and bearish OBs
+            nearest_bullish_ob = None
+            nearest_bearish_ob = None
+            min_bullish_dist = float('inf')
+            min_bearish_dist = float('inf')
+
+            for ob in order_blocks:
+                ob_mid = (ob['high'] + ob['low']) / 2.0
+                distance = abs(current_price - ob_mid)
+                distance_pips = distance / pip_size
+
+                if 'BULLISH' in ob.get('type', ''):
+                    if distance < min_bullish_dist:
+                        min_bullish_dist = distance
+                        nearest_bullish_ob = {
+                            'high': ob['high'],
+                            'low': ob['low'],
+                            'mid': ob_mid,
+                            'distance_pips': round(distance_pips, 2),
+                            'score': round(max(0, 1 - (distance / threshold_distance)), 3),
+                            'strength': ob.get('strength', 'MEDIUM'),
+                            'displacement_atr': ob.get('displacement_size_atr', 0)
+                        }
+                elif 'BEARISH' in ob.get('type', ''):
+                    if distance < min_bearish_dist:
+                        min_bearish_dist = distance
+                        nearest_bearish_ob = {
+                            'high': ob['high'],
+                            'low': ob['low'],
+                            'mid': ob_mid,
+                            'distance_pips': round(distance_pips, 2),
+                            'score': round(max(0, 1 - (distance / threshold_distance)), 3),
+                            'strength': ob.get('strength', 'MEDIUM'),
+                            'displacement_atr': ob.get('displacement_size_atr', 0)
+                        }
+
+            # Find nearest FVGs
+            nearest_bullish_fvg = None
+            nearest_bearish_fvg = None
+            min_bullish_fvg_dist = float('inf')
+            min_bearish_fvg_dist = float('inf')
+
+            for fvg in fvgs:
+                fvg_mid = (fvg['top'] + fvg['bottom']) / 2.0
+                distance = abs(current_price - fvg_mid)
+                distance_pips = distance / pip_size
+
+                if 'BULLISH' in fvg.get('type', ''):
+                    if distance < min_bullish_fvg_dist:
+                        min_bullish_fvg_dist = distance
+                        nearest_bullish_fvg = {
+                            'top': fvg['top'],
+                            'bottom': fvg['bottom'],
+                            'mid': fvg_mid,
+                            'distance_pips': round(distance_pips, 2),
+                            'score': round(max(0, 1 - (distance / threshold_distance)), 3),
+                            'size_pips': fvg.get('size_pips', 0)
+                        }
+                elif 'BEARISH' in fvg.get('type', ''):
+                    if distance < min_bearish_fvg_dist:
+                        min_bearish_fvg_dist = distance
+                        nearest_bearish_fvg = {
+                            'top': fvg['top'],
+                            'bottom': fvg['bottom'],
+                            'mid': fvg_mid,
+                            'distance_pips': round(distance_pips, 2),
+                            'score': round(max(0, 1 - (distance / threshold_distance)), 3),
+                            'size_pips': fvg.get('size_pips', 0)
+                        }
+
+            # Calculate overall alignment score
+            # Higher score if price is near OBs/FVGs that support potential trades
+            bullish_ob_score = nearest_bullish_ob['score'] if nearest_bullish_ob else 0
+            bearish_ob_score = nearest_bearish_ob['score'] if nearest_bearish_ob else 0
+            bullish_fvg_score = nearest_bullish_fvg['score'] if nearest_bullish_fvg else 0
+            bearish_fvg_score = nearest_bearish_fvg['score'] if nearest_bearish_fvg else 0
+
+            # OBs weighted 2x higher than FVGs
+            bullish_alignment = (bullish_ob_score * 2 + bullish_fvg_score) / 3
+            bearish_alignment = (bearish_ob_score * 2 + bearish_fvg_score) / 3
+
+            # Determine which direction has better proximity support
+            if bullish_alignment > bearish_alignment:
+                dominant_bias = 'BULLISH'
+                alignment_score = bullish_alignment
+            elif bearish_alignment > bullish_alignment:
+                dominant_bias = 'BEARISH'
+                alignment_score = bearish_alignment
+            else:
+                dominant_bias = 'NEUTRAL'
+                alignment_score = max(bullish_alignment, bearish_alignment)
+
+            # Find absolute nearest OB distance for analytics
+            nearest_ob_distance = min(
+                nearest_bullish_ob['distance_pips'] if nearest_bullish_ob else float('inf'),
+                nearest_bearish_ob['distance_pips'] if nearest_bearish_ob else float('inf')
+            )
+            if nearest_ob_distance == float('inf'):
+                nearest_ob_distance = None
+
+            return {
+                'nearest_bullish_ob': nearest_bullish_ob,
+                'nearest_bearish_ob': nearest_bearish_ob,
+                'nearest_bullish_fvg': nearest_bullish_fvg,
+                'nearest_bearish_fvg': nearest_bearish_fvg,
+                'bullish_alignment_score': round(bullish_alignment, 3),
+                'bearish_alignment_score': round(bearish_alignment, 3),
+                'dominant_bias': dominant_bias,
+                'alignment_score': round(alignment_score, 3),
+                'nearest_ob_distance_pips': nearest_ob_distance,
+                'total_obs_found': len(order_blocks),
+                'total_fvgs_found': len(fvgs)
+            }
+
+        except Exception as e:
+            self.logger.error(f"OB proximity scoring failed: {e}")
+            return {
+                'nearest_bullish_ob': None,
+                'nearest_bearish_ob': None,
+                'nearest_bullish_fvg': None,
+                'nearest_bearish_fvg': None,
+                'bullish_alignment_score': 0,
+                'bearish_alignment_score': 0,
+                'dominant_bias': 'NEUTRAL',
+                'alignment_score': 0,
+                'nearest_ob_distance_pips': None,
+                'total_obs_found': 0,
+                'total_fvgs_found': 0
+            }

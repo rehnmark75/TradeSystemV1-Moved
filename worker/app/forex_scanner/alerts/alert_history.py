@@ -510,6 +510,8 @@ class AlertHistoryManager:
                         trigger_type, validation_details, swing_proximity_distance, swing_proximity_valid,
                         market_bias, market_bias_conflict, directional_consensus,
                         market_structure_analysis, order_flow_analysis, confluence_details,
+                        ob_proximity_score, nearest_ob_distance_pips,
+                        liquidity_sweep_detected, liquidity_sweep_type, liquidity_sweep_quality,
                         claude_analysis, claude_score, claude_decision, claude_approved,
                         claude_reason, claude_mode, claude_raw_response,
                         alert_message, alert_level,
@@ -529,6 +531,8 @@ class AlertHistoryManager:
                         %(trigger_type)s, %(validation_details)s, %(swing_proximity_distance)s, %(swing_proximity_valid)s,
                         %(market_bias)s, %(market_bias_conflict)s, %(directional_consensus)s,
                         %(market_structure_analysis)s, %(order_flow_analysis)s, %(confluence_details)s,
+                        %(ob_proximity_score)s, %(nearest_ob_distance_pips)s,
+                        %(liquidity_sweep_detected)s, %(liquidity_sweep_type)s, %(liquidity_sweep_quality)s,
                         %(claude_analysis)s, %(claude_score)s, %(claude_decision)s, %(claude_approved)s,
                         %(claude_reason)s, %(claude_mode)s, %(claude_raw_response)s,
                         %(alert_message)s, %(alert_level)s,
@@ -1208,6 +1212,13 @@ class AlertHistoryManager:
             confluence_details = signal.get('confluence_details')
             smart_money_metadata = signal.get('smart_money_metadata')
 
+            # OB Proximity and Liquidity Sweep fields (NEW)
+            ob_proximity_score = signal.get('ob_proximity_score')
+            nearest_ob_distance_pips = signal.get('nearest_ob_distance_pips')
+            liquidity_sweep_detected = signal.get('liquidity_sweep_detected', False)
+            liquidity_sweep_type = signal.get('liquidity_sweep_type')
+            liquidity_sweep_quality = signal.get('liquidity_sweep_quality')
+
             # ================================
             # DEDUPLICATION FIELDS
             # ================================
@@ -1350,6 +1361,13 @@ class AlertHistoryManager:
                 'market_structure_analysis': market_structure_analysis,
                 'order_flow_analysis': order_flow_analysis,
                 'confluence_details': confluence_details,
+
+                # OB Proximity and Liquidity Sweep (NEW)
+                'ob_proximity_score': ob_proximity_score,
+                'nearest_ob_distance_pips': nearest_ob_distance_pips,
+                'liquidity_sweep_detected': liquidity_sweep_detected,
+                'liquidity_sweep_type': liquidity_sweep_type,
+                'liquidity_sweep_quality': liquidity_sweep_quality,
 
                 # Deduplication
                 'signal_hash': signal_hash,

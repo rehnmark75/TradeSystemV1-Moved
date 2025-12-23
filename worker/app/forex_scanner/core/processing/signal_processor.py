@@ -611,11 +611,23 @@ class SignalProcessor:
                                     smart_money_result.get('confluence_details', {}))
         signal['confluence_details'] = json.dumps(make_json_serializable(confluence))
 
+        # Extract OB proximity fields for analytics
+        ob_proximity = order_flow.get('ob_proximity', {})
+        signal['ob_proximity_score'] = ob_proximity.get('alignment_score')
+        signal['nearest_ob_distance_pips'] = ob_proximity.get('nearest_ob_distance_pips')
+
+        # Extract liquidity sweep fields for analytics (NEW)
+        liquidity_analysis = sm_analysis.get('liquidity_analysis',
+                                             smart_money_result.get('liquidity_analysis', {}))
+        signal['liquidity_sweep_detected'] = liquidity_analysis.get('sweep_detected', False)
+        signal['liquidity_sweep_type'] = liquidity_analysis.get('sweep_type')
+        signal['liquidity_sweep_quality'] = liquidity_analysis.get('sweep_quality')
+
         # Add metadata
         metadata = sm_analysis.get('analysis_metadata', smart_money_result.get('analysis_metadata'))
         if metadata:
             signal['smart_money_metadata'] = json.dumps(make_json_serializable(metadata))
-        
+
         return signal
     
 
@@ -636,7 +648,13 @@ class SignalProcessor:
             signal.setdefault('order_flow_analysis', None)
             signal.setdefault('confluence_details', None)
             signal.setdefault('smart_money_metadata', None)
-        
+            # NEW: OB proximity and liquidity sweep defaults
+            signal.setdefault('ob_proximity_score', None)
+            signal.setdefault('nearest_ob_distance_pips', None)
+            signal.setdefault('liquidity_sweep_detected', False)
+            signal.setdefault('liquidity_sweep_type', None)
+            signal.setdefault('liquidity_sweep_quality', None)
+
         return signal
     
     # All existing methods remain unchanged below...

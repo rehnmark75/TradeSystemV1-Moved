@@ -45,6 +45,18 @@ except ImportError:
         ANALYZERS_AVAILABLE = False
         logging.getLogger(__name__).warning("Smart money analyzers not available - using mock implementation")
 
+# Import liquidity sweep analyzer
+try:
+    from .strategies.helpers.silver_bullet_liquidity import SilverBulletLiquidity
+    LIQUIDITY_ANALYZER_AVAILABLE = True
+except ImportError:
+    try:
+        from core.strategies.helpers.silver_bullet_liquidity import SilverBulletLiquidity
+        LIQUIDITY_ANALYZER_AVAILABLE = True
+    except ImportError:
+        LIQUIDITY_ANALYZER_AVAILABLE = False
+        logging.getLogger(__name__).warning("Liquidity sweep analyzer not available")
+
 try:
     from configdata import config
 except ImportError:
@@ -84,10 +96,26 @@ class SmartMoneyReadOnlyAnalyzer:
         self.order_flow_weight = getattr(config, 'SMART_MONEY_ORDER_FLOW_WEIGHT', 0.3)
         self.min_confidence_boost = getattr(config, 'SMART_MONEY_MIN_CONFIDENCE_BOOST', 0.1)
         self.max_confidence_boost = getattr(config, 'SMART_MONEY_MAX_CONFIDENCE_BOOST', 0.3)
-        
+
+        # Liquidity sweep configuration (NEW)
+        self.liquidity_sweep_enabled = getattr(config, 'SMART_MONEY_LIQUIDITY_SWEEP_ENABLED', True)
+        self.liquidity_sweep_weight = getattr(config, 'SMART_MONEY_LIQUIDITY_SWEEP_WEIGHT', 0.20)
+        self.liquidity_sweep_lookback = getattr(config, 'SMART_MONEY_LIQUIDITY_SWEEP_LOOKBACK_BARS', 10)
+        self.min_sweep_quality = getattr(config, 'SMART_MONEY_MIN_SWEEP_QUALITY', 0.4)
+
+        # Initialize liquidity analyzer
+        self.liquidity_analyzer = None
+        if LIQUIDITY_ANALYZER_AVAILABLE and self.liquidity_sweep_enabled:
+            try:
+                self.liquidity_analyzer = SilverBulletLiquidity(logger=self.logger)
+                self.logger.info("✅ Liquidity sweep analyzer initialized")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize liquidity analyzer: {e}")
+
         self.logger.info("🧠 SmartMoneyReadOnlyAnalyzer initialized")
         self.logger.info(f"   Enabled: {'✅' if self.enabled else '❌'}")
         self.logger.info(f"   Analyzers available: {'✅' if ANALYZERS_AVAILABLE else '❌'}")
+        self.logger.info(f"   Liquidity sweep: {'✅' if self.liquidity_analyzer else '❌'}")
         self.logger.info(f"   Weights - Structure: {self.structure_weight}, OrderFlow: {self.order_flow_weight}")
     
     def analyze_signal(self, signal, df, epic, timeframe='5m') -> Dict:
@@ -130,7 +158,12 @@ class SmartMoneyReadOnlyAnalyzer:
             order_flow_analysis = self._analyze_order_flow_safe(
                 signal, df, epic, timeframe, start_time
             )
-            
+
+            # 2.5 Analyze Liquidity Sweeps (NEW)
+            liquidity_analysis = self._analyze_liquidity_sweeps_safe(
+                signal, df, epic, timeframe, start_time
+            )
+
             # 3. Smart Money Validation
             smart_money_validation = self._validate_signal_with_smart_money_safe(
                 signal, market_structure_analysis, order_flow_analysis
@@ -141,9 +174,10 @@ class SmartMoneyReadOnlyAnalyzer:
                 signal, smart_money_validation
             )
             
-            # 5. Generate Confluence Analysis
+            # 5. Generate Confluence Analysis (now includes liquidity sweep)
             confluence_details = self._generate_confluence_analysis_safe(
-                signal, market_structure_analysis, order_flow_analysis, smart_money_validation
+                signal, market_structure_analysis, order_flow_analysis, smart_money_validation,
+                liquidity_analysis
             )
             
             # 6. Determine Smart Money Type
@@ -165,9 +199,10 @@ class SmartMoneyReadOnlyAnalyzer:
                 'smart_money_score': smart_money_validation.get('score', 0.5),
                 'market_structure_analysis': market_structure_analysis,
                 'order_flow_analysis': order_flow_analysis,
+                'liquidity_analysis': liquidity_analysis,
                 'confluence_details': confluence_details,
                 'analysis_metadata': {
-                    'analyzer_version': '2.0.0_production',
+                    'analyzer_version': '2.1.0_with_liquidity',
                     'analysis_timestamp': start_time.isoformat(),
                     'analysis_duration_seconds': elapsed_time,
                     'epic': epic,
@@ -175,7 +210,8 @@ class SmartMoneyReadOnlyAnalyzer:
                     'original_signal_type': signal.get('signal_type') if signal else None,
                     'original_confidence': signal.get('confidence_score') if signal else None,
                     'data_points_analyzed': len(df),
-                    'analyzers_available': ANALYZERS_AVAILABLE
+                    'analyzers_available': ANALYZERS_AVAILABLE,
+                    'liquidity_analyzer_available': self.liquidity_analyzer is not None
                 }
             }
             
@@ -289,7 +325,120 @@ class SmartMoneyReadOnlyAnalyzer:
                 'supply_demand_zones': [],
                 'signal_validation': {'order_flow_aligned': True, 'order_flow_score': 0.5}
             }
-    
+
+    def _analyze_liquidity_sweeps_safe(
+        self,
+        signal: Optional[Dict],
+        df: pd.DataFrame,
+        epic: str,
+        timeframe: str,
+        start_time: datetime
+    ) -> Dict:
+        """
+        Safely analyze liquidity sweeps for signal enrichment.
+        Detects BSL (buy-side liquidity) and SSL (sell-side liquidity) sweeps.
+        """
+        default_result = {
+            'sweep_detected': False,
+            'sweep_type': None,
+            'sweep_level': None,
+            'sweep_pips': None,
+            'sweep_bars_ago': None,
+            'sweep_quality': 0,
+            'signal_alignment': False,
+            'liquidity_levels_found': 0,
+            'enabled': self.liquidity_sweep_enabled
+        }
+
+        try:
+            # Check if liquidity analysis is enabled and analyzer is available
+            if not self.liquidity_sweep_enabled or not self.liquidity_analyzer:
+                default_result['error'] = 'Liquidity sweep analysis disabled or unavailable'
+                return default_result
+
+            # Check timeout
+            if (datetime.now() - start_time).total_seconds() > self.analysis_timeout:
+                default_result['error'] = 'Analysis timeout'
+                return default_result
+
+            # Get pip value for the pair
+            pip_value = self._get_pip_value(epic)
+
+            # 1. Detect liquidity levels (swing highs/lows)
+            liquidity_levels = self.liquidity_analyzer.detect_liquidity_levels(
+                df=df,
+                lookback_bars=self.liquidity_sweep_lookback,
+                swing_strength=3,
+                pip_value=pip_value
+            )
+
+            if not liquidity_levels:
+                default_result['liquidity_levels_found'] = 0
+                return default_result
+
+            default_result['liquidity_levels_found'] = len(liquidity_levels)
+
+            # 2. Detect if any liquidity was swept recently
+            sweep = self.liquidity_analyzer.detect_liquidity_sweep(
+                df=df,
+                liquidity_levels=liquidity_levels,
+                min_sweep_pips=3.0,
+                max_sweep_pips=15.0,
+                pip_value=pip_value,
+                require_rejection=True,
+                max_sweep_age=self.liquidity_sweep_lookback
+            )
+
+            if not sweep:
+                return default_result
+
+            # 3. Calculate sweep quality
+            sweep_quality = self.liquidity_analyzer.calculate_sweep_quality(sweep)
+
+            # 4. Determine signal alignment
+            # BSL sweep (price swept highs) = bearish signal expected (reversal down)
+            # SSL sweep (price swept lows) = bullish signal expected (reversal up)
+            signal_type = signal.get('signal_type', '').upper() if signal else ''
+            sweep_type = sweep.liquidity_level.liquidity_type.value  # 'BSL' or 'SSL'
+
+            signal_alignment = False
+            if sweep_type == 'SSL' and signal_type in ['BULL', 'BUY']:
+                signal_alignment = True  # SSL sweep supports bullish signal
+            elif sweep_type == 'BSL' and signal_type in ['BEAR', 'SELL']:
+                signal_alignment = True  # BSL sweep supports bearish signal
+
+            return {
+                'sweep_detected': True,
+                'sweep_type': sweep_type,
+                'sweep_level': sweep.liquidity_level.price,
+                'sweep_pips': sweep.sweep_pips,
+                'sweep_bars_ago': sweep.rejection_candles,
+                'sweep_quality': round(sweep_quality, 3),
+                'sweep_status': sweep.status.value,
+                'rejection_confirmed': sweep.rejection_confirmed,
+                'signal_alignment': signal_alignment,
+                'liquidity_levels_found': len(liquidity_levels),
+                'enabled': True
+            }
+
+        except Exception as e:
+            self.logger.error(f"❌ Liquidity sweep analysis failed for {epic}: {e}")
+            default_result['error'] = str(e)
+            return default_result
+
+    def _get_pip_value(self, epic: str) -> float:
+        """Get pip value for the given epic"""
+        if not epic:
+            return 0.0001
+        e = epic.upper()
+        if 'JPY' in e:
+            return 0.01
+        if any(x in e for x in ['XAU', 'GOLD']):
+            return 0.1
+        if any(x in e for x in ['XAG', 'SILV']):
+            return 0.01
+        return 0.0001
+
     def _validate_signal_with_smart_money_safe(
         self,
         signal: Optional[Dict],
@@ -389,39 +538,69 @@ class SmartMoneyReadOnlyAnalyzer:
         signal: Optional[Dict],
         market_structure_analysis: Dict,
         order_flow_analysis: Dict,
-        smart_money_validation: Dict
+        smart_money_validation: Dict,
+        liquidity_analysis: Optional[Dict] = None
     ) -> Dict:
-        """Safely generate confluence analysis"""
+        """Safely generate confluence analysis with OB proximity and liquidity sweep scoring"""
         try:
             confluence_factors = []
             confluence_score = 0.0
-            
+            liquidity_analysis = liquidity_analysis or {}
+
             # Structure confluence
             structure_bias = market_structure_analysis.get('current_bias', 'NEUTRAL')
             if structure_bias != 'NEUTRAL':
                 confluence_factors.append(f"Market structure: {structure_bias}")
                 confluence_score += 0.3
-            
+
             # Order flow confluence
             order_flow_bias = order_flow_analysis.get('order_flow_bias', 'NEUTRAL')
             if order_flow_bias != 'NEUTRAL':
                 confluence_factors.append(f"Order flow: {order_flow_bias}")
                 confluence_score += 0.2
-            
-            # Key level proximity
+
+            # OB Proximity scoring
+            ob_proximity = order_flow_analysis.get('ob_proximity', {})
+            ob_alignment_score = ob_proximity.get('alignment_score', 0)
+            if ob_alignment_score > 0:
+                # Weight: 0.15 for OB proximity
+                ob_proximity_weight = 0.15
+                proximity_contribution = ob_alignment_score * ob_proximity_weight
+                confluence_score += proximity_contribution
+
+                # Add details to factors
+                nearest_ob_dist = ob_proximity.get('nearest_ob_distance_pips')
+                if nearest_ob_dist is not None and nearest_ob_dist < 20:
+                    confluence_factors.append(f"Near OB ({nearest_ob_dist:.1f} pips, score: {ob_alignment_score:.2f})")
+
+            # Liquidity Sweep confluence (NEW)
+            sweep_detected = liquidity_analysis.get('sweep_detected', False)
+            sweep_quality = liquidity_analysis.get('sweep_quality', 0)
+            if sweep_detected and sweep_quality >= self.min_sweep_quality:
+                sweep_type = liquidity_analysis.get('sweep_type', 'Unknown')
+                signal_alignment = liquidity_analysis.get('signal_alignment', False)
+
+                # Weight: 0.20 for liquidity sweep (configurable)
+                liquidity_contribution = sweep_quality * self.liquidity_sweep_weight
+                confluence_score += liquidity_contribution
+
+                alignment_str = "aligned" if signal_alignment else "counter"
+                confluence_factors.append(f"Liquidity sweep: {sweep_type} ({alignment_str}, quality: {sweep_quality:.2f})")
+
+            # Key level proximity (legacy - kept for compatibility)
             nearby_levels = order_flow_analysis.get('signal_validation', {}).get('nearby_levels', [])
             if nearby_levels:
                 confluence_factors.append(f"Near {len(nearby_levels)} key levels")
                 confluence_score += 0.1 * min(len(nearby_levels), 3)
-            
+
             # Structure events
             recent_events = market_structure_analysis.get('structure_events', [])
             if recent_events:
                 confluence_factors.append(f"{len(recent_events)} recent structure events")
                 confluence_score += 0.1
-            
+
             confluence_score = min(1.0, confluence_score)
-            
+
             return {
                 'confluence_factors': confluence_factors,
                 'confluence_score': confluence_score,
@@ -429,9 +608,20 @@ class SmartMoneyReadOnlyAnalyzer:
                 'structure_bias': structure_bias,
                 'order_flow_bias': order_flow_bias,
                 'nearby_levels_count': len(nearby_levels),
-                'structure_events_count': len(recent_events)
+                'structure_events_count': len(recent_events),
+                # OB proximity analytics
+                'ob_proximity_score': ob_alignment_score,
+                'ob_proximity_bias': ob_proximity.get('dominant_bias', 'NEUTRAL'),
+                'nearest_ob_distance_pips': ob_proximity.get('nearest_ob_distance_pips'),
+                'total_obs_found': ob_proximity.get('total_obs_found', 0),
+                'total_fvgs_found': ob_proximity.get('total_fvgs_found', 0),
+                # Liquidity sweep analytics (NEW)
+                'liquidity_sweep_detected': sweep_detected,
+                'liquidity_sweep_type': liquidity_analysis.get('sweep_type'),
+                'liquidity_sweep_quality': sweep_quality,
+                'liquidity_sweep_alignment': liquidity_analysis.get('signal_alignment', False)
             }
-            
+
         except Exception as e:
             self.logger.error(f"❌ Confluence analysis failed: {e}")
             return {
