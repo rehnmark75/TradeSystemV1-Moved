@@ -65,9 +65,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.4.0"
-STRATEGY_DATE = "2025-12-22"
-STRATEGY_STATUS = "ATR-Based SL Cap - Prevents Oversized Stops"
+STRATEGY_VERSION = "2.5.0"
+STRATEGY_DATE = "2025-12-23"
+STRATEGY_STATUS = "Pair-Specific Blocking - USDCHF filtered on weak setups"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -348,6 +348,145 @@ PAIR_MIN_CONFIDENCE = {
 
     # Default for others = MIN_CONFIDENCE_THRESHOLD (0.50)
 }
+
+# ============================================================================
+# v2.5.0: PAIR-SPECIFIC BLOCKING CONDITIONS
+# ============================================================================
+# Block signals for specific pairs when certain unfavorable conditions combine.
+# Based on analysis of live trading outcomes showing consistent losses.
+#
+# USDCHF Analysis (Trade 1620, Alert 6562):
+#   - 139 closed trades, 26.62% win rate, -$4,917.77 total P&L (worst pair)
+#   - Avg loss: -$54.04 per trade
+#   - High EMA distance (>60 pips): 0% win rate, -$515 loss
+#   - No volume confirmation: 0% win rate, -$1,031 loss
+#   - Not in optimal zone: 25% win rate, -$480 loss
+#   - Combined bad conditions: 0% win rate
+#
+# These blocking conditions use tier2_swing.volume_confirmed from strategy_indicators
+# (NOT the top-level volume_confirmation column which is always false for SMC_SIMPLE)
+
+PAIR_BLOCKING_CONDITIONS = {
+    # USDCHF: Block when multiple weak factors combine
+    # This pair has the worst performance (-$4,917) and needs strict filtering
+    'CS.D.USDCHF.MINI.IP': {
+        'enabled': True,
+        'description': 'Block USDCHF on weak setups - worst performing pair',
+        'conditions': {
+            # Block when EMA distance is too extended (price has moved too far)
+            'max_ema_distance_pips': 60.0,  # >60 pips from 4H EMA = 0% win rate
+
+            # Require volume confirmation for this pair (normally optional)
+            'require_volume_confirmation': True,  # No volume = 0% win rate
+
+            # Block momentum entries (negative pullback) without volume
+            'block_momentum_without_volume': True,
+
+            # Require optimal zone entry for this difficult pair
+            'require_optimal_zone': False,  # Set True to be more strict
+
+            # Minimum confidence override for this pair
+            'min_confidence_override': 0.60,  # Higher than default 0.50
+        },
+        'blocking_logic': 'any',  # 'any' = block if ANY condition fails, 'all' = block only if ALL fail
+    },
+
+    # USDCHF alternative epic format
+    'USDCHF': {
+        'enabled': True,
+        'description': 'Block USDCHF on weak setups - worst performing pair',
+        'conditions': {
+            'max_ema_distance_pips': 60.0,
+            'require_volume_confirmation': True,
+            'block_momentum_without_volume': True,
+            'require_optimal_zone': False,
+            'min_confidence_override': 0.60,
+        },
+        'blocking_logic': 'any',
+    },
+
+    # Template for other pairs (disabled by default)
+    # Copy and modify for pairs showing consistent losses
+    # 'CS.D.EURJPY.MINI.IP': {
+    #     'enabled': False,
+    #     'description': 'Template - not active',
+    #     'conditions': {
+    #         'max_ema_distance_pips': 80.0,
+    #         'require_volume_confirmation': False,
+    #         'block_momentum_without_volume': False,
+    #         'require_optimal_zone': False,
+    #         'min_confidence_override': None,
+    #     },
+    #     'blocking_logic': 'any',
+    # },
+}
+
+def should_block_signal(epic: str, signal_data: dict) -> tuple[bool, str]:
+    """
+    Check if a signal should be blocked based on pair-specific conditions.
+
+    Args:
+        epic: The trading pair epic (e.g., 'CS.D.USDCHF.MINI.IP')
+        signal_data: Dict containing signal details with keys:
+            - ema_distance_pips: float - Distance from 4H EMA in pips
+            - volume_confirmed: bool - Whether volume spike was confirmed
+            - in_optimal_zone: bool - Whether entry is in Fib optimal zone
+            - pullback_depth: float - Pullback percentage (negative = momentum)
+            - confidence_score: float - Overall confidence score
+
+    Returns:
+        Tuple of (should_block: bool, reason: str)
+    """
+    # Check if pair has blocking conditions configured
+    config = PAIR_BLOCKING_CONDITIONS.get(epic)
+    if not config or not config.get('enabled', False):
+        return False, ""
+
+    conditions = config.get('conditions', {})
+    blocking_logic = config.get('blocking_logic', 'any')
+
+    block_reasons = []
+
+    # Check EMA distance
+    max_ema = conditions.get('max_ema_distance_pips')
+    if max_ema is not None:
+        ema_distance = signal_data.get('ema_distance_pips', 0)
+        if ema_distance > max_ema:
+            block_reasons.append(f"EMA distance {ema_distance:.1f} > {max_ema} pips")
+
+    # Check volume confirmation
+    if conditions.get('require_volume_confirmation', False):
+        volume_confirmed = signal_data.get('volume_confirmed', False)
+        if not volume_confirmed:
+            block_reasons.append("No volume confirmation (required for this pair)")
+
+    # Check momentum without volume
+    if conditions.get('block_momentum_without_volume', False):
+        pullback_depth = signal_data.get('pullback_depth', 0)
+        volume_confirmed = signal_data.get('volume_confirmed', False)
+        if pullback_depth < 0 and not volume_confirmed:
+            block_reasons.append(f"Momentum entry (pullback {pullback_depth:.1%}) without volume")
+
+    # Check optimal zone requirement
+    if conditions.get('require_optimal_zone', False):
+        in_optimal = signal_data.get('in_optimal_zone', False)
+        if not in_optimal:
+            block_reasons.append("Not in optimal Fib zone (required for this pair)")
+
+    # Check confidence override
+    min_conf = conditions.get('min_confidence_override')
+    if min_conf is not None:
+        confidence = signal_data.get('confidence_score', 0)
+        if confidence < min_conf:
+            block_reasons.append(f"Confidence {confidence:.1%} < {min_conf:.1%} minimum for this pair")
+
+    # Determine if signal should be blocked
+    if blocking_logic == 'any' and block_reasons:
+        return True, f"Blocked: {'; '.join(block_reasons)}"
+    elif blocking_logic == 'all' and len(block_reasons) == len([c for c in conditions.values() if c]):
+        return True, f"Blocked (all conditions failed): {'; '.join(block_reasons)}"
+
+    return False, ""
 
 # ============================================================================
 # CONFIDENCE SCORING

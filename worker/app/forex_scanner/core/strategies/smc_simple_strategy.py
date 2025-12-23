@@ -2,9 +2,17 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.4.0
-DATE: 2025-12-22
-STATUS: ATR-Based SL Cap - Prevents Oversized Stops
+VERSION: 2.5.0
+DATE: 2025-12-23
+STATUS: Pair-Specific Blocking - USDCHF filtered on weak setups
+
+v2.5.0 CHANGES (Pair-Specific Blocking):
+    - NEW: Pair-specific blocking conditions for consistently losing pairs
+    - USDCHF: Block when EMA distance >60 pips (0% win rate historically)
+    - USDCHF: Require volume confirmation (no vol = 0% win rate)
+    - USDCHF: Block momentum entries without volume confirmation
+    - USDCHF: Higher confidence threshold (60% vs 50% default)
+    - Analysis: USDCHF was worst pair (-$4,917, 26.6% WR) - now filtered
 
 v2.4.0 CHANGES (ATR-Based SL Cap):
     - FIX: Fixed 55 pip cap was still 7x ATR on low-volatility pairs
@@ -716,6 +724,29 @@ class SMCSimpleStrategy:
                 signal_line = (ema_12 - ema_26).ewm(span=9, adjust=False).mean()
                 macd_signal = float(signal_line.iloc[-1])
                 macd_histogram = macd_line - macd_signal
+
+            # ================================================================
+            # v2.5.0: PAIR-SPECIFIC BLOCKING CHECK
+            # ================================================================
+            # Check if this signal should be blocked based on pair-specific conditions
+            # This catches weak setups that historically underperform for specific pairs
+            try:
+                from configdata.strategies import config_smc_simple as smc_config
+                if hasattr(smc_config, 'should_block_signal'):
+                    signal_data = {
+                        'ema_distance_pips': ema_distance,
+                        'volume_confirmed': volume_confirmed,
+                        'in_optimal_zone': in_optimal_zone,
+                        'pullback_depth': pullback_depth,
+                        'confidence_score': confidence,
+                    }
+                    should_block, block_reason = smc_config.should_block_signal(epic, signal_data)
+                    if should_block:
+                        self.logger.warning(f"⛔ PAIR-SPECIFIC BLOCK: {epic}")
+                        self.logger.warning(f"   {block_reason}")
+                        return None
+            except ImportError:
+                pass  # Config not available, skip blocking check
 
             # ================================================================
             # BUILD SIGNAL
