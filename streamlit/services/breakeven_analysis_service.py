@@ -394,12 +394,20 @@ class BreakevenAnalysisService:
         if candles.empty:
             return None
 
-        pip_multiplier = self._get_pip_multiplier(trade['symbol'])
+        symbol = trade['symbol']
+        pip_multiplier = self._get_pip_multiplier(symbol)
         entry_price = safe_float(trade['entry_price'])
         direction = trade['direction']
 
         if entry_price <= 0:
             return None
+
+        # CEEM epics have trade data scaled by 10000x vs candle data
+        # Trade: 11633, Candle: 1.1633 - need to normalize entry price AND use correct pip multiplier
+        if 'CEEM' in symbol.upper() and entry_price > 1000:
+            entry_price = entry_price / 10000.0
+            pip_multiplier = 10000  # After normalization, use standard EUR pip multiplier
+            logger.debug(f"CEEM price normalized: {trade['entry_price']} -> {entry_price}, pip_multiplier: {pip_multiplier}")
 
         mfe_pips = 0.0
         mae_pips = 0.0
@@ -761,12 +769,6 @@ class BreakevenAnalysisService:
 
         # Get unique epic/direction combinations
         for epic in trades['symbol'].unique():
-            # Skip CEEM epics - their trade data uses scaled pricing (11633 vs 1.1633)
-            # which doesn't match candle data and produces invalid MFE/MAE values
-            if 'CEEM' in epic.upper():
-                logger.info(f"Skipping {epic} (CEEM scaled pricing not supported)")
-                continue
-
             for direction in ['BUY', 'SELL']:
                 logger.info(f"Analyzing {epic} {direction}...")
                 analysis = self.analyze_epic_direction(trades, epic, direction)
