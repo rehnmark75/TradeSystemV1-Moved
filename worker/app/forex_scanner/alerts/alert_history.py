@@ -509,6 +509,7 @@ class AlertHistoryManager:
                         signal_trigger, signal_conditions, crossover_type,
                         trigger_type, validation_details, swing_proximity_distance, swing_proximity_valid,
                         market_bias, market_bias_conflict, directional_consensus,
+                        market_structure_analysis, order_flow_analysis, confluence_details,
                         claude_analysis, claude_score, claude_decision, claude_approved,
                         claude_reason, claude_mode, claude_raw_response,
                         alert_message, alert_level,
@@ -527,6 +528,7 @@ class AlertHistoryManager:
                         %(signal_trigger)s, %(signal_conditions)s, %(crossover_type)s,
                         %(trigger_type)s, %(validation_details)s, %(swing_proximity_distance)s, %(swing_proximity_valid)s,
                         %(market_bias)s, %(market_bias_conflict)s, %(directional_consensus)s,
+                        %(market_structure_analysis)s, %(order_flow_analysis)s, %(confluence_details)s,
                         %(claude_analysis)s, %(claude_score)s, %(claude_decision)s, %(claude_approved)s,
                         %(claude_reason)s, %(claude_mode)s, %(claude_raw_response)s,
                         %(alert_message)s, %(alert_level)s,
@@ -1198,6 +1200,15 @@ class AlertHistoryManager:
             directional_consensus = signal.get('directional_consensus', market_strength.get('directional_consensus'))
 
             # ================================
+            # SMART MONEY ANALYSIS FIELDS
+            # ================================
+            # These come from SmartMoneyReadOnlyAnalyzer via signal_processor
+            market_structure_analysis = signal.get('market_structure_analysis')
+            order_flow_analysis = signal.get('order_flow_analysis')
+            confluence_details = signal.get('confluence_details')
+            smart_money_metadata = signal.get('smart_money_metadata')
+
+            # ================================
             # DEDUPLICATION FIELDS
             # ================================
             signal_hash = signal.get('signal_hash')
@@ -1334,6 +1345,11 @@ class AlertHistoryManager:
                 'market_bias': market_bias,
                 'market_bias_conflict': market_bias_conflict,
                 'directional_consensus': directional_consensus,
+
+                # Smart money analysis (already JSON strings from signal_processor)
+                'market_structure_analysis': market_structure_analysis,
+                'order_flow_analysis': order_flow_analysis,
+                'confluence_details': confluence_details,
 
                 # Deduplication
                 'signal_hash': signal_hash,

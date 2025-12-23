@@ -503,6 +503,8 @@ class SignalProcessor:
             'ichimoku': True,
             'smc': True,
             'smc_fast': True,
+            'smc_simple': True,
+            'smc_structure': True,
             'momentum': True,
             # Traditional technical analysis strategies that DON'T use smart money
             'mean_reversion': False,
@@ -574,31 +576,44 @@ class SignalProcessor:
         """
         Merge smart money analysis results into signal
         FIXED: Use make_json_serializable for all JSON operations to handle datetime objects
+        FIXED: Extract from nested 'smart_money_analysis' field if present
         """
         if not smart_money_result:
             return signal
-        
+
+        # Smart money analyzer returns data nested under 'smart_money_analysis'
+        # Extract the nested data if present, otherwise use the result directly
+        sm_analysis = smart_money_result.get('smart_money_analysis', {})
+
         # Update signal with smart money data
-        signal['smart_money_validated'] = smart_money_result.get('smart_money_validated', False)
-        signal['smart_money_type'] = smart_money_result.get('smart_money_type', 'UNKNOWN')
-        signal['smart_money_score'] = smart_money_result.get('smart_money_score', 0.5)
-        signal['enhanced_confidence_score'] = smart_money_result.get('enhanced_confidence_score', 
+        # Check both nested and direct locations for backward compatibility
+        signal['smart_money_validated'] = sm_analysis.get('smart_money_validated',
+                                            smart_money_result.get('smart_money_validated', False))
+        signal['smart_money_type'] = sm_analysis.get('smart_money_type',
+                                            smart_money_result.get('smart_money_type', 'UNKNOWN'))
+        signal['smart_money_score'] = sm_analysis.get('smart_money_score',
+                                            smart_money_result.get('smart_money_score', 0.5))
+        signal['enhanced_confidence_score'] = smart_money_result.get('confidence_score',
                                                                     signal.get('confidence_score', 0.5))
-        
+
         # Add detailed analysis data for database storage (as JSON strings)
         # FIXED: Use make_json_serializable to handle datetime objects
-        market_structure = smart_money_result.get('market_structure_analysis', {})
+        # FIXED: Extract from nested 'smart_money_analysis' field
+        market_structure = sm_analysis.get('market_structure_analysis',
+                                          smart_money_result.get('market_structure_analysis', {}))
         signal['market_structure_analysis'] = json.dumps(make_json_serializable(market_structure))
-        
-        order_flow = smart_money_result.get('order_flow_analysis', {})
+
+        order_flow = sm_analysis.get('order_flow_analysis',
+                                    smart_money_result.get('order_flow_analysis', {}))
         signal['order_flow_analysis'] = json.dumps(make_json_serializable(order_flow))
-        
-        confluence = smart_money_result.get('confluence_details', {})
+
+        confluence = sm_analysis.get('confluence_details',
+                                    smart_money_result.get('confluence_details', {}))
         signal['confluence_details'] = json.dumps(make_json_serializable(confluence))
-        
+
         # Add metadata
-        if smart_money_result.get('analysis_metadata'):
-            metadata = smart_money_result.get('analysis_metadata', {})
+        metadata = sm_analysis.get('analysis_metadata', smart_money_result.get('analysis_metadata'))
+        if metadata:
             signal['smart_money_metadata'] = json.dumps(make_json_serializable(metadata))
         
         return signal
