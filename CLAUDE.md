@@ -58,19 +58,19 @@ trade_scan.py (entry point)
 
 ### Key Files Quick Reference
 
-| Purpose | File |
-|---------|------|
-| **Live scanner entry** | `worker/app/trade_scan.py` |
-| **Backtest entry** | `worker/app/forex_scanner/bt.py` → `backtest_cli.py` |
-| **Main config** | `worker/app/forex_scanner/config.py` |
-| **Orchestrator** | `worker/app/forex_scanner/core/trading/trading_orchestrator.py` |
-| **Scanner** | `worker/app/forex_scanner/core/scanner.py` |
-| **Signal detector** | `worker/app/forex_scanner/core/signal_detector.py` |
-| **Data fetcher** | `worker/app/forex_scanner/core/data_fetcher.py` |
-| **Strategies** | `worker/app/forex_scanner/core/strategies/*.py` |
-| **Alert history** | `worker/app/forex_scanner/alerts/alert_history.py` |
-| **Order executor** | `worker/app/forex_scanner/alerts/order_executor.py` |
-| **Trailing stops** | `worker/app/forex_scanner/config_trailing_stops.py` |
+| Purpose | File | Container |
+|---------|------|-----------|
+| **Live scanner entry** | `worker/app/trade_scan.py` | task-worker |
+| **Backtest entry** | `worker/app/forex_scanner/bt.py` | task-worker |
+| **Strategy config** | `worker/app/forex_scanner/config.py` | task-worker |
+| **Orchestrator** | `worker/app/forex_scanner/core/trading/trading_orchestrator.py` | task-worker |
+| **Scanner** | `worker/app/forex_scanner/core/scanner.py` | task-worker |
+| **Signal detector** | `worker/app/forex_scanner/core/signal_detector.py` | task-worker |
+| **Strategies** | `worker/app/forex_scanner/core/strategies/*.py` | task-worker |
+| **Order executor** | `worker/app/forex_scanner/alerts/order_executor.py` | task-worker |
+| **TRAILING STOPS (LIVE)** | `dev-app/config.py` → `PAIR_TRAILING_CONFIGS` | **fastapi-dev** |
+| **Trailing stops (backtest)** | `worker/app/forex_scanner/config_trailing_stops.py` | task-worker |
+| **Trade monitoring** | `dev-app/trailing_class.py` | fastapi-dev |
 
 ### Strategies Available
 | Strategy | File | Enable in config.py |
@@ -126,6 +126,40 @@ For detailed information, see these docs (read with Read tool when needed):
 - **Database-Driven**: The system uses dynamic, optimized parameters from PostgreSQL
 - **Modular Design**: New strategies follow lightweight configuration patterns
 - **Real-time Intelligence**: Market analysis and trade context evaluation available
+
+---
+
+## 🚨 CRITICAL: Container & Config Ownership
+
+**NEVER confuse these containers - they have DIFFERENT config files!**
+
+| Container | Purpose | Config Location | Owns |
+|-----------|---------|-----------------|------|
+| **fastapi-dev** | Live trade execution, trailing stops, breakeven | `dev-app/config.py` | **TRAILING STOPS (source of truth)** |
+| **task-worker** | Strategy scanning, backtesting, signal generation | `worker/app/forex_scanner/config.py` | Strategies, backtesting |
+| **streamlit** | Analytics dashboard, breakeven optimizer | Reads from fastapi-dev via mount | Display only |
+
+### Trailing Stop Configuration
+
+**Source of Truth**: `dev-app/config.py` → `PAIR_TRAILING_CONFIGS`
+
+This file controls:
+- `break_even_trigger_points` - When to move SL to breakeven
+- `early_breakeven_trigger_points` - Early BE trigger
+- `stage1/2/3_trigger_points` - Progressive trailing stages
+- `min_trail_distance` - Minimum trailing distance
+
+**DO NOT** edit `worker/app/forex_scanner/config_trailing_stops.py` for live trading changes - that file is for backtesting only!
+
+### When updating trailing stops:
+1. Edit `dev-app/config.py` (the ONLY source of truth)
+2. Restart `fastapi-dev`: `docker restart fastapi-dev`
+3. Verify: `docker exec fastapi-dev python3 -c "from config import PAIR_TRAILING_CONFIGS; print(PAIR_TRAILING_CONFIGS['CS.D.EURUSD.CEEM.IP'])"`
+
+### Streamlit reads trailing config via docker-compose mount:
+```yaml
+- ./dev-app/config.py:/app/trailing_config.py:ro
+```
 
 ## 🤖 Agent Configuration
 

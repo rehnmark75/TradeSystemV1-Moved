@@ -68,9 +68,17 @@ class EpicAnalysis:
     avg_mae: float
     median_mae: float
     percentile_75_mae: float
+    percentile_95_mae: float  # For stop-loss analysis
+    max_mae: float  # Maximum adverse excursion seen
     optimal_be_trigger: float
     conservative_be_trigger: float
     current_be_trigger: float
+    # Stop-loss optimization fields
+    optimal_stop_loss: float  # Recommended SL based on MAE analysis
+    current_stop_loss: float  # Current average SL from historical trades
+    configured_stop_loss: float  # Configured SL from strategy settings
+    sl_recommendation: str  # TIGHTEN, WIDEN, KEEP_CURRENT
+    sl_priority: str  # high, medium, low
     recommendation: str
     priority: str
     confidence: str
@@ -115,13 +123,25 @@ class BreakevenAnalysisService:
         self.trailing_config = self._load_trailing_config()
 
     def _load_trailing_config(self) -> Dict[str, Any]:
-        """Load current trailing stop configuration."""
+        """
+        Load current trailing stop configuration.
+
+        Source of truth: dev-app/config.py (fastapi-dev container)
+        This is mounted as /app/trailing_config.py in the streamlit container.
+        """
         try:
-            from forex_scanner.config_trailing_stops import PAIR_TRAILING_CONFIGS
-            return PAIR_TRAILING_CONFIGS
+            # Primary: Load from fastapi-dev config (source of truth for trailing stops)
+            import trailing_config
+            return trailing_config.PAIR_TRAILING_CONFIGS
         except ImportError:
-            logger.warning("Could not load trailing stop config, using defaults")
-            return {}
+            logger.warning("Could not load trailing_config.py, trying forex_scanner fallback")
+            try:
+                # Fallback: forex_scanner config (for backwards compatibility)
+                from forex_scanner.config_trailing_stops import PAIR_TRAILING_CONFIGS
+                return PAIR_TRAILING_CONFIGS
+            except ImportError:
+                logger.warning("Could not load any trailing stop config, using defaults")
+                return {}
 
     def _get_pip_multiplier(self, symbol: str) -> int:
         """Get pip multiplier based on currency pair type."""
@@ -131,6 +151,9 @@ class BreakevenAnalysisService:
         if 'JPY' in symbol_upper:
             return self.PIP_MULTIPLIERS['JPY']
         return self.PIP_MULTIPLIERS['DEFAULT']
+
+    # Default SL if not in config
+    DEFAULT_STOP_LOSS = 25
 
     def _get_current_be_trigger(self, symbol: str) -> float:
         """Get current BE trigger from config."""
@@ -145,6 +168,95 @@ class BreakevenAnalysisService:
                 return epic_config.get('break_even_trigger_points', self.DEFAULT_BE_TRIGGER)
 
         return self.DEFAULT_BE_TRIGGER
+
+    def _get_configured_stop_loss(self, symbol: str) -> float:
+        """
+        Get configured stop loss from strategy config.
+
+        This looks up the intended SL from config files, not what was
+        actually used in historical trades.
+        """
+        try:
+            # Try to get from main config DEFAULT_STOP_LOSS_PIPS
+            from forex_scanner import config as forex_config
+
+            # Check for pair-specific SL settings first
+            if hasattr(forex_config, 'get_pair_min_stop_loss'):
+                pair_min_sl = forex_config.get_pair_min_stop_loss(symbol)
+                if pair_min_sl > 0:
+                    return pair_min_sl
+
+            # Check DEFAULT_STOP_LOSS_PIPS from config
+            if hasattr(forex_config, 'DEFAULT_STOP_LOSS_PIPS'):
+                return float(forex_config.DEFAULT_STOP_LOSS_PIPS)
+
+            # Fallback to trailing config min_trail_distance as proxy for SL
+            config = self.trailing_config.get(symbol, {})
+            if config:
+                # min_trail_distance is a reasonable proxy for minimum SL
+                return config.get('min_trail_distance', self.DEFAULT_STOP_LOSS)
+
+            # Try partial match
+            for epic_key, epic_config in self.trailing_config.items():
+                if symbol in epic_key or epic_key in symbol:
+                    return epic_config.get('min_trail_distance', self.DEFAULT_STOP_LOSS)
+
+        except ImportError:
+            logger.warning("Could not import forex_scanner config for SL lookup")
+
+        return self.DEFAULT_STOP_LOSS
+
+    def _calculate_current_stop_loss(self, trades: pd.DataFrame, epic: str) -> float:
+        """
+        Calculate average stop-loss distance in pips from trade data.
+
+        For CEEM epics, sl_price stores the actual price level, so we need to
+        calculate pip distance from entry_price - sl_price.
+        For other epics, sl_price may already be the pip distance.
+        """
+        if trades.empty:
+            return 20.0  # Default fallback
+
+        sl_distances = []
+        pip_multiplier = self._get_pip_multiplier(epic)
+
+        for _, trade in trades.iterrows():
+            entry_price = safe_float(trade.get('entry_price', 0))
+            sl_price = safe_float(trade.get('sl_price', 0))
+            direction = trade.get('direction', 'BUY')
+
+            if entry_price <= 0 or sl_price <= 0:
+                continue
+
+            # CEEM epics have scaled prices (11633 instead of 1.1633)
+            # Normalize if needed
+            if 'CEEM' in epic.upper():
+                if entry_price > 1000:
+                    entry_price = entry_price / 10000.0
+                if sl_price > 1000:
+                    sl_price = sl_price / 10000.0
+                pip_multiplier = 10000  # Standard forex pip multiplier after normalization
+
+            # Check if sl_price looks like a pip distance (small number) or actual price
+            # If sl_price is close to entry_price, it's an actual price level
+            # If sl_price is a small number (< 100), it's likely already pip distance
+            if sl_price < 100 and entry_price > 100:
+                # sl_price is already pip distance
+                sl_distances.append(sl_price)
+            else:
+                # sl_price is actual price level, calculate pip distance
+                if direction == 'BUY':
+                    distance_pips = (entry_price - sl_price) * pip_multiplier
+                else:  # SELL
+                    distance_pips = (sl_price - entry_price) * pip_multiplier
+
+                # Sanity check - SL should be positive and reasonable (0-100 pips typically)
+                if 0 < distance_pips < 200:
+                    sl_distances.append(distance_pips)
+
+        if sl_distances:
+            return round(float(np.mean(sl_distances)), 1)
+        return 20.0  # Default fallback
 
     # =========================================================================
     # DATABASE OPERATIONS
@@ -164,8 +276,9 @@ class BreakevenAnalysisService:
         SELECT
             epic, direction, trade_count, win_rate,
             avg_mfe, median_mfe, percentile_25_mfe, percentile_75_mfe,
-            avg_mae, median_mae, percentile_75_mae,
+            avg_mae, median_mae, percentile_75_mae, percentile_95_mae, max_mae,
             optimal_be_trigger, conservative_be_trigger, current_be_trigger,
+            optimal_stop_loss, current_stop_loss, configured_stop_loss, sl_recommendation, sl_priority,
             recommendation, priority, confidence,
             be_reach_rate, be_protection_rate, be_profit_rate,
             analysis_notes, analyzed_at
@@ -194,16 +307,18 @@ class BreakevenAnalysisService:
         INSERT INTO breakeven_analysis_cache (
             epic, direction, trade_count, win_rate,
             avg_mfe, median_mfe, percentile_25_mfe, percentile_75_mfe,
-            avg_mae, median_mae, percentile_75_mae,
+            avg_mae, median_mae, percentile_75_mae, percentile_95_mae, max_mae,
             optimal_be_trigger, conservative_be_trigger, current_be_trigger,
+            optimal_stop_loss, current_stop_loss, configured_stop_loss, sl_recommendation, sl_priority,
             recommendation, priority, confidence,
             be_reach_rate, be_protection_rate, be_profit_rate,
             analysis_notes, analyzed_at, trades_analyzed
         ) VALUES (
             %s, %s, %s, %s,
             %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
             %s, %s, %s,
-            %s, %s, %s,
+            %s, %s, %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s,
             %s, NOW(), %s
@@ -218,9 +333,16 @@ class BreakevenAnalysisService:
             avg_mae = EXCLUDED.avg_mae,
             median_mae = EXCLUDED.median_mae,
             percentile_75_mae = EXCLUDED.percentile_75_mae,
+            percentile_95_mae = EXCLUDED.percentile_95_mae,
+            max_mae = EXCLUDED.max_mae,
             optimal_be_trigger = EXCLUDED.optimal_be_trigger,
             conservative_be_trigger = EXCLUDED.conservative_be_trigger,
             current_be_trigger = EXCLUDED.current_be_trigger,
+            optimal_stop_loss = EXCLUDED.optimal_stop_loss,
+            current_stop_loss = EXCLUDED.current_stop_loss,
+            configured_stop_loss = EXCLUDED.configured_stop_loss,
+            sl_recommendation = EXCLUDED.sl_recommendation,
+            sl_priority = EXCLUDED.sl_priority,
             recommendation = EXCLUDED.recommendation,
             priority = EXCLUDED.priority,
             confidence = EXCLUDED.confidence,
@@ -239,7 +361,10 @@ class BreakevenAnalysisService:
                         analysis.epic, analysis.direction, analysis.trade_count, analysis.win_rate,
                         analysis.avg_mfe, analysis.median_mfe, analysis.percentile_25_mfe, analysis.percentile_75_mfe,
                         analysis.avg_mae, analysis.median_mae, analysis.percentile_75_mae,
+                        analysis.percentile_95_mae, analysis.max_mae,
                         analysis.optimal_be_trigger, analysis.conservative_be_trigger, analysis.current_be_trigger,
+                        analysis.optimal_stop_loss, analysis.current_stop_loss, analysis.configured_stop_loss,
+                        analysis.sl_recommendation, analysis.sl_priority,
                         analysis.recommendation, analysis.priority, analysis.confidence,
                         analysis.be_reach_rate, analysis.be_protection_rate, analysis.be_profit_rate,
                         analysis.analysis_notes, json.dumps(analysis.trades_analyzed)
@@ -266,6 +391,10 @@ class BreakevenAnalysisService:
     # DATA FETCHING
     # =========================================================================
 
+    # Maximum trade duration for valid analysis (48 hours)
+    # Trades open longer than this are likely abandoned positions or data errors
+    MAX_TRADE_DURATION_HOURS = 48
+
     def fetch_trades_for_analysis(
         self,
         trades_per_group: int = 10,
@@ -281,7 +410,7 @@ class BreakevenAnalysisService:
         Returns:
             DataFrame with trade data
         """
-        query = """
+        query = f"""
         WITH ranked_trades AS (
             SELECT
                 id,
@@ -305,6 +434,8 @@ class BreakevenAnalysisService:
               AND closed_at IS NOT NULL
               AND entry_price IS NOT NULL
               AND sl_price IS NOT NULL
+              -- Filter out zombie trades (open too long - likely abandoned or data errors)
+              AND EXTRACT(EPOCH FROM (closed_at - timestamp))/3600 <= {self.MAX_TRADE_DURATION_HOURS}
         """
 
         params = [trades_per_group]
@@ -329,7 +460,7 @@ class BreakevenAnalysisService:
                     return pd.read_sql(query, conn, params=(epic_filter, trades_per_group))
                 else:
                     # Simplified query without filter
-                    simple_query = """
+                    simple_query = f"""
                     WITH ranked_trades AS (
                         SELECT
                             id, symbol, direction, entry_price, sl_price, tp_price,
@@ -339,6 +470,7 @@ class BreakevenAnalysisService:
                         FROM trade_log
                         WHERE status = 'closed' AND closed_at IS NOT NULL
                               AND entry_price IS NOT NULL AND sl_price IS NOT NULL
+                              AND EXTRACT(EPOCH FROM (closed_at - timestamp))/3600 <= {self.MAX_TRADE_DURATION_HOURS}
                     )
                     SELECT * FROM ranked_trades WHERE row_num <= %s
                     ORDER BY symbol, direction, closed_at DESC
@@ -495,9 +627,12 @@ class BreakevenAnalysisService:
         percentile_25_mfe = float(np.percentile(mfe_array, 25))
         percentile_75_mfe = float(np.percentile(mfe_array, 75))
 
-        # MAE metrics
+        # MAE metrics (expanded for stop-loss analysis)
         median_mae = float(np.median(mae_array))
+        avg_mae = float(np.mean(mae_array))
         percentile_75_mae = float(np.percentile(mae_array, 75))
+        percentile_95_mae = float(np.percentile(mae_array, 95))
+        max_mae = float(np.max(mae_array))
 
         # Optimal BE trigger calculation
         # Formula: Lock at 60% of median MFE, but ensure above worst drawdowns
@@ -510,6 +645,16 @@ class BreakevenAnalysisService:
 
         # Conservative alternative: use 25th percentile MFE (works for weak trades too)
         conservative_trigger = max(percentile_25_mfe * 0.7, safety_floor)
+
+        # =========================================================================
+        # OPTIMAL STOP-LOSS CALCULATION
+        # =========================================================================
+        # Strategy: SL should be wide enough to survive normal drawdowns but not so
+        # wide that losses become excessive. Use 95th percentile MAE as baseline.
+        #
+        # Formula: optimal_sl = percentile_95_mae * 1.1 (10% buffer above worst normal drawdowns)
+        # This ensures ~95% of winning trades won't get stopped out prematurely
+        optimal_stop_loss = round(percentile_95_mae * 1.1, 1)
 
         # Confidence based on sample size and MFE consistency
         mfe_std = float(np.std(mfe_array))
@@ -525,6 +670,7 @@ class BreakevenAnalysisService:
         return {
             'optimal_trigger': round(optimal_trigger, 1),
             'conservative_trigger': round(conservative_trigger, 1),
+            'optimal_stop_loss': optimal_stop_loss,
             'confidence': confidence,
             'metrics': {
                 'median_mfe': round(median_mfe, 1),
@@ -532,7 +678,10 @@ class BreakevenAnalysisService:
                 'percentile_25_mfe': round(percentile_25_mfe, 1),
                 'percentile_75_mfe': round(percentile_75_mfe, 1),
                 'median_mae': round(median_mae, 1),
+                'avg_mae': round(avg_mae, 1),
                 'percentile_75_mae': round(percentile_75_mae, 1),
+                'percentile_95_mae': round(percentile_95_mae, 1),
+                'max_mae': round(max_mae, 1),
                 'mfe_std': round(mfe_std, 1),
                 'sample_size': len(mfe_values)
             },
@@ -603,6 +752,62 @@ class BreakevenAnalysisService:
     # RECOMMENDATION GENERATION
     # =========================================================================
 
+    def _generate_sl_recommendation(
+        self,
+        current_sl: float,
+        optimal_sl: float,
+        metrics: Dict[str, Any]
+    ) -> tuple:
+        """
+        Generate stop-loss recommendation based on MAE analysis.
+
+        Args:
+            current_sl: Current average stop-loss used
+            optimal_sl: Optimal stop-loss from MAE analysis
+            metrics: Analysis metrics dict containing MAE data
+
+        Returns:
+            Tuple of (recommendation, priority)
+        """
+        if optimal_sl <= 0 or current_sl <= 0:
+            return ("NO_DATA", "low")
+
+        difference = optimal_sl - current_sl
+        pct_difference = abs(difference) / current_sl * 100 if current_sl > 0 else 100
+
+        # Get MAE metrics for context
+        percentile_95_mae = metrics.get('percentile_95_mae', 0)
+        max_mae = metrics.get('max_mae', 0)
+
+        # Decision matrix for stop-loss
+        if pct_difference < 10:
+            # Within 10% - keep current
+            recommendation = "KEEP_CURRENT"
+            priority = "low"
+        elif difference > 0 and pct_difference > 25:
+            # Optimal is significantly higher - SL is too tight
+            # Check if max_mae is much higher than current SL (getting stopped out)
+            if max_mae > current_sl * 1.3:
+                recommendation = "WIDEN_SL"
+                priority = "high"  # Getting stopped out prematurely
+            else:
+                recommendation = "WIDEN_SL"
+                priority = "medium"
+        elif difference < 0 and pct_difference > 25:
+            # Optimal is significantly lower - can tighten SL
+            recommendation = "TIGHTEN_SL"
+            priority = "medium"  # Less urgent - saving money but not critical
+        elif difference > 0:
+            # Slight increase needed
+            recommendation = "MINOR_WIDEN"
+            priority = "low"
+        else:
+            # Slight decrease possible
+            recommendation = "MINOR_TIGHTEN"
+            priority = "low"
+
+        return (recommendation, priority)
+
     def _generate_recommendation(
         self,
         current_be: float,
@@ -659,6 +864,12 @@ class BreakevenAnalysisService:
         direction: str
     ) -> Optional[EpicAnalysis]:
         """Perform full analysis for an epic/direction combination."""
+        # Skip old MINI contract for EURUSD - IG changed to CEEM contract
+        # Other pairs still use MINI contracts
+        if 'EURUSD' in epic.upper() and 'MINI' in epic.upper():
+            logger.info(f"Skipping {epic} {direction}: Old MINI contract, EURUSD now uses CEEM only")
+            return None
+
         subset = trades[
             (trades['symbol'] == epic) &
             (trades['direction'] == direction)
@@ -713,6 +924,22 @@ class BreakevenAnalysisService:
 
         metrics = optimal_data.get('metrics', {})
 
+        # Get current average stop-loss from trades (what was actually used)
+        # For CEEM epics, sl_price stores the actual price level, not pip distance
+        # We need to calculate pip distance from entry_price - sl_price
+        current_stop_loss = self._calculate_current_stop_loss(subset, epic)
+
+        # Get configured stop-loss from strategy settings (what SHOULD be used)
+        configured_stop_loss = self._get_configured_stop_loss(epic)
+
+        # Get optimal stop-loss from MAE analysis
+        optimal_stop_loss = optimal_data.get('optimal_stop_loss', 0) or 0
+
+        # Generate stop-loss recommendation (compare optimal vs configured, not historical)
+        sl_recommendation, sl_priority = self._generate_sl_recommendation(
+            configured_stop_loss, optimal_stop_loss, metrics
+        )
+
         return EpicAnalysis(
             epic=epic,
             direction=direction,
@@ -722,12 +949,19 @@ class BreakevenAnalysisService:
             median_mfe=metrics.get('median_mfe', 0),
             percentile_25_mfe=metrics.get('percentile_25_mfe', 0),
             percentile_75_mfe=metrics.get('percentile_75_mfe', 0),
-            avg_mae=metrics.get('median_mae', 0),  # Using median for avg display
+            avg_mae=metrics.get('avg_mae', 0),
             median_mae=metrics.get('median_mae', 0),
             percentile_75_mae=metrics.get('percentile_75_mae', 0),
+            percentile_95_mae=metrics.get('percentile_95_mae', 0),
+            max_mae=metrics.get('max_mae', 0),
             optimal_be_trigger=optimal_data.get('optimal_trigger', 0) or 0,
             conservative_be_trigger=optimal_data.get('conservative_trigger', 0) or 0,
             current_be_trigger=current_be,
+            optimal_stop_loss=optimal_stop_loss,
+            current_stop_loss=round(current_stop_loss, 1),
+            configured_stop_loss=round(configured_stop_loss, 1),
+            sl_recommendation=sl_recommendation,
+            sl_priority=sl_priority,
             recommendation=rec['action'],
             priority=rec['priority'],
             confidence=optimal_data.get('confidence', 'low'),
@@ -797,9 +1031,16 @@ class BreakevenAnalysisService:
         for a in analyses:
             epic_display = format_epic_display(a.epic)
 
-            # Calculate difference
-            diff = a.optimal_be_trigger - a.current_be_trigger
-            diff_str = f"+{diff:.0f}" if diff > 0 else f"{diff:.0f}"
+            # Calculate BE difference
+            be_diff = a.optimal_be_trigger - a.current_be_trigger
+            be_diff_str = f"+{be_diff:.0f}" if be_diff > 0 else f"{be_diff:.0f}"
+
+            # Calculate SL difference (optimal vs configured)
+            sl_diff = a.optimal_stop_loss - a.configured_stop_loss
+            sl_diff_str = f"+{sl_diff:.0f}" if sl_diff > 0 else f"{sl_diff:.0f}"
+
+            # Flag if actual SL differs significantly from configured
+            sl_mismatch = abs(a.current_stop_loss - a.configured_stop_loss) > 5
 
             rows.append({
                 'Epic': epic_display,
@@ -809,11 +1050,18 @@ class BreakevenAnalysisService:
                 'Avg MFE': f"{a.avg_mfe:.0f}",
                 'Med MFE': f"{a.median_mfe:.0f}",
                 'Avg MAE': f"{a.avg_mae:.0f}",
+                'P95 MAE': f"{a.percentile_95_mae:.0f}",
                 'Optimal BE': f"{a.optimal_be_trigger:.0f}",
                 'Current BE': f"{a.current_be_trigger:.0f}",
-                'Diff': diff_str,
-                'Action': a.recommendation,
-                'Priority': a.priority.upper(),
+                'BE Diff': be_diff_str,
+                'BE Action': a.recommendation,
+                'BE Priority': a.priority.upper(),
+                'Optimal SL': f"{a.optimal_stop_loss:.0f}",
+                'Config SL': f"{a.configured_stop_loss:.0f}",
+                'Actual SL': f"{a.current_stop_loss:.0f}" + ("⚠️" if sl_mismatch else ""),
+                'SL Diff': sl_diff_str,
+                'SL Action': a.sl_recommendation,
+                'SL Priority': a.sl_priority.upper(),
                 'Confidence': a.confidence.upper()
             })
 

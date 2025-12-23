@@ -5391,12 +5391,13 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
 
     def render_breakeven_optimizer_tab(self):
         """Render the Breakeven Optimizer analysis tab."""
-        st.header("📈 Optimal Breakeven Analysis")
+        st.header("📈 Breakeven & Stop-Loss Optimizer")
         st.markdown("""
-        *Analyze historical trade MFE/MAE patterns to find optimal breakeven trigger points.*
+        *Analyze historical trade MFE/MAE patterns to find optimal breakeven triggers and stop-loss levels.*
 
-        This tool examines your recent trades per epic/direction to recommend when to move
-        your stop loss to breakeven for maximum trade protection without cutting winners short.
+        This tool examines your recent trades per epic/direction to recommend:
+        - **Breakeven Triggers**: When to move stop-loss to breakeven
+        - **Stop-Loss Levels**: Optimal initial stop-loss distance based on MAE analysis
         """)
 
         # Import service
@@ -5475,10 +5476,11 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
     def _display_breakeven_results(self, service, analyses):
         """Display breakeven analysis results from fresh analysis."""
         import numpy as np
+        from services.breakeven_analysis_service import format_epic_display
 
         # Summary statistics
         st.subheader("📊 Summary Statistics")
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
             st.metric("Epic/Direction Pairs", len(analyses))
@@ -5486,39 +5488,66 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
             total_trades = sum(a.trade_count for a in analyses)
             st.metric("Total Trades Analyzed", total_trades)
         with col3:
-            high_priority = sum(1 for a in analyses if a.priority == 'high')
-            st.metric("High Priority Actions", high_priority,
-                     delta=None if high_priority == 0 else f"{high_priority} need attention",
+            high_priority_be = sum(1 for a in analyses if a.priority == 'high')
+            st.metric("High Priority BE", high_priority_be,
+                     delta=None if high_priority_be == 0 else f"{high_priority_be} need attention",
                      delta_color="inverse")
         with col4:
+            high_priority_sl = sum(1 for a in analyses if a.sl_priority == 'high')
+            st.metric("High Priority SL", high_priority_sl,
+                     delta=None if high_priority_sl == 0 else f"{high_priority_sl} need attention",
+                     delta_color="inverse")
+        with col5:
             avg_win_rate = np.mean([a.win_rate for a in analyses])
             st.metric("Avg Win Rate", f"{avg_win_rate:.1f}%")
 
-        # Main results table
-        st.subheader("📋 Recommendations by Epic/Direction")
-
+        # Main results table - split into BE and SL sections
+        st.subheader("📋 Breakeven Recommendations")
         df = service.get_summary_dataframe(analyses)
 
-        # Style the dataframe
-        def highlight_priority(row):
-            if row['Priority'] == 'HIGH':
+        # BE columns subset
+        be_cols = ['Epic', 'Dir', 'Trades', 'Win%', 'Avg MFE', 'Med MFE', 'Avg MAE',
+                   'Optimal BE', 'Current BE', 'BE Diff', 'BE Action', 'BE Priority', 'Confidence']
+        be_df = df[be_cols].copy()
+
+        def highlight_be_priority(row):
+            if row['BE Priority'] == 'HIGH':
                 return ['background-color: rgba(255, 99, 71, 0.3)'] * len(row)
-            elif row['Priority'] == 'MEDIUM':
+            elif row['BE Priority'] == 'MEDIUM':
                 return ['background-color: rgba(255, 193, 7, 0.3)'] * len(row)
             return [''] * len(row)
 
-        styled_df = df.style.apply(highlight_priority, axis=1)
-        st.dataframe(styled_df, use_container_width=True, height=400)
+        styled_be_df = be_df.style.apply(highlight_be_priority, axis=1)
+        st.dataframe(styled_be_df, use_container_width=True, height=300)
+
+        # Stop-Loss recommendations table
+        st.subheader("🛑 Stop-Loss Recommendations")
+        sl_cols = ['Epic', 'Dir', 'Trades', 'Win%', 'Avg MAE', 'P95 MAE',
+                   'Optimal SL', 'Current SL', 'SL Diff', 'SL Action', 'SL Priority']
+        sl_df = df[sl_cols].copy()
+
+        def highlight_sl_priority(row):
+            if row['SL Priority'] == 'HIGH':
+                return ['background-color: rgba(255, 99, 71, 0.3)'] * len(row)
+            elif row['SL Priority'] == 'MEDIUM':
+                return ['background-color: rgba(255, 193, 7, 0.3)'] * len(row)
+            return [''] * len(row)
+
+        styled_sl_df = sl_df.style.apply(highlight_sl_priority, axis=1)
+        st.dataframe(styled_sl_df, use_container_width=True, height=300)
 
         # Detailed view expanders
         st.subheader("🔎 Detailed Analysis")
 
         for analysis in analyses:
             epic_display = format_epic_display(analysis.epic)
-            priority_icon = "🔴" if analysis.priority == 'high' else "🟡" if analysis.priority == 'medium' else "🟢"
+            # Combined priority indicator - show highest priority
+            max_priority = 'high' if analysis.priority == 'high' or analysis.sl_priority == 'high' else \
+                          'medium' if analysis.priority == 'medium' or analysis.sl_priority == 'medium' else 'low'
+            priority_icon = "🔴" if max_priority == 'high' else "🟡" if max_priority == 'medium' else "🟢"
 
             with st.expander(f"{priority_icon} {epic_display} - {analysis.direction} ({analysis.trade_count} trades)"):
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
 
                 with col1:
                     st.markdown("**MFE Distribution (pips)**")
@@ -5530,6 +5559,8 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
                     st.markdown("**MAE Distribution (pips)**")
                     st.markdown(f"- Median: **{analysis.median_mae:.1f}**")
                     st.markdown(f"- 75th Percentile: **{analysis.percentile_75_mae:.1f}**")
+                    st.markdown(f"- 95th Percentile: **{analysis.percentile_95_mae:.1f}**")
+                    st.markdown(f"- Maximum: **{analysis.max_mae:.1f}**")
 
                 with col2:
                     st.markdown("**Breakeven Analysis**")
@@ -5537,11 +5568,28 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
                     st.markdown(f"- Optimal Trigger: **{analysis.optimal_be_trigger:.1f}** pips")
                     st.markdown(f"- Conservative: **{analysis.conservative_be_trigger:.1f}** pips")
 
-                    diff = analysis.optimal_be_trigger - analysis.current_be_trigger
-                    if abs(diff) > 1:
-                        direction = "⬇️ Lower by" if diff < 0 else "⬆️ Raise by"
-                        st.markdown(f"- Suggested Change: **{direction} {abs(diff):.0f} pips**")
+                    be_diff = analysis.optimal_be_trigger - analysis.current_be_trigger
+                    if abs(be_diff) > 1:
+                        direction = "⬇️ Lower by" if be_diff < 0 else "⬆️ Raise by"
+                        st.markdown(f"- Suggested Change: **{direction} {abs(be_diff):.0f} pips**")
 
+                    st.markdown(f"- Action: **{analysis.recommendation}**")
+                    st.markdown(f"- Priority: **{analysis.priority.upper()}**")
+
+                with col3:
+                    st.markdown("**Stop-Loss Analysis**")
+                    st.markdown(f"- Current SL: **{analysis.current_stop_loss:.0f}** pips")
+                    st.markdown(f"- Optimal SL: **{analysis.optimal_stop_loss:.1f}** pips")
+
+                    sl_diff = analysis.optimal_stop_loss - analysis.current_stop_loss
+                    if abs(sl_diff) > 1:
+                        direction = "⬇️ Tighten by" if sl_diff < 0 else "⬆️ Widen by"
+                        st.markdown(f"- Suggested Change: **{direction} {abs(sl_diff):.0f} pips**")
+
+                    st.markdown(f"- Action: **{analysis.sl_recommendation}**")
+                    st.markdown(f"- Priority: **{analysis.sl_priority.upper()}**")
+
+                    st.markdown("---")
                     st.markdown(f"- Win Rate: **{analysis.win_rate:.0f}%**")
                     st.markdown(f"- Confidence: **{analysis.confidence.upper()}**")
 
@@ -5580,7 +5628,7 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
 
         # Summary statistics
         st.subheader("📊 Summary Statistics")
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
             st.metric("Epic/Direction Pairs", len(df))
@@ -5588,71 +5636,140 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
             total_trades = df['trade_count'].sum()
             st.metric("Total Trades Analyzed", int(total_trades))
         with col3:
-            high_priority = (df['priority'] == 'high').sum()
-            st.metric("High Priority Actions", int(high_priority),
-                     delta=None if high_priority == 0 else f"{high_priority} need attention",
+            high_priority_be = (df['priority'] == 'high').sum()
+            st.metric("High Priority BE", int(high_priority_be),
+                     delta=None if high_priority_be == 0 else f"{high_priority_be} need attention",
                      delta_color="inverse")
         with col4:
+            # Check if sl_priority column exists (for backwards compatibility)
+            if 'sl_priority' in df.columns:
+                high_priority_sl = (df['sl_priority'] == 'high').sum()
+            else:
+                high_priority_sl = 0
+            st.metric("High Priority SL", int(high_priority_sl),
+                     delta=None if high_priority_sl == 0 else f"{high_priority_sl} need attention",
+                     delta_color="inverse")
+        with col5:
             avg_win_rate = df['win_rate'].mean()
             st.metric("Avg Win Rate", f"{avg_win_rate:.1f}%")
 
-        # Main results table
-        st.subheader("📋 Recommendations by Epic/Direction")
+        # Check if SL columns exist (for backwards compatibility)
+        has_sl_data = 'optimal_stop_loss' in df.columns and df['optimal_stop_loss'].notna().any()
 
-        # Create display dataframe
-        display_df = df[['epic', 'direction', 'trade_count', 'win_rate',
+        # Breakeven Recommendations Table
+        st.subheader("📋 Breakeven Recommendations")
+
+        # Create BE display dataframe
+        be_display_df = df[['epic', 'direction', 'trade_count', 'win_rate',
                         'avg_mfe', 'median_mfe', 'avg_mae',
                         'optimal_be_trigger', 'current_be_trigger',
                         'recommendation', 'priority', 'confidence']].copy()
 
         # Clean epic names
-        display_df['epic'] = display_df['epic'].apply(
+        be_display_df['epic'] = be_display_df['epic'].apply(
             lambda x: x.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
         )
 
         # Calculate diff
-        display_df['diff'] = display_df['optimal_be_trigger'] - display_df['current_be_trigger']
-        display_df['diff'] = display_df['diff'].apply(lambda x: f"+{x:.0f}" if x > 0 else f"{x:.0f}")
+        be_display_df['diff'] = be_display_df['optimal_be_trigger'] - be_display_df['current_be_trigger']
+        be_display_df['diff'] = be_display_df['diff'].apply(lambda x: f"+{x:.0f}" if x > 0 else f"{x:.0f}")
 
         # Format columns
-        display_df['win_rate'] = display_df['win_rate'].apply(lambda x: f"{x:.0f}%")
-        display_df['avg_mfe'] = display_df['avg_mfe'].apply(lambda x: f"{x:.0f}")
-        display_df['median_mfe'] = display_df['median_mfe'].apply(lambda x: f"{x:.0f}")
-        display_df['avg_mae'] = display_df['avg_mae'].apply(lambda x: f"{x:.0f}")
-        display_df['optimal_be_trigger'] = display_df['optimal_be_trigger'].apply(lambda x: f"{x:.0f}")
-        display_df['current_be_trigger'] = display_df['current_be_trigger'].apply(lambda x: f"{x:.0f}")
-        display_df['priority'] = display_df['priority'].str.upper()
-        display_df['confidence'] = display_df['confidence'].str.upper()
+        be_display_df['win_rate'] = be_display_df['win_rate'].apply(lambda x: f"{x:.0f}%")
+        be_display_df['avg_mfe'] = be_display_df['avg_mfe'].apply(lambda x: f"{x:.0f}")
+        be_display_df['median_mfe'] = be_display_df['median_mfe'].apply(lambda x: f"{x:.0f}")
+        be_display_df['avg_mae'] = be_display_df['avg_mae'].apply(lambda x: f"{x:.0f}")
+        be_display_df['optimal_be_trigger'] = be_display_df['optimal_be_trigger'].apply(lambda x: f"{x:.0f}")
+        be_display_df['current_be_trigger'] = be_display_df['current_be_trigger'].apply(lambda x: f"{x:.0f}")
+        be_display_df['priority'] = be_display_df['priority'].str.upper()
+        be_display_df['confidence'] = be_display_df['confidence'].str.upper()
 
         # Rename columns for display
-        display_df.columns = ['Epic', 'Dir', 'Trades', 'Win%', 'Avg MFE', 'Med MFE', 'Avg MAE',
+        be_display_df.columns = ['Epic', 'Dir', 'Trades', 'Win%', 'Avg MFE', 'Med MFE', 'Avg MAE',
                              'Optimal BE', 'Current BE', 'Action', 'Priority', 'Confidence', 'Diff']
 
         # Reorder columns
-        display_df = display_df[['Epic', 'Dir', 'Trades', 'Win%', 'Avg MFE', 'Med MFE', 'Avg MAE',
+        be_display_df = be_display_df[['Epic', 'Dir', 'Trades', 'Win%', 'Avg MFE', 'Med MFE', 'Avg MAE',
                                 'Optimal BE', 'Current BE', 'Diff', 'Action', 'Priority', 'Confidence']]
 
         # Style the dataframe
-        def highlight_priority(row):
+        def highlight_be_priority(row):
             if row['Priority'] == 'HIGH':
                 return ['background-color: rgba(255, 99, 71, 0.3)'] * len(row)
             elif row['Priority'] == 'MEDIUM':
                 return ['background-color: rgba(255, 193, 7, 0.3)'] * len(row)
             return [''] * len(row)
 
-        styled_df = display_df.style.apply(highlight_priority, axis=1)
-        st.dataframe(styled_df, use_container_width=True, height=400)
+        styled_be_df = be_display_df.style.apply(highlight_be_priority, axis=1)
+        st.dataframe(styled_be_df, use_container_width=True, height=300)
+
+        # Stop-Loss Recommendations Table (if data exists)
+        if has_sl_data:
+            st.subheader("🛑 Stop-Loss Recommendations")
+
+            sl_display_df = df[['epic', 'direction', 'trade_count', 'win_rate', 'avg_mae']].copy()
+
+            # Add SL columns if they exist
+            if 'percentile_95_mae' in df.columns:
+                sl_display_df['p95_mae'] = df['percentile_95_mae']
+            else:
+                sl_display_df['p95_mae'] = 0
+
+            sl_display_df['optimal_sl'] = df['optimal_stop_loss']
+            sl_display_df['current_sl'] = df['current_stop_loss']
+            sl_display_df['sl_action'] = df['sl_recommendation'] if 'sl_recommendation' in df.columns else 'N/A'
+            sl_display_df['sl_priority'] = df['sl_priority'] if 'sl_priority' in df.columns else 'low'
+
+            # Clean epic names
+            sl_display_df['epic'] = sl_display_df['epic'].apply(
+                lambda x: x.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            )
+
+            # Calculate SL diff
+            sl_display_df['sl_diff'] = sl_display_df['optimal_sl'] - sl_display_df['current_sl']
+            sl_display_df['sl_diff'] = sl_display_df['sl_diff'].apply(lambda x: f"+{x:.0f}" if x > 0 else f"{x:.0f}")
+
+            # Format columns
+            sl_display_df['win_rate'] = sl_display_df['win_rate'].apply(lambda x: f"{x:.0f}%")
+            sl_display_df['avg_mae'] = sl_display_df['avg_mae'].apply(lambda x: f"{x:.0f}")
+            sl_display_df['p95_mae'] = sl_display_df['p95_mae'].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "N/A")
+            sl_display_df['optimal_sl'] = sl_display_df['optimal_sl'].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "N/A")
+            sl_display_df['current_sl'] = sl_display_df['current_sl'].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "N/A")
+            sl_display_df['sl_priority'] = sl_display_df['sl_priority'].str.upper()
+
+            # Rename columns
+            sl_display_df.columns = ['Epic', 'Dir', 'Trades', 'Win%', 'Avg MAE', 'P95 MAE',
+                                     'Optimal SL', 'Current SL', 'Action', 'Priority', 'Diff']
+
+            # Reorder
+            sl_display_df = sl_display_df[['Epic', 'Dir', 'Trades', 'Win%', 'Avg MAE', 'P95 MAE',
+                                           'Optimal SL', 'Current SL', 'Diff', 'Action', 'Priority']]
+
+            def highlight_sl_priority(row):
+                if row['Priority'] == 'HIGH':
+                    return ['background-color: rgba(255, 99, 71, 0.3)'] * len(row)
+                elif row['Priority'] == 'MEDIUM':
+                    return ['background-color: rgba(255, 193, 7, 0.3)'] * len(row)
+                return [''] * len(row)
+
+            styled_sl_df = sl_display_df.style.apply(highlight_sl_priority, axis=1)
+            st.dataframe(styled_sl_df, use_container_width=True, height=300)
 
         # Detailed expanders
         st.subheader("🔎 Detailed Analysis")
 
         for _, row in df.iterrows():
             epic_display = row['epic'].replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
-            priority = row['priority']
-            priority_icon = "🔴" if priority == 'high' else "🟡" if priority == 'medium' else "🟢"
+            be_priority = row['priority']
+            sl_priority = row.get('sl_priority', 'low') or 'low'
+
+            # Combined priority indicator
+            max_priority = 'high' if be_priority == 'high' or sl_priority == 'high' else \
+                          'medium' if be_priority == 'medium' or sl_priority == 'medium' else 'low'
+            priority_icon = "🔴" if max_priority == 'high' else "🟡" if max_priority == 'medium' else "🟢"
 
             with st.expander(f"{priority_icon} {epic_display} - {row['direction']} ({int(row['trade_count'])} trades)"):
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
 
                 with col1:
                     st.markdown("**MFE Distribution (pips)**")
@@ -5664,6 +5781,10 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
                     st.markdown("**MAE Distribution (pips)**")
                     st.markdown(f"- Median: **{row['median_mae']:.1f}**")
                     st.markdown(f"- 75th Percentile: **{row['percentile_75_mae']:.1f}**")
+                    if 'percentile_95_mae' in row and pd.notna(row.get('percentile_95_mae')):
+                        st.markdown(f"- 95th Percentile: **{row['percentile_95_mae']:.1f}**")
+                    if 'max_mae' in row and pd.notna(row.get('max_mae')):
+                        st.markdown(f"- Maximum: **{row['max_mae']:.1f}**")
 
                 with col2:
                     st.markdown("**Breakeven Analysis**")
@@ -5671,11 +5792,32 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
                     st.markdown(f"- Optimal Trigger: **{row['optimal_be_trigger']:.1f}** pips")
                     st.markdown(f"- Conservative: **{row['conservative_be_trigger']:.1f}** pips")
 
-                    diff = row['optimal_be_trigger'] - row['current_be_trigger']
-                    if abs(diff) > 1:
-                        direction = "⬇️ Lower by" if diff < 0 else "⬆️ Raise by"
-                        st.markdown(f"- Suggested Change: **{direction} {abs(diff):.0f} pips**")
+                    be_diff = row['optimal_be_trigger'] - row['current_be_trigger']
+                    if abs(be_diff) > 1:
+                        direction = "⬇️ Lower by" if be_diff < 0 else "⬆️ Raise by"
+                        st.markdown(f"- Suggested Change: **{direction} {abs(be_diff):.0f} pips**")
 
+                    st.markdown(f"- Action: **{row['recommendation']}**")
+                    st.markdown(f"- Priority: **{row['priority'].upper()}**")
+
+                with col3:
+                    st.markdown("**Stop-Loss Analysis**")
+                    if has_sl_data and pd.notna(row.get('optimal_stop_loss')):
+                        st.markdown(f"- Current SL: **{row['current_stop_loss']:.0f}** pips")
+                        st.markdown(f"- Optimal SL: **{row['optimal_stop_loss']:.1f}** pips")
+
+                        sl_diff = row['optimal_stop_loss'] - row['current_stop_loss']
+                        if abs(sl_diff) > 1:
+                            direction = "⬇️ Tighten by" if sl_diff < 0 else "⬆️ Widen by"
+                            st.markdown(f"- Suggested Change: **{direction} {abs(sl_diff):.0f} pips**")
+
+                        sl_action = row.get('sl_recommendation', 'N/A')
+                        st.markdown(f"- Action: **{sl_action}**")
+                        st.markdown(f"- Priority: **{sl_priority.upper()}**")
+                    else:
+                        st.markdown("*No SL data available. Run fresh analysis.*")
+
+                    st.markdown("---")
                     st.markdown(f"- Win Rate: **{row['win_rate']:.0f}%**")
                     st.markdown(f"- Confidence: **{row['confidence'].upper()}**")
 
@@ -5697,7 +5839,7 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
         st.markdown("---")
         col1, col2 = st.columns([3, 1])
         with col2:
-            csv = display_df.to_csv(index=False)
+            csv = be_display_df.to_csv(index=False)
             st.download_button(
                 "📥 Export CSV",
                 csv,

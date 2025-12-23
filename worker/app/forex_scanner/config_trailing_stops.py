@@ -3,6 +3,23 @@
 Progressive 3-Stage Trailing Stop Configuration with MFE Protection
 Used by both live trading and backtest systems
 
+v2.7.0 OPTIMIZATION (2025-12-23) - MFE/MAE Analysis Based:
+- BE triggers optimized per-pair based on actual MFE/MAE data analysis
+- Used weighted average of BUY/SELL optimal values (SELL often needs higher)
+- Key insight: SELL positions typically need higher BE triggers than BUY
+- Future: Consider direction-specific BE triggers in trailing stop manager
+
+BUY vs SELL Analysis Summary (optimal_be_trigger):
+  EURJPY: BUY=27, SELL=55 → Use 40 (SELL-weighted, high discrepancy)
+  GBPUSD: BUY=25, SELL=46 → Use 35 (average, SELL needs more room)
+  USDJPY: BUY=33, SELL=47 → Use 40 (average)
+  EURUSD: BUY=24, SELL=12 → Use 20 (BUY-weighted, SELL is lower)
+  NZDUSD: BUY=12, SELL=17 → Use 15 (both low, use average)
+  AUDUSD: BUY=13, SELL=28 → Use 20 (SELL-weighted)
+  USDCAD: BUY=20, SELL=18 → Use 20 (keep similar)
+  USDCHF: BUY=26, SELL=25 → Use 26 (already optimized v2.6.0)
+  AUDJPY: BUY=33, SELL=25 → Use 28 (BUY-weighted)
+
 v2.5.0 OPTIMIZATION (2025-12-22):
 - Increased all trigger points by ~40% to let winners develop further
 - Increased lock points to capture more profit when triggered
@@ -30,80 +47,91 @@ PAIR_TRAILING_CONFIGS = {
 
     # CEEM epic uses scaled pricing (11646 instead of 1.1646), 1 pip = 1 point
     'CS.D.EURUSD.CEEM.IP': {
-        'stage1_trigger_points': 28,      # v2.5.0: 28 (was 20) - let trade develop more
-        'stage1_lock_points': 12,         # v2.5.0: 12 (was 6) - lock more profit
-        'stage2_trigger_points': 38,      # v2.5.0: 38 (was 28) - closer to TP target
-        'stage2_lock_points': 25,         # v2.5.0: 25 (was 18) - protect 60%+ of target
-        'stage3_trigger_points': 45,      # v2.5.0: 45 (was 32) - let trade run
+        # v2.7.0: MFE/MAE Analysis - BUY opt=24, SELL opt=12 → Use 20 (BUY-weighted)
+        # SELL has lower optimal BE but BUY needs more room
+        'stage1_trigger_points': 25,      # v2.7.0: 25 (was 28) - adjusted to optimal
+        'stage1_lock_points': 10,         # v2.7.0: 10 (was 12) - proportional
+        'stage2_trigger_points': 35,      # v2.7.0: 35 (was 38) - adjusted
+        'stage2_lock_points': 22,         # v2.7.0: 22 (was 25) - proportional
+        'stage3_trigger_points': 42,      # v2.7.0: 42 (was 45) - adjusted
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 25,  # v2.5.0: 25 (was 18) - more breathing room
+        'break_even_trigger_points': 20,  # v2.7.0: 20 (was 25) - from MFE/MAE analysis
     },
 
     'CS.D.AUDUSD.MINI.IP': {
-        'stage1_trigger_points': 28,      # v2.5.0: 28 (was 20) - let trade develop more
-        'stage1_lock_points': 12,         # v2.5.0: 12 (was 6) - lock more profit
-        'stage2_trigger_points': 38,      # v2.5.0: 38 (was 28) - closer to TP target
-        'stage2_lock_points': 25,         # v2.5.0: 25 (was 18) - protect 60%+ of target
-        'stage3_trigger_points': 45,      # v2.5.0: 45 (was 32) - let trade run
+        # v2.7.0: MFE/MAE Analysis - BUY opt=13, SELL opt=28 → Use 20 (SELL-weighted)
+        # BUY shows lower MFE, SELL needs more room before BE
+        'stage1_trigger_points': 25,      # v2.7.0: 25 (was 28) - adjusted
+        'stage1_lock_points': 10,         # v2.7.0: 10 (was 12) - proportional
+        'stage2_trigger_points': 35,      # v2.7.0: 35 (was 38) - adjusted
+        'stage2_lock_points': 22,         # v2.7.0: 22 (was 25) - proportional
+        'stage3_trigger_points': 42,      # v2.7.0: 42 (was 45) - adjusted
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 25,  # v2.5.0: 25 (was 18) - more breathing room
+        'break_even_trigger_points': 20,  # v2.7.0: 20 (was 25) - from MFE/MAE analysis
     },
 
     'CS.D.NZDUSD.MINI.IP': {
-        'stage1_trigger_points': 28,      # v2.5.0: 28 (was 20) - let trade develop more
-        'stage1_lock_points': 12,         # v2.5.0: 12 (was 6) - lock more profit
-        'stage2_trigger_points': 38,      # v2.5.0: 38 (was 28) - closer to TP target
-        'stage2_lock_points': 25,         # v2.5.0: 25 (was 18) - protect 60%+ of target
-        'stage3_trigger_points': 45,      # v2.5.0: 45 (was 32) - let trade run
+        # v2.7.0: MFE/MAE Analysis - BUY opt=12, SELL opt=17 → Use 15 (average)
+        # Both directions show lower optimal BE - NZDUSD less volatile
+        'stage1_trigger_points': 20,      # v2.7.0: 20 (was 28) - significant reduction
+        'stage1_lock_points': 8,          # v2.7.0: 8 (was 12) - proportional
+        'stage2_trigger_points': 28,      # v2.7.0: 28 (was 38) - adjusted
+        'stage2_lock_points': 18,         # v2.7.0: 18 (was 25) - proportional
+        'stage3_trigger_points': 35,      # v2.7.0: 35 (was 45) - adjusted
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 25,  # v2.5.0: 25 (was 18) - more breathing room
+        'min_trail_distance': 12,         # v2.7.0: 12 (was 15) - NZDUSD less volatile
+        'break_even_trigger_points': 15,  # v2.7.0: 15 (was 25) - from MFE/MAE analysis
     },
 
     'CS.D.USDCAD.MINI.IP': {
-        'stage1_trigger_points': 28,      # v2.5.0: 28 (was 20) - let trade develop more
-        'stage1_lock_points': 12,         # v2.5.0: 12 (was 6) - lock more profit
-        'stage2_trigger_points': 38,      # v2.5.0: 38 (was 28) - closer to TP target
-        'stage2_lock_points': 25,         # v2.5.0: 25 (was 18) - protect 60%+ of target
-        'stage3_trigger_points': 45,      # v2.5.0: 45 (was 32) - let trade run
+        # v2.7.0: MFE/MAE Analysis - BUY opt=20, SELL opt=18 → Use 20 (keep similar)
+        # Both directions agree, current config is close to optimal
+        'stage1_trigger_points': 25,      # v2.7.0: 25 (was 28) - slight adjustment
+        'stage1_lock_points': 10,         # v2.7.0: 10 (was 12) - proportional
+        'stage2_trigger_points': 35,      # v2.7.0: 35 (was 38) - adjusted
+        'stage2_lock_points': 22,         # v2.7.0: 22 (was 25) - proportional
+        'stage3_trigger_points': 42,      # v2.7.0: 42 (was 45) - adjusted
         'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
         'stage3_min_distance': 4,         # Minimum trail distance
         'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 25,  # v2.5.0: 25 (was 18) - more breathing room
+        'break_even_trigger_points': 20,  # v2.7.0: 20 (was 25) - from MFE/MAE analysis
     },
 
     'CS.D.USDCHF.MINI.IP': {
+        # v2.7.0: MFE/MAE Analysis - BUY opt=26, SELL opt=25 → Use 26 (confirmed v2.6.0 was close)
         # v2.6.0 USDCHF OPTIMIZATION (2025-12-23):
         # Analysis: 40.7% win rate, -4,917 SEK loss, stops too tight (9-13 pips getting hit by noise)
         # Solution: Increase all triggers by 25% to let trades develop, wider stops for CHF volatility
-        'stage1_trigger_points': 35,      # v2.6.0: 35 (was 28) - CHF needs more room to develop
-        'stage1_lock_points': 15,         # v2.6.0: 15 (was 12) - lock more profit when triggered
-        'stage2_trigger_points': 48,      # v2.6.0: 48 (was 38) - closer to TP target
-        'stage2_lock_points': 32,         # v2.6.0: 32 (was 25) - protect 65%+ of target
-        'stage3_trigger_points': 56,      # v2.6.0: 56 (was 45) - let winners run longer
+        'stage1_trigger_points': 32,      # v2.7.0: 32 (was 35) - reduced slightly based on MFE data
+        'stage1_lock_points': 14,         # v2.7.0: 14 (was 15) - proportional
+        'stage2_trigger_points': 42,      # v2.7.0: 42 (was 48) - adjusted to optimal
+        'stage2_lock_points': 28,         # v2.7.0: 28 (was 32) - proportional
+        'stage3_trigger_points': 50,      # v2.7.0: 50 (was 56) - adjusted
         'stage3_atr_multiplier': 0.9,     # v2.6.0: 0.9 (was 0.8) - wider ATR trailing for CHF
         'stage3_min_distance': 4,         # v2.6.0: 4 (was 2) - more breathing room
         'min_trail_distance': 18,         # v2.6.0: 18 (was 15) - prevent noise stopouts
-        'break_even_trigger_points': 32,  # v2.6.0: 32 (was 25) - CHF is choppy, needs room
+        'break_even_trigger_points': 26,  # v2.7.0: 26 (was 32) - from MFE/MAE analysis
     },
 
     # ========== GBP PAIRS - High Volatility ==========
 
     'CS.D.GBPUSD.MINI.IP': {
-        'stage1_trigger_points': 35,      # v2.5.0: 35 (was 25) - GBP needs more room
-        'stage1_lock_points': 15,         # v2.5.0: 15 (was 8) - lock more profit
-        'stage2_trigger_points': 45,      # v2.5.0: 45 (was 32) - closer to TP target
-        'stage2_lock_points': 30,         # v2.5.0: 30 (was 20) - protect 60%+ of target
-        'stage3_trigger_points': 55,      # v2.5.0: 55 (was 38) - let trade run
+        # v2.7.0: MFE/MAE Analysis - BUY opt=25, SELL opt=46 → Use 35 (SELL-weighted)
+        # SELL positions need significantly more room before BE trigger
+        'stage1_trigger_points': 40,      # v2.7.0: 40 (was 35) - increased for SELL
+        'stage1_lock_points': 16,         # v2.7.0: 16 (was 15) - proportional
+        'stage2_trigger_points': 52,      # v2.7.0: 52 (was 45) - adjusted
+        'stage2_lock_points': 34,         # v2.7.0: 34 (was 30) - protect more
+        'stage3_trigger_points': 60,      # v2.7.0: 60 (was 55) - let SELL run
         'stage3_atr_multiplier': 1.0,     # Wider trailing
         'stage3_min_distance': 3,         # More distance
         'min_trail_distance': 18,         # Higher minimum
-        'break_even_trigger_points': 30,  # v2.5.0: 30 (was 20) - GBP is volatile
+        'break_even_trigger_points': 35,  # v2.7.0: 35 (was 30) - compromise BUY=25/SELL=46
     },
 
     'CS.D.GBPJPY.MINI.IP': {
@@ -145,39 +173,45 @@ PAIR_TRAILING_CONFIGS = {
     # ========== JPY PAIRS - Different Pip Scale ==========
 
     'CS.D.USDJPY.MINI.IP': {
-        'stage1_trigger_points': 28,      # v2.5.0: 28 (was 20) - let trade develop more
-        'stage1_lock_points': 10,         # v2.5.0: 10 (was 5) - lock more profit
-        'stage2_trigger_points': 38,      # v2.5.0: 38 (was 28) - closer to TP target
-        'stage2_lock_points': 22,         # v2.5.0: 22 (was 15) - protect 60%+ of target
-        'stage3_trigger_points': 45,      # v2.5.0: 45 (was 32) - let trade run
+        # v2.7.0: MFE/MAE Analysis - BUY opt=33, SELL opt=47 → Use 40 (average)
+        # Both directions need higher BE than current, SELL especially
+        'stage1_trigger_points': 45,      # v2.7.0: 45 (was 28) - significant increase
+        'stage1_lock_points': 18,         # v2.7.0: 18 (was 10) - proportional
+        'stage2_trigger_points': 55,      # v2.7.0: 55 (was 38) - adjusted
+        'stage2_lock_points': 35,         # v2.7.0: 35 (was 22) - protect more
+        'stage3_trigger_points': 65,      # v2.7.0: 65 (was 45) - let trade run
         'stage3_atr_multiplier': 0.8,
         'stage3_min_distance': 4,
-        'min_trail_distance': 12,
-        'break_even_trigger_points': 25,  # v2.5.0: 25 (was 18) - more breathing room
+        'min_trail_distance': 15,         # v2.7.0: 15 (was 12) - increased
+        'break_even_trigger_points': 40,  # v2.7.0: 40 (was 25) - from MFE/MAE analysis
     },
 
     'CS.D.EURJPY.MINI.IP': {
-        'stage1_trigger_points': 35,      # v2.5.0: 35 (was 25) - let trade develop more
-        'stage1_lock_points': 12,         # v2.5.0: 12 (was 6) - lock more profit
-        'stage2_trigger_points': 48,      # v2.5.0: 48 (was 35) - closer to TP target
-        'stage2_lock_points': 30,         # v2.5.0: 30 (was 18) - protect 60%+ of target
-        'stage3_trigger_points': 55,      # v2.5.0: 55 (was 40) - let trade run
+        # v2.7.0: MFE/MAE Analysis - BUY opt=27, SELL opt=55 → Use 40 (SELL-weighted)
+        # Huge discrepancy! SELL needs 2x higher BE than BUY
+        'stage1_trigger_points': 45,      # v2.7.0: 45 (was 35) - increased for SELL
+        'stage1_lock_points': 18,         # v2.7.0: 18 (was 12) - proportional
+        'stage2_trigger_points': 55,      # v2.7.0: 55 (was 48) - adjusted
+        'stage2_lock_points': 36,         # v2.7.0: 36 (was 30) - protect more
+        'stage3_trigger_points': 65,      # v2.7.0: 65 (was 55) - let trade run
         'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 15,
-        'break_even_trigger_points': 28,  # v2.5.0: 28 (was 18) - EUR/JPY is volatile
+        'stage3_min_distance': 3,         # v2.7.0: 3 (was 2) - more room
+        'min_trail_distance': 18,         # v2.7.0: 18 (was 15) - increased
+        'break_even_trigger_points': 40,  # v2.7.0: 40 (was 28) - compromise BUY=27/SELL=55
     },
 
     'CS.D.AUDJPY.MINI.IP': {
-        'stage1_trigger_points': 25,      # v2.5.0: 25 (was 18) - let trade develop more
-        'stage1_lock_points': 10,         # v2.5.0: 10 (was 4) - lock more profit
-        'stage2_trigger_points': 32,      # v2.5.0: 32 (was 22) - closer to TP target
-        'stage2_lock_points': 20,         # v2.5.0: 20 (was 10) - protect 60%+ of target
-        'stage3_trigger_points': 38,      # v2.5.0: 38 (was 26) - let trade run
+        # v2.7.0: MFE/MAE Analysis - BUY opt=33, SELL opt=25 → Use 28 (BUY-weighted)
+        # BUY needs more room, SELL is fine with current settings
+        'stage1_trigger_points': 32,      # v2.7.0: 32 (was 25) - increased for BUY
+        'stage1_lock_points': 13,         # v2.7.0: 13 (was 10) - proportional
+        'stage2_trigger_points': 42,      # v2.7.0: 42 (was 32) - adjusted
+        'stage2_lock_points': 26,         # v2.7.0: 26 (was 20) - protect more
+        'stage3_trigger_points': 50,      # v2.7.0: 50 (was 38) - let trade run
         'stage3_atr_multiplier': 0.9,
         'stage3_min_distance': 4,
         'min_trail_distance': 15,
-        'break_even_trigger_points': 20,  # v2.5.0: 20 (was 12) - more breathing room
+        'break_even_trigger_points': 28,  # v2.7.0: 28 (was 20) - from MFE/MAE analysis
         # Profit Protection Rule
         'enable_profit_protection': False,
     },

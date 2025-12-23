@@ -167,7 +167,8 @@ services:
       - ./streamlit:/app:cached
       - ./logs:/logs:ro  # Read-only for safety
       - ./worker/app/claude_analysis_enhanced:/app/claude_analysis_enhanced:ro  # Vision analysis charts
-      - ./worker/app/forex_scanner:/app/forex_scanner:ro  # Config files for breakeven analyzer
+      - ./worker/app/forex_scanner:/app/forex_scanner:ro  # Strategy config files
+      - ./dev-app/config.py:/app/trailing_config.py:ro  # Trailing stop config (source of truth from fastapi-dev)
     working_dir: /app
     networks:
       - lab-net
