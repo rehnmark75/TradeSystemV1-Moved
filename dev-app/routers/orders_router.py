@@ -818,11 +818,30 @@ async def ig_place_order(
             raise HTTPException(status_code=500, detail="Order confirmation missing deal ID.")
 
         entry_price = float(entry_price_raw)
+        logger.info(f"✅ Order confirmed: Deal ID {deal_id}, Entry Price (raw): {entry_price}")
+
+        # CEEM epics return scaled prices from IG API (11633.5 instead of 1.16335)
+        # Normalize to standard forex format for consistent database storage
+        if "CEEM" in epic and entry_price > 1000:
+            entry_price_normalized = entry_price / 10000.0
+            logger.info(f"📐 CEEM price normalized: {entry_price} -> {entry_price_normalized}")
+            entry_price = entry_price_normalized
+
         logger.info(f"✅ Order confirmed: Deal ID {deal_id}, Entry Price: {entry_price}")
-        
+
         # Convert to actual prices for database
-        actual_stop_price = convert_stop_distance_to_price(entry_price, sl_limit, direction, epic)
-        actual_limit_price = convert_limit_distance_to_price(entry_price, limit_distance, direction, epic)
+        # Note: For CEEM, entry_price is now normalized, so we need to use the original scaled price for SL/TP calc
+        # since get_point_value("CEEM") returns 1.0 expecting scaled prices
+        if "CEEM" in epic:
+            # Use original scaled price for SL/TP calculation since point_value=1.0 expects scaled format
+            actual_stop_price = convert_stop_distance_to_price(float(entry_price_raw), sl_limit, direction, epic)
+            actual_limit_price = convert_limit_distance_to_price(float(entry_price_raw), limit_distance, direction, epic)
+            # Then normalize the results to match entry_price format
+            actual_stop_price = actual_stop_price / 10000.0
+            actual_limit_price = actual_limit_price / 10000.0
+        else:
+            actual_stop_price = convert_stop_distance_to_price(entry_price, sl_limit, direction, epic)
+            actual_limit_price = convert_limit_distance_to_price(entry_price, limit_distance, direction, epic)
         
         logger.info(f"🔍 DEBUG: alert_id parameter value: {alert_id} (type: {type(alert_id)})")
         logger.info(f"🔍 DEBUG: alert_id is None: {alert_id is None}")
