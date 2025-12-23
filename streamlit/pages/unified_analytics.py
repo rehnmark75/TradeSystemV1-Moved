@@ -5389,6 +5389,322 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
             st.markdown("---")
             st.info("💡 **Tip:** Run for several more days to gather statistically significant data, then tune parameters per epic.")
 
+    def render_breakeven_optimizer_tab(self):
+        """Render the Breakeven Optimizer analysis tab."""
+        st.header("📈 Optimal Breakeven Analysis")
+        st.markdown("""
+        *Analyze historical trade MFE/MAE patterns to find optimal breakeven trigger points.*
+
+        This tool examines your recent trades per epic/direction to recommend when to move
+        your stop loss to breakeven for maximum trade protection without cutting winners short.
+        """)
+
+        # Import service
+        try:
+            from services.breakeven_analysis_service import BreakevenAnalysisService, format_epic_display
+            service = BreakevenAnalysisService()
+        except ImportError as e:
+            st.error(f"Failed to load Breakeven Analysis Service: {e}")
+            return
+
+        # Configuration section
+        st.subheader("⚙️ Analysis Configuration")
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+
+        with col1:
+            trades_per_group = st.slider(
+                "Trades per Epic/Dir",
+                min_value=5,
+                max_value=50,
+                value=10,
+                help="Number of recent trades to analyze per epic/direction combination"
+            )
+
+        with col2:
+            # Get available epics
+            available_epics = service.get_available_epics()
+            epic_filter = st.multiselect(
+                "Filter Epics (optional)",
+                options=available_epics,
+                default=[],
+                help="Leave empty to analyze all epics with trades"
+            )
+
+        with col3:
+            use_cache = st.checkbox("Use cached results", value=True,
+                                   help="Load from cache for faster display (updated hourly)")
+
+        with col4:
+            analyze_btn = st.button("🔍 Run Fresh Analysis", type="primary")
+
+        st.markdown("---")
+
+        # Main display area
+        if analyze_btn:
+            # Run fresh analysis
+            with st.spinner("Analyzing trade patterns... This may take a minute for large datasets."):
+                analyses = service.run_full_analysis(
+                    trades_per_group=trades_per_group,
+                    epic_filter=epic_filter if epic_filter else None,
+                    save_to_cache=True
+                )
+
+            if not analyses:
+                st.warning("⚠️ No trades found for analysis. Ensure you have closed trades with entry/exit data.")
+                return
+
+            self._display_breakeven_results(service, analyses)
+
+        elif use_cache:
+            # Load from cache
+            cached_df = service.get_cached_analysis(max_age_hours=24)
+
+            if cached_df.empty:
+                st.info("📭 No cached analysis found. Click 'Run Fresh Analysis' to generate recommendations.")
+                return
+
+            # Display cache info
+            if 'analyzed_at' in cached_df.columns:
+                latest_analysis = cached_df['analyzed_at'].max()
+                st.caption(f"📅 Last analyzed: {latest_analysis}")
+
+            self._display_breakeven_results_from_cache(cached_df)
+        else:
+            st.info("👆 Click 'Run Fresh Analysis' to analyze your trade data and get breakeven recommendations.")
+
+    def _display_breakeven_results(self, service, analyses):
+        """Display breakeven analysis results from fresh analysis."""
+        import numpy as np
+
+        # Summary statistics
+        st.subheader("📊 Summary Statistics")
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Epic/Direction Pairs", len(analyses))
+        with col2:
+            total_trades = sum(a.trade_count for a in analyses)
+            st.metric("Total Trades Analyzed", total_trades)
+        with col3:
+            high_priority = sum(1 for a in analyses if a.priority == 'high')
+            st.metric("High Priority Actions", high_priority,
+                     delta=None if high_priority == 0 else f"{high_priority} need attention",
+                     delta_color="inverse")
+        with col4:
+            avg_win_rate = np.mean([a.win_rate for a in analyses])
+            st.metric("Avg Win Rate", f"{avg_win_rate:.1f}%")
+
+        # Main results table
+        st.subheader("📋 Recommendations by Epic/Direction")
+
+        df = service.get_summary_dataframe(analyses)
+
+        # Style the dataframe
+        def highlight_priority(row):
+            if row['Priority'] == 'HIGH':
+                return ['background-color: rgba(255, 99, 71, 0.3)'] * len(row)
+            elif row['Priority'] == 'MEDIUM':
+                return ['background-color: rgba(255, 193, 7, 0.3)'] * len(row)
+            return [''] * len(row)
+
+        styled_df = df.style.apply(highlight_priority, axis=1)
+        st.dataframe(styled_df, use_container_width=True, height=400)
+
+        # Detailed view expanders
+        st.subheader("🔎 Detailed Analysis")
+
+        for analysis in analyses:
+            epic_display = format_epic_display(analysis.epic)
+            priority_icon = "🔴" if analysis.priority == 'high' else "🟡" if analysis.priority == 'medium' else "🟢"
+
+            with st.expander(f"{priority_icon} {epic_display} - {analysis.direction} ({analysis.trade_count} trades)"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**MFE Distribution (pips)**")
+                    st.markdown(f"- Average: **{analysis.avg_mfe:.1f}**")
+                    st.markdown(f"- Median: **{analysis.median_mfe:.1f}**")
+                    st.markdown(f"- 25th Percentile: **{analysis.percentile_25_mfe:.1f}**")
+                    st.markdown(f"- 75th Percentile: **{analysis.percentile_75_mfe:.1f}**")
+
+                    st.markdown("**MAE Distribution (pips)**")
+                    st.markdown(f"- Median: **{analysis.median_mae:.1f}**")
+                    st.markdown(f"- 75th Percentile: **{analysis.percentile_75_mae:.1f}**")
+
+                with col2:
+                    st.markdown("**Breakeven Analysis**")
+                    st.markdown(f"- Current Trigger: **{analysis.current_be_trigger:.0f}** pips")
+                    st.markdown(f"- Optimal Trigger: **{analysis.optimal_be_trigger:.1f}** pips")
+                    st.markdown(f"- Conservative: **{analysis.conservative_be_trigger:.1f}** pips")
+
+                    diff = analysis.optimal_be_trigger - analysis.current_be_trigger
+                    if abs(diff) > 1:
+                        direction = "⬇️ Lower by" if diff < 0 else "⬆️ Raise by"
+                        st.markdown(f"- Suggested Change: **{direction} {abs(diff):.0f} pips**")
+
+                    st.markdown(f"- Win Rate: **{analysis.win_rate:.0f}%**")
+                    st.markdown(f"- Confidence: **{analysis.confidence.upper()}**")
+
+                # Efficiency metrics
+                st.markdown("**Efficiency Metrics**")
+                metric_col1, metric_col2, metric_col3 = st.columns(3)
+                with metric_col1:
+                    st.metric("BE Reach Rate", f"{analysis.be_reach_rate:.0f}%",
+                             help="Percentage of trades that reached the BE trigger level")
+                with metric_col2:
+                    st.metric("BE Protection Rate", f"{analysis.be_protection_rate:.0f}%",
+                             help="Percentage of BE trades that exited at exactly breakeven")
+                with metric_col3:
+                    st.metric("BE Profit Rate", f"{analysis.be_profit_rate:.0f}%",
+                             help="Percentage of BE trades that continued to profit")
+
+                # Analysis notes
+                if analysis.analysis_notes:
+                    st.info(f"💡 {analysis.analysis_notes}")
+
+        # Export option
+        st.markdown("---")
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            csv = df.to_csv(index=False)
+            st.download_button(
+                "📥 Export CSV",
+                csv,
+                "breakeven_analysis.csv",
+                "text/csv"
+            )
+
+    def _display_breakeven_results_from_cache(self, df):
+        """Display breakeven analysis results from cached DataFrame."""
+        import numpy as np
+
+        # Summary statistics
+        st.subheader("📊 Summary Statistics")
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Epic/Direction Pairs", len(df))
+        with col2:
+            total_trades = df['trade_count'].sum()
+            st.metric("Total Trades Analyzed", int(total_trades))
+        with col3:
+            high_priority = (df['priority'] == 'high').sum()
+            st.metric("High Priority Actions", int(high_priority),
+                     delta=None if high_priority == 0 else f"{high_priority} need attention",
+                     delta_color="inverse")
+        with col4:
+            avg_win_rate = df['win_rate'].mean()
+            st.metric("Avg Win Rate", f"{avg_win_rate:.1f}%")
+
+        # Main results table
+        st.subheader("📋 Recommendations by Epic/Direction")
+
+        # Create display dataframe
+        display_df = df[['epic', 'direction', 'trade_count', 'win_rate',
+                        'avg_mfe', 'median_mfe', 'avg_mae',
+                        'optimal_be_trigger', 'current_be_trigger',
+                        'recommendation', 'priority', 'confidence']].copy()
+
+        # Clean epic names
+        display_df['epic'] = display_df['epic'].apply(
+            lambda x: x.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+        )
+
+        # Calculate diff
+        display_df['diff'] = display_df['optimal_be_trigger'] - display_df['current_be_trigger']
+        display_df['diff'] = display_df['diff'].apply(lambda x: f"+{x:.0f}" if x > 0 else f"{x:.0f}")
+
+        # Format columns
+        display_df['win_rate'] = display_df['win_rate'].apply(lambda x: f"{x:.0f}%")
+        display_df['avg_mfe'] = display_df['avg_mfe'].apply(lambda x: f"{x:.0f}")
+        display_df['median_mfe'] = display_df['median_mfe'].apply(lambda x: f"{x:.0f}")
+        display_df['avg_mae'] = display_df['avg_mae'].apply(lambda x: f"{x:.0f}")
+        display_df['optimal_be_trigger'] = display_df['optimal_be_trigger'].apply(lambda x: f"{x:.0f}")
+        display_df['current_be_trigger'] = display_df['current_be_trigger'].apply(lambda x: f"{x:.0f}")
+        display_df['priority'] = display_df['priority'].str.upper()
+        display_df['confidence'] = display_df['confidence'].str.upper()
+
+        # Rename columns for display
+        display_df.columns = ['Epic', 'Dir', 'Trades', 'Win%', 'Avg MFE', 'Med MFE', 'Avg MAE',
+                             'Optimal BE', 'Current BE', 'Action', 'Priority', 'Confidence', 'Diff']
+
+        # Reorder columns
+        display_df = display_df[['Epic', 'Dir', 'Trades', 'Win%', 'Avg MFE', 'Med MFE', 'Avg MAE',
+                                'Optimal BE', 'Current BE', 'Diff', 'Action', 'Priority', 'Confidence']]
+
+        # Style the dataframe
+        def highlight_priority(row):
+            if row['Priority'] == 'HIGH':
+                return ['background-color: rgba(255, 99, 71, 0.3)'] * len(row)
+            elif row['Priority'] == 'MEDIUM':
+                return ['background-color: rgba(255, 193, 7, 0.3)'] * len(row)
+            return [''] * len(row)
+
+        styled_df = display_df.style.apply(highlight_priority, axis=1)
+        st.dataframe(styled_df, use_container_width=True, height=400)
+
+        # Detailed expanders
+        st.subheader("🔎 Detailed Analysis")
+
+        for _, row in df.iterrows():
+            epic_display = row['epic'].replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            priority = row['priority']
+            priority_icon = "🔴" if priority == 'high' else "🟡" if priority == 'medium' else "🟢"
+
+            with st.expander(f"{priority_icon} {epic_display} - {row['direction']} ({int(row['trade_count'])} trades)"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**MFE Distribution (pips)**")
+                    st.markdown(f"- Average: **{row['avg_mfe']:.1f}**")
+                    st.markdown(f"- Median: **{row['median_mfe']:.1f}**")
+                    st.markdown(f"- 25th Percentile: **{row['percentile_25_mfe']:.1f}**")
+                    st.markdown(f"- 75th Percentile: **{row['percentile_75_mfe']:.1f}**")
+
+                    st.markdown("**MAE Distribution (pips)**")
+                    st.markdown(f"- Median: **{row['median_mae']:.1f}**")
+                    st.markdown(f"- 75th Percentile: **{row['percentile_75_mae']:.1f}**")
+
+                with col2:
+                    st.markdown("**Breakeven Analysis**")
+                    st.markdown(f"- Current Trigger: **{row['current_be_trigger']:.0f}** pips")
+                    st.markdown(f"- Optimal Trigger: **{row['optimal_be_trigger']:.1f}** pips")
+                    st.markdown(f"- Conservative: **{row['conservative_be_trigger']:.1f}** pips")
+
+                    diff = row['optimal_be_trigger'] - row['current_be_trigger']
+                    if abs(diff) > 1:
+                        direction = "⬇️ Lower by" if diff < 0 else "⬆️ Raise by"
+                        st.markdown(f"- Suggested Change: **{direction} {abs(diff):.0f} pips**")
+
+                    st.markdown(f"- Win Rate: **{row['win_rate']:.0f}%**")
+                    st.markdown(f"- Confidence: **{row['confidence'].upper()}**")
+
+                # Efficiency metrics
+                st.markdown("**Efficiency Metrics**")
+                metric_col1, metric_col2, metric_col3 = st.columns(3)
+                with metric_col1:
+                    st.metric("BE Reach Rate", f"{row['be_reach_rate']:.0f}%")
+                with metric_col2:
+                    st.metric("BE Protection Rate", f"{row['be_protection_rate']:.0f}%")
+                with metric_col3:
+                    st.metric("BE Profit Rate", f"{row['be_profit_rate']:.0f}%")
+
+                # Analysis notes
+                if row.get('analysis_notes'):
+                    st.info(f"💡 {row['analysis_notes']}")
+
+        # Export option
+        st.markdown("---")
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            csv = display_df.to_csv(index=False)
+            st.download_button(
+                "📥 Export CSV",
+                csv,
+                "breakeven_analysis.csv",
+                "text/csv"
+            )
+
     def run(self):
         """Main application entry point"""
         # App header
@@ -5396,10 +5712,11 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
         st.markdown("*Unified dashboard for comprehensive trading analysis*")
 
         # Tab navigation
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
             "📊 Overview", "🎯 Strategy Analysis", "💰 Trade Performance",
             "🧠 Market Intelligence", "🔍 Trade Analysis", "🔧 Settings & Debug",
-            "📋 Alert History", "🚫 SMC Rejections", "🔄 EMA Rejections", "⏳ Unfilled Orders"
+            "📋 Alert History", "🚫 SMC Rejections", "🔄 EMA Rejections", "⏳ Unfilled Orders",
+            "📈 Breakeven Optimizer"
         ])
 
         with tab1:
@@ -5431,6 +5748,9 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
 
         with tab10:
             self.render_unfilled_orders_tab()
+
+        with tab11:
+            self.render_breakeven_optimizer_tab()
 
         # Footer
         st.markdown("---")

@@ -167,6 +167,7 @@ services:
       - ./streamlit:/app:cached
       - ./logs:/logs:ro  # Read-only for safety
       - ./worker/app/claude_analysis_enhanced:/app/claude_analysis_enhanced:ro  # Vision analysis charts
+      - ./worker/app/forex_scanner:/app/forex_scanner:ro  # Config files for breakeven analyzer
     working_dir: /app
     networks:
       - lab-net
