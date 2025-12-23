@@ -288,12 +288,77 @@ ADX_PAIR_MULTIPLIERS = {
     'USDJPY': 1.1,     # USD/JPY - requires stronger trends
     'EURJPY': 0.85,    # EUR/JPY - cross pairs trend more aggressively
     'GBPJPY': 0.8,     # GBP/JPY - very volatile cross
-    'USDCHF': 1.2,     # USD/CHF - safe haven, requires clearer trends
+    'USDCHF': 1.0,     # USD/CHF - reduced from 1.2 (was too restrictive, blocking valid trades)
     'DEFAULT': 1.0     # Default multiplier for other pairs
 }
 
 # Grace period: Allow signals during temporary ADX dips if recent trend was strong
 ADX_GRACE_PERIOD_BARS = 2  # Allow 2 bars of weak ADX if previous trend was strong
+
+# =============================================================================
+# USDCHF PAIR-SPECIFIC OPTIMIZATION (v2.6.0 - 2025-12-23)
+# =============================================================================
+# Analysis Results:
+# - Win rate: 40.7% (37 wins / 52 losses)
+# - Total P&L: -4,917 SEK
+# - Root cause: Stops too tight (9-13 pips), wrong trading hours, poor R:R
+# - 100% loss rate during 8-11 UTC (Asian close/London open transition)
+# - 83% loss rate at 17 UTC
+# - Best performance: 1, 4, 13-15 UTC (US session)
+
+# USDCHF Blocked Trading Hours (UTC) - 100% loss rate during these hours
+USDCHF_BLOCKED_HOURS_UTC = [7, 8, 9, 10, 11, 17]  # Asian close / London open overlap
+
+# USDCHF Preferred Trading Hours (UTC) - Best historical performance
+USDCHF_PREFERRED_HOURS_UTC = [1, 4, 13, 14, 15, 22]  # US session focus
+
+# USDCHF Minimum Stop Loss (pips) - Prevent stops that are too tight
+# Analysis showed 57% of losses from 8-13 pip stops (noise stopouts)
+USDCHF_MIN_STOP_LOSS_PIPS = 18  # Minimum 18 pips for USDCHF
+
+# USDCHF Stop Loss Buffer (additional pips added to calculated SL)
+USDCHF_SL_BUFFER_PIPS = 5  # Extra buffer for CHF volatility
+
+# Enable/disable USDCHF-specific filters
+ENABLE_USDCHF_HOUR_FILTER = True  # Block trading during bad hours
+ENABLE_USDCHF_MIN_SL_FILTER = True  # Enforce minimum stop loss
+
+# Pair-specific settings dictionary (extensible for other pairs)
+PAIR_SPECIFIC_SETTINGS = {
+    'USDCHF': {
+        'blocked_hours_utc': USDCHF_BLOCKED_HOURS_UTC,
+        'preferred_hours_utc': USDCHF_PREFERRED_HOURS_UTC,
+        'min_stop_loss_pips': USDCHF_MIN_STOP_LOSS_PIPS,
+        'sl_buffer_pips': USDCHF_SL_BUFFER_PIPS,
+        'enable_hour_filter': ENABLE_USDCHF_HOUR_FILTER,
+        'enable_min_sl_filter': ENABLE_USDCHF_MIN_SL_FILTER,
+    },
+    # Add other pair-specific settings here as needed
+}
+
+def get_pair_settings(pair: str) -> dict:
+    """Get pair-specific settings, returns empty dict if none defined."""
+    # Normalize pair name (handle both 'USDCHF' and 'CS.D.USDCHF.MINI.IP' formats)
+    pair_clean = pair.upper()
+    for known_pair in PAIR_SPECIFIC_SETTINGS:
+        if known_pair in pair_clean:
+            return PAIR_SPECIFIC_SETTINGS[known_pair]
+    return {}
+
+def is_pair_hour_blocked(pair: str, hour_utc: int) -> bool:
+    """Check if trading is blocked for a pair at given UTC hour."""
+    settings = get_pair_settings(pair)
+    if not settings.get('enable_hour_filter', False):
+        return False
+    blocked_hours = settings.get('blocked_hours_utc', [])
+    return hour_utc in blocked_hours
+
+def get_pair_min_stop_loss(pair: str) -> float:
+    """Get minimum stop loss for a pair, returns 0 if no minimum defined."""
+    settings = get_pair_settings(pair)
+    if not settings.get('enable_min_sl_filter', False):
+        return 0.0
+    return settings.get('min_stop_loss_pips', 0.0)
 
 # ==============================================
 # DATA QUALITY AND INTEGRITY SETTINGS

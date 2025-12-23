@@ -78,15 +78,18 @@ PAIR_TRAILING_CONFIGS = {
     },
 
     'CS.D.USDCHF.MINI.IP': {
-        'stage1_trigger_points': 28,      # v2.5.0: 28 (was 20) - let trade develop more
-        'stage1_lock_points': 12,         # v2.5.0: 12 (was 6) - lock more profit
-        'stage2_trigger_points': 38,      # v2.5.0: 38 (was 28) - closer to TP target
-        'stage2_lock_points': 25,         # v2.5.0: 25 (was 18) - protect 60%+ of target
-        'stage3_trigger_points': 45,      # v2.5.0: 45 (was 32) - let trade run
-        'stage3_atr_multiplier': 0.8,     # ATR trailing multiplier
-        'stage3_min_distance': 2,         # Minimum trail distance
-        'min_trail_distance': 15,         # Overall minimum distance
-        'break_even_trigger_points': 25,  # v2.5.0: 25 (was 18) - more breathing room
+        # v2.6.0 USDCHF OPTIMIZATION (2025-12-23):
+        # Analysis: 40.7% win rate, -4,917 SEK loss, stops too tight (9-13 pips getting hit by noise)
+        # Solution: Increase all triggers by 25% to let trades develop, wider stops for CHF volatility
+        'stage1_trigger_points': 35,      # v2.6.0: 35 (was 28) - CHF needs more room to develop
+        'stage1_lock_points': 15,         # v2.6.0: 15 (was 12) - lock more profit when triggered
+        'stage2_trigger_points': 48,      # v2.6.0: 48 (was 38) - closer to TP target
+        'stage2_lock_points': 32,         # v2.6.0: 32 (was 25) - protect 65%+ of target
+        'stage3_trigger_points': 56,      # v2.6.0: 56 (was 45) - let winners run longer
+        'stage3_atr_multiplier': 0.9,     # v2.6.0: 0.9 (was 0.8) - wider ATR trailing for CHF
+        'stage3_min_distance': 4,         # v2.6.0: 4 (was 2) - more breathing room
+        'min_trail_distance': 18,         # v2.6.0: 18 (was 15) - prevent noise stopouts
+        'break_even_trigger_points': 32,  # v2.6.0: 32 (was 25) - CHF is choppy, needs room
     },
 
     # ========== GBP PAIRS - High Volatility ==========

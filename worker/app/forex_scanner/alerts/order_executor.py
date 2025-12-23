@@ -282,6 +282,9 @@ class OrderExecutor:
             else:
                 self.logger.debug(f"📋 Using strategy-provided stop_distance: {stop_distance} pips")
 
+            # v2.6.0: Apply pair-specific minimum stop loss (USDCHF optimization)
+            stop_distance = self._apply_pair_stop_loss_minimum(internal_epic, stop_distance)
+
             # If limit_distance not provided, try to calculate from price levels
             if limit_distance is None:
                 entry_price = signal.get('entry_price', signal.get('price'))
@@ -1251,7 +1254,7 @@ class OrderExecutor:
         """
         if not self.enabled:
             return False
-        
+
         # Check minimum confidence
         confidence = signal.get('confidence_score', 0)
         min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
@@ -1259,11 +1262,46 @@ class OrderExecutor:
         if confidence < min_confidence:
             self.logger.info(f"📊 Signal confidence {confidence:.1%} below threshold {min_confidence:.1%}")
             return False
-        
+
+        # ========== USDCHF PAIR-SPECIFIC FILTERS (v2.6.0) ==========
+        epic = signal.get('epic', '')
+
+        # Check pair-specific blocked hours
+        if hasattr(config, 'is_pair_hour_blocked'):
+            from datetime import datetime, timezone
+            current_hour_utc = datetime.now(timezone.utc).hour
+            if config.is_pair_hour_blocked(epic, current_hour_utc):
+                pair_settings = config.get_pair_settings(epic) if hasattr(config, 'get_pair_settings') else {}
+                blocked_hours = pair_settings.get('blocked_hours_utc', [])
+                self.logger.warning(f"🚫 BLOCKED: {epic} trading blocked at {current_hour_utc}:00 UTC (blocked hours: {blocked_hours})")
+                return False
+
         # Add more risk management rules here:
         # - Check if market is open
         # - Check daily/weekly loss limits
         # - Check maximum positions
         # - Check news events
-        
+
         return True
+
+    def _apply_pair_stop_loss_minimum(self, epic: str, stop_distance: int) -> int:
+        """
+        Apply pair-specific minimum stop loss (v2.6.0 - USDCHF optimization)
+
+        Args:
+            epic: Trading epic (internal or external format)
+            stop_distance: Calculated stop distance in pips
+
+        Returns:
+            Adjusted stop distance (at least the minimum for the pair)
+        """
+        if not hasattr(config, 'get_pair_min_stop_loss'):
+            return stop_distance
+
+        min_sl = config.get_pair_min_stop_loss(epic)
+
+        if min_sl > 0 and stop_distance < min_sl:
+            self.logger.info(f"📏 USDCHF SL FLOOR: Adjusting stop from {stop_distance} to {int(min_sl)} pips (minimum for pair)")
+            return int(min_sl)
+
+        return stop_distance
