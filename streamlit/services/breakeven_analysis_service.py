@@ -761,6 +761,12 @@ class BreakevenAnalysisService:
 
         # Get unique epic/direction combinations
         for epic in trades['symbol'].unique():
+            # Skip CEEM epics - their trade data uses scaled pricing (11633 vs 1.1633)
+            # which doesn't match candle data and produces invalid MFE/MAE values
+            if 'CEEM' in epic.upper():
+                logger.info(f"Skipping {epic} (CEEM scaled pricing not supported)")
+                continue
+
             for direction in ['BUY', 'SELL']:
                 logger.info(f"Analyzing {epic} {direction}...")
                 analysis = self.analyze_epic_direction(trades, epic, direction)
