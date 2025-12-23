@@ -5711,46 +5711,62 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
         st.title("📊 Trading Analytics Hub")
         st.markdown("*Unified dashboard for comprehensive trading analysis*")
 
-        # Tab navigation
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
-            "📊 Overview", "🎯 Strategy Analysis", "💰 Trade Performance",
-            "🧠 Market Intelligence", "🔍 Trade Analysis", "🔧 Settings & Debug",
-            "📋 Alert History", "🚫 SMC Rejections", "🔄 EMA Rejections", "⏳ Unfilled Orders",
-            "📈 Breakeven Optimizer"
+        # Tab navigation - Grouped into 5 main categories with sub-tabs
+        tab_overview, tab_analysis, tab_performance, tab_rejections, tab_settings = st.tabs([
+            "📊 Overview",
+            "📈 Analysis",
+            "💰 Performance",
+            "🚫 Rejections",
+            "⚙️ Settings"
         ])
 
-        with tab1:
+        with tab_overview:
             self.render_overview_tab()
 
-        with tab2:
-            self.render_strategy_analysis_tab()
+        with tab_analysis:
+            # Sub-tabs for analysis features
+            analysis_tabs = st.tabs([
+                "🎯 Strategy",
+                "🔍 Trade Analysis",
+                "🧠 Market Intelligence",
+                "📈 Breakeven Optimizer"
+            ])
+            with analysis_tabs[0]:
+                self.render_strategy_analysis_tab()
+            with analysis_tabs[1]:
+                self.render_trade_analysis_tab()
+            with analysis_tabs[2]:
+                self.render_market_intelligence_tab()
+            with analysis_tabs[3]:
+                self.render_breakeven_optimizer_tab()
 
-        with tab3:
-            self.render_trade_performance_tab()
+        with tab_performance:
+            # Sub-tabs for performance tracking
+            perf_tabs = st.tabs([
+                "💰 Trade Performance",
+                "📋 Alert History"
+            ])
+            with perf_tabs[0]:
+                self.render_trade_performance_tab()
+            with perf_tabs[1]:
+                self.render_alert_history_tab()
 
-        with tab4:
-            self.render_market_intelligence_tab()
+        with tab_rejections:
+            # Sub-tabs for rejection analysis
+            rejection_tabs = st.tabs([
+                "🚫 SMC Rejections",
+                "🔄 EMA Rejections",
+                "⏳ Unfilled Orders"
+            ])
+            with rejection_tabs[0]:
+                self.render_smc_rejections_tab()
+            with rejection_tabs[1]:
+                self.render_ema_double_rejections_tab()
+            with rejection_tabs[2]:
+                self.render_unfilled_orders_tab()
 
-        with tab5:
-            self.render_trade_analysis_tab()
-
-        with tab6:
+        with tab_settings:
             self.render_settings_debug_tab()
-
-        with tab7:
-            self.render_alert_history_tab()
-
-        with tab8:
-            self.render_smc_rejections_tab()
-
-        with tab9:
-            self.render_ema_double_rejections_tab()
-
-        with tab10:
-            self.render_unfilled_orders_tab()
-
-        with tab11:
-            self.render_breakeven_optimizer_tab()
 
         # Footer
         st.markdown("---")
