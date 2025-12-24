@@ -195,7 +195,8 @@ class SMCSimpleStrategy:
         self.block_asian = getattr(smc_config, 'BLOCK_ASIAN_SESSION', True)
 
         # Signal Limits
-        self.max_signals_per_pair = getattr(smc_config, 'MAX_SIGNALS_PER_PAIR_PER_DAY', 1)
+        # NOTE: MAX_SIGNALS_PER_PAIR_PER_DAY removed in v3.0.0 - was never enforced
+        # Adaptive cooldown now manages signal frequency dynamically
         self.cooldown_hours = getattr(smc_config, 'SIGNAL_COOLDOWN_HOURS', 4)
 
         # v3.0.0: Adaptive Cooldown Configuration

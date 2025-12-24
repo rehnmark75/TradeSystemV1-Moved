@@ -255,9 +255,11 @@ BLOCK_ASIAN_SESSION = True               # Block 21:00-07:00 UTC
 # SIGNAL LIMITS
 # ============================================================================
 
-MAX_SIGNALS_PER_PAIR_PER_DAY = 1         # Maximum 1 signal per pair per day
+# DEPRECATED in v3.0.0: MAX_SIGNALS_PER_PAIR_PER_DAY was never enforced in code
+# Signal frequency is now managed by the adaptive cooldown system below
+
 MAX_CONCURRENT_SIGNALS = 3               # Maximum concurrent open signals
-SIGNAL_COOLDOWN_HOURS = 3                # v2.3.0: REDUCED from 4 - allow more opportunities in active markets
+SIGNAL_COOLDOWN_HOURS = 3                # Fallback when ADAPTIVE_COOLDOWN_ENABLED=False
 
 # ============================================================================
 # v3.0.0: ADAPTIVE COOLDOWN SYSTEM
