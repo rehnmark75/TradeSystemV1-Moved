@@ -391,6 +391,41 @@ class UnifiedTradingDashboard:
         finally:
             conn.close()
 
+    def fetch_filled_trades_for_analysis(self, limit: int = 100) -> pd.DataFrame:
+        """Fetch only filled trades (closed or tracking) for analysis - excludes unfilled limit orders"""
+        conn = self.get_database_connection()
+        if not conn:
+            return pd.DataFrame()
+
+        try:
+            # Only fetch trades that were actually filled (closed or currently tracking)
+            # Exclude: pending, pending_limit, limit_not_filled, limit_rejected, limit_cancelled
+            query = """
+                SELECT
+                    id, symbol, direction, timestamp, status,
+                    profit_loss, pnl_currency
+                FROM trade_log
+                WHERE status IN ('closed', 'tracking')
+                ORDER BY timestamp DESC
+                LIMIT %s
+            """
+            df = pd.read_sql_query(query, conn, params=[limit])
+
+            if not df.empty:
+                # Create display-friendly columns
+                df['symbol_short'] = df['symbol'].str.replace('CS.D.', '').str.replace('.MINI.IP', '').str.replace('.CEEM.IP', '')
+                df['pnl_display'] = df.apply(
+                    lambda row: f"{row['profit_loss']:+.2f} {row['pnl_currency']}" if pd.notna(row['profit_loss']) else "Open",
+                    axis=1
+                )
+
+            return df
+        except Exception as e:
+            logging.warning(f"Error fetching filled trades for analysis: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
+
     def render_overview_tab(self):
         """Render the overview tab with key metrics and charts"""
         st.header("📊 Trading Overview")
@@ -1723,14 +1758,30 @@ class UnifiedTradingDashboard:
         st.header("🔍 Individual Trade Analysis")
         st.markdown("*Comprehensive analysis of trade execution and entry signals*")
 
-        # Get latest closed trade ID as default
-        default_trade_id = self.fetch_latest_closed_trade_id()
+        # Fetch only filled trades (closed or tracking) - exclude unfilled limit orders
+        filled_trades = self.fetch_filled_trades_for_analysis()
 
-        # Input for trade ID (shared between sub-tabs)
+        if filled_trades.empty:
+            st.warning("No filled trades found for analysis.")
+            return
+
+        # Create trade selection options
+        trade_options = {
+            f"#{row['id']} | {row['symbol_short']} | {row['direction']} | {row['timestamp'].strftime('%Y-%m-%d %H:%M')} | {row['pnl_display']}": row['id']
+            for _, row in filled_trades.iterrows()
+        }
+
+        # Input for trade selection (shared between sub-tabs)
         col1, col2 = st.columns([3, 1])
 
         with col1:
-            trade_id = st.number_input("Enter Trade ID", min_value=1, value=default_trade_id, step=1, key="trade_id_input")
+            selected_trade = st.selectbox(
+                "Select Trade to Analyze",
+                options=list(trade_options.keys()),
+                key="trade_select_input",
+                help="Only showing filled trades (closed or currently open)"
+            )
+            trade_id = trade_options[selected_trade]
 
         with col2:
             analyze_btn = st.button("🔍 Analyze Trade", type="primary")
@@ -5605,7 +5656,7 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
         # Stop-Loss recommendations table
         st.subheader("🛑 Stop-Loss Recommendations")
         sl_cols = ['Epic', 'Dir', 'Trades', 'Win%', 'Avg MAE', 'P95 MAE',
-                   'Optimal SL', 'Current SL', 'SL Diff', 'SL Action', 'SL Priority']
+                   'Optimal SL', 'Config SL', 'Actual SL', 'SL Diff', 'SL Action', 'SL Priority']
         sl_df = df[sl_cols].copy()
 
         def highlight_sl_priority(row):
@@ -5707,6 +5758,30 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
     def _display_breakeven_results_from_cache(self, df):
         """Display breakeven analysis results from cached DataFrame."""
         import numpy as np
+        import importlib
+
+        # Re-read current BE config to get latest values (not cached values)
+        try:
+            import trailing_config
+            importlib.reload(trailing_config)
+            current_config = trailing_config.PAIR_TRAILING_CONFIGS
+        except ImportError:
+            current_config = {}
+
+        # Update current_be_trigger from live config instead of cached values
+        def get_current_be_from_config(epic):
+            """Get current BE trigger from live config."""
+            config = current_config.get(epic, {})
+            if config:
+                return config.get('break_even_trigger_points', 25)
+            # Try partial match
+            for key, cfg in current_config.items():
+                if epic in key or key in epic:
+                    return cfg.get('break_even_trigger_points', 25)
+            return 25  # Default
+
+        df = df.copy()
+        df['current_be_trigger'] = df['epic'].apply(get_current_be_from_config)
 
         # Summary statistics
         st.subheader("📊 Summary Statistics")

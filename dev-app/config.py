@@ -164,8 +164,8 @@ PARTIAL_CLOSE_SIZE = 0.5  # Size to close (0.5 = 50% of position)
 # Time-based protection settings (NEW in v2.9.0)
 TIME_BASED_PROTECTION = {
     'enabled': True,
-    'min_profit_pips': 5,              # Minimum profit to trigger time-based protection
-    'time_threshold_minutes': 30,       # After 30 mins in profit, protect the trade
+    'min_profit_pips': 10,             # v2.9.1: Raised 5→10 pips to let trades develop more
+    'time_threshold_minutes': 60,       # v2.9.1: Raised 30→60 mins (4 candles on 15m TF)
     'protection_buffer_pips': 2,        # Move SL to entry + 2 pips
 }
 

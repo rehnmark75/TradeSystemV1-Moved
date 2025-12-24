@@ -129,16 +129,20 @@ class BreakevenAnalysisService:
         Source of truth: dev-app/config.py (fastapi-dev container)
         This is mounted as /app/trailing_config.py in the streamlit container.
         """
+        import importlib
         try:
             # Primary: Load from fastapi-dev config (source of truth for trailing stops)
+            # Force reload to pick up any config changes without container restart
             import trailing_config
+            importlib.reload(trailing_config)
             return trailing_config.PAIR_TRAILING_CONFIGS
         except ImportError:
             logger.warning("Could not load trailing_config.py, trying forex_scanner fallback")
             try:
                 # Fallback: forex_scanner config (for backwards compatibility)
-                from forex_scanner.config_trailing_stops import PAIR_TRAILING_CONFIGS
-                return PAIR_TRAILING_CONFIGS
+                from forex_scanner import config_trailing_stops
+                importlib.reload(config_trailing_stops)
+                return config_trailing_stops.PAIR_TRAILING_CONFIGS
             except ImportError:
                 logger.warning("Could not load any trailing stop config, using defaults")
                 return {}
