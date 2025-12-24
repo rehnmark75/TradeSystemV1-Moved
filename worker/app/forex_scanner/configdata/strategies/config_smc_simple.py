@@ -260,6 +260,47 @@ MAX_CONCURRENT_SIGNALS = 3               # Maximum concurrent open signals
 SIGNAL_COOLDOWN_HOURS = 3                # v2.3.0: REDUCED from 4 - allow more opportunities in active markets
 
 # ============================================================================
+# v3.0.0: ADAPTIVE COOLDOWN SYSTEM
+# ============================================================================
+# Dynamic cooldown based on trade outcomes, win rates, and market context.
+# Replaces static cooldown with intelligent, context-aware timing.
+
+ADAPTIVE_COOLDOWN_ENABLED = True         # Enable adaptive cooldown (False = use static SIGNAL_COOLDOWN_HOURS)
+
+# Base cooldown (starting point before adjustments)
+BASE_COOLDOWN_HOURS = 2.0                # Base cooldown before adjustments
+
+# Trade outcome multipliers
+COOLDOWN_AFTER_WIN_MULTIPLIER = 0.5      # Reduce cooldown by 50% after a winning trade
+COOLDOWN_AFTER_LOSS_MULTIPLIER = 1.5     # Increase cooldown by 50% after a losing trade
+
+# Consecutive loss handling
+CONSECUTIVE_LOSS_PENALTY_HOURS = 1.0     # Add 1 hour per consecutive loss on same pair
+MAX_CONSECUTIVE_LOSSES_BEFORE_BLOCK = 3  # Block pair entirely after 3 consecutive losses
+CONSECUTIVE_LOSS_BLOCK_HOURS = 8.0       # Block duration after max consecutive losses
+
+# Win rate-based adjustments (rolling window of recent trades)
+WIN_RATE_LOOKBACK_TRADES = 20            # Number of trades to calculate rolling win rate
+HIGH_WIN_RATE_THRESHOLD = 0.60           # 60%+ win rate = high performer
+LOW_WIN_RATE_THRESHOLD = 0.40            # Below 40% = poor performer
+CRITICAL_WIN_RATE_THRESHOLD = 0.30       # Below 30% = consider blocking
+
+HIGH_WIN_RATE_COOLDOWN_REDUCTION = 0.25  # Reduce cooldown by 25% for high win rate pairs
+LOW_WIN_RATE_COOLDOWN_INCREASE = 0.50    # Increase cooldown by 50% for low win rate pairs
+
+# Market context adjustments
+HIGH_VOLATILITY_ATR_MULTIPLIER = 1.5     # ATR > 1.5x 20-period average = high volatility
+VOLATILITY_COOLDOWN_ADJUSTMENT = 0.30    # +30% cooldown during high volatility
+STRONG_TREND_COOLDOWN_REDUCTION = 0.30   # -30% cooldown when strong EMA trend alignment
+
+# Session-based adjustments
+SESSION_CHANGE_RESET_COOLDOWN = True     # Reset cooldown on session change (london→new_york)
+
+# Absolute bounds (safety limits)
+MIN_COOLDOWN_HOURS = 1.0                 # Never less than 1 hour
+MAX_COOLDOWN_HOURS = 12.0                # Never more than 12 hours
+
+# ============================================================================
 # PAIR CONFIGURATION
 # ============================================================================
 

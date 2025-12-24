@@ -114,6 +114,11 @@ class SMCSimpleStrategy:
         self.recent_signals = {}  # {pair: [(timestamp, price), ...]}
         self.pending_entries = {}  # {pair: pending_entry_data}
 
+        # v3.0.0: Adaptive cooldown state tracking
+        self.pair_consecutive_losses = {}  # {pair: int} - consecutive loss count
+        self.pair_last_session = {}  # {pair: session_name} - track session changes
+        self._trade_outcome_cache = {}  # {pair: {'outcome': dict, 'cached_at': datetime}}
+
         # Rejection tracking (v2.2.0) - initialized after config is loaded
         self.rejection_manager = None
         if self._db_manager is not None and self.rejection_tracking_enabled:
@@ -192,6 +197,27 @@ class SMCSimpleStrategy:
         # Signal Limits
         self.max_signals_per_pair = getattr(smc_config, 'MAX_SIGNALS_PER_PAIR_PER_DAY', 1)
         self.cooldown_hours = getattr(smc_config, 'SIGNAL_COOLDOWN_HOURS', 4)
+
+        # v3.0.0: Adaptive Cooldown Configuration
+        self.adaptive_cooldown_enabled = getattr(smc_config, 'ADAPTIVE_COOLDOWN_ENABLED', False)
+        self.base_cooldown_hours = getattr(smc_config, 'BASE_COOLDOWN_HOURS', 2.0)
+        self.cooldown_after_win_multiplier = getattr(smc_config, 'COOLDOWN_AFTER_WIN_MULTIPLIER', 0.5)
+        self.cooldown_after_loss_multiplier = getattr(smc_config, 'COOLDOWN_AFTER_LOSS_MULTIPLIER', 1.5)
+        self.consecutive_loss_penalty_hours = getattr(smc_config, 'CONSECUTIVE_LOSS_PENALTY_HOURS', 1.0)
+        self.max_consecutive_losses_before_block = getattr(smc_config, 'MAX_CONSECUTIVE_LOSSES_BEFORE_BLOCK', 3)
+        self.consecutive_loss_block_hours = getattr(smc_config, 'CONSECUTIVE_LOSS_BLOCK_HOURS', 8.0)
+        self.win_rate_lookback_trades = getattr(smc_config, 'WIN_RATE_LOOKBACK_TRADES', 20)
+        self.high_win_rate_threshold = getattr(smc_config, 'HIGH_WIN_RATE_THRESHOLD', 0.60)
+        self.low_win_rate_threshold = getattr(smc_config, 'LOW_WIN_RATE_THRESHOLD', 0.40)
+        self.critical_win_rate_threshold = getattr(smc_config, 'CRITICAL_WIN_RATE_THRESHOLD', 0.30)
+        self.high_win_rate_cooldown_reduction = getattr(smc_config, 'HIGH_WIN_RATE_COOLDOWN_REDUCTION', 0.25)
+        self.low_win_rate_cooldown_increase = getattr(smc_config, 'LOW_WIN_RATE_COOLDOWN_INCREASE', 0.50)
+        self.high_volatility_atr_multiplier = getattr(smc_config, 'HIGH_VOLATILITY_ATR_MULTIPLIER', 1.5)
+        self.volatility_cooldown_adjustment = getattr(smc_config, 'VOLATILITY_COOLDOWN_ADJUSTMENT', 0.30)
+        self.strong_trend_cooldown_reduction = getattr(smc_config, 'STRONG_TREND_COOLDOWN_REDUCTION', 0.30)
+        self.session_change_reset_cooldown = getattr(smc_config, 'SESSION_CHANGE_RESET_COOLDOWN', True)
+        self.min_cooldown_hours = getattr(smc_config, 'MIN_COOLDOWN_HOURS', 1.0)
+        self.max_cooldown_hours = getattr(smc_config, 'MAX_COOLDOWN_HOURS', 12.0)
 
         # Confidence thresholds
         self.min_confidence = getattr(smc_config, 'MIN_CONFIDENCE_THRESHOLD', 0.50)
@@ -1720,34 +1746,285 @@ class SMCSimpleStrategy:
             return False, f"Outside trading hours (hour={hour})"
 
     def _check_cooldown(self, pair: str, current_time: datetime = None) -> Tuple[bool, str]:
-        """Check if pair is in cooldown period
+        """Check if pair is in cooldown period using adaptive or static logic
+
+        v3.0.0: Now uses adaptive cooldown based on trade outcomes, win rates,
+        and market context when ADAPTIVE_COOLDOWN_ENABLED is True.
 
         Args:
             pair: Currency pair name
             current_time: Current candle timestamp (for backtest mode). If None, uses datetime.now()
         """
-        if pair not in self.pair_cooldowns:
-            return True, "No cooldown"
-
-        last_signal = self.pair_cooldowns[pair]
         # Use provided time for backtest, or real time for live trading
         check_time = current_time if current_time is not None else datetime.now()
+
+        # No previous signal = no cooldown
+        if pair not in self.pair_cooldowns:
+            return True, "No cooldown (first signal)"
+
+        last_signal = self.pair_cooldowns[pair]
 
         # Handle timezone-aware vs naive datetime comparison
         if hasattr(last_signal, 'tzinfo') and last_signal.tzinfo is not None:
             if hasattr(check_time, 'tzinfo') and check_time.tzinfo is None:
-                # last_signal is tz-aware, check_time is naive - make check_time naive too
                 last_signal = last_signal.replace(tzinfo=None)
         elif hasattr(check_time, 'tzinfo') and check_time.tzinfo is not None:
-            # check_time is tz-aware, last_signal is naive - make check_time naive
             check_time = check_time.replace(tzinfo=None)
 
         hours_since = (check_time - last_signal).total_seconds() / 3600
 
-        if hours_since < self.cooldown_hours:
-            return False, f"In cooldown ({hours_since:.1f}h < {self.cooldown_hours}h)"
+        # Calculate effective cooldown (adaptive or static)
+        if self.adaptive_cooldown_enabled:
+            effective_cooldown, cooldown_breakdown = self._calculate_adaptive_cooldown(pair, check_time)
+            cooldown_type = "adaptive"
+        else:
+            effective_cooldown = self.cooldown_hours
+            cooldown_breakdown = "static"
+            cooldown_type = "static"
 
-        return True, f"Cooldown expired ({hours_since:.1f}h)"
+        if hours_since < effective_cooldown:
+            return False, f"In {cooldown_type} cooldown ({hours_since:.1f}h < {effective_cooldown:.1f}h) [{cooldown_breakdown}]"
+
+        return True, f"Cooldown expired ({hours_since:.1f}h >= {effective_cooldown:.1f}h {cooldown_type})"
+
+    def _calculate_adaptive_cooldown(self, pair: str, current_time: datetime) -> Tuple[float, str]:
+        """Calculate dynamic cooldown based on trade outcomes and market context
+
+        v3.0.0: Implements intelligent cooldown that adapts to:
+        - Last trade outcome (win/loss)
+        - Consecutive losses on pair
+        - Rolling win rate
+        - Session changes
+
+        Args:
+            pair: Currency pair name (e.g., 'EURUSD')
+            current_time: Current timestamp for calculations
+
+        Returns:
+            Tuple of (cooldown_hours, breakdown_string)
+        """
+        breakdown_parts = []
+        cooldown = self.base_cooldown_hours
+        breakdown_parts.append(f"base={cooldown:.1f}h")
+
+        # Get the epic for database queries (pair might be 'EURUSD', need 'CS.D.EURUSD.CEEM.IP')
+        epic = self._get_epic_for_pair(pair)
+
+        # 1. Check consecutive losses - if blocked, return early
+        consecutive_losses = self.pair_consecutive_losses.get(pair, 0)
+        if consecutive_losses >= self.max_consecutive_losses_before_block:
+            return self.consecutive_loss_block_hours, f"BLOCKED ({consecutive_losses} consecutive losses)"
+
+        # 2. Last trade outcome adjustment
+        last_outcome = self._get_last_trade_outcome(epic)
+        if last_outcome:
+            if last_outcome.get('profitable'):
+                cooldown *= self.cooldown_after_win_multiplier
+                breakdown_parts.append(f"win×{self.cooldown_after_win_multiplier}")
+            else:
+                cooldown *= self.cooldown_after_loss_multiplier
+                breakdown_parts.append(f"loss×{self.cooldown_after_loss_multiplier}")
+
+        # 3. Consecutive loss penalty (additive)
+        if consecutive_losses > 0:
+            penalty = consecutive_losses * self.consecutive_loss_penalty_hours
+            cooldown += penalty
+            breakdown_parts.append(f"+{penalty:.1f}h ({consecutive_losses} consec)")
+
+        # 4. Win rate adjustment
+        win_rate = self._get_pair_win_rate(epic)
+        if win_rate is not None:
+            if win_rate >= self.high_win_rate_threshold:
+                reduction = 1.0 - self.high_win_rate_cooldown_reduction
+                cooldown *= reduction
+                breakdown_parts.append(f"highWR({win_rate*100:.0f}%)×{reduction:.2f}")
+            elif win_rate < self.low_win_rate_threshold:
+                increase = 1.0 + self.low_win_rate_cooldown_increase
+                cooldown *= increase
+                breakdown_parts.append(f"lowWR({win_rate*100:.0f}%)×{increase:.2f}")
+
+        # 5. Session change check - reset if new session
+        if self.session_change_reset_cooldown:
+            current_session = self._get_current_session(current_time)
+            last_session = self.pair_last_session.get(pair)
+            if last_session and current_session != last_session:
+                # Session changed - reduce cooldown significantly
+                cooldown = min(cooldown, self.min_cooldown_hours)
+                breakdown_parts.append(f"session_change({last_session}→{current_session})")
+
+        # 6. Clamp to bounds
+        original_cooldown = cooldown
+        cooldown = max(self.min_cooldown_hours, min(self.max_cooldown_hours, cooldown))
+        if cooldown != original_cooldown:
+            breakdown_parts.append(f"clamped({original_cooldown:.1f}→{cooldown:.1f})")
+
+        return cooldown, " | ".join(breakdown_parts)
+
+    def _get_epic_for_pair(self, pair: str) -> str:
+        """Convert pair name to epic format for database queries
+
+        Args:
+            pair: Short pair name (e.g., 'EURUSD') or full epic
+
+        Returns:
+            Full epic code (e.g., 'CS.D.EURUSD.CEEM.IP')
+        """
+        # If already an epic, return as-is
+        if pair.startswith('CS.D.'):
+            return pair
+
+        # Map common pair names to epics
+        pair_to_epic = {
+            'EURUSD': 'CS.D.EURUSD.CEEM.IP',
+            'GBPUSD': 'CS.D.GBPUSD.MINI.IP',
+            'USDJPY': 'CS.D.USDJPY.MINI.IP',
+            'USDCHF': 'CS.D.USDCHF.MINI.IP',
+            'AUDUSD': 'CS.D.AUDUSD.MINI.IP',
+            'USDCAD': 'CS.D.USDCAD.MINI.IP',
+            'NZDUSD': 'CS.D.NZDUSD.MINI.IP',
+            'EURJPY': 'CS.D.EURJPY.MINI.IP',
+            'GBPJPY': 'CS.D.GBPJPY.MINI.IP',
+            'AUDJPY': 'CS.D.AUDJPY.MINI.IP',
+        }
+        return pair_to_epic.get(pair.upper(), f'CS.D.{pair.upper()}.MINI.IP')
+
+    def _get_last_trade_outcome(self, epic: str) -> Optional[Dict]:
+        """Query database for most recent closed trade on this pair
+
+        Args:
+            epic: IG Markets epic code
+
+        Returns:
+            Dict with 'profitable', 'pnl', 'closed_at' or None if no trades found
+        """
+        # Check cache first (avoid repeated DB queries within short period)
+        cache_key = epic
+        cache_entry = self._trade_outcome_cache.get(cache_key)
+        if cache_entry:
+            cache_age = (datetime.now() - cache_entry['cached_at']).total_seconds()
+            if cache_age < 300:  # 5 minute cache
+                return cache_entry['outcome']
+
+        # No db_manager = no database queries possible
+        if self._db_manager is None:
+            return None
+
+        try:
+            conn = self._db_manager.get_connection()
+            cursor = conn.cursor()
+
+            # Query for most recent closed trade on this symbol
+            query = """
+                SELECT
+                    symbol,
+                    profit_loss,
+                    (profit_loss > 0) as profitable,
+                    closed_at,
+                    pips_gained
+                FROM trade_log
+                WHERE symbol = %s
+                  AND status = 'closed'
+                  AND closed_at IS NOT NULL
+                ORDER BY closed_at DESC
+                LIMIT 1
+            """
+            cursor.execute(query, (epic,))
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if row:
+                outcome = {
+                    'symbol': row[0],
+                    'pnl': float(row[1]) if row[1] else 0.0,
+                    'profitable': bool(row[2]),
+                    'closed_at': row[3],
+                    'pips_gained': float(row[4]) if row[4] else 0.0
+                }
+                # Cache the result
+                self._trade_outcome_cache[cache_key] = {
+                    'outcome': outcome,
+                    'cached_at': datetime.now()
+                }
+                self.logger.debug(f"📊 Last trade outcome for {epic}: {'WIN' if outcome['profitable'] else 'LOSS'} ({outcome['pnl']:.2f})")
+                return outcome
+
+            return None
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to get last trade outcome for {epic}: {e}")
+            return None
+
+    def _get_pair_win_rate(self, epic: str) -> Optional[float]:
+        """Calculate rolling win rate for pair over last N trades
+
+        Args:
+            epic: IG Markets epic code
+
+        Returns:
+            Win rate as float (0.0 to 1.0) or None if insufficient data
+        """
+        if self._db_manager is None:
+            return None
+
+        try:
+            conn = self._db_manager.get_connection()
+            cursor = conn.cursor()
+
+            # Get last N closed trades for this symbol
+            query = """
+                SELECT
+                    COUNT(*) as total_trades,
+                    SUM(CASE WHEN profit_loss > 0 THEN 1 ELSE 0 END) as winning_trades
+                FROM (
+                    SELECT profit_loss
+                    FROM trade_log
+                    WHERE symbol = %s
+                      AND status = 'closed'
+                      AND closed_at IS NOT NULL
+                      AND profit_loss IS NOT NULL
+                    ORDER BY closed_at DESC
+                    LIMIT %s
+                ) recent_trades
+            """
+            cursor.execute(query, (epic, self.win_rate_lookback_trades))
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if row and row[0] and row[0] >= 5:  # Require at least 5 trades for meaningful win rate
+                total = int(row[0])
+                wins = int(row[1]) if row[1] else 0
+                win_rate = wins / total
+                self.logger.debug(f"📊 Win rate for {epic}: {win_rate*100:.1f}% ({wins}/{total})")
+                return win_rate
+
+            return None
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to get win rate for {epic}: {e}")
+            return None
+
+    def _get_current_session(self, current_time: datetime) -> str:
+        """Determine current trading session
+
+        Args:
+            current_time: Current timestamp
+
+        Returns:
+            Session name: 'asian', 'london', 'new_york', 'overlap'
+        """
+        hour = current_time.hour
+
+        # Session definitions (UTC)
+        if 21 <= hour or hour < 7:
+            return 'asian'
+        elif 7 <= hour < 12:
+            return 'london'
+        elif 12 <= hour < 16:
+            return 'overlap'  # London-NY overlap
+        else:
+            return 'new_york'
 
     def _update_cooldown(self, pair: str, signal_time: datetime = None):
         """Update cooldown after signal generation
@@ -1756,13 +2033,48 @@ class SMCSimpleStrategy:
             pair: Currency pair name
             signal_time: Signal timestamp (for backtest mode). If None, uses datetime.now()
         """
-        self.pair_cooldowns[pair] = signal_time if signal_time is not None else datetime.now()
+        effective_time = signal_time if signal_time is not None else datetime.now()
+        self.pair_cooldowns[pair] = effective_time
+
+        # Track current session for session change detection
+        if self.adaptive_cooldown_enabled:
+            self.pair_last_session[pair] = self._get_current_session(effective_time)
+
+    def update_trade_outcome(self, pair: str, profitable: bool):
+        """Update consecutive loss tracking after a trade closes
+
+        Call this method when a trade closes to update the adaptive cooldown state.
+
+        Args:
+            pair: Currency pair name
+            profitable: Whether the trade was profitable
+        """
+        if profitable:
+            # Reset consecutive losses on win
+            self.pair_consecutive_losses[pair] = 0
+            self.logger.info(f"🟢 {pair}: Consecutive losses reset after WIN")
+        else:
+            # Increment consecutive losses
+            current = self.pair_consecutive_losses.get(pair, 0)
+            self.pair_consecutive_losses[pair] = current + 1
+            self.logger.warning(f"🔴 {pair}: Consecutive losses now {current + 1}")
+
+            if self.pair_consecutive_losses[pair] >= self.max_consecutive_losses_before_block:
+                self.logger.error(f"⛔ {pair}: BLOCKED for {self.consecutive_loss_block_hours}h after {self.pair_consecutive_losses[pair]} consecutive losses")
+
+        # Clear outcome cache to force fresh query
+        epic = self._get_epic_for_pair(pair)
+        if epic in self._trade_outcome_cache:
+            del self._trade_outcome_cache[epic]
 
     def reset_cooldowns(self):
         """Reset all cooldowns - call this at the start of each backtest to ensure fresh state"""
         self.pair_cooldowns = {}
+        self.pair_consecutive_losses = {}
+        self.pair_last_session = {}
+        self._trade_outcome_cache = {}
         if self.logger:
-            self.logger.info("🔄 SMC Simple strategy cooldowns reset for new backtest")
+            self.logger.info("🔄 SMC Simple strategy cooldowns reset for new backtest (v3.0.0 adaptive state cleared)")
 
     def _build_description(
         self,
