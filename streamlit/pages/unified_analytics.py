@@ -144,12 +144,14 @@ class UnifiedTradingDashboard:
         try:
             with conn.cursor() as cursor:
                 # Base query with enhanced filtering
+                # Only count truly pending orders (pending, pending_limit)
+                # Exclude terminal states: limit_not_filled, limit_rejected, limit_cancelled
                 base_query = """
                 SELECT
                     COUNT(*) as total_trades,
                     COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as winning_trades,
                     COUNT(CASE WHEN profit_loss < 0 THEN 1 END) as losing_trades,
-                    COUNT(CASE WHEN profit_loss IS NULL OR status = 'pending' THEN 1 END) as pending_trades,
+                    COUNT(CASE WHEN status IN ('pending', 'pending_limit') THEN 1 END) as pending_trades,
                     COALESCE(SUM(profit_loss), 0) as total_profit_loss,
                     COALESCE(AVG(CASE WHEN profit_loss > 0 THEN profit_loss END), 0) as avg_profit,
                     COALESCE(AVG(CASE WHEN profit_loss < 0 THEN profit_loss END), 0) as avg_loss,
@@ -263,12 +265,54 @@ class UnifiedTradingDashboard:
 
             # Enhance DataFrame
             if not df.empty:
-                df['trade_result'] = df['profit_loss'].apply(
-                    lambda x: 'WIN' if pd.notna(x) and x > 0 else 'LOSS' if pd.notna(x) and x < 0 else 'PENDING'
-                )
-                df['profit_loss_formatted'] = df['profit_loss'].apply(
-                    lambda x: f"{x:.2f} {df.iloc[0]['pnl_currency']}" if pd.notna(x) else "Pending"
-                )
+                # Determine trade result based on status and profit_loss
+                # Only pending_limit and pending are truly "pending" orders
+                # limit_not_filled, limit_rejected, limit_cancelled are terminal states (not pending)
+                def get_trade_result(row):
+                    status = row.get('status', '')
+                    pnl = row.get('profit_loss')
+
+                    # Check P&L first for completed trades
+                    if pd.notna(pnl):
+                        return 'WIN' if pnl > 0 else 'LOSS' if pnl < 0 else 'BREAKEVEN'
+
+                    # For NULL P&L, check status to determine actual state
+                    if status in ('pending', 'pending_limit'):
+                        return 'PENDING'
+                    elif status == 'tracking':
+                        return 'OPEN'
+                    elif status == 'limit_not_filled':
+                        return 'EXPIRED'
+                    elif status == 'limit_rejected':
+                        return 'REJECTED'
+                    elif status == 'limit_cancelled':
+                        return 'CANCELLED'
+                    else:
+                        # Fallback for any other status with NULL P&L
+                        return 'PENDING'
+
+                df['trade_result'] = df.apply(get_trade_result, axis=1)
+
+                # Format P&L display based on trade result
+                def format_pnl(row):
+                    pnl = row.get('profit_loss')
+                    result = row.get('trade_result', '')
+                    currency = row.get('pnl_currency', '')
+
+                    if pd.notna(pnl):
+                        return f"{pnl:.2f} {currency}"
+                    elif result == 'OPEN':
+                        return "Open"
+                    elif result == 'EXPIRED':
+                        return "Not Filled"
+                    elif result == 'REJECTED':
+                        return "Rejected"
+                    elif result == 'CANCELLED':
+                        return "Cancelled"
+                    else:
+                        return "Pending"
+
+                df['profit_loss_formatted'] = df.apply(format_pnl, axis=1)
 
             return df
 
@@ -599,7 +643,7 @@ class UnifiedTradingDashboard:
         # Display metrics
         st.subheader("📊 Performance Metrics")
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
             pnl = metrics.get('total_pnl', 0)
@@ -621,10 +665,21 @@ class UnifiedTradingDashboard:
             """, unsafe_allow_html=True)
 
         with col3:
-            st.metric("Completed Trades", metrics.get('completed_trades', 0))
+            st.metric("Completed", metrics.get('completed_trades', 0))
 
         with col4:
-            st.metric("Pending Trades", metrics.get('pending_trades', 0))
+            # Show pending and open trades
+            pending = metrics.get('pending_trades', 0)
+            open_trades = metrics.get('open_trades', 0)
+            st.metric("Pending/Open", f"{pending}/{open_trades}",
+                     help="Pending limit orders / Currently open positions")
+
+        with col5:
+            # Show expired and rejected trades
+            expired = metrics.get('expired_trades', 0)
+            rejected = metrics.get('rejected_trades', 0)
+            st.metric("Expired/Rejected", f"{expired}/{rejected}",
+                     help="Unfilled limit orders / Rejected or cancelled orders")
 
         # Detailed trades table
         st.subheader("📋 Trade Details")
@@ -633,10 +688,17 @@ class UnifiedTradingDashboard:
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
+            # Get unique trade results from data, with sensible ordering
+            result_order = ['WIN', 'LOSS', 'BREAKEVEN', 'OPEN', 'PENDING', 'EXPIRED', 'REJECTED', 'CANCELLED']
+            available_results = trades_df['trade_result'].unique() if 'trade_result' in trades_df.columns else []
+            ordered_results = [r for r in result_order if r in available_results]
+            # Add any results not in our predefined order
+            ordered_results += [r for r in available_results if r not in result_order]
+
             result_filter = st.multiselect(
                 "Filter by Result",
-                options=['WIN', 'LOSS', 'PENDING'],
-                default=['WIN', 'LOSS', 'PENDING'],
+                options=ordered_results,
+                default=ordered_results,
                 key="result_filter"
             )
 
@@ -3382,12 +3444,29 @@ class UnifiedTradingDashboard:
         # Basic counts
         total_trades = len(df)
         trades_with_pnl = df[df['profit_loss'].notna()]
-        pending_trades = df[df['profit_loss'].isna()]
 
-        if trades_with_pnl.empty:
+        # Count truly pending trades (only pending_limit and pending statuses)
+        # Exclude limit_not_filled, limit_rejected, limit_cancelled as they are terminal states
+        pending_statuses = ('pending', 'pending_limit')
+        if 'status' in df.columns:
+            pending_trades = df[df['status'].isin(pending_statuses)]
+            open_trades = df[df['status'] == 'tracking']
+            expired_trades = df[df['status'] == 'limit_not_filled']
+            rejected_trades = df[df['status'].isin(['limit_rejected', 'limit_cancelled'])]
+        else:
+            # Fallback if status column not available
+            pending_trades = df[df['profit_loss'].isna()]
+            open_trades = pd.DataFrame()
+            expired_trades = pd.DataFrame()
+            rejected_trades = pd.DataFrame()
+
+        if trades_with_pnl.empty and pending_trades.empty and open_trades.empty:
             return {
                 'total_trades': total_trades,
                 'pending_trades': len(pending_trades),
+                'open_trades': len(open_trades),
+                'expired_trades': len(expired_trades),
+                'rejected_trades': len(rejected_trades),
                 'completed_trades': 0,
                 'has_data': False
             }
@@ -3403,6 +3482,9 @@ class UnifiedTradingDashboard:
             'total_trades': total_trades,
             'completed_trades': len(trades_with_pnl),
             'pending_trades': len(pending_trades),
+            'open_trades': len(open_trades),
+            'expired_trades': len(expired_trades),
+            'rejected_trades': len(rejected_trades),
             'winning_trades': len(winning_trades),
             'losing_trades': len(losing_trades),
             'total_pnl': total_pnl,

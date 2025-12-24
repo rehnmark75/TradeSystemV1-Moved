@@ -1542,6 +1542,124 @@ class EnhancedTradeProcessor:
                             f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
                             f"profit={profit_points}pts, trigger={break_even_trigger_points}pts")
 
+            # --- STEP 0: Early Break-Even (Risk Elimination) ---
+            # v2.8.0: Move SL to entry BEFORE partial close to eliminate risk first
+            early_be_trigger_points = trailing_config.get('early_breakeven_trigger_points', 10)
+            early_be_buffer_points = trailing_config.get('early_breakeven_buffer_points', 1)
+            is_profitable_for_early_be = profit_points >= early_be_trigger_points
+
+            # Check if early BE should trigger (before partial close)
+            if not getattr(trade, 'early_be_executed', False) and is_profitable_for_early_be:
+                self.logger.info(f"🛡️ [EARLY BE TRIGGER] Trade {trade.id}: "
+                            f"Profit {profit_points}pts >= early BE trigger {early_be_trigger_points}pts")
+
+                # Calculate early breakeven stop level (entry + small buffer)
+                if trade.direction.upper() == "BUY":
+                    early_be_stop = trade.entry_price + (early_be_buffer_points * point_value)
+                else:
+                    early_be_stop = trade.entry_price - (early_be_buffer_points * point_value)
+
+                # Check if this improves current stop (only move if beneficial)
+                current_stop = trade.sl_price or 0.0
+                should_move_early_be = False
+                if trade.direction.upper() == "BUY":
+                    should_move_early_be = early_be_stop > current_stop
+                else:
+                    should_move_early_be = early_be_stop < current_stop
+
+                if should_move_early_be:
+                    adjustment_distance = abs(early_be_stop - current_stop)
+                    adjustment_points = int(adjustment_distance / point_value)
+                    direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
+
+                    self.logger.info(f"🛡️ [EARLY BE] Trade {trade.id}: Moving SL to entry+{early_be_buffer_points}pts = {early_be_stop:.5f}")
+
+                    # Send stop adjustment
+                    success = self._send_stop_adjustment(
+                        trade, adjustment_points, direction_stop, 0,
+                        new_stop_level=early_be_stop
+                    )
+
+                    if isinstance(success, dict) and success.get("status") == "updated":
+                        trade.sl_price = early_be_stop
+                        trade.early_be_executed = True
+                        trade.early_be_time = datetime.utcnow()
+                        trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+
+                        try:
+                            db.commit()
+                            self.logger.info(f"✅ [EARLY BE SUCCESS] Trade {trade.id}: Risk eliminated, SL at {early_be_stop:.5f}")
+                        except Exception as commit_error:
+                            db.rollback()
+                            self.logger.error(f"❌ [EARLY BE COMMIT FAILED] Trade {trade.id}: {commit_error}")
+                            raise
+                else:
+                    # SL already better than early BE level
+                    self.logger.debug(f"📊 [EARLY BE SKIP] Trade {trade.id}: Current SL {current_stop:.5f} already better than early BE {early_be_stop:.5f}")
+                    trade.early_be_executed = True  # Mark as done to avoid re-checking
+
+            # --- STEP 0.5: Time-Based Protection (NEW v2.9.0) ---
+            # If trade has been in profit for X minutes, protect it even if pip triggers not met
+            from config import TIME_BASED_PROTECTION
+            time_protection = TIME_BASED_PROTECTION
+
+            if time_protection.get('enabled', True) and not getattr(trade, 'time_protection_executed', False):
+                min_profit_for_time = time_protection.get('min_profit_pips', 5)
+                time_threshold_mins = time_protection.get('time_threshold_minutes', 30)
+                protection_buffer = time_protection.get('protection_buffer_pips', 2)
+
+                # Check if trade is in profit
+                if profit_points >= min_profit_for_time:
+                    # Calculate how long trade has been open
+                    trade_open_time = trade.timestamp
+                    if trade_open_time:
+                        time_open = (datetime.utcnow() - trade_open_time).total_seconds() / 60
+
+                        if time_open >= time_threshold_mins:
+                            self.logger.info(f"⏰ [TIME PROTECTION TRIGGER] Trade {trade.id}: "
+                                        f"Open {time_open:.0f} mins >= {time_threshold_mins} mins, profit {profit_points}pts")
+
+                            # Calculate time-based protection stop level
+                            if trade.direction.upper() == "BUY":
+                                time_protect_stop = trade.entry_price + (protection_buffer * point_value)
+                            else:
+                                time_protect_stop = trade.entry_price - (protection_buffer * point_value)
+
+                            # Check if this improves current stop
+                            current_stop = trade.sl_price or 0.0
+                            should_move_time = False
+                            if trade.direction.upper() == "BUY":
+                                should_move_time = time_protect_stop > current_stop
+                            else:
+                                should_move_time = time_protect_stop < current_stop
+
+                            if should_move_time:
+                                adjustment_distance = abs(time_protect_stop - current_stop)
+                                adjustment_points = int(adjustment_distance / point_value)
+                                direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
+
+                                self.logger.info(f"⏰ [TIME PROTECTION] Trade {trade.id}: Moving SL to entry+{protection_buffer}pts = {time_protect_stop:.5f}")
+
+                                success = self._send_stop_adjustment(
+                                    trade, adjustment_points, direction_stop, 0,
+                                    new_stop_level=time_protect_stop
+                                )
+
+                                if isinstance(success, dict) and success.get("status") == "updated":
+                                    trade.sl_price = time_protect_stop
+                                    trade.time_protection_executed = True
+                                    trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+
+                                    try:
+                                        db.commit()
+                                        self.logger.info(f"✅ [TIME PROTECTION SUCCESS] Trade {trade.id}: Protected after {time_open:.0f} mins")
+                                    except Exception as commit_error:
+                                        db.rollback()
+                                        self.logger.error(f"❌ [TIME PROTECTION COMMIT FAILED] Trade {trade.id}: {commit_error}")
+                            else:
+                                self.logger.debug(f"⏰ [TIME PROTECTION SKIP] Trade {trade.id}: SL already better")
+                                trade.time_protection_executed = True
+
             # --- STEP 1: Break-even logic ---
             # ✅ CRITICAL FIX: Skip break-even logic if already profit_protected
             if trade.status == "profit_protected":

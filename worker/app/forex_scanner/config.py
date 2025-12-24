@@ -468,7 +468,7 @@ RANGING_MARKET_STRATEGY = False  # Multi-oscillator ranging market strategy - Re
 VOLUME_PROFILE_STRATEGY = False  # Institutional Volume-by-Price analysis strategy
 
 # EMA Double Confirmation Strategy
-EMA_DOUBLE_CONFIRMATION_STRATEGY = True  # NEW: Wait for 2 successful EMA 21/50 crossovers before taking 3rd
+EMA_DOUBLE_CONFIRMATION_STRATEGY = False  # DISABLED: Claude consistently rejects these signals
 
 # ICT Silver Bullet Strategy
 # Time-based SMC strategy trading during specific windows (3-4AM, 10-11AM, 2-3PM NY)

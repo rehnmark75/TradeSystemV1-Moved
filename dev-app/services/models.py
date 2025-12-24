@@ -73,6 +73,13 @@ class TradeLog(Base):
     partial_close_executed = Column(Boolean, nullable=False, default=False)  # True if partial close was executed
     partial_close_time = Column(DateTime, nullable=True)  # Timestamp when partial close occurred
 
+    # Early break-even tracking columns (v2.8.0: risk elimination before partial close)
+    early_be_executed = Column(Boolean, nullable=False, default=False)  # True if early BE was executed
+    early_be_time = Column(DateTime, nullable=True)  # Timestamp when early BE occurred
+
+    # Time-based protection tracking (v2.9.0: protect trades after X mins in profit)
+    time_protection_executed = Column(Boolean, nullable=False, default=False)  # True if time protection was executed
+
     # 🔥 NEW: P&L tracking columns (added for deal correlation)
     profit_loss = Column(Numeric(12, 2), nullable=True)
     pnl_currency = Column(String(10), nullable=True, default='SEK')  # Currency (SEK, USD, etc.)

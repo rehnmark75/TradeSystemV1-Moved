@@ -150,328 +150,337 @@ PARTIAL_CLOSE_SIZE = 0.5  # Size to close (0.5 = 50% of position)
 #   USDCHF: BUY=26, SELL=25 -> Use 26 (already optimized v2.6.0)
 #   AUDJPY: BUY=33, SELL=25 -> Use 28 (BUY-weighted)
 
-PAIR_TRAILING_CONFIGS = {
-    # ========== MAJOR PAIRS - Standard Volatility ==========
+# =============================================================================
+# v2.9.0 SIMPLIFIED TRAILING CONFIG - Fixed 15 pip triggers + Time-based protection
+# =============================================================================
+# Key changes:
+# - ALL pairs use 15 pip break-even trigger (was 17-40 depending on pair)
+# - ALL pairs use 10 pip early BE trigger (risk elimination)
+# - ALL pairs use 13 pip partial close trigger
+# - NEW: Time-based protection after 30 mins in profit
+# - Simplified stage triggers: 20/30/40 pips for all pairs
+# =============================================================================
 
-    # CEEM epic uses scaled pricing (11646 instead of 1.1646)
+# Time-based protection settings (NEW in v2.9.0)
+TIME_BASED_PROTECTION = {
+    'enabled': True,
+    'min_profit_pips': 5,              # Minimum profit to trigger time-based protection
+    'time_threshold_minutes': 30,       # After 30 mins in profit, protect the trade
+    'protection_buffer_pips': 2,        # Move SL to entry + 2 pips
+}
+
+PAIR_TRAILING_CONFIGS = {
+    # ==========================================================================
+    # v2.9.0: UNIFIED CONFIG - Same triggers for ALL pairs
+    # Rationale: Complex per-pair optimization wasn't working. Trades were
+    # hitting 25-35 pips profit but triggers were set at 35-40 pips.
+    # Simple 15 pip trigger ensures protection actually kicks in.
+    # ==========================================================================
+
+    # ========== MAJOR PAIRS ==========
     'CS.D.EURUSD.CEEM.IP': {
-        # v2.7.0: MFE/MAE Analysis - BUY opt=24, SELL opt=12 -> Use 20 (BUY-weighted)
-        'early_breakeven_trigger_points': 20,  # v2.7.0: 20 (was 6) - from MFE/MAE analysis
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 25,           # v2.7.0: 25 (was 10)
-        'stage1_lock_points': 10,              # v2.7.0: 10 (was 5)
-        'stage2_trigger_points': 35,           # v2.7.0: 35 (was 15)
-        'stage2_lock_points': 22,              # v2.7.0: 22 (was 10)
-        'stage3_trigger_points': 42,           # v2.7.0: 42 (was 20)
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
         'stage3_atr_multiplier': 0.8,
         'stage3_min_distance': 4,
-        'min_trail_distance': 15,              # v2.7.0: 15 (was 4)
-        'break_even_trigger_points': 20,       # v2.7.0: 20 (was 6) - from MFE/MAE analysis
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,   # v2.9.0: Fixed 15 pips for ALL
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.AUDUSD.MINI.IP': {
-        # v2.7.0: MFE/MAE Analysis - BUY opt=13, SELL opt=28 -> Use 20 (SELL-weighted)
-        'early_breakeven_trigger_points': 20,  # v2.7.0: 20 (was 6)
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 25,           # v2.7.0: 25 (was 10)
-        'stage1_lock_points': 10,              # v2.7.0: 10 (was 5)
-        'stage2_trigger_points': 35,           # v2.7.0: 35 (was 15)
-        'stage2_lock_points': 22,              # v2.7.0: 22 (was 10)
-        'stage3_trigger_points': 42,           # v2.7.0: 42 (was 20)
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
         'stage3_atr_multiplier': 0.8,
         'stage3_min_distance': 4,
-        'min_trail_distance': 15,              # v2.7.0: 15 (was 4)
-        'break_even_trigger_points': 20,       # v2.7.0: 20 (was 6) - from MFE/MAE analysis
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.NZDUSD.MINI.IP': {
-        # v2.7.0: MFE/MAE Analysis - BUY opt=12, SELL opt=17 -> Use 15 (average)
-        'early_breakeven_trigger_points': 15,  # v2.7.0: 15 (was 6) - NZDUSD less volatile
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 20,           # v2.7.0: 20 (was 10)
-        'stage1_lock_points': 8,               # v2.7.0: 8 (was 5)
-        'stage2_trigger_points': 28,           # v2.7.0: 28 (was 15)
-        'stage2_lock_points': 18,              # v2.7.0: 18 (was 10)
-        'stage3_trigger_points': 35,           # v2.7.0: 35 (was 20)
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
         'stage3_atr_multiplier': 0.8,
         'stage3_min_distance': 4,
-        'min_trail_distance': 12,              # v2.7.0: 12 (was 4)
-        'break_even_trigger_points': 15,       # v2.7.0: 15 (was 6) - from MFE/MAE analysis
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.USDCAD.MINI.IP': {
-        # v2.7.0: MFE/MAE Analysis - BUY opt=20, SELL opt=18 -> Use 20 (keep similar)
-        'early_breakeven_trigger_points': 20,  # v2.7.0: 20 (was 6)
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 25,           # v2.7.0: 25 (was 10)
-        'stage1_lock_points': 10,              # v2.7.0: 10 (was 5)
-        'stage2_trigger_points': 35,           # v2.7.0: 35 (was 15)
-        'stage2_lock_points': 22,              # v2.7.0: 22 (was 10)
-        'stage3_trigger_points': 42,           # v2.7.0: 42 (was 20)
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
         'stage3_atr_multiplier': 0.8,
         'stage3_min_distance': 4,
-        'min_trail_distance': 15,              # v2.7.0: 15 (was 4)
-        'break_even_trigger_points': 20,       # v2.7.0: 20 (was 6) - from MFE/MAE analysis
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.USDCHF.MINI.IP': {
-        # v2.7.0: MFE/MAE Analysis - BUY opt=26, SELL opt=25 -> Use 26 (confirmed v2.6.0)
-        # v2.6.0 USDCHF OPTIMIZATION: Wider stops for CHF volatility
-        'early_breakeven_trigger_points': 26,  # v2.7.0: 26 (was 6)
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 32,           # v2.7.0: 32 (was 10)
-        'stage1_lock_points': 14,              # v2.7.0: 14 (was 5)
-        'stage2_trigger_points': 42,           # v2.7.0: 42 (was 15)
-        'stage2_lock_points': 28,              # v2.7.0: 28 (was 10)
-        'stage3_trigger_points': 50,           # v2.7.0: 50 (was 20)
-        'stage3_atr_multiplier': 0.9,          # v2.6.0: 0.9 (wider for CHF)
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
         'stage3_min_distance': 4,
-        'min_trail_distance': 18,              # v2.7.0: 18 (was 4) - prevent noise stopouts
-        'break_even_trigger_points': 26,       # v2.7.0: 26 (was 6) - from MFE/MAE analysis
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
-    # ========== GBP PAIRS - High Volatility ==========
-
+    # ========== GBP PAIRS ==========
     'CS.D.GBPUSD.MINI.IP': {
-        # v2.7.0: MFE/MAE Analysis - BUY opt=25, SELL opt=46 -> Use 35 (SELL-weighted)
-        'early_breakeven_trigger_points': 35,  # v2.7.0: 35 (was 8) - SELL needs room
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 40,           # v2.7.0: 40 (was 12)
-        'stage1_lock_points': 16,              # v2.7.0: 16 (was 6)
-        'stage2_trigger_points': 52,           # v2.7.0: 52 (was 18)
-        'stage2_lock_points': 34,              # v2.7.0: 34 (was 12)
-        'stage3_trigger_points': 60,           # v2.7.0: 60 (was 25)
-        'stage3_atr_multiplier': 1.0,          # Wider trailing
-        'stage3_min_distance': 3,
-        'min_trail_distance': 18,              # v2.7.0: 18 (was 4)
-        'break_even_trigger_points': 35,       # v2.7.0: 35 (was 8) - compromise BUY=25/SELL=46
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
-        'partial_close_trigger_points': 15,
+        'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.GBPJPY.MINI.IP': {
-        # v2.7.0: GBP/JPY very volatile - keeping wider settings
-        'early_breakeven_trigger_points': 32,  # v2.7.0: 32
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 32,
-        'stage1_lock_points': 12,
-        'stage2_trigger_points': 42,
-        'stage2_lock_points': 28,
-        'stage3_trigger_points': 50,
-        'stage3_atr_multiplier': 1.0,
-        'stage3_min_distance': 3,
-        'min_trail_distance': 18,
-        'break_even_trigger_points': 32,       # v2.7.0: 32 (was 8)
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
-        'partial_close_trigger_points': 18,
+        'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.GBPAUD.MINI.IP': {
-        'early_breakeven_trigger_points': 32,
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 32,
-        'stage1_lock_points': 12,
-        'stage2_trigger_points': 42,
-        'stage2_lock_points': 28,
-        'stage3_trigger_points': 50,
-        'stage3_atr_multiplier': 1.0,
-        'stage3_min_distance': 3,
-        'min_trail_distance': 18,
-        'break_even_trigger_points': 32,
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
-        'partial_close_trigger_points': 18,
+        'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.GBPNZD.MINI.IP': {
-        'early_breakeven_trigger_points': 32,
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 32,
-        'stage1_lock_points': 12,
-        'stage2_trigger_points': 42,
-        'stage2_lock_points': 28,
-        'stage3_trigger_points': 50,
-        'stage3_atr_multiplier': 1.0,
-        'stage3_min_distance': 3,
-        'min_trail_distance': 18,
-        'break_even_trigger_points': 32,
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
-        'partial_close_trigger_points': 18,
+        'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
-    # ========== JPY PAIRS - Different Pip Scale ==========
-
+    # ========== JPY PAIRS ==========
     'CS.D.USDJPY.MINI.IP': {
-        # v2.7.0: MFE/MAE Analysis - BUY opt=33, SELL opt=47 -> Use 40 (average)
-        'early_breakeven_trigger_points': 40,  # v2.7.0: 40 (was 6) - significant increase
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 45,           # v2.7.0: 45 (was 10)
-        'stage1_lock_points': 18,              # v2.7.0: 18 (was 5)
-        'stage2_trigger_points': 55,           # v2.7.0: 55 (was 15)
-        'stage2_lock_points': 35,              # v2.7.0: 35 (was 10)
-        'stage3_trigger_points': 65,           # v2.7.0: 65 (was 20)
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
         'stage3_atr_multiplier': 0.8,
         'stage3_min_distance': 4,
-        'min_trail_distance': 15,              # v2.7.0: 15 (was 4)
-        'break_even_trigger_points': 40,       # v2.7.0: 40 (was 6) - from MFE/MAE analysis
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.EURJPY.MINI.IP': {
-        # v2.7.0: MFE/MAE Analysis - BUY opt=27, SELL opt=55 -> Use 40 (SELL-weighted)
-        # Huge discrepancy! SELL needs 2x higher BE than BUY
-        'early_breakeven_trigger_points': 40,  # v2.7.0: 40 (was 6)
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 45,           # v2.7.0: 45 (was 10)
-        'stage1_lock_points': 18,              # v2.7.0: 18 (was 5)
-        'stage2_trigger_points': 55,           # v2.7.0: 55 (was 15)
-        'stage2_lock_points': 36,              # v2.7.0: 36 (was 10)
-        'stage3_trigger_points': 65,           # v2.7.0: 65 (was 20)
-        'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 3,
-        'min_trail_distance': 18,              # v2.7.0: 18 (was 4)
-        'break_even_trigger_points': 40,       # v2.7.0: 40 (was 6) - compromise BUY=27/SELL=55
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.AUDJPY.MINI.IP': {
-        # v2.7.0: MFE/MAE Analysis - BUY opt=33, SELL opt=25 -> Use 28 (BUY-weighted)
-        'early_breakeven_trigger_points': 28,  # v2.7.0: 28 (was 6)
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 32,           # v2.7.0: 32 (was 10)
-        'stage1_lock_points': 13,              # v2.7.0: 13 (was 5)
-        'stage2_trigger_points': 42,           # v2.7.0: 42 (was 15)
-        'stage2_lock_points': 26,              # v2.7.0: 26 (was 10)
-        'stage3_trigger_points': 50,           # v2.7.0: 50 (was 20)
-        'stage3_atr_multiplier': 0.9,
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
         'stage3_min_distance': 4,
-        'min_trail_distance': 15,              # v2.7.0: 15 (was 4)
-        'break_even_trigger_points': 28,       # v2.7.0: 28 (was 6) - from MFE/MAE analysis
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.CADJPY.MINI.IP': {
-        'early_breakeven_trigger_points': 17,
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 17,
-        'stage1_lock_points': 6,
-        'stage2_trigger_points': 22,
-        'stage2_lock_points': 14,
-        'stage3_trigger_points': 26,
-        'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 15,
-        'break_even_trigger_points': 17,
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.CHFJPY.MINI.IP': {
-        'early_breakeven_trigger_points': 17,
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 17,
-        'stage1_lock_points': 6,
-        'stage2_trigger_points': 22,
-        'stage2_lock_points': 14,
-        'stage3_trigger_points': 26,
-        'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 15,
-        'break_even_trigger_points': 17,
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.NZDJPY.MINI.IP': {
-        'early_breakeven_trigger_points': 17,
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 17,
-        'stage1_lock_points': 6,
-        'stage2_trigger_points': 22,
-        'stage2_lock_points': 14,
-        'stage3_trigger_points': 26,
-        'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 15,
-        'break_even_trigger_points': 17,
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
-    # ========== CROSS PAIRS - Medium-High Volatility ==========
-
+    # ========== CROSS PAIRS ==========
     'CS.D.EURAUD.MINI.IP': {
-        'early_breakeven_trigger_points': 20,
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 25,
-        'stage1_lock_points': 10,
-        'stage2_trigger_points': 35,
-        'stage2_lock_points': 22,
-        'stage3_trigger_points': 42,
-        'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 16,
-        'break_even_trigger_points': 20,
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
-        'partial_close_trigger_points': 15,
+        'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.EURNZD.MINI.IP': {
-        'early_breakeven_trigger_points': 20,
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 25,
-        'stage1_lock_points': 10,
-        'stage2_trigger_points': 35,
-        'stage2_lock_points': 22,
-        'stage3_trigger_points': 42,
-        'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 16,
-        'break_even_trigger_points': 20,
+        'stage1_trigger_points': 20,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
+        'break_even_trigger_points': 15,
         'enable_partial_close': True,
-        'partial_close_trigger_points': 15,
+        'partial_close_trigger_points': 13,
         'partial_close_size': 0.5,
     },
 
     'CS.D.AUDNZD.MINI.IP': {
-        'early_breakeven_trigger_points': 15,
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
         'stage1_trigger_points': 20,
         'stage1_lock_points': 8,
-        'stage2_trigger_points': 28,
-        'stage2_lock_points': 18,
-        'stage3_trigger_points': 35,
-        'stage3_atr_multiplier': 0.85,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 15,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
         'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
@@ -479,16 +488,16 @@ PAIR_TRAILING_CONFIGS = {
     },
 
     'CS.D.EURGBP.MINI.IP': {
-        'early_breakeven_trigger_points': 15,
+        'early_breakeven_trigger_points': 10,
         'early_breakeven_buffer_points': 1,
         'stage1_trigger_points': 20,
         'stage1_lock_points': 8,
-        'stage2_trigger_points': 28,
-        'stage2_lock_points': 18,
-        'stage3_trigger_points': 35,
-        'stage3_atr_multiplier': 0.75,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 14,
+        'stage2_trigger_points': 30,
+        'stage2_lock_points': 15,
+        'stage3_trigger_points': 40,
+        'stage3_atr_multiplier': 0.8,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,
         'break_even_trigger_points': 15,
         'enable_partial_close': True,
         'partial_close_trigger_points': 13,
@@ -496,23 +505,22 @@ PAIR_TRAILING_CONFIGS = {
     },
 }
 
-# Default configuration for pairs not explicitly configured above
-# v2.7.0: Updated with MFE/MAE-based optimizations
+# Default configuration - same as all pairs
 DEFAULT_TRAILING_CONFIG = {
-    'early_breakeven_trigger_points': 20,  # v2.7.0: 20 (was 6) - let trades develop
-    'early_breakeven_buffer_points': 1,    # SL at entry + 1 pt
-    'stage1_trigger_points': 25,           # v2.7.0: 25 (was 10) - lock profit after +25 pts
-    'stage1_lock_points': 10,              # v2.7.0: 10 (was 5) - guarantee +10 pts profit
-    'stage2_trigger_points': 35,           # v2.7.0: 35 (was 15) - profit lock trigger
-    'stage2_lock_points': 22,              # v2.7.0: 22 (was 10) - profit guarantee
-    'stage3_trigger_points': 42,           # v2.7.0: 42 (was 20) - start percentage trailing
-    'stage3_atr_multiplier': 0.8,          # ATR trailing multiplier
-    'stage3_min_distance': 4,              # Minimum trail distance
-    'min_trail_distance': 15,              # v2.7.0: 15 (was 4) - prevent noise stopouts
-    'break_even_trigger_points': 20,       # v2.7.0: 20 (was 6) - from MFE/MAE analysis
-    'enable_partial_close': True,          # Enable partial close
-    'partial_close_trigger_points': 13,    # Partial close at +13 pips (separate from BE)
-    'partial_close_size': 0.5,             # Close 50% of position
+    'early_breakeven_trigger_points': 10,
+    'early_breakeven_buffer_points': 1,
+    'stage1_trigger_points': 20,
+    'stage1_lock_points': 8,
+    'stage2_trigger_points': 30,
+    'stage2_lock_points': 15,
+    'stage3_trigger_points': 40,
+    'stage3_atr_multiplier': 0.8,
+    'stage3_min_distance': 4,
+    'min_trail_distance': 8,
+    'break_even_trigger_points': 15,   # v2.9.0: Fixed 15 pips for ALL
+    'enable_partial_close': True,
+    'partial_close_trigger_points': 13,
+    'partial_close_size': 0.5,
 }
 
 
