@@ -663,24 +663,26 @@ class SmartTrailing(TrailingStrategy):
 
 class Progressive3StageTrailing(TrailingStrategy):
     """
-    4-Stage Progressive Trailing Strategy - Optimized for Small Account Protection
+    4-Stage Progressive Trailing Strategy - v3.0.0 REDESIGNED for Profit Capture
 
-    Based on MAE Analysis (Dec 2025):
-    - Winners only dip 3 pips on average (median 2.7 pips, 75th percentile 3.5 pips)
-    - Losers dip 15 pips on average before hitting SL
-    - Conclusion: Good trades barely dip, so early breakeven is safe
+    v3.0.0 Changes (Dec 2025):
+    - Stage 3 ATR multiplier: 0.8x → 2.0x (industry standard)
+    - Wider triggers: 15/25/38/50 for majors, 20/30/45/60 for JPY crosses
+    - Widened retracement percentages to let runners develop
+    - Partial close delayed to 20 pips @ 40% (was 13 pips @ 50%)
 
-    Stage 0: EARLY BREAKEVEN at +6 pts → SL to entry + 1 pt (NEW - capital protection)
-    Stage 1: Profit Lock at +10 pts → SL to entry + 5 pts (guaranteed small profit)
-    Stage 2: Profit Lock-in at +15 pts → SL to entry + 10 pts (meaningful profit secured)
-    Stage 3: Percentage-based trailing at +20+ pts (reliable trend following)
+    v3.0.0 STAGE CONFIGURATION:
+    Stage 0: EARLY BREAKEVEN at +15 pts → SL to entry + 2 pts (majors) / +20 pts for JPY
+    Stage 1: Profit Lock at +25 pts → SL to entry + 12 pts (guaranteed profit)
+    Stage 2: Profit Lock-in at +38 pts → SL to entry + 20 pts (meaningful profit)
+    Stage 3: Percentage-based trailing at +50+ pts with 2.0x ATR (trend capture)
 
-    Stage 3 uses tiered percentage retracement:
-    - 50+ points profit: 15% retracement allowed
-    - 25-49 points profit: 20% retracement allowed
-    - 20-24 points profit: 25% retracement allowed
+    Stage 3 uses tiered percentage retracement (v3.0.0 - WIDENED):
+    - 60+ points profit: 20% retracement allowed (was 15%)
+    - 40-59 points profit: 25% retracement allowed (was 20%)
+    - 30-39 points profit: 30% retracement allowed (was 25%)
 
-    This strategy prevents scenarios like GBPUSD (+15 → 0) where profit is given back.
+    This allows runners to develop while still protecting meaningful profits.
     """
 
     def __init__(self, config: TrailingConfig, logger):
@@ -924,12 +926,13 @@ class Progressive3StageTrailing(TrailingStrategy):
             effective_profit = current_profit_points
 
         # Tiered percentage trailing based on effective profit level
-        if effective_profit >= 50:
-            retracement_percentage = 0.15  # 15% retracement for big profits (50+ points)
-        elif effective_profit >= 25:
-            retracement_percentage = 0.20  # 20% retracement for medium profits (25-49 points)
+        # v3.0.0: WIDENED retracement percentages to let runners develop
+        if effective_profit >= 60:
+            retracement_percentage = 0.20  # 20% retracement for big profits (60+ points) - was 15%
+        elif effective_profit >= 40:
+            retracement_percentage = 0.25  # 25% retracement for medium profits (40-59 points) - was 20%
         else:
-            retracement_percentage = 0.25  # 25% retracement for smaller profits (18-24 points)
+            retracement_percentage = 0.30  # 30% retracement for smaller profits (30-39 points) - was 25%
 
         # Calculate trail distance in points, with IG minimum protection
         # ✅ CRITICAL FIX: Always respect IG's min_stop_distance_points to avoid rejection
