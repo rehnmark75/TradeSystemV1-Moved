@@ -95,7 +95,8 @@ class SupportResistanceValidator:
                 current_price=current_price,
                 signal_type=signal_type,
                 levels=levels,
-                df=df
+                df=df,
+                epic=epic
             )
             
             # Enhanced validation details
@@ -140,8 +141,8 @@ class SupportResistanceValidator:
             datetime.now() < self._cache_expiry[cache_key]):
             return self._level_cache[cache_key]
         
-        # Calculate new levels
-        levels = self._calculate_pivot_levels(df)
+        # Calculate new levels (pair-aware)
+        levels = self._calculate_pivot_levels(df, epic)
         
         # Cache results
         self._level_cache[cache_key] = levels
@@ -149,14 +150,15 @@ class SupportResistanceValidator:
         
         return levels
     
-    def _calculate_pivot_levels(self, df: pd.DataFrame) -> Dict:
+    def _calculate_pivot_levels(self, df: pd.DataFrame, epic: str = None) -> Dict:
         """
         Calculate pivot-based support and resistance levels
         Based on TradingView pivothigh/pivotlow logic
-        
+
         Args:
             df: Price data DataFrame with OHLC columns
-            
+            epic: Trading instrument for pair-aware pip calculation
+
         Returns:
             Dictionary with support/resistance data
         """
@@ -170,21 +172,21 @@ class SupportResistanceValidator:
                     'pivot_highs': [],
                     'pivot_lows': []
                 }
-            
+
             df_work = df.copy().reset_index(drop=True)
-            
+
             # Calculate pivot highs and lows
             pivot_highs = self._find_pivot_highs(df_work)
             pivot_lows = self._find_pivot_lows(df_work)
-            
-            # Filter significant levels
-            resistance_levels = self._filter_significant_levels(pivot_highs, 'resistance')
-            support_levels = self._filter_significant_levels(pivot_lows, 'support')
-            
-            # Find nearest levels to current price
+
+            # Filter significant levels (pair-aware)
+            resistance_levels = self._filter_significant_levels(pivot_highs, 'resistance', epic)
+            support_levels = self._filter_significant_levels(pivot_lows, 'support', epic)
+
+            # Find nearest levels to current price (pair-aware)
             current_price = float(df_work['close'].iloc[-1])
-            nearest_support = self._find_nearest_support(support_levels, current_price)
-            nearest_resistance = self._find_nearest_resistance(resistance_levels, current_price)
+            nearest_support = self._find_nearest_support(support_levels, current_price, epic)
+            nearest_resistance = self._find_nearest_resistance(resistance_levels, current_price, epic)
             
             return {
                 'support_levels': support_levels,
@@ -269,49 +271,67 @@ class SupportResistanceValidator:
         
         return sorted(list(set(pivot_lows)))
     
-    def _filter_significant_levels(self, levels: List[float], level_type: str) -> List[float]:
+    def _filter_significant_levels(self, levels: List[float], level_type: str, epic: str = None) -> List[float]:
         """
         Filter levels to keep only significant ones
         Removes levels that are too close together
+
+        Args:
+            levels: List of price levels
+            level_type: 'support' or 'resistance'
+            epic: Trading instrument for pair-aware pip calculation
         """
         if not levels:
             return []
-        
+
+        pip_size = self._get_pip_size(epic) if epic else 0.0001
         filtered_levels = []
-        
+
         for level in sorted(levels, reverse=(level_type == 'resistance')):
             is_significant = True
-            
+
             for existing_level in filtered_levels:
-                pip_distance = abs(level - existing_level) * 10000  # Convert to pips
+                pip_distance = abs(level - existing_level) / pip_size  # Pair-aware pip calculation
                 if pip_distance < self.min_level_distance_pips:
                     is_significant = False
                     break
-            
+
             if is_significant:
                 filtered_levels.append(level)
-                
+
                 # Limit to top 5 levels to avoid clutter
                 if len(filtered_levels) >= 5:
                     break
-        
+
         return filtered_levels
-    
-    def _find_nearest_support(self, support_levels: List[float], current_price: float) -> Optional[float]:
+
+    def _find_nearest_support(self, support_levels: List[float], current_price: float, epic: str = None) -> Optional[float]:
         """
         Find nearest support level below current price
         ENHANCED: Also considers levels AT current price (within small tolerance)
+
+        Args:
+            support_levels: List of support price levels
+            current_price: Current market price
+            epic: Trading instrument for pair-aware pip calculation
         """
-        pip_tolerance = 0.0001 * 2  # 2 pips tolerance for "AT" level detection
+        pip_size = self._get_pip_size(epic) if epic else 0.0001
+        pip_tolerance = pip_size * 2  # 2 pips tolerance for "AT" level detection
         supports_below = [level for level in support_levels if level <= current_price + pip_tolerance]
         return max(supports_below) if supports_below else None
 
-    def _find_nearest_resistance(self, resistance_levels: List[float], current_price: float) -> Optional[float]:
+    def _find_nearest_resistance(self, resistance_levels: List[float], current_price: float, epic: str = None) -> Optional[float]:
         """
         Find nearest resistance level above current price
         ENHANCED: Also considers levels AT current price (within small tolerance)
+
+        Args:
+            resistance_levels: List of resistance price levels
+            current_price: Current market price
+            epic: Trading instrument for pair-aware pip calculation
         """
-        pip_tolerance = 0.0001 * 2  # 2 pips tolerance for "AT" level detection
+        pip_size = self._get_pip_size(epic) if epic else 0.0001
+        pip_tolerance = pip_size * 2  # 2 pips tolerance for "AT" level detection
         resistances_above = [level for level in resistance_levels if level >= current_price - pip_tolerance]
         return min(resistances_above) if resistances_above else None
     
@@ -319,7 +339,8 @@ class SupportResistanceValidator:
                               current_price: float,
                               signal_type: str,
                               levels: Dict,
-                              df: pd.DataFrame) -> Dict:
+                              df: pd.DataFrame,
+                              epic: str = None) -> Dict:
         """
         Check if trade direction conflicts with nearby major levels
 
@@ -328,8 +349,15 @@ class SupportResistanceValidator:
         - For SELL signals: Check ALL resistance levels if we're AT one (within tolerance)
         - Also check nearest resistance (BUY) or support (SELL) in the trade direction
         - Consider volume confirmation for recent level breaks
+
+        Args:
+            current_price: Current market price
+            signal_type: 'BUY', 'SELL', 'BULL', or 'BEAR'
+            levels: Dictionary with support/resistance levels
+            df: Price dataframe for volume analysis
+            epic: Trading instrument epic (for pair-aware pip size)
         """
-        pip_size = 0.0001  # Default for most pairs (except JPY)
+        pip_size = self._get_pip_size(epic) if epic else 0.0001
 
         all_support_levels = levels.get('support_levels', [])
         all_resistance_levels = levels.get('resistance_levels', [])
@@ -511,8 +539,239 @@ class SupportResistanceValidator:
             self._level_cache.clear()
             self._cache_expiry.clear()
             self.logger.info(f"✅ Updated S/R Validator: {', '.join(updated)}")
-        
+
         return len(updated) > 0
+
+    # =========================================================================
+    # PATH-TO-TARGET BLOCKING CHECK (NEW)
+    # =========================================================================
+
+    # Pair-specific blocking thresholds
+    PAIR_BLOCKING_THRESHOLDS = {
+        'EURUSD': {'critical_block_pct': 25, 'warning_block_pct': 50, 'min_sr_distance_pips': 5},
+        'GBPUSD': {'critical_block_pct': 25, 'warning_block_pct': 50, 'min_sr_distance_pips': 8},
+        'USDJPY': {'critical_block_pct': 25, 'warning_block_pct': 50, 'min_sr_distance_pips': 5},
+        'GBPJPY': {'critical_block_pct': 20, 'warning_block_pct': 45, 'min_sr_distance_pips': 10},
+        'AUDUSD': {'critical_block_pct': 25, 'warning_block_pct': 50, 'min_sr_distance_pips': 4},
+        'USDCHF': {'critical_block_pct': 25, 'warning_block_pct': 50, 'min_sr_distance_pips': 4},
+        'USDCAD': {'critical_block_pct': 25, 'warning_block_pct': 50, 'min_sr_distance_pips': 5},
+        'NZDUSD': {'critical_block_pct': 25, 'warning_block_pct': 50, 'min_sr_distance_pips': 4},
+        'AUDJPY': {'critical_block_pct': 25, 'warning_block_pct': 50, 'min_sr_distance_pips': 7},
+        'EURJPY': {'critical_block_pct': 22, 'warning_block_pct': 48, 'min_sr_distance_pips': 8},
+    }
+
+    DEFAULT_BLOCKING_THRESHOLDS = {
+        'critical_block_pct': 25,  # Block if S/R within 25% of path (75%+ blocked)
+        'warning_block_pct': 50,   # Warning if S/R within 50% of path
+        'min_sr_distance_pips': 5
+    }
+
+    def _get_pair_blocking_thresholds(self, epic: str) -> Dict:
+        """Get pair-specific thresholds for S/R blocking validation"""
+        # Extract pair from epic (e.g., 'CS.D.EURUSD.CEEM.IP' -> 'EURUSD')
+        pair = epic.split('.')[2] if '.' in epic and len(epic.split('.')) > 2 else epic
+        return self.PAIR_BLOCKING_THRESHOLDS.get(pair, self.DEFAULT_BLOCKING_THRESHOLDS)
+
+    def check_path_to_target_blocking(
+        self,
+        entry_price: float,
+        take_profit: float,
+        signal_type: str,
+        levels: Dict,
+        epic: str
+    ) -> Tuple[bool, str, Dict]:
+        """
+        Check if S/R level blocks the path from entry to take profit target.
+
+        This is the KEY validation that prevents trades where S/R is blocking
+        most of the profit potential.
+
+        Args:
+            entry_price: Trade entry price
+            take_profit: Take profit target price
+            signal_type: 'BUY', 'SELL', 'BULL', or 'BEAR'
+            levels: Dictionary with support/resistance levels
+            epic: Trading instrument for pair-aware calculations
+
+        Returns:
+            Tuple of (is_blocked, reason, details)
+            - is_blocked: True if S/R is critically blocking the path
+            - reason: Human-readable explanation
+            - details: Dict with analysis data for logging/storage
+        """
+        try:
+            pip_size = self._get_pip_size(epic)
+            target_distance_pips = abs(take_profit - entry_price) / pip_size
+
+            # Skip if target distance is too small
+            if target_distance_pips < 5:
+                return False, "Target distance too small for path analysis", {
+                    'target_distance_pips': target_distance_pips,
+                    'analysis_skipped': True
+                }
+
+            # Get pair-specific blocking thresholds
+            thresholds = self._get_pair_blocking_thresholds(epic)
+            critical_pct = thresholds['critical_block_pct']
+            warning_pct = thresholds['warning_block_pct']
+            min_sr_dist = thresholds['min_sr_distance_pips']
+
+            blocking_sr = None
+            blocking_type = None
+            distance_to_sr_pips = None
+            path_blocked_pct = None
+
+            if signal_type.upper() in ['BUY', 'BULL']:
+                # For BUY: check resistance levels BETWEEN entry and TP
+                for resistance in levels.get('resistance_levels', []):
+                    if entry_price < resistance < take_profit:
+                        dist_to_sr = (resistance - entry_price) / pip_size
+
+                        # Skip if S/R is very close (might be noise)
+                        if dist_to_sr < min_sr_dist:
+                            continue
+
+                        # Calculate how much of the path is blocked
+                        blocked_pct = (1 - (dist_to_sr / target_distance_pips)) * 100
+
+                        # Track the most problematic S/R level (closest to entry)
+                        if blocking_sr is None or dist_to_sr < distance_to_sr_pips:
+                            blocking_sr = resistance
+                            blocking_type = 'resistance'
+                            distance_to_sr_pips = dist_to_sr
+                            path_blocked_pct = blocked_pct
+
+            elif signal_type.upper() in ['SELL', 'BEAR']:
+                # For SELL: check support levels BETWEEN entry and TP
+                for support in levels.get('support_levels', []):
+                    if take_profit < support < entry_price:
+                        dist_to_sr = (entry_price - support) / pip_size
+
+                        # Skip if S/R is very close (might be noise)
+                        if dist_to_sr < min_sr_dist:
+                            continue
+
+                        # Calculate how much of the path is blocked
+                        blocked_pct = (1 - (dist_to_sr / target_distance_pips)) * 100
+
+                        # Track the most problematic S/R level (closest to entry)
+                        if blocking_sr is None or dist_to_sr < distance_to_sr_pips:
+                            blocking_sr = support
+                            blocking_type = 'support'
+                            distance_to_sr_pips = dist_to_sr
+                            path_blocked_pct = blocked_pct
+
+            # Build result details
+            details = {
+                'entry_price': entry_price,
+                'take_profit': take_profit,
+                'target_distance_pips': round(target_distance_pips, 1),
+                'signal_type': signal_type,
+                'epic': epic,
+                'blocking_sr_level': blocking_sr,
+                'blocking_sr_type': blocking_type,
+                'distance_to_sr_pips': round(distance_to_sr_pips, 1) if distance_to_sr_pips else None,
+                'path_blocked_pct': round(path_blocked_pct, 1) if path_blocked_pct else 0,
+                'thresholds': thresholds,
+                'is_critical': False,
+                'is_warning': False
+            }
+
+            # No blocking S/R found
+            if blocking_sr is None:
+                return False, "Path to target clear - no S/R blocking", details
+
+            # Check if blocking is critical (should reject trade)
+            if path_blocked_pct >= (100 - critical_pct):
+                details['is_critical'] = True
+                reason = (
+                    f"CRITICAL: {blocking_type.upper()} at {blocking_sr:.5f} blocks "
+                    f"{path_blocked_pct:.0f}% of path to TP "
+                    f"(only {distance_to_sr_pips:.1f} pips before S/R, target: {target_distance_pips:.1f} pips)"
+                )
+                self.logger.warning(f"🚧 {epic}: {reason}")
+                return True, reason, details
+
+            # Check if blocking is warning level (allow but flag)
+            if path_blocked_pct >= (100 - warning_pct):
+                details['is_warning'] = True
+                reason = (
+                    f"WARNING: {blocking_type.upper()} at {blocking_sr:.5f} blocks "
+                    f"{path_blocked_pct:.0f}% of path to TP "
+                    f"({distance_to_sr_pips:.1f} pips to S/R)"
+                )
+                self.logger.info(f"⚠️ {epic}: {reason}")
+                return False, reason, details
+
+            # S/R exists but not critically blocking
+            reason = (
+                f"S/R at {blocking_sr:.5f} in path but not blocking significantly "
+                f"({path_blocked_pct:.0f}% blocked, threshold: {100-critical_pct}%)"
+            )
+            return False, reason, details
+
+        except Exception as e:
+            self.logger.error(f"❌ Error checking path-to-target blocking: {e}")
+            return False, f"Path blocking check error: {str(e)}", {'error': str(e)}
+
+    def validate_with_path_blocking(
+        self,
+        signal: Dict,
+        df: pd.DataFrame,
+        epic: str
+    ) -> Tuple[bool, str, Dict]:
+        """
+        Complete S/R validation including path-to-target blocking check.
+
+        This combines the existing proximity check with the new path blocking check.
+
+        Args:
+            signal: Trading signal with entry_price, take_profit, signal_type
+            df: Price data DataFrame
+            epic: Trading instrument
+
+        Returns:
+            Tuple of (is_valid, reason, details)
+        """
+        # First, run standard proximity validation
+        is_valid, reason, details = self.validate_trade_direction(signal, df, epic)
+
+        if not is_valid:
+            return is_valid, reason, details
+
+        # Extract prices for path blocking check
+        entry_price = self._get_current_price(signal)
+        take_profit = signal.get('take_profit') or signal.get('tp_price')
+        signal_type = signal.get('signal_type', '').upper()
+
+        if not entry_price or not take_profit:
+            details['path_blocking_skipped'] = True
+            details['path_blocking_reason'] = "Missing entry or TP price"
+            return is_valid, reason, details
+
+        # Get levels for path blocking check
+        levels = self._get_support_resistance_levels(df, epic)
+
+        # Check path-to-target blocking
+        is_blocked, block_reason, block_details = self.check_path_to_target_blocking(
+            entry_price=entry_price,
+            take_profit=take_profit,
+            signal_type=signal_type,
+            levels=levels,
+            epic=epic
+        )
+
+        # Merge blocking details into main details
+        details['path_blocking'] = block_details
+
+        if is_blocked:
+            return False, block_reason, details
+
+        # Add path blocking info to reason if there was a warning
+        if block_details.get('is_warning'):
+            reason = f"{reason} | {block_reason}"
+
+        return True, reason, details
 
 
 # Integration function for trade_validator.py

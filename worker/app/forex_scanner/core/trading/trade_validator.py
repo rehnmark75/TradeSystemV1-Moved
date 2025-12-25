@@ -1222,19 +1222,34 @@ class TradeValidator:
                 self.logger.warning(f"⚠️ Invalid market data format for {epic} - allowing trade")
                 return True, "S/R validation skipped - invalid data format"
             
-            # Use the S/R validator
-            is_valid, reason, details = self.sr_validator.validate_trade_direction(
+            # Use the S/R validator with path-to-target blocking check
+            # This uses the new validate_with_path_blocking method which includes:
+            # 1. Standard proximity check (are we AT an S/R level?)
+            # 2. Path-to-target blocking check (is S/R blocking path to TP?)
+            is_valid, reason, details = self.sr_validator.validate_with_path_blocking(
                 signal=signal,
                 df=market_data,
                 epic=epic
             )
-            
+
+            # Store path blocking details in signal for analytics tracking
+            if details.get('path_blocking'):
+                signal['sr_path_blocking'] = details['path_blocking']
+
             # Log S/R analysis details for debugging
             if details.get('nearest_support') or details.get('nearest_resistance'):
                 self.logger.debug(f"🔍 S/R Analysis for {epic}: "
                                 f"Support: {details.get('nearest_support')}, "
                                 f"Resistance: {details.get('nearest_resistance')}, "
                                 f"Current: {details.get('current_price')}")
+
+            # Log path blocking details if present
+            path_blocking = details.get('path_blocking', {})
+            if path_blocking.get('blocking_sr_level'):
+                self.logger.info(f"🚧 Path Blocking for {epic}: "
+                               f"S/R at {path_blocking.get('blocking_sr_level'):.5f} "
+                               f"({path_blocking.get('blocking_sr_type')}) "
+                               f"blocks {path_blocking.get('path_blocked_pct', 0):.0f}% of path to TP")
             
             return is_valid, reason
             

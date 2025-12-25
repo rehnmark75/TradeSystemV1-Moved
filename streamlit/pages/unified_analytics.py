@@ -3723,7 +3723,13 @@ class UnifiedTradingDashboard:
                 potential_reward_pips,
                 potential_rr_ratio,
                 confidence_score,
-                strategy_version
+                strategy_version,
+                -- S/R Path Blocking fields (may be NULL if not yet populated)
+                sr_blocking_level,
+                sr_blocking_type,
+                sr_blocking_distance_pips,
+                sr_path_blocked_pct,
+                target_distance_pips
             FROM smc_simple_rejections
             WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
             """
@@ -3931,8 +3937,8 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
         st.markdown("---")
 
         # Sub-tabs for different analysis views
-        sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5 = st.tabs([
-            "📊 Stage Breakdown", "⏰ Time Analysis", "💹 Market Context", "🎯 Near-Misses", "⚡ Scanner Efficiency"
+        sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6 = st.tabs([
+            "📊 Stage Breakdown", "🚧 S/R Path Blocking", "⏰ Time Analysis", "💹 Market Context", "🎯 Near-Misses", "⚡ Scanner Efficiency"
         ])
 
         # Fetch data
@@ -3946,15 +3952,18 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
             self._render_stage_breakdown(df, stats)
 
         with sub_tab2:
-            self._render_time_analysis(df)
+            self._render_sr_path_blocking(df, days_filter)
 
         with sub_tab3:
-            self._render_market_context(df)
+            self._render_time_analysis(df)
 
         with sub_tab4:
-            self._render_near_misses(df, days_filter)
+            self._render_market_context(df)
 
         with sub_tab5:
+            self._render_near_misses(df, days_filter)
+
+        with sub_tab6:
             self._render_scanner_efficiency(days_filter)
 
     def _render_stage_breakdown(self, df: pd.DataFrame, stats: dict):
@@ -4009,6 +4018,177 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
                 "Count": st.column_config.NumberColumn("Count", format="%d")
             }
         )
+
+    def _render_sr_path_blocking(self, df: pd.DataFrame, days_filter: int):
+        """Render S/R Path Blocking analysis sub-tab"""
+        st.subheader("🚧 S/R Path Blocking Analysis")
+
+        st.info("""
+        **What is S/R Path Blocking?**
+
+        This analysis shows trades rejected because a Support/Resistance level was blocking
+        the path from entry to take profit target. For example, if you're buying at 1.2500
+        with a TP at 1.2560, but there's resistance at 1.2510, that resistance blocks 83%
+        of your profit path - a high-risk trade that should be avoided.
+
+        **Critical threshold:** S/R blocking >75% of path = Auto-reject
+        **Warning threshold:** S/R blocking >50% of path = Flagged for review
+        """)
+
+        # Filter for SR_PATH_BLOCKED rejections
+        sr_blocked_df = df[df['rejection_stage'] == 'SR_PATH_BLOCKED'].copy() if 'rejection_stage' in df.columns else pd.DataFrame()
+
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            sr_blocked_count = len(sr_blocked_df)
+            total_rejections = len(df)
+            pct_of_total = (sr_blocked_count / total_rejections * 100) if total_rejections > 0 else 0
+            st.metric(
+                "S/R Path Blocked Rejections",
+                f"{sr_blocked_count:,}",
+                f"{pct_of_total:.1f}% of all rejections"
+            )
+
+        with col2:
+            if 'sr_path_blocked_pct' in sr_blocked_df.columns and not sr_blocked_df.empty:
+                avg_blocked = sr_blocked_df['sr_path_blocked_pct'].mean()
+                st.metric("Avg Path Blocked %", f"{avg_blocked:.1f}%")
+            else:
+                st.metric("Avg Path Blocked %", "N/A")
+
+        with col3:
+            if not sr_blocked_df.empty and 'pair' in sr_blocked_df.columns:
+                affected_pairs = sr_blocked_df['pair'].nunique()
+                st.metric("Affected Pairs", affected_pairs)
+            else:
+                st.metric("Affected Pairs", "0")
+
+        with col4:
+            if not sr_blocked_df.empty and 'target_distance_pips' in sr_blocked_df.columns:
+                avg_target = sr_blocked_df['target_distance_pips'].mean()
+                st.metric("Avg Target Distance", f"{avg_target:.1f} pips")
+            else:
+                st.metric("Avg Target Distance", "N/A")
+
+        if sr_blocked_df.empty:
+            st.info("No S/R path blocking rejections found for the selected period. This is good - it means no trades were rejected due to S/R blocking the path to target!")
+
+            # Show alternative: Check if there are S/R related issues in other stages
+            sr_related = df[df['rejection_reason'].str.contains('S/R|support|resistance|level', case=False, na=False)]
+            if not sr_related.empty:
+                st.warning(f"However, {len(sr_related)} rejections mention S/R in other stages:")
+                st.dataframe(
+                    sr_related[['scan_timestamp', 'pair', 'rejection_stage', 'rejection_reason']].head(10),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            return
+
+        st.markdown("---")
+
+        # Breakdown by pair
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("#### S/R Blocking by Currency Pair")
+            if 'pair' in sr_blocked_df.columns:
+                pair_counts = sr_blocked_df['pair'].value_counts().reset_index()
+                pair_counts.columns = ['Pair', 'Count']
+
+                fig_pair = px.bar(
+                    pair_counts,
+                    x='Pair',
+                    y='Count',
+                    title="S/R Path Blocking Rejections by Pair",
+                    color='Count',
+                    color_continuous_scale='Reds'
+                )
+                st.plotly_chart(fig_pair, use_container_width=True)
+
+        with col2:
+            st.markdown("#### S/R Blocking by Type")
+            if 'sr_blocking_type' in sr_blocked_df.columns and sr_blocked_df['sr_blocking_type'].notna().any():
+                type_counts = sr_blocked_df['sr_blocking_type'].value_counts().reset_index()
+                type_counts.columns = ['Type', 'Count']
+
+                fig_type = px.pie(
+                    type_counts,
+                    values='Count',
+                    names='Type',
+                    title="Blocking by S/R Type (Support vs Resistance)",
+                    color_discrete_map={'resistance': '#f44336', 'support': '#4caf50'}
+                )
+                st.plotly_chart(fig_type, use_container_width=True)
+
+        # Path blocked percentage distribution
+        if 'sr_path_blocked_pct' in sr_blocked_df.columns and sr_blocked_df['sr_path_blocked_pct'].notna().any():
+            st.markdown("#### Path Blocked Percentage Distribution")
+            fig_hist = px.histogram(
+                sr_blocked_df,
+                x='sr_path_blocked_pct',
+                nbins=20,
+                title="Distribution of Path Blocked Percentage",
+                labels={'sr_path_blocked_pct': 'Path Blocked %'},
+                color_discrete_sequence=['#ff6b6b']
+            )
+            fig_hist.add_vline(x=75, line_dash="dash", line_color="red",
+                              annotation_text="Critical (75%)")
+            fig_hist.add_vline(x=50, line_dash="dash", line_color="orange",
+                              annotation_text="Warning (50%)")
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+        # Detailed rejection table
+        st.markdown("#### Recent S/R Path Blocking Rejections")
+        display_cols = ['scan_timestamp', 'pair', 'attempted_direction', 'current_price',
+                       'potential_take_profit', 'sr_blocking_level', 'sr_blocking_type',
+                       'sr_blocking_distance_pips', 'sr_path_blocked_pct', 'target_distance_pips']
+        available_cols = [c for c in display_cols if c in sr_blocked_df.columns]
+
+        if available_cols:
+            st.dataframe(
+                sr_blocked_df[available_cols].head(20),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "scan_timestamp": st.column_config.DatetimeColumn("Time", format="MMM DD, HH:mm"),
+                    "pair": st.column_config.TextColumn("Pair"),
+                    "attempted_direction": st.column_config.TextColumn("Direction"),
+                    "current_price": st.column_config.NumberColumn("Entry", format="%.5f"),
+                    "potential_take_profit": st.column_config.NumberColumn("TP Target", format="%.5f"),
+                    "sr_blocking_level": st.column_config.NumberColumn("S/R Level", format="%.5f"),
+                    "sr_blocking_type": st.column_config.TextColumn("S/R Type"),
+                    "sr_blocking_distance_pips": st.column_config.NumberColumn("Dist to S/R", format="%.1f pips"),
+                    "sr_path_blocked_pct": st.column_config.ProgressColumn("Path Blocked", min_value=0, max_value=100, format="%.1f%%"),
+                    "target_distance_pips": st.column_config.NumberColumn("Target Dist", format="%.1f pips")
+                }
+            )
+        else:
+            st.dataframe(sr_blocked_df.head(20), use_container_width=True, hide_index=True)
+
+        # Analysis insights
+        st.markdown("---")
+        st.markdown("#### 💡 Insights")
+
+        if 'pair' in sr_blocked_df.columns and not sr_blocked_df.empty:
+            most_blocked_pair = sr_blocked_df['pair'].value_counts().idxmax()
+            most_blocked_count = sr_blocked_df['pair'].value_counts().max()
+
+            st.markdown(f"""
+            - **Most affected pair:** {most_blocked_pair} ({most_blocked_count} rejections)
+            - This pair may have significant S/R levels that frequently block trade targets
+            - Consider adjusting TP targets or entry timing for this pair
+            """)
+
+        if 'sr_blocking_type' in sr_blocked_df.columns and sr_blocked_df['sr_blocking_type'].notna().any():
+            type_mode = sr_blocked_df['sr_blocking_type'].mode()
+            if len(type_mode) > 0:
+                dominant_type = type_mode.iloc[0]
+                st.markdown(f"""
+                - **Dominant blocking type:** {dominant_type.upper()}
+                - {'BUY signals are being blocked by resistance levels' if dominant_type == 'resistance' else 'SELL signals are being blocked by support levels'}
+                """)
 
     def _render_time_analysis(self, df: pd.DataFrame):
         """Render time analysis sub-tab"""
