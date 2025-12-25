@@ -64,6 +64,8 @@ class ForexChartGenerator:
         'down_candle': '#ef5350',    # Red for down candles
         'volume_up': '#26a69a80',    # Semi-transparent green
         'volume_down': '#ef535080',  # Semi-transparent red
+        'ema_9': '#ff9800',          # Orange for EMA 9
+        'ema_21': '#2196f3',         # Blue for EMA 21
         'ema_50': '#9c27b0',         # Purple for EMA 50
         'ema_200': '#673ab7',        # Deep purple for EMA 200
         'entry': '#00e676',          # Bright green
@@ -75,6 +77,9 @@ class ForexChartGenerator:
         'order_block': '#ffeb3b',    # Yellow for order blocks
         'bos_bull': '#00e676',       # Green for bullish BOS
         'bos_bear': '#ff1744',       # Red for bearish BOS
+        'support': '#4caf50',        # Green for support levels
+        'resistance': '#f44336',     # Red for resistance levels
+        'entry_type_bg': '#000000cc', # Semi-transparent black for entry type label
     }
 
     def __init__(self, db_manager=None, data_fetcher=None):
@@ -165,15 +170,32 @@ class ForexChartGenerator:
                 # Plot candlesticks manually (since we're using regular matplotlib)
                 self._plot_candlesticks(ax, df, tf)
 
+                # Extract strategy_indicators for enhanced charting
+                strategy_indicators = signal.get('strategy_indicators', {}) if signal else {}
+
                 # Add EMA 50 on 4H
                 if tf == '4h' and len(df) >= 50:
                     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
                     ax.plot(range(len(df)), df['EMA50'].values, color=self.COLORS['ema_50'],
                            linewidth=1.5, label='EMA 50', alpha=0.9)
 
+                # Add EMA 9/21 on 15m for swing break context and micro-structure
+                if tf == '15m' and len(df) >= 21:
+                    self._add_ema_stack(ax, df, strategy_indicators)
+
+                # Add Support/Resistance levels on 15m (swing break timeframe)
+                if tf == '15m' and strategy_indicators:
+                    self._add_support_resistance_levels(ax, df, strategy_indicators)
+
+                # Add signal levels on 15m (swing break timeframe) for context
+                if tf == '15m' and signal:
+                    self._add_signal_levels(ax, df, signal)
+
                 # Add signal levels on entry timeframe (5m)
                 if tf == '5m' and signal:
                     self._add_signal_levels(ax, df, signal)
+                    # Add entry type annotation on 5m (entry timeframe)
+                    self._add_entry_type_annotation(ax, df, signal, strategy_indicators)
 
                 # Add SMC annotations
                 if smc_data and tf in ['15m', '5m']:
@@ -387,6 +409,138 @@ class ForexChartGenerator:
 
         except Exception as e:
             logger.warning(f"Error adding SMC annotations: {e}")
+
+    def _add_ema_stack(self, ax, df: pd.DataFrame, strategy_indicators: Dict[str, Any]) -> None:
+        """Add EMA 9/21 lines on 5m chart for micro-structure analysis"""
+        try:
+            # Try to get EMA values from strategy_indicators first
+            dataframe_analysis = strategy_indicators.get('dataframe_analysis', {})
+            ema_data = dataframe_analysis.get('ema_data', {})
+
+            # Calculate EMAs from dataframe if not enough data in indicators
+            if len(df) >= 9:
+                df['EMA9'] = df['Close'].ewm(span=9, adjust=False).mean()
+                ax.plot(range(len(df)), df['EMA9'].values, color=self.COLORS['ema_9'],
+                       linewidth=1.2, label='EMA 9', alpha=0.8)
+
+            if len(df) >= 21:
+                df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
+                ax.plot(range(len(df)), df['EMA21'].values, color=self.COLORS['ema_21'],
+                       linewidth=1.2, label='EMA 21', alpha=0.8)
+
+        except Exception as e:
+            logger.warning(f"Error adding EMA stack: {e}")
+
+    def _add_entry_type_annotation(
+        self,
+        ax,
+        df: pd.DataFrame,
+        signal: Dict[str, Any],
+        strategy_indicators: Dict[str, Any]
+    ) -> None:
+        """Add entry type (PULLBACK/MOMENTUM) annotation with pullback depth"""
+        try:
+            # Get entry type from signal or strategy_indicators
+            tier3_entry = strategy_indicators.get('tier3_entry', {})
+            entry_type = tier3_entry.get('entry_type') or signal.get('entry_type', 'UNKNOWN')
+            pullback_depth = tier3_entry.get('pullback_depth', signal.get('pullback_depth', 0))
+            in_optimal_zone = tier3_entry.get('in_optimal_zone', signal.get('in_optimal_zone', False))
+            volume_confirmed = strategy_indicators.get('tier2_swing', {}).get('volume_confirmed', False)
+
+            if not entry_type or entry_type == 'UNKNOWN':
+                return
+
+            # Position annotation in top-right corner
+            x_pos = len(df) - 1
+            y_range = df['High'].max() - df['Low'].min()
+            y_pos = df['High'].max() - (y_range * 0.05)
+
+            # Build annotation text
+            depth_pct = abs(pullback_depth * 100)
+            if entry_type == 'PULLBACK':
+                zone_status = "✓ Optimal" if in_optimal_zone else "Outside Zone"
+                annotation_text = f"⬇ {entry_type}\nDepth: {depth_pct:.1f}%\n{zone_status}"
+                bg_color = '#1565c0'  # Blue for pullback
+            else:  # MOMENTUM
+                annotation_text = f"⚡ {entry_type}\nExtension: {depth_pct:.1f}%"
+                bg_color = '#ff6f00'  # Orange for momentum
+
+            # Add volume status
+            vol_icon = "📊 Vol ✓" if volume_confirmed else "📊 Vol ✗"
+            annotation_text += f"\n{vol_icon}"
+
+            # Draw annotation box
+            ax.annotate(
+                annotation_text,
+                xy=(x_pos, y_pos),
+                fontsize=9,
+                fontweight='bold',
+                color='white',
+                ha='right',
+                va='top',
+                bbox=dict(
+                    boxstyle='round,pad=0.4',
+                    facecolor=bg_color,
+                    edgecolor='white',
+                    alpha=0.9
+                )
+            )
+
+        except Exception as e:
+            logger.warning(f"Error adding entry type annotation: {e}")
+
+    def _add_support_resistance_levels(
+        self,
+        ax,
+        df: pd.DataFrame,
+        strategy_indicators: Dict[str, Any]
+    ) -> None:
+        """Add support and resistance horizontal lines from strategy_indicators"""
+        try:
+            # Get S/R data from dataframe_analysis
+            dataframe_analysis = strategy_indicators.get('dataframe_analysis', {})
+            sr_data = dataframe_analysis.get('sr_data', {})
+
+            if not sr_data:
+                return
+
+            x_max = len(df) - 1
+            current_price = df['Close'].iloc[-1]
+
+            # Support level
+            support = sr_data.get('nearest_support')
+            support_dist = sr_data.get('distance_to_support_pips', 0)
+            if support and support < current_price:
+                ax.axhline(y=support, color=self.COLORS['support'],
+                          linestyle='-', linewidth=1.5, alpha=0.7)
+                ax.annotate(
+                    f"S: {support:.5f} ({support_dist:.1f}p)",
+                    xy=(x_max * 0.02, support),
+                    fontsize=8,
+                    color=self.COLORS['support'],
+                    fontweight='bold',
+                    va='bottom',
+                    alpha=0.9
+                )
+
+            # Resistance level
+            resistance = sr_data.get('nearest_resistance')
+            resistance_dist = sr_data.get('distance_to_resistance_pips', 0)
+            if resistance and resistance > current_price:
+                ax.axhline(y=resistance, color=self.COLORS['resistance'],
+                          linestyle='-', linewidth=1.5, alpha=0.7)
+                ax.annotate(
+                    f"R: {resistance:.5f} ({resistance_dist:.1f}p)",
+                    xy=(x_max * 0.02, resistance),
+                    fontsize=8,
+                    color=self.COLORS['resistance'],
+                    fontweight='bold',
+                    va='top',
+                    alpha=0.9
+                )
+
+        except Exception as e:
+            logger.warning(f"Error adding S/R levels: {e}")
 
     def _add_fib_zone(self, ax, df: pd.DataFrame, signal: Dict[str, Any]) -> None:
         """Add Fibonacci optimal zone shading (38.2% - 61.8%)"""

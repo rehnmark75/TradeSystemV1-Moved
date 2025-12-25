@@ -965,6 +965,7 @@ Be concise but thorough. The Silver Bullet strategy is TIME-SENSITIVE - quality 
         multi-timeframe analysis of forex signals.
 
         Updated for v2.3.0 relaxed thresholds based on rejection analysis.
+        Enhanced with rich strategy_indicators data for better AI analysis.
         """
         try:
             # Extract signal data
@@ -984,18 +985,48 @@ Be concise but thorough. The Silver Bullet strategy is TIME-SENSITIVE - quality 
             reward_pips = signal.get('reward_pips', 0)
             rr_ratio = signal.get('rr_ratio', 0)
 
-            # SMC-specific data
-            entry_type = signal.get('entry_type', 'PULLBACK')  # PULLBACK or MOMENTUM
-            swing_level = signal.get('swing_level', 0)
-            opposite_swing = signal.get('opposite_swing', 0)
-            pullback_depth = signal.get('pullback_depth', 0)
-            ema_value = signal.get('ema_value', 0)
-            ema_distance = signal.get('ema_distance_pips', 0)
-            in_optimal_zone = signal.get('in_optimal_zone', False)
-            volume_confirmed = signal.get('volume_confirmed', False)
-
-            # v2.3.0: Extract confidence breakdown if available
+            # Extract rich data from strategy_indicators
             strategy_indicators = signal.get('strategy_indicators', {})
+
+            # Tier 1 - EMA Bias data
+            tier1_ema = strategy_indicators.get('tier1_ema', {})
+            ema_value = tier1_ema.get('ema_value', signal.get('ema_value', 0))
+            ema_distance = tier1_ema.get('distance_pips', signal.get('ema_distance_pips', 0))
+            ema_direction = tier1_ema.get('direction', direction)
+
+            # Tier 2 - Swing Break data
+            tier2_swing = strategy_indicators.get('tier2_swing', {})
+            swing_level = tier2_swing.get('swing_level', signal.get('swing_level', 0))
+            body_close_confirmed = tier2_swing.get('body_close_confirmed', True)
+            volume_confirmed = tier2_swing.get('volume_confirmed', signal.get('volume_confirmed', False))
+
+            # Tier 3 - Entry data
+            tier3_entry = strategy_indicators.get('tier3_entry', {})
+            entry_type = tier3_entry.get('entry_type', signal.get('entry_type', 'PULLBACK'))
+            pullback_depth = tier3_entry.get('pullback_depth', signal.get('pullback_depth', 0))
+            fib_zone = tier3_entry.get('fib_zone', 'Unknown')
+            in_optimal_zone = tier3_entry.get('in_optimal_zone', signal.get('in_optimal_zone', False))
+            order_type = tier3_entry.get('order_type', 'market')
+
+            # Risk management data
+            risk_mgmt = strategy_indicators.get('risk_management', {})
+            if risk_mgmt:
+                stop_loss = risk_mgmt.get('stop_loss', stop_loss)
+                take_profit = risk_mgmt.get('take_profit', take_profit)
+                risk_pips = risk_mgmt.get('risk_pips', risk_pips)
+                reward_pips = risk_mgmt.get('reward_pips', reward_pips)
+                rr_ratio = risk_mgmt.get('rr_ratio', rr_ratio)
+
+            # Opposite swing for SL reference
+            opposite_swing = signal.get('opposite_swing', 0)
+
+            # Dataframe analysis - S/R and additional indicators
+            dataframe_analysis = strategy_indicators.get('dataframe_analysis', {})
+            sr_data = dataframe_analysis.get('sr_data', {})
+            ema_data = dataframe_analysis.get('ema_data', {})
+            other_indicators = dataframe_analysis.get('other_indicators', {})
+
+            # Confidence breakdown
             confidence_breakdown = strategy_indicators.get('confidence_breakdown', {})
 
             # Build chart analysis instructions
@@ -1019,26 +1050,35 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 
 **Timeframes Displayed:**
 - 4H timeframe: Shows 50 EMA trend bias (purple line)
-- 15m timeframe: Shows swing break confirmation
-- 5m timeframe: Shows entry zone with Fibonacci levels
+- 15m timeframe: PRIMARY ANALYSIS - Shows swing break, EMAs 9/21, S/R levels, entry/SL/TP
+- 5m timeframe: Shows entry zone with Fibonacci levels and entry type annotation
 
-**Key Visual Markers:**
+**Key Visual Markers (on 15m chart - PRIMARY):**
 - GREEN dashed line: Entry price level
 - RED dashed line: Stop loss level (below opposite swing)
 - BLUE dashed line: Take profit target
-- YELLOW shaded zone: Fibonacci optimal entry zone (38.2%-61.8%)
+- ORANGE line: EMA 9 (fast momentum)
+- BLUE line: EMA 21 (trend confirmation)
+- GREEN horizontal line: Support level with distance in pips
+- RED horizontal line: Resistance level with distance in pips
 - ORANGE horizontal lines: Swing high levels
 - BLUE horizontal lines: Swing low levels
+
+**Key Visual Markers (on 5m chart):**
+- YELLOW shaded zone: Fibonacci optimal entry zone (38.2%-61.8%)
+- Entry Type Box (top-right): Shows PULLBACK/MOMENTUM, depth %, zone status, volume ✓/✗
 {momentum_note}
 **CRITICAL CHART ANALYSIS CHECKLIST:**
 1. ✓ Is price clearly respecting the 4H EMA trend direction?
 2. ✓ Is the swing break on 15m clean and confirmed (full candle close)?
-3. ✓ For PULLBACK: Is entry within or near the optimal Fibonacci zone?
-4. ✓ For MOMENTUM: Is breakout clean with strong directional candles?
-5. ✓ Is stop loss placement below a valid structure low (for longs)?
-6. ✓ Does the price action show clean trend structure?
-7. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
-8. ✓ Is there sufficient distance to next resistance/support?
+3. ✓ Are EMA 9/21 aligned with the trade direction on 15m chart?
+4. ✓ Is entry clear of nearby S/R obstacles shown on 15m?
+5. ✓ For PULLBACK: Is entry within or near the optimal Fibonacci zone (5m)?
+6. ✓ For MOMENTUM: Is breakout clean with strong directional candles?
+7. ✓ Is stop loss placement below a valid structure low (for longs)?
+8. ✓ Does the price action show clean trend structure?
+9. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
+10. ✓ Does the entry type box (5m) show favorable conditions?
 """
 
             # v2.3.0: Enhanced entry type explanation
@@ -1069,6 +1109,58 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 - Fib Accuracy: {confidence_breakdown.get('fib_accuracy', 0)*100:.1f}%
 """
 
+            # Build S/R context section
+            sr_context = ""
+            if sr_data:
+                nearest_support = sr_data.get('nearest_support')
+                nearest_resistance = sr_data.get('nearest_resistance')
+                dist_support = sr_data.get('distance_to_support_pips', 0)
+                dist_resistance = sr_data.get('distance_to_resistance_pips', 0)
+
+                sr_context = f"""
+**SUPPORT/RESISTANCE CONTEXT:**
+- Nearest Support: {self._format_price(nearest_support)} ({dist_support:.1f} pips below)
+- Nearest Resistance: {self._format_price(nearest_resistance)} ({dist_resistance:.1f} pips above)
+- Path to Target: {'⚠️ Resistance in way' if direction == 'BULL' and dist_resistance < reward_pips else '⚠️ Support in way' if direction == 'BEAR' and dist_support < reward_pips else '✅ Clear path'}
+"""
+
+            # Build EMA stack context
+            ema_stack_context = ""
+            if ema_data:
+                ema_9_val = ema_data.get('ema_9', 0)
+                ema_21_val = ema_data.get('ema_21', 0)
+                ema_50_val = ema_data.get('ema_50', 0)
+
+                if ema_9_val and ema_21_val:
+                    ema_alignment = "Bullish" if ema_9_val > ema_21_val else "Bearish"
+                    ema_aligned_with_signal = (ema_alignment == "Bullish" and direction == "BULL") or \
+                                              (ema_alignment == "Bearish" and direction == "BEAR")
+
+                    ema_stack_context = f"""
+**5M EMA MICRO-STRUCTURE:**
+- EMA 9: {self._format_price(ema_9_val)}
+- EMA 21: {self._format_price(ema_21_val)}
+- EMA 50: {self._format_price(ema_50_val)}
+- 5m Trend: {ema_alignment} {'✅ Aligned' if ema_aligned_with_signal else '⚠️ Conflict'}
+"""
+
+            # Build Bollinger Band context if available
+            bb_context = ""
+            if other_indicators:
+                bb_upper = other_indicators.get('bb_upper')
+                bb_middle = other_indicators.get('bb_middle')
+                bb_lower = other_indicators.get('bb_lower')
+
+                if bb_upper and bb_lower and entry_price:
+                    bb_width = (bb_upper - bb_lower) * 10000  # in pips
+                    price_in_bb = "Upper band" if entry_price > bb_middle else "Lower band"
+
+                    bb_context = f"""
+**BOLLINGER BAND CONTEXT:**
+- BB Width: {bb_width:.1f} pips ({'Wide/Volatile' if bb_width > 30 else 'Narrow/Consolidating'})
+- Entry Position: {price_in_bb} region
+"""
+
             # Build SMC-specific analysis section
             smc_analysis = f"""
 ## SMC SIMPLE v2.3.0 STRATEGY DATA (3-TIER VALIDATION)
@@ -1076,16 +1168,22 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 **TIER 1 - 4H Directional Bias:**
 - 50 EMA Value: {self._format_price(ema_value)}
 - Distance from EMA: {ema_distance:.1f} pips {'✅' if ema_distance >= 2.5 else '⚠️ Close to EMA'}
-- Bias Direction: {direction}
+- Bias Direction: {ema_direction}
 
 **TIER 2 - 15m Swing Break:**
 - Swing Level Broken: {self._format_price(swing_level)}
 - Opposite Swing (SL reference): {self._format_price(opposite_swing)}
+- Body Close Confirmed: {'✅ Yes' if body_close_confirmed else '❌ No'}
 - Volume Confirmed: {'✅ Yes' if volume_confirmed else '❌ No'}
 
 **TIER 3 - Entry Analysis:**
 {entry_type_detail}
+- Fib Zone: {fib_zone}
+- Order Type: {order_type.upper()}
 {confidence_detail}
+{sr_context}
+{ema_stack_context}
+{bb_context}
 """
 
             # Build the complete prompt
@@ -1122,21 +1220,29 @@ DECISION: [APPROVE/REJECT]
 REASON: [2-3 sentences explaining your professional assessment. Focus on: trend alignment, entry quality, R:R ratio, and any visual concerns from the chart]
 
 **SCORING GUIDELINES FOR v2.3.0:**
-- 8-10: Strong trend alignment, clean entry (pullback in zone OR strong momentum), R:R ≥ 2.0
-- 6-7: Good setup with minor concerns (e.g., momentum slightly extended, volume not confirmed)
-- 4-5: Marginal setup - weak trend or entry quality issues
-- 1-3: Poor setup - counter-trend, bad R:R, or technical breakdown
+- 8-10: Strong trend alignment, clean swing break on 15m, R:R ≥ 2.0, volume confirmed, EMA 9/21 aligned on 15m
+- 6-7: Good setup with minor concerns (e.g., momentum slightly extended, volume not confirmed, S/R nearby but manageable)
+- 4-5: Marginal setup - weak trend, entry quality issues, or EMA micro-structure conflict on 15m
+- 1-3: Poor setup - counter-trend, bad R:R, S/R blocking target, or technical breakdown
 
 **ENTRY TYPE EVALUATION:**
-- PULLBACK entries: Prefer entries in 38.2%-61.8% Fib zone. Outside zone = lower score but not automatic rejection
-- MOMENTUM entries: Accept up to 50% beyond break point. Look for strong directional candles, reject if showing exhaustion
+- PULLBACK entries: Prefer entries in 38.2%-61.8% Fib zone (check 5m chart). Outside zone = lower score but not automatic rejection
+- MOMENTUM entries: Accept up to 50% beyond break point. Look for strong directional candles on 15m, reject if showing exhaustion
+- Check entry type box on 5m chart for quick visual confirmation
+
+**SUPPORT/RESISTANCE EVALUATION (check 15m chart):**
+- Check if S/R levels shown on 15m chart obstruct the path to take profit
+- For BULL: Resistance should be BEYOND take profit level
+- For BEAR: Support should be BEYOND take profit level
+- S/R within 50% of target distance = caution, within 25% = strong concern
 
 **AUTOMATIC REJECTION CRITERIA:**
 - Counter-trend trades (price on wrong side of 4H EMA)
 - R:R ratio below 1.5
-- MOMENTUM entry showing reversal candles (engulfing, pin bars against direction)
-- Price too close to EMA (<2.5 pips) - buffer zone violation
-- Clear resistance/support blocking path to target
+- MOMENTUM entry showing reversal candles on 15m (engulfing, pin bars against direction)
+- Price too close to 4H EMA (<2.5 pips) - buffer zone violation
+- S/R level on 15m blocking more than 75% of path to target
+- EMA 9/21 crossed against signal direction on 15m
 
 Be concise but thorough. Your assessment determines if real money is risked."""
 
