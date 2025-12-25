@@ -773,6 +773,195 @@ class StockScannerCLI:
         print(f"   Tokens: {analysis.tokens_used}")
         print(f"   Latency: {analysis.latency_ms}ms")
 
+    # =========================================================================
+    # BROKER TRADE STATISTICS COMMANDS
+    # =========================================================================
+
+    async def cmd_broker_positions(self):
+        """Show current open positions from broker"""
+        print("\n[BROKER] Open Positions")
+        print("=" * 60)
+
+        if not self.robomarkets:
+            print("[ERROR] RoboMarkets client not configured")
+            return False
+
+        try:
+            from .services.broker_trade_analyzer import BrokerTradeAnalyzer
+
+            async with self.robomarkets:
+                analyzer = BrokerTradeAnalyzer(self.robomarkets)
+                summary = await analyzer.get_open_positions_summary()
+
+            if summary.get("error"):
+                print(f"[ERROR] {summary['error']}")
+                return False
+
+            print(f"\n[SUMMARY]")
+            print(f"   Open Positions: {summary['count']}")
+            print(f"   Unrealized P&L: ${summary['total_unrealized_pnl']:,.2f}")
+            print(f"   Long: {summary['by_side'].get('long', 0)} | Short: {summary['by_side'].get('short', 0)}")
+
+            if summary['positions']:
+                print(f"\n[POSITIONS]")
+                print("-" * 60)
+                for p in summary['positions']:
+                    pnl_color = "+" if p['unrealized_pnl'] >= 0 else ""
+                    print(f"   {p['ticker']:6} | {p['side']:5} | Qty: {p['quantity']:>6.1f} | "
+                          f"Entry: ${p['entry_price']:>8.2f} | Current: ${p['current_price']:>8.2f} | "
+                          f"P&L: {pnl_color}${p['unrealized_pnl']:>8.2f}")
+
+            print("\n" + "=" * 60)
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to get positions: {e}")
+            logger.exception("Broker positions error")
+            return False
+
+    async def cmd_broker_trades(self, days: int = 30, limit: int = 50):
+        """Show closed trades from broker"""
+        print(f"\n[BROKER] Closed Trades - Last {days} Days")
+        print("=" * 60)
+
+        if not self.robomarkets:
+            print("[ERROR] RoboMarkets client not configured")
+            return False
+
+        try:
+            from .services.broker_trade_analyzer import BrokerTradeAnalyzer
+
+            async with self.robomarkets:
+                analyzer = BrokerTradeAnalyzer(self.robomarkets)
+                summary = await analyzer.get_closed_trades_summary(days=days)
+
+            if summary.get("error"):
+                print(f"[ERROR] {summary['error']}")
+                return False
+
+            print(f"\n[SUMMARY]")
+            print(f"   Total Closed Trades: {summary['count']}")
+            print(f"   Total Profit/Loss: ${summary['total_profit']:,.2f}")
+
+            if summary['trades']:
+                print(f"\n[RECENT TRADES] (showing up to {limit})")
+                print("-" * 60)
+                for t in summary['trades'][:limit]:
+                    pnl_color = "+" if t['profit'] >= 0 else ""
+                    print(f"   {t['ticker']:6} | {t['side']:5} | "
+                          f"Open: ${t['open_price']:>8.2f} | Close: ${t['close_price']:>8.2f} | "
+                          f"P&L: {pnl_color}${t['profit']:>8.2f} ({pnl_color}{t['profit_pct']:.1f}%) | "
+                          f"{t['duration_hours']:.1f}h")
+
+            print("\n" + "=" * 60)
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to get trades: {e}")
+            logger.exception("Broker trades error")
+            return False
+
+    async def cmd_broker_stats(self, days: int = 30):
+        """Show comprehensive broker trading statistics"""
+        print(f"\n[BROKER] Trading Statistics - Last {days} Days")
+        print("=" * 60)
+
+        if not self.robomarkets:
+            print("[ERROR] RoboMarkets client not configured")
+            return False
+
+        try:
+            from .services.broker_trade_analyzer import BrokerTradeAnalyzer
+
+            async with self.robomarkets:
+                analyzer = BrokerTradeAnalyzer(self.robomarkets)
+                report = await analyzer.generate_report(days=days)
+
+            print(report)
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to get statistics: {e}")
+            logger.exception("Broker stats error")
+            return False
+
+    async def cmd_broker_sync(self, days: int = 30):
+        """Sync broker trades to local database"""
+        print(f"\n[BROKER] Syncing Trades to Database - Last {days} Days")
+        print("=" * 60)
+
+        if not self.robomarkets:
+            print("[ERROR] RoboMarkets client not configured")
+            return False
+
+        try:
+            from .services.broker_trade_analyzer import BrokerTradeSync
+
+            async with self.robomarkets:
+                sync = BrokerTradeSync(self.db, self.robomarkets)
+                result = await sync.sync_all(days=days)
+
+            print(f"\n[RESULTS]")
+            print(f"   Positions: {result['positions']['total']} fetched, "
+                  f"{result['positions']['inserted']} new, {result['positions']['updated']} updated")
+            print(f"   Trades: {result['trades']['total']} fetched, "
+                  f"{result['trades']['inserted']} new, {result['trades']['updated']} updated")
+            print(f"\n   Total: {result['total_fetched']} fetched, "
+                  f"{result['total_inserted']} inserted, {result['total_updated']} updated")
+
+            print("\n" + "=" * 60)
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to sync trades: {e}")
+            logger.exception("Broker sync error")
+            return False
+
+    async def cmd_broker_db_stats(self, days: int = 30):
+        """Show broker statistics from local database"""
+        print(f"\n[BROKER] Database Statistics - Last {days} Days")
+        print("=" * 60)
+
+        try:
+            from .services.broker_trade_analyzer import BrokerTradeSync
+
+            # Create sync instance just for DB queries (no API needed)
+            sync = BrokerTradeSync(self.db, None)
+            stats = await sync.get_statistics_from_db(days=days)
+
+            print(f"\n[OPEN POSITIONS]")
+            print(f"   Count: {stats['open_positions']}")
+            print(f"   Unrealized P&L: ${stats['open_unrealized_pnl']:,.2f}")
+
+            print(f"\n[CLOSED TRADES]")
+            print(f"   Total: {stats['total_trades']}")
+            print(f"   Wins: {stats['winning_trades']} | Losses: {stats['losing_trades']}")
+            print(f"   Win Rate: {stats['win_rate']:.1f}%")
+
+            print(f"\n[PROFIT METRICS]")
+            print(f"   Net Profit: ${stats['net_profit']:,.2f}")
+            print(f"   Total Profit: ${stats['total_profit']:,.2f}")
+            print(f"   Total Loss: ${stats['total_loss']:,.2f}")
+            print(f"   Profit Factor: {stats['profit_factor']:.2f}")
+            print(f"   Expectancy: ${stats['expectancy']:,.2f}")
+
+            print(f"\n[AVERAGES]")
+            print(f"   Avg Win: ${stats['avg_win']:,.2f} ({stats['avg_win_pct']:.1f}%)")
+            print(f"   Avg Loss: ${stats['avg_loss']:,.2f} ({stats['avg_loss_pct']:.1f}%)")
+            print(f"   Avg Duration: {stats['avg_duration_hours']:.1f} hours")
+
+            print(f"\n[BY SIDE]")
+            print(f"   Long: {stats['long_trades']} trades, {stats['long_win_rate']:.1f}% win, ${stats['long_profit']:,.2f}")
+            print(f"   Short: {stats['short_trades']} trades, {stats['short_win_rate']:.1f}% win, ${stats['short_profit']:,.2f}")
+
+            print("\n" + "=" * 60)
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to get DB statistics: {e}")
+            logger.exception("Broker DB stats error")
+            return False
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser"""
@@ -935,6 +1124,70 @@ def create_parser() -> argparse.ArgumentParser:
         help="Signal ID to show details for"
     )
 
+    # =========================================================================
+    # BROKER TRADE STATISTICS COMMANDS
+    # =========================================================================
+
+    # broker-positions
+    subparsers.add_parser(
+        "broker-positions",
+        help="Show current open positions from broker"
+    )
+
+    # broker-trades
+    broker_trades_parser = subparsers.add_parser(
+        "broker-trades",
+        help="Show closed trades from broker"
+    )
+    broker_trades_parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Days of trade history to fetch (default: 30)"
+    )
+    broker_trades_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum trades to display (default: 50)"
+    )
+
+    # broker-stats
+    broker_stats_parser = subparsers.add_parser(
+        "broker-stats",
+        help="Show comprehensive trading statistics from broker"
+    )
+    broker_stats_parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Days of history to analyze (default: 30)"
+    )
+
+    # broker-sync
+    broker_sync_parser = subparsers.add_parser(
+        "broker-sync",
+        help="Sync broker trades to local database"
+    )
+    broker_sync_parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Days of history to sync (default: 30)"
+    )
+
+    # broker-db-stats
+    broker_db_stats_parser = subparsers.add_parser(
+        "broker-db-stats",
+        help="Show broker statistics from local database"
+    )
+    broker_db_stats_parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Days of history to analyze (default: 30)"
+    )
+
     return parser
 
 
@@ -999,6 +1252,26 @@ async def main():
             )
         elif args.command == "claude-detail":
             success = await cli.cmd_claude_detail(args.signal_id)
+        # Broker trade statistics commands
+        elif args.command == "broker-positions":
+            success = await cli.cmd_broker_positions()
+        elif args.command == "broker-trades":
+            success = await cli.cmd_broker_trades(
+                days=getattr(args, "days", 30),
+                limit=getattr(args, "limit", 50)
+            )
+        elif args.command == "broker-stats":
+            success = await cli.cmd_broker_stats(
+                days=getattr(args, "days", 30)
+            )
+        elif args.command == "broker-sync":
+            success = await cli.cmd_broker_sync(
+                days=getattr(args, "days", 30)
+            )
+        elif args.command == "broker-db-stats":
+            success = await cli.cmd_broker_db_stats(
+                days=getattr(args, "days", 30)
+            )
         else:
             parser.print_help()
             success = False

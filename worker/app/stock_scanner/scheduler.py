@@ -74,6 +74,16 @@ except ImportError:
     PERFORMANCE_TRACKER_AVAILABLE = False
     PerformanceTracker = None
 
+# Import broker trade sync
+try:
+    from stock_scanner.services.broker_trade_analyzer import BrokerTradeSync
+    from stock_scanner.core.trading.robomarkets_client import RoboMarketsClient
+    BROKER_SYNC_AVAILABLE = True
+except ImportError:
+    BROKER_SYNC_AVAILABLE = False
+    BrokerTradeSync = None
+    RoboMarketsClient = None
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -127,10 +137,20 @@ class StockScheduler:
             'type': 'quick',
             'description': 'Pre-market gap and earnings scan'
         },
+        'broker_sync_am': {
+            'time': time(9, 30),      # 9:30 AM ET (market open)
+            'type': 'broker',
+            'description': 'Broker trades sync (market open)'
+        },
         'intraday': {
             'time': time(12, 30),     # 12:30 PM ET
             'type': 'scanner_only',
             'description': 'Intraday momentum scanner'
+        },
+        'broker_sync_pm': {
+            'time': time(16, 0),      # 4:00 PM ET (market close)
+            'type': 'broker',
+            'description': 'Broker trades sync (market close)'
         },
         'post_market': {
             'time': time(16, 30),     # 4:30 PM ET
@@ -723,6 +743,72 @@ class StockScheduler:
         await self._log_pipeline_run('post_market_scan', results, elapsed)
         return results
 
+    async def run_broker_sync(self, days: int = 30):
+        """
+        Sync broker trades from RoboMarkets API to local database.
+
+        Runs at:
+        - 9:30 AM ET (market open) - catch overnight trades
+        - 4:00 PM ET (market close) - sync end-of-day trades
+
+        Syncs:
+        - Open positions (current state)
+        - Closed trades from last N days
+        """
+        logger.info("=" * 60)
+        logger.info("BROKER SYNC - Syncing trades from RoboMarkets")
+        logger.info("=" * 60)
+
+        start_time = datetime.now()
+        results = {}
+
+        if not BROKER_SYNC_AVAILABLE:
+            logger.warning("[SKIP] Broker sync not available - missing dependencies")
+            return {'skipped': True, 'reason': 'dependencies not available'}
+
+        try:
+            # Check for API credentials
+            api_key = os.getenv('ROBOMARKETS_API_KEY', config.ROBOMARKETS_API_KEY if hasattr(config, 'ROBOMARKETS_API_KEY') else '')
+            account_id = os.getenv('ROBOMARKETS_ACCOUNT_ID', config.ROBOMARKETS_ACCOUNT_ID if hasattr(config, 'ROBOMARKETS_ACCOUNT_ID') else '')
+
+            if not api_key or not account_id:
+                logger.warning("[SKIP] Broker sync - missing API credentials")
+                return {'skipped': True, 'reason': 'missing API credentials'}
+
+            # Initialize broker client and sync service
+            client = RoboMarketsClient(api_key=api_key, account_id=account_id)
+            broker_sync = BrokerTradeSync(db_manager=self.db, robomarkets_client=client)
+
+            async with client:
+                # Run full sync
+                sync_result = await broker_sync.sync_all(days=days)
+
+                results = {
+                    'positions_fetched': sync_result['positions']['total'],
+                    'positions_inserted': sync_result['positions']['inserted'],
+                    'positions_updated': sync_result['positions']['updated'],
+                    'trades_fetched': sync_result['trades']['total'],
+                    'trades_inserted': sync_result['trades']['inserted'],
+                    'trades_updated': sync_result['trades']['updated'],
+                    'total_synced': sync_result['total_inserted'] + sync_result['total_updated']
+                }
+
+                logger.info(f"[OK] Broker sync complete:")
+                logger.info(f"     Positions: {results['positions_fetched']} fetched, "
+                           f"{results['positions_inserted']} new, {results['positions_updated']} updated")
+                logger.info(f"     Trades: {results['trades_fetched']} fetched, "
+                           f"{results['trades_inserted']} new, {results['trades_updated']} updated")
+
+        except Exception as e:
+            logger.error(f"Broker sync error: {e}")
+            results['error'] = str(e)
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"\nBroker sync complete in {elapsed:.1f}s")
+
+        await self._log_pipeline_run('broker_sync', results, elapsed)
+        return results
+
     async def weekly_sync(self):
         """Run weekly instrument sync from RoboMarkets + fundamentals update"""
         logger.info("=" * 60)
@@ -933,6 +1019,8 @@ class StockScheduler:
                     await self.run_pipeline()
                 elif next_task == "weekly_sync":
                     await self.weekly_sync()
+                elif next_task in ("broker_sync_am", "broker_sync_pm"):
+                    await self.run_broker_sync()
 
         except asyncio.CancelledError:
             logger.info("Scheduler cancelled")
@@ -984,9 +1072,11 @@ async def run_once(task: str):
             await scheduler.weekly_sync()
         elif task == "fundamentals":
             await scheduler.fundamentals.run_fundamentals_pipeline()
+        elif task == "brokersync":
+            await scheduler.run_broker_sync()
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, scanners, premarket, intraday, postmarket, weekly, fundamentals")
+            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, scanners, premarket, intraday, postmarket, weekly, fundamentals, brokersync")
     finally:
         await scheduler.cleanup()
 
@@ -998,7 +1088,7 @@ def main():
     parser.add_argument('command', nargs='?', default='run',
                        choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'smc',
                                'watchlist', 'signals', 'scanners', 'premarket', 'intraday',
-                               'postmarket', 'weekly', 'fundamentals', 'status'],
+                               'postmarket', 'weekly', 'fundamentals', 'brokersync', 'status'],
                        help='Command to execute')
     args = parser.parse_args()
 
@@ -1016,7 +1106,7 @@ def main():
 
     elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'smc', 'watchlist',
                           'signals', 'scanners', 'premarket', 'intraday', 'postmarket',
-                          'weekly', 'fundamentals']:
+                          'weekly', 'fundamentals', 'brokersync']:
         print(f"Running {args.command}...")
         asyncio.run(run_once(args.command))
 
@@ -1057,6 +1147,7 @@ def main():
         print("  metrics     - Calculate metrics only")
         print("  smc         - Run SMC analysis only")
         print("  watchlist   - Build watchlist only")
+        print("  brokersync  - Sync broker trades to database")
 
 
 if __name__ == '__main__':

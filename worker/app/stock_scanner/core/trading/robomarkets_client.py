@@ -19,7 +19,7 @@ import aiohttp
 import logging
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -100,6 +100,15 @@ class Position:
     stop_loss: Optional[float]
     take_profit: Optional[float]
     opened_at: datetime
+
+
+@dataclass
+class AccountBalance:
+    """Account balance information"""
+    total_value: float  # my_portfolio - total account value
+    invested: float  # investments - value in positions
+    available: float  # available_to_invest - free cash
+    timestamp: datetime
 
 
 class RoboMarketsError(Exception):
@@ -557,6 +566,9 @@ class RoboMarketsClient:
 
         try:
             data = await self._request("GET", endpoint, params=params)
+            # Handle both list response and dict with "orders" key
+            if isinstance(data, list):
+                return data
             return data.get("orders", [])
 
         except RoboMarketsError as e:
@@ -580,18 +592,25 @@ class RoboMarketsClient:
             data = await self._request("GET", endpoint)
             positions = []
 
-            for deal in data.get("deals", []):
+            # Handle both list response and dict with "deals" key
+            if isinstance(data, list):
+                deals = data
+            else:
+                deals = data.get("deals", [])
+
+            for deal in deals:
+                # API uses snake_case: id, volume, open_price, open_time, close_price
                 position = Position(
-                    deal_id=str(deal.get("dealId", "")),
+                    deal_id=str(deal.get("id", deal.get("dealId", ""))),
                     ticker=deal.get("ticker", ""),
                     side="long" if deal.get("side") == "buy" else "short",
-                    quantity=float(deal.get("quantity", 0)),
-                    entry_price=float(deal.get("openPrice", 0)),
-                    current_price=float(deal.get("currentPrice", 0)),
+                    quantity=float(deal.get("volume", deal.get("quantity", 0))),
+                    entry_price=float(deal.get("open_price", deal.get("openPrice", 0))),
+                    current_price=float(deal.get("close_price", deal.get("currentPrice", 0))),
                     unrealized_pnl=float(deal.get("profit", 0)),
-                    stop_loss=float(deal.get("stopLoss")) if deal.get("stopLoss") else None,
-                    take_profit=float(deal.get("takeProfit")) if deal.get("takeProfit") else None,
-                    opened_at=datetime.utcfromtimestamp(deal.get("openTime", 0))
+                    stop_loss=float(deal.get("stop_loss", deal.get("stopLoss", 0))) if deal.get("stop_loss") or deal.get("stopLoss") else None,
+                    take_profit=float(deal.get("take_profit", deal.get("takeProfit", 0))) if deal.get("take_profit") or deal.get("takeProfit") else None,
+                    opened_at=datetime.utcfromtimestamp(deal.get("open_time", deal.get("openTime", 0)))
                 )
                 positions.append(position)
 
@@ -656,6 +675,133 @@ class RoboMarketsClient:
             logger.error(f"Failed to close position {deal_id}: {e.message}")
             raise
 
+    async def get_deal_history(
+        self,
+        history_from: datetime = None,
+        history_to: datetime = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Dict]:
+        """
+        Get closed deals history for statistics.
+
+        Args:
+            history_from: Start date for history (default: 30 days ago)
+            history_to: End date for history (default: now)
+            skip: Number of records to skip for pagination
+            limit: Maximum records to return (max 100)
+
+        Returns:
+            List of closed deal dictionaries with P&L data
+        """
+        endpoint = f"/accounts/{self.account_id}/deals"
+
+        # Default to last 30 days if no dates specified
+        if history_from is None:
+            history_from = datetime.utcnow() - timedelta(days=30)
+        if history_to is None:
+            history_to = datetime.utcnow()
+
+        params = {
+            "history_from": int(history_from.timestamp()),
+            "history_to": int(history_to.timestamp()),
+            "skip": skip,
+            "limit": min(limit, 100)  # API max is 100
+        }
+
+        try:
+            data = await self._request("GET", endpoint, params=params)
+
+            # Handle both list response and dict with "deals" key
+            if isinstance(data, list):
+                deals = data
+            else:
+                deals = data.get("deals", [])
+
+            # Parse and enrich deal data
+            parsed_deals = []
+            for deal in deals:
+                # API uses snake_case: id, volume, open_price, open_time, close_price, close_time
+                parsed_deal = {
+                    "deal_id": str(deal.get("id", deal.get("dealId", ""))),
+                    "ticker": deal.get("ticker", ""),
+                    "side": "long" if deal.get("side") == "buy" else "short",
+                    "quantity": float(deal.get("volume", deal.get("quantity", 0))),
+                    "open_price": float(deal.get("open_price", deal.get("openPrice", 0))),
+                    "close_price": float(deal.get("close_price", deal.get("closePrice", 0))) if deal.get("close_price") or deal.get("closePrice") else None,
+                    "open_time": datetime.utcfromtimestamp(deal.get("open_time", deal.get("openTime", 0))) if deal.get("open_time") or deal.get("openTime") else None,
+                    "close_time": datetime.utcfromtimestamp(deal.get("close_time", deal.get("closeTime", 0))) if deal.get("close_time") or deal.get("closeTime") else None,
+                    "profit": float(deal.get("profit", 0)),
+                    "profit_pct": 0.0,
+                    "status": deal.get("status", "unknown"),
+                    "stop_loss": float(deal.get("stop_loss", deal.get("stopLoss", 0))) if deal.get("stop_loss") or deal.get("stopLoss") else None,
+                    "take_profit": float(deal.get("take_profit", deal.get("takeProfit", 0))) if deal.get("take_profit") or deal.get("takeProfit") else None,
+                    "raw": deal
+                }
+
+                # Calculate profit percentage
+                if parsed_deal["open_price"] and parsed_deal["open_price"] > 0:
+                    if parsed_deal["close_price"]:
+                        if parsed_deal["side"] == "long":
+                            parsed_deal["profit_pct"] = (
+                                (parsed_deal["close_price"] - parsed_deal["open_price"]) /
+                                parsed_deal["open_price"]
+                            ) * 100
+                        else:
+                            parsed_deal["profit_pct"] = (
+                                (parsed_deal["open_price"] - parsed_deal["close_price"]) /
+                                parsed_deal["open_price"]
+                            ) * 100
+
+                parsed_deals.append(parsed_deal)
+
+            logger.info(f"Fetched {len(parsed_deals)} closed deals from history")
+            return parsed_deals
+
+        except RoboMarketsError as e:
+            logger.error(f"Failed to get deal history: {e.message}")
+            raise
+
+    async def get_all_deal_history(
+        self,
+        history_from: datetime = None,
+        history_to: datetime = None
+    ) -> List[Dict]:
+        """
+        Get all closed deals history with pagination handling.
+
+        Args:
+            history_from: Start date for history
+            history_to: End date for history
+
+        Returns:
+            Complete list of closed deals
+        """
+        all_deals = []
+        skip = 0
+        limit = 100
+
+        while True:
+            deals = await self.get_deal_history(
+                history_from=history_from,
+                history_to=history_to,
+                skip=skip,
+                limit=limit
+            )
+
+            if not deals:
+                break
+
+            all_deals.extend(deals)
+
+            if len(deals) < limit:
+                break
+
+            skip += limit
+
+        logger.info(f"Fetched total of {len(all_deals)} closed deals")
+        return all_deals
+
     # =========================================================================
     # UTILITY METHODS
     # =========================================================================
@@ -699,3 +845,33 @@ class RoboMarketsClient:
         """
         instrument = await self.get_instrument(ticker)
         return instrument is not None and instrument.is_tradeable
+
+    # =========================================================================
+    # ACCOUNT
+    # =========================================================================
+
+    async def get_account_balance(self) -> AccountBalance:
+        """
+        Get account balance information
+
+        Returns:
+            AccountBalance object with total value, invested, and available cash
+        """
+        endpoint = f"/accounts/{self.account_id}"
+
+        try:
+            data = await self._request("GET", endpoint)
+
+            # API returns: {'cash': {'my_portfolio': X, 'investments': Y, 'available_to_invest': Z}}
+            cash = data.get("cash", {})
+
+            return AccountBalance(
+                total_value=float(cash.get("my_portfolio", 0)),
+                invested=float(cash.get("investments", 0)),
+                available=float(cash.get("available_to_invest", 0)),
+                timestamp=datetime.utcnow()
+            )
+
+        except RoboMarketsError as e:
+            logger.error(f"Failed to get account balance: {e.message}")
+            raise

@@ -163,6 +163,8 @@ services:
       - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
       - SYSTEM_MONITOR_URL=http://system-monitor:8095
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-d4thb4pr01qnn6lkv89gd4thb4pr01qnn6lkv8a0}
+      - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
+      - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
     volumes:
       - ./streamlit:/app:cached
       - ./logs:/logs:ro  # Read-only for safety
@@ -239,6 +241,7 @@ services:
     environment:
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
+      - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
     command: ["python", "-m", "stock_scanner.scheduler", "run"]
     networks:
