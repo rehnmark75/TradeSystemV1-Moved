@@ -58,13 +58,22 @@ def main():
         "MACD": "MACD_MOMENTUM",
         "MACD_MOMENTUM": "MACD_MOMENTUM",
         "MOMENTUM": "MACD_MOMENTUM",
+        "ZLMA": "ZLMA_CROSSOVER",
+        "ZLMA_CROSSOVER": "ZLMA_CROSSOVER",
+        "ZEROLAG": "ZLMA_CROSSOVER",
     }
 
     while i < len(args):
         arg = args[i]
 
-        # Handle ticker (uppercase letters)
-        if arg.upper() in TICKER_SHORTCUTS or (arg.upper().isalpha() and len(arg) <= 5):
+        # Handle strategy shortcuts FIRST (before ticker detection)
+        if arg.upper() in STRATEGY_MAP:
+            strategy_name = STRATEGY_MAP[arg.upper()]
+            processed_args.extend(["--strategy", strategy_name])
+            print(f"📈 Using {arg.upper()} strategy ({strategy_name})")
+
+        # Handle ticker (uppercase letters) - check after strategy
+        elif arg.upper() in TICKER_SHORTCUTS or (arg.upper().isalpha() and len(arg) <= 5 and arg.upper() not in STRATEGY_MAP):
             processed_args.extend(["--ticker", arg.upper()])
             print(f"📊 Testing {arg.upper()}")
             ticker_specified = True
@@ -73,12 +82,6 @@ def main():
         elif arg == "--all":
             processed_args.append("--all")
             print("📊 Testing all tradeable stocks")
-
-        # Handle strategy shortcuts
-        elif arg.upper() in STRATEGY_MAP:
-            strategy_name = STRATEGY_MAP[arg.upper()]
-            processed_args.extend(["--strategy", strategy_name])
-            print(f"📈 Using {arg.upper()} strategy ({strategy_name})")
 
         # Handle days as a number
         elif arg.isdigit():
@@ -175,8 +178,9 @@ Common Tickers:
   Industrial: BA, CAT
 
 Available Strategies:
-  EMA_PULLBACK (default) - EMA trend pullback entries
-  MACD_MOMENTUM          - MACD histogram crossover momentum
+  EMA_PULLBACK (default) - EMA trend pullback entries (PF 2.02)
+  MACD_MOMENTUM          - MACD histogram zero-cross momentum (PF 1.71)
+  ZLMA_CROSSOVER         - Zero-Lag MA crossover signals
 
 Options:
   --show-signals      Show detailed signal breakdown

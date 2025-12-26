@@ -372,6 +372,23 @@ class BacktestDataProvider:
         dx = 100 * abs(plus_di - minus_di) / di_sum
         df['adx'] = dx.ewm(span=14, adjust=False).mean()
 
+        # ZLMA (Zero-Lag Moving Average) - period 15 (default)
+        # Formula: ZLMA = EMA(close + (close - EMA(close)), period)
+        # This reduces lag by compensating for the EMA's inherent delay
+        zlma_period = 15
+        ema_for_zlma = df['close'].ewm(span=zlma_period, adjust=False).mean()
+        zlma_correction = df['close'] + (df['close'] - ema_for_zlma)
+        df['zlma'] = zlma_correction.ewm(span=zlma_period, adjust=False).mean()
+        df['ema_15'] = ema_for_zlma  # Keep the base EMA for crossover detection
+
+        # ZLMA crossover detection
+        df['zlma_above_ema'] = df['zlma'] > df['ema_15']
+        df['prev_zlma_above_ema'] = df['zlma_above_ema'].shift(1)
+
+        # ZLMA-EMA separation (for signal strength)
+        df['zlma_ema_diff'] = df['zlma'] - df['ema_15']
+        df['zlma_ema_diff_pct'] = (df['zlma_ema_diff'] / df['ema_15']) * 100
+
         return df
 
     async def get_ticker_sector(self, ticker: str) -> Optional[str]:

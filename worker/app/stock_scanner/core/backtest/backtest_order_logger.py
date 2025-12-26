@@ -143,6 +143,17 @@ class BacktestOrderLogger:
         # Convert signal timestamp to proper datetime
         signal_ts = to_datetime(signal.signal_timestamp)
 
+        # Extract indicator values - handle different signal types gracefully
+        ema_20 = getattr(signal, 'ema_20', None) or getattr(signal, 'zlma', None)
+        ema_50 = getattr(signal, 'ema_50', None) or getattr(signal, 'ema_15', None)
+        ema_100 = getattr(signal, 'ema_100', None)
+        ema_200 = getattr(signal, 'ema_200', None)
+        rsi = getattr(signal, 'rsi', None)
+        atr = getattr(signal, 'atr', None)
+        pullback_percent = getattr(signal, 'pullback_percent', None) or getattr(signal, 'crossover_strength', None)
+        volume = getattr(signal, 'volume', None)
+        relative_volume = getattr(signal, 'relative_volume', None)
+
         signal_id = await self.db.fetchval(
             query,
             execution_id,
@@ -161,16 +172,16 @@ class BacktestOrderLogger:
             result_str,
             pnl_percent,
             holding_days,
-            signal.ema_20,
-            signal.ema_50,
-            signal.ema_100,
-            signal.ema_200,
-            signal.rsi,
-            signal.atr,
-            signal.pullback_percent,
-            sector or signal.sector,
-            signal.volume,
-            signal.relative_volume
+            ema_20,
+            ema_50,
+            ema_100,
+            ema_200,
+            rsi,
+            atr,
+            pullback_percent,
+            sector or getattr(signal, 'sector', None),
+            volume,
+            relative_volume
         )
 
         # Track statistics
