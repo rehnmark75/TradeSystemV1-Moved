@@ -20,12 +20,15 @@ from .backtest_data_provider import BacktestDataProvider
 from .trade_simulator import TradeSimulator
 from .backtest_order_logger import BacktestOrderLogger
 from ...strategies.ema_trend_pullback import EMATrendPullbackStrategy, PullbackSignal
+from ...strategies.macd_momentum import MACDMomentumStrategy, MACDMomentumSignal
 
 
 # Strategy registry
 STRATEGY_REGISTRY: Dict[str, Type] = {
     'EMA_PULLBACK': EMATrendPullbackStrategy,
     'EMA_TREND_PULLBACK': EMATrendPullbackStrategy,
+    'MACD_MOMENTUM': MACDMomentumStrategy,
+    'MACD': MACDMomentumStrategy,
 }
 
 

@@ -55,6 +55,9 @@ def main():
         "EMA_PULLBACK": "EMA_PULLBACK",
         "PULLBACK": "EMA_PULLBACK",
         "TREND": "EMA_PULLBACK",
+        "MACD": "MACD_MOMENTUM",
+        "MACD_MOMENTUM": "MACD_MOMENTUM",
+        "MOMENTUM": "MACD_MOMENTUM",
     }
 
     while i < len(args):
@@ -173,6 +176,7 @@ Common Tickers:
 
 Available Strategies:
   EMA_PULLBACK (default) - EMA trend pullback entries
+  MACD_MOMENTUM          - MACD histogram crossover momentum
 
 Options:
   --show-signals      Show detailed signal breakdown
