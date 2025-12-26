@@ -345,6 +345,33 @@ class BacktestDataProvider:
         df['volume_sma_20'] = df['volume'].rolling(window=20).mean()
         df['relative_volume'] = df['volume'] / df['volume_sma_20'].replace(0, np.nan)
 
+        # MACD (12, 26, 9) - Standard settings
+        exp1 = df['close'].ewm(span=12, adjust=False).mean()
+        exp2 = df['close'].ewm(span=26, adjust=False).mean()
+        df['macd'] = exp1 - exp2
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_histogram'] = df['macd'] - df['macd_signal']
+
+        # ADX (Average Directional Index) - 14 period
+        # Calculate directional movement
+        high_diff = df['high'].diff()
+        low_diff = -df['low'].diff()
+
+        # +DM and -DM
+        plus_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
+        minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
+
+        # Smoothed +DI and -DI (using ATR already calculated)
+        atr_safe = df['atr'].replace(0, np.nan)
+        plus_di = 100 * (plus_dm.ewm(span=14, adjust=False).mean() / atr_safe)
+        minus_di = 100 * (minus_dm.ewm(span=14, adjust=False).mean() / atr_safe)
+
+        # DX and ADX
+        di_sum = plus_di + minus_di
+        di_sum = di_sum.replace(0, 1)  # Avoid division by zero
+        dx = 100 * abs(plus_di - minus_di) / di_sum
+        df['adx'] = dx.ewm(span=14, adjust=False).mean()
+
         return df
 
     async def get_ticker_sector(self, ticker: str) -> Optional[str]:

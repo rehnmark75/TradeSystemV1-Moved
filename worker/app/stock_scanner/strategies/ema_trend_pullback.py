@@ -60,9 +60,9 @@ class EMATrendPullbackStrategy:
     MIN_PULLBACK_THRESHOLD = 2.0      # Minimum pullback required
     MAX_PULLBACK_THRESHOLD = 5.0      # Maximum pullback (too deep = trend weakening)
 
-    # Risk management
-    DEFAULT_STOP_LOSS_PCT = 2.0       # 2% stop loss
-    DEFAULT_TAKE_PROFIT_PCT = 4.0     # 4% take profit (2:1 R:R)
+    # Risk management (optimized 2025-12-25, see docs/ema_pullback_optimization_results.md)
+    DEFAULT_STOP_LOSS_PCT = 5.0       # 5% stop loss
+    DEFAULT_TAKE_PROFIT_PCT = 10.0    # 10% take profit (2:1 R:R)
     ATR_STOP_MULTIPLIER = 1.5         # Alternative: 1.5x ATR for stop
 
     def __init__(
@@ -71,9 +71,9 @@ class EMATrendPullbackStrategy:
         stop_loss_pct: float = DEFAULT_STOP_LOSS_PCT,
         take_profit_pct: float = DEFAULT_TAKE_PROFIT_PCT,
         use_atr_stops: bool = False,
-        min_rsi: float = 30.0,        # Don't enter if RSI too low (oversold)
-        max_rsi: float = 70.0,        # Don't enter if RSI too high (overbought)
-        min_relative_volume: float = 0.5  # Minimum relative volume
+        min_rsi: float = 40.0,        # Don't enter if RSI too low (panic selling)
+        max_rsi: float = 60.0,        # Don't enter if RSI too high (no real pullback)
+        min_relative_volume: float = 1.2  # Minimum relative volume (20% above average)
     ):
         self.pullback_threshold_pct = pullback_threshold_pct
         self.stop_loss_pct = stop_loss_pct
@@ -138,6 +138,22 @@ class EMATrendPullbackStrategy:
         if current['close'] <= current['ema_50']:
             return None
 
+        # ==== ADX TREND STRENGTH FILTER ====
+        # Only enter pullbacks in moderate+ trends (ADX > 20)
+        # Welles Wilder's ADX: 20+ indicates trending market
+        MIN_ADX = 20.0
+        if pd.notna(current.get('adx')):
+            if current['adx'] < MIN_ADX:
+                self.logger.debug(f"{ticker}: ADX too low ({current['adx']:.1f} < {MIN_ADX})")
+                return None
+
+        # ==== MACD MOMENTUM FILTER ====
+        # Only enter when MACD is positive (bullish momentum)
+        if pd.notna(current.get('macd')):
+            if current['macd'] <= 0:
+                self.logger.debug(f"{ticker}: MACD negative ({current['macd']:.4f})")
+                return None
+
         # 4. Price crossed ABOVE 20 EMA (entry trigger)
         if not (current['above_ema_20'] and not current['prev_above_ema20']):
             return None
@@ -190,6 +206,12 @@ class EMATrendPullbackStrategy:
 
         confidence = self._calculate_confidence(df, current, pullback_depth)
         quality_tier = self._get_quality_tier(confidence)
+
+        # ==== QUALITY TIER FILTER ====
+        # Skip low-quality signals (C and D tiers have negative expectancy)
+        if quality_tier in ('C', 'D'):
+            self.logger.debug(f"{ticker}: Quality tier too low ({quality_tier})")
+            return None
 
         # ==== CREATE SIGNAL ====
 
