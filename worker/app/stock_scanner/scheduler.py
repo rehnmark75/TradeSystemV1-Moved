@@ -379,7 +379,10 @@ class StockScheduler:
         # === STAGE 9: Claude AI Analysis ===
         logger.info("\n[STAGE 9/9] Running Claude AI analysis on top signals...")
         try:
-            if self.scanner_manager:
+            if not config.CLAUDE_ANALYSIS_ENABLED:
+                logger.info("[SKIP] Claude Analysis disabled in config")
+                results['claude_analysis'] = {'skipped': True, 'reason': 'disabled'}
+            elif self.scanner_manager:
                 # Analyze top A+ and A tier signals
                 analyzed = await self.scanner_manager.analyze_signals_with_claude(
                     min_tier='A',

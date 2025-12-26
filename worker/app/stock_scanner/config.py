@@ -61,6 +61,13 @@ NEWS_CACHE_TTL = 3600   # Cache news for 1 hour
 NEWS_MIN_ARTICLES = 2   # Minimum articles for confident sentiment
 
 # =============================================================================
+# CLAUDE AI ANALYSIS CONFIGURATION
+# =============================================================================
+
+# Set to False to disable Claude AI analysis in the daily pipeline
+CLAUDE_ANALYSIS_ENABLED = os.getenv("CLAUDE_ANALYSIS_ENABLED", "false").lower() == "true"
+
+# =============================================================================
 # DATA FETCHING CONFIGURATION
 # =============================================================================
 

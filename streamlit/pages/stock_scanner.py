@@ -2777,12 +2777,15 @@ def render_scanner_signals_tab(service):
     # Filters - Row 1
     col1, col2, col3, col4 = st.columns(4)
 
+    # Build scanner list dynamically from database
+    by_scanner = stats.get('by_scanner', [])
+    scanner_names = ["All Scanners"] + [s['scanner_name'] for s in by_scanner]
+
     with col1:
         scanner_filter = st.selectbox(
             "Scanner",
-            ["All Scanners", "trend_momentum", "breakout_confirmation", "mean_reversion", "gap_and_go",
-             "zlma_trend", "smc_ema_trend", "ema_crossover", "macd_momentum",
-             "selling_climax", "rsi_divergence", "wyckoff_spring"]
+            scanner_names,
+            format_func=lambda x: x.replace('_', ' ').title() if x != "All Scanners" else x
         )
 
     with col2:
@@ -3257,13 +3260,34 @@ def render_scanner_analysis_tab(service):
         st.info("No scanner data available yet. Run scanners to generate signals.")
         return
 
-    # Scanner selector
-    scanner_names = [s['scanner_name'] for s in by_scanner]
-    selected_scanner = st.selectbox(
-        "Select Scanner to Analyze",
-        scanner_names,
-        format_func=lambda x: x.replace('_', ' ').title()
-    )
+    # Scanner selector and date filter
+    from datetime import datetime, timedelta
+
+    col_scanner, col_date_from, col_date_to = st.columns([2, 1, 1])
+
+    with col_scanner:
+        scanner_names = [s['scanner_name'] for s in by_scanner]
+        selected_scanner = st.selectbox(
+            "Select Scanner to Analyze",
+            scanner_names,
+            format_func=lambda x: x.replace('_', ' ').title()
+        )
+
+    with col_date_from:
+        # Default to 30 days ago
+        default_from = datetime.now().date() - timedelta(days=30)
+        date_from = st.date_input(
+            "From Date",
+            value=default_from,
+            max_value=datetime.now().date()
+        )
+
+    with col_date_to:
+        date_to = st.date_input(
+            "To Date",
+            value=datetime.now().date(),
+            max_value=datetime.now().date()
+        )
 
     st.markdown("---")
 
@@ -3289,11 +3313,13 @@ def render_scanner_analysis_tab(service):
 
         st.markdown("---")
 
-        # Get signals for this scanner
+        # Get signals for this scanner with date filter
         signals = service.get_scanner_signals(
             scanner_name=selected_scanner,
             status=None,  # All statuses
-            limit=100
+            signal_date_from=str(date_from),
+            signal_date_to=str(date_to),
+            limit=200
         )
 
         if signals:
@@ -3355,19 +3381,30 @@ def render_scanner_analysis_tab(service):
 
             st.markdown("---")
 
-            # Recent signals table
-            st.subheader(f"Recent {selected_scanner.replace('_', ' ').title()} Signals")
+            # Recent signals table with date range
+            st.subheader(f"{selected_scanner.replace('_', ' ').title()} Signals ({date_from} to {date_to})")
 
-            # Prepare data for table
+            # Prepare data for table with SL/TP levels
             table_data = []
-            for s in signals[:20]:  # Show last 20
+            for s in signals[:50]:  # Show up to 50 signals in date range
+                entry = float(s.get('entry_price', 0))
+                stop_loss = float(s.get('stop_loss', 0)) if s.get('stop_loss') else None
+                tp1 = float(s.get('take_profit_1', 0)) if s.get('take_profit_1') else None
+                tp2 = float(s.get('take_profit_2', 0)) if s.get('take_profit_2') else None
+                rr = float(s.get('risk_reward_ratio', 0)) if s.get('risk_reward_ratio') else None
+                risk_pct = float(s.get('risk_percent', 0)) if s.get('risk_percent') else None
+
                 table_data.append({
                     'Ticker': s.get('ticker', ''),
                     'Type': s.get('signal_type', ''),
-                    'Entry': f"${float(s.get('entry_price', 0)):.2f}",
+                    'Entry': f"${entry:.2f}",
+                    'Stop Loss': f"${stop_loss:.2f}" if stop_loss else '-',
+                    'TP1': f"${tp1:.2f}" if tp1 else '-',
+                    'TP2': f"${tp2:.2f}" if tp2 else '-',
+                    'R:R': f"{rr:.1f}:1" if rr else '-',
+                    'Risk%': f"{risk_pct:.1f}%" if risk_pct else '-',
                     'Score': s.get('composite_score', 0),
                     'Tier': s.get('quality_tier', ''),
-                    'Status': s.get('status', ''),
                     'Claude': s.get('claude_action', '-'),
                     'Date': str(s.get('signal_timestamp', ''))[:10] if s.get('signal_timestamp') else ''
                 })
@@ -3423,6 +3460,11 @@ def render_scanner_analysis_tab(service):
             'description': 'MACD momentum confluence with price structure.',
             'best_for': 'Momentum confirmation trades',
             'criteria': 'MACD crossover, histogram expansion, price structure'
+        },
+        'ema_pullback': {
+            'description': 'EMA trend pullback strategy with optimized filters for high-probability entries.',
+            'best_for': 'Strong uptrends with healthy pullbacks',
+            'criteria': 'EMA 20/50/100/200 alignment, ADX>20 trend strength, MACD>0 bullish, RSI 40-60, Volume>=1.2x avg'
         }
     }
 
