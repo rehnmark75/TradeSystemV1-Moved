@@ -240,6 +240,12 @@ class MetricsCalculator:
             metrics['macd_signal'] = round(macd_vals['signal'], 6)
             metrics['macd_histogram'] = round(macd_vals['histogram'], 6)
 
+        # ADX (14-day) - Average Directional Index for trend strength
+        if metrics.get('atr_14'):
+            adx = self._calculate_adx(highs, lows, closes, metrics['atr_14'], period=14)
+            if adx is not None:
+                metrics['adx'] = round(adx, 2)
+
         # Daily range percent
         if len(highs) >= 1:
             daily_range = ((highs[-1] - lows[-1]) / current_price) * 100
@@ -469,6 +475,73 @@ class MetricsCalculator:
             'signal': float(signal_line[-1]),
             'histogram': float(histogram[-1])
         }
+
+    def _calculate_adx(
+        self,
+        highs: np.ndarray,
+        lows: np.ndarray,
+        closes: np.ndarray,
+        atr: float,
+        period: int = 14
+    ) -> Optional[float]:
+        """
+        Calculate Average Directional Index (ADX).
+
+        ADX measures trend strength regardless of direction.
+        - ADX > 20: Trending market (Welles Wilder threshold)
+        - ADX > 25: Strong trend
+        - ADX > 40: Very strong trend
+        - ADX < 20: Weak/ranging market
+        """
+        if len(closes) < period + 1 or atr <= 0:
+            return None
+
+        # Calculate directional movement
+        high_diff = np.diff(highs)
+        low_diff = -np.diff(lows)
+
+        # +DM: positive directional movement
+        plus_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0)
+        # -DM: negative directional movement
+        minus_dm = np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0)
+
+        # Smooth +DM and -DM using Wilder's smoothing (EMA with alpha = 1/period)
+        def wilder_smooth(data, period):
+            result = np.zeros(len(data))
+            result[period-1] = np.sum(data[:period])
+            for i in range(period, len(data)):
+                result[i] = result[i-1] - (result[i-1] / period) + data[i]
+            return result
+
+        smooth_plus_dm = wilder_smooth(plus_dm, period)
+        smooth_minus_dm = wilder_smooth(minus_dm, period)
+
+        # Calculate True Range and smooth it
+        tr1 = highs[1:] - lows[1:]
+        tr2 = np.abs(highs[1:] - closes[:-1])
+        tr3 = np.abs(lows[1:] - closes[:-1])
+        tr = np.maximum(tr1, np.maximum(tr2, tr3))
+        smooth_tr = wilder_smooth(tr, period)
+
+        # Avoid division by zero
+        smooth_tr = np.where(smooth_tr == 0, 1, smooth_tr)
+
+        # Calculate +DI and -DI
+        plus_di = 100 * smooth_plus_dm / smooth_tr
+        minus_di = 100 * smooth_minus_dm / smooth_tr
+
+        # Calculate DX
+        di_sum = plus_di + minus_di
+        di_sum = np.where(di_sum == 0, 1, di_sum)
+        dx = 100 * np.abs(plus_di - minus_di) / di_sum
+
+        # Smooth DX to get ADX
+        adx = wilder_smooth(dx, period) / period
+
+        # Return latest ADX value (need enough data)
+        if len(adx) >= period * 2:
+            return float(adx[-1])
+        return None
 
     def _classify_trend(
         self,
@@ -826,7 +899,7 @@ class MetricsCalculator:
                 sma_20, sma_50, sma_200, ema_20,
                 price_vs_sma20, price_vs_sma50, price_vs_sma200,
                 trend_strength, ma_alignment,
-                rsi_14, macd, macd_signal, macd_histogram,
+                rsi_14, macd, macd_signal, macd_histogram, adx,
                 daily_range_percent, weekly_range_percent,
                 z_score_50, percentile_volume,
                 data_quality, candles_available,
@@ -838,12 +911,12 @@ class MetricsCalculator:
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18,
-                $19, $20, $21, $22, $23, $24, $25, $26, $27,
-                $28, $29, $30, $31, $32, $33,
-                $34, $35, $36, $37, $38, $39,
-                $40, $41, $42, $43, $44,
-                $45, $46, $47,
-                $48, $49, $50, $51, $52
+                $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
+                $29, $30, $31, $32, $33, $34,
+                $35, $36, $37, $38, $39, $40,
+                $41, $42, $43, $44, $45,
+                $46, $47, $48,
+                $49, $50, $51, $52, $53
             )
             ON CONFLICT (ticker, calculation_date)
             DO UPDATE SET
@@ -872,6 +945,7 @@ class MetricsCalculator:
                 macd = EXCLUDED.macd,
                 macd_signal = EXCLUDED.macd_signal,
                 macd_histogram = EXCLUDED.macd_histogram,
+                adx = EXCLUDED.adx,
                 daily_range_percent = EXCLUDED.daily_range_percent,
                 weekly_range_percent = EXCLUDED.weekly_range_percent,
                 z_score_50 = EXCLUDED.z_score_50,
@@ -929,6 +1003,7 @@ class MetricsCalculator:
             metrics.get('macd'),
             metrics.get('macd_signal'),
             metrics.get('macd_histogram'),
+            metrics.get('adx'),
             metrics.get('daily_range_percent'),
             metrics.get('weekly_range_percent'),
             metrics.get('z_score_50'),

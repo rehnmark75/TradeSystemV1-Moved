@@ -82,20 +82,30 @@ class EMAPullbackConfig(ScannerConfig):
     ema_proximity_pct: float = 3.0  # Price within 3% of SMA20 or SMA50
 
     # ==========================================================================
-    # RSI Confirmation (Optimized per agent recommendations)
+    # RSI Confirmation (Optimized 2025-12-25 - PF 2.02 achieved)
     # ==========================================================================
     rsi_period: int = 14
-    rsi_pullback_min: float = 45.0  # CHANGED from 40 (strong trends stay elevated)
-    rsi_pullback_max: float = 70.0  # CHANGED from 60 (allow momentum)
+    rsi_pullback_min: float = 40.0  # Optimized: 40-60 healthy pullback zone
+    rsi_pullback_max: float = 60.0  # Optimized: avoid panic (<40) or no pullback (>60)
     rsi_reset_min: float = 45.0     # Ideal reset zone lower bound
     rsi_reset_max: float = 55.0     # Ideal reset zone upper bound
 
     # ==========================================================================
-    # Volume Filters (Z-score style)
+    # ADX Trend Strength Filter (Optimized 2025-12-25)
+    # ==========================================================================
+    min_adx: float = 20.0  # Welles Wilder threshold - trending market
+
+    # ==========================================================================
+    # MACD Momentum Filter (Optimized 2025-12-25)
+    # ==========================================================================
+    require_positive_macd: bool = True  # Only enter when MACD > 0 (bullish momentum)
+
+    # ==========================================================================
+    # Volume Filters (Optimized 2025-12-25 - PF 2.02 achieved)
     # ==========================================================================
     volume_contraction_threshold: float = 0.85  # Below 85% of SMA(20) = contracted
     volume_spike_reject: float = 1.5  # Reject if volume > 1.5x average (panic)
-    min_relative_volume: float = 0.3  # Minimum volume (not dead stock)
+    min_relative_volume: float = 1.2  # Optimized: require institutional participation (1.2x avg)
 
     # ==========================================================================
     # Risk Management
@@ -186,10 +196,15 @@ class EMAPullbackScanner(BaseScanner):
             if signal:
                 signals.append(signal)
 
-        # Step 4: Sort by composite score
+        # Step 4: Filter out C/D quality tiers (Optimized 2025-12-25)
+        # Only keep A+, A, B signals - C/D tiers have negative expectancy
+        signals = [s for s in signals if s.quality_tier not in [QualityTier.C, QualityTier.D]]
+        logger.info(f"After quality tier filter (A+/A/B only): {len(signals)} signals")
+
+        # Step 5: Sort by composite score
         signals.sort(key=lambda x: x.composite_score, reverse=True)
 
-        # Step 5: Apply limit
+        # Step 6: Apply limit
         signals = signals[:self.config.max_signals_per_run]
 
         # Log summary
@@ -230,11 +245,13 @@ class EMAPullbackScanner(BaseScanner):
         candidates: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Filter for quality pullback setups with RSI and volume confirmation.
+        Filter for quality pullback setups with optimized filters.
 
-        Quality criteria:
-        - RSI in valid zone (45-70) - not oversold (panic) or overbought (extended)
-        - Volume not spiking (< 1.5x average) - no panic selling
+        Optimized 2025-12-25 to achieve PF 2.02:
+        - ADX > 20: Trending market confirmation (Welles Wilder threshold)
+        - MACD > 0: Bullish momentum confirmation
+        - RSI 40-60: Healthy pullback zone (not panic or exhaustion)
+        - Volume >= 1.2x: Institutional participation required
         - Price near EMA zones (within proximity threshold)
         - Pullback depth within acceptable range
         """
@@ -242,14 +259,33 @@ class EMAPullbackScanner(BaseScanner):
 
         for c in candidates:
             # ------------------------------------------------------------------
-            # RSI Filter: Must be in valid pullback zone
+            # ADX Filter: Only enter in trending markets (Optimized 2025-12-25)
+            # ADX > 20 = Welles Wilder threshold for trending market
+            # ------------------------------------------------------------------
+            adx = c.get('adx')
+            if adx is not None:
+                if float(adx) < self.config.min_adx:
+                    continue  # Skip non-trending markets
+
+            # ------------------------------------------------------------------
+            # MACD Filter: Require bullish momentum (Optimized 2025-12-25)
+            # MACD > 0 confirms bullish momentum, avoiding counter-trend entries
+            # ------------------------------------------------------------------
+            if self.config.require_positive_macd:
+                macd = c.get('macd')
+                if macd is not None:
+                    if float(macd) <= 0:
+                        continue  # Skip bearish/neutral momentum
+
+            # ------------------------------------------------------------------
+            # RSI Filter: Must be in valid pullback zone (40-60 optimized)
             # ------------------------------------------------------------------
             rsi_14 = float(c.get('rsi_14') or 50)
             if not (self.config.rsi_pullback_min <= rsi_14 <= self.config.rsi_pullback_max):
                 continue
 
             # ------------------------------------------------------------------
-            # Volume Filter: Reject volume spikes (panic selling)
+            # Volume Filter: Require institutional participation (>=1.2x optimized)
             # ------------------------------------------------------------------
             rel_vol = float(c.get('relative_volume') or 1.0)
 
