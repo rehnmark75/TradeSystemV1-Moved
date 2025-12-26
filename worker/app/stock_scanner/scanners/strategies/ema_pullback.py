@@ -21,6 +21,7 @@ that achieved PF 2.02 in backtesting.
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, date
 from decimal import Decimal
 from typing import List, Dict, Any, Optional
@@ -35,6 +36,7 @@ from ...core.backtest.backtest_data_provider import BacktestDataProvider
 logger = logging.getLogger(__name__)
 
 
+@dataclass
 class EMAPullbackConfig(ScannerConfig):
     """Configuration for EMA Pullback Scanner - uses backtested strategy defaults"""
 

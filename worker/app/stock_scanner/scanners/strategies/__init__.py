@@ -11,10 +11,9 @@ Concrete implementations of trading scanners:
 - SectorRotationScanner: Sector leaders and laggards
 - ZLMATrendScanner: Zero-Lag MA crossover signals
 
-Forex-adapted strategies:
-- SMCEmaTrendScanner: SMC-style EMA trend following with swing structure
-- EMACrossoverScanner: EMA cascade crossover with trend alignment
-- MACDMomentumScanner: MACD momentum confluence with price structure
+Backtested strategies (use strategy class directly):
+- MACDMomentumScanner: MACD momentum (PF 1.71) - uses MACDMomentumStrategy
+- EMAPullbackScanner: EMA pullback entries (PF 2.02) - uses EMATrendPullbackStrategy
 
 AlphaSuite-adapted strategies:
 - SellingClimaxScanner: Capitulation bottoming with volume spike and reversal
@@ -32,17 +31,15 @@ from .short_squeeze import ShortSqueezeScanner
 from .sector_rotation import SectorRotationScanner
 from .zlma_trend import ZLMATrendScanner
 
-# Forex-adapted strategies
-from .smc_ema_trend import SMCEmaTrendScanner
-from .ema_crossover import EMACrossoverScanner
+# Backtested strategies
 from .macd_momentum import MACDMomentumScanner
+from .ema_pullback import EMAPullbackScanner
 
 # AlphaSuite-adapted strategies
 from .selling_climax import SellingClimaxScanner
 from .rsi_divergence import RSIDivergenceScanner
 from .wyckoff_spring import WyckoffSpringScanner
 from .trend_reversal import TrendReversalScanner
-from .ema_pullback import EMAPullbackScanner
 
 __all__ = [
     'TrendMomentumScanner',
@@ -53,15 +50,12 @@ __all__ = [
     'ShortSqueezeScanner',
     'SectorRotationScanner',
     'ZLMATrendScanner',
-    # Forex-adapted strategies
-    'SMCEmaTrendScanner',
-    'EMACrossoverScanner',
+    # Backtested strategies
     'MACDMomentumScanner',
+    'EMAPullbackScanner',
     # AlphaSuite-adapted strategies
     'SellingClimaxScanner',
     'RSIDivergenceScanner',
     'WyckoffSpringScanner',
     'TrendReversalScanner',
-    # EMA Pullback strategy
-    'EMAPullbackScanner',
 ]

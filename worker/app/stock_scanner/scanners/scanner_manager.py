@@ -27,17 +27,14 @@ from .strategies import (
     ShortSqueezeScanner,
     SectorRotationScanner,
     ZLMATrendScanner,
-    # Forex-adapted strategies
-    SMCEmaTrendScanner,
-    EMACrossoverScanner,
+    # Backtested strategies
     MACDMomentumScanner,
+    EMAPullbackScanner,
     # AlphaSuite-adapted strategies
     SellingClimaxScanner,
     RSIDivergenceScanner,
     WyckoffSpringScanner,
     TrendReversalScanner,
-    # EMA Pullback strategy
-    EMAPullbackScanner,
 )
 
 # Claude analysis imports (lazy load to avoid circular imports)
@@ -96,17 +93,14 @@ class ScannerManager:
         'short_squeeze': ShortSqueezeScanner,
         'sector_rotation': SectorRotationScanner,
         'zlma_trend': ZLMATrendScanner,
-        # Forex-adapted strategies
-        'smc_ema_trend': SMCEmaTrendScanner,
-        'ema_crossover': EMACrossoverScanner,
+        # Backtested strategies
         'macd_momentum': MACDMomentumScanner,
+        'ema_pullback': EMAPullbackScanner,
         # AlphaSuite-adapted strategies
         'selling_climax': SellingClimaxScanner,
         'rsi_divergence': RSIDivergenceScanner,
         'wyckoff_spring': WyckoffSpringScanner,
         'trend_reversal': TrendReversalScanner,
-        # EMA Pullback strategy
-        'ema_pullback': EMAPullbackScanner,
     }
 
     def __init__(

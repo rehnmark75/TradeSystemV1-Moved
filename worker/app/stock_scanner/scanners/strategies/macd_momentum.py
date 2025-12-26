@@ -1,117 +1,94 @@
 """
 MACD Momentum Scanner
 
-Adapted from forex MACD strategy for stocks.
-Uses MACD histogram crossover with price structure confirmation
-and multi-timeframe alignment for momentum entries.
+Uses the backtested MACDMomentumStrategy for signal detection.
+This ensures identical entry logic between backtesting and live scanning.
 
-Entry Criteria:
-- MACD histogram crosses zero (positive for bullish, negative for bearish)
-- Histogram expanding (current > previous) showing momentum
-- Price structure: Higher lows (bullish) or lower highs (bearish)
-- Not at price extremes (avoid buying tops, selling bottoms)
+Entry Logic (from backtested strategy - PF 1.71):
+1. MACD histogram crosses above zero (bullish) or below zero (bearish)
+2. Histogram strength >= 2x minimum threshold (strong momentum confirmation)
+3. ADX > 25 (trending market - filters out ranging conditions)
+4. Price structure: Higher lows (bullish) or lower highs (bearish)
+5. Relative volume >= 1.2x (above-average institutional participation)
+6. RSI 30-70 (not at extremes)
+7. Quality tier A+, A, or B only (skip C/D)
 
-Stop Logic:
-- 1.5x ATR from entry (tighter for momentum plays)
+Risk Management:
+- Stop: 2.0x ATR from entry
+- Target: 5.0x ATR (2.5:1 R:R)
 
-Target:
-- TP1: 3x ATR (2:1 R:R)
-- TP2: 4.5x ATR (3:1 R:R)
-
-Best For:
-- Momentum breakouts
-- Trend continuation after consolidation
-- Fresh momentum signals
+This scanner fetches candle data and runs the exact same strategy
+that achieved PF 1.71 in backtesting.
 """
 
 import logging
-from datetime import datetime
-from decimal import Decimal
-from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
+from datetime import datetime, timedelta, date
+from decimal import Decimal
+from typing import List, Dict, Any, Optional
 
 from ..base_scanner import (
     BaseScanner, SignalSetup, ScannerConfig,
     SignalType, QualityTier
 )
-from ..scoring import SignalScorer
+from ...strategies.macd_momentum import MACDMomentumStrategy, MACDMomentumSignal
+from ...core.backtest.backtest_data_provider import BacktestDataProvider
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class MACDMomentumConfig(ScannerConfig):
-    """Configuration for MACD Momentum Scanner"""
+    """Configuration for MACD Momentum Scanner - uses backtested strategy defaults"""
 
-    # ==========================================================================
-    # MACD Parameters (standard settings)
-    # ==========================================================================
-    macd_fast: int = 12
-    macd_slow: int = 26
-    macd_signal: int = 9
-
-    # ==========================================================================
-    # Histogram Thresholds
-    # ==========================================================================
-    # Stock MACD histogram values are typically larger than forex
+    # Strategy parameters (match backtested strategy)
+    stop_loss_atr_mult: float = 2.0    # 2.0x ATR stop loss
+    take_profit_atr_mult: float = 5.0  # 5.0x ATR take profit (2.5:1 R:R)
     histogram_min_threshold: float = 0.01  # Minimum histogram value
-    histogram_expansion_required: bool = True  # Current > previous
+    min_adx: float = 25.0              # ADX threshold for trending market
+    min_rsi: float = 30.0              # RSI range lower bound
+    max_rsi: float = 70.0              # RSI range upper bound
+    min_relative_volume: float = 1.2   # Volume >= 1.2x average
 
-    # ==========================================================================
-    # Price Structure
-    # ==========================================================================
-    require_price_structure: bool = True  # Higher lows (bull) / lower highs (bear)
-    structure_lookback: int = 10  # Bars to check price structure
-
-    # ==========================================================================
-    # Extreme Filter (52-week range position)
-    # ==========================================================================
-    price_percentile_max: float = 95.0  # Don't buy at top 5% of range
-    price_percentile_min: float = 5.0  # Don't sell at bottom 5%
-
-    # ==========================================================================
-    # Risk Management
-    # ==========================================================================
-    atr_stop_multiplier: float = 1.5  # Tighter stop for momentum
-    min_rr_ratio: float = 2.0
-
-    # Default R:R targets
-    tp1_rr_ratio: float = 2.0
-    tp2_rr_ratio: float = 3.0
-
-    # ==========================================================================
-    # Trend/Alignment Filters
-    # ==========================================================================
-    require_trend_alignment: bool = True  # Trend must match direction
-    min_relative_volume: float = 0.8
-
-    # ==========================================================================
-    # Fundamental Filters
-    # ==========================================================================
-    max_pe_ratio: float = 100.0  # Momentum stocks can be expensive
-    min_institutional_pct: float = 10.0
+    # Scanning limits
+    max_signals_per_run: int = 50
+    min_score_threshold: int = 60      # Minimum quality score
 
 
 class MACDMomentumScanner(BaseScanner):
     """
-    Scans for MACD momentum signals with structure confirmation.
+    MACD Momentum Scanner using the exact backtested strategy logic.
 
-    Philosophy (adapted from forex MACD strategy):
-    - Enter on fresh MACD momentum (histogram crossing zero)
-    - Confirm with expanding histogram (momentum increasing)
-    - Validate with price structure (HL for bull, LH for bear)
-    - Avoid extremes to prevent buying tops/selling bottoms
+    This scanner:
+    1. Pre-filters candidates using watchlist data (fast database query)
+    2. Fetches candle data for promising candidates
+    3. Runs MACDMomentumStrategy.scan() - identical to backtest
+    4. Converts signals to SignalSetup format for database storage
+
+    This ensures live signals match backtested performance (PF 1.71).
     """
 
     def __init__(
         self,
         db_manager,
         config: MACDMomentumConfig = None,
-        scorer: SignalScorer = None
+        scorer=None
     ):
         super().__init__(db_manager, config or MACDMomentumConfig(), scorer)
-        if scorer is None:
-            self.scorer = SignalScorer()
+
+        # Initialize the backtested strategy with optimized parameters
+        self.strategy = MACDMomentumStrategy(
+            stop_loss_atr_mult=self.config.stop_loss_atr_mult,
+            take_profit_atr_mult=self.config.take_profit_atr_mult,
+            histogram_min_threshold=self.config.histogram_min_threshold,
+            min_adx=self.config.min_adx,
+            min_rsi=self.config.min_rsi,
+            max_rsi=self.config.max_rsi,
+            min_relative_volume=self.config.min_relative_volume
+        )
+
+        # Data provider for fetching candle data with indicators
+        self.data_provider = BacktestDataProvider(db_manager)
 
     @property
     def scanner_name(self) -> str:
@@ -119,74 +96,115 @@ class MACDMomentumScanner(BaseScanner):
 
     @property
     def description(self) -> str:
-        return "MACD momentum confluence with price structure confirmation"
+        return "MACD momentum - uses backtested strategy (PF 1.71)"
 
     async def scan(self, calculation_date: datetime = None) -> List[SignalSetup]:
         """
-        Execute MACD Momentum scan.
+        Execute MACD Momentum scan using the backtested strategy.
 
         Steps:
-        1. Get candidates with MACD crossover signals
-        2. Filter for histogram expansion and structure
-        3. Filter out price extremes
-        4. Score and create signals
-        5. Return sorted signals
+        1. Get pre-filtered candidates from watchlist (momentum indicators)
+        2. For each candidate, fetch candle data with indicators
+        3. Run MACDMomentumStrategy.scan() - exact backtest logic
+        4. Convert MACDMomentumSignal to SignalSetup format
+        5. Return sorted signals by quality
         """
-        logger.info(f"Starting {self.scanner_name} scan")
+        logger.info(f"Starting {self.scanner_name} scan (using backtested strategy)")
 
+        # Get the latest available watchlist date if not specified
         if calculation_date is None:
-            from datetime import timedelta
-            calculation_date = (datetime.now() - timedelta(days=1)).date()
+            calculation_date = await self._get_latest_watchlist_date()
+        elif isinstance(calculation_date, datetime):
+            calculation_date = calculation_date.date()
 
-        # Get bullish and bearish MACD candidates
-        bullish_candidates = await self._get_bullish_macd_candidates(calculation_date)
-        bearish_candidates = await self._get_bearish_macd_candidates(calculation_date)
+        logger.info(f"Using watchlist date: {calculation_date}")
 
-        logger.info(f"MACD signals: {len(bullish_candidates)} bullish, {len(bearish_candidates)} bearish")
+        # Step 1: Pre-filter candidates from watchlist
+        # Keep pre-filter loose - strategy will apply strict filters on candle data
+        candidates = await self._get_momentum_candidates(calculation_date)
+        logger.info(f"Found {len(candidates)} candidates for MACD momentum scan")
 
-        # Filter for momentum and structure conditions
-        bullish_setups = self._filter_bullish_momentum(bullish_candidates)
-        bearish_setups = self._filter_bearish_momentum(bearish_candidates)
-
-        logger.info(f"After momentum filter: {len(bullish_setups)} bullish, {len(bearish_setups)} bearish")
-
-        # Score and create signals
+        # Step 2 & 3: Fetch data and run strategy for each candidate
         signals = []
+        scanned_count = 0
 
-        for candidate in bullish_setups:
-            signal = self._create_signal(candidate, SignalType.BUY)
-            if signal:
-                signals.append(signal)
+        for candidate in candidates:
+            ticker = candidate['ticker']
+            sector = candidate.get('sector')
 
-        for candidate in bearish_setups:
-            signal = self._create_signal(candidate, SignalType.SELL)
-            if signal:
-                signals.append(signal)
+            try:
+                # Fetch candle data with all indicators
+                df = await self.data_provider.get_historical_data(
+                    ticker=ticker,
+                    start_date=calculation_date - timedelta(days=365),
+                    end_date=calculation_date,
+                    timeframe='1d'
+                )
 
-        # Sort by score
+                if df.empty or len(df) < 220:
+                    continue
+
+                scanned_count += 1
+
+                # Run the exact backtested strategy logic
+                macd_signal = self.strategy.scan(df, ticker, sector)
+
+                if macd_signal:
+                    # Convert to SignalSetup format
+                    signal = self._convert_to_signal_setup(macd_signal, candidate)
+                    if signal:
+                        signals.append(signal)
+                        logger.info(f"{ticker}: Signal generated - {macd_signal.quality_tier} tier, "
+                                    f"confidence {macd_signal.confidence:.1%}")
+
+            except Exception as e:
+                logger.warning(f"{ticker}: Error scanning - {e}")
+                continue
+
+        logger.info(f"Scanned {scanned_count} tickers, generated {len(signals)} signals")
+
+        # Step 4: Sort by composite score (quality)
         signals.sort(key=lambda x: x.composite_score, reverse=True)
 
-        # Apply limit
+        # Step 5: Apply limit
         signals = signals[:self.config.max_signals_per_run]
 
         # Log summary
         high_quality = sum(1 for s in signals if s.is_high_quality)
-        total_candidates = len(bullish_candidates) + len(bearish_candidates)
-        self.log_scan_summary(total_candidates, len(signals), high_quality)
+        self.log_scan_summary(len(candidates), len(signals), high_quality)
 
         return signals
 
-    async def _get_bullish_macd_candidates(
-        self,
-        calculation_date: datetime
-    ) -> List[Dict[str, Any]]:
-        """Get stocks with bullish MACD signals"""
+    async def _get_latest_watchlist_date(self) -> date:
+        """Get the most recent date with watchlist data."""
+        query = """
+            SELECT MAX(calculation_date) as latest_date
+            FROM stock_watchlist
+        """
+        rows = await self.db.fetch(query)
+        if rows and rows[0]['latest_date']:
+            return rows[0]['latest_date']
+        return datetime.now().date()
 
-        # MACD bullish cross or positive histogram
-        # Note: macd_cross_signal is in watchlist (w), macd_histogram is in metrics (m)
+    async def _get_momentum_candidates(
+        self,
+        calculation_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Pre-filter candidates with momentum potential from watchlist.
+
+        This fast database query reduces the number of tickers we need
+        to fetch full candle data for. We use loose filters here because
+        the strategy will apply strict filters (ADX, histogram, etc.) on
+        the actual candle data.
+        """
+        # Query for candidates that might have MACD momentum signals
+        # Keep pre-filter loose - strategy is the source of truth
         additional_filters = """
-            AND w.macd_cross_signal IN ('bullish_cross', 'bullish')
-            AND m.macd_histogram > 0
+            AND (
+                w.macd_cross_signal IN ('bullish_cross', 'bullish', 'bearish_cross', 'bearish')
+                OR w.trend_strength IN ('strong_up', 'up', 'strong_down', 'down')
+            )
         """
 
         return await self.get_watchlist_candidates(
@@ -194,326 +212,183 @@ class MACDMomentumScanner(BaseScanner):
             additional_filters
         )
 
-    async def _get_bearish_macd_candidates(
+    def _convert_to_signal_setup(
         self,
-        calculation_date: datetime
-    ) -> List[Dict[str, Any]]:
-        """Get stocks with bearish MACD signals"""
-
-        # MACD bearish cross or negative histogram
-        # Note: macd_cross_signal is in watchlist (w), macd_histogram is in metrics (m)
-        additional_filters = """
-            AND w.macd_cross_signal IN ('bearish_cross', 'bearish')
-            AND m.macd_histogram < 0
-        """
-
-        return await self.get_watchlist_candidates(
-            calculation_date,
-            additional_filters
-        )
-
-    def _filter_bullish_momentum(
-        self,
-        candidates: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Filter for bullish momentum with structure confirmation"""
-
-        filtered = []
-
-        for c in candidates:
-            # Check histogram value meets threshold
-            histogram = float(c.get('macd_histogram') or 0)
-            if histogram < self.config.histogram_min_threshold:
-                continue
-
-            # Volume check
-            rel_vol = float(c.get('relative_volume') or 0)
-            if rel_vol < self.config.min_relative_volume:
-                continue
-
-            # Price extreme filter - don't buy at yearly highs
-            high_low_signal = c.get('high_low_signal', '')
-            if high_low_signal == 'new_high':
-                # Calculate approximate percentile from 52-week range
-                current = float(c.get('current_price') or 0)
-                high_52w = float(c.get('fifty_two_week_high') or current)
-                low_52w = float(c.get('fifty_two_week_low') or current)
-
-                if high_52w > low_52w:
-                    percentile = (current - low_52w) / (high_52w - low_52w) * 100
-                    if percentile > self.config.price_percentile_max:
-                        continue
-
-            # Trend alignment if required
-            if self.config.require_trend_alignment:
-                trend = c.get('trend_strength', '')
-                # Allow uptrend or neutral (recovering)
-                if trend in ['strong_down', 'down']:
-                    continue
-
-            # Check for fresh MACD cross (preferred)
-            macd_cross = c.get('macd_cross_signal', '')
-            is_fresh_cross = macd_cross == 'bullish_cross'
-
-            c['signal_direction'] = 'BULLISH'
-            c['is_fresh_cross'] = is_fresh_cross
-            c['histogram_value'] = histogram
-            filtered.append(c)
-
-        return filtered
-
-    def _filter_bearish_momentum(
-        self,
-        candidates: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Filter for bearish momentum with structure confirmation"""
-
-        filtered = []
-
-        for c in candidates:
-            # Check histogram value meets threshold (negative)
-            histogram = float(c.get('macd_histogram') or 0)
-            if histogram > -self.config.histogram_min_threshold:
-                continue
-
-            # Volume check
-            rel_vol = float(c.get('relative_volume') or 0)
-            if rel_vol < self.config.min_relative_volume:
-                continue
-
-            # Price extreme filter - don't sell at yearly lows
-            high_low_signal = c.get('high_low_signal', '')
-            if high_low_signal == 'new_low':
-                current = float(c.get('current_price') or 0)
-                high_52w = float(c.get('fifty_two_week_high') or current)
-                low_52w = float(c.get('fifty_two_week_low') or current)
-
-                if high_52w > low_52w:
-                    percentile = (current - low_52w) / (high_52w - low_52w) * 100
-                    if percentile < self.config.price_percentile_min:
-                        continue
-
-            # Trend alignment if required
-            if self.config.require_trend_alignment:
-                trend = c.get('trend_strength', '')
-                # Allow downtrend or neutral (weakening)
-                if trend in ['strong_up', 'up']:
-                    continue
-
-            # Check for fresh MACD cross
-            macd_cross = c.get('macd_cross_signal', '')
-            is_fresh_cross = macd_cross == 'bearish_cross'
-
-            c['signal_direction'] = 'BEARISH'
-            c['is_fresh_cross'] = is_fresh_cross
-            c['histogram_value'] = histogram
-            filtered.append(c)
-
-        return filtered
-
-    def _create_signal(
-        self,
-        candidate: Dict[str, Any],
-        signal_type: SignalType
+        macd_signal: MACDMomentumSignal,
+        candidate: Dict[str, Any]
     ) -> Optional[SignalSetup]:
-        """Create a SignalSetup from a candidate"""
+        """
+        Convert a MACDMomentumSignal from the strategy to SignalSetup format.
 
-        # Score the candidate
-        if signal_type == SignalType.BUY:
-            score_components = self.scorer.score_bullish(candidate)
-        else:
-            score_components = self.scorer.score_bearish(candidate)
+        The strategy already validated all entry conditions, so we just
+        need to format the output for database storage.
+        """
+        # Convert confidence to composite score (0-100)
+        composite_score = int(macd_signal.confidence * 100)
 
-        composite_score = score_components.composite_score
-
-        # Boost score for fresh MACD crosses
-        if candidate.get('is_fresh_cross'):
-            composite_score = min(100, composite_score + 5)
-
-        # Minimum score threshold
-        if composite_score < self.config.min_score_threshold:
-            return None
-
-        # Calculate entry levels
-        entry, stop, tp1, tp2 = self._calculate_entry_levels(candidate, signal_type)
+        # Get quality tier from strategy
+        tier_map = {
+            'A+': QualityTier.A_PLUS,
+            'A': QualityTier.A,
+            'B': QualityTier.B,
+            'C': QualityTier.C,
+            'D': QualityTier.D
+        }
+        quality_tier = tier_map.get(macd_signal.quality_tier, QualityTier.B)
 
         # Calculate risk percent
-        risk_pct = abs(entry - stop) / entry * 100
+        entry = macd_signal.entry_price
+        stop = macd_signal.stop_loss_price
+        risk_pct = abs(entry - stop) / entry * 100 if entry > 0 else 0
 
-        # Build setup description
-        confluence_factors = self._build_confluence_factors(candidate, signal_type)
-        description = self._build_description(candidate, confluence_factors)
+        # Determine signal type
+        signal_type = SignalType.BUY if macd_signal.signal_type == 'BUY' else SignalType.SELL
 
-        # Create signal
+        # Build confluence factors
+        confluence_factors = self._build_confluence_factors(macd_signal, candidate)
+
+        # Build description
+        description = self._build_description(macd_signal, candidate)
+
+        # Create SignalSetup
         signal = SignalSetup(
-            ticker=candidate['ticker'],
+            ticker=macd_signal.ticker,
             scanner_name=self.scanner_name,
             signal_type=signal_type,
-            entry_price=entry,
-            stop_loss=stop,
-            take_profit_1=tp1,
-            take_profit_2=tp2,
-            risk_reward_ratio=Decimal(str(self.config.tp1_rr_ratio)),
+            signal_timestamp=macd_signal.signal_timestamp,
+            entry_price=Decimal(str(round(entry, 4))),
+            stop_loss=Decimal(str(round(stop, 4))),
+            take_profit_1=Decimal(str(round(macd_signal.take_profit_price, 4))),
+            take_profit_2=None,  # Strategy uses single TP
+            risk_reward_ratio=Decimal(str(round(macd_signal.risk_reward_ratio, 2))),
             risk_percent=Decimal(str(round(risk_pct, 2))),
             composite_score=composite_score,
-            trend_score=Decimal(str(round(score_components.weighted_trend, 2))),
-            momentum_score=Decimal(str(round(score_components.weighted_momentum, 2))),
-            volume_score=Decimal(str(round(score_components.weighted_volume, 2))),
-            pattern_score=Decimal(str(round(score_components.weighted_pattern, 2))),
-            confluence_score=Decimal(str(round(score_components.weighted_confluence, 2))),
+            quality_tier=quality_tier,
+            trend_score=Decimal('0'),  # Strategy doesn't break down scores
+            momentum_score=Decimal('0'),
+            volume_score=Decimal('0'),
+            pattern_score=Decimal('0'),
+            confluence_score=Decimal(str(round(macd_signal.confidence * 25, 2))),
             setup_description=description,
             confluence_factors=confluence_factors,
             timeframe="daily",
-            market_regime=self._determine_market_regime(candidate),
+            market_regime=self._determine_market_regime(macd_signal, candidate),
             max_risk_per_trade_pct=Decimal(str(self.config.max_risk_per_trade_pct)),
-            raw_data=candidate,
-        )
-
-        # Calculate position size
-        signal.suggested_position_size_pct = self.calculate_position_size(
-            Decimal(str(self.config.max_risk_per_trade_pct)),
-            entry,
-            stop,
-            signal.quality_tier
+            raw_data={
+                'macd': macd_signal.macd,
+                'macd_signal': macd_signal.macd_signal,
+                'macd_histogram': macd_signal.macd_histogram,
+                'prev_histogram': macd_signal.prev_histogram,
+                'rsi': macd_signal.rsi,
+                'atr': macd_signal.atr,
+                'relative_volume': macd_signal.relative_volume,
+                **candidate
+            }
         )
 
         return signal
+
+    def _build_confluence_factors(
+        self,
+        macd_signal: MACDMomentumSignal,
+        candidate: Dict[str, Any]
+    ) -> List[str]:
+        """Build confluence factors from the signal and candidate data."""
+        factors = []
+
+        # MACD histogram cross
+        if macd_signal.signal_type == 'BUY':
+            factors.append("MACD histogram crossed above zero")
+        else:
+            factors.append("MACD histogram crossed below zero")
+
+        # Histogram strength
+        hist = abs(macd_signal.macd_histogram)
+        if hist >= 0.05:
+            factors.append(f"Strong histogram ({hist:.3f})")
+        elif hist >= 0.02:
+            factors.append(f"Good histogram ({hist:.3f})")
+
+        # ADX (from candidate if available)
+        adx = candidate.get('adx')
+        if adx:
+            adx_val = float(adx)
+            if adx_val >= 30:
+                factors.append(f"Strong trend (ADX {adx_val:.0f})")
+            elif adx_val >= 25:
+                factors.append(f"Trending (ADX {adx_val:.0f})")
+
+        # RSI
+        if macd_signal.rsi:
+            rsi = macd_signal.rsi
+            if 45 <= rsi <= 55:
+                factors.append(f"RSI neutral ({rsi:.0f})")
+            elif macd_signal.signal_type == 'BUY' and rsi < 50:
+                factors.append(f"RSI has room to rise ({rsi:.0f})")
+            elif macd_signal.signal_type == 'SELL' and rsi > 50:
+                factors.append(f"RSI has room to fall ({rsi:.0f})")
+
+        # Volume
+        if macd_signal.relative_volume:
+            rv = macd_signal.relative_volume
+            if rv >= 1.5:
+                factors.append(f"High volume ({rv:.1f}x)")
+            elif rv >= 1.2:
+                factors.append(f"Above-avg volume ({rv:.1f}x)")
+
+        # Trend strength from candidate
+        trend = candidate.get('trend_strength', '')
+        if trend == 'strong_up':
+            factors.append("Strong uptrend")
+        elif trend == 'up':
+            factors.append("Uptrend confirmed")
+        elif trend == 'strong_down':
+            factors.append("Strong downtrend")
+        elif trend == 'down':
+            factors.append("Downtrend confirmed")
+
+        return factors[:8]
+
+    def _build_description(
+        self,
+        macd_signal: MACDMomentumSignal,
+        candidate: Dict[str, Any]
+    ) -> str:
+        """Build human-readable description."""
+        ticker = macd_signal.ticker
+        direction = "bullish" if macd_signal.signal_type == 'BUY' else "bearish"
+        hist = macd_signal.macd_histogram
+
+        desc = f"{ticker} MACD momentum {direction} entry. "
+        desc += f"Histogram crossed zero to {hist:.4f}. "
+
+        if macd_signal.rsi:
+            desc += f"RSI at {macd_signal.rsi:.0f}. "
+
+        desc += f"Quality: {macd_signal.quality_tier} tier ({macd_signal.confidence:.0%} confidence)."
+
+        return desc
 
     def _calculate_entry_levels(
         self,
         candidate: Dict[str, Any],
         signal_type: SignalType
-    ) -> Tuple[Decimal, Decimal, Decimal, Optional[Decimal]]:
+    ) -> tuple:
         """
-        Calculate entry, stop, and take profit levels.
-
-        For MACD Momentum:
-        - Entry: Current price
-        - Stop: 1.5x ATR (tighter for momentum)
-        - TP1: 3x ATR (2:1 R:R)
-        - TP2: 4.5x ATR (3:1 R:R)
+        Not used - entry levels come from the backtested strategy signal.
+        This method is required by the base class but we override the flow.
         """
-        current_price = Decimal(str(candidate.get('current_price', 0)))
-        atr_percent = float(candidate.get('atr_percent') or 3.0)
+        # Return placeholder values - actual levels come from strategy.scan()
+        price = Decimal(str(candidate.get('current_price', 0)))
+        return (price, price * Decimal('0.95'), price * Decimal('1.10'), None)
 
-        # ATR in price terms
-        atr = current_price * Decimal(str(atr_percent / 100))
-
-        # Entry at current price
-        entry = current_price
-
-        # Stop loss: 1.5x ATR (tighter for momentum)
-        stop = self.calculate_atr_based_stop(entry, atr, signal_type)
-
-        # Take profits
-        tp1, tp2 = self.calculate_take_profits(entry, stop, signal_type)
-
-        return entry, stop, tp1, tp2
-
-    def _build_confluence_factors(
+    def _determine_market_regime(
         self,
-        candidate: Dict[str, Any],
-        signal_type: SignalType
-    ) -> List[str]:
-        """Build list of confluence factors for this setup"""
-
-        factors = []
-        is_fresh = candidate.get('is_fresh_cross', False)
-        histogram = candidate.get('histogram_value', 0)
-
-        if signal_type == SignalType.BUY:
-            # MACD factors
-            if is_fresh:
-                factors.append("Fresh MACD bullish cross")
-            else:
-                factors.append("MACD histogram positive")
-
-            factors.append(f"Histogram: +{abs(histogram):.3f}")
-
-            # Trend
-            trend = candidate.get('trend_strength', '')
-            if trend == 'strong_up':
-                factors.append("Strong uptrend")
-            elif trend == 'up':
-                factors.append("Uptrend confirmed")
-            elif trend == 'neutral':
-                factors.append("Trend turning bullish")
-
-            # Position in range
-            high_low = candidate.get('high_low_signal', '')
-            if high_low == 'near_high':
-                factors.append("Near 52W high (momentum)")
-            elif high_low in ['middle', 'near_low']:
-                factors.append("Room to run higher")
-
-        else:  # SELL
-            if is_fresh:
-                factors.append("Fresh MACD bearish cross")
-            else:
-                factors.append("MACD histogram negative")
-
-            factors.append(f"Histogram: {histogram:.3f}")
-
-            trend = candidate.get('trend_strength', '')
-            if trend == 'strong_down':
-                factors.append("Strong downtrend")
-            elif trend == 'down':
-                factors.append("Downtrend confirmed")
-            elif trend == 'neutral':
-                factors.append("Trend turning bearish")
-
-            high_low = candidate.get('high_low_signal', '')
-            if high_low == 'near_low':
-                factors.append("Near 52W low (momentum)")
-            elif high_low in ['middle', 'near_high']:
-                factors.append("Room to fall lower")
-
-        # Volume
-        rel_vol = float(candidate.get('relative_volume') or 0)
-        if rel_vol >= 1.5:
-            factors.append(f"High volume ({rel_vol:.1f}x)")
-        elif rel_vol >= 1.0:
-            factors.append(f"Avg volume ({rel_vol:.1f}x)")
-
-        # RSI
-        rsi = float(candidate.get('rsi_14') or 50)
-        if signal_type == SignalType.BUY and rsi > 50:
-            factors.append(f"RSI bullish ({rsi:.0f})")
-        elif signal_type == SignalType.SELL and rsi < 50:
-            factors.append(f"RSI bearish ({rsi:.0f})")
-
-        return factors
-
-    def _build_description(
-        self,
-        candidate: Dict[str, Any],
-        factors: List[str]
+        macd_signal: MACDMomentumSignal,
+        candidate: Dict[str, Any]
     ) -> str:
-        """Build human-readable setup description"""
-
-        ticker = candidate['ticker']
-        direction = candidate.get('signal_direction', 'BULLISH')
-        is_fresh = candidate.get('is_fresh_cross', False)
-        histogram = candidate.get('histogram_value', 0)
-
-        desc = f"{ticker} MACD momentum {direction.lower()}. "
-
-        if is_fresh:
-            desc += "Fresh histogram cross. "
-        else:
-            desc += f"Histogram {'expanding' if abs(histogram) > 0.05 else 'positive'}. "
-
-        if factors:
-            desc += f"Factors: {', '.join(factors[:2])}"
-
-        return desc
-
-    def _determine_market_regime(self, candidate: Dict[str, Any]) -> str:
-        """Determine market regime for the stock"""
-
+        """Determine market regime from signal and candidate data."""
         trend_strength = candidate.get('trend_strength', '')
-        is_fresh = candidate.get('is_fresh_cross', False)
-        atr_pct = float(candidate.get('atr_percent') or 0)
 
         if trend_strength == 'strong_up':
             regime = "Strong Uptrend"
@@ -526,14 +401,6 @@ class MACDMomentumScanner(BaseScanner):
         else:
             regime = "Transitioning"
 
-        if is_fresh:
-            regime += " (Fresh Momentum)"
-        else:
-            regime += " (Momentum)"
-
-        if atr_pct > 5:
-            regime += " - High Vol"
-        elif atr_pct < 2:
-            regime += " - Low Vol"
+        regime += " - MACD Momentum"
 
         return regime

@@ -1673,16 +1673,25 @@ Analyze and respond in this exact JSON format:
                 """)
                 totals = dict(cursor.fetchone())
 
-                # By scanner
+                # By scanner - include ALL registered scanners, even those without signals
                 cursor.execute("""
                     SELECT
-                        scanner_name,
-                        COUNT(*) as signal_count,
-                        ROUND(AVG(composite_score)::numeric, 1) as avg_score,
-                        COUNT(*) FILTER (WHERE status = 'active') as active_count
-                    FROM stock_scanner_signals
-                    GROUP BY scanner_name
-                    ORDER BY signal_count DESC
+                        r.scanner_name,
+                        COALESCE(s.signal_count, 0) as signal_count,
+                        COALESCE(s.avg_score, 0) as avg_score,
+                        COALESCE(s.active_count, 0) as active_count
+                    FROM stock_signal_scanners r
+                    LEFT JOIN (
+                        SELECT
+                            scanner_name,
+                            COUNT(*) as signal_count,
+                            ROUND(AVG(composite_score)::numeric, 1) as avg_score,
+                            COUNT(*) FILTER (WHERE status = 'active') as active_count
+                        FROM stock_scanner_signals
+                        GROUP BY scanner_name
+                    ) s ON r.scanner_name = s.scanner_name
+                    WHERE r.is_active = true
+                    ORDER BY COALESCE(s.signal_count, 0) DESC, r.scanner_name
                 """)
                 by_scanner = [dict(r) for r in cursor.fetchall()]
 

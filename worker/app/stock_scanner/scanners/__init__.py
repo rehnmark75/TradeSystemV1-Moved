@@ -44,14 +44,14 @@ from .strategies import (
     MeanReversionScanner,
     GapAndGoScanner,
     ZLMATrendScanner,
-    # Forex-adapted strategies
-    SMCEmaTrendScanner,
-    EMACrossoverScanner,
+    # Backtested strategies
     MACDMomentumScanner,
+    EMAPullbackScanner,
     # AlphaSuite-adapted strategies
     SellingClimaxScanner,
     RSIDivergenceScanner,
     WyckoffSpringScanner,
+    TrendReversalScanner,
 )
 
 __all__ = [
@@ -88,12 +88,12 @@ __all__ = [
     'MeanReversionScanner',
     'GapAndGoScanner',
     'ZLMATrendScanner',
-    # Forex-adapted strategies
-    'SMCEmaTrendScanner',
-    'EMACrossoverScanner',
+    # Backtested strategies
     'MACDMomentumScanner',
+    'EMAPullbackScanner',
     # AlphaSuite-adapted strategies
     'SellingClimaxScanner',
     'RSIDivergenceScanner',
     'WyckoffSpringScanner',
+    'TrendReversalScanner',
 ]
