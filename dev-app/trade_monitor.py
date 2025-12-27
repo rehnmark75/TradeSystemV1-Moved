@@ -488,6 +488,20 @@ class TradeMonitor:
         print("✅ Enhanced processor available, continuing initialization...")
         self.monitoring_enabled = True
 
+        # Check master trailing stop disable flag
+        try:
+            from config import TRAILING_STOPS_ENABLED
+            if not TRAILING_STOPS_ENABLED:
+                print("⚠️  TRAILING STOPS DISABLED via config.TRAILING_STOPS_ENABLED = False")
+                self.monitoring_enabled = False
+                # Still create logger for status reporting
+                logger_setup = TradeMonitorLogger()
+                self.logger = logger_setup.get_logger()
+                self.logger.warning("⚠️  Trailing stops disabled via config flag")
+                return
+        except ImportError:
+            pass  # Config not available, continue with monitoring enabled
+
         # Use standard trailing config (simplified - removed progressive config)
         if trade_config is None:
             self.trade_config = SCALPING_CONFIG_WITH_EMA

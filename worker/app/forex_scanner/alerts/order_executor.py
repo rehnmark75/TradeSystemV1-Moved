@@ -302,6 +302,25 @@ class OrderExecutor:
             else:
                 self.logger.debug(f"📋 Using strategy-provided limit_distance: {limit_distance} pips")
 
+            # === FIXED SL/TP OVERRIDE (for testing) ===
+            try:
+                from config import (
+                    FIXED_SL_TP_OVERRIDE_ENABLED,
+                    FIXED_STOP_LOSS_PIPS,
+                    FIXED_TAKE_PROFIT_PIPS
+                )
+                if FIXED_SL_TP_OVERRIDE_ENABLED:
+                    original_sl = stop_distance
+                    original_tp = limit_distance
+                    stop_distance = FIXED_STOP_LOSS_PIPS
+                    limit_distance = FIXED_TAKE_PROFIT_PIPS
+                    self.logger.info(
+                        f"🔒 FIXED SL/TP OVERRIDE: SL {original_sl}→{stop_distance}, "
+                        f"TP {original_tp}→{limit_distance} pips"
+                    )
+            except ImportError:
+                pass  # Config not available, use strategy values
+
             # ✅ SAFETY VALIDATION: Ensure reasonable SL/TP values
             # For all pairs, stop_distance and limit_distance should be in reasonable pip/point range
             max_reasonable_sl = 100  # Maximum reasonable stop loss in pips/points

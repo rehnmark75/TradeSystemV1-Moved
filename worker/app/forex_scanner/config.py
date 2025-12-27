@@ -41,6 +41,13 @@ except ImportError as e:
         }
     }
 
+# ================== FIXED SL/TP OVERRIDE ==================
+# Temporary testing mode - overrides strategy-calculated SL/TP
+# Set FIXED_SL_TP_OVERRIDE_ENABLED = False to use strategy values
+FIXED_SL_TP_OVERRIDE_ENABLED = True
+FIXED_STOP_LOSS_PIPS = 9              # Fixed SL in pips (when override enabled)
+FIXED_TAKE_PROFIT_PIPS = 15           # Fixed TP in pips (when override enabled)
+
 # Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/forex")
 

@@ -22,6 +22,11 @@ TRADING_BLACKLIST = [
     # Add other blocked epics here as needed
 ]
 
+# ================== TRAILING STOP MASTER CONTROL ==================
+# Set to False to completely disable trailing stop monitoring
+# Set to True to re-enable trailing stops
+TRAILING_STOPS_ENABLED = False
+
 # Additional epic mappings from broker transaction analyzer
 BROKER_EPIC_MAP = {
     'USD/CAD': 'CS.D.USDCAD.MINI.IP',
