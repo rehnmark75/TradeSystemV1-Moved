@@ -11,7 +11,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 docker exec -it task-worker python /app/forex_scanner/script.py
 
 # Database queries
-docker exec -it postgres psql -U postgres -d trading -c "SELECT ..."
+docker exec postgres psql -U postgres -d forex -c "SELECT ..."    # Forex candles/trades
+docker exec postgres psql -U postgres -d stocks -c "SELECT ..."   # Stock candles
 
 # Interactive shell
 docker exec -it task-worker bash

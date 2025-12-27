@@ -112,7 +112,7 @@ class StockScheduler:
     5. watchlist  - Build tiered, scored watchlist
     6. signals    - Run ZLMA + all scanner strategies
 
-    Schedule (Mon-Fri):
+    Schedule (Mon-Sat):
     - 05:00 UTC (00:00 ET): Full pipeline - ready before EU morning
     - 6:00 AM ET: Pre-market scan (gaps, earnings)
     - 12:30 PM ET: Intraday scanner run
@@ -231,8 +231,8 @@ class StockScheduler:
         if now >= target:
             target += timedelta(days=1)
 
-        # Skip weekends (Saturday=5, Sunday=6)
-        while target.weekday() in (5, 6):
+        # Skip Sunday only (Sunday=6) - Saturday runs for weekend analysis
+        while target.weekday() == 6:
             target += timedelta(days=1)
 
         return target
@@ -902,10 +902,10 @@ class StockScheduler:
         """
         now = datetime.now(self.ET)
         today = now.date()
-        is_weekday = now.weekday() < 5  # Mon-Fri
+        is_trading_day = now.weekday() < 6  # Mon-Sat (Saturday runs for Friday EOD data)
 
-        if not is_weekday:
-            logger.info("Weekend - skipping missed task check")
+        if not is_trading_day:
+            logger.info("Sunday - skipping missed task check")
             return
 
         # Check if full_pipeline has run today
@@ -953,13 +953,13 @@ class StockScheduler:
             target = datetime.combine(today, config['time'])
             target = self.ET.localize(target)
 
-            # If it's a weekend or we've passed the time, find next valid slot
-            if now >= target or now.weekday() >= 5:
-                # Schedule for tomorrow (or today if weekend and time hasn't passed)
+            # If it's Sunday or we've passed the time, find next valid slot
+            if now >= target or now.weekday() >= 6:
+                # Schedule for tomorrow (or today if Sunday and time hasn't passed)
                 if now >= target:
                     target += timedelta(days=1)
-                # Skip weekends
-                while target.weekday() >= 5:
+                # Skip Sunday only
+                while target.weekday() >= 6:
                     target += timedelta(days=1)
 
             candidates.append((task_name, target))
@@ -978,7 +978,7 @@ class StockScheduler:
         self.running = True
 
         logger.info("Enhanced Stock Scheduler started")
-        logger.info("Schedule (Mon-Fri):")
+        logger.info("Schedule (Mon-Sat):")
         for task_name, config in self.SCHEDULE.items():
             et_time = config['time'].strftime('%H:%M')
             # Calculate UTC time (ET is UTC-5 in winter, UTC-4 in summer)
@@ -1118,7 +1118,7 @@ def main():
 
         print("\nEnhanced Stock Scanner Scheduler Status")
         print("=" * 60)
-        print("\nSchedule (Mon-Fri):")
+        print("\nSchedule (Mon-Sat):")
         for task_name, config in scheduler.SCHEDULE.items():
             et_time = config['time'].strftime('%H:%M')
             utc_hour = (config['time'].hour + 5) % 24  # Approximate UTC
