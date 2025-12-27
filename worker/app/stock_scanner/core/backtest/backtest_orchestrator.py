@@ -19,19 +19,38 @@ from ..database.async_database_manager import AsyncDatabaseManager
 from .backtest_data_provider import BacktestDataProvider
 from .trade_simulator import TradeSimulator
 from .backtest_order_logger import BacktestOrderLogger
+
+# Already optimized strategies
 from ...strategies.ema_trend_pullback import EMATrendPullbackStrategy, PullbackSignal
 from ...strategies.macd_momentum import MACDMomentumStrategy, MACDMomentumSignal
 from ...strategies.zlma_crossover import ZLMACrossoverStrategy, ZLMASignal
 
+# New strategies to be backtested
+from ...strategies.breakout_confirmation import BreakoutConfirmationStrategy
+from ...strategies.gap_and_go import GapAndGoStrategy
+from ...strategies.reversal_strategy import ReversalStrategy
+from ...strategies.rsi_divergence import RSIDivergenceStrategy
+from ...strategies.trend_reversal import TrendReversalStrategy
 
-# Strategy registry
+
+# Strategy registry (8 strategies total)
 STRATEGY_REGISTRY: Dict[str, Type] = {
+    # Already optimized
     'EMA_PULLBACK': EMATrendPullbackStrategy,
     'EMA_TREND_PULLBACK': EMATrendPullbackStrategy,
     'MACD_MOMENTUM': MACDMomentumStrategy,
     'MACD': MACDMomentumStrategy,
     'ZLMA_CROSSOVER': ZLMACrossoverStrategy,
     'ZLMA': ZLMACrossoverStrategy,
+    # To be backtested
+    'BREAKOUT': BreakoutConfirmationStrategy,
+    'BREAKOUT_CONFIRMATION': BreakoutConfirmationStrategy,
+    'GAP_AND_GO': GapAndGoStrategy,
+    'GAP': GapAndGoStrategy,
+    'REVERSAL': ReversalStrategy,
+    'RSI_DIVERGENCE': RSIDivergenceStrategy,
+    'RSI_DIV': RSIDivergenceStrategy,
+    'TREND_REVERSAL': TrendReversalStrategy,
 }
 
 

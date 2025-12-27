@@ -19,21 +19,15 @@ from collections import defaultdict
 from .base_scanner import BaseScanner, SignalSetup, ScannerConfig, QualityTier
 from .scoring import SignalScorer
 from .strategies import (
-    TrendMomentumScanner,
-    BreakoutConfirmationScanner,
-    MeanReversionScanner,
-    GapAndGoScanner,
-    EarningsMomentumScanner,
-    ShortSqueezeScanner,
-    SectorRotationScanner,
+    # Backtested & optimized strategies
     ZLMATrendScanner,
-    # Backtested strategies
     MACDMomentumScanner,
     EMAPullbackScanner,
-    # AlphaSuite-adapted strategies
-    SellingClimaxScanner,
+    # To be backtested
+    BreakoutConfirmationScanner,
+    GapAndGoScanner,
+    ReversalScanner,  # Merged: selling_climax + mean_reversion + wyckoff_spring
     RSIDivergenceScanner,
-    WyckoffSpringScanner,
     TrendReversalScanner,
 )
 
@@ -83,23 +77,17 @@ class ScannerManager:
         csv = manager.export_tradingview_csv()
     """
 
-    # Available scanner classes
+    # Available scanner classes (8 total - all backtested or to be backtested)
     SCANNER_CLASSES: Dict[str, Type[BaseScanner]] = {
-        'trend_momentum': TrendMomentumScanner,
+        # Backtested & optimized (PF > 1.0)
+        'zlma_trend': ZLMATrendScanner,           # PF: 1.55, WR: 50%
+        'macd_momentum': MACDMomentumScanner,     # PF: 1.71, WR: 42%
+        'ema_pullback': EMAPullbackScanner,       # PF: 2.02
+        # To be backtested
         'breakout_confirmation': BreakoutConfirmationScanner,
-        'mean_reversion': MeanReversionScanner,
         'gap_and_go': GapAndGoScanner,
-        'earnings_momentum': EarningsMomentumScanner,
-        'short_squeeze': ShortSqueezeScanner,
-        'sector_rotation': SectorRotationScanner,
-        'zlma_trend': ZLMATrendScanner,
-        # Backtested strategies
-        'macd_momentum': MACDMomentumScanner,
-        'ema_pullback': EMAPullbackScanner,
-        # AlphaSuite-adapted strategies
-        'selling_climax': SellingClimaxScanner,
+        'reversal_scanner': ReversalScanner,      # Merged: climax + mean_rev + wyckoff
         'rsi_divergence': RSIDivergenceScanner,
-        'wyckoff_spring': WyckoffSpringScanner,
         'trend_reversal': TrendReversalScanner,
     }
 

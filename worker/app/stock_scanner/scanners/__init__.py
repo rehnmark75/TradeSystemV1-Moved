@@ -1,13 +1,19 @@
 """
 Stock Signal Scanners Module
 
-Automated signal scanning system with multiple strategies:
-- Trend Momentum: Pullback entries in established uptrends
-- Breakout Confirmation: Volume-confirmed breakouts
-- Mean Reversion: Oversold bounces with reversal patterns
-- Gap & Go: Gap continuation plays
+8 consolidated scanners (down from 14):
 
-Each scanner generates scored signals with entry, stop-loss, and take-profit levels.
+Backtested & Optimized:
+- ZLMATrendScanner: Zero-Lag MA crossover (PF 1.55, WR 50%)
+- MACDMomentumScanner: MACD histogram momentum (PF 1.71, WR 42%)
+- EMAPullbackScanner: EMA cascade pullback (PF 2.02)
+
+To Be Backtested:
+- BreakoutConfirmationScanner: 52W high breakouts with volume
+- GapAndGoScanner: Gap continuation plays
+- ReversalScanner: Capitulation + mean reversion + Wyckoff springs (merged)
+- RSIDivergenceScanner: Price/RSI divergence reversals
+- TrendReversalScanner: Multi-day downtrend-to-uptrend reversals
 
 Usage:
     from stock_scanner.scanners import ScannerManager, TradingViewExporter
@@ -37,20 +43,17 @@ from .exclusion_filters import (
 from .scanner_manager import ScannerManager
 from .export import TradingViewExporter
 
-# Strategy scanners
+# Strategy scanners (8 total - consolidated from 14)
 from .strategies import (
-    TrendMomentumScanner,
-    BreakoutConfirmationScanner,
-    MeanReversionScanner,
-    GapAndGoScanner,
+    # Backtested & optimized strategies
     ZLMATrendScanner,
-    # Backtested strategies
     MACDMomentumScanner,
     EMAPullbackScanner,
-    # AlphaSuite-adapted strategies
-    SellingClimaxScanner,
+    # To be backtested
+    BreakoutConfirmationScanner,
+    GapAndGoScanner,
+    ReversalScanner,  # Merged: selling_climax + mean_reversion + wyckoff_spring
     RSIDivergenceScanner,
-    WyckoffSpringScanner,
     TrendReversalScanner,
 )
 
@@ -82,18 +85,15 @@ __all__ = [
     # Export
     'TradingViewExporter',
 
-    # Strategies
-    'TrendMomentumScanner',
-    'BreakoutConfirmationScanner',
-    'MeanReversionScanner',
-    'GapAndGoScanner',
+    # Strategy scanners (8 total)
+    # Backtested & optimized
     'ZLMATrendScanner',
-    # Backtested strategies
     'MACDMomentumScanner',
     'EMAPullbackScanner',
-    # AlphaSuite-adapted strategies
-    'SellingClimaxScanner',
+    # To be backtested
+    'BreakoutConfirmationScanner',
+    'GapAndGoScanner',
+    'ReversalScanner',
     'RSIDivergenceScanner',
-    'WyckoffSpringScanner',
     'TrendReversalScanner',
 ]
