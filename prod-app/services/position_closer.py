@@ -5,7 +5,7 @@ Automatically closes all open positions on Fridays at 20:30 UTC to prevent weeke
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 import httpx
 from .ig_orders import has_open_position
@@ -367,8 +367,9 @@ class PositionCloser:
                                        (now_utc.hour == self.closure_hour and now_utc.minute >= self.closure_minute)):
             days_until_closure = 7  # Next week if we've passed this week's closure time
 
-        next_closure = now_utc.replace(hour=self.closure_hour, minute=self.closure_minute, second=0, microsecond=0)
-        next_closure = next_closure.replace(day=next_closure.day + days_until_closure)
+        next_closure = (now_utc + timedelta(days=days_until_closure)).replace(
+            hour=self.closure_hour, minute=self.closure_minute, second=0, microsecond=0
+        )
         return next_closure.isoformat()
 
     def _get_time_until_next_closure(self) -> str:
