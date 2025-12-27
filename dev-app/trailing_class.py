@@ -949,6 +949,13 @@ class Progressive3StageTrailing(TrailingStrategy):
             effective_profit * retracement_percentage  # Percentage-based distance
         )
 
+        # ✅ v3.1.0: Apply wider trailing multiplier for partial positions
+        if getattr(trade, 'partial_close_executed', False):
+            from config import PARTIAL_POSITION_TRAIL_MULTIPLIER
+            original_distance = trail_distance_points
+            trail_distance_points = trail_distance_points * PARTIAL_POSITION_TRAIL_MULTIPLIER
+            self.logger.debug(f"[PARTIAL TRAIL STAGE3] Trade {trade.id}: Widening distance {original_distance:.1f}pts → {trail_distance_points:.1f}pts")
+
         trail_distance_price = trail_distance_points * point_value
 
         if direction == "BUY":
@@ -1522,6 +1529,16 @@ class EnhancedTradeProcessor:
             
             # Calculate safe trailing distance
             safe_trail_distance = self.calculate_safe_trail_distance(trade)
+
+            # ✅ v3.1.0: Apply wider trailing multiplier for partial positions
+            # This gives remaining position more breathing room after partial close
+            if getattr(trade, 'partial_close_executed', False):
+                from config import PARTIAL_POSITION_TRAIL_MULTIPLIER
+                original_distance = safe_trail_distance
+                safe_trail_distance = int(safe_trail_distance * PARTIAL_POSITION_TRAIL_MULTIPLIER)
+                self.logger.debug(f"🔧 [PARTIAL TRAIL] Trade {trade.id}: Applying {PARTIAL_POSITION_TRAIL_MULTIPLIER}x multiplier: "
+                               f"{original_distance}pts → {safe_trail_distance}pts")
+
             safe_trail_distance_price = safe_trail_distance * point_value
 
             # ✅ CRITICAL FIX: Calculate current profit correctly (NO abs() - show actual profit/loss)
@@ -2250,6 +2267,35 @@ class EnhancedTradeProcessor:
 
             # --- STEP 2: Advanced trailing logic ---
             should_trail = False
+
+            # ✅ v3.1.0: Post-partial-close calm period check
+            # After partial close, give remaining position breathing room before trailing
+            if getattr(trade, 'partial_close_executed', False) and trade.partial_close_time:
+                from config import POST_PARTIAL_CLOSE_CALM_MINUTES, POST_PARTIAL_CLOSE_MIN_MOVE_PIPS
+
+                time_since_partial = (datetime.utcnow() - trade.partial_close_time).total_seconds() / 60.0
+                calm_period_active = time_since_partial < POST_PARTIAL_CLOSE_CALM_MINUTES
+
+                # Calculate price move since partial close (use entry + partial_close_trigger as reference)
+                partial_close_trigger = trailing_config.get('partial_close_trigger_points', 25)
+                if trade.direction.upper() == "BUY":
+                    partial_close_price = trade.entry_price + (partial_close_trigger * point_value)
+                    price_move_since_partial = (current_price - partial_close_price) / point_value
+                else:
+                    partial_close_price = trade.entry_price - (partial_close_trigger * point_value)
+                    price_move_since_partial = (partial_close_price - current_price) / point_value
+
+                min_move_achieved = price_move_since_partial >= POST_PARTIAL_CLOSE_MIN_MOVE_PIPS
+
+                # Skip trailing if still in calm period AND haven't moved enough
+                if calm_period_active and not min_move_achieved:
+                    self.logger.info(f"⏸️ [PARTIAL CALM] Trade {trade.id}: In calm period ({time_since_partial:.1f}/{POST_PARTIAL_CLOSE_CALM_MINUTES} mins), "
+                                   f"price move {price_move_since_partial:.1f}/{POST_PARTIAL_CLOSE_MIN_MOVE_PIPS} pips - skipping trailing")
+                    return True  # Continue monitoring but don't trail yet
+                elif not calm_period_active:
+                    self.logger.debug(f"✅ [PARTIAL CALM END] Trade {trade.id}: Calm period ended ({time_since_partial:.1f} mins)")
+                elif min_move_achieved:
+                    self.logger.info(f"✅ [PARTIAL BREAKOUT] Trade {trade.id}: Price moved +{price_move_since_partial:.1f} pips beyond partial close - resuming trailing")
 
             # ✅ CRITICAL FIX: Allow trailing for profit_protected status OR moved_to_breakeven
             trail_ready = getattr(trade, 'moved_to_breakeven', False) or trade.status == "profit_protected"

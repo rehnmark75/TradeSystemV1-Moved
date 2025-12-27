@@ -129,6 +129,12 @@ STAGE3_MIN_ADJUSTMENT = 5    # Minimum points to move stop (prevents too-frequen
 ENABLE_PARTIAL_CLOSE_AT_BREAKEVEN = True  # Master toggle for partial close feature
 PARTIAL_CLOSE_SIZE = 0.5  # Size to close (0.5 = 50% of position)
 
+# v3.1.0: Post-Partial-Close Trailing Enhancements
+# After partial close, give the remaining position room to breathe before aggressive trailing
+POST_PARTIAL_CLOSE_CALM_MINUTES = 5  # Wait 5 minutes before trailing resumes after partial close
+POST_PARTIAL_CLOSE_MIN_MOVE_PIPS = 5  # OR require price to move +5 pips beyond partial close level
+PARTIAL_POSITION_TRAIL_MULTIPLIER = 1.5  # Use 1.5x wider trailing distance for partial positions
+
 # ================== PAIR-SPECIFIC TRAILING CONFIGURATIONS ==================
 # Per-pair trailing stop configurations (overrides default values above)
 # Note: IG's min_stop_distance_points from trade_log ALWAYS takes priority when available
