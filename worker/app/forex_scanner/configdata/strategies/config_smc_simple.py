@@ -1,12 +1,23 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.6.0 (EURUSD Pair-Specific Overrides)
+# Version: 2.7.0 (AUDUSD Pair-Specific Overrides from Rejection Outcome Analysis)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback OR momentum continuation entry
+#
+# v2.7.0 AUDUSD PAIR-SPECIFIC OVERRIDES (from Rejection Outcome Analysis):
+#   - NEW: AUDUSD overrides based on 30-day outcome analysis
+#   - 844 rejections analyzed: 61% would-be winners (filters too aggressive)
+#   - TIER2_SWING: 56.4% win rate, TIER3_PULLBACK: 90.9% win rate
+#   - AUDUSD: MIN_BODY_PERCENTAGE 0.35 → 0.25
+#   - AUDUSD: MIN_BREAKOUT_ATR_RATIO 0.50 → 0.40
+#   - AUDUSD: MOMENTUM_MIN_DEPTH -0.50 → -0.65
+#   - AUDUSD: FIB_PULLBACK_MIN 0.236 → 0.18
+#   - AUDUSD: MIN_CONFIDENCE_THRESHOLD 0.50 → 0.45
+#   - IMPACT: Recovers ~4,446 net pips from over-filtered signals
 #
 # v2.6.0 EURUSD PAIR-SPECIFIC OVERRIDES:
 #   - NEW: PAIR_PARAMETER_OVERRIDES dict for per-pair settings
@@ -73,9 +84,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.6.0"
+STRATEGY_VERSION = "2.7.0"
 STRATEGY_DATE = "2025-12-28"
-STRATEGY_STATUS = "EURUSD Pair-Specific Overrides - relaxed body/ATR filters"
+STRATEGY_STATUS = "AUDUSD + EURUSD Pair-Specific Overrides from Rejection Outcome Analysis"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -571,6 +582,52 @@ PAIR_PARAMETER_OVERRIDES = {
             'MIN_BODY_PERCENTAGE': 0.25,
             'MIN_BREAKOUT_ATR_RATIO': 0.40,
             'MOMENTUM_MIN_DEPTH': -0.60,
+        },
+    },
+
+    # ============================================================================
+    # v2.7.0: AUDUSD PAIR-SPECIFIC OVERRIDES
+    # ============================================================================
+    # Rejection Outcome Analysis (30 days):
+    #   - 844 rejections total, 61% would-be win rate
+    #   - TIER2_SWING: 753 rejections, 56.4% win rate - slightly too aggressive
+    #   - TIER3_PULLBACK: 66 rejections, 90.9% win rate - far too aggressive
+    #   - CONFIDENCE: 25 rejections, 100% win rate - too aggressive
+    #   - Net missed: 4,446 pips (7,290 missed - 2,844 avoided)
+    #
+    # AUDUSD characteristics:
+    #   - Lower volatility than GBP/JPY pairs
+    #   - Smaller candle bodies on breakouts
+    #   - Shallower pullbacks before continuation
+    #
+    'CS.D.AUDUSD.MINI.IP': {
+        'enabled': True,
+        'description': 'AUDUSD relaxed parameters - outcome analysis shows 61% rejection win rate',
+        'overrides': {
+            # Tier 2: Swing break - relax for smaller AUDUSD breakouts
+            'MIN_BODY_PERCENTAGE': 0.25,       # Default: 0.35 - AUDUSD has smaller bodies
+            'MIN_BREAKOUT_ATR_RATIO': 0.40,    # Default: 0.50 - allow smaller breakouts
+
+            # Tier 3: Pullback/Momentum - relax for AUDUSD's shallow pullbacks
+            'MOMENTUM_MIN_DEPTH': -0.65,       # Default: -0.50 - allow deeper momentum continuation
+            'FIB_PULLBACK_MIN': 0.18,          # Default: 0.236 - accept shallower pullbacks
+            'FIB_PULLBACK_MAX': 0.75,          # Default: 0.70 - accept deeper pullbacks
+
+            # Confidence: Lower threshold since rejections show high win rate
+            'MIN_CONFIDENCE_THRESHOLD': 0.45,  # Default: 0.50 - lower for AUDUSD
+        },
+    },
+    # Alias for pair name format
+    'AUDUSD': {
+        'enabled': True,
+        'description': 'AUDUSD relaxed parameters - outcome analysis shows 61% rejection win rate',
+        'overrides': {
+            'MIN_BODY_PERCENTAGE': 0.25,
+            'MIN_BREAKOUT_ATR_RATIO': 0.40,
+            'MOMENTUM_MIN_DEPTH': -0.65,
+            'FIB_PULLBACK_MIN': 0.18,
+            'FIB_PULLBACK_MAX': 0.75,
+            'MIN_CONFIDENCE_THRESHOLD': 0.45,
         },
     },
 }

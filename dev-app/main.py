@@ -6,6 +6,16 @@ from routers.orders_router import router as orders_router
 from routers.analytics_status_router import router as analytics_status_router
 from datetime import datetime, timedelta
 
+# Rejection outcome analysis router
+try:
+    from routers.rejection_outcome_router import router as rejection_outcome_router
+    REJECTION_OUTCOME_AVAILABLE = True
+    print("✅ Rejection outcome analysis router imported successfully")
+except ImportError as e:
+    print(f"⚠️ Rejection outcome router not available: {e}")
+    REJECTION_OUTCOME_AVAILABLE = False
+    rejection_outcome_router = None
+
 # 🔥 ENHANCED: Safe import of enhanced trading analytics router with complete P/L system
 try:
     from routers.trading_analytics_router import router as trading_analytics_router
@@ -1007,6 +1017,16 @@ if ANALYTICS_AVAILABLE and trading_analytics_router:
 if TRADE_ANALYSIS_AVAILABLE and trade_analysis_router:
     app.include_router(trade_analysis_router, tags=["trade-analysis"])
     print("✅ Trade analysis router registered")
+
+# Rejection outcome analysis router
+if REJECTION_OUTCOME_AVAILABLE and rejection_outcome_router:
+    app.include_router(rejection_outcome_router, tags=["rejection-outcome-analysis"])
+    print("✅ Rejection outcome analysis router registered")
+    print("📊 Rejection outcome endpoints available:")
+    print("   • GET /api/rejection-outcomes/summary")
+    print("   • GET /api/rejection-outcomes/win-rate-by-stage")
+    print("   • GET /api/rejection-outcomes/missed-profit")
+    print("   • GET /api/rejection-outcomes/parameter-suggestions")
     print("📊 Trade analysis endpoints available:")
     print("   • GET /api/trade-analysis/trade/{trade_id} - Comprehensive trade analysis")
     print("   • GET /api/trade-analysis/trade/{trade_id}/timeline - Event timeline")
