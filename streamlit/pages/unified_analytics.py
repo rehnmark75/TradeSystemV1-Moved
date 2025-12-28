@@ -3937,8 +3937,8 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
         st.markdown("---")
 
         # Sub-tabs for different analysis views
-        sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6 = st.tabs([
-            "📊 Stage Breakdown", "🚧 S/R Path Blocking", "⏰ Time Analysis", "💹 Market Context", "🎯 Near-Misses", "⚡ Scanner Efficiency"
+        sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6, sub_tab7 = st.tabs([
+            "📊 Stage Breakdown", "📈 Outcome Analysis", "🚧 S/R Path Blocking", "⏰ Time Analysis", "💹 Market Context", "🎯 Near-Misses", "⚡ Scanner Efficiency"
         ])
 
         # Fetch data
@@ -3952,18 +3952,21 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
             self._render_stage_breakdown(df, stats)
 
         with sub_tab2:
-            self._render_sr_path_blocking(df, days_filter)
+            self._render_rejection_outcome_analysis(days_filter)
 
         with sub_tab3:
-            self._render_time_analysis(df)
+            self._render_sr_path_blocking(df, days_filter)
 
         with sub_tab4:
-            self._render_market_context(df)
+            self._render_time_analysis(df)
 
         with sub_tab5:
-            self._render_near_misses(df, days_filter)
+            self._render_market_context(df)
 
         with sub_tab6:
+            self._render_near_misses(df, days_filter)
+
+        with sub_tab7:
             self._render_scanner_efficiency(days_filter)
 
     def _render_stage_breakdown(self, df: pd.DataFrame, stats: dict):
@@ -4018,6 +4021,227 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
                 "Count": st.column_config.NumberColumn("Count", format="%d")
             }
         )
+
+    def _render_rejection_outcome_analysis(self, days_filter: int):
+        """
+        Render rejection outcome analysis sub-tab.
+        Shows what would have happened if rejected signals were executed.
+        """
+        st.subheader("📈 Rejection Outcome Analysis")
+
+        st.info("""
+        **What is Rejection Outcome Analysis?**
+
+        This analysis tracks what would have happened if rejected signals were actually executed.
+        Using fixed SL=9 pips and TP=15 pips, we monitor price movement after each rejection to determine:
+        - **Would-be Winners**: Signals that would have hit TP before SL
+        - **Would-be Losers**: Signals that would have hit SL before TP
+
+        This helps identify if rejection filters are too aggressive (missing profitable trades) or
+        working correctly (filtering out losing trades).
+        """)
+
+        # Fetch data from FastAPI endpoint
+        fastapi_base_url = "http://fastapi-dev:8000"
+        headers = {
+            "X-APIM-Gateway": "verified",
+            "X-API-KEY": "436abe054a074894a0517e5172f0e5b6"
+        }
+
+        try:
+            # Fetch summary
+            summary_response = requests.get(
+                f"{fastapi_base_url}/api/rejection-outcomes/summary",
+                params={"days": days_filter},
+                headers=headers,
+                timeout=30
+            )
+
+            if summary_response.status_code != 200:
+                st.warning("⚠️ Could not fetch outcome data. Run the rejection outcome analyzer first.")
+                st.code("""
+# Run the analyzer to populate outcome data:
+docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outcome_analyzer.py --days 7
+                """)
+                return
+
+            summary = summary_response.json()
+
+            if summary.get('total_analyzed', 0) == 0:
+                st.warning("⚠️ No outcome data available yet. Run the analyzer to populate data.")
+                st.code("""
+# First, run the database migration:
+docker exec postgres psql -U postgres -d forex -f /app/forex_scanner/migrations/create_smc_rejection_outcomes_table.sql
+
+# Then run the analyzer:
+docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outcome_analyzer.py --days 7
+                """)
+                return
+
+            # Summary metrics row
+            st.markdown("### Overall Summary")
+            col1, col2, col3, col4, col5 = st.columns(5)
+
+            with col1:
+                st.metric("Total Analyzed", f"{summary.get('total_analyzed', 0):,}")
+
+            with col2:
+                win_rate = summary.get('would_be_win_rate', 0)
+                delta_color = "normal" if win_rate >= 50 else "inverse"
+                st.metric(
+                    "Would-Be Win Rate",
+                    f"{win_rate:.1f}%",
+                    delta=f"{win_rate - 50:.1f}% vs break-even" if win_rate else None,
+                    delta_color=delta_color
+                )
+
+            with col3:
+                st.metric(
+                    "Would-Be Winners",
+                    summary.get('winners', 0),
+                    help="Rejected signals that would have hit TP"
+                )
+
+            with col4:
+                missed_pips = summary.get('total_missed_pips', 0)
+                st.metric(
+                    "Missed Profit",
+                    f"{missed_pips:.0f} pips",
+                    help="Potential profit from would-be winners"
+                )
+
+            with col5:
+                avoided_loss = summary.get('avoided_loss_pips', 0)
+                st.metric(
+                    "Avoided Loss",
+                    f"{avoided_loss:.0f} pips",
+                    help="Loss avoided by rejecting would-be losers"
+                )
+
+            st.markdown("---")
+
+            # Win rate by stage analysis
+            st.markdown("### Win Rate by Rejection Stage")
+
+            stage_response = requests.get(
+                f"{fastapi_base_url}/api/rejection-outcomes/win-rate-by-stage",
+                params={"days": days_filter},
+                headers=headers,
+                timeout=30
+            )
+
+            if stage_response.status_code == 200:
+                stage_data = stage_response.json()
+
+                if stage_data:
+                    stage_df = pd.DataFrame(stage_data)
+
+                    # Bar chart
+                    fig = px.bar(
+                        stage_df,
+                        x='rejection_stage',
+                        y='would_be_win_rate',
+                        color='would_be_win_rate',
+                        color_continuous_scale='RdYlGn',
+                        title='Would-Be Win Rate by Rejection Stage',
+                        labels={'would_be_win_rate': 'Win Rate (%)', 'rejection_stage': 'Stage'}
+                    )
+                    fig.add_hline(y=50, line_dash="dash", line_color="gray",
+                                  annotation_text="Break-even (50%)")
+                    fig.update_layout(coloraxis_colorbar=dict(title="Win Rate %"))
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Interpretation
+                    st.markdown("### Stage Interpretation")
+
+                    for _, row in stage_df.iterrows():
+                        stage = row.get('rejection_stage', 'UNKNOWN')
+                        win_rate = row.get('would_be_win_rate', 0) or 0
+                        total = row.get('total_analyzed', 0)
+                        missed = row.get('missed_profit_pips', 0) or 0
+                        avoided = row.get('avoided_loss_pips', 0) or 0
+
+                        if win_rate > 60:
+                            st.warning(
+                                f"⚠️ **{stage}**: {win_rate:.0f}% win rate ({total} signals) - "
+                                f"Missing {missed:.0f} pips of profit. Consider relaxing this filter."
+                            )
+                        elif win_rate < 40:
+                            st.success(
+                                f"✅ **{stage}**: {win_rate:.0f}% win rate ({total} signals) - "
+                                f"Correctly avoided {avoided:.0f} pips of loss. Keep current settings."
+                            )
+                        else:
+                            st.info(
+                                f"ℹ️ **{stage}**: {win_rate:.0f}% win rate ({total} signals) - "
+                                f"Neutral performance. Net: {missed - avoided:.0f} pips."
+                            )
+
+                    # Data table
+                    st.markdown("### Detailed Stage Metrics")
+                    st.dataframe(
+                        stage_df[[
+                            'rejection_stage', 'total_analyzed', 'would_be_winners',
+                            'would_be_losers', 'would_be_win_rate', 'missed_profit_pips',
+                            'avoided_loss_pips', 'avg_mfe_pips', 'avg_mae_pips'
+                        ]].rename(columns={
+                            'rejection_stage': 'Stage',
+                            'total_analyzed': 'Total',
+                            'would_be_winners': 'Winners',
+                            'would_be_losers': 'Losers',
+                            'would_be_win_rate': 'Win Rate %',
+                            'missed_profit_pips': 'Missed Pips',
+                            'avoided_loss_pips': 'Avoided Pips',
+                            'avg_mfe_pips': 'Avg MFE',
+                            'avg_mae_pips': 'Avg MAE'
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+            st.markdown("---")
+
+            # Parameter suggestions
+            st.markdown("### Parameter Suggestions")
+
+            suggestions_response = requests.get(
+                f"{fastapi_base_url}/api/rejection-outcomes/parameter-suggestions",
+                params={"days": days_filter},
+                headers=headers,
+                timeout=30
+            )
+
+            if suggestions_response.status_code == 200:
+                suggestions = suggestions_response.json()
+
+                # Overall assessment
+                if suggestions.get('overall_assessment'):
+                    st.markdown(f"**Overall Assessment:** {suggestions['overall_assessment']}")
+
+                # Stage adjustments
+                if suggestions.get('stage_adjustments'):
+                    with st.expander("Stage-Specific Recommendations", expanded=True):
+                        for adj in suggestions['stage_adjustments']:
+                            issue = adj.get('issue', '')
+                            if issue == 'TOO_AGGRESSIVE':
+                                st.warning(f"⚠️ {adj.get('recommendation', '')}")
+                            elif issue == 'WORKING_WELL':
+                                st.success(f"✅ {adj.get('recommendation', '')}")
+                            else:
+                                st.info(f"ℹ️ {adj.get('recommendation', '')}")
+
+                # Session patterns
+                if suggestions.get('session_patterns'):
+                    with st.expander("Session Patterns"):
+                        session_df = pd.DataFrame(suggestions['session_patterns'])
+                        if not session_df.empty:
+                            st.dataframe(session_df, use_container_width=True, hide_index=True)
+
+        except requests.exceptions.RequestException as e:
+            st.error(f"Failed to connect to FastAPI backend: {e}")
+            st.info("Make sure the fastapi-dev container is running.")
+        except Exception as e:
+            st.error(f"Error rendering outcome analysis: {e}")
 
     def _render_sr_path_blocking(self, df: pd.DataFrame, days_filter: int):
         """Render S/R Path Blocking analysis sub-tab"""
