@@ -836,6 +836,22 @@ class BaseScanner(ABC):
 
         return factors
 
+    async def get_all_active_tickers(self) -> List[str]:
+        """
+        Get all active stock tickers from stock_instruments.
+
+        Returns:
+            List of ticker symbols for all active stocks
+        """
+        query = """
+            SELECT ticker
+            FROM stock_instruments
+            WHERE is_active = true
+            ORDER BY ticker
+        """
+        rows = await self.db.fetch(query)
+        return [r['ticker'] for r in rows]
+
     def log_scan_summary(
         self,
         candidates_analyzed: int,

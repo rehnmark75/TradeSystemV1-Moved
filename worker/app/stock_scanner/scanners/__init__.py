@@ -1,19 +1,18 @@
 """
 Stock Signal Scanners Module
 
-8 consolidated scanners (down from 14):
+7 consolidated scanners (TREND_REVERSAL removed - PF 1.09 too low):
 
-Backtested & Optimized:
+Backtested & Optimized (PF > 1.5):
 - ZLMATrendScanner: Zero-Lag MA crossover (PF 1.55, WR 50%)
 - MACDMomentumScanner: MACD histogram momentum (PF 1.71, WR 42%)
 - EMAPullbackScanner: EMA cascade pullback (PF 2.02)
+- ReversalScanner: Capitulation + mean reversion + Wyckoff springs (PF 2.44)
 
-To Be Backtested:
+Other Strategies (lower PF, included for diversity):
 - BreakoutConfirmationScanner: 52W high breakouts with volume
 - GapAndGoScanner: Gap continuation plays
-- ReversalScanner: Capitulation + mean reversion + Wyckoff springs (merged)
 - RSIDivergenceScanner: Price/RSI divergence reversals
-- TrendReversalScanner: Multi-day downtrend-to-uptrend reversals
 
 Usage:
     from stock_scanner.scanners import ScannerManager, TradingViewExporter
@@ -43,18 +42,17 @@ from .exclusion_filters import (
 from .scanner_manager import ScannerManager
 from .export import TradingViewExporter
 
-# Strategy scanners (8 total - consolidated from 14)
+# Strategy scanners (7 total - TREND_REVERSAL removed)
 from .strategies import (
-    # Backtested & optimized strategies
+    # Backtested & optimized strategies (PF > 1.5)
     ZLMATrendScanner,
     MACDMomentumScanner,
     EMAPullbackScanner,
-    # To be backtested
+    ReversalScanner,  # PF 2.44 - Best performer
+    # Other strategies (lower PF)
     BreakoutConfirmationScanner,
     GapAndGoScanner,
-    ReversalScanner,  # Merged: selling_climax + mean_reversion + wyckoff_spring
     RSIDivergenceScanner,
-    TrendReversalScanner,
 )
 
 __all__ = [
@@ -85,15 +83,14 @@ __all__ = [
     # Export
     'TradingViewExporter',
 
-    # Strategy scanners (8 total)
-    # Backtested & optimized
+    # Strategy scanners (7 total)
+    # Backtested & optimized (PF > 1.5)
     'ZLMATrendScanner',
     'MACDMomentumScanner',
     'EMAPullbackScanner',
-    # To be backtested
+    'ReversalScanner',
+    # Other strategies
     'BreakoutConfirmationScanner',
     'GapAndGoScanner',
-    'ReversalScanner',
     'RSIDivergenceScanner',
-    'TrendReversalScanner',
 ]

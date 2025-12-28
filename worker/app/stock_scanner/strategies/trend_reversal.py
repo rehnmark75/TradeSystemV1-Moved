@@ -68,23 +68,29 @@ class TrendReversalStrategy:
     - Entry early in potential new uptrend
     """
 
-    # Risk management - wider stops for reversals
-    DEFAULT_STOP_ATR_MULT = 2.5
-    DEFAULT_TAKE_PROFIT_RR = 2.0  # 2:1 R:R for TP1
+    # Risk management - best from v2
+    DEFAULT_STOP_ATR_MULT = 2.0  # Balanced stop
+    DEFAULT_TAKE_PROFIT_RR = 2.5  # Good R:R
 
     # Prior downtrend requirements
-    RSI_WAS_OVERSOLD_THRESHOLD = 40.0
-    PRICE_BELOW_EMA20_PCT = -2.0  # More than 2% below EMA-20
+    RSI_WAS_OVERSOLD_THRESHOLD = 35.0  # Deep oversold
+    PRICE_BELOW_EMA20_PCT = -3.0  # 3% below EMA-20
 
     # Confirmation requirements
     CONFIRMATION_DAYS = 3
     MIN_POSITIVE_DAYS = 2  # At least 2 of 3 days
-    MIN_RSI_IMPROVEMENT = 10.0
+    MIN_RSI_IMPROVEMENT = 12.0  # Good improvement
 
     # Current state requirements
-    RSI_NOW_MIN = 40.0
-    RSI_NOW_MAX = 65.0
-    RSI_NOT_EXTENDED = 70.0
+    RSI_NOW_MIN = 45.0  # Recovery zone
+    RSI_NOW_MAX = 60.0  # Has room
+    RSI_NOT_EXTENDED = 65.0
+
+    # Quality filter - B-tier and above
+    MIN_CONFIDENCE_THRESHOLD = 0.55
+
+    # No MACD requirement (didn't help)
+    REQUIRE_MACD_IMPROVING = False
 
     def __init__(
         self,
@@ -95,6 +101,8 @@ class TrendReversalStrategy:
         min_rsi_improvement: float = MIN_RSI_IMPROVEMENT,
         rsi_now_min: float = RSI_NOW_MIN,
         rsi_now_max: float = RSI_NOW_MAX,
+        min_confidence: float = MIN_CONFIDENCE_THRESHOLD,
+        require_macd_improving: bool = REQUIRE_MACD_IMPROVING,
     ):
         self.stop_atr_mult = stop_atr_mult
         self.take_profit_rr = take_profit_rr
@@ -103,6 +111,8 @@ class TrendReversalStrategy:
         self.min_rsi_improvement = min_rsi_improvement
         self.rsi_now_min = rsi_now_min
         self.rsi_now_max = rsi_now_max
+        self.min_confidence = min_confidence
+        self.require_macd_improving = require_macd_improving
         self.logger = logging.getLogger(__name__)
 
     def scan(
@@ -189,6 +199,12 @@ class TrendReversalStrategy:
         confidence = self._calculate_confidence(
             reversal_metrics, rsi_low, crossed_ema_20
         )
+
+        # Filter out low-confidence signals
+        if confidence < self.min_confidence:
+            self.logger.debug(f"{ticker}: Confidence too low ({confidence:.2f} < {self.min_confidence})")
+            return None
+
         quality_tier = self._get_quality_tier(confidence)
 
         # Create signal
@@ -313,6 +329,10 @@ class TrendReversalStrategy:
         if metrics['rsi_improvement'] < self.min_rsi_improvement:
             return False
 
+        # MACD must be improving if required
+        if self.require_macd_improving and not metrics['macd_improving']:
+            return False
+
         metrics['passes'] = True
         return True
 
@@ -399,4 +419,5 @@ class TrendReversalStrategy:
             'min_rsi_improvement': self.min_rsi_improvement,
             'rsi_now_min': self.rsi_now_min,
             'rsi_now_max': self.rsi_now_max,
+            'min_confidence': self.min_confidence,
         }

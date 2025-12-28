@@ -30,10 +30,9 @@ from ...strategies.breakout_confirmation import BreakoutConfirmationStrategy
 from ...strategies.gap_and_go import GapAndGoStrategy
 from ...strategies.reversal_strategy import ReversalStrategy
 from ...strategies.rsi_divergence import RSIDivergenceStrategy
-from ...strategies.trend_reversal import TrendReversalStrategy
 
 
-# Strategy registry (8 strategies total)
+# Strategy registry (7 strategies total - TREND_REVERSAL removed, PF too low)
 STRATEGY_REGISTRY: Dict[str, Type] = {
     # Already optimized
     'EMA_PULLBACK': EMATrendPullbackStrategy,
@@ -42,15 +41,14 @@ STRATEGY_REGISTRY: Dict[str, Type] = {
     'MACD': MACDMomentumStrategy,
     'ZLMA_CROSSOVER': ZLMACrossoverStrategy,
     'ZLMA': ZLMACrossoverStrategy,
-    # To be backtested
+    # Backtested strategies
     'BREAKOUT': BreakoutConfirmationStrategy,
     'BREAKOUT_CONFIRMATION': BreakoutConfirmationStrategy,
     'GAP_AND_GO': GapAndGoStrategy,
     'GAP': GapAndGoStrategy,
-    'REVERSAL': ReversalStrategy,
+    'REVERSAL': ReversalStrategy,  # PF 2.44 - Best performer
     'RSI_DIVERGENCE': RSIDivergenceStrategy,
     'RSI_DIV': RSIDivergenceStrategy,
-    'TREND_REVERSAL': TrendReversalStrategy,
 }
 
 

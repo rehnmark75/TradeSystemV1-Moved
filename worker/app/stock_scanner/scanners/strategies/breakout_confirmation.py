@@ -1,21 +1,23 @@
 """
 Breakout Confirmation Scanner
 
-Identifies volume-confirmed breakouts from consolidation patterns.
+Uses the backtested BreakoutConfirmationStrategy for signal detection.
+This ensures identical entry logic between backtesting and live scanning.
 
-Entry Criteria:
-- Near 52-week high (within 5%) or making new high
-- Volume surge (> 1.5x average)
-- Positive gap or strong close
-- MACD momentum expanding
+Entry Criteria (from backtested strategy):
+1. Near 52-week high (within 5%) or making new high
+2. Volume surge (> 1.5x average)
+3. Positive gap or strong close (>2% daily gain)
+4. MACD momentum expanding (positive histogram)
+5. ADX > 22 (trending market)
+6. RSI 50-75 (momentum but not overbought)
 
 Stop Logic:
-- Below breakout level (recent consolidation high)
-- Or 1.5-2x ATR below entry
+- 2.2x ATR below entry (wider for breakout volatility)
+- Max 8% stop distance
 
 Target:
-- TP1: Measured move based on consolidation range
-- TP2: Extension target (1.618 fib or round number)
+- 4.5x ATR (2:1 R:R)
 
 Best For:
 - Strong momentum markets
@@ -24,7 +26,7 @@ Best For:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -34,65 +36,38 @@ from ..base_scanner import (
     SignalType, QualityTier
 )
 from ..scoring import SignalScorer
-from ..exclusion_filters import ExclusionFilterEngine, FilterConfig
+from ...strategies.breakout_confirmation import BreakoutConfirmationStrategy, BreakoutSignal
+from ...core.backtest.backtest_data_provider import BacktestDataProvider
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class BreakoutConfig(ScannerConfig):
-    """Configuration specific to Breakout Scanner"""
+    """Configuration for Breakout Scanner - uses backtested strategy defaults"""
 
-    # Position requirements
-    max_pct_from_high: float = 5.0  # Within 5% of 52W high
-    require_near_high: bool = True
-
-    # Volume requirements
-    min_relative_volume: float = 1.3
-    optimal_volume: float = 2.0
-
-    # Gap requirements
-    allow_gap_breakout: bool = True
-    min_gap_pct: float = 1.0
-
-    # Trend
-    require_bullish_trend: bool = True
-
-    # ATR for stops
-    atr_stop_multiplier: float = 2.0  # Wider stops for breakouts
-
-    # =========================================================================
-    # FUNDAMENTAL FILTERS FOR BREAKOUT
-    # Focus: Avoid short squeezes, look for quality breakouts
-    # =========================================================================
-
-    # Valuation - growth stocks can have higher P/E
-    max_pe_ratio: float = 80.0  # Allow growth premium for breakouts
-
-    # Growth - strong growth drives breakouts
-    min_earnings_growth: float = 0.05  # 5%+ earnings growth
-    min_revenue_growth: float = 0.0  # At least flat revenue
-
-    # Short interest - IMPORTANT: avoid high short interest breakouts
-    # These can be short squeezes that reverse violently
-    max_short_percent: float = 25.0  # Avoid high short interest
-
-    # Institutional support - big money drives breakouts
-    min_institutional_pct: float = 30.0
-
-    # Avoid earnings uncertainty
-    days_to_earnings_min: int = 5  # No breakout plays right before earnings
+    # Strategy parameters (match backtested strategy)
+    stop_loss_atr_mult: float = 2.2   # 2.2x ATR stop loss
+    take_profit_atr_mult: float = 4.5  # 4.5x ATR take profit
+    max_pct_from_high: float = 5.0     # Within 5% of 52W high
+    min_relative_volume: float = 1.5   # Volume surge threshold
+    min_daily_change: float = 2.0      # Minimum daily gain %
+    min_adx: float = 22.0              # ADX threshold
+    min_rsi: float = 50.0              # RSI lower bound
+    max_rsi: float = 75.0              # RSI upper bound
 
 
 class BreakoutConfirmationScanner(BaseScanner):
     """
-    Scans for volume-confirmed breakout setups.
+    Scans for volume-confirmed breakout setups using the backtested strategy.
 
     Philosophy:
     - Breakouts need volume confirmation to be valid
     - Near 52W highs means limited overhead resistance
     - Gaps add conviction (institutional interest)
     - Failed breakouts get stopped out quickly
+
+    Uses the exact same logic as the backtested strategy (PF varies by market).
     """
 
     def __init__(
@@ -102,12 +77,22 @@ class BreakoutConfirmationScanner(BaseScanner):
         scorer: SignalScorer = None
     ):
         super().__init__(db_manager, config or BreakoutConfig(), scorer)
-        self.exclusion_filter = ExclusionFilterEngine(FilterConfig(
-            max_tier=3,
-            min_relative_volume=1.0,
-            max_atr_percent=12.0,
-            min_score_for_trade=55,
-        ))
+
+        # Initialize the backtested strategy
+        self.strategy = BreakoutConfirmationStrategy(
+            stop_loss_atr_mult=self.config.stop_loss_atr_mult,
+            take_profit_atr_mult=self.config.take_profit_atr_mult,
+            max_pct_from_high=self.config.max_pct_from_high,
+            min_relative_volume=self.config.min_relative_volume,
+            min_daily_change=self.config.min_daily_change,
+            min_adx=self.config.min_adx,
+            min_rsi=self.config.min_rsi,
+            max_rsi=self.config.max_rsi,
+        )
+
+        # Initialize data provider for fetching candles with indicators
+        self.data_provider = BacktestDataProvider(db_manager)
+
         if scorer is None:
             self.scorer = SignalScorer()
 
@@ -117,248 +102,228 @@ class BreakoutConfirmationScanner(BaseScanner):
 
     @property
     def description(self) -> str:
-        return "Volume-confirmed breakouts from consolidation patterns"
+        return "Volume-confirmed breakouts - uses backtested strategy"
 
     async def scan(self, calculation_date: datetime = None) -> List[SignalSetup]:
         """
-        Execute breakout scan.
+        Execute Breakout scan using the backtested strategy.
 
         Steps:
-        1. Get candidates near 52W highs
-        2. Filter for volume surge
-        3. Check for breakout confirmation
-        4. Score and apply filters
-        5. Calculate entry/exit levels
+        1. Get ALL active tickers from stock_instruments
+        2. For each ticker, fetch candle data with indicators
+        3. Run BreakoutConfirmationStrategy.scan() - exact backtest logic
+        4. Convert BreakoutSignal to SignalSetup format
+        5. Return sorted signals by quality
         """
-        logger.info(f"Starting {self.scanner_name} scan")
+        logger.info(f"Starting {self.scanner_name} scan (using backtested strategy)")
 
+        # Set calculation date
         if calculation_date is None:
-            from datetime import timedelta
-            calculation_date = (datetime.now() - timedelta(days=1)).date()
+            calculation_date = datetime.now().date()
+        elif isinstance(calculation_date, datetime):
+            calculation_date = calculation_date.date()
 
-        # Get breakout candidates
-        candidates = await self._get_breakout_candidates(calculation_date)
-        logger.info(f"Found {len(candidates)} breakout candidates")
+        logger.info(f"Scan date: {calculation_date}")
 
-        if not candidates:
-            return []
+        # Step 1: Get ALL active tickers - no pre-filtering
+        tickers = await self.get_all_active_tickers()
+        logger.info(f"Scanning {len(tickers)} active stocks for breakouts")
 
-        # Filter for confirmation
-        confirmed = self._filter_confirmed_breakouts(candidates)
-        logger.info(f"Found {len(confirmed)} confirmed breakouts")
-
-        # Score and create signals
+        # Step 2 & 3: Fetch data and run strategy for each ticker
         signals = []
-        for candidate in confirmed:
-            signal = self._create_signal(candidate)
-            if signal:
-                signals.append(signal)
+        scanned_count = 0
 
-        # Sort by score
+        for ticker in tickers:
+            sector = None  # Can be fetched from stock_instruments if needed
+
+            try:
+                # Fetch candle data with all indicators
+                df = await self.data_provider.get_historical_data(
+                    ticker=ticker,
+                    start_date=calculation_date - timedelta(days=365),
+                    end_date=calculation_date,
+                    timeframe='1d'
+                )
+
+                if df.empty or len(df) < 260:  # Need 252 trading days for 52W high
+                    continue
+
+                scanned_count += 1
+
+                # Run the exact backtested strategy logic
+                breakout_signal = self.strategy.scan(df, ticker, sector)
+
+                if breakout_signal:
+                    # Convert to SignalSetup format (pass ticker info as minimal candidate)
+                    candidate = {'ticker': ticker, 'sector': sector}
+                    signal = self._convert_to_signal_setup(breakout_signal, candidate)
+                    if signal:
+                        signals.append(signal)
+                        logger.info(f"{ticker}: Signal generated - {breakout_signal.quality_tier} tier, "
+                                  f"confidence {breakout_signal.confidence:.1%}")
+
+            except Exception as e:
+                logger.warning(f"{ticker}: Error scanning - {e}")
+                continue
+
+        logger.info(f"Scanned {scanned_count} tickers, generated {len(signals)} signals")
+
+        # Step 4: Sort by composite score (quality)
         signals.sort(key=lambda x: x.composite_score, reverse=True)
 
-        # Apply limit
+        # Step 5: Apply limit
         signals = signals[:self.config.max_signals_per_run]
 
         # Log summary
         high_quality = sum(1 for s in signals if s.is_high_quality)
-        self.log_scan_summary(len(candidates), len(signals), high_quality)
+        self.log_scan_summary(len(tickers), len(signals), high_quality)
 
         return signals
 
-    async def _get_breakout_candidates(
+    def _convert_to_signal_setup(
         self,
-        calculation_date: datetime
-    ) -> List[Dict[str, Any]]:
-        """Get stocks near 52W highs with volume"""
-
-        additional_filters = """
-            AND w.high_low_signal IN ('near_high', 'new_high')
-            AND w.relative_volume >= {min_vol}
-        """.format(min_vol=self.config.min_relative_volume)
-
-        if self.config.require_bullish_trend:
-            additional_filters += """
-                AND w.sma_cross_signal IN ('golden_cross', 'bullish')
-            """
-
-        return await self.get_watchlist_candidates(
-            calculation_date,
-            additional_filters
-        )
-
-    def _filter_confirmed_breakouts(
-        self,
-        candidates: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Filter for confirmed breakout setups"""
-
-        confirmed = []
-
-        for c in candidates:
-            # Check position from high
-            pct_from_high = float(c.get('pct_from_52w_high') or -100)
-            if abs(pct_from_high) > self.config.max_pct_from_high:
-                continue
-
-            # Volume confirmation
-            rel_vol = float(c.get('relative_volume') or 0)
-            if rel_vol < self.config.min_relative_volume:
-                continue
-
-            # Gap or strong close confirmation
-            gap_signal = c.get('gap_signal', '')
-            price_change_1d = float(c.get('price_change_1d') or 0)
-
-            has_gap = gap_signal in ['gap_up', 'gap_up_large']
-            has_strong_close = price_change_1d > 2.0
-
-            if not (has_gap or has_strong_close):
-                continue
-
-            # MACD momentum
-            macd_cross = c.get('macd_cross_signal', '')
-            if macd_cross not in ['bullish_cross', 'bullish']:
-                continue
-
-            confirmed.append(c)
-
-        return confirmed
-
-    def _create_signal(
-        self,
+        breakout_signal: BreakoutSignal,
         candidate: Dict[str, Any]
     ) -> Optional[SignalSetup]:
-        """Create a SignalSetup from a breakout candidate"""
+        """
+        Convert a BreakoutSignal from the strategy to SignalSetup format.
 
-        # Score the candidate
-        score_components = self.scorer.score_bullish(candidate)
-        composite_score = score_components.composite_score
+        The strategy already validated all entry conditions, so we just
+        need to format the output for database storage.
+        """
+        # Convert confidence to composite score (0-100)
+        composite_score = int(breakout_signal.confidence * 100)
 
-        # Breakout bonus for near/new high
-        high_low = candidate.get('high_low_signal', '')
-        if high_low == 'new_high':
-            composite_score = min(100, composite_score + 5)
-
-        # Volume bonus for extreme volume
-        rel_vol = float(candidate.get('relative_volume') or 0)
-        if rel_vol >= self.config.optimal_volume:
-            composite_score = min(100, composite_score + 3)
-
-        # Apply exclusion filter
-        exclusion = self.exclusion_filter.check_bullish_exclusions(
-            candidate, composite_score
-        )
-
-        if exclusion.is_excluded:
-            logger.debug(
-                f"Excluded {candidate['ticker']}: {exclusion.summary}"
-            )
-            return None
-
-        # Calculate entry levels
-        entry, stop, tp1, tp2 = self._calculate_entry_levels(
-            candidate, SignalType.BUY
-        )
+        # Get quality tier from strategy
+        tier_map = {
+            'A+': QualityTier.A_PLUS,
+            'A': QualityTier.A,
+            'B': QualityTier.B,
+            'C': QualityTier.C,
+            'D': QualityTier.D
+        }
+        quality_tier = tier_map.get(breakout_signal.quality_tier, QualityTier.B)
 
         # Calculate risk percent
-        risk_pct = abs(entry - stop) / entry * 100
+        entry = breakout_signal.entry_price
+        stop = breakout_signal.stop_loss_price
+        risk_pct = abs(entry - stop) / entry * 100 if entry > 0 else 0
 
-        # Build setup description
-        confluence_factors = self.build_confluence_factors(candidate)
-        confluence_factors.insert(0, 'Breakout')  # Add breakout factor
-        description = self._build_description(candidate, confluence_factors)
+        # Determine signal type
+        signal_type = SignalType.BUY if breakout_signal.signal_type == 'BUY' else SignalType.SELL
 
-        # Create signal
+        # Build confluence factors
+        confluence_factors = self._build_confluence_factors(breakout_signal, candidate)
+
+        # Build description
+        description = self._build_description(breakout_signal, candidate)
+
+        # Create SignalSetup
         signal = SignalSetup(
-            ticker=candidate['ticker'],
+            ticker=breakout_signal.ticker,
             scanner_name=self.scanner_name,
-            signal_type=SignalType.BUY,
-            entry_price=entry,
-            stop_loss=stop,
-            take_profit_1=tp1,
-            take_profit_2=tp2,
-            risk_reward_ratio=Decimal(str(self.config.tp1_rr_ratio)),
+            signal_type=signal_type,
+            entry_price=Decimal(str(round(entry, 4))),
+            stop_loss=Decimal(str(round(stop, 4))),
+            take_profit_1=Decimal(str(round(breakout_signal.take_profit_price, 4))),
+            take_profit_2=None,
+            risk_reward_ratio=Decimal(str(round(breakout_signal.risk_reward_ratio, 2))),
             risk_percent=Decimal(str(round(risk_pct, 2))),
             composite_score=composite_score,
-            trend_score=Decimal(str(round(score_components.weighted_trend, 2))),
-            momentum_score=Decimal(str(round(score_components.weighted_momentum, 2))),
-            volume_score=Decimal(str(round(score_components.weighted_volume, 2))),
-            pattern_score=Decimal(str(round(score_components.weighted_pattern, 2))),
-            confluence_score=Decimal(str(round(score_components.weighted_confluence, 2))),
+            trend_score=Decimal('0'),  # Strategy handles this internally
+            momentum_score=Decimal('0'),
+            volume_score=Decimal('0'),
+            pattern_score=Decimal('0'),
+            confluence_score=Decimal('0'),
             setup_description=description,
             confluence_factors=confluence_factors,
             timeframe="daily",
             market_regime="Breakout",
             max_risk_per_trade_pct=Decimal(str(self.config.max_risk_per_trade_pct)),
-            raw_data=candidate,
+            raw_data={
+                'pct_from_52w_high': breakout_signal.pct_from_52w_high,
+                'relative_volume': breakout_signal.relative_volume,
+                'daily_change_pct': breakout_signal.daily_change_pct,
+                'atr': breakout_signal.atr,
+                'rsi': breakout_signal.rsi,
+                'adx': breakout_signal.adx,
+                'has_gap_up': breakout_signal.has_gap_up,
+            },
         )
 
         # Calculate position size
         signal.suggested_position_size_pct = self.calculate_position_size(
             Decimal(str(self.config.max_risk_per_trade_pct)),
-            entry,
-            stop,
-            signal.quality_tier
+            signal.entry_price,
+            signal.stop_loss,
+            quality_tier
         )
 
         return signal
+
+    def _build_confluence_factors(
+        self,
+        breakout_signal: BreakoutSignal,
+        candidate: Dict[str, Any]
+    ) -> List[str]:
+        """Build list of confluence factors"""
+        factors = ['Breakout Setup']
+
+        # Position from high
+        if breakout_signal.pct_from_52w_high >= 0:
+            factors.append('New 52W High')
+        elif breakout_signal.pct_from_52w_high >= -2:
+            factors.append('Near 52W High')
+
+        # Volume
+        if breakout_signal.relative_volume >= 2.0:
+            factors.append(f'High Volume ({breakout_signal.relative_volume:.1f}x)')
+        else:
+            factors.append(f'Volume Surge ({breakout_signal.relative_volume:.1f}x)')
+
+        # Gap
+        if breakout_signal.has_gap_up:
+            factors.append('Gap Up')
+
+        # Daily change
+        if breakout_signal.daily_change_pct >= 3.0:
+            factors.append(f'Strong Move (+{breakout_signal.daily_change_pct:.1f}%)')
+
+        # ADX
+        if breakout_signal.adx and breakout_signal.adx >= 30:
+            factors.append(f'Strong Trend (ADX {breakout_signal.adx:.0f})')
+
+        return factors
+
+    def _build_description(
+        self,
+        breakout_signal: BreakoutSignal,
+        candidate: Dict[str, Any]
+    ) -> str:
+        """Build human-readable setup description"""
+        ticker = breakout_signal.ticker
+        pct = breakout_signal.pct_from_52w_high
+        vol = breakout_signal.relative_volume
+        change = breakout_signal.daily_change_pct
+
+        desc = f"{ticker} breakout: "
+
+        if pct >= 0:
+            desc += "New 52W high, "
+        else:
+            desc += f"{abs(pct):.1f}% from high, "
+
+        desc += f"{vol:.1f}x volume, +{change:.1f}% today"
+
+        if breakout_signal.has_gap_up:
+            desc += ", gap up"
+
+        return desc
 
     def _calculate_entry_levels(
         self,
         candidate: Dict[str, Any],
         signal_type: SignalType
     ) -> Tuple[Decimal, Decimal, Decimal, Optional[Decimal]]:
-        """
-        Calculate entry, stop, and take profit levels for breakouts.
-
-        Breakout strategy uses wider stops (2x ATR) to avoid
-        getting shaken out during initial volatility.
-        """
-        current_price = Decimal(str(candidate.get('current_price', 0)))
-        atr_percent = float(candidate.get('atr_percent') or 3.0)
-
-        # ATR in price terms
-        atr = current_price * Decimal(str(atr_percent / 100))
-
-        # Entry at current price
-        entry = current_price
-
-        # Stop loss: 2x ATR below (wider for breakouts)
-        stop = entry - (atr * Decimal(str(self.config.atr_stop_multiplier)))
-
-        # Ensure stop isn't too far (max 8%)
-        max_stop = entry * Decimal('0.92')
-        stop = max(stop, max_stop)
-
-        # Take profits
-        tp1, tp2 = self.calculate_take_profits(entry, stop, signal_type)
-
-        return entry, stop, tp1, tp2
-
-    def _build_description(
-        self,
-        candidate: Dict[str, Any],
-        factors: List[str]
-    ) -> str:
-        """Build human-readable setup description"""
-
-        ticker = candidate['ticker']
-        price = float(candidate.get('current_price', 0))
-        pct_from_high = float(candidate.get('pct_from_52w_high') or 0)
-        rel_vol = float(candidate.get('relative_volume') or 0)
-        gap = candidate.get('gap_signal', '')
-
-        desc = f"{ticker} breakout setup. "
-
-        if pct_from_high >= -1:
-            desc += "At/near 52W high. "
-        else:
-            desc += f"{abs(pct_from_high):.1f}% from 52W high. "
-
-        desc += f"Volume {rel_vol:.1f}x. "
-
-        if gap in ['gap_up', 'gap_up_large']:
-            desc += "Gap up confirmation. "
-
-        return desc
+        """Not used - strategy handles entry level calculation"""
+        pass

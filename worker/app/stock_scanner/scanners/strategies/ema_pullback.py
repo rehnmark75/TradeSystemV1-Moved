@@ -98,34 +98,32 @@ class EMAPullbackScanner(BaseScanner):
         Execute EMA Pullback scan using the backtested strategy.
 
         Steps:
-        1. Get pre-filtered candidates from watchlist (bullish trend)
-        2. For each candidate, fetch candle data with indicators
+        1. Get ALL active tickers from stock_instruments
+        2. For each ticker, fetch candle data with indicators
         3. Run EMATrendPullbackStrategy.scan() - exact backtest logic
         4. Convert PullbackSignal to SignalSetup format
         5. Return sorted signals by quality
         """
         logger.info(f"Starting {self.scanner_name} scan (using backtested strategy)")
 
-        # Get the latest available watchlist date if not specified
+        # Set calculation date
         if calculation_date is None:
-            calculation_date = await self._get_latest_watchlist_date()
+            calculation_date = datetime.now().date()
         elif isinstance(calculation_date, datetime):
             calculation_date = calculation_date.date()
 
-        logger.info(f"Using watchlist date: {calculation_date}")
+        logger.info(f"Scan date: {calculation_date}")
 
-        # Step 1: Pre-filter candidates with bullish trend from watchlist
-        # This is a fast database query to reduce the number of tickers to scan
-        candidates = await self._get_trend_candidates(calculation_date)
-        logger.info(f"Found {len(candidates)} candidates with bullish trend alignment")
+        # Step 1: Get ALL active tickers - no pre-filtering
+        tickers = await self.get_all_active_tickers()
+        logger.info(f"Scanning {len(tickers)} active stocks for EMA pullback")
 
-        # Step 2 & 3: Fetch data and run strategy for each candidate
+        # Step 2 & 3: Fetch data and run strategy for each ticker
         signals = []
         scanned_count = 0
 
-        for candidate in candidates:
-            ticker = candidate['ticker']
-            sector = candidate.get('sector')
+        for ticker in tickers:
+            sector = None  # Can be fetched from stock_instruments if needed
 
             try:
                 # Fetch candle data with all indicators
@@ -145,7 +143,8 @@ class EMAPullbackScanner(BaseScanner):
                 pullback_signal = self.strategy.scan(df, ticker, sector)
 
                 if pullback_signal:
-                    # Convert to SignalSetup format
+                    # Convert to SignalSetup format (pass ticker info as minimal candidate)
+                    candidate = {'ticker': ticker, 'sector': sector}
                     signal = self._convert_to_signal_setup(pullback_signal, candidate)
                     if signal:
                         signals.append(signal)
@@ -166,7 +165,7 @@ class EMAPullbackScanner(BaseScanner):
 
         # Log summary
         high_quality = sum(1 for s in signals if s.is_high_quality)
-        self.log_scan_summary(len(candidates), len(signals), high_quality)
+        self.log_scan_summary(len(tickers), len(signals), high_quality)
 
         return signals
 

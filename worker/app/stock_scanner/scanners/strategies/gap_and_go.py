@@ -1,21 +1,23 @@
 """
 Gap & Go Scanner
 
-Identifies gap continuation opportunities with catalyst confirmation.
+Uses the backtested GapAndGoStrategy for signal detection.
+This ensures identical entry logic between backtesting and live scanning.
 
-Entry Criteria:
-- Gap up > 2% (large gap > 4%)
-- High pre-market/early volume (> 1.5x average)
-- Gap doesn't fill in first hour (holds above gap open)
-- Bullish trend context (not gapping into resistance)
+Entry Criteria (from backtested strategy):
+1. Gap up >= 2% (calculated from open vs prev close)
+2. Volume surge >= 1.5x average
+3. Not gapping into major resistance (overbought at 52W high)
+4. Not in death cross (avoid bearish trend gaps)
+5. RSI 40-80 (momentum with room to run)
 
 Stop Logic:
-- Below gap open (low of gap candle)
-- Or below pre-market low
+- Below gap open (gap must hold)
+- Max 5% stop distance
 
 Target:
-- TP1: Gap extension (50-100% of gap size)
-- TP2: Next resistance or measured move
+- TP1: Gap extension (100% of gap size added)
+- TP2: 2.5R or higher
 
 Best For:
 - Earnings beats
@@ -25,7 +27,7 @@ Best For:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -35,64 +37,38 @@ from ..base_scanner import (
     SignalType, QualityTier
 )
 from ..scoring import SignalScorer
-from ..exclusion_filters import ExclusionFilterEngine, FilterConfig
+from ...strategies.gap_and_go import GapAndGoStrategy, GapSignal
+from ...core.backtest.backtest_data_provider import BacktestDataProvider
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class GapAndGoConfig(ScannerConfig):
-    """Configuration specific to Gap & Go Scanner"""
+    """Configuration for Gap & Go Scanner - uses backtested strategy defaults"""
 
-    # Gap requirements
-    min_gap_pct: float = 2.0  # Minimum 2% gap
-    large_gap_pct: float = 4.0  # Large gap threshold
-    max_gap_pct: float = 15.0  # Avoid extreme gaps (risky)
-
-    # Volume requirements
-    min_relative_volume: float = 1.5  # Strong volume required
-    extreme_volume_threshold: float = 3.0
-
-    # Trend context
-    prefer_bullish_trend: bool = True
-    avoid_resistance: bool = True  # Don't gap into 52W high resistance
-
-    # Risk
-    atr_stop_multiplier: float = 1.5
-    max_stop_loss_pct: float = 5.0  # Tighter stops for gaps
-
-    # =========================================================================
-    # FUNDAMENTAL FILTERS FOR GAP & GO
-    # Focus: Catalyst-driven moves, accept earnings gaps
-    # Note: Gaps often occur ON earnings, so we DON'T filter earnings date
-    # =========================================================================
-
-    # Valuation - gaps can happen at any valuation
-    max_pe_ratio: float = 100.0  # Very permissive for gap plays
-
-    # Growth - prefer growing companies for continuation
-    min_revenue_growth: float = -0.10  # Allow 10% revenue decline (turnaround gaps)
-
-    # Short interest - high short can ADD fuel to gaps (squeeze)
-    # Note: We DON'T filter out high short interest here - it can help
-    max_short_percent: float = None  # Disabled - shorts can amplify gaps
-
-    # Liquidity - critical for gaps (need to exit fast if wrong)
-    min_institutional_pct: float = 15.0  # Some institutional presence
-
-    # NO earnings filter - gaps often ARE the earnings reaction
-    days_to_earnings_min: int = None  # Disabled for gap plays
+    # Strategy parameters (match backtested strategy)
+    min_gap_pct: float = 2.0          # Minimum gap size
+    large_gap_pct: float = 4.0        # Large gap threshold
+    max_gap_pct: float = 12.0         # Max gap (avoid extremes)
+    min_relative_volume: float = 1.5  # Volume surge threshold
+    stop_multiplier: float = 0.98     # Stop 2% below gap open
+    max_stop_pct: float = 5.0         # Maximum stop loss %
+    min_rsi: float = 40.0             # RSI lower bound
+    max_rsi: float = 80.0             # RSI upper bound
 
 
 class GapAndGoScanner(BaseScanner):
     """
-    Scans for gap continuation opportunities.
+    Scans for gap continuation opportunities using the backtested strategy.
 
     Philosophy:
     - Gaps represent overnight information or catalyst
     - Volume confirms institutional interest
     - Gaps in direction of trend more reliable
     - Quick decisions needed - gaps are time-sensitive
+
+    Uses the exact same logic as the backtested strategy.
     """
 
     def __init__(
@@ -102,12 +78,22 @@ class GapAndGoScanner(BaseScanner):
         scorer: SignalScorer = None
     ):
         super().__init__(db_manager, config or GapAndGoConfig(), scorer)
-        self.exclusion_filter = ExclusionFilterEngine(FilterConfig(
-            max_tier=3,
-            min_relative_volume=1.2,
-            max_atr_percent=15.0,
-            min_score_for_trade=50,
-        ))
+
+        # Initialize the backtested strategy
+        self.strategy = GapAndGoStrategy(
+            min_gap_pct=self.config.min_gap_pct,
+            large_gap_pct=self.config.large_gap_pct,
+            max_gap_pct=self.config.max_gap_pct,
+            min_relative_volume=self.config.min_relative_volume,
+            stop_multiplier=self.config.stop_multiplier,
+            max_stop_pct=self.config.max_stop_pct,
+            min_rsi=self.config.min_rsi,
+            max_rsi=self.config.max_rsi,
+        )
+
+        # Initialize data provider for fetching candles with indicators
+        self.data_provider = BacktestDataProvider(db_manager)
+
         if scorer is None:
             self.scorer = SignalScorer()
 
@@ -117,263 +103,224 @@ class GapAndGoScanner(BaseScanner):
 
     @property
     def description(self) -> str:
-        return "Gap continuation plays with catalyst confirmation"
+        return "Gap continuation plays - uses backtested strategy"
 
     async def scan(self, calculation_date: datetime = None) -> List[SignalSetup]:
         """
-        Execute gap & go scan.
+        Execute Gap & Go scan using the backtested strategy.
 
         Steps:
-        1. Get candidates with gaps
-        2. Filter by gap size and direction
-        3. Check volume confirmation
-        4. Score and apply filters
-        5. Calculate entry/exit levels
+        1. Get ALL active tickers from stock_instruments
+        2. For each ticker, fetch candle data with indicators
+        3. Run GapAndGoStrategy.scan() - exact backtest logic
+        4. Convert GapSignal to SignalSetup format
+        5. Return sorted signals by quality
         """
-        logger.info(f"Starting {self.scanner_name} scan")
+        logger.info(f"Starting {self.scanner_name} scan (using backtested strategy)")
 
+        # Set calculation date
         if calculation_date is None:
-            from datetime import timedelta
-            calculation_date = (datetime.now() - timedelta(days=1)).date()
+            calculation_date = datetime.now().date()
+        elif isinstance(calculation_date, datetime):
+            calculation_date = calculation_date.date()
 
-        # Get gap candidates
-        candidates = await self._get_gap_candidates(calculation_date)
-        logger.info(f"Found {len(candidates)} gap candidates")
+        logger.info(f"Scan date: {calculation_date}")
 
-        if not candidates:
-            return []
+        # Step 1: Get ALL active tickers - no pre-filtering
+        tickers = await self.get_all_active_tickers()
+        logger.info(f"Scanning {len(tickers)} active stocks for gaps")
 
-        # Filter for tradeable gaps
-        tradeable = self._filter_tradeable_gaps(candidates)
-        logger.info(f"Found {len(tradeable)} tradeable gaps")
-
-        # Score and create signals
+        # Step 2 & 3: Fetch data and run strategy for each ticker
         signals = []
-        for candidate in tradeable:
-            signal = self._create_signal(candidate)
-            if signal:
-                signals.append(signal)
+        scanned_count = 0
 
-        # Sort by score
+        for ticker in tickers:
+            sector = None  # Can be fetched from stock_instruments if needed
+
+            try:
+                # Fetch candle data with all indicators
+                df = await self.data_provider.get_historical_data(
+                    ticker=ticker,
+                    start_date=calculation_date - timedelta(days=100),  # Shorter history for gaps
+                    end_date=calculation_date,
+                    timeframe='1d'
+                )
+
+                if df.empty or len(df) < 30:  # Need some history for indicators
+                    continue
+
+                scanned_count += 1
+
+                # Run the exact backtested strategy logic
+                gap_signal = self.strategy.scan(df, ticker, sector)
+
+                if gap_signal:
+                    # Convert to SignalSetup format (pass ticker info as minimal candidate)
+                    candidate = {'ticker': ticker, 'sector': sector}
+                    signal = self._convert_to_signal_setup(gap_signal, candidate)
+                    if signal:
+                        signals.append(signal)
+                        logger.info(f"{ticker}: Signal generated - {gap_signal.quality_tier} tier, "
+                                  f"gap {gap_signal.gap_pct:.1f}%")
+
+            except Exception as e:
+                logger.warning(f"{ticker}: Error scanning - {e}")
+                continue
+
+        logger.info(f"Scanned {scanned_count} tickers, generated {len(signals)} signals")
+
+        # Step 4: Sort by composite score (quality)
         signals.sort(key=lambda x: x.composite_score, reverse=True)
 
-        # Apply limit
+        # Step 5: Apply limit
         signals = signals[:self.config.max_signals_per_run]
 
         # Log summary
         high_quality = sum(1 for s in signals if s.is_high_quality)
-        self.log_scan_summary(len(candidates), len(signals), high_quality)
+        self.log_scan_summary(len(tickers), len(signals), high_quality)
 
         return signals
 
-    async def _get_gap_candidates(
+    def _convert_to_signal_setup(
         self,
-        calculation_date: datetime
-    ) -> List[Dict[str, Any]]:
-        """Get stocks with gap ups"""
-
-        additional_filters = """
-            AND w.gap_signal IN ('gap_up', 'gap_up_large')
-            AND w.relative_volume >= {min_vol}
-        """.format(min_vol=self.config.min_relative_volume)
-
-        return await self.get_watchlist_candidates(
-            calculation_date,
-            additional_filters
-        )
-
-    def _filter_tradeable_gaps(
-        self,
-        candidates: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Filter for tradeable gap setups"""
-
-        tradeable = []
-
-        for c in candidates:
-            # Check gap size from price change
-            price_change_1d = float(c.get('price_change_1d') or 0)
-
-            # Validate gap size
-            if price_change_1d < self.config.min_gap_pct:
-                continue
-
-            if price_change_1d > self.config.max_gap_pct:
-                # Extreme gaps are risky
-                logger.debug(f"Skipping {c['ticker']}: gap too large ({price_change_1d:.1f}%)")
-                continue
-
-            # Volume confirmation
-            rel_vol = float(c.get('relative_volume') or 0)
-            if rel_vol < self.config.min_relative_volume:
-                continue
-
-            # Trend context preference
-            if self.config.prefer_bullish_trend:
-                sma_cross = c.get('sma_cross_signal', '')
-                # Don't require bullish, but death cross is bad
-                if sma_cross == 'death_cross':
-                    continue
-
-            # Avoid gapping into major resistance
-            if self.config.avoid_resistance:
-                high_low = c.get('high_low_signal', '')
-                rsi_signal = c.get('rsi_signal', '')
-
-                # Already at 52W high + overbought = risky
-                if high_low == 'new_high' and rsi_signal in ['overbought', 'overbought_extreme']:
-                    continue
-
-            tradeable.append(c)
-
-        return tradeable
-
-    def _create_signal(
-        self,
+        gap_signal: GapSignal,
         candidate: Dict[str, Any]
     ) -> Optional[SignalSetup]:
-        """Create a SignalSetup from a gap candidate"""
+        """
+        Convert a GapSignal from the strategy to SignalSetup format.
 
-        # Score the candidate
-        score_components = self.scorer.score_bullish(candidate)
-        composite_score = score_components.composite_score
+        The strategy already validated all entry conditions, so we just
+        need to format the output for database storage.
+        """
+        # Convert confidence to composite score (0-100)
+        composite_score = int(gap_signal.confidence * 100)
 
-        # Gap size bonus
-        price_change_1d = float(candidate.get('price_change_1d') or 0)
-        if price_change_1d >= self.config.large_gap_pct:
-            composite_score = min(100, composite_score + 5)
-
-        # Extreme volume bonus
-        rel_vol = float(candidate.get('relative_volume') or 0)
-        if rel_vol >= self.config.extreme_volume_threshold:
-            composite_score = min(100, composite_score + 5)
-
-        # Trend alignment bonus
-        sma_cross = candidate.get('sma_cross_signal', '')
-        if sma_cross in ['golden_cross', 'bullish']:
-            composite_score = min(100, composite_score + 3)
-
-        # Apply exclusion filter
-        exclusion = self.exclusion_filter.check_bullish_exclusions(
-            candidate, composite_score
-        )
-
-        if exclusion.is_excluded:
-            logger.debug(
-                f"Excluded {candidate['ticker']}: {exclusion.summary}"
-            )
-            return None
-
-        # Calculate entry levels
-        entry, stop, tp1, tp2 = self._calculate_entry_levels(
-            candidate, SignalType.BUY
-        )
+        # Get quality tier from strategy
+        tier_map = {
+            'A+': QualityTier.A_PLUS,
+            'A': QualityTier.A,
+            'B': QualityTier.B,
+            'C': QualityTier.C,
+            'D': QualityTier.D
+        }
+        quality_tier = tier_map.get(gap_signal.quality_tier, QualityTier.B)
 
         # Calculate risk percent
-        risk_pct = abs(entry - stop) / entry * 100
+        entry = gap_signal.entry_price
+        stop = gap_signal.stop_loss_price
+        risk_pct = abs(entry - stop) / entry * 100 if entry > 0 else 0
 
-        # Build setup description
-        confluence_factors = self.build_confluence_factors(candidate)
-        gap_type = "Large Gap" if price_change_1d >= self.config.large_gap_pct else "Gap"
-        confluence_factors.insert(0, f'{gap_type} +{price_change_1d:.1f}%')
-        description = self._build_description(candidate, confluence_factors)
+        # Determine signal type
+        signal_type = SignalType.BUY if gap_signal.signal_type == 'BUY' else SignalType.SELL
 
-        # Create signal
+        # Build confluence factors
+        confluence_factors = self._build_confluence_factors(gap_signal, candidate)
+
+        # Build description
+        description = self._build_description(gap_signal, candidate)
+
+        # Create SignalSetup
         signal = SignalSetup(
-            ticker=candidate['ticker'],
+            ticker=gap_signal.ticker,
             scanner_name=self.scanner_name,
-            signal_type=SignalType.BUY,
-            entry_price=entry,
-            stop_loss=stop,
-            take_profit_1=tp1,
-            take_profit_2=tp2,
-            risk_reward_ratio=Decimal(str(self.config.tp1_rr_ratio)),
+            signal_type=signal_type,
+            entry_price=Decimal(str(round(entry, 4))),
+            stop_loss=Decimal(str(round(stop, 4))),
+            take_profit_1=Decimal(str(round(gap_signal.take_profit_price, 4))),
+            take_profit_2=None,
+            risk_reward_ratio=Decimal(str(round(gap_signal.risk_reward_ratio, 2))),
             risk_percent=Decimal(str(round(risk_pct, 2))),
             composite_score=composite_score,
-            trend_score=Decimal(str(round(score_components.weighted_trend, 2))),
-            momentum_score=Decimal(str(round(score_components.weighted_momentum, 2))),
-            volume_score=Decimal(str(round(score_components.weighted_volume, 2))),
-            pattern_score=Decimal(str(round(score_components.weighted_pattern, 2))),
-            confluence_score=Decimal(str(round(score_components.weighted_confluence, 2))),
+            trend_score=Decimal('0'),  # Strategy handles this internally
+            momentum_score=Decimal('0'),
+            volume_score=Decimal('0'),
+            pattern_score=Decimal('0'),
+            confluence_score=Decimal('0'),
             setup_description=description,
             confluence_factors=confluence_factors,
             timeframe="daily",
-            market_regime="Gap Play",
+            market_regime="Gap & Go",
             max_risk_per_trade_pct=Decimal(str(self.config.max_risk_per_trade_pct)),
-            raw_data=candidate,
+            raw_data={
+                'gap_pct': gap_signal.gap_pct,
+                'gap_open_price': gap_signal.gap_open_price,
+                'relative_volume': gap_signal.relative_volume,
+                'atr': gap_signal.atr,
+                'rsi': gap_signal.rsi,
+                'is_large_gap': gap_signal.is_large_gap,
+                'ema_200_above': gap_signal.ema_200_above,
+            },
         )
 
         # Calculate position size
         signal.suggested_position_size_pct = self.calculate_position_size(
             Decimal(str(self.config.max_risk_per_trade_pct)),
-            entry,
-            stop,
-            signal.quality_tier
+            signal.entry_price,
+            signal.stop_loss,
+            quality_tier
         )
 
         return signal
+
+    def _build_confluence_factors(
+        self,
+        gap_signal: GapSignal,
+        candidate: Dict[str, Any]
+    ) -> List[str]:
+        """Build list of confluence factors"""
+        factors = ['Gap & Go Setup']
+
+        # Gap size
+        if gap_signal.is_large_gap:
+            factors.append(f'Large Gap ({gap_signal.gap_pct:.1f}%)')
+        else:
+            factors.append(f'Gap Up ({gap_signal.gap_pct:.1f}%)')
+
+        # Volume
+        if gap_signal.relative_volume >= 2.0:
+            factors.append(f'High Volume ({gap_signal.relative_volume:.1f}x)')
+        else:
+            factors.append(f'Volume Surge ({gap_signal.relative_volume:.1f}x)')
+
+        # Trend context
+        if gap_signal.ema_200_above:
+            factors.append('Above EMA-200 (Bullish)')
+
+        # RSI
+        if gap_signal.rsi:
+            if 50 <= gap_signal.rsi <= 70:
+                factors.append(f'Good Momentum (RSI {gap_signal.rsi:.0f})')
+
+        return factors
+
+    def _build_description(
+        self,
+        gap_signal: GapSignal,
+        candidate: Dict[str, Any]
+    ) -> str:
+        """Build human-readable setup description"""
+        ticker = gap_signal.ticker
+        gap = gap_signal.gap_pct
+        vol = gap_signal.relative_volume
+
+        desc = f"{ticker} gap: "
+
+        if gap_signal.is_large_gap:
+            desc += f"Large gap +{gap:.1f}%, "
+        else:
+            desc += f"+{gap:.1f}% gap, "
+
+        desc += f"{vol:.1f}x volume"
+
+        if gap_signal.ema_200_above:
+            desc += ", above EMA-200"
+
+        return desc
 
     def _calculate_entry_levels(
         self,
         candidate: Dict[str, Any],
         signal_type: SignalType
     ) -> Tuple[Decimal, Decimal, Decimal, Optional[Decimal]]:
-        """
-        Calculate entry, stop, and take profit levels for gaps.
-
-        Gap strategy:
-        - Entry: Current price or slightly above gap candle high
-        - Stop: Below gap open (gap must hold)
-        - Target: Gap extension
-        """
-        current_price = Decimal(str(candidate.get('current_price', 0)))
-        atr_percent = float(candidate.get('atr_percent') or 3.0)
-        price_change_1d = float(candidate.get('price_change_1d') or 2.0)
-
-        # ATR in price terms
-        atr = current_price * Decimal(str(atr_percent / 100))
-
-        # Entry at current price
-        entry = current_price
-
-        # Stop loss: Below gap open
-        # Gap open approximation: current_price / (1 + change%)
-        gap_open = current_price / (1 + Decimal(str(price_change_1d / 100)))
-        stop = gap_open * Decimal('0.99')  # Slightly below gap open
-
-        # Apply max constraint
-        max_stop_distance = entry * Decimal(str(self.config.max_stop_loss_pct / 100))
-        if (entry - stop) > max_stop_distance:
-            stop = entry - max_stop_distance
-
-        # Take profit 1: Gap extension (add 50-100% of gap size)
-        gap_size = current_price - gap_open
-        tp1 = entry + (gap_size * Decimal('0.75'))  # 75% extension
-
-        # Take profit 2: Full gap extension or 3R
-        risk = entry - stop
-        tp2_r = entry + (risk * Decimal('3.0'))
-        tp2_gap = entry + gap_size
-        tp2 = max(tp2_r, tp2_gap)
-
-        return entry, stop, tp1, tp2
-
-    def _build_description(
-        self,
-        candidate: Dict[str, Any],
-        factors: List[str]
-    ) -> str:
-        """Build human-readable setup description"""
-
-        ticker = candidate['ticker']
-        price_change = float(candidate.get('price_change_1d') or 0)
-        rel_vol = float(candidate.get('relative_volume') or 0)
-        sma_cross = candidate.get('sma_cross_signal', '')
-
-        desc = f"{ticker} gap continuation. "
-        desc += f"Gapped +{price_change:.1f}% on {rel_vol:.1f}x volume. "
-
-        if sma_cross in ['golden_cross', 'bullish']:
-            desc += "In uptrend. "
-
-        return desc
+        """Not used - strategy handles entry level calculation"""
+        pass

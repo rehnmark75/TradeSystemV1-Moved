@@ -496,26 +496,9 @@ class ZLMATrendScanner(BaseScanner):
         return [dict(r) for r in rows]
 
     async def _get_qualified_tickers(self, calculation_date: datetime) -> List[str]:
-        """Get tickers that meet minimum criteria."""
-        query = """
-            SELECT w.ticker
-            FROM stock_watchlist w
-            JOIN stock_screening_metrics m ON w.ticker = m.ticker
-                AND m.calculation_date = w.calculation_date
-            WHERE w.calculation_date = $1
-              AND w.tier <= $2
-              AND COALESCE(m.atr_percent, 0) >= $3
-              AND COALESCE(m.relative_volume, 0) >= $4
-            ORDER BY w.rank_overall
-        """
-        rows = await self.db.fetch(
-            query,
-            calculation_date,
-            self.config.max_tier,
-            self.config.min_atr_percent,
-            self.config.min_relative_volume
-        )
-        return [r['ticker'] for r in rows]
+        """Get all active tickers for ZLMA scan."""
+        # Scan ALL active stocks - no pre-filtering
+        return await self.get_all_active_tickers()
 
     async def _get_candidate_data(
         self,

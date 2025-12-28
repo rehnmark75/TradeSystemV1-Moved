@@ -71,21 +71,24 @@ class BreakoutConfirmationStrategy:
     """
 
     # Risk management - wider stops for breakout volatility
-    DEFAULT_STOP_LOSS_ATR_MULT = 2.0   # 2x ATR for stop
-    DEFAULT_TAKE_PROFIT_ATR_MULT = 4.0  # 4x ATR for TP (2:1 R:R)
+    DEFAULT_STOP_LOSS_ATR_MULT = 2.2   # 2.2x ATR for stop
+    DEFAULT_TAKE_PROFIT_ATR_MULT = 4.5  # 4.5x ATR for TP
 
-    # Position requirements
-    MAX_PCT_FROM_52W_HIGH = 5.0  # Within 5% of high
+    # Position requirements - balanced
+    MAX_PCT_FROM_52W_HIGH = 5.0  # Within 5% of high (back to original)
 
     # Volume requirements
-    MIN_RELATIVE_VOLUME = 1.5  # Strong volume surge
+    MIN_RELATIVE_VOLUME = 1.5  # Back to original
     OPTIMAL_VOLUME = 2.0  # Extra confidence bonus
 
     # Gap requirements
-    MIN_DAILY_CHANGE = 2.0  # Strong close or gap up
+    MIN_DAILY_CHANGE = 2.0  # Back to original
 
     # Trend filters
-    DEFAULT_MIN_ADX = 25.0  # Require strong trending
+    DEFAULT_MIN_ADX = 22.0  # Slightly looser than 25
+
+    # EMA alignment filter - disabled (too strict)
+    REQUIRE_EMA_ALIGNMENT = False
 
     def __init__(
         self,
@@ -95,9 +98,10 @@ class BreakoutConfirmationStrategy:
         min_relative_volume: float = MIN_RELATIVE_VOLUME,
         min_daily_change: float = MIN_DAILY_CHANGE,
         min_adx: float = DEFAULT_MIN_ADX,
-        min_rsi: float = 50.0,    # Momentum, not oversold
-        max_rsi: float = 75.0,    # Not overbought
+        min_rsi: float = 50.0,    # Back to original
+        max_rsi: float = 75.0,    # Back to original
         lookback_52w: int = 252,  # ~1 year of trading days
+        require_ema_alignment: bool = REQUIRE_EMA_ALIGNMENT,
     ):
         self.stop_loss_atr_mult = stop_loss_atr_mult
         self.take_profit_atr_mult = take_profit_atr_mult
@@ -108,6 +112,7 @@ class BreakoutConfirmationStrategy:
         self.min_rsi = min_rsi
         self.max_rsi = max_rsi
         self.lookback_52w = lookback_52w
+        self.require_ema_alignment = require_ema_alignment
         self.logger = logging.getLogger(__name__)
 
     def scan(
@@ -185,6 +190,16 @@ class BreakoutConfirmationStrategy:
             if adx < self.min_adx:
                 self.logger.debug(f"{ticker}: ADX too low ({adx:.1f} < {self.min_adx})")
                 return None
+
+        # ==== EMA ALIGNMENT FILTER ====
+        if self.require_ema_alignment:
+            if pd.notna(current.get('ema_50')) and pd.notna(current.get('ema_200')):
+                ema_50 = float(current['ema_50'])
+                ema_200 = float(current['ema_200'])
+                # Require Price > EMA50 > EMA200 (bullish alignment)
+                if not (current_close > ema_50 > ema_200):
+                    self.logger.debug(f"{ticker}: EMA not aligned (need Price > EMA50 > EMA200)")
+                    return None
 
         # ==== RSI FILTER ====
         if pd.notna(current['rsi']):
@@ -356,4 +371,5 @@ class BreakoutConfirmationStrategy:
             'min_adx': self.min_adx,
             'min_rsi': self.min_rsi,
             'max_rsi': self.max_rsi,
+            'require_ema_alignment': self.require_ema_alignment,
         }

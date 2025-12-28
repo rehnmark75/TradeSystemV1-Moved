@@ -80,24 +80,27 @@ class ReversalStrategy:
     - Counter-trend - requires strict risk management
     """
 
-    # Risk management
-    DEFAULT_STOP_ATR_MULT = 1.8
-    DEFAULT_TAKE_PROFIT_RR = 2.0
+    # Risk management - tighter stops, larger targets
+    DEFAULT_STOP_ATR_MULT = 1.5  # Tighter stop (was 1.8)
+    DEFAULT_TAKE_PROFIT_RR = 2.5  # Higher R:R target (was 2.0)
 
-    # Selling Climax parameters
+    # Selling Climax parameters - stricter
     CLIMAX_NEW_LOW_LOOKBACK = 20
-    CLIMAX_VOLUME_SPIKE_MULT = 2.5
-    CLIMAX_MIN_CLOSE_POSITION = 0.5
+    CLIMAX_VOLUME_SPIKE_MULT = 3.0  # Higher volume requirement (was 2.5)
+    CLIMAX_MIN_CLOSE_POSITION = 0.6  # Stronger reversal close (was 0.5)
 
-    # Mean Reversion parameters
-    MEAN_REV_MAX_RSI = 35.0
-    MEAN_REV_EXTREME_RSI = 25.0
+    # Mean Reversion parameters - stricter RSI
+    MEAN_REV_MAX_RSI = 30.0  # True oversold only (was 35)
+    MEAN_REV_EXTREME_RSI = 22.0  # More extreme (was 25)
 
-    # Wyckoff Spring parameters
+    # Wyckoff Spring parameters - tighter
     SPRING_BOX_LOOKBACK = 20
-    SPRING_MAX_BOX_HEIGHT_PCT = 10.0
+    SPRING_MAX_BOX_HEIGHT_PCT = 8.0  # Tighter consolidation (was 10)
     SPRING_MIN_BOX_HEIGHT_PCT = 2.0
-    SPRING_MAX_VOLUME_RATIO = 1.2
+    SPRING_MAX_VOLUME_RATIO = 1.0  # Lower volume on spring (was 1.2)
+
+    # Quality filter - B-tier and above only
+    MIN_CONFIDENCE_THRESHOLD = 0.58
 
     def __init__(
         self,
@@ -106,12 +109,14 @@ class ReversalStrategy:
         climax_volume_mult: float = CLIMAX_VOLUME_SPIKE_MULT,
         mean_rev_max_rsi: float = MEAN_REV_MAX_RSI,
         max_stop_pct: float = 8.0,
+        min_confidence: float = MIN_CONFIDENCE_THRESHOLD,
     ):
         self.stop_atr_mult = stop_atr_mult
         self.take_profit_rr = take_profit_rr
         self.climax_volume_mult = climax_volume_mult
         self.mean_rev_max_rsi = mean_rev_max_rsi
         self.max_stop_pct = max_stop_pct
+        self.min_confidence = min_confidence
         self.logger = logging.getLogger(__name__)
 
     def scan(
@@ -214,6 +219,12 @@ class ReversalStrategy:
         confidence = self._calculate_confidence(
             patterns_found, pattern_data, rsi, volume_ratio
         )
+
+        # Filter out low-confidence signals (C-tier and below)
+        if confidence < self.min_confidence:
+            self.logger.debug(f"{ticker}: Confidence too low ({confidence:.2f} < {self.min_confidence})")
+            return None
+
         quality_tier = self._get_quality_tier(confidence)
 
         # Get close position if available
@@ -487,4 +498,5 @@ class ReversalStrategy:
             'climax_volume_mult': self.climax_volume_mult,
             'mean_rev_max_rsi': self.mean_rev_max_rsi,
             'max_stop_pct': self.max_stop_pct,
+            'min_confidence': self.min_confidence,
         }

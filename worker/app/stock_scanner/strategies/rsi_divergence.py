@@ -70,18 +70,22 @@ class RSIDivergenceStrategy:
     - More conservative position sizing
     """
 
-    # Risk management
-    DEFAULT_STOP_ATR_MULT = 1.5
+    # Risk management - wider stops to avoid premature exits
+    DEFAULT_STOP_ATR_MULT = 1.2  # Slightly wider stop
     DEFAULT_TAKE_PROFIT_ATR_MULT = 3.0  # 2:1 R:R
 
-    # Divergence detection
+    # Divergence detection - balanced parameters
     RSI_PERIOD = 14
-    MIN_DIVERGENCE_BARS = 5
-    MAX_DIVERGENCE_BARS = 25
+    MIN_DIVERGENCE_BARS = 5  # Back to original
+    MAX_DIVERGENCE_BARS = 22  # Slightly tighter than original 25
     SWING_WINDOW = 3  # Bars on each side to define swing
 
-    # RSI thresholds
-    BULLISH_RSI_MAX = 50.0  # RSI should be relatively low for bullish div
+    # RSI thresholds - moderately strict
+    BULLISH_RSI_MAX = 45.0  # Compromise between 40 and 50
+    MIN_RSI_IMPROVEMENT = 5.0  # Lower threshold (was 8)
+
+    # Volume filter - minimal
+    MIN_RELATIVE_VOLUME = 1.0  # Minimal volume requirement
 
     def __init__(
         self,
@@ -93,6 +97,8 @@ class RSIDivergenceStrategy:
         bullish_rsi_max: float = BULLISH_RSI_MAX,
         require_trend_context: bool = True,  # Below EMA-200 for bullish
         max_stop_pct: float = 8.0,
+        min_rsi_improvement: float = MIN_RSI_IMPROVEMENT,
+        min_relative_volume: float = MIN_RELATIVE_VOLUME,
     ):
         self.stop_atr_mult = stop_atr_mult
         self.take_profit_atr_mult = take_profit_atr_mult
@@ -102,6 +108,8 @@ class RSIDivergenceStrategy:
         self.bullish_rsi_max = bullish_rsi_max
         self.require_trend_context = require_trend_context
         self.max_stop_pct = max_stop_pct
+        self.min_rsi_improvement = min_rsi_improvement
+        self.min_relative_volume = min_relative_volume
         self.logger = logging.getLogger(__name__)
 
     def scan(
@@ -152,7 +160,20 @@ class RSIDivergenceStrategy:
             self.logger.debug(f"{ticker}: RSI too high for bullish div ({rsi_current:.1f})")
             return None
 
+        # Check minimum RSI improvement
+        rsi_improvement = rsi_current - rsi_prior
+        if rsi_improvement < self.min_rsi_improvement:
+            self.logger.debug(f"{ticker}: RSI improvement too small ({rsi_improvement:.1f})")
+            return None
+
         current = df.iloc[-1]
+
+        # Volume confirmation filter
+        if pd.notna(current.get('relative_volume')):
+            relative_volume = float(current['relative_volume'])
+            if relative_volume < self.min_relative_volume:
+                self.logger.debug(f"{ticker}: Volume too low ({relative_volume:.2f}x)")
+                return None
 
         # Check trend context if required
         ema_200_below = False
@@ -375,4 +396,6 @@ class RSIDivergenceStrategy:
             'bullish_rsi_max': self.bullish_rsi_max,
             'require_trend_context': self.require_trend_context,
             'max_stop_pct': self.max_stop_pct,
+            'min_rsi_improvement': self.min_rsi_improvement,
+            'min_relative_volume': self.min_relative_volume,
         }

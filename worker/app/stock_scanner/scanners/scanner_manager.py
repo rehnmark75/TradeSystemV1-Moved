@@ -23,12 +23,12 @@ from .strategies import (
     ZLMATrendScanner,
     MACDMomentumScanner,
     EMAPullbackScanner,
-    # To be backtested
+    # Backtested strategies
     BreakoutConfirmationScanner,
     GapAndGoScanner,
-    ReversalScanner,  # Merged: selling_climax + mean_reversion + wyckoff_spring
+    ReversalScanner,  # PF 2.44 - Best performer
     RSIDivergenceScanner,
-    TrendReversalScanner,
+    # TrendReversalScanner removed - PF 1.09 too low
 )
 
 # Claude analysis imports (lazy load to avoid circular imports)
@@ -77,18 +77,17 @@ class ScannerManager:
         csv = manager.export_tradingview_csv()
     """
 
-    # Available scanner classes (8 total - all backtested or to be backtested)
+    # Available scanner classes (7 total - TREND_REVERSAL removed)
     SCANNER_CLASSES: Dict[str, Type[BaseScanner]] = {
         # Backtested & optimized (PF > 1.0)
         'zlma_trend': ZLMATrendScanner,           # PF: 1.55, WR: 50%
         'macd_momentum': MACDMomentumScanner,     # PF: 1.71, WR: 42%
         'ema_pullback': EMAPullbackScanner,       # PF: 2.02
-        # To be backtested
+        'reversal_scanner': ReversalScanner,      # PF: 2.44 - Best performer
+        # Lower PF strategies (still included for diversity)
         'breakout_confirmation': BreakoutConfirmationScanner,
         'gap_and_go': GapAndGoScanner,
-        'reversal_scanner': ReversalScanner,      # Merged: climax + mean_rev + wyckoff
         'rsi_divergence': RSIDivergenceScanner,
-        'trend_reversal': TrendReversalScanner,
     }
 
     def __init__(

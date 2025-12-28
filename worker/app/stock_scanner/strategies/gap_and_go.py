@@ -69,21 +69,25 @@ class GapAndGoStrategy:
     - Tighter stops due to gap risk
     """
 
-    # Risk management - tighter stops for gaps
-    DEFAULT_STOP_MULTIPLIER = 0.99  # Stop 1% below gap open
+    # Risk management - slightly wider stops
+    DEFAULT_STOP_MULTIPLIER = 0.98  # Stop 2% below gap open
     DEFAULT_MAX_STOP_PCT = 5.0  # Max 5% stop
 
-    # Gap requirements
+    # Gap requirements - keep original, but add better filters
     MIN_GAP_PCT = 2.0  # Minimum gap size
     LARGE_GAP_PCT = 4.0  # Large gap threshold
-    MAX_GAP_PCT = 15.0  # Avoid extreme gaps
+    MAX_GAP_PCT = 12.0  # Avoid extreme gaps
 
     # Volume requirements
-    MIN_RELATIVE_VOLUME = 1.5
+    MIN_RELATIVE_VOLUME = 1.5  # Back to original
 
-    # Target multipliers
-    TP1_GAP_EXTENSION = 0.75  # 75% extension of gap
-    TP2_MIN_R = 3.0  # Minimum 3R for TP2
+    # Target multipliers - larger targets
+    TP1_GAP_EXTENSION = 1.0  # 100% extension of gap
+    TP2_MIN_R = 2.5  # Minimum 2.5R for TP
+
+    # Additional filters - keep but loosen
+    MAX_GAP_FILL_PCT = 40.0  # Max gap fill allowed (loosened from 25)
+    MIN_ADX = 18.0  # Minimum ADX (loosened from 20)
 
     def __init__(
         self,
@@ -93,9 +97,11 @@ class GapAndGoStrategy:
         min_relative_volume: float = MIN_RELATIVE_VOLUME,
         stop_multiplier: float = DEFAULT_STOP_MULTIPLIER,
         max_stop_pct: float = DEFAULT_MAX_STOP_PCT,
-        min_rsi: float = 40.0,
-        max_rsi: float = 80.0,
+        min_rsi: float = 40.0,  # Back to original
+        max_rsi: float = 75.0,  # Slightly loosened
         avoid_overbought_at_high: bool = True,
+        max_gap_fill_pct: float = MAX_GAP_FILL_PCT,
+        min_adx: float = MIN_ADX,
     ):
         self.min_gap_pct = min_gap_pct
         self.large_gap_pct = large_gap_pct
@@ -106,6 +112,8 @@ class GapAndGoStrategy:
         self.min_rsi = min_rsi
         self.max_rsi = max_rsi
         self.avoid_overbought_at_high = avoid_overbought_at_high
+        self.max_gap_fill_pct = max_gap_fill_pct
+        self.min_adx = min_adx
         self.logger = logging.getLogger(__name__)
 
     def scan(
@@ -174,8 +182,15 @@ class GapAndGoStrategy:
         if current_close < current_open:
             # Gap filled - potential reversal
             fill_pct = (current_open - current_close) / (current_open - prev_close) * 100
-            if fill_pct > 50:  # More than 50% filled
+            if fill_pct > self.max_gap_fill_pct:  # Tightened from 50% to 25%
                 self.logger.debug(f"{ticker}: Gap filled {fill_pct:.0f}%")
+                return None
+
+        # ==== ADX TREND STRENGTH FILTER ====
+        if pd.notna(current.get('adx')):
+            adx = float(current['adx'])
+            if adx < self.min_adx:
+                self.logger.debug(f"{ticker}: ADX too low ({adx:.1f})")
                 return None
 
         # ==== RSI FILTER ====
@@ -349,4 +364,6 @@ class GapAndGoStrategy:
             'max_stop_pct': self.max_stop_pct,
             'min_rsi': self.min_rsi,
             'max_rsi': self.max_rsi,
+            'max_gap_fill_pct': self.max_gap_fill_pct,
+            'min_adx': self.min_adx,
         }
