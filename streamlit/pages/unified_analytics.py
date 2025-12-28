@@ -15,6 +15,7 @@ from typing import Dict, List, Any, Optional
 import logging
 from dataclasses import dataclass
 import os
+import requests
 
 # Import centralized database utilities for connection pooling
 from services.db_utils import DatabaseContextManager, get_connection_string
