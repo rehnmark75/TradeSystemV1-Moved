@@ -1,12 +1,20 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.7.0 (AUDUSD + NZDUSD Pair-Specific Overrides from Rejection Outcome Analysis)
+# Version: 2.8.0 (Per-Pair Session Overrides from trade_log Analysis)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback OR momentum continuation entry
+#
+# v2.8.0 PER-PAIR SESSION OVERRIDES (from 90-day trade_log analysis):
+#   - NEW: PAIR_SESSION_OVERRIDES dict for Asian session control per pair
+#   - Asian session (21:00-07:00 UTC) outperforms Active hours for 7/9 pairs
+#   - ALLOW Asian: USDJPY, USDCHF, EURJPY, EURUSD, AUDUSD, NZDUSD, GBPUSD
+#   - BLOCK Asian: AUDJPY, USDCAD (underperform in Asian session)
+#   - IMPACT: Recovers ~$5,710 from pairs that perform better in Asian session
+#   - Analysis: Asian 50.5% WR (-$684) vs Active 47.7% WR (-$6,131)
 #
 # v2.7.0 AUDUSD PAIR-SPECIFIC OVERRIDES (from Rejection Outcome Analysis):
 #   - NEW: AUDUSD overrides based on 30-day outcome analysis
@@ -84,9 +92,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.7.0"
+STRATEGY_VERSION = "2.8.0"
 STRATEGY_DATE = "2025-12-28"
-STRATEGY_STATUS = "AUDUSD + NZDUSD + EURUSD Pair-Specific Overrides from Rejection Outcome Analysis"
+STRATEGY_STATUS = "Per-Pair Session Overrides + AUDUSD/NZDUSD/EURUSD Parameter Overrides"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -269,6 +277,48 @@ NY_SESSION_END = time(21, 0)             # 21:00 UTC
 # Allowed sessions
 ALLOWED_SESSIONS = ['london', 'new_york', 'overlap']
 BLOCK_ASIAN_SESSION = True               # Block 21:00-07:00 UTC
+
+# ============================================================================
+# v2.8.0: PAIR-SPECIFIC SESSION OVERRIDES (2025-12-28)
+# ============================================================================
+# Based on 90-day analysis of trade_log, Asian session outperforms Active hours
+# for 7 of 9 pairs. Allow Asian trading for profitable pairs, block for losers.
+#
+# Analysis source: trade_log (90 days, 402 trades)
+# - Asian session: 115 trades, -$684, 50.5% WR, avg -$5.95/trade
+# - Active hours: 287 trades, -$6,131, 47.7% WR, avg -$21.36/trade
+#
+PAIR_SESSION_OVERRIDES = {
+    # ALLOW Asian session for pairs that outperform Active hours
+    'CS.D.USDJPY.MINI.IP': {'allow_asian': True},   # +$1,625 advantage (58.3% vs 32.6% WR)
+    'CS.D.USDCHF.MINI.IP': {'allow_asian': True},   # +$2,272 advantage (50.0% vs 31.3% WR)
+    'CS.D.EURJPY.MINI.IP': {'allow_asian': True},   # +$381 advantage (56.3% vs 60.0% WR, but +$143 vs -$238)
+    'CS.D.EURUSD.CEEM.IP': {'allow_asian': True},   # +$600 advantage
+    'CS.D.AUDUSD.MINI.IP': {'allow_asian': True},   # +$298 advantage (55.6% vs 45.5% WR)
+    'CS.D.NZDUSD.MINI.IP': {'allow_asian': True},   # +$279 advantage (58.3% vs 42.9% WR)
+    'CS.D.GBPUSD.MINI.IP': {'allow_asian': True},   # +$254 advantage (57.1% vs 60.6% WR, but -$180 vs -$434)
+
+    # KEEP Asian block for pairs that underperform Active hours
+    'CS.D.AUDJPY.MINI.IP': {'allow_asian': False},  # -$38 disadvantage (33.3% vs 50.0% WR)
+    'CS.D.USDCAD.MINI.IP': {'allow_asian': False},  # -$225 disadvantage (42.9% vs 58.3% WR)
+}
+
+def is_asian_session_allowed(epic: str) -> bool:
+    """
+    Check if Asian session trading is allowed for a specific pair.
+
+    Args:
+        epic: The trading pair epic (e.g., 'CS.D.USDJPY.MINI.IP')
+
+    Returns:
+        True if Asian session is allowed for this pair, False otherwise
+    """
+    override = PAIR_SESSION_OVERRIDES.get(epic)
+    if override is not None:
+        return override.get('allow_asian', not BLOCK_ASIAN_SESSION)
+
+    # Default to global BLOCK_ASIAN_SESSION setting
+    return not BLOCK_ASIAN_SESSION
 
 # ============================================================================
 # SIGNAL LIMITS

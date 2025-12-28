@@ -341,7 +341,7 @@ class SMCSimpleStrategy:
             # PRE-FILTER: Session Check
             # ================================================================
             if self.session_filter_enabled:
-                session_valid, session_reason = self._check_session(candle_timestamp)
+                session_valid, session_reason = self._check_session(candle_timestamp, epic)
                 if not session_valid:
                     self.logger.info(f"\n🕐 SESSION FILTER: {session_reason}")
                     # Track rejection
@@ -1758,16 +1758,31 @@ class SMCSimpleStrategy:
 
         return limit_entry, offset_pips
 
-    def _check_session(self, timestamp) -> Tuple[bool, str]:
-        """Check if current time is in allowed trading session"""
+    def _check_session(self, timestamp, epic: str = None) -> Tuple[bool, str]:
+        """Check if current time is in allowed trading session
+
+        Args:
+            timestamp: Candle timestamp
+            epic: Trading pair epic for pair-specific session overrides (v2.8.0)
+        """
         if isinstance(timestamp, pd.Timestamp):
             hour = timestamp.hour
         else:
             hour = datetime.now().hour
 
         # Asian session: 21:00-07:00 UTC
-        if self.block_asian and (hour >= 21 or hour < 7):
-            return False, f"Asian session blocked (hour={hour})"
+        if hour >= 21 or hour < 7:
+            # v2.8.0: Check pair-specific override for Asian session
+            if epic:
+                from forex_scanner.configdata.strategies import config_smc_simple as smc_config
+                if hasattr(smc_config, 'is_asian_session_allowed'):
+                    if smc_config.is_asian_session_allowed(epic):
+                        pair_name = epic.split('.')[2] if '.' in epic else epic
+                        return True, f"Asian session ALLOWED for {pair_name} (hour={hour})"
+
+            # Default to global block
+            if self.block_asian:
+                return False, f"Asian session blocked (hour={hour})"
 
         # London: 07:00-16:00, NY: 12:00-21:00
         if 7 <= hour <= 21:
