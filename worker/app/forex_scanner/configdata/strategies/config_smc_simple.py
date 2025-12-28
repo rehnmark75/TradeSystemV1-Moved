@@ -1,7 +1,7 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.7.0 (AUDUSD Pair-Specific Overrides from Rejection Outcome Analysis)
+# Version: 2.7.0 (AUDUSD + NZDUSD Pair-Specific Overrides from Rejection Outcome Analysis)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
@@ -86,7 +86,7 @@ from datetime import time
 STRATEGY_NAME = "SMC_SIMPLE"
 STRATEGY_VERSION = "2.7.0"
 STRATEGY_DATE = "2025-12-28"
-STRATEGY_STATUS = "AUDUSD + EURUSD Pair-Specific Overrides from Rejection Outcome Analysis"
+STRATEGY_STATUS = "AUDUSD + NZDUSD + EURUSD Pair-Specific Overrides from Rejection Outcome Analysis"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -627,6 +627,44 @@ PAIR_PARAMETER_OVERRIDES = {
             'MOMENTUM_MIN_DEPTH': -0.65,
             'FIB_PULLBACK_MIN': 0.18,
             'FIB_PULLBACK_MAX': 0.75,
+            'MIN_CONFIDENCE_THRESHOLD': 0.45,
+        },
+    },
+
+    # ============================================================================
+    # v2.7.0: NZDUSD PAIR-SPECIFIC OVERRIDES
+    # ============================================================================
+    # Rejection Outcome Analysis (30 days):
+    #   - 562 rejections total, 56% would-be win rate
+    #   - TIER2_SWING: 429 rejections, 54.1% win rate - neutral
+    #   - TIER3_PULLBACK: 108 rejections, 53.7% win rate - neutral
+    #   - CONFIDENCE: 25 rejections, 100% win rate - too aggressive
+    #   - Net missed: 2,502 pips
+    #
+    # NZDUSD characteristics:
+    #   - Similar to AUDUSD (commodity currency)
+    #   - Lower volatility pair
+    #   - CONFIDENCE filter is blocking all winners
+    #
+    'CS.D.NZDUSD.MINI.IP': {
+        'enabled': True,
+        'description': 'NZDUSD relaxed parameters - CONFIDENCE stage has 100% rejection win rate',
+        'overrides': {
+            # Tier 2: Slight relaxation for smaller breakouts
+            'MIN_BODY_PERCENTAGE': 0.30,       # Default: 0.35 - slight relaxation
+            'MIN_BREAKOUT_ATR_RATIO': 0.45,    # Default: 0.50 - slight relaxation
+
+            # Confidence: Lower threshold since CONFIDENCE rejections show 100% win rate
+            'MIN_CONFIDENCE_THRESHOLD': 0.45,  # Default: 0.50 - lower for NZDUSD
+        },
+    },
+    # Alias for pair name format
+    'NZDUSD': {
+        'enabled': True,
+        'description': 'NZDUSD relaxed parameters - CONFIDENCE stage has 100% rejection win rate',
+        'overrides': {
+            'MIN_BODY_PERCENTAGE': 0.30,
+            'MIN_BREAKOUT_ATR_RATIO': 0.45,
             'MIN_CONFIDENCE_THRESHOLD': 0.45,
         },
     },
