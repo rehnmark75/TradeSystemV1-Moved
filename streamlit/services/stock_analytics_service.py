@@ -1536,7 +1536,8 @@ Analyze and respond in this exact JSON format:
         claude_analyzed_only: bool = False,
         signal_date_from: str = None,
         signal_date_to: str = None,
-        limit: int = 100
+        limit: int = 100,
+        order_by: str = 'score'
     ) -> List[Dict[str, Any]]:
         """
         Get scanner signals from database.
@@ -1550,6 +1551,7 @@ Analyze and respond in this exact JSON format:
             signal_date_from: Filter signals from this date (str: YYYY-MM-DD)
             signal_date_to: Filter signals up to this date (str: YYYY-MM-DD)
             limit: Maximum results
+            order_by: 'score' (default) or 'timestamp' for most recent first
 
         Returns:
             List of signal dictionaries
@@ -1638,13 +1640,24 @@ Analyze and respond in this exact JSON format:
             FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN latest_news n ON s.ticker = n.ticker
+        """
+
+        # Add ORDER BY based on parameter
+        if order_by == 'timestamp':
+            query += """
+            ORDER BY s.signal_timestamp DESC
+            """
+        else:
+            # Default: order by score (Claude analyzed first, then by score)
+            query += """
             ORDER BY
                 CASE WHEN s.claude_analyzed_at IS NOT NULL THEN 0 ELSE 1 END,
                 COALESCE(s.claude_score, 0) DESC,
                 s.composite_score DESC,
                 s.signal_timestamp DESC
-            LIMIT {limit}
-        """
+            """
+
+        query += f"LIMIT {limit}"
 
         return _self._execute_query(query, tuple(params) if params else None)
 
@@ -2513,8 +2526,473 @@ Respond in this exact JSON format:
             conn.close()
 
 
-# Singleton instance
-@st.cache_resource
+    # =========================================================================
+    # NEW DASHBOARD METHODS (Stock Scanner Redesign)
+    # =========================================================================
+
+    @st.cache_data(ttl=60)
+    def get_dashboard_stats(_self) -> Dict[str, Any]:
+        """
+        Get comprehensive dashboard statistics for the redesigned stock scanner page.
+
+        Returns metrics for: active signals, high quality signals, Claude analyzed,
+        today's signals, scanner leaderboard, and tier distribution.
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return {}
+
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Core signal stats
+                cursor.execute("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE status = 'active') as active_signals,
+                        COUNT(*) FILTER (WHERE status = 'active' AND quality_tier IN ('A+', 'A')) as high_quality,
+                        COUNT(*) FILTER (WHERE status = 'active' AND claude_analyzed_at IS NOT NULL) as claude_analyzed,
+                        COUNT(*) FILTER (WHERE DATE(signal_timestamp) = CURRENT_DATE AND status = 'active') as today_signals,
+                        COUNT(*) FILTER (WHERE status = 'active' AND signal_type = 'BUY') as buy_signals,
+                        COUNT(*) FILTER (WHERE status = 'active' AND signal_type = 'SELL') as sell_signals
+                    FROM stock_scanner_signals
+                """)
+                stats = dict(cursor.fetchone())
+
+                # Quality tier distribution for active signals
+                cursor.execute("""
+                    SELECT
+                        quality_tier,
+                        COUNT(*) as count
+                    FROM stock_scanner_signals
+                    WHERE status = 'active'
+                    GROUP BY quality_tier
+                    ORDER BY
+                        CASE quality_tier
+                            WHEN 'A+' THEN 1
+                            WHEN 'A' THEN 2
+                            WHEN 'B' THEN 3
+                            WHEN 'C' THEN 4
+                            WHEN 'D' THEN 5
+                        END
+                """)
+                tier_dist = {r['quality_tier']: r['count'] for r in cursor.fetchall()}
+                stats['tier_distribution'] = tier_dist
+
+                # Signal distribution by scanner
+                cursor.execute("""
+                    SELECT
+                        scanner_name,
+                        COUNT(*) as count
+                    FROM stock_scanner_signals
+                    WHERE status = 'active'
+                    GROUP BY scanner_name
+                    ORDER BY count DESC
+                """)
+                scanner_dist = {r['scanner_name']: r['count'] for r in cursor.fetchall()}
+                stats['scanner_distribution'] = scanner_dist
+
+                # Last scan time
+                cursor.execute("""
+                    SELECT MAX(signal_timestamp) as last_scan
+                    FROM stock_scanner_signals
+                """)
+                result = cursor.fetchone()
+                stats['last_scan'] = result['last_scan'] if result else None
+
+                # Total stocks scanned (from instruments)
+                cursor.execute("""
+                    SELECT COUNT(*) as count FROM stock_instruments WHERE is_active = true
+                """)
+                stats['total_stocks'] = cursor.fetchone()['count']
+
+                return stats
+
+        except Exception as e:
+            logger.error(f"Failed to get dashboard stats: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    @st.cache_data(ttl=300)
+    def get_scanner_leaderboard(_self) -> List[Dict[str, Any]]:
+        """
+        Get scanners ranked by profit factor from backtest executions.
+
+        Returns list of scanners with their backtest performance metrics.
+        Maps scanner names to backtest strategy names (case-insensitive, handles variations).
+        """
+        query = """
+            WITH scanner_mapping AS (
+                -- Map scanner names to backtest strategy names
+                -- 8 active scanners after consolidation
+                SELECT scanner_name,
+                    CASE
+                        WHEN scanner_name = 'breakout_confirmation' THEN 'BREAKOUT'
+                        WHEN scanner_name = 'trend_reversal' THEN 'TREND_REVERSAL'
+                        WHEN scanner_name = 'rsi_divergence' THEN 'RSI_DIVERGENCE'
+                        WHEN scanner_name = 'gap_and_go' THEN 'GAP_AND_GO'
+                        WHEN scanner_name = 'macd_momentum' THEN 'MACD_MOMENTUM'
+                        WHEN scanner_name = 'ema_pullback' THEN 'EMA_PULLBACK'
+                        WHEN scanner_name = 'zlma_trend' THEN 'ZLMA_CROSSOVER'
+                        WHEN scanner_name = 'reversal_scanner' THEN 'REVERSAL'
+                        ELSE UPPER(REPLACE(scanner_name, '_', '_'))
+                    END as strategy_name
+                FROM stock_signal_scanners
+                WHERE is_active = true
+            )
+            SELECT
+                s.scanner_name,
+                COALESCE(b.profit_factor, 0) as profit_factor,
+                COALESCE(b.win_rate, 0) as win_rate,
+                COALESCE(b.total_trades, 0) as total_trades,
+                COALESCE(b.winners, 0) as winners,
+                COALESCE(b.losers, 0) as losers,
+                COALESCE(active.signal_count, 0) as active_signals
+            FROM stock_signal_scanners s
+            JOIN scanner_mapping m ON s.scanner_name = m.scanner_name
+            LEFT JOIN LATERAL (
+                SELECT
+                    profit_factor,
+                    win_rate,
+                    total_trades,
+                    winners,
+                    losers
+                FROM stock_backtest_executions
+                WHERE strategy_name = m.strategy_name
+                  AND status = 'completed'
+                  AND total_trades > 0  -- Skip empty backtest runs
+                ORDER BY completed_at DESC
+                LIMIT 1
+            ) b ON true
+            LEFT JOIN (
+                -- Map old signal scanner names to new scanner names
+                SELECT
+                    CASE
+                        WHEN scanner_name = 'trend_reversal' THEN 'reversal_scanner'
+                        WHEN scanner_name = 'trend_momentum' THEN 'ema_pullback'
+                        ELSE scanner_name
+                    END as mapped_scanner_name,
+                    COUNT(*) as signal_count
+                FROM stock_scanner_signals
+                WHERE status = 'active'
+                GROUP BY 1
+            ) active ON s.scanner_name = active.mapped_scanner_name
+            WHERE s.is_active = true
+            ORDER BY COALESCE(b.profit_factor, 0) DESC, s.scanner_name
+        """
+        return _self._execute_query(query, ())
+
+    @st.cache_data(ttl=60)
+    def get_top_signals(_self, limit: int = 5, min_tier: str = 'A') -> List[Dict[str, Any]]:
+        """
+        Get top quality active signals for dashboard display.
+
+        Args:
+            limit: Maximum number of signals to return
+            min_tier: Minimum quality tier ('A+', 'A', 'B', 'C', 'D')
+
+        Returns:
+            List of top signals with company info
+        """
+        tier_filter = "('A+', 'A')" if min_tier == 'A' else "('A+')" if min_tier == 'A+' else "('A+', 'A', 'B')"
+
+        query = f"""
+            SELECT
+                s.id,
+                s.ticker,
+                i.name as company_name,
+                s.signal_type,
+                s.composite_score,
+                s.quality_tier,
+                s.scanner_name,
+                s.entry_price,
+                s.stop_loss,
+                s.take_profit_1,
+                s.risk_reward_ratio,
+                s.claude_grade,
+                s.claude_action,
+                s.signal_timestamp
+            FROM stock_scanner_signals s
+            LEFT JOIN stock_instruments i ON s.ticker = i.ticker
+            WHERE s.status = 'active'
+            AND s.quality_tier IN {tier_filter}
+            ORDER BY s.composite_score DESC, s.signal_timestamp DESC
+            LIMIT %s
+        """
+        return _self._execute_query(query, (limit,))
+
+    @st.cache_data(ttl=300)
+    def get_scanner_backtest_metrics(_self, scanner_name: str) -> Dict[str, Any]:
+        """
+        Get detailed backtest metrics for a specific scanner.
+
+        Args:
+            scanner_name: Name of the scanner
+
+        Returns:
+            Dict with profit_factor, win_rate, avg_r_multiple, etc.
+        """
+        query = """
+            SELECT
+                strategy_name as scanner_name,
+                profit_factor,
+                win_rate,
+                total_trades,
+                winning_trades,
+                losing_trades,
+                avg_r_multiple,
+                max_r_multiple,
+                min_r_multiple,
+                max_drawdown_pct,
+                total_return_pct,
+                sharpe_ratio,
+                start_date,
+                end_date,
+                completed_at
+            FROM stock_backtest_executions
+            WHERE strategy_name = %s
+            ORDER BY completed_at DESC
+            LIMIT 1
+        """
+        results = _self._execute_query(query, (scanner_name,))
+        return results[0] if results else {}
+
+    # =========================================================================
+    # WATCHLIST METHODS (5 Predefined Technical Screens)
+    # =========================================================================
+
+    @st.cache_data(ttl=60)
+    def get_watchlist_results(_self, watchlist_name: str, scan_date: str = None) -> pd.DataFrame:
+        """
+        Get results for a specific predefined watchlist.
+
+        For crossover watchlists (ema_50_crossover, ema_20_crossover, macd_bullish_cross):
+        - Shows only active entries
+        - Days is calculated from crossover_date to today
+
+        For event watchlists (gap_up_continuation, rsi_oversold_bounce):
+        - Shows entries for the selected date
+        - Days is always 1 (single-day events)
+
+        Args:
+            watchlist_name: One of: ema_50_crossover, ema_20_crossover,
+                           macd_bullish_cross, gap_up_continuation, rsi_oversold_bounce
+            scan_date: Optional date string (YYYY-MM-DD). For event watchlists only.
+
+        Returns:
+            DataFrame with stocks matching the watchlist criteria
+        """
+        # Crossover watchlists show all active entries (ignores scan_date)
+        crossover_watchlists = {'ema_50_crossover', 'ema_20_crossover', 'macd_bullish_cross'}
+
+        if watchlist_name in crossover_watchlists:
+            # For crossover watchlists: show all active entries, calculate days from crossover_date
+            query = """
+                SELECT
+                    w.ticker,
+                    i.name,
+                    w.price,
+                    w.volume,
+                    w.avg_volume,
+                    w.ema_20,
+                    w.ema_50,
+                    w.ema_200,
+                    w.rsi_14,
+                    w.macd,
+                    w.macd_histogram,
+                    w.gap_pct,
+                    w.price_change_1d,
+                    w.scan_date,
+                    w.crossover_date,
+                    (CURRENT_DATE - w.crossover_date) + 1 as days_on_list,
+                    CASE WHEN s.ticker IS NOT NULL THEN true ELSE false END as has_signal,
+                    s.quality_tier as signal_tier,
+                    s.signal_type
+                FROM stock_watchlist_results w
+                LEFT JOIN stock_instruments i ON w.ticker = i.ticker
+                LEFT JOIN LATERAL (
+                    SELECT ticker, quality_tier, signal_type
+                    FROM stock_scanner_signals
+                    WHERE ticker = w.ticker AND status = 'active'
+                    ORDER BY composite_score DESC
+                    LIMIT 1
+                ) s ON true
+                WHERE w.watchlist_name = %s
+                AND w.status = 'active'
+                ORDER BY w.volume DESC
+            """
+            results = _self._execute_query(query, (watchlist_name,))
+        else:
+            # For event watchlists: show entries for specific date, days is always 1
+            query = """
+                SELECT
+                    w.ticker,
+                    i.name,
+                    w.price,
+                    w.volume,
+                    w.avg_volume,
+                    w.ema_20,
+                    w.ema_50,
+                    w.ema_200,
+                    w.rsi_14,
+                    w.macd,
+                    w.macd_histogram,
+                    w.gap_pct,
+                    w.price_change_1d,
+                    w.scan_date,
+                    w.crossover_date,
+                    1 as days_on_list,
+                    CASE WHEN s.ticker IS NOT NULL THEN true ELSE false END as has_signal,
+                    s.quality_tier as signal_tier,
+                    s.signal_type
+                FROM stock_watchlist_results w
+                LEFT JOIN stock_instruments i ON w.ticker = i.ticker
+                LEFT JOIN LATERAL (
+                    SELECT ticker, quality_tier, signal_type
+                    FROM stock_scanner_signals
+                    WHERE ticker = w.ticker AND status = 'active'
+                    ORDER BY composite_score DESC
+                    LIMIT 1
+                ) s ON true
+                WHERE w.watchlist_name = %s
+                AND w.scan_date = COALESCE(%s::date, (
+                    SELECT MAX(scan_date)
+                    FROM stock_watchlist_results
+                    WHERE watchlist_name = %s
+                ))
+                ORDER BY w.volume DESC
+            """
+            results = _self._execute_query(query, (watchlist_name, scan_date, watchlist_name))
+
+        return pd.DataFrame(results) if results else pd.DataFrame()
+
+    @st.cache_data(ttl=300)
+    def get_watchlist_available_dates(_self, watchlist_name: str = None) -> List[str]:
+        """
+        Get list of available scan dates for watchlists (last 30 days).
+
+        Args:
+            watchlist_name: Optional filter by specific watchlist
+
+        Returns:
+            List of date strings in YYYY-MM-DD format, newest first
+        """
+        if watchlist_name:
+            query = """
+                SELECT DISTINCT scan_date
+                FROM stock_watchlist_results
+                WHERE watchlist_name = %s
+                  AND scan_date >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY scan_date DESC
+            """
+            results = _self._execute_query(query, (watchlist_name,))
+        else:
+            query = """
+                SELECT DISTINCT scan_date
+                FROM stock_watchlist_results
+                WHERE scan_date >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY scan_date DESC
+            """
+            results = _self._execute_query(query, ())
+
+        return [str(r['scan_date']) for r in results] if results else []
+
+    @st.cache_data(ttl=60)
+    def get_watchlist_stats(_self, scan_date: str = None) -> Dict[str, Any]:
+        """
+        Get statistics for all predefined watchlists.
+
+        For crossover watchlists: counts all active entries (ignores scan_date)
+        For event watchlists: counts entries for the specified date
+
+        Args:
+            scan_date: Optional date string (YYYY-MM-DD). Only used for event watchlists.
+
+        Returns dict with 'counts' (per watchlist), 'last_scan', and 'total_stocks_scanned'.
+        """
+        # Get counts for crossover watchlists (all active entries)
+        crossover_query = """
+            SELECT
+                watchlist_name,
+                COUNT(*) as stock_count,
+                MAX(scan_date) as last_scan
+            FROM stock_watchlist_results
+            WHERE watchlist_name IN ('ema_50_crossover', 'ema_20_crossover', 'macd_bullish_cross')
+            AND status = 'active'
+            GROUP BY watchlist_name
+        """
+        crossover_results = _self._execute_query(crossover_query, ())
+
+        # Get counts for event watchlists (specific date)
+        if scan_date:
+            event_query = """
+                SELECT
+                    watchlist_name,
+                    COUNT(*) as stock_count,
+                    MAX(scan_date) as last_scan
+                FROM stock_watchlist_results
+                WHERE watchlist_name IN ('gap_up_continuation', 'rsi_oversold_bounce')
+                AND scan_date = %s::date
+                GROUP BY watchlist_name
+            """
+            event_results = _self._execute_query(event_query, (scan_date,))
+        else:
+            event_query = """
+                SELECT
+                    watchlist_name,
+                    COUNT(*) as stock_count,
+                    MAX(scan_date) as last_scan
+                FROM stock_watchlist_results
+                WHERE watchlist_name IN ('gap_up_continuation', 'rsi_oversold_bounce')
+                AND scan_date = (
+                    SELECT MAX(scan_date) FROM stock_watchlist_results
+                    WHERE watchlist_name IN ('gap_up_continuation', 'rsi_oversold_bounce')
+                )
+                GROUP BY watchlist_name
+            """
+            event_results = _self._execute_query(event_query, ())
+
+        # Combine results
+        all_results = crossover_results + event_results
+        counts = {r['watchlist_name']: r['stock_count'] for r in all_results}
+
+        # Get last scan date (most recent from any watchlist)
+        last_scan = max((r['last_scan'] for r in all_results), default=None) if all_results else None
+
+        # Get total stocks scanned (from stock_instruments)
+        total_query = "SELECT COUNT(*) as total FROM stock_instruments WHERE is_active = true"
+        total_result = _self._execute_query(total_query, ())
+        total_stocks = total_result[0]['total'] if total_result else 0
+
+        return {
+            'counts': counts,
+            'last_scan': last_scan,
+            'total_stocks_scanned': total_stocks
+        }
+
+    @st.cache_data(ttl=60)
+    def get_all_active_tickers_from_instruments(_self) -> List[str]:
+        """
+        Get all active tickers from stock_instruments table.
+        Used for the new scanning approach that checks all stocks.
+        """
+        query = """
+            SELECT ticker
+            FROM stock_instruments
+            WHERE is_active = true
+            ORDER BY ticker
+        """
+        results = _self._execute_query(query, ())
+        return [r['ticker'] for r in results]
+
+
+# Service instance - no caching to allow code changes to take effect
+# Individual methods use @st.cache_data for query caching
+_service_instance = None
+
+
 def get_stock_service() -> StockAnalyticsService:
     """Get or create the stock analytics service singleton."""
-    return StockAnalyticsService()
+    global _service_instance
+    if _service_instance is None:
+        _service_instance = StockAnalyticsService()
+    return _service_instance

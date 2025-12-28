@@ -1295,3 +1295,39 @@ class ScannerManager:
             'api_configured': bool(FINNHUB_API_KEY),
             'error': None if FINNHUB_API_KEY else 'FINNHUB_API_KEY not configured'
         }
+
+    # =========================================================================
+    # WATCHLIST SCANNER
+    # =========================================================================
+
+    async def run_watchlist_scanner(
+        self,
+        calculation_date: datetime = None
+    ) -> Dict[str, int]:
+        """
+        Run the 5 predefined technical watchlist scans.
+
+        These are separate from signal scanners - they identify stocks matching
+        specific technical criteria (EMA crossovers, MACD, etc.) for the
+        Watchlists tab in Streamlit.
+
+        Args:
+            calculation_date: Date to run scan for (default: today)
+
+        Returns:
+            Dict with count per watchlist
+        """
+        from .watchlist_scanner import WatchlistScanner
+
+        logger.info("=" * 60)
+        logger.info("RUNNING WATCHLIST SCANNER (5 predefined screens)")
+        logger.info("=" * 60)
+
+        scanner = WatchlistScanner(self.db)
+        results = await scanner.run(calculation_date)
+
+        logger.info("Watchlist scan complete:")
+        for name, count in results.items():
+            logger.info(f"  {name}: {count} stocks")
+
+        return results
