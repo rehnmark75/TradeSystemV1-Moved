@@ -4238,6 +4238,97 @@ docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outco
                         if not session_df.empty:
                             st.dataframe(session_df, use_container_width=True, hide_index=True)
 
+                # Pair-specific insights
+                if suggestions.get('pair_insights'):
+                    st.markdown("---")
+                    st.markdown("### 💱 Per-Pair Recommendations")
+
+                    pair_insights = suggestions['pair_insights']
+
+                    # Summary by pair
+                    pair_df = pd.DataFrame(pair_insights)
+
+                    if not pair_df.empty:
+                        # Create color-coded bar chart
+                        fig = px.bar(
+                            pair_df,
+                            x='pair',
+                            y='would_be_win_rate',
+                            color='status',
+                            color_discrete_map={
+                                'TOO_AGGRESSIVE': '#ff6b6b',
+                                'WORKING_WELL': '#51cf66',
+                                'NEUTRAL': '#ffd43b'
+                            },
+                            title='Would-Be Win Rate by Currency Pair',
+                            labels={
+                                'would_be_win_rate': 'Win Rate (%)',
+                                'pair': 'Currency Pair',
+                                'status': 'Filter Status'
+                            },
+                            hover_data=['total_analyzed', 'missed_profit_pips', 'avoided_loss_pips', 'net_pips']
+                        )
+                        fig.add_hline(y=50, line_dash="dash", line_color="gray",
+                                      annotation_text="Break-even (50%)")
+                        fig.add_hline(y=60, line_dash="dot", line_color="red",
+                                      annotation_text="Too Aggressive (60%)")
+                        fig.add_hline(y=40, line_dash="dot", line_color="green",
+                                      annotation_text="Working Well (40%)")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # Pair-specific recommendations
+                        st.markdown("#### Pair-Specific Action Items")
+
+                        # Sort by net impact (pairs with highest missed profit first)
+                        pair_df_sorted = pair_df.sort_values('net_pips', ascending=False)
+
+                        for _, row in pair_df_sorted.iterrows():
+                            pair = row.get('pair', 'UNKNOWN')
+                            epic = row.get('epic', '')
+                            win_rate = row.get('win_rate', 0) or 0
+                            total = row.get('total_analyzed', 0)
+                            status = row.get('status', 'NEUTRAL')
+                            recommendation = row.get('recommendation', '')
+                            net_pips = row.get('net_pips', 0) or 0
+                            missed = row.get('missed_profit_pips', 0) or 0
+                            avoided = row.get('avoided_loss_pips', 0) or 0
+
+                            if status == 'TOO_AGGRESSIVE':
+                                st.warning(
+                                    f"⚠️ **{pair}** ({epic}): {win_rate:.0f}% win rate from {total} rejections. "
+                                    f"Net missed: {net_pips:.0f} pips. {recommendation}"
+                                )
+                            elif status == 'WORKING_WELL':
+                                st.success(
+                                    f"✅ **{pair}** ({epic}): {win_rate:.0f}% win rate from {total} rejections. "
+                                    f"Net saved: {abs(net_pips):.0f} pips. {recommendation}"
+                                )
+                            else:
+                                st.info(
+                                    f"ℹ️ **{pair}** ({epic}): {win_rate:.0f}% win rate from {total} rejections. "
+                                    f"Net impact: {net_pips:.0f} pips. {recommendation}"
+                                )
+
+                        # Detailed pair metrics table
+                        with st.expander("Detailed Pair Metrics"):
+                            display_df = pair_df[[
+                                'pair', 'epic', 'total_analyzed', 'would_be_winners',
+                                'would_be_losers', 'would_be_win_rate', 'missed_profit_pips',
+                                'avoided_loss_pips', 'net_pips', 'status'
+                            ]].rename(columns={
+                                'pair': 'Pair',
+                                'epic': 'Epic',
+                                'total_analyzed': 'Total',
+                                'would_be_winners': 'Winners',
+                                'would_be_losers': 'Losers',
+                                'would_be_win_rate': 'Win Rate %',
+                                'missed_profit_pips': 'Missed Pips',
+                                'avoided_loss_pips': 'Avoided Pips',
+                                'net_pips': 'Net Pips',
+                                'status': 'Status'
+                            })
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
         except requests.exceptions.RequestException as e:
             st.error(f"Failed to connect to FastAPI backend: {e}")
             st.info("Make sure the fastapi-dev container is running.")
