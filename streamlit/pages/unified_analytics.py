@@ -4253,7 +4253,7 @@ docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outco
                         fig = px.bar(
                             pair_df,
                             x='pair',
-                            y='would_be_win_rate',
+                            y='win_rate',
                             color='status',
                             color_discrete_map={
                                 'TOO_AGGRESSIVE': '#ff6b6b',
@@ -4262,7 +4262,7 @@ docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outco
                             },
                             title='Would-Be Win Rate by Currency Pair',
                             labels={
-                                'would_be_win_rate': 'Win Rate (%)',
+                                'win_rate': 'Win Rate (%)',
                                 'pair': 'Currency Pair',
                                 'status': 'Filter Status'
                             },
@@ -4312,16 +4312,13 @@ docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outco
                         # Detailed pair metrics table
                         with st.expander("Detailed Pair Metrics"):
                             display_df = pair_df[[
-                                'pair', 'epic', 'total_analyzed', 'would_be_winners',
-                                'would_be_losers', 'would_be_win_rate', 'missed_profit_pips',
-                                'avoided_loss_pips', 'net_pips', 'status'
+                                'pair', 'epic', 'total_analyzed', 'win_rate',
+                                'missed_profit_pips', 'avoided_loss_pips', 'net_pips', 'status'
                             ]].rename(columns={
                                 'pair': 'Pair',
                                 'epic': 'Epic',
                                 'total_analyzed': 'Total',
-                                'would_be_winners': 'Winners',
-                                'would_be_losers': 'Losers',
-                                'would_be_win_rate': 'Win Rate %',
+                                'win_rate': 'Win Rate %',
                                 'missed_profit_pips': 'Missed Pips',
                                 'avoided_loss_pips': 'Avoided Pips',
                                 'net_pips': 'Net Pips',
