@@ -1,12 +1,20 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.3.1 (Capped Structural Stops)
+# Version: 2.6.0 (EURUSD Pair-Specific Overrides)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback OR momentum continuation entry
+#
+# v2.6.0 EURUSD PAIR-SPECIFIC OVERRIDES:
+#   - NEW: PAIR_PARAMETER_OVERRIDES dict for per-pair settings
+#   - EURUSD: MIN_BODY_PERCENTAGE 0.35 → 0.25 (smaller candle bodies)
+#   - EURUSD: MIN_BREAKOUT_ATR_RATIO 0.50 → 0.40 (smaller breakouts)
+#   - EURUSD: MOMENTUM_MIN_DEPTH -0.50 → -0.60 (deeper momentum)
+#   - IMPACT: Recovers ~150 signals/week from "Weak breakout body" rejections
+#   - All other pairs: unchanged (use default parameters)
 #
 # v2.4.0 ATR-BASED SL CAP:
 #   - PROBLEM: Fixed 55 pip cap was still 7x ATR on low-volatility pairs
@@ -65,9 +73,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.5.0"
-STRATEGY_DATE = "2025-12-23"
-STRATEGY_STATUS = "Pair-Specific Blocking - USDCHF filtered on weak setups"
+STRATEGY_VERSION = "2.6.0"
+STRATEGY_DATE = "2025-12-28"
+STRATEGY_STATUS = "EURUSD Pair-Specific Overrides - relaxed body/ATR filters"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -530,6 +538,61 @@ def should_block_signal(epic: str, signal_data: dict) -> tuple[bool, str]:
         return True, f"Blocked (all conditions failed): {'; '.join(block_reasons)}"
 
     return False, ""
+
+# ============================================================================
+# v2.6.0: PAIR-SPECIFIC PARAMETER OVERRIDES
+# ============================================================================
+# Override default strategy parameters for specific pairs.
+# Only EURUSD is configured - all other pairs use default values.
+#
+# EURUSD Analysis (7-day rejection data):
+#   - 740 TIER2_SWING rejections, mostly "Weak breakout body (6-35% < 35%)"
+#   - EURUSD has smaller-bodied candles than GBP/JPY pairs
+#   - Reducing MIN_BODY_PERCENTAGE from 0.35 to 0.25 recovers ~150 signals
+
+PAIR_PARAMETER_OVERRIDES = {
+    'CS.D.EURUSD.CEEM.IP': {
+        'enabled': True,
+        'description': 'EURUSD relaxed parameters - smaller body candles',
+        'overrides': {
+            # Tier 2: Swing break parameters
+            'MIN_BODY_PERCENTAGE': 0.25,      # Default: 0.35 - EURUSD has smaller bodies
+            'MIN_BREAKOUT_ATR_RATIO': 0.40,   # Default: 0.50 - allow smaller breakouts
+
+            # Tier 3: Entry parameters
+            'MOMENTUM_MIN_DEPTH': -0.60,      # Default: -0.50 - allow deeper momentum
+        },
+    },
+    # Alias for pair name format
+    'EURUSD': {
+        'enabled': True,
+        'description': 'EURUSD relaxed parameters - smaller body candles',
+        'overrides': {
+            'MIN_BODY_PERCENTAGE': 0.25,
+            'MIN_BREAKOUT_ATR_RATIO': 0.40,
+            'MOMENTUM_MIN_DEPTH': -0.60,
+        },
+    },
+}
+
+def get_pair_parameter(epic: str, param_name: str, default_value):
+    """
+    Get parameter value with pair-specific override if configured.
+
+    Args:
+        epic: The trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
+        param_name: The parameter name to look up (e.g., 'MIN_BODY_PERCENTAGE')
+        default_value: The default value to return if no override exists
+
+    Returns:
+        The overridden value if configured, otherwise the default value
+    """
+    config = PAIR_PARAMETER_OVERRIDES.get(epic)
+    if config and config.get('enabled', False):
+        overrides = config.get('overrides', {})
+        if param_name in overrides:
+            return overrides[param_name]
+    return default_value
 
 # ============================================================================
 # CONFIDENCE SCORING

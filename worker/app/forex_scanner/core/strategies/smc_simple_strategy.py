@@ -274,6 +274,28 @@ class SMCSimpleStrategy:
         self.rejection_tracking_enabled = getattr(smc_config, 'REJECTION_TRACKING_ENABLED', False)
         self.rejection_log_to_console = getattr(smc_config, 'REJECTION_LOG_TO_CONSOLE', False)
 
+        # v2.6.0: Pair-specific parameter overrides
+        self.pair_parameter_overrides = getattr(smc_config, 'PAIR_PARAMETER_OVERRIDES', {})
+
+    def _get_pair_param(self, epic: str, param_name: str, default_value):
+        """
+        Get parameter with pair-specific override if configured.
+
+        Args:
+            epic: The trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
+            param_name: The parameter name to look up (e.g., 'MIN_BODY_PERCENTAGE')
+            default_value: The default value to return if no override exists
+
+        Returns:
+            The overridden value if configured, otherwise the default value
+        """
+        config = self.pair_parameter_overrides.get(epic)
+        if config and config.get('enabled', False):
+            overrides = config.get('overrides', {})
+            if param_name in overrides:
+                return overrides[param_name]
+        return default_value
+
     def detect_signal(
         self,
         df_trigger: pd.DataFrame,
@@ -393,7 +415,7 @@ class SMCSimpleStrategy:
             # ================================================================
             self.logger.info(f"\n📈 TIER 2: Checking {self.trigger_tf} Swing Break")
 
-            swing_result = self._check_swing_break(df_trigger, direction, pip_value)
+            swing_result = self._check_swing_break(df_trigger, direction, pip_value, epic)
 
             if not swing_result['valid']:
                 self.logger.info(f"   ❌ {swing_result['reason']}")
@@ -437,7 +459,8 @@ class SMCSimpleStrategy:
                 swing_level,
                 opposite_swing,  # v1.6.0: Pass opposite swing for correct Fib calc
                 break_candle,
-                pip_value
+                pip_value,
+                epic  # v2.6.0: Pass epic for pair-specific overrides
             )
 
             if not pullback_result['valid']:
@@ -1001,7 +1024,7 @@ class SMCSimpleStrategy:
 
         return lookback
 
-    def _check_swing_break(self, df: pd.DataFrame, direction: str, pip_value: float) -> Dict:
+    def _check_swing_break(self, df: pd.DataFrame, direction: str, pip_value: float, epic: str = None) -> Dict:
         """
         TIER 2: Check swing break with body-close confirmation on trigger timeframe
 
@@ -1189,26 +1212,31 @@ class SMCSimpleStrategy:
                 volume_confirmed = break_vol > vol_sma * self.volume_multiplier
 
         # v1.8.0: Momentum quality filter - ensure strong breakout candle
+        # v2.6.0: Uses pair-specific overrides for EURUSD
         momentum_quality_passed = True
         if self.momentum_quality_enabled:
             # Calculate ATR for context
             atr = self._calculate_atr(df)
             if atr > 0:
                 # Check 1: Breakout candle range should be significant (> 50% of ATR)
+                # v2.6.0: Use pair-specific MIN_BREAKOUT_ATR_RATIO if configured
+                pair_min_atr_ratio = self._get_pair_param(epic, 'MIN_BREAKOUT_ATR_RATIO', self.min_breakout_atr_ratio)
                 break_range = break_high - break_low
-                if break_range < atr * self.min_breakout_atr_ratio:
+                if break_range < atr * pair_min_atr_ratio:
                     return {
                         'valid': False,
-                        'reason': f"Weak breakout candle (range {break_range/atr*100:.0f}% of ATR < {self.min_breakout_atr_ratio*100:.0f}%)"
+                        'reason': f"Weak breakout candle (range {break_range/atr*100:.0f}% of ATR < {pair_min_atr_ratio*100:.0f}%)"
                     }
 
                 # Check 2: Body should be majority of candle (> 60% = strong momentum)
+                # v2.6.0: Use pair-specific MIN_BODY_PERCENTAGE if configured
+                pair_min_body = self._get_pair_param(epic, 'MIN_BODY_PERCENTAGE', self.min_body_percentage)
                 break_body = abs(break_close - break_open)
                 body_percentage = break_body / break_range if break_range > 0 else 0
-                if body_percentage < self.min_body_percentage:
+                if body_percentage < pair_min_body:
                     return {
                         'valid': False,
-                        'reason': f"Weak breakout body ({body_percentage*100:.0f}% < {self.min_body_percentage*100:.0f}%)"
+                        'reason': f"Weak breakout body ({body_percentage*100:.0f}% < {pair_min_body*100:.0f}%)"
                     }
 
         # v1.6.0: Find the opposite swing for Fib calculation
@@ -1257,7 +1285,8 @@ class SMCSimpleStrategy:
         swing_level: float,
         opposite_swing: float,
         break_candle: Dict,
-        pip_value: float
+        pip_value: float,
+        epic: str = None
     ) -> Dict:
         """
         TIER 3: Check if price is in valid entry zone (pullback OR momentum continuation)
@@ -1345,13 +1374,18 @@ class SMCSimpleStrategy:
             self.logger.debug(f"   Current: {current_close:.5f}, depth={pullback_depth*100:.1f}%")
 
         # v1.8.0: Determine entry type and validate zone
+        # v2.6.0: Uses pair-specific overrides for EURUSD
         entry_type = 'PULLBACK'  # Default
+
+        # v2.6.0: Get pair-specific momentum min depth if configured
+        pair_momentum_min = self._get_pair_param(epic, 'MOMENTUM_MIN_DEPTH', self.momentum_min_depth)
 
         # Check for momentum continuation entry (price beyond break point)
         if pullback_depth < 0:
             if self.momentum_mode_enabled:
                 # v1.8.0: Allow momentum entries within configured range
-                if self.momentum_min_depth <= pullback_depth <= self.momentum_max_depth:
+                # v2.6.0: Use pair-specific momentum_min_depth
+                if pair_momentum_min <= pullback_depth <= self.momentum_max_depth:
                     entry_type = 'MOMENTUM'
                     # Momentum entries are not in "optimal" Fib zone
                     return {
@@ -1363,10 +1397,10 @@ class SMCSimpleStrategy:
                         'swing_range_pips': range_pips,
                         'reason': f"Momentum continuation ({pullback_depth*100:.1f}% beyond break)"
                     }
-                elif pullback_depth < self.momentum_min_depth:
+                elif pullback_depth < pair_momentum_min:
                     return {
                         'valid': False,
-                        'reason': f"Price too far beyond break ({pullback_depth*100:.1f}% < {self.momentum_min_depth*100:.0f}%)"
+                        'reason': f"Price too far beyond break ({pullback_depth*100:.1f}% < {pair_momentum_min*100:.0f}%)"
                     }
             else:
                 # Momentum mode disabled - reject prices beyond break
