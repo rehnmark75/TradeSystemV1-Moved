@@ -324,16 +324,37 @@ class MarketIntelligenceEngine:
                     'nearest_support': None,
                     'nearest_resistance': None
                 }
-            
+
+            # =========================================================
+            # ENHANCED REGIME DATA COLLECTION (v2.0)
+            # Collect ADX-based trending data for comparison analysis
+            # This runs in parallel with legacy detection (data only)
+            # =========================================================
+            enhanced_regime_data = {}
+            try:
+                # Check if enhanced data collection is enabled
+                try:
+                    from forex_scanner.configdata.market_intelligence_config import COLLECT_ENHANCED_REGIME_DATA
+                except ImportError:
+                    COLLECT_ENHANCED_REGIME_DATA = True
+
+                if COLLECT_ENHANCED_REGIME_DATA:
+                    enhanced_regime_data = self.collect_enhanced_regime_data(
+                        epic, recent_primary, recent_secondary, regime_scores
+                    )
+            except Exception as e:
+                self.logger.debug(f"Enhanced regime collection failed for {epic}: {e}")
+
             return {
                 'regime_scores': regime_scores,
                 'current_price': current_price,
                 'price_change_24h': price_change_24h,
                 'volatility_percentile': volatility_percentile,
                 'volume_analysis': volume_analysis,
-                'support_resistance': support_resistance
+                'support_resistance': support_resistance,
+                'enhanced_regime': enhanced_regime_data  # v2.0 data collection
             }
-            
+
         except Exception as e:
             self.logger.warning(f"Single pair analysis failed for {epic}: {e}")
             return self._get_fallback_analysis()
@@ -1299,16 +1320,442 @@ Regime Distribution: Trending({regime_counts['trending']}), Ranging({regime_coun
         try:
             if len(self.market_memory) < 3:
                 return 0.5
-            
+
             recent_regimes = [state.get('regime', 'unknown') for state in list(self.market_memory.values())[-5:]]
-            
+
             if not recent_regimes:
                 return 0.5
-            
+
             most_common = max(set(recent_regimes), key=recent_regimes.count)
             stability = recent_regimes.count(most_common) / len(recent_regimes)
-            
+
             return stability
-            
+
         except:
             return 0.5
+
+    # =========================================================================
+    # ENHANCED REGIME DETECTION v2.0 (2025-12-28)
+    # =========================================================================
+    # These methods implement ADX-based trending detection and separate
+    # volatility from directionality. Currently DISABLED - data collection only.
+    # =========================================================================
+
+    def _calculate_adx(self, df: pd.DataFrame, period: int = 14) -> Optional[float]:
+        """
+        Calculate Average Directional Index (ADX) for trend strength.
+
+        ADX measures trend strength regardless of direction:
+        - ADX < 20: Weak trend / ranging
+        - ADX 20-25: Emerging trend
+        - ADX 25-50: Strong trend
+        - ADX > 50: Very strong trend
+
+        Returns:
+            ADX value (0-100) or None if calculation fails
+        """
+        try:
+            if len(df) < period + 1:
+                return None
+
+            df_calc = df.copy()
+
+            # Calculate True Range
+            df_calc['tr'] = np.maximum(
+                df_calc['high'] - df_calc['low'],
+                np.maximum(
+                    abs(df_calc['high'] - df_calc['close'].shift(1)),
+                    abs(df_calc['low'] - df_calc['close'].shift(1))
+                )
+            )
+
+            # Calculate +DM and -DM
+            df_calc['up_move'] = df_calc['high'] - df_calc['high'].shift(1)
+            df_calc['down_move'] = df_calc['low'].shift(1) - df_calc['low']
+
+            df_calc['+dm'] = np.where(
+                (df_calc['up_move'] > df_calc['down_move']) & (df_calc['up_move'] > 0),
+                df_calc['up_move'],
+                0
+            )
+            df_calc['-dm'] = np.where(
+                (df_calc['down_move'] > df_calc['up_move']) & (df_calc['down_move'] > 0),
+                df_calc['down_move'],
+                0
+            )
+
+            # Smooth with EMA
+            df_calc['atr'] = df_calc['tr'].ewm(span=period, adjust=False).mean()
+            df_calc['+di'] = 100 * (df_calc['+dm'].ewm(span=period, adjust=False).mean() / df_calc['atr'])
+            df_calc['-di'] = 100 * (df_calc['-dm'].ewm(span=period, adjust=False).mean() / df_calc['atr'])
+
+            # Calculate DX
+            df_calc['dx'] = 100 * abs(df_calc['+di'] - df_calc['-di']) / (df_calc['+di'] + df_calc['-di'])
+
+            # Calculate ADX (smoothed DX)
+            df_calc['adx'] = df_calc['dx'].ewm(span=period, adjust=False).mean()
+
+            adx_value = df_calc['adx'].iloc[-1]
+
+            if pd.isna(adx_value):
+                return None
+
+            return float(adx_value)
+
+        except Exception as e:
+            self.logger.debug(f"ADX calculation error: {e}")
+            return None
+
+    def _calculate_enhanced_trend_score(self, df_primary: pd.DataFrame, df_secondary: pd.DataFrame) -> Dict:
+        """
+        Enhanced trend score using ADX + EMA alignment + momentum.
+
+        This separates trend strength (ADX) from volatility (ATR ratio).
+
+        Returns:
+            Dict with:
+            - trend_score: 0-1 score for trending vs ranging
+            - adx_value: Raw ADX value
+            - ema_alignment_score: EMA alignment contribution
+            - momentum_score: Price momentum contribution
+            - trend_direction: 'bullish', 'bearish', or 'neutral'
+        """
+        try:
+            # Import config
+            try:
+                from forex_scanner.configdata.market_intelligence_config import (
+                    ADX_TRENDING_THRESHOLD, ADX_STRONG_TREND_THRESHOLD, ADX_WEAK_TREND_THRESHOLD,
+                    EMA_ALIGNMENT_WEIGHT, ADX_WEIGHT, MOMENTUM_WEIGHT
+                )
+            except ImportError:
+                ADX_TRENDING_THRESHOLD = 25
+                ADX_STRONG_TREND_THRESHOLD = 40
+                ADX_WEAK_TREND_THRESHOLD = 20
+                EMA_ALIGNMENT_WEIGHT = 0.4
+                ADX_WEIGHT = 0.4
+                MOMENTUM_WEIGHT = 0.2
+
+            result = {
+                'trend_score': 0.5,
+                'adx_value': None,
+                'ema_alignment_score': 0.5,
+                'momentum_score': 0.5,
+                'trend_direction': 'neutral',
+                'is_trending': False,
+                'is_ranging': False
+            }
+
+            # 1. ADX-based trend strength (40% weight)
+            adx = self._calculate_adx(df_primary)
+            if adx is not None:
+                result['adx_value'] = adx
+
+                if adx >= ADX_STRONG_TREND_THRESHOLD:
+                    adx_score = 1.0
+                elif adx >= ADX_TRENDING_THRESHOLD:
+                    adx_score = 0.7 + (adx - ADX_TRENDING_THRESHOLD) / (ADX_STRONG_TREND_THRESHOLD - ADX_TRENDING_THRESHOLD) * 0.3
+                elif adx >= ADX_WEAK_TREND_THRESHOLD:
+                    adx_score = 0.4 + (adx - ADX_WEAK_TREND_THRESHOLD) / (ADX_TRENDING_THRESHOLD - ADX_WEAK_TREND_THRESHOLD) * 0.3
+                else:
+                    adx_score = adx / ADX_WEAK_TREND_THRESHOLD * 0.4
+            else:
+                adx_score = 0.5
+
+            # 2. EMA alignment (40% weight)
+            ema_score = 0.5
+            trend_direction = 'neutral'
+
+            try:
+                if all(col in df_secondary.columns for col in ['ema_9', 'ema_21']):
+                    latest = df_secondary.iloc[-1]
+
+                    if 'ema_50' in df_secondary.columns:
+                        # Check 9/21/50 alignment
+                        if latest['ema_9'] > latest['ema_21'] > latest['ema_50']:
+                            ema_score = 1.0
+                            trend_direction = 'bullish'
+                        elif latest['ema_9'] < latest['ema_21'] < latest['ema_50']:
+                            ema_score = 1.0
+                            trend_direction = 'bearish'
+                        elif latest['ema_9'] > latest['ema_21']:
+                            ema_score = 0.6
+                            trend_direction = 'bullish'
+                        elif latest['ema_9'] < latest['ema_21']:
+                            ema_score = 0.6
+                            trend_direction = 'bearish'
+                        else:
+                            ema_score = 0.3
+                    else:
+                        # Just 9/21
+                        if latest['ema_9'] > latest['ema_21'] * 1.001:  # 0.1% buffer
+                            ema_score = 0.7
+                            trend_direction = 'bullish'
+                        elif latest['ema_9'] < latest['ema_21'] * 0.999:
+                            ema_score = 0.7
+                            trend_direction = 'bearish'
+                        else:
+                            ema_score = 0.3
+            except Exception as e:
+                self.logger.debug(f"EMA alignment calc error: {e}")
+
+            result['ema_alignment_score'] = ema_score
+            result['trend_direction'] = trend_direction
+
+            # 3. Price momentum (20% weight)
+            momentum_score = 0.5
+            try:
+                price_change = (df_primary['close'].iloc[-1] - df_primary['close'].iloc[0]) / df_primary['close'].iloc[0]
+                # Normalize: 1% move = 0.5 score, 2% move = 1.0 score
+                momentum_score = min(1.0, abs(price_change) * 50)
+            except:
+                pass
+
+            result['momentum_score'] = momentum_score
+
+            # Combine scores with weights
+            combined_score = (
+                adx_score * ADX_WEIGHT +
+                ema_score * EMA_ALIGNMENT_WEIGHT +
+                momentum_score * MOMENTUM_WEIGHT
+            )
+
+            result['trend_score'] = combined_score
+            result['is_trending'] = combined_score >= 0.55
+            result['is_ranging'] = combined_score < 0.45
+
+            return result
+
+        except Exception as e:
+            self.logger.debug(f"Enhanced trend score error: {e}")
+            return {
+                'trend_score': 0.5,
+                'adx_value': None,
+                'ema_alignment_score': 0.5,
+                'momentum_score': 0.5,
+                'trend_direction': 'neutral',
+                'is_trending': False,
+                'is_ranging': False
+            }
+
+    def _calculate_enhanced_volatility_score(self, df: pd.DataFrame) -> Dict:
+        """
+        Enhanced volatility scoring that's SEPARATE from structure regime.
+
+        Volatility is orthogonal to trending/ranging - a market can be:
+        - High volatility trending
+        - Low volatility trending
+        - High volatility ranging
+        - Low volatility ranging
+
+        Returns:
+            Dict with:
+            - volatility_score: 0-1 (0=low, 1=high)
+            - volatility_regime: 'low', 'medium', 'high'
+            - atr_ratio: Current ATR vs baseline
+            - volatility_percentile: Where current vol sits historically
+        """
+        try:
+            if len(df) < 20:
+                return {
+                    'volatility_score': 0.5,
+                    'volatility_regime': 'medium',
+                    'atr_ratio': 1.0,
+                    'volatility_percentile': 50.0
+                }
+
+            df_calc = df.copy()
+
+            # Calculate ATR
+            df_calc['tr'] = np.maximum(
+                df_calc['high'] - df_calc['low'],
+                np.maximum(
+                    abs(df_calc['high'] - df_calc['close'].shift(1)),
+                    abs(df_calc['low'] - df_calc['close'].shift(1))
+                )
+            )
+
+            recent_atr = df_calc['tr'].tail(14).mean()
+            baseline_atr = df_calc['tr'].tail(50).mean()
+
+            atr_ratio = recent_atr / baseline_atr if baseline_atr > 0 else 1.0
+
+            # Calculate percentile
+            atr_series = df_calc['tr'].rolling(14).mean().dropna()
+            if len(atr_series) >= 10:
+                volatility_percentile = stats.percentileofscore(atr_series, recent_atr)
+            else:
+                volatility_percentile = 50.0
+
+            # Convert to 0-1 score
+            # ATR ratio of 1.0 = baseline = 0.5 score
+            # ATR ratio of 1.5 = 50% above baseline = ~0.75 score
+            # ATR ratio of 0.5 = 50% below baseline = ~0.25 score
+            volatility_score = min(1.0, max(0.0, 0.5 + (atr_ratio - 1.0) * 0.5))
+
+            # Determine regime
+            if volatility_score > 0.65:
+                volatility_regime = 'high'
+            elif volatility_score < 0.35:
+                volatility_regime = 'low'
+            else:
+                volatility_regime = 'medium'
+
+            return {
+                'volatility_score': volatility_score,
+                'volatility_regime': volatility_regime,
+                'atr_ratio': float(atr_ratio),
+                'volatility_percentile': float(volatility_percentile)
+            }
+
+        except Exception as e:
+            self.logger.debug(f"Enhanced volatility score error: {e}")
+            return {
+                'volatility_score': 0.5,
+                'volatility_regime': 'medium',
+                'atr_ratio': 1.0,
+                'volatility_percentile': 50.0
+            }
+
+    def calculate_enhanced_regime(self, df_primary: pd.DataFrame, df_secondary: pd.DataFrame) -> Dict:
+        """
+        Calculate enhanced regime using ADX-based trending + separate volatility.
+
+        This is the main entry point for v2.0 regime detection.
+        Currently used for DATA COLLECTION ONLY - not affecting trading decisions.
+
+        Returns:
+            Dict with enhanced regime analysis:
+            - structure_regime: 'trending', 'ranging', 'breakout', 'reversal'
+            - volatility_regime: 'low', 'medium', 'high'
+            - combined_regime: e.g., 'high_volatility_trending'
+            - trend_details: ADX, EMA alignment, momentum scores
+            - volatility_details: ATR ratio, percentile
+            - legacy_comparison: How this differs from legacy detection
+        """
+        try:
+            # Calculate enhanced scores
+            trend_data = self._calculate_enhanced_trend_score(df_primary, df_secondary)
+            volatility_data = self._calculate_enhanced_volatility_score(df_primary)
+
+            # Determine structure regime (trending vs ranging)
+            if trend_data['trend_score'] >= 0.55:
+                structure_regime = 'trending'
+            elif trend_data['trend_score'] <= 0.45:
+                structure_regime = 'ranging'
+            else:
+                structure_regime = 'transitioning'
+
+            # Check for breakout (high volume + compression release)
+            breakout_score = self._calculate_breakout_score(df_primary, df_secondary)
+            if breakout_score > 0.6 and volatility_data['volatility_score'] > 0.6:
+                structure_regime = 'breakout'
+
+            # Check for reversal
+            reversal_score = self._calculate_reversal_score(df_primary, df_secondary)
+            if reversal_score > 0.7:
+                structure_regime = 'reversal'
+
+            # Combined regime label
+            combined_regime = f"{volatility_data['volatility_regime']}_volatility_{structure_regime}"
+
+            return {
+                'structure_regime': structure_regime,
+                'volatility_regime': volatility_data['volatility_regime'],
+                'combined_regime': combined_regime,
+                'trend_details': {
+                    'trend_score': trend_data['trend_score'],
+                    'adx_value': trend_data['adx_value'],
+                    'ema_alignment': trend_data['ema_alignment_score'],
+                    'momentum': trend_data['momentum_score'],
+                    'direction': trend_data['trend_direction']
+                },
+                'volatility_details': {
+                    'volatility_score': volatility_data['volatility_score'],
+                    'atr_ratio': volatility_data['atr_ratio'],
+                    'percentile': volatility_data['volatility_percentile']
+                },
+                'scores': {
+                    'trending': trend_data['trend_score'],
+                    'ranging': 1 - trend_data['trend_score'],
+                    'breakout': breakout_score,
+                    'reversal': reversal_score,
+                    'high_volatility': volatility_data['volatility_score'],
+                    'low_volatility': 1 - volatility_data['volatility_score']
+                }
+            }
+
+        except Exception as e:
+            self.logger.warning(f"Enhanced regime calculation error: {e}")
+            return {
+                'structure_regime': 'unknown',
+                'volatility_regime': 'medium',
+                'combined_regime': 'medium_volatility_unknown',
+                'trend_details': {},
+                'volatility_details': {},
+                'scores': {}
+            }
+
+    def collect_enhanced_regime_data(self, epic: str, df_primary: pd.DataFrame, df_secondary: pd.DataFrame, legacy_scores: Dict) -> Dict:
+        """
+        Collect enhanced regime data for comparison with legacy detection.
+
+        This method is called during normal scanning to build up a dataset
+        of enhanced vs legacy regime detection for analysis.
+
+        Args:
+            epic: Trading pair epic
+            df_primary: Primary timeframe data
+            df_secondary: Secondary timeframe data
+            legacy_scores: The legacy regime scores
+
+        Returns:
+            Dict with both legacy and enhanced regime analysis
+        """
+        try:
+            # Import config to check if collection is enabled
+            try:
+                from forex_scanner.configdata.market_intelligence_config import (
+                    COLLECT_ENHANCED_REGIME_DATA, LOG_REGIME_COMPARISON
+                )
+            except ImportError:
+                COLLECT_ENHANCED_REGIME_DATA = True
+                LOG_REGIME_COMPARISON = True
+
+            if not COLLECT_ENHANCED_REGIME_DATA:
+                return {}
+
+            # Calculate enhanced regime
+            enhanced = self.calculate_enhanced_regime(df_primary, df_secondary)
+
+            # Get legacy dominant regime
+            legacy_dominant = max(legacy_scores, key=legacy_scores.get)
+            legacy_confidence = legacy_scores[legacy_dominant]
+
+            comparison = {
+                'epic': epic,
+                'timestamp': datetime.now().isoformat(),
+                'legacy': {
+                    'dominant_regime': legacy_dominant,
+                    'confidence': legacy_confidence,
+                    'scores': legacy_scores
+                },
+                'enhanced': enhanced,
+                'differs': legacy_dominant != enhanced['structure_regime'],
+                'adx_available': enhanced['trend_details'].get('adx_value') is not None
+            }
+
+            # Log if regimes differ
+            if LOG_REGIME_COMPARISON and comparison['differs']:
+                clean_epic = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                adx = enhanced['trend_details'].get('adx_value', 'N/A')
+                self.logger.info(
+                    f"🔬 REGIME COMPARISON {clean_epic}: "
+                    f"Legacy={legacy_dominant} ({legacy_confidence:.1%}) vs "
+                    f"Enhanced={enhanced['structure_regime']} (ADX={adx})"
+                )
+
+            return comparison
+
+        except Exception as e:
+            self.logger.debug(f"Enhanced regime data collection error: {e}")
+            return {}

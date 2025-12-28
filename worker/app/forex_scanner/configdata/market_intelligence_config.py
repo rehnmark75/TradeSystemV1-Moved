@@ -344,10 +344,56 @@ MARKET_INTELLIGENCE_BLOCK_UNSUITABLE_REGIMES = True   # RE-ENABLED for quality f
 # v2.3.2: Market Bias Filter - Block counter-trend trades when directional consensus is high
 # Trade 1586 analysis: BUY in bearish market (1.0 consensus) hit SL immediately
 # This filter BLOCKS trades that go against strong market momentum
-MARKET_BIAS_FILTER_ENABLED = True             # Enable blocking counter-trend trades
+#
+# v2.3.3 (2025-12-28): DISABLED - Market Intelligence Analysis shows:
+#   - Counter-trend trades: 51.5% win rate, -$1,478 P&L
+#   - Aligned trades: 47.6% win rate, -$4,297 P&L
+#   - Counter-trend OUTPERFORMS aligned by 3.9% win rate and $2,819 P&L
+#   - The market_bias detection is inverted or lagging
+#   - Keeping MI data collection active for further analysis
+#   - Will re-enable after fixing regime detection algorithms
+MARKET_BIAS_FILTER_ENABLED = False            # DISABLED - counter-trend outperforms aligned
 MARKET_BIAS_MIN_CONSENSUS = 0.70              # Block when directional_consensus >= 70%
                                                # Lower = more aggressive filtering
                                                # Higher = only block very strong trends
+
+# =============================================================================
+# ENHANCED REGIME DETECTION v2.0 (2025-12-28)
+# =============================================================================
+# Problem Analysis:
+#   - High volatility dominates 83.5% of the time (ATR-based)
+#   - Trending detection has 27.3% win rate (lagging indicator)
+#   - Counter-trend trades outperform aligned (51.5% vs 47.6%)
+#
+# Solution: Separate volatility from directionality, add ADX-based trending
+#
+# DISABLED BY DEFAULT - Only collecting data for analysis
+
+# Enable enhanced regime detection (replaces legacy logic)
+ENHANCED_REGIME_DETECTION_ENABLED = False   # DISABLED - data collection only
+
+# ADX-based trending detection thresholds
+ADX_TRENDING_THRESHOLD = 25          # ADX > 25 = trending market
+ADX_STRONG_TREND_THRESHOLD = 40      # ADX > 40 = strong trend
+ADX_WEAK_TREND_THRESHOLD = 20        # ADX < 20 = ranging/consolidating
+
+# EMA alignment weight in trending score
+EMA_ALIGNMENT_WEIGHT = 0.4           # 40% weight for EMA alignment
+ADX_WEIGHT = 0.4                     # 40% weight for ADX value
+MOMENTUM_WEIGHT = 0.2                # 20% weight for momentum
+
+# Volatility-Directionality separation
+SEPARATE_VOLATILITY_FROM_STRUCTURE = True   # Treat volatility as orthogonal
+VOLATILITY_AS_MODIFIER = True               # Use volatility to modify, not classify
+
+# Structure regime thresholds (when enhanced detection is enabled)
+TRENDING_SCORE_THRESHOLD = 0.55      # Score > 0.55 = trending
+RANGING_SCORE_THRESHOLD = 0.55       # Inverse trending > 0.55 = ranging
+BREAKOUT_SCORE_THRESHOLD = 0.60      # Score > 0.60 = breakout potential
+
+# Data collection for analysis (always enabled)
+COLLECT_ENHANCED_REGIME_DATA = True  # Collect new regime scores for comparison
+LOG_REGIME_COMPARISON = True         # Log old vs new regime detection
 
 # =============================================================================
 # INTELLIGENCE ANALYSIS CONFIGURATION
