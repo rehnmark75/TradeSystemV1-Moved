@@ -707,36 +707,94 @@ class IntelligentForexScanner:
             import traceback
             self.logger.debug(f"   Traceback: {traceback.format_exc()}")
 
+    def _calculate_boundary_aligned_sleep(self, scan_duration: float) -> float:
+        """
+        Calculate sleep time to align with 15m candle boundaries.
+
+        When SCAN_ALIGN_TO_BOUNDARIES is enabled, scans are timed to occur
+        shortly after 15m candle closes (:00, :15, :30, :45 + offset).
+
+        Returns:
+            float: Seconds to sleep before next scan
+        """
+        from datetime import datetime, timedelta
+
+        offset_seconds = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
+
+        now = datetime.utcnow()
+        current_minute = now.minute
+        current_second = now.second
+
+        # Find next 15m boundary (0, 15, 30, 45)
+        next_boundary_minute = ((current_minute // 15) + 1) * 15 % 60
+
+        # Calculate time to next boundary
+        if next_boundary_minute == 0 and current_minute >= 45:
+            # Boundary is at next hour
+            next_boundary = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        else:
+            next_boundary = now.replace(minute=next_boundary_minute, second=0, microsecond=0)
+            if next_boundary < now:
+                next_boundary += timedelta(hours=1)
+
+        # Add offset (scan after boundary to allow data to settle)
+        target_scan_time = next_boundary + timedelta(seconds=offset_seconds)
+
+        # Calculate sleep time
+        sleep_seconds = (target_scan_time - now).total_seconds()
+
+        # If we're already past the target time for this boundary, calculate for next
+        if sleep_seconds < 0:
+            sleep_seconds += 15 * 60  # Add 15 minutes
+
+        # Log boundary alignment info
+        self.logger.debug(f"⏰ Boundary scan: next at {target_scan_time.strftime('%H:%M:%S')} UTC (sleeping {sleep_seconds:.0f}s)")
+
+        return max(10, sleep_seconds)  # Minimum 10 seconds between scans
+
     def start_continuous_scanning(self):
         """Start continuous scanning"""
         self.running = True
+
+        # Check if boundary-aligned scanning is enabled
+        boundary_aligned = getattr(config, 'SCAN_ALIGN_TO_BOUNDARIES', False)
+        use_1m_base = getattr(config, 'USE_1M_BASE_SYNTHESIS', False)
+
         self.logger.info(f"🚀 Starting continuous scanning")
         self.logger.info(f"   Interval: {self.scan_interval}s")
         self.logger.info(f"   Epics: {len(self.epic_list)}")
         self.logger.info(f"   SignalProcessor: {'✅ Active' if self.use_signal_processor else '❌ Inactive'}")
-        
+        self.logger.info(f"   1m Base Synthesis: {'✅ Enabled' if use_1m_base else '❌ Disabled (5m base)'}")
+        self.logger.info(f"   Boundary Scanning: {'✅ Enabled' if boundary_aligned else '❌ Disabled'}")
+
         try:
             while self.running:
                 scan_start = time.time()
-                
+
                 # Perform scan
                 signals = self.scan_once('live')
-                
+
                 if signals:
                     self.logger.info(f"📤 {len(signals)} signals detected")
-                    
+
                     # Log Smart Money summary if available
                     sm_validated = sum(1 for s in signals if s.get('smart_money_validated'))
                     if sm_validated > 0:
                         self.logger.info(f"🧠 Smart Money validated: {sm_validated}/{len(signals)}")
-                
-                # Calculate sleep time
+
+                # Calculate sleep time based on mode
                 scan_duration = time.time() - scan_start
-                sleep_time = max(0, self.scan_interval - scan_duration)
-                
+
+                if boundary_aligned:
+                    # Boundary-aligned scanning: sync with 15m candle closes
+                    sleep_time = self._calculate_boundary_aligned_sleep(scan_duration)
+                else:
+                    # Standard fixed interval scanning
+                    sleep_time = max(0, self.scan_interval - scan_duration)
+
                 if sleep_time > 0:
                     time.sleep(sleep_time)
-                
+
         except KeyboardInterrupt:
             self.logger.info("🛑 Scanning stopped by user")
         except Exception as e:

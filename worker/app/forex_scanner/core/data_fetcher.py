@@ -1627,6 +1627,415 @@ class DataFetcher:
             self.logger.error(f"❌ Error in 4H resampling: {e}")
             return df
 
+    # =========================================================================
+    # 1M-BASED RESAMPLING FUNCTIONS
+    # =========================================================================
+    # These functions synthesize higher timeframes from 1-minute base candles.
+    # Benefits over 5m base:
+    # - Better gap resilience (1 missing = 6.7% vs 33% data loss)
+    # - Fresher data (max 1m stale vs 5m)
+    # - Precise boundary detection (1m granularity)
+    # Enable via config.USE_1M_BASE_SYNTHESIS = True
+    # =========================================================================
+
+    def _resample_to_15m_from_1m(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Synthesize 15m candles from 1m base data (15 x 1m = 1 x 15m)
+
+        This provides better gap resilience than 5m-based synthesis:
+        - 5m base: 1 missing candle = 33% data loss
+        - 1m base: 1 missing candle = 6.7% data loss
+        """
+        try:
+            if df is None or len(df) == 0:
+                self.logger.warning("⚠️ Empty dataframe provided for 1m→15m resampling")
+                return df
+
+            if len(df) < 15:
+                self.logger.warning("⚠️ Insufficient 1m data for 15m resampling (need at least 15 bars)")
+                return df
+
+            if 'start_time' not in df.columns:
+                self.logger.error("❌ Missing 'start_time' column for resampling")
+                return df
+
+            df = df.sort_values('start_time')
+            df_indexed = df.set_index('start_time')
+
+            # Resample 1m → 15m
+            df_15m = df_indexed.resample(
+                '15min',
+                label='left',
+                closed='left',
+                origin='epoch'
+            ).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'ltv': 'sum'
+            })
+
+            # Calculate completeness for each 15m period
+            expected_candles = 15  # 15 x 1m candles per 15m period
+            completeness_data = []
+
+            for timestamp in df_15m.index:
+                period_start = timestamp
+                period_end = timestamp + pd.Timedelta(minutes=15)
+
+                period_candles = df_indexed[
+                    (df_indexed.index >= period_start) &
+                    (df_indexed.index < period_end)
+                ]
+
+                actual_candles = len(period_candles)
+                completeness_data.append({
+                    'period_start': timestamp,
+                    'actual_1m_candles': actual_candles,
+                    'expected_1m_candles': expected_candles,
+                    'completeness_ratio': actual_candles / expected_candles,
+                    'is_complete': actual_candles == expected_candles,
+                    'missing_minutes': expected_candles - actual_candles
+                })
+
+            completeness_df = pd.DataFrame(completeness_data).set_index('period_start')
+            df_15m = df_15m.join(completeness_df)
+
+            # Add trading confidence score
+            def calculate_trading_confidence(row):
+                base_score = row['completeness_ratio'] * 100
+                try:
+                    current_time = pd.Timestamp.now()
+                    if row.name.tz is not None:
+                        if current_time.tz is None:
+                            current_time = current_time.tz_localize('UTC')
+                        current_time = current_time.tz_convert(row.name.tz)
+                    elif current_time.tz is not None:
+                        current_time = current_time.tz_localize(None)
+
+                    if current_time - row.name < pd.Timedelta(minutes=20):
+                        if not row['is_complete']:
+                            base_score *= 0.8
+                except Exception:
+                    pass
+
+                if pd.notna(row['close']):
+                    base_score = min(100, base_score * 1.05)
+
+                return round(base_score, 1)
+
+            df_15m['trading_confidence'] = df_15m.apply(calculate_trading_confidence, axis=1)
+            df_15m['suitable_for_entry'] = df_15m['trading_confidence'] >= 90.0
+            df_15m['suitable_for_analysis'] = df_15m['trading_confidence'] >= 80.0
+            df_15m['data_warning'] = df_15m['trading_confidence'] < 85.0
+
+            df_15m = df_15m.dropna(subset=['open', 'high', 'low', 'close'], how='all')
+            df_15m_reset = df_15m.reset_index()
+
+            # Log quality metrics
+            total_candles = len(df_15m_reset)
+            if total_candles > 0:
+                complete_candles = len(df_15m_reset[df_15m_reset['is_complete']])
+                high_confidence = len(df_15m_reset[df_15m_reset['trading_confidence'] >= 90])
+                self.logger.debug(f"✅ 15m from 1m synthesis: {complete_candles}/{total_candles} complete ({complete_candles/total_candles*100:.1f}%), {high_confidence} high-confidence")
+
+            return df_15m_reset
+
+        except Exception as e:
+            self.logger.error(f"❌ Error in 1m→15m resampling: {e}")
+            return df
+
+    def _resample_to_60m_from_1m(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Synthesize 1h candles from 1m base data (60 x 1m = 1 x 1h)
+        """
+        try:
+            if df is None or len(df) == 0:
+                self.logger.warning("⚠️ Empty dataframe provided for 1m→60m resampling")
+                return df
+
+            if len(df) < 60:
+                self.logger.warning("⚠️ Insufficient 1m data for 60m resampling (need at least 60 bars)")
+                return df
+
+            if 'start_time' not in df.columns:
+                self.logger.error("❌ Missing 'start_time' column for resampling")
+                return df
+
+            df = df.sort_values('start_time')
+            df_indexed = df.set_index('start_time')
+
+            # Resample 1m → 60m
+            df_60m = df_indexed.resample(
+                '60min',
+                label='left',
+                closed='left',
+                origin='epoch'
+            ).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'ltv': 'sum'
+            })
+
+            # Calculate completeness
+            expected_candles = 60
+            completeness_data = []
+
+            for timestamp in df_60m.index:
+                period_start = timestamp
+                period_end = timestamp + pd.Timedelta(hours=1)
+
+                period_candles = df_indexed[
+                    (df_indexed.index >= period_start) &
+                    (df_indexed.index < period_end)
+                ]
+
+                actual_candles = len(period_candles)
+                completeness_data.append({
+                    'period_start': timestamp,
+                    'actual_1m_candles': actual_candles,
+                    'expected_1m_candles': expected_candles,
+                    'completeness_ratio': actual_candles / expected_candles,
+                    'is_complete': actual_candles >= 57,  # Allow 95% complete
+                    'missing_minutes': expected_candles - actual_candles
+                })
+
+            completeness_df = pd.DataFrame(completeness_data).set_index('period_start')
+            df_60m = df_60m.join(completeness_df)
+
+            df_60m['trading_confidence'] = (df_60m['completeness_ratio'] * 100).round(1)
+            df_60m['suitable_for_analysis'] = df_60m['trading_confidence'] >= 80.0
+
+            df_60m = df_60m.dropna(subset=['open', 'high', 'low', 'close'], how='all')
+            df_60m_reset = df_60m.reset_index()
+
+            total_candles = len(df_60m_reset)
+            if total_candles > 0:
+                complete_candles = len(df_60m_reset[df_60m_reset['is_complete']])
+                self.logger.debug(f"✅ 60m from 1m synthesis: {complete_candles}/{total_candles} complete ({complete_candles/total_candles*100:.1f}%)")
+
+            return df_60m_reset
+
+        except Exception as e:
+            self.logger.error(f"❌ Error in 1m→60m resampling: {e}")
+            return df
+
+    def _resample_to_4h_from_1m(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Synthesize 4h candles from 1m base data (240 x 1m = 1 x 4h)
+        """
+        try:
+            if df is None or len(df) == 0:
+                self.logger.warning("⚠️ Empty dataframe provided for 1m→4h resampling")
+                return df
+
+            if len(df) < 240:
+                self.logger.warning("⚠️ Insufficient 1m data for 4h resampling (need at least 240 bars)")
+                return df
+
+            if 'start_time' not in df.columns:
+                self.logger.error("❌ Missing 'start_time' column for resampling")
+                return df
+
+            df = df.sort_values('start_time')
+            df_indexed = df.set_index('start_time')
+
+            # Resample 1m → 4h
+            df_4h = df_indexed.resample(
+                '4h',
+                label='left',
+                closed='left',
+                origin='epoch'
+            ).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'ltv': 'sum'
+            })
+
+            # Calculate completeness
+            expected_candles = 240
+            completeness_data = []
+
+            for timestamp in df_4h.index:
+                period_start = timestamp
+                period_end = timestamp + pd.Timedelta(hours=4)
+
+                period_candles = df_indexed[
+                    (df_indexed.index >= period_start) &
+                    (df_indexed.index < period_end)
+                ]
+
+                actual_candles = len(period_candles)
+                completeness_data.append({
+                    'period_start': timestamp,
+                    'actual_1m_candles': actual_candles,
+                    'expected_1m_candles': expected_candles,
+                    'completeness_ratio': actual_candles / expected_candles,
+                    'is_complete': actual_candles >= 228,  # Allow 95% complete
+                    'missing_minutes': expected_candles - actual_candles
+                })
+
+            completeness_df = pd.DataFrame(completeness_data).set_index('period_start')
+            df_4h = df_4h.join(completeness_df)
+
+            df_4h['trading_confidence'] = (df_4h['completeness_ratio'] * 100).round(1)
+            df_4h['suitable_for_analysis'] = df_4h['trading_confidence'] >= 80.0
+
+            df_4h = df_4h.dropna(subset=['open', 'high', 'low', 'close'], how='all')
+            df_4h_reset = df_4h.reset_index()
+
+            total_candles = len(df_4h_reset)
+            if total_candles > 0:
+                complete_candles = len(df_4h_reset[df_4h_reset['is_complete']])
+                self.logger.debug(f"✅ 4h from 1m synthesis: {complete_candles}/{total_candles} complete ({complete_candles/total_candles*100:.1f}%)")
+
+            return df_4h_reset
+
+        except Exception as e:
+            self.logger.error(f"❌ Error in 1m→4h resampling: {e}")
+            return df
+
+    def _resample_to_5m_from_1m(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Synthesize 5m candles from 1m base data (5 x 1m = 1 x 5m)
+
+        This allows complete synthesis chain: 1m → 5m → (validation against streamed 5m)
+        """
+        try:
+            if df is None or len(df) == 0:
+                self.logger.warning("⚠️ Empty dataframe provided for 1m→5m resampling")
+                return df
+
+            if len(df) < 5:
+                self.logger.warning("⚠️ Insufficient 1m data for 5m resampling (need at least 5 bars)")
+                return df
+
+            if 'start_time' not in df.columns:
+                self.logger.error("❌ Missing 'start_time' column for resampling")
+                return df
+
+            df = df.sort_values('start_time')
+            df_indexed = df.set_index('start_time')
+
+            # Resample 1m → 5m
+            df_5m = df_indexed.resample(
+                '5min',
+                label='left',
+                closed='left',
+                origin='epoch'
+            ).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'ltv': 'sum'
+            })
+
+            # Calculate completeness
+            expected_candles = 5
+            completeness_data = []
+
+            for timestamp in df_5m.index:
+                period_start = timestamp
+                period_end = timestamp + pd.Timedelta(minutes=5)
+
+                period_candles = df_indexed[
+                    (df_indexed.index >= period_start) &
+                    (df_indexed.index < period_end)
+                ]
+
+                actual_candles = len(period_candles)
+                completeness_data.append({
+                    'period_start': timestamp,
+                    'actual_1m_candles': actual_candles,
+                    'expected_1m_candles': expected_candles,
+                    'completeness_ratio': actual_candles / expected_candles,
+                    'is_complete': actual_candles == expected_candles,
+                    'missing_minutes': expected_candles - actual_candles
+                })
+
+            completeness_df = pd.DataFrame(completeness_data).set_index('period_start')
+            df_5m = df_5m.join(completeness_df)
+
+            df_5m['trading_confidence'] = (df_5m['completeness_ratio'] * 100).round(1)
+            df_5m['suitable_for_analysis'] = df_5m['trading_confidence'] >= 80.0
+
+            df_5m = df_5m.dropna(subset=['open', 'high', 'low', 'close'], how='all')
+            df_5m_reset = df_5m.reset_index()
+
+            return df_5m_reset
+
+        except Exception as e:
+            self.logger.error(f"❌ Error in 1m→5m resampling: {e}")
+            return df
+
+    def get_candle_boundary_info(self, timeframe: str = '15m') -> dict:
+        """
+        Get information about candle boundary timing for scan alignment.
+
+        15m boundaries: :00, :15, :30, :45 minutes past hour
+        1h boundaries: :00 minutes past hour
+        4h boundaries: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
+
+        Returns:
+            dict: {
+                'is_at_boundary': bool,      # Within offset of boundary
+                'minutes_since_close': int,  # Minutes since last boundary
+                'seconds_until_next': int,   # Seconds until next boundary
+                'last_boundary': datetime,   # Last candle close time
+                'next_boundary': datetime    # Next candle close time
+            }
+        """
+        from datetime import datetime, timedelta
+
+        now = datetime.utcnow()
+        current_minute = now.minute
+        current_hour = now.hour
+
+        if timeframe == '15m':
+            # 15m boundaries at :00, :15, :30, :45
+            boundary_minute = (current_minute // 15) * 15
+            last_boundary = now.replace(minute=boundary_minute, second=0, microsecond=0)
+            next_boundary = last_boundary + timedelta(minutes=15)
+
+        elif timeframe == '1h' or timeframe == '60m':
+            # 1h boundaries at :00
+            last_boundary = now.replace(minute=0, second=0, microsecond=0)
+            next_boundary = last_boundary + timedelta(hours=1)
+
+        elif timeframe == '4h':
+            # 4h boundaries at 00:00, 04:00, 08:00, 12:00, 16:00, 20:00
+            boundary_hour = (current_hour // 4) * 4
+            last_boundary = now.replace(hour=boundary_hour, minute=0, second=0, microsecond=0)
+            next_boundary = last_boundary + timedelta(hours=4)
+
+        else:
+            # Default to 15m
+            boundary_minute = (current_minute // 15) * 15
+            last_boundary = now.replace(minute=boundary_minute, second=0, microsecond=0)
+            next_boundary = last_boundary + timedelta(minutes=15)
+
+        minutes_since_close = (now - last_boundary).total_seconds() / 60
+        seconds_until_next = (next_boundary - now).total_seconds()
+
+        # Consider "at boundary" if within configured offset
+        from forex_scanner import config
+        offset = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
+        is_at_boundary = minutes_since_close * 60 <= offset
+
+        return {
+            'is_at_boundary': is_at_boundary,
+            'minutes_since_close': int(minutes_since_close),
+            'seconds_until_next': int(seconds_until_next),
+            'last_boundary': last_boundary,
+            'next_boundary': next_boundary
+        }
+
     def should_trade_on_candle(self, candle_row) -> Dict[str, any]:
         """
         Determine if a 15m candle is suitable for trading decisions
@@ -1769,26 +2178,47 @@ class DataFetcher:
         # Calculate lookback time in UTC (database time)
         since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
         
-        # FIXED: Handle 15m, 60m, and 4h data by resampling 5m data if needed
-        if timeframe == '15m':
-            source_tf = 5  # Always fetch 5m data for 15m resampling
-            # Increase lookback to ensure we have enough 5m data
-            # 15m needs 3x more 5m bars, so increase lookback accordingly
-            adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
-            since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
-        elif timeframe == '1h':
-            source_tf = 5  # Always fetch 5m data for 60m resampling
-            # Increase lookback to ensure we have enough 5m data
-            # 60m needs 12x more 5m bars, so increase lookback accordingly
-            adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
-            since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
-        elif timeframe == '4h':
-            source_tf = 5  # Always fetch 5m data for 4h resampling
-            # 4h needs 48x more 5m bars (48 x 5m = 4h), increase lookback accordingly
-            adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
-            since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+        # Determine source timeframe based on synthesis mode
+        # USE_1M_BASE_SYNTHESIS: Use 1m candles as base (better gap resilience)
+        # Default (False): Use 5m candles as base (current behavior)
+        use_1m_base = getattr(config, 'USE_1M_BASE_SYNTHESIS', False)
+
+        if use_1m_base:
+            # 1M BASE SYNTHESIS MODE
+            # Benefits: 1 gap = 6.7% loss vs 33% with 5m base, fresher data
+            if timeframe in ('15m', '1h', '4h', '5m'):
+                source_tf = 1  # Fetch 1m data for all resampling
+                # Calculate lookback multiplier based on target timeframe
+                # 15m needs 15x more 1m bars, 1h needs 60x, 4h needs 240x, 5m needs 5x
+                multipliers = {'5m': 5, '15m': 15, '1h': 60, '4h': 240}
+                base_multiplier = multipliers.get(timeframe, 15)
+                # Add 20% buffer for resampling edge cases
+                adjusted_lookback = lookback_hours * 1.2
+                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+                self.logger.debug(f"📊 Using 1m base synthesis for {timeframe} (source_tf=1)")
+            else:
+                source_tf = tf_minutes
         else:
-            source_tf = tf_minutes
+            # 5M BASE SYNTHESIS MODE (default - current behavior)
+            if timeframe == '15m':
+                source_tf = 5  # Always fetch 5m data for 15m resampling
+                # Increase lookback to ensure we have enough 5m data
+                # 15m needs 3x more 5m bars, so increase lookback accordingly
+                adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
+                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+            elif timeframe == '1h':
+                source_tf = 5  # Always fetch 5m data for 60m resampling
+                # Increase lookback to ensure we have enough 5m data
+                # 60m needs 12x more 5m bars, so increase lookback accordingly
+                adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
+                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+            elif timeframe == '4h':
+                source_tf = 5  # Always fetch 5m data for 4h resampling
+                # 4h needs 48x more 5m bars (48 x 5m = 4h), increase lookback accordingly
+                adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
+                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+            else:
+                source_tf = tf_minutes
         
         # Use validated preferred prices for trading safety
         # Optimize data fetching: for large requests (backtesting), get most recent data
@@ -1906,28 +2336,53 @@ class DataFetcher:
             # Add timezone columns using the correct method
             df = tz_manager.add_timezone_columns_to_df(df)
             
-            # FIXED: Complete 15m, 60m, and 4H resampling implementation
-            if timeframe == '15m' and source_tf == 5:
-                self.logger.debug(f"🔄 Resampling 5m data to 15m for {epic}")
-                df = self._resample_to_15m_optimized(df)
-
-                if df is None or len(df) == 0:
-                    self.logger.error(f"❌ 15m resampling failed for {epic}")
-                    return None
-            elif timeframe == '1h' and source_tf == 5:
-                self.logger.debug(f"🔄 Resampling 5m data to 60m for {epic}")
-                df = self._resample_to_60m_optimized(df)
-
-                if df is None or len(df) == 0:
-                    self.logger.error(f"❌ 60m resampling failed for {epic}")
-                    return None
-            elif timeframe == '4h' and source_tf == 5:
-                self.logger.debug(f"🔄 Resampling 5m data to 4h for {epic}")
-                df = self._resample_to_4h_optimized(df)
-
-                if df is None or len(df) == 0:
-                    self.logger.error(f"❌ 4h resampling failed for {epic}")
-                    return None
+            # Resampling implementation - supports both 5m and 1m base modes
+            if source_tf == 1:
+                # 1M BASE SYNTHESIS MODE
+                if timeframe == '5m':
+                    self.logger.debug(f"🔄 Resampling 1m data to 5m for {epic}")
+                    df = self._resample_to_5m_from_1m(df)
+                    if df is None or len(df) == 0:
+                        self.logger.error(f"❌ 1m→5m resampling failed for {epic}")
+                        return None
+                elif timeframe == '15m':
+                    self.logger.debug(f"🔄 Resampling 1m data to 15m for {epic}")
+                    df = self._resample_to_15m_from_1m(df)
+                    if df is None or len(df) == 0:
+                        self.logger.error(f"❌ 1m→15m resampling failed for {epic}")
+                        return None
+                elif timeframe == '1h':
+                    self.logger.debug(f"🔄 Resampling 1m data to 60m for {epic}")
+                    df = self._resample_to_60m_from_1m(df)
+                    if df is None or len(df) == 0:
+                        self.logger.error(f"❌ 1m→60m resampling failed for {epic}")
+                        return None
+                elif timeframe == '4h':
+                    self.logger.debug(f"🔄 Resampling 1m data to 4h for {epic}")
+                    df = self._resample_to_4h_from_1m(df)
+                    if df is None or len(df) == 0:
+                        self.logger.error(f"❌ 1m→4h resampling failed for {epic}")
+                        return None
+            elif source_tf == 5:
+                # 5M BASE SYNTHESIS MODE (default)
+                if timeframe == '15m':
+                    self.logger.debug(f"🔄 Resampling 5m data to 15m for {epic}")
+                    df = self._resample_to_15m_optimized(df)
+                    if df is None or len(df) == 0:
+                        self.logger.error(f"❌ 15m resampling failed for {epic}")
+                        return None
+                elif timeframe == '1h':
+                    self.logger.debug(f"🔄 Resampling 5m data to 60m for {epic}")
+                    df = self._resample_to_60m_optimized(df)
+                    if df is None or len(df) == 0:
+                        self.logger.error(f"❌ 60m resampling failed for {epic}")
+                        return None
+                elif timeframe == '4h':
+                    self.logger.debug(f"🔄 Resampling 5m data to 4h for {epic}")
+                    df = self._resample_to_4h_optimized(df)
+                    if df is None or len(df) == 0:
+                        self.logger.error(f"❌ 4h resampling failed for {epic}")
+                        return None
 
             return df.reset_index(drop=True)
             

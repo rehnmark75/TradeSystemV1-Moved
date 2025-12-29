@@ -1482,50 +1482,104 @@ class TradingOrchestrator:
             self.logger.error(f"❌ Error testing Claude configuration: {e}")
             return {}
     
+    def _calculate_boundary_aligned_sleep(self) -> float:
+        """
+        Calculate sleep time to align with 15m candle boundaries.
+
+        When SCAN_ALIGN_TO_BOUNDARIES is enabled, scans are timed to occur
+        shortly after 15m candle closes (:00, :15, :30, :45 + offset).
+
+        Returns:
+            float: Seconds to sleep before next scan
+        """
+        from datetime import timedelta
+
+        offset_seconds = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
+
+        now = datetime.utcnow()
+        current_minute = now.minute
+
+        # Find next 15m boundary (0, 15, 30, 45)
+        next_boundary_minute = ((current_minute // 15) + 1) * 15 % 60
+
+        # Calculate time to next boundary
+        if next_boundary_minute == 0 and current_minute >= 45:
+            # Boundary is at next hour
+            next_boundary = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        else:
+            next_boundary = now.replace(minute=next_boundary_minute, second=0, microsecond=0)
+            if next_boundary < now:
+                next_boundary += timedelta(hours=1)
+
+        # Add offset (scan after boundary to allow data to settle)
+        target_scan_time = next_boundary + timedelta(seconds=offset_seconds)
+
+        # Calculate sleep time
+        sleep_seconds = (target_scan_time - now).total_seconds()
+
+        # If we're already past the target time for this boundary, calculate for next
+        if sleep_seconds < 0:
+            sleep_seconds += 15 * 60  # Add 15 minutes
+
+        return max(10, sleep_seconds)  # Minimum 10 seconds between scans
+
     def start_continuous_scan(self):
         """Start continuous scanning loop with database saving + NEW validation + ENHANCED Claude"""
         self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
+
         if self.session_manager:
             self.session_manager.start_session(self.session_id)
-        
+
+        # Check synthesis and boundary scanning modes
+        use_1m_base = getattr(config, 'USE_1M_BASE_SYNTHESIS', False)
+        boundary_aligned = getattr(config, 'SCAN_ALIGN_TO_BOUNDARIES', False)
+
         self.logger.info(f"🚀 Trading session started: {self.session_id}")
         self.logger.info(f"   Start time: {datetime.now()}")
         self.logger.info(f"   Scan interval: {self.scan_interval}s")
+        self.logger.info(f"   1m Base Synthesis: {'✅ Enabled' if use_1m_base else '❌ Disabled (5m base)'}")
+        self.logger.info(f"   Boundary Scanning: {'✅ Enabled' if boundary_aligned else '❌ Disabled'}")
         self.logger.info(f"   Intelligence preset: {self.intelligence_preset}")
         self.logger.info(f"   Intelligence threshold: {self.intelligence_threshold:.1%}")
         self.logger.info(f"   Alert saving: {'Enabled' if self.alert_history else 'Disabled'}")
         self.logger.info(f"   Duplicate detection: Handled by Scanner only")
         self.logger.info(f"   Claude enabled: {self.enable_claude}")
-        
+
         if self.enable_claude:
             self.logger.info(f"   Claude analysis mode: {self.claude_analysis_mode}")
             self.logger.info(f"   Claude analysis level: {self.claude_analysis_level}")
             self.logger.info(f"   Advanced Claude prompts: {self.use_advanced_claude_prompts}")
-        
+
         # Test NEW validator configuration on startup
         self.test_validator_configuration()
-        
+
         # ENHANCED: Test Claude configuration on startup
         if self.enable_claude:
             self.test_claude_configuration()
-        
+
         if self.performance_tracker:
             self.performance_tracker.reset_session_metrics()
             self.logger.info("🔄 Session metrics reset")
-        
+
         self.running = True
-        
+
         try:
             while self.running:
                 # Perform scan (which now includes intelligence filtering, enhanced Claude analysis, and saves all signals to database)
                 signals = self.scan_once()
-                
-                # Wait for next scan interval
+
+                # Wait for next scan - use boundary alignment if enabled
                 if self.running:
-                    self.logger.info(f"⏰ Waiting {self.scan_interval}s until next scan...")
-                    time.sleep(self.scan_interval)
-                    
+                    if boundary_aligned:
+                        sleep_time = self._calculate_boundary_aligned_sleep()
+                        next_scan = datetime.utcnow() + timedelta(seconds=sleep_time)
+                        self.logger.info(f"⏰ Boundary-aligned: next scan at {next_scan.strftime('%H:%M:%S')} UTC (sleeping {sleep_time:.0f}s)")
+                    else:
+                        sleep_time = self.scan_interval
+                        self.logger.info(f"⏰ Waiting {sleep_time}s until next scan...")
+
+                    time.sleep(sleep_time)
+
         except KeyboardInterrupt:
             self.logger.info("⏹️ Continuous scan interrupted by user")
         except Exception as e:

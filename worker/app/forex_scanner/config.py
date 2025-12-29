@@ -104,6 +104,17 @@ SPREAD_PIPS = 1.5   # default spread for BID/ASK adjustment
 
 USE_BID_ADJUSTMENT = False  # whether to adjust BID prices to MID
 DEFAULT_TIMEFRAME = '15m'  # Default timeframe for signals ('5m', '15m', '1h')
+
+# =============================================================================
+# 1M BASE CANDLE SYNTHESIS CONFIGURATION
+# =============================================================================
+# When enabled, synthesizes 15m/1h/4h candles from 1m base instead of 5m base.
+# Benefits: Better gap resilience (1 gap = 6.7% vs 33%), fresher data, precise boundaries
+USE_1M_BASE_SYNTHESIS = True  # Master switch: False=5m base (default), True=1m base
+
+# Boundary-aligned scanning: align scans to 15m candle close times (:00, :15, :30, :45)
+SCAN_ALIGN_TO_BOUNDARIES = True  # When True, scans at :01, :16, :31, :46 (after boundary)
+SCAN_BOUNDARY_OFFSET_SECONDS = 60  # Seconds after boundary to scan (allows data to settle)
 # Signal confidence threshold - unified for signal generation AND execution
 MIN_CONFIDENCE = 0.60  # 60% confidence (only generate signals that meet execution criteria)
 #=============================================================================
