@@ -40,6 +40,7 @@ class TransactionMatch:
     open_level: Optional[float] = None
     close_level: Optional[float] = None
     position_size: Optional[float] = None
+    date_utc: Optional[datetime] = None  # Parsed UTC datetime for accurate closed_at
 
 
 @dataclass
@@ -296,6 +297,9 @@ class TradePnLCorrelator:
                 # Extract currency
                 currency = tx.get('currency', 'SEK')
                 
+                # Parse dateUtc for accurate closed_at timestamp
+                date_utc = self._parse_ig_date_utc(tx.get('dateUtc', ''))
+
                 # Create transaction match object
                 transaction = TransactionMatch(
                     reference=tx.get('reference', ''),
@@ -306,11 +310,12 @@ class TradePnLCorrelator:
                     transaction_type=transaction_type,
                     open_level=self._safe_float(tx.get('openLevel')),
                     close_level=self._safe_float(tx.get('closeLevel')),
-                    position_size=self._safe_float(tx.get('size'))
+                    position_size=self._safe_float(tx.get('size')),
+                    date_utc=date_utc
                 )
-                
+
                 transactions.append(transaction)
-                self.logger.debug(f"📊 Parsed transaction: {transaction.reference} -> {transaction.profit_loss} {transaction.currency}")
+                self.logger.debug(f"📊 Parsed transaction: {transaction.reference} -> {transaction.profit_loss} {transaction.currency} @ {date_utc}")
                 
         except Exception as e:
             self.logger.error(f"❌ Error parsing transaction data: {e}")
@@ -343,6 +348,28 @@ class TradePnLCorrelator:
         try:
             return float(value) if value is not None else None
         except (ValueError, TypeError):
+            return None
+
+    def _parse_ig_date_utc(self, date_str: str) -> Optional[datetime]:
+        """
+        Parse IG API dateUtc string to datetime object.
+        IG uses format: '2025-12-29T09:48:15' or '2025/12/29 09:48:15'
+        """
+        if not date_str:
+            return None
+
+        try:
+            # Try ISO format first (most common from IG)
+            if 'T' in date_str:
+                return datetime.fromisoformat(date_str.replace('Z', '+00:00').split('+')[0])
+            # Try slash format
+            elif '/' in date_str:
+                return datetime.strptime(date_str, "%Y/%m/%d %H:%M:%S")
+            # Try dash format without T
+            else:
+                return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError) as e:
+            self.logger.warning(f"⚠️ Could not parse IG date '{date_str}': {e}")
             return None
     
     def _match_transactions_to_trades(
@@ -384,13 +411,17 @@ class TradePnLCorrelator:
                     
                     # Update the trade_log entry
                     # Status should be 'closed' since we have transaction P/L
+                    # Use IG's dateUtc for accurate closed_at (when trade actually closed on IG)
+                    actual_close_time = correlation.transaction_match.date_utc or datetime.utcnow()
+                    self.logger.info(f"🕐 Using IG close time: {actual_close_time} for trade {correlation.trade_log_id}")
+
                     update_data = {
                         "profit_loss": correlation.transaction_match.profit_loss,
                         "pnl_currency": correlation.transaction_match.currency,
                         "status": "closed",  # Change from expired/tracking to closed
-                        "closed_at": datetime.now(),
-                        "updated_at": datetime.now(),
-                        "pnl_updated_at": datetime.now()
+                        "closed_at": actual_close_time,  # Use actual IG close time, not detection time
+                        "updated_at": datetime.utcnow(),
+                        "pnl_updated_at": datetime.utcnow()
                     }
                     
                     self.db_session.execute(

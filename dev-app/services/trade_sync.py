@@ -44,6 +44,35 @@ class EnhancedTradeStatusManager:
         self._positions_cache = None  # Cache for all positions
         self._cache_timestamp = None
         self._cache_ttl_seconds = 30  # Cache positions for 30 seconds
+
+    def _parse_ig_date(self, date_str: str) -> Optional[datetime]:
+        """
+        Parse IG API date string to datetime object.
+        IG uses formats: '2025-12-29T09:48:15' or '2025/12/29 09:48:15' or '29/12/25'
+        """
+        if not date_str:
+            return None
+
+        try:
+            # Try ISO format first (most common from IG)
+            if 'T' in date_str:
+                return datetime.fromisoformat(date_str.replace('Z', '+00:00').split('+')[0])
+            # Try slash format with time
+            elif '/' in date_str and ':' in date_str:
+                return datetime.strptime(date_str, "%Y/%m/%d %H:%M:%S")
+            # Try DD/MM/YY format (common in IG activity)
+            elif '/' in date_str and len(date_str) <= 10:
+                return datetime.strptime(date_str, "%d/%m/%y")
+            # Try dash format without T
+            elif '-' in date_str and ':' in date_str:
+                return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+            # Try dash date only
+            elif '-' in date_str:
+                return datetime.strptime(date_str, "%Y-%m-%d")
+            return None
+        except (ValueError, TypeError) as e:
+            self.logger.debug(f"⚠️ Could not parse IG date '{date_str}': {e}")
+            return None
     
     async def verify_and_update_trade_status(self, trade: TradeLog, db: Session) -> str:
         """
@@ -647,8 +676,19 @@ class EnhancedTradeStatusManager:
                 trade.position_reference = position_ref
                 self.logger.info(f"📋 [POSITION REF] Trade {trade.id}: position_reference = {position_ref}")
 
-            # Set closed_at timestamp
-            trade.closed_at = datetime.utcnow()
+            # Set closed_at timestamp using actual IG close time if available
+            close_date_str = activity_close_data.get("close_date")
+            if close_date_str:
+                actual_close_time = self._parse_ig_date(close_date_str)
+                if actual_close_time:
+                    trade.closed_at = actual_close_time
+                    self.logger.info(f"🕐 [CLOSE TIME] Trade {trade.id}: Using IG close time {actual_close_time}")
+                else:
+                    trade.closed_at = datetime.utcnow()
+                    self.logger.info(f"🕐 [CLOSE TIME] Trade {trade.id}: Could not parse IG date, using current time")
+            else:
+                trade.closed_at = datetime.utcnow()
+                self.logger.info(f"🕐 [CLOSE TIME] Trade {trade.id}: No IG close date, using current time")
 
         # Don't commit here - let the caller handle it
         self.logger.info(f"📊 [STATUS UPDATE] Trade {trade.id}: {old_status} → {status} (reason: {exit_reason})")

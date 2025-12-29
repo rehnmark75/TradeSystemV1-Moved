@@ -31,10 +31,11 @@ class IGActivity:
     status: str
     description: str
     details: Optional[str] = None
-    
+
     # Derived fields
     position_reference: Optional[str] = None
     action: Optional[str] = None  # 'OPENED' or 'CLOSED'
+    date_utc: Optional[datetime] = None  # Parsed UTC datetime for accurate closed_at
 
 
 @dataclass
@@ -48,6 +49,7 @@ class DealCorrelation:
     activity_found: bool = False
     transaction_found: bool = False
     trade_log_found: bool = False
+    close_time: Optional[datetime] = None  # Actual close time from IG
 
 
 class IGDealCorrelator:
@@ -66,7 +68,36 @@ class IGDealCorrelator:
         self.ig_api_base = API_BASE_URL
         
         self.logger.info("🔗 IGDealCorrelator initialized for deal ID correlation")
-    
+
+    def _parse_ig_date(self, date_str: str) -> Optional[datetime]:
+        """
+        Parse IG API date string to datetime object.
+        IG uses formats: '2025-12-29T09:48:15' or '2025/12/29 09:48:15' or '29/12/25'
+        """
+        if not date_str:
+            return None
+
+        try:
+            # Try ISO format first (most common from IG)
+            if 'T' in date_str:
+                return datetime.fromisoformat(date_str.replace('Z', '+00:00').split('+')[0])
+            # Try slash format with time
+            elif '/' in date_str and ':' in date_str:
+                return datetime.strptime(date_str, "%Y/%m/%d %H:%M:%S")
+            # Try DD/MM/YY format (common in IG activity)
+            elif '/' in date_str and len(date_str) <= 10:
+                return datetime.strptime(date_str, "%d/%m/%y")
+            # Try dash format without T
+            elif '-' in date_str and ':' in date_str:
+                return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+            # Try dash date only
+            elif '-' in date_str:
+                return datetime.strptime(date_str, "%Y-%m-%d")
+            return None
+        except (ValueError, TypeError) as e:
+            self.logger.debug(f"⚠️ Could not parse IG date '{date_str}': {e}")
+            return None
+
     async def _fetch_ig_transactions(self, trading_headers: dict, days_back: int) -> dict:
         """Fetch transactions using the same method as existing endpoint"""
         try:
@@ -163,10 +194,13 @@ class IGDealCorrelator:
                     # Extract position reference from description
                     description = activity.get('description', '')
                     position_reference = self._extract_position_reference(description)
-                    
+
                     # Determine action from description
                     action = self._determine_action(description)
-                    
+
+                    # Parse date for accurate timestamp
+                    date_utc = self._parse_ig_date(activity.get('date', ''))
+
                     ig_activity = IGActivity(
                         date=activity.get('date', ''),
                         epic=activity.get('epic', ''),
@@ -178,12 +212,13 @@ class IGDealCorrelator:
                         description=description,
                         details=activity.get('details'),
                         position_reference=position_reference,
-                        action=action
+                        action=action,
+                        date_utc=date_utc
                     )
-                    
+
                     activities.append(ig_activity)
-                    
-                    self.logger.debug(f"✅ Parsed activity: {ig_activity.deal_id} - {ig_activity.action}")
+
+                    self.logger.debug(f"✅ Parsed activity: {ig_activity.deal_id} - {ig_activity.action} @ {date_utc}")
                     
                 except Exception as e:
                     self.logger.debug(f"⚠️ Skipping activity {i+1} (parsing error): {e}")
@@ -419,12 +454,14 @@ class IGDealCorrelator:
                 continue
                 
             correlation = DealCorrelation(deal_id=deal_id)
-            
+
             # Check if we have activity data
             if deal_id in activity_by_deal_id:
                 correlation.activity_found = True
                 activity = activity_by_deal_id[deal_id]
-                
+                # Capture close time from activity
+                correlation.close_time = activity.date_utc
+
                 # Try to match with transaction by position reference
                 if activity.position_reference:
                     if activity.position_reference in transaction_by_reference:
@@ -432,20 +469,20 @@ class IGDealCorrelator:
                         correlation.transaction_reference = activity.position_reference
                         correlation.profit_loss = transaction.profit_loss
                         correlation.transaction_found = True
-            
+
             # Check if we have transaction data directly
             if deal_id in transaction_by_deal_id:
                 transaction = transaction_by_deal_id[deal_id]
                 correlation.transaction_found = True
                 correlation.transaction_reference = transaction.reference
                 correlation.profit_loss = transaction.profit_loss
-            
+
             # Check if we have trade_log entry
             trade_log_entry = self._find_trade_log_by_deal_id(deal_id)
             if trade_log_entry:
                 correlation.trade_log_found = True
                 correlation.trade_log_id = trade_log_entry.id
-            
+
             # Determine correlation status
             if correlation.activity_found and correlation.transaction_found and correlation.trade_log_found:
                 correlation.correlation_status = "matched"
@@ -453,7 +490,7 @@ class IGDealCorrelator:
                 correlation.correlation_status = "partial"
             else:
                 correlation.correlation_status = "missing"
-            
+
             correlations.append(correlation)
             
             # Log correlation details
@@ -500,10 +537,11 @@ class IGDealCorrelator:
                         if not hasattr(trade_log, 'profit_loss'):
                             # Add new columns to trade_log table
                             self._add_pnl_columns_to_trade_log()
-                        
-                        # ✅ TIMESTAMP FIX: Use explicit UTC timestamp to prevent timezone issues
+
+                        # Use actual close time from IG activity, fallback to current time
+                        actual_close_time = correlation.close_time or datetime.utcnow()
                         current_utc = datetime.utcnow()
-                        self.logger.info(f"🕐 Setting closed_at timestamp: {current_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC for deal {correlation.deal_id}")
+                        self.logger.info(f"🕐 Using IG close time: {actual_close_time.strftime('%Y-%m-%d %H:%M:%S')} UTC for deal {correlation.deal_id}")
 
                         # Update the trade with actual P&L
                         self.db_session.execute(
@@ -520,7 +558,7 @@ class IGDealCorrelator:
                                 "pnl": correlation.profit_loss,
                                 "currency": "SEK",  # Assuming SEK based on your transaction data
                                 "deal_id": correlation.deal_id,
-                                "closed_at": current_utc,
+                                "closed_at": actual_close_time,  # Use actual IG close time
                                 "updated_at": current_utc
                             }
                         )
@@ -619,12 +657,14 @@ class IGDealCorrelator:
                 continue
                 
             correlation = DealCorrelation(deal_id=deal_id)
-            
+
             # Check if we have activity data
             if deal_id in activity_by_deal_id:
                 correlation.activity_found = True
                 activity = activity_by_deal_id[deal_id]
-                
+                # Capture close time from activity
+                correlation.close_time = activity.date_utc
+
                 # Try exact match first
                 if activity.position_reference and activity.position_reference in transaction_by_reference:
                     transaction = transaction_by_reference[activity.position_reference]
@@ -632,7 +672,7 @@ class IGDealCorrelator:
                     correlation.profit_loss = transaction.profit_loss
                     correlation.transaction_found = True
                     self.logger.debug(f"✅ Exact match: {activity.position_reference}")
-                
+
                 # Try fuzzy matching if exact match failed
                 elif activity.position_reference:
                     fuzzy_match = self._find_fuzzy_reference_match(activity.position_reference, transactions)
@@ -641,20 +681,20 @@ class IGDealCorrelator:
                         correlation.profit_loss = fuzzy_match.profit_loss
                         correlation.transaction_found = True
                         self.logger.info(f"🎯 Fuzzy match: {activity.position_reference} → {fuzzy_match.reference}")
-            
+
             # Check if we have transaction data directly
             if deal_id in transaction_by_deal_id:
                 transaction = transaction_by_deal_id[deal_id]
                 correlation.transaction_found = True
                 correlation.transaction_reference = transaction.reference
                 correlation.profit_loss = transaction.profit_loss
-            
+
             # Check if we have trade_log entry
             trade_log_entry = self._find_trade_log_by_deal_id(deal_id)
             if trade_log_entry:
                 correlation.trade_log_found = True
                 correlation.trade_log_id = trade_log_entry.id
-            
+
             # Determine correlation status
             if correlation.activity_found and correlation.transaction_found and correlation.trade_log_found:
                 correlation.correlation_status = "matched"
