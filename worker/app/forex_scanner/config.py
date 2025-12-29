@@ -115,8 +115,8 @@ USE_1M_BASE_SYNTHESIS = True  # Master switch: False=5m base (default), True=1m 
 # Boundary-aligned scanning: align scans to 15m candle close times (:00, :15, :30, :45)
 SCAN_ALIGN_TO_BOUNDARIES = True  # When True, scans at :01, :16, :31, :46 (after boundary)
 SCAN_BOUNDARY_OFFSET_SECONDS = 60  # Seconds after boundary to scan (allows data to settle)
-# Signal confidence threshold - unified for signal generation AND execution
-MIN_CONFIDENCE = 0.60  # 60% confidence (only generate signals that meet execution criteria)
+# Signal confidence threshold - scanner-level filter (should be below strategy thresholds)
+MIN_CONFIDENCE = 0.40  # 40% - low to let strategies control their own thresholds (SMC_SIMPLE uses 48%)
 #=============================================================================
 # DATA FETCHER OPTIMIZATION CONFIGURATION
 # =============================================================================
