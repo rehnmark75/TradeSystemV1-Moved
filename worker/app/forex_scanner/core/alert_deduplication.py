@@ -308,7 +308,100 @@ class AlertDeduplicationManager:
         except Exception as e:
             self.logger.error(f"Error checking cooldown periods: {e}")
             return True, ""  # Allow on error
-    
+
+    def _check_trade_cooldown(self, epic: str) -> Tuple[bool, str]:
+        """
+        Check if epic is in trade cooldown based on actual trade_log entries.
+        This prevents wasting Claude API calls on signals that will be rejected at execution.
+
+        Checks both:
+        1. Recent trade OPENINGS (prevents back-to-back entries)
+        2. Recent trade CLOSURES (allows market to settle)
+        """
+        try:
+            # Get cooldown setting - match dev-app default of 30 minutes
+            trade_cooldown_minutes = getattr(config, 'TRADE_COOLDOWN_MINUTES', 30)
+
+            # Skip check if cooldown is disabled
+            if not getattr(config, 'TRADE_COOLDOWN_ENABLED', True):
+                return True, ""
+
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            current_time = datetime.utcnow()
+            cooldown_threshold = current_time - timedelta(minutes=trade_cooldown_minutes)
+
+            # Check for recent trade OPENINGS (timestamp = when trade was opened)
+            cursor.execute("""
+                SELECT timestamp, status, direction
+                FROM trade_log
+                WHERE symbol = %s
+                  AND timestamp IS NOT NULL
+                  AND timestamp >= %s
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """, (epic, cooldown_threshold))
+
+            recent_opened = cursor.fetchone()
+
+            if recent_opened:
+                opening_time = recent_opened[0]
+                status = recent_opened[1]
+
+                # Handle timezone-naive timestamps
+                if opening_time.tzinfo is None:
+                    opening_time = opening_time.replace(tzinfo=None)
+
+                # Check if timestamp is valid (not in the future)
+                if opening_time <= current_time:
+                    time_elapsed = (current_time - opening_time).total_seconds() / 60
+                    remaining = int(trade_cooldown_minutes - time_elapsed)
+
+                    if remaining > 0:
+                        cursor.close()
+                        conn.close()
+                        return False, f"Trade opened {int(time_elapsed)}min ago, {remaining}min cooldown remaining"
+
+            # Check for recent trade CLOSURES
+            cursor.execute("""
+                SELECT closed_at, status, direction
+                FROM trade_log
+                WHERE symbol = %s
+                  AND status IN ('closed', 'expired')
+                  AND closed_at IS NOT NULL
+                  AND closed_at >= %s
+                ORDER BY closed_at DESC
+                LIMIT 1
+            """, (epic, cooldown_threshold))
+
+            recent_closed = cursor.fetchone()
+
+            if recent_closed:
+                close_time = recent_closed[0]
+
+                # Handle timezone-naive timestamps
+                if close_time.tzinfo is None:
+                    close_time = close_time.replace(tzinfo=None)
+
+                # Check if timestamp is valid (not in the future)
+                if close_time <= current_time:
+                    time_elapsed = (current_time - close_time).total_seconds() / 60
+                    remaining = int(trade_cooldown_minutes - time_elapsed)
+
+                    if remaining > 0:
+                        cursor.close()
+                        conn.close()
+                        return False, f"Trade closed {int(time_elapsed)}min ago, {remaining}min cooldown remaining"
+
+            cursor.close()
+            conn.close()
+            return True, ""
+
+        except Exception as e:
+            self.logger.error(f"Error checking trade cooldown for {epic}: {e}")
+            return True, ""  # Allow on error (fail-open for safety)
+
     def should_allow_alert(self, signal: Dict) -> Tuple[bool, str, Dict]:
         """
         Main method to check if an alert should be allowed
@@ -345,6 +438,7 @@ class AlertDeduplicationManager:
             ("Global Rate Limit", self._check_global_rate_limits()),
             ("Epic Rate Limit", self._check_epic_rate_limits(epic)),
             ("Cooldown Period", self._check_cooldown_periods(cooldown_key)),
+            ("Trade Cooldown", self._check_trade_cooldown(epic)),  # Check actual trade_log
         ]
 
         # Only add hash check if enabled (master switch)

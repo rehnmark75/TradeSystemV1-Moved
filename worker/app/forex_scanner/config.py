@@ -867,10 +867,15 @@ TIMEFRAME_WEIGHTS = {
 # Alert Deduplication Configuration
 ALERT_COOLDOWN_MINUTES = 5       # Minutes between same epic+signal alerts (reduced from 15 - hash check disabled)
 STRATEGY_COOLDOWN_MINUTES = 3    # Strategy-specific cooldown (reduced from 10)
-GLOBAL_COOLDOWN_SECONDS = 30            # Global cooldown between any alerts 
+GLOBAL_COOLDOWN_SECONDS = 30            # Global cooldown between any alerts
 MAX_ALERTS_PER_HOUR = 50        # Global hourly alert limit
 MAX_ALERTS_PER_EPIC_HOUR = 6    # Per-epic hourly alert limit
 ENABLE_ALERT_DEDUPLICATION = True  # Master switch for deduplication
+
+# Trade Cooldown Configuration (prevents signals for epics with recent trades)
+# This check queries trade_log table to prevent wasting Claude API calls
+TRADE_COOLDOWN_ENABLED = True    # Enable trade cooldown check before signal processing
+TRADE_COOLDOWN_MINUTES = 30      # Cooldown after trade open/close (must match dev-app)
 
 # Rate limiting settings
 MAX_ALERTS_PER_HOUR = 50                # Global hourly alert limit
