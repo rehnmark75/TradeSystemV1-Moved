@@ -30,6 +30,7 @@ from components.tabs import (
     render_alert_history_tab,
     render_overview_tab,
     render_strategy_performance_tab,
+    render_trade_performance_tab,
 )
 
 # Configure page
@@ -6483,7 +6484,8 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
                 "Alert History"
             ])
             with perf_tabs[0]:
-                self.render_trade_performance_tab()
+                # Use extracted tab component
+                render_trade_performance_tab()
             with perf_tabs[1]:
                 # Use extracted tab component
                 render_alert_history_tab()

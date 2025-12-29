@@ -11,6 +11,7 @@ from .ema_rejections_tab import render_ema_double_rejections_tab
 from .alert_history_tab import render_alert_history_tab
 from .overview_tab import render_overview_tab
 from .strategy_performance_tab import render_strategy_performance_tab
+from .trade_performance_tab import render_trade_performance_tab
 
 __all__ = [
     'render_smc_rejections_tab',
@@ -18,4 +19,5 @@ __all__ = [
     'render_alert_history_tab',
     'render_overview_tab',
     'render_strategy_performance_tab',
+    'render_trade_performance_tab',
 ]
