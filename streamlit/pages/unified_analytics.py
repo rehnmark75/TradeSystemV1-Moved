@@ -19,6 +19,8 @@ import requests
 
 # Import centralized database utilities for connection pooling
 from services.db_utils import DatabaseContextManager, get_connection_string
+# Import rejection analytics service for cached rejection data
+from services.rejection_analytics_service import RejectionAnalyticsService
 
 # Configure page
 st.set_page_config(
@@ -106,6 +108,8 @@ class UnifiedTradingDashboard:
 
     def __init__(self):
         self.initialize_session_state()
+        # Initialize services
+        self.rejection_service = RejectionAnalyticsService()
 
     def initialize_session_state(self):
         """Initialize Streamlit session state"""
@@ -136,9 +140,10 @@ class UnifiedTradingDashboard:
             st.error(f"Database connection failed: {e}")
             return None
 
-    def fetch_trading_statistics(self, days_back: int = 7, pairs_filter: List[str] = None) -> Optional[TradingStatistics]:
-        """Fetch comprehensive trading statistics from trade_log table"""
-        conn = self.get_database_connection()
+    @st.cache_data(ttl=300)
+    def fetch_trading_statistics(_self, days_back: int = 7, pairs_filter: tuple = None) -> Optional[TradingStatistics]:
+        """Fetch comprehensive trading statistics from trade_log table (cached 5 min)"""
+        conn = _self.get_database_connection()
         if not conn:
             return None
 
@@ -237,9 +242,10 @@ class UnifiedTradingDashboard:
         finally:
             conn.close()
 
-    def fetch_trades_dataframe(self, days_back: int = 7, pairs_filter: List[str] = None) -> pd.DataFrame:
-        """Fetch detailed trades data as DataFrame"""
-        conn = self.get_database_connection()
+    @st.cache_data(ttl=300)
+    def fetch_trades_dataframe(_self, days_back: int = 7, pairs_filter: tuple = None) -> pd.DataFrame:
+        """Fetch detailed trades data as DataFrame (cached 5 min)"""
+        conn = _self.get_database_connection()
         if not conn:
             return pd.DataFrame()
 
@@ -323,9 +329,10 @@ class UnifiedTradingDashboard:
         finally:
             conn.close()
 
-    def fetch_strategy_performance(self, days_back: int = 30) -> pd.DataFrame:
-        """Fetch strategy performance data"""
-        conn = self.get_database_connection()
+    @st.cache_data(ttl=300)
+    def fetch_strategy_performance(_self, days_back: int = 30) -> pd.DataFrame:
+        """Fetch strategy performance data (cached 5 min)"""
+        conn = _self.get_database_connection()
         if not conn:
             return pd.DataFrame()
 
@@ -370,9 +377,10 @@ class UnifiedTradingDashboard:
         finally:
             conn.close()
 
-    def fetch_latest_closed_trade_id(self) -> int:
-        """Fetch the ID of the most recent trade entry that is closed"""
-        conn = self.get_database_connection()
+    @st.cache_data(ttl=60)
+    def fetch_latest_closed_trade_id(_self) -> int:
+        """Fetch the ID of the most recent trade entry that is closed (cached 1 min)"""
+        conn = _self.get_database_connection()
         if not conn:
             return 1  # Default fallback
 
@@ -392,9 +400,10 @@ class UnifiedTradingDashboard:
         finally:
             conn.close()
 
-    def fetch_filled_trades_for_analysis(self, limit: int = 100) -> pd.DataFrame:
-        """Fetch only filled trades (closed or tracking) for analysis - excludes unfilled limit orders"""
-        conn = self.get_database_connection()
+    @st.cache_data(ttl=180)
+    def fetch_filled_trades_for_analysis(_self, limit: int = 100) -> pd.DataFrame:
+        """Fetch only filled trades (closed or tracking) for analysis (cached 3 min)"""
+        conn = _self.get_database_connection()
         if not conn:
             return pd.DataFrame()
 
@@ -3544,9 +3553,10 @@ class UnifiedTradingDashboard:
             'has_data': True
         }
 
-    def fetch_alert_history(self, days: int, status_filter: str, strategy_filter: str, pair_filter: str) -> pd.DataFrame:
+    @st.cache_data(ttl=180)
+    def fetch_alert_history(_self, days: int, status_filter: str, strategy_filter: str, pair_filter: str) -> pd.DataFrame:
         """
-        Fetch alert history with Claude analysis data from database.
+        Fetch alert history with Claude analysis data from database (cached 3 min).
 
         Args:
             days: Number of days to look back
@@ -3557,7 +3567,7 @@ class UnifiedTradingDashboard:
         Returns:
             DataFrame with alert history data
         """
-        conn = self.get_database_connection()
+        conn = _self.get_database_connection()
         if not conn:
             return pd.DataFrame()
 
@@ -3676,9 +3686,10 @@ class UnifiedTradingDashboard:
     # SMC REJECTIONS TAB (v2.2.0)
     # =========================================================================
 
-    def fetch_smc_rejections(self, days: int, stage_filter: str, pair_filter: str, session_filter: str) -> pd.DataFrame:
+    @st.cache_data(ttl=300)
+    def fetch_smc_rejections(_self, days: int, stage_filter: str, pair_filter: str, session_filter: str) -> pd.DataFrame:
         """
-        Fetch SMC Simple strategy rejection data from database.
+        Fetch SMC Simple strategy rejection data from database (cached 5 min).
 
         Args:
             days: Number of days to look back
@@ -3689,7 +3700,7 @@ class UnifiedTradingDashboard:
         Returns:
             DataFrame with rejection data
         """
-        conn = self.get_database_connection()
+        conn = _self.get_database_connection()
         if not conn:
             return pd.DataFrame()
 
@@ -3768,9 +3779,10 @@ class UnifiedTradingDashboard:
         finally:
             conn.close()
 
-    def fetch_smc_rejection_stats(self, days: int) -> dict:
+    @st.cache_data(ttl=300)
+    def fetch_smc_rejection_stats(_self, days: int) -> dict:
         """
-        Fetch aggregated SMC rejection statistics.
+        Fetch aggregated SMC rejection statistics (cached 5 min).
 
         Args:
             days: Number of days to look back
@@ -3778,7 +3790,7 @@ class UnifiedTradingDashboard:
         Returns:
             Dictionary with aggregated statistics
         """
-        conn = self.get_database_connection()
+        conn = _self.get_database_connection()
         if not conn:
             return {}
 
@@ -3851,60 +3863,19 @@ class UnifiedTradingDashboard:
 
         st.markdown("Analyze why SMC Simple strategy signals were rejected to improve strategy parameters")
 
-        # Check if table exists by trying to fetch data
-        conn = self.get_database_connection()
-        stages = ["All"]
-        pairs = ["All"]
-        sessions = ["All"]
+        # Get filter options from service (cached)
+        filter_options = self.rejection_service.get_smc_filter_options()
 
-        if conn:
-            try:
-                # Check table exists
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables
-                        WHERE table_name = 'smc_simple_rejections'
-                    )
-                """)
-                table_exists = cursor.fetchone()[0]
-
-                if not table_exists:
-                    st.warning("⚠️ SMC Rejections table not yet created. Run the database migration:")
-                    st.code("""
+        if not filter_options.get('table_exists', True):
+            st.warning("⚠️ SMC Rejections table not yet created. Run the database migration:")
+            st.code("""
 docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simple_rejections_table.sql
-                    """)
-                    conn.close()
-                    return
+            """)
+            return
 
-                # Get unique stages
-                stage_df = pd.read_sql_query(
-                    "SELECT DISTINCT rejection_stage FROM smc_simple_rejections ORDER BY rejection_stage",
-                    conn
-                )
-                stages.extend(stage_df['rejection_stage'].tolist())
-
-                # Get unique pairs
-                pair_df = pd.read_sql_query(
-                    "SELECT DISTINCT pair FROM smc_simple_rejections WHERE pair IS NOT NULL ORDER BY pair",
-                    conn
-                )
-                pairs.extend(pair_df['pair'].tolist())
-
-                # Get unique sessions
-                session_df = pd.read_sql_query(
-                    "SELECT DISTINCT market_session FROM smc_simple_rejections WHERE market_session IS NOT NULL ORDER BY market_session",
-                    conn
-                )
-                sessions.extend(session_df['market_session'].tolist())
-
-            except Exception as e:
-                if "does not exist" in str(e):
-                    st.warning("⚠️ SMC Rejections table not yet created. Run the database migration first.")
-                    return
-                st.warning(f"Could not load filter options: {e}")
-            finally:
-                conn.close()
+        stages = filter_options['stages']
+        pairs = filter_options['pairs']
+        sessions = filter_options['sessions']
 
         # Filters row
         col1, col2, col3, col4 = st.columns(4)
@@ -3917,8 +3888,8 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
         with col4:
             session_filter = st.selectbox("Session", sessions, key="smc_rej_session")
 
-        # Fetch statistics
-        stats = self.fetch_smc_rejection_stats(days_filter)
+        # Fetch statistics from service (cached)
+        stats = self.rejection_service.fetch_smc_rejection_stats(days_filter)
 
         # Summary metrics
         st.markdown("---")
@@ -3942,8 +3913,8 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
             "📊 Stage Breakdown", "📈 Outcome Analysis", "🚧 S/R Path Blocking", "⏰ Time Analysis", "💹 Market Context", "🎯 Near-Misses", "⚡ Scanner Efficiency"
         ])
 
-        # Fetch data
-        df = self.fetch_smc_rejections(days_filter, stage_filter, pair_filter, session_filter)
+        # Fetch data from service (cached)
+        df = self.rejection_service.fetch_smc_rejections(days_filter, stage_filter, pair_filter, session_filter)
 
         if df.empty:
             st.info("No rejections found for the selected filters.")
@@ -4980,9 +4951,10 @@ docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outco
     # EMA DOUBLE REJECTIONS TAB (v2.3.0)
     # =========================================================================
 
-    def fetch_ema_double_rejections(self, days: int, stage_filter: str, pair_filter: str, session_filter: str) -> pd.DataFrame:
+    @st.cache_data(ttl=300)
+    def fetch_ema_double_rejections(_self, days: int, stage_filter: str, pair_filter: str, session_filter: str) -> pd.DataFrame:
         """
-        Fetch EMA Double Confirmation strategy rejection data from database.
+        Fetch EMA Double Confirmation strategy rejection data from database (cached 5 min).
 
         Args:
             days: Number of days to look back
@@ -4993,7 +4965,7 @@ docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outco
         Returns:
             DataFrame with rejection data
         """
-        conn = self.get_database_connection()
+        conn = _self.get_database_connection()
         if not conn:
             return pd.DataFrame()
 
@@ -5071,9 +5043,10 @@ docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outco
         finally:
             conn.close()
 
-    def fetch_ema_double_rejection_stats(self, days: int) -> dict:
+    @st.cache_data(ttl=300)
+    def fetch_ema_double_rejection_stats(_self, days: int) -> dict:
         """
-        Fetch aggregated EMA Double rejection statistics.
+        Fetch aggregated EMA Double rejection statistics (cached 5 min).
 
         Args:
             days: Number of days to look back
@@ -5081,7 +5054,7 @@ docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outco
         Returns:
             Dictionary with aggregated statistics
         """
-        conn = self.get_database_connection()
+        conn = _self.get_database_connection()
         if not conn:
             return {}
 
@@ -5164,60 +5137,19 @@ docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outco
 
         st.markdown("Analyze why EMA Double Confirmation strategy signals were rejected to improve strategy parameters")
 
-        # Check if table exists by trying to fetch data
-        conn = self.get_database_connection()
-        stages = ["All"]
-        pairs = ["All"]
-        sessions = ["All"]
+        # Get filter options from service (cached)
+        filter_options = self.rejection_service.get_ema_filter_options()
 
-        if conn:
-            try:
-                # Check table exists
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables
-                        WHERE table_name = 'ema_double_rejections'
-                    )
-                """)
-                table_exists = cursor.fetchone()[0]
-
-                if not table_exists:
-                    st.warning("⚠️ EMA Double Rejections table not yet created. Run the database migration:")
-                    st.code("""
+        if not filter_options.get('table_exists', True):
+            st.warning("⚠️ EMA Double Rejections table not yet created. Run the database migration:")
+            st.code("""
 docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migrations/create_ema_double_rejections_table.sql
-                    """)
-                    conn.close()
-                    return
+            """)
+            return
 
-                # Get unique stages
-                stage_df = pd.read_sql_query(
-                    "SELECT DISTINCT rejection_stage FROM ema_double_rejections ORDER BY rejection_stage",
-                    conn
-                )
-                stages.extend(stage_df['rejection_stage'].tolist())
-
-                # Get unique pairs
-                pair_df = pd.read_sql_query(
-                    "SELECT DISTINCT pair FROM ema_double_rejections WHERE pair IS NOT NULL ORDER BY pair",
-                    conn
-                )
-                pairs.extend(pair_df['pair'].tolist())
-
-                # Get unique sessions
-                session_df = pd.read_sql_query(
-                    "SELECT DISTINCT market_session FROM ema_double_rejections WHERE market_session IS NOT NULL ORDER BY market_session",
-                    conn
-                )
-                sessions.extend(session_df['market_session'].tolist())
-
-            except Exception as e:
-                if "does not exist" in str(e):
-                    st.warning("⚠️ EMA Double Rejections table not yet created. Run the database migration first.")
-                    return
-                st.warning(f"Could not load filter options: {e}")
-            finally:
-                conn.close()
+        stages = filter_options['stages']
+        pairs = filter_options['pairs']
+        sessions = filter_options['sessions']
 
         # Filters row
         col1, col2, col3, col4 = st.columns(4)
@@ -5230,8 +5162,8 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
         with col4:
             session_filter = st.selectbox("Session", sessions, key="ema_double_rej_session")
 
-        # Fetch statistics
-        stats = self.fetch_ema_double_rejection_stats(days_filter)
+        # Fetch statistics from service (cached)
+        stats = self.rejection_service.fetch_ema_double_rejection_stats(days_filter)
 
         # Summary metrics
         st.markdown("---")
@@ -5257,8 +5189,8 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
             "📊 Stage Breakdown", "⏰ Time Analysis", "💹 Market Context", "🎯 Near-Misses"
         ])
 
-        # Fetch data
-        df = self.fetch_ema_double_rejections(days_filter, stage_filter, pair_filter, session_filter)
+        # Fetch data from service (cached)
+        df = self.rejection_service.fetch_ema_double_rejections(days_filter, stage_filter, pair_filter, session_filter)
 
         if df.empty:
             st.info("No rejections found for the selected filters.")
