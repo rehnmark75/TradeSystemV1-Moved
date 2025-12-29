@@ -33,6 +33,7 @@ from components.tabs import (
     render_trade_performance_tab,
     render_unfilled_orders_tab,
     render_settings_tab,
+    render_market_intelligence_tab,
 )
 
 # Configure page
@@ -6475,7 +6476,8 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
             with analysis_tabs[1]:
                 self.render_trade_analysis_tab()
             with analysis_tabs[2]:
-                self.render_market_intelligence_tab()
+                # Use extracted tab component
+                render_market_intelligence_tab()
             with analysis_tabs[3]:
                 self.render_breakeven_optimizer_tab()
 
