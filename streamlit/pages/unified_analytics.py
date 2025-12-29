@@ -19,10 +19,18 @@ import requests
 
 # Import centralized database utilities for connection pooling
 from services.db_utils import DatabaseContextManager, get_connection_string
-# Import rejection analytics service for cached rejection data
+# Import services for cached data
 from services.rejection_analytics_service import RejectionAnalyticsService
+from services.trading_analytics_service import TradingAnalyticsService
+from services.alert_history_service import AlertHistoryService
 # Import tab components
-from components.tabs import render_smc_rejections_tab, render_ema_double_rejections_tab
+from components.tabs import (
+    render_smc_rejections_tab,
+    render_ema_double_rejections_tab,
+    render_alert_history_tab,
+    render_overview_tab,
+    render_strategy_performance_tab,
+)
 
 # Configure page
 st.set_page_config(
@@ -6447,18 +6455,20 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
         ])
 
         with tab_overview:
-            self.render_overview_tab()
+            # Use extracted tab component
+            render_overview_tab()
 
         with tab_analysis:
             # Sub-tabs for analysis features
             analysis_tabs = st.tabs([
-                "🎯 Strategy",
-                "🔍 Trade Analysis",
-                "🧠 Market Intelligence",
-                "📈 Breakeven Optimizer"
+                "Strategy",
+                "Trade Analysis",
+                "Market Intelligence",
+                "Breakeven Optimizer"
             ])
             with analysis_tabs[0]:
-                self.render_strategy_analysis_tab()
+                # Use extracted tab component
+                render_strategy_performance_tab()
             with analysis_tabs[1]:
                 self.render_trade_analysis_tab()
             with analysis_tabs[2]:
@@ -6469,13 +6479,14 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
         with tab_performance:
             # Sub-tabs for performance tracking
             perf_tabs = st.tabs([
-                "💰 Trade Performance",
-                "📋 Alert History"
+                "Trade Performance",
+                "Alert History"
             ])
             with perf_tabs[0]:
                 self.render_trade_performance_tab()
             with perf_tabs[1]:
-                self.render_alert_history_tab()
+                # Use extracted tab component
+                render_alert_history_tab()
 
         with tab_rejections:
             # Sub-tabs for rejection analysis
