@@ -32,6 +32,7 @@ from components.tabs import (
     render_strategy_performance_tab,
     render_trade_performance_tab,
     render_unfilled_orders_tab,
+    render_settings_tab,
 )
 
 # Configure page
@@ -6509,7 +6510,8 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
                 render_unfilled_orders_tab()
 
         with tab_settings:
-            self.render_settings_debug_tab()
+            # Use extracted tab component
+            render_settings_tab()
 
         # Footer
         st.markdown("---")

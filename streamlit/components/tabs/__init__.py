@@ -13,6 +13,7 @@ from .overview_tab import render_overview_tab
 from .strategy_performance_tab import render_strategy_performance_tab
 from .trade_performance_tab import render_trade_performance_tab
 from .unfilled_orders_tab import render_unfilled_orders_tab
+from .settings_tab import render_settings_tab
 
 __all__ = [
     'render_smc_rejections_tab',
@@ -22,4 +23,5 @@ __all__ = [
     'render_strategy_performance_tab',
     'render_trade_performance_tab',
     'render_unfilled_orders_tab',
+    'render_settings_tab',
 ]
