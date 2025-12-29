@@ -1133,14 +1133,28 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
             if sr_data:
                 nearest_support = sr_data.get('nearest_support')
                 nearest_resistance = sr_data.get('nearest_resistance')
-                dist_support = sr_data.get('distance_to_support_pips', 0)
-                dist_resistance = sr_data.get('distance_to_resistance_pips', 0)
+                dist_support = sr_data.get('distance_to_support_pips') or 0
+                dist_resistance = sr_data.get('distance_to_resistance_pips') or 0
+
+                support_str = f"{self._format_price(nearest_support)} ({dist_support:.1f} pips below)" if nearest_support else "N/A"
+                resistance_str = f"{self._format_price(nearest_resistance)} ({dist_resistance:.1f} pips above)" if nearest_resistance else "N/A"
+
+                # Check path to target (only if we have the relevant S/R data)
+                path_clear = True
+                if direction == 'BULL' and nearest_resistance and dist_resistance < reward_pips:
+                    path_clear = False
+                    path_note = '⚠️ Resistance in way'
+                elif direction == 'BEAR' and nearest_support and dist_support < reward_pips:
+                    path_clear = False
+                    path_note = '⚠️ Support in way'
+                else:
+                    path_note = '✅ Clear path'
 
                 sr_context = f"""
 **SUPPORT/RESISTANCE CONTEXT:**
-- Nearest Support: {self._format_price(nearest_support)} ({dist_support:.1f} pips below)
-- Nearest Resistance: {self._format_price(nearest_resistance)} ({dist_resistance:.1f} pips above)
-- Path to Target: {'⚠️ Resistance in way' if direction == 'BULL' and dist_resistance < reward_pips else '⚠️ Support in way' if direction == 'BEAR' and dist_support < reward_pips else '✅ Clear path'}
+- Nearest Support: {support_str}
+- Nearest Resistance: {resistance_str}
+- Path to Target: {path_note}
 """
 
             # Build EMA stack context
