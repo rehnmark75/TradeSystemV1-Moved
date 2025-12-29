@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "ralph-wiggum@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true
+  }
+}
