@@ -15,6 +15,7 @@ from .trade_performance_tab import render_trade_performance_tab
 from .unfilled_orders_tab import render_unfilled_orders_tab
 from .settings_tab import render_settings_tab
 from .market_intelligence_tab import render_market_intelligence_tab
+from .breakeven_optimizer_tab import render_breakeven_optimizer_tab
 
 __all__ = [
     'render_smc_rejections_tab',
@@ -26,4 +27,5 @@ __all__ = [
     'render_unfilled_orders_tab',
     'render_settings_tab',
     'render_market_intelligence_tab',
+    'render_breakeven_optimizer_tab',
 ]
