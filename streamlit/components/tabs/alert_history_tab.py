@@ -90,13 +90,13 @@ def _render_alert_row(row: pd.Series):
     alert_level = row.get('alert_level', '')
 
     if is_approved == True or claude_decision == 'APPROVE':
-        status_icon = "+"
+        status_icon = "✅"
         status_text = "APPROVED"
     elif is_approved == False or claude_decision == 'REJECT' or alert_level == 'REJECTED':
-        status_icon = "-"
+        status_icon = "❌"
         status_text = "REJECTED"
     else:
-        status_icon = "o"
+        status_icon = "⚪"
         status_text = "PENDING"
 
     # Format timestamp
