@@ -894,7 +894,62 @@ class SMCSimpleStrategy:
                 # Description
                 'description': self._build_description(
                     direction, ema_distance, pullback_depth, rr_ratio
-                )
+                ),
+
+                # Analytics fields - same structure as rejection tracking for comparative analysis
+                'market_structure_analysis': {
+                    'trend_direction': direction,
+                    'ema_bias': {
+                        'timeframe': self.htf_timeframe,
+                        'ema_period': self.ema_period,
+                        'ema_value': ema_value,
+                        'distance_pips': ema_distance,
+                        'price_position': 'above' if direction == 'BULL' else 'below'
+                    },
+                    'swing_structure': {
+                        'timeframe': self.trigger_tf,
+                        'swing_level': swing_level,
+                        'opposite_swing': opposite_swing,
+                        'break_confirmed': True,
+                        'break_type': 'swing_high' if direction == 'BEAR' else 'swing_low'
+                    }
+                },
+                'order_flow_analysis': {
+                    'volume_confirmed': volume_confirmed,
+                    'volume_ratio': round(volume_ratio, 2),
+                    'atr': round(atr, 6) if atr else 0.0,
+                    'entry_type': entry_type,  # PULLBACK or MOMENTUM
+                    'order_type': order_type   # limit or market
+                },
+                'confluence_details': {
+                    'tier1_ema_aligned': True,
+                    'tier2_swing_break': True,
+                    'tier3_pullback_valid': True,
+                    'in_optimal_fib_zone': in_optimal_zone,
+                    'fib_zone': f"{self.fib_min*100:.1f}%-{self.fib_max*100:.1f}%",
+                    'pullback_depth_pct': round(pullback_depth * 100, 1),
+                    'volume_spike': volume_confirmed,
+                    'rr_acceptable': rr_ratio >= self.min_rr_ratio,
+                    'confluence_count': sum([
+                        True,  # EMA aligned
+                        True,  # Swing break
+                        True,  # Pullback valid
+                        in_optimal_zone,
+                        volume_confirmed,
+                        rr_ratio >= 2.0
+                    ])
+                },
+                'signal_conditions': {
+                    'session': self._get_current_session(candle_dt) if hasattr(self, '_get_current_session') else 'unknown',
+                    'spread_pips': entry_df['spread'].iloc[-1] if 'spread' in entry_df.columns else None,
+                    'current_price': market_price,
+                    'limit_offset_pips': round(limit_offset_pips, 1) if order_type == 'limit' else 0.0,
+                    'risk_pips': round(risk_pips, 1),
+                    'reward_pips': round(reward_pips, 1),
+                    'rr_ratio': round(rr_ratio, 2),
+                    'confidence': round(confidence, 2),
+                    'atr_pips': round(atr / pip_value, 1) if atr else 0.0
+                }
             }
 
             self.logger.info(f"\n📋 Signal Summary:")
