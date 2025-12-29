@@ -735,10 +735,11 @@ class TradeValidator:
 
             # Fetch multiple timeframes for comprehensive chart
             # Using lookback_hours instead of num_candles (DataFetcher uses get_enhanced_data)
+            # SMC Simple uses: 4H (bias), 15m (swing break), 5m (entry)
             timeframes = [
                 ('4h', 400),   # 400 hours = ~16 days of 4h candles (~100 candles)
-                ('1h', 200),   # 200 hours = ~8 days of 1h candles
                 ('15m', 50),   # 50 hours = ~200 15m candles
+                ('5m', 24),    # 24 hours = ~288 5m candles (entry timeframe)
             ]
 
             for timeframe, lookback_hours in timeframes:
