@@ -1017,6 +1017,25 @@ Be concise but thorough. The Silver Bullet strategy is TIME-SENSITIVE - quality 
                 reward_pips = risk_mgmt.get('reward_pips', reward_pips)
                 rr_ratio = risk_mgmt.get('rr_ratio', rr_ratio)
 
+            # Check if fixed SL/TP override is enabled
+            fixed_sl_tp_enabled = False
+            fixed_sl_note = ""
+            try:
+                from config import (
+                    FIXED_SL_TP_OVERRIDE_ENABLED,
+                    FIXED_STOP_LOSS_PIPS,
+                    FIXED_TAKE_PROFIT_PIPS
+                )
+                if FIXED_SL_TP_OVERRIDE_ENABLED:
+                    fixed_sl_tp_enabled = True
+                    # Override with fixed values for display
+                    risk_pips = FIXED_STOP_LOSS_PIPS
+                    reward_pips = FIXED_TAKE_PROFIT_PIPS
+                    rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
+                    fixed_sl_note = f"\n⚠️ **FIXED SL/TP MODE ACTIVE**: All trades use SL={FIXED_STOP_LOSS_PIPS} pips, TP={FIXED_TAKE_PROFIT_PIPS} pips (R:R={rr_ratio:.2f}:1) regardless of strategy calculation."
+            except ImportError:
+                pass
+
             # Opposite swing for SL reference
             opposite_swing = signal.get('opposite_swing', 0)
 
@@ -1204,9 +1223,9 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 💰 TRADE LEVELS
 ═══════════════════════════════════════════════════════════════
 • Entry Price: {self._format_price(entry_price)}
-• Stop Loss: {self._format_price(stop_loss)} ({risk_pips:.1f} pips risk)
-• Take Profit: {self._format_price(take_profit)} ({reward_pips:.1f} pips reward)
-• Risk:Reward Ratio: {rr_ratio:.2f}:1
+• Stop Loss: {risk_pips:.1f} pips
+• Take Profit: {reward_pips:.1f} pips
+• Risk:Reward Ratio: {rr_ratio:.2f}:1{fixed_sl_note}
 {chart_instruction}
 {smc_analysis}
 ═══════════════════════════════════════════════════════════════
@@ -1219,11 +1238,12 @@ SCORE: [1-10]
 DECISION: [APPROVE/REJECT]
 REASON: [2-3 sentences explaining your professional assessment. Focus on: trend alignment, entry quality, R:R ratio, and any visual concerns from the chart]
 
-**SCORING GUIDELINES FOR v2.3.0:**
-- 8-10: Strong trend alignment, clean swing break on 15m, R:R ≥ 2.0, volume confirmed, EMA 9/21 aligned on 15m
+**SCORING GUIDELINES FOR v2.8.1:**
+- 8-10: Strong trend alignment, clean swing break on 15m, volume confirmed, EMA 9/21 aligned on 15m
 - 6-7: Good setup with minor concerns (e.g., momentum slightly extended, volume not confirmed, S/R nearby but manageable)
 - 4-5: Marginal setup - weak trend, entry quality issues, or EMA micro-structure conflict on 15m
-- 1-3: Poor setup - counter-trend, bad R:R, S/R blocking target, or technical breakdown
+- 1-3: Poor setup - counter-trend, S/R blocking target, or technical breakdown
+NOTE: R:R is fixed at 1.67:1 (9 pip SL / 15 pip TP) - do not penalize for R:R.
 
 **ENTRY TYPE EVALUATION:**
 - PULLBACK entries: Prefer entries in 38.2%-61.8% Fib zone (check 5m chart). Outside zone = lower score but not automatic rejection
@@ -1238,10 +1258,9 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 
 **AUTOMATIC REJECTION CRITERIA:**
 - Counter-trend trades (price on wrong side of 4H EMA)
-- R:R ratio below 1.5
 - MOMENTUM entry showing reversal candles on 15m (engulfing, pin bars against direction)
 - Price too close to 4H EMA (<2.5 pips) - buffer zone violation
-- S/R level on 15m blocking more than 75% of path to target
+- S/R level on 15m blocking more than 75% of path to target (15 pips)
 - EMA 9/21 crossed against signal direction on 15m
 
 Be concise but thorough. Your assessment determines if real money is risked."""
