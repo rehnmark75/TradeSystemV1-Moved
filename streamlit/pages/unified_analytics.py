@@ -21,6 +21,8 @@ import requests
 from services.db_utils import DatabaseContextManager, get_connection_string
 # Import rejection analytics service for cached rejection data
 from services.rejection_analytics_service import RejectionAnalyticsService
+# Import tab components
+from components.tabs import render_smc_rejections_tab, render_ema_double_rejections_tab
 
 # Configure page
 st.set_page_config(
@@ -6483,9 +6485,11 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
                 "⏳ Unfilled Orders"
             ])
             with rejection_tabs[0]:
-                self.render_smc_rejections_tab()
+                # Use extracted tab component
+                render_smc_rejections_tab()
             with rejection_tabs[1]:
-                self.render_ema_double_rejections_tab()
+                # Use extracted tab component
+                render_ema_double_rejections_tab()
             with rejection_tabs[2]:
                 self.render_unfilled_orders_tab()
 

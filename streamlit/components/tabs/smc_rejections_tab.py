@@ -1,0 +1,1051 @@
+"""
+SMC Rejections Tab Component
+
+Renders the SMC Simple strategy rejection analysis tab with multiple sub-tabs:
+- Stage Breakdown
+- Outcome Analysis
+- S/R Path Blocking
+- Time Analysis
+- Market Context
+- Near-Misses
+- Scanner Efficiency
+"""
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import requests
+from typing import Dict, Any
+
+from services.rejection_analytics_service import RejectionAnalyticsService
+from services.db_utils import get_psycopg2_connection
+
+
+def render_smc_rejections_tab():
+    """Render SMC Simple Rejection Analysis tab"""
+    service = RejectionAnalyticsService()
+
+    # Header with refresh button
+    header_col1, header_col2 = st.columns([6, 1])
+    with header_col1:
+        st.header("SMC Simple Rejection Analysis")
+    with header_col2:
+        if st.button("Refresh", key="smc_rejections_refresh", help="Refresh rejection data"):
+            st.rerun()
+
+    st.markdown("Analyze why SMC Simple strategy signals were rejected to improve strategy parameters")
+
+    # Get filter options from service (cached)
+    filter_options = service.get_smc_filter_options()
+
+    if not filter_options.get('table_exists', True):
+        st.warning("SMC Rejections table not yet created. Run the database migration:")
+        st.code("""
+docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simple_rejections_table.sql
+        """)
+        return
+
+    stages = filter_options['stages']
+    pairs = filter_options['pairs']
+    sessions = filter_options['sessions']
+
+    # Filters row
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        days_filter = st.selectbox("Time Period", [7, 14, 30, 60, 90], index=2, key="smc_rej_days")
+    with col2:
+        stage_filter = st.selectbox("Rejection Stage", stages, key="smc_rej_stage")
+    with col3:
+        pair_filter = st.selectbox("Pair", pairs, key="smc_rej_pair")
+    with col4:
+        session_filter = st.selectbox("Session", sessions, key="smc_rej_session")
+
+    # Fetch statistics from service (cached)
+    stats = service.fetch_smc_rejection_stats(days_filter)
+
+    # Summary metrics
+    st.markdown("---")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Total Rejections", f"{stats.get('total', 0):,}")
+    with col2:
+        st.metric("Unique Pairs", stats.get('unique_pairs', 0))
+    with col3:
+        top_stage = max(stats.get('by_stage', {'N/A': 0}).items(), key=lambda x: x[1])[0] if stats.get('by_stage') else 'N/A'
+        st.metric("Top Rejection Stage", top_stage)
+    with col4:
+        st.metric("Near-Misses", stats.get('near_misses', 0), help="Signals that reached confidence stage but were rejected")
+    with col5:
+        st.metric("Most Rejected Pair", stats.get('most_rejected_pair', 'N/A'))
+
+    st.markdown("---")
+
+    # Sub-tabs for different analysis views
+    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6, sub_tab7 = st.tabs([
+        "Stage Breakdown", "Outcome Analysis", "S/R Path Blocking", "Time Analysis", "Market Context", "Near-Misses", "Scanner Efficiency"
+    ])
+
+    # Fetch data from service (cached)
+    df = service.fetch_smc_rejections(days_filter, stage_filter, pair_filter, session_filter)
+
+    if df.empty:
+        st.info("No rejections found for the selected filters.")
+        return
+
+    with sub_tab1:
+        _render_stage_breakdown(df, stats)
+
+    with sub_tab2:
+        _render_rejection_outcome_analysis(days_filter)
+
+    with sub_tab3:
+        _render_sr_path_blocking(df, days_filter)
+
+    with sub_tab4:
+        _render_time_analysis(df)
+
+    with sub_tab5:
+        _render_market_context(df)
+
+    with sub_tab6:
+        _render_near_misses(df, days_filter)
+
+    with sub_tab7:
+        _render_scanner_efficiency(days_filter)
+
+
+def _render_stage_breakdown(df: pd.DataFrame, stats: dict):
+    """Render stage breakdown sub-tab"""
+    st.subheader("Rejections by Stage")
+
+    if df.empty:
+        st.info("No rejection data available.")
+        return
+
+    # Pie chart for stage distribution
+    stage_counts = df['rejection_stage'].value_counts().reset_index()
+    stage_counts.columns = ['Stage', 'Count']
+
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        fig_pie = px.pie(
+            stage_counts,
+            values='Count',
+            names='Stage',
+            title="Rejection Distribution by Stage",
+            color_discrete_sequence=px.colors.qualitative.Set2
+        )
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    with col2:
+        # Bar chart
+        fig_bar = px.bar(
+            stage_counts,
+            x='Stage',
+            y='Count',
+            title="Rejection Counts by Stage",
+            color='Count',
+            color_continuous_scale='Reds'
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # Detailed reason breakdown
+    st.subheader("Top Rejection Reasons")
+    reason_counts = df.groupby(['rejection_stage', 'rejection_reason']).size().reset_index(name='Count')
+    reason_counts = reason_counts.sort_values('Count', ascending=False).head(20)
+
+    st.dataframe(
+        reason_counts,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "rejection_stage": st.column_config.TextColumn("Stage"),
+            "rejection_reason": st.column_config.TextColumn("Reason"),
+            "Count": st.column_config.NumberColumn("Count", format="%d")
+        }
+    )
+
+
+def _render_rejection_outcome_analysis(days_filter: int):
+    """Render rejection outcome analysis sub-tab."""
+    st.subheader("Rejection Outcome Analysis")
+
+    st.info("""
+    **What is Rejection Outcome Analysis?**
+
+    This analysis tracks what would have happened if rejected signals were actually executed.
+    Using fixed SL=9 pips and TP=15 pips, we monitor price movement after each rejection to determine:
+    - **Would-be Winners**: Signals that would have hit TP before SL
+    - **Would-be Losers**: Signals that would have hit SL before TP
+
+    This helps identify if rejection filters are too aggressive (missing profitable trades) or
+    working correctly (filtering out losing trades).
+    """)
+
+    # Fetch data from FastAPI endpoint
+    fastapi_base_url = "http://fastapi-dev:8000"
+    headers = {
+        "X-APIM-Gateway": "verified",
+        "X-API-KEY": "436abe054a074894a0517e5172f0e5b6"
+    }
+
+    try:
+        # Fetch summary
+        summary_response = requests.get(
+            f"{fastapi_base_url}/api/rejection-outcomes/summary",
+            params={"days": days_filter},
+            headers=headers,
+            timeout=30
+        )
+
+        if summary_response.status_code != 200:
+            st.warning("Could not fetch outcome data. Run the rejection outcome analyzer first.")
+            st.code("""
+# Run the analyzer to populate outcome data:
+docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outcome_analyzer.py --days 7
+            """)
+            return
+
+        summary = summary_response.json()
+
+        if summary.get('total_analyzed', 0) == 0:
+            st.warning("No outcome data available yet. Run the analyzer to populate data.")
+            st.code("""
+# First, run the database migration:
+docker exec postgres psql -U postgres -d forex -f /app/forex_scanner/migrations/create_smc_rejection_outcomes_table.sql
+
+# Then run the analyzer:
+docker exec -it task-worker python /app/forex_scanner/monitoring/rejection_outcome_analyzer.py --days 7
+            """)
+            return
+
+        # Summary metrics row
+        st.markdown("### Overall Summary")
+        col1, col2, col3, col4, col5 = st.columns(5)
+
+        with col1:
+            st.metric("Total Analyzed", f"{summary.get('total_analyzed', 0):,}")
+
+        with col2:
+            win_rate = summary.get('would_be_win_rate', 0)
+            delta_color = "normal" if win_rate >= 50 else "inverse"
+            st.metric(
+                "Would-Be Win Rate",
+                f"{win_rate:.1f}%",
+                delta=f"{win_rate - 50:.1f}% vs break-even" if win_rate else None,
+                delta_color=delta_color
+            )
+
+        with col3:
+            st.metric(
+                "Would-Be Winners",
+                summary.get('winners', 0),
+                help="Rejected signals that would have hit TP"
+            )
+
+        with col4:
+            missed_pips = summary.get('total_missed_pips', 0)
+            st.metric(
+                "Missed Profit",
+                f"{missed_pips:.0f} pips",
+                help="Potential profit from would-be winners"
+            )
+
+        with col5:
+            avoided_loss = summary.get('avoided_loss_pips', 0)
+            st.metric(
+                "Avoided Loss",
+                f"{avoided_loss:.0f} pips",
+                help="Loss avoided by rejecting would-be losers"
+            )
+
+        st.markdown("---")
+
+        # Win rate by stage analysis
+        st.markdown("### Win Rate by Rejection Stage")
+
+        stage_response = requests.get(
+            f"{fastapi_base_url}/api/rejection-outcomes/win-rate-by-stage",
+            params={"days": days_filter},
+            headers=headers,
+            timeout=30
+        )
+
+        if stage_response.status_code == 200:
+            stage_data = stage_response.json()
+
+            if stage_data:
+                stage_df = pd.DataFrame(stage_data)
+
+                # Bar chart
+                fig = px.bar(
+                    stage_df,
+                    x='rejection_stage',
+                    y='would_be_win_rate',
+                    color='would_be_win_rate',
+                    color_continuous_scale='RdYlGn',
+                    title='Would-Be Win Rate by Rejection Stage',
+                    labels={'would_be_win_rate': 'Win Rate (%)', 'rejection_stage': 'Stage'}
+                )
+                fig.add_hline(y=50, line_dash="dash", line_color="gray",
+                              annotation_text="Break-even (50%)")
+                fig.update_layout(coloraxis_colorbar=dict(title="Win Rate %"))
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Interpretation
+                st.markdown("### Stage Interpretation")
+
+                for _, row in stage_df.iterrows():
+                    stage = row.get('rejection_stage', 'UNKNOWN')
+                    win_rate = row.get('would_be_win_rate', 0) or 0
+                    total = row.get('total_analyzed', 0)
+                    missed = row.get('missed_profit_pips', 0) or 0
+                    avoided = row.get('avoided_loss_pips', 0) or 0
+
+                    if win_rate > 60:
+                        st.warning(
+                            f"**{stage}**: {win_rate:.0f}% win rate ({total} signals) - "
+                            f"Missing {missed:.0f} pips of profit. Consider relaxing this filter."
+                        )
+                    elif win_rate < 40:
+                        st.success(
+                            f"**{stage}**: {win_rate:.0f}% win rate ({total} signals) - "
+                            f"Correctly avoided {avoided:.0f} pips of loss. Keep current settings."
+                        )
+                    else:
+                        st.info(
+                            f"**{stage}**: {win_rate:.0f}% win rate ({total} signals) - "
+                            f"Neutral performance. Net: {missed - avoided:.0f} pips."
+                        )
+
+                # Data table
+                st.markdown("### Detailed Stage Metrics")
+                display_cols = [
+                    'rejection_stage', 'total_analyzed', 'would_be_winners',
+                    'would_be_losers', 'would_be_win_rate', 'missed_profit_pips',
+                    'avoided_loss_pips', 'avg_mfe_pips', 'avg_mae_pips'
+                ]
+                available_cols = [c for c in display_cols if c in stage_df.columns]
+                if available_cols:
+                    st.dataframe(
+                        stage_df[available_cols].rename(columns={
+                            'rejection_stage': 'Stage',
+                            'total_analyzed': 'Total',
+                            'would_be_winners': 'Winners',
+                            'would_be_losers': 'Losers',
+                            'would_be_win_rate': 'Win Rate %',
+                            'missed_profit_pips': 'Missed Pips',
+                            'avoided_loss_pips': 'Avoided Pips',
+                            'avg_mfe_pips': 'Avg MFE',
+                            'avg_mae_pips': 'Avg MAE'
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+        st.markdown("---")
+
+        # Parameter suggestions
+        st.markdown("### Parameter Suggestions")
+
+        suggestions_response = requests.get(
+            f"{fastapi_base_url}/api/rejection-outcomes/parameter-suggestions",
+            params={"days": days_filter},
+            headers=headers,
+            timeout=30
+        )
+
+        if suggestions_response.status_code == 200:
+            suggestions = suggestions_response.json()
+
+            if suggestions.get('overall_assessment'):
+                st.markdown(f"**Overall Assessment:** {suggestions['overall_assessment']}")
+
+            if suggestions.get('stage_adjustments'):
+                with st.expander("Stage-Specific Recommendations", expanded=True):
+                    for adj in suggestions['stage_adjustments']:
+                        issue = adj.get('issue', '')
+                        if issue == 'TOO_AGGRESSIVE':
+                            st.warning(f"{adj.get('recommendation', '')}")
+                        elif issue == 'WORKING_WELL':
+                            st.success(f"{adj.get('recommendation', '')}")
+                        else:
+                            st.info(f"{adj.get('recommendation', '')}")
+
+            if suggestions.get('session_patterns'):
+                with st.expander("Session Patterns"):
+                    session_df = pd.DataFrame(suggestions['session_patterns'])
+                    if not session_df.empty:
+                        st.dataframe(session_df, use_container_width=True, hide_index=True)
+
+            if suggestions.get('pair_insights'):
+                _render_pair_insights(suggestions['pair_insights'])
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to connect to FastAPI backend: {e}")
+        st.info("Make sure the fastapi-dev container is running.")
+    except Exception as e:
+        st.error(f"Error rendering outcome analysis: {e}")
+
+
+def _render_pair_insights(pair_insights: list):
+    """Render per-pair recommendations."""
+    st.markdown("---")
+    st.markdown("### Per-Pair Recommendations")
+
+    pair_df = pd.DataFrame(pair_insights)
+
+    if pair_df.empty:
+        return
+
+    # Create color-coded bar chart
+    fig = px.bar(
+        pair_df,
+        x='pair',
+        y='win_rate',
+        color='status',
+        color_discrete_map={
+            'TOO_AGGRESSIVE': '#ff6b6b',
+            'WORKING_WELL': '#51cf66',
+            'NEUTRAL': '#ffd43b'
+        },
+        title='Would-Be Win Rate by Currency Pair',
+        labels={
+            'win_rate': 'Win Rate (%)',
+            'pair': 'Currency Pair',
+            'status': 'Filter Status'
+        },
+        hover_data=['total_analyzed', 'missed_profit_pips', 'avoided_loss_pips', 'net_pips']
+    )
+    fig.add_hline(y=50, line_dash="dash", line_color="gray", annotation_text="Break-even (50%)")
+    fig.add_hline(y=60, line_dash="dot", line_color="red", annotation_text="Too Aggressive (60%)")
+    fig.add_hline(y=40, line_dash="dot", line_color="green", annotation_text="Working Well (40%)")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Pair-specific recommendations
+    st.markdown("#### Pair-Specific Action Items")
+
+    pair_df_sorted = pair_df.sort_values('net_pips', ascending=False)
+
+    for _, row in pair_df_sorted.iterrows():
+        pair = row.get('pair', 'UNKNOWN')
+        epic = row.get('epic', '')
+        win_rate = row.get('win_rate', 0) or 0
+        total = row.get('total_analyzed', 0)
+        status = row.get('status', 'NEUTRAL')
+        recommendation = row.get('recommendation', '')
+        net_pips = row.get('net_pips', 0) or 0
+
+        if status == 'TOO_AGGRESSIVE':
+            st.warning(
+                f"**{pair}** ({epic}): {win_rate:.0f}% win rate from {total} rejections. "
+                f"Net missed: {net_pips:.0f} pips. {recommendation}"
+            )
+        elif status == 'WORKING_WELL':
+            st.success(
+                f"**{pair}** ({epic}): {win_rate:.0f}% win rate from {total} rejections. "
+                f"Net saved: {abs(net_pips):.0f} pips. {recommendation}"
+            )
+        else:
+            st.info(
+                f"**{pair}** ({epic}): {win_rate:.0f}% win rate from {total} rejections. "
+                f"Net impact: {net_pips:.0f} pips. {recommendation}"
+            )
+
+    # Detailed pair metrics table
+    with st.expander("Detailed Pair Metrics"):
+        display_cols = [
+            'pair', 'epic', 'total_analyzed', 'win_rate',
+            'missed_profit_pips', 'avoided_loss_pips', 'net_pips', 'status'
+        ]
+        available_cols = [c for c in display_cols if c in pair_df.columns]
+        if available_cols:
+            display_df = pair_df[available_cols].rename(columns={
+                'pair': 'Pair',
+                'epic': 'Epic',
+                'total_analyzed': 'Total',
+                'win_rate': 'Win Rate %',
+                'missed_profit_pips': 'Missed Pips',
+                'avoided_loss_pips': 'Avoided Pips',
+                'net_pips': 'Net Pips',
+                'status': 'Status'
+            })
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+
+def _render_sr_path_blocking(df: pd.DataFrame, days_filter: int):
+    """Render S/R Path Blocking analysis sub-tab"""
+    st.subheader("S/R Path Blocking Analysis")
+
+    st.info("""
+    **What is S/R Path Blocking?**
+
+    This analysis shows trades rejected because a Support/Resistance level was blocking
+    the path from entry to take profit target. For example, if you're buying at 1.2500
+    with a TP at 1.2560, but there's resistance at 1.2510, that resistance blocks 83%
+    of your profit path - a high-risk trade that should be avoided.
+
+    **Critical threshold:** S/R blocking >75% of path = Auto-reject
+    **Warning threshold:** S/R blocking >50% of path = Flagged for review
+    """)
+
+    # Filter for SR_PATH_BLOCKED rejections
+    sr_blocked_df = df[df['rejection_stage'] == 'SR_PATH_BLOCKED'].copy() if 'rejection_stage' in df.columns else pd.DataFrame()
+
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        sr_blocked_count = len(sr_blocked_df)
+        total_rejections = len(df)
+        pct_of_total = (sr_blocked_count / total_rejections * 100) if total_rejections > 0 else 0
+        st.metric(
+            "S/R Path Blocked Rejections",
+            f"{sr_blocked_count:,}",
+            f"{pct_of_total:.1f}% of all rejections"
+        )
+
+    with col2:
+        if 'sr_path_blocked_pct' in sr_blocked_df.columns and not sr_blocked_df.empty:
+            avg_blocked = sr_blocked_df['sr_path_blocked_pct'].mean()
+            st.metric("Avg Path Blocked %", f"{avg_blocked:.1f}%")
+        else:
+            st.metric("Avg Path Blocked %", "N/A")
+
+    with col3:
+        if not sr_blocked_df.empty and 'pair' in sr_blocked_df.columns:
+            affected_pairs = sr_blocked_df['pair'].nunique()
+            st.metric("Affected Pairs", affected_pairs)
+        else:
+            st.metric("Affected Pairs", "0")
+
+    with col4:
+        if not sr_blocked_df.empty and 'target_distance_pips' in sr_blocked_df.columns:
+            avg_target = sr_blocked_df['target_distance_pips'].mean()
+            st.metric("Avg Target Distance", f"{avg_target:.1f} pips")
+        else:
+            st.metric("Avg Target Distance", "N/A")
+
+    if sr_blocked_df.empty:
+        st.info("No S/R path blocking rejections found for the selected period. This is good - it means no trades were rejected due to S/R blocking the path to target!")
+
+        # Show alternative: Check if there are S/R related issues in other stages
+        sr_related = df[df['rejection_reason'].str.contains('S/R|support|resistance|level', case=False, na=False)]
+        if not sr_related.empty:
+            st.warning(f"However, {len(sr_related)} rejections mention S/R in other stages:")
+            st.dataframe(
+                sr_related[['scan_timestamp', 'pair', 'rejection_stage', 'rejection_reason']].head(10),
+                use_container_width=True,
+                hide_index=True
+            )
+        return
+
+    st.markdown("---")
+
+    # Breakdown by pair
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### S/R Blocking by Currency Pair")
+        if 'pair' in sr_blocked_df.columns:
+            pair_counts = sr_blocked_df['pair'].value_counts().reset_index()
+            pair_counts.columns = ['Pair', 'Count']
+
+            fig_pair = px.bar(
+                pair_counts,
+                x='Pair',
+                y='Count',
+                title="S/R Path Blocking Rejections by Pair",
+                color='Count',
+                color_continuous_scale='Reds'
+            )
+            st.plotly_chart(fig_pair, use_container_width=True)
+
+    with col2:
+        st.markdown("#### S/R Blocking by Type")
+        if 'sr_blocking_type' in sr_blocked_df.columns and sr_blocked_df['sr_blocking_type'].notna().any():
+            type_counts = sr_blocked_df['sr_blocking_type'].value_counts().reset_index()
+            type_counts.columns = ['Type', 'Count']
+
+            fig_type = px.pie(
+                type_counts,
+                values='Count',
+                names='Type',
+                title="Blocking by S/R Type (Support vs Resistance)",
+                color_discrete_map={'resistance': '#f44336', 'support': '#4caf50'}
+            )
+            st.plotly_chart(fig_type, use_container_width=True)
+
+    # Path blocked percentage distribution
+    if 'sr_path_blocked_pct' in sr_blocked_df.columns and sr_blocked_df['sr_path_blocked_pct'].notna().any():
+        st.markdown("#### Path Blocked Percentage Distribution")
+        fig_hist = px.histogram(
+            sr_blocked_df,
+            x='sr_path_blocked_pct',
+            nbins=20,
+            title="Distribution of Path Blocked Percentage",
+            labels={'sr_path_blocked_pct': 'Path Blocked %'},
+            color_discrete_sequence=['#ff6b6b']
+        )
+        fig_hist.add_vline(x=75, line_dash="dash", line_color="red", annotation_text="Critical (75%)")
+        fig_hist.add_vline(x=50, line_dash="dash", line_color="orange", annotation_text="Warning (50%)")
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+    # Detailed rejection table
+    st.markdown("#### Recent S/R Path Blocking Rejections")
+    display_cols = ['scan_timestamp', 'pair', 'attempted_direction', 'current_price',
+                   'potential_take_profit', 'sr_blocking_level', 'sr_blocking_type',
+                   'sr_blocking_distance_pips', 'sr_path_blocked_pct', 'target_distance_pips']
+    available_cols = [c for c in display_cols if c in sr_blocked_df.columns]
+
+    if available_cols:
+        st.dataframe(
+            sr_blocked_df[available_cols].head(20),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "scan_timestamp": st.column_config.DatetimeColumn("Time", format="MMM DD, HH:mm"),
+                "pair": st.column_config.TextColumn("Pair"),
+                "attempted_direction": st.column_config.TextColumn("Direction"),
+                "current_price": st.column_config.NumberColumn("Entry", format="%.5f"),
+                "potential_take_profit": st.column_config.NumberColumn("TP Target", format="%.5f"),
+                "sr_blocking_level": st.column_config.NumberColumn("S/R Level", format="%.5f"),
+                "sr_blocking_type": st.column_config.TextColumn("S/R Type"),
+                "sr_blocking_distance_pips": st.column_config.NumberColumn("Dist to S/R", format="%.1f pips"),
+                "sr_path_blocked_pct": st.column_config.ProgressColumn("Path Blocked", min_value=0, max_value=100, format="%.1f%%"),
+                "target_distance_pips": st.column_config.NumberColumn("Target Dist", format="%.1f pips")
+            }
+        )
+    else:
+        st.dataframe(sr_blocked_df.head(20), use_container_width=True, hide_index=True)
+
+    # Analysis insights
+    st.markdown("---")
+    st.markdown("#### Insights")
+
+    if 'pair' in sr_blocked_df.columns and not sr_blocked_df.empty:
+        most_blocked_pair = sr_blocked_df['pair'].value_counts().idxmax()
+        most_blocked_count = sr_blocked_df['pair'].value_counts().max()
+
+        st.markdown(f"""
+        - **Most affected pair:** {most_blocked_pair} ({most_blocked_count} rejections)
+        - This pair may have significant S/R levels that frequently block trade targets
+        - Consider adjusting TP targets or entry timing for this pair
+        """)
+
+    if 'sr_blocking_type' in sr_blocked_df.columns and sr_blocked_df['sr_blocking_type'].notna().any():
+        type_mode = sr_blocked_df['sr_blocking_type'].mode()
+        if len(type_mode) > 0:
+            dominant_type = type_mode.iloc[0]
+            st.markdown(f"""
+            - **Dominant blocking type:** {dominant_type.upper()}
+            - {'BUY signals are being blocked by resistance levels' if dominant_type == 'resistance' else 'SELL signals are being blocked by support levels'}
+            """)
+
+
+def _render_time_analysis(df: pd.DataFrame):
+    """Render time analysis sub-tab"""
+    st.subheader("Rejection Patterns Over Time")
+
+    if df.empty or 'market_hour' not in df.columns:
+        st.info("No time data available.")
+        return
+
+    # Heatmap: Hour vs Stage
+    if 'market_hour' in df.columns and df['market_hour'].notna().any():
+        st.markdown("#### Rejections by Hour and Stage")
+        pivot = df.groupby(['market_hour', 'rejection_stage']).size().unstack(fill_value=0)
+
+        fig_heat = px.imshow(
+            pivot.values,
+            x=pivot.columns.tolist(),
+            y=pivot.index.tolist(),
+            labels=dict(x="Rejection Stage", y="Hour (UTC)", color="Count"),
+            title="Rejection Heatmap: Hour vs Stage",
+            color_continuous_scale='YlOrRd'
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
+
+    # Rejections by hour
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if 'market_hour' in df.columns:
+            hour_counts = df['market_hour'].value_counts().sort_index().reset_index()
+            hour_counts.columns = ['Hour', 'Count']
+
+            fig_hour = px.bar(
+                hour_counts,
+                x='Hour',
+                y='Count',
+                title="Rejections by Hour (UTC)",
+                color='Count',
+                color_continuous_scale='Blues'
+            )
+            st.plotly_chart(fig_hour, use_container_width=True)
+
+    with col2:
+        # By session
+        if 'market_session' in df.columns and df['market_session'].notna().any():
+            session_counts = df['market_session'].value_counts().reset_index()
+            session_counts.columns = ['Session', 'Count']
+
+            fig_session = px.bar(
+                session_counts,
+                x='Session',
+                y='Count',
+                title="Rejections by Market Session",
+                color='Session',
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            st.plotly_chart(fig_session, use_container_width=True)
+
+    # Rejections over time (daily trend)
+    st.markdown("#### Daily Rejection Trend")
+    if 'scan_timestamp' in df.columns:
+        df_copy = df.copy()
+        df_copy['date'] = pd.to_datetime(df_copy['scan_timestamp']).dt.date
+        daily_counts = df_copy.groupby(['date', 'rejection_stage']).size().reset_index(name='Count')
+
+        fig_trend = px.line(
+            daily_counts,
+            x='date',
+            y='Count',
+            color='rejection_stage',
+            title="Daily Rejections by Stage",
+            markers=True
+        )
+        st.plotly_chart(fig_trend, use_container_width=True)
+
+
+def _render_market_context(df: pd.DataFrame):
+    """Render market context sub-tab"""
+    st.subheader("Market Context Analysis")
+
+    if df.empty:
+        st.info("No market context data available.")
+        return
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # ATR distribution by stage
+        if 'atr_15m' in df.columns and df['atr_15m'].notna().any():
+            st.markdown("#### ATR at Rejection Points")
+            fig_atr = px.box(
+                df[df['atr_15m'].notna()],
+                x='rejection_stage',
+                y='atr_15m',
+                title="ATR Distribution by Rejection Stage",
+                color='rejection_stage'
+            )
+            st.plotly_chart(fig_atr, use_container_width=True)
+
+    with col2:
+        # EMA distance distribution
+        if 'ema_distance_pips' in df.columns and df['ema_distance_pips'].notna().any():
+            st.markdown("#### EMA Distance at Rejection Points")
+            fig_ema = px.histogram(
+                df[df['ema_distance_pips'].notna()],
+                x='ema_distance_pips',
+                color='rejection_stage',
+                title="EMA Distance Distribution (pips)",
+                nbins=30
+            )
+            st.plotly_chart(fig_ema, use_container_width=True)
+
+    # Volume ratio analysis
+    if 'volume_ratio' in df.columns and df['volume_ratio'].notna().any():
+        st.markdown("#### Volume Ratio at Rejection Points")
+        fig_vol = px.scatter(
+            df[df['volume_ratio'].notna()],
+            x='ema_distance_pips' if 'ema_distance_pips' in df.columns else 'market_hour',
+            y='volume_ratio',
+            color='rejection_stage',
+            title="Volume Ratio vs EMA Distance",
+            hover_data=['pair', 'rejection_reason']
+        )
+        st.plotly_chart(fig_vol, use_container_width=True)
+
+    # Pullback depth analysis
+    if 'pullback_depth' in df.columns and df['pullback_depth'].notna().any():
+        st.markdown("#### Pullback Depth Distribution")
+        pullback_df = df[df['pullback_depth'].notna()].copy()
+        pullback_df['pullback_pct'] = pullback_df['pullback_depth'] * 100
+
+        fig_pb = px.histogram(
+            pullback_df,
+            x='pullback_pct',
+            color='rejection_stage',
+            title="Pullback Depth Distribution (%)",
+            nbins=40,
+            labels={'pullback_pct': 'Pullback Depth (%)'}
+        )
+        st.plotly_chart(fig_pb, use_container_width=True)
+
+
+def _render_near_misses(df: pd.DataFrame, days: int):
+    """Render near-misses sub-tab"""
+    st.subheader("Near-Miss Signals")
+    st.caption("Signals that almost passed - reached the confidence stage but were rejected")
+
+    # Filter to confidence stage rejections
+    near_miss_df = df[df['rejection_stage'] == 'CONFIDENCE'].copy()
+
+    if near_miss_df.empty:
+        st.info("No near-miss signals (confidence-stage rejections) found for the selected period.")
+        return
+
+    # Sort by confidence score descending
+    if 'confidence_score' in near_miss_df.columns:
+        near_miss_df = near_miss_df.sort_values('confidence_score', ascending=False)
+
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Near-Misses", len(near_miss_df))
+    with col2:
+        avg_conf = near_miss_df['confidence_score'].mean() * 100 if 'confidence_score' in near_miss_df.columns and near_miss_df['confidence_score'].notna().any() else 0
+        st.metric("Avg Confidence", f"{avg_conf:.1f}%")
+    with col3:
+        avg_rr = near_miss_df['potential_rr_ratio'].mean() if 'potential_rr_ratio' in near_miss_df.columns and near_miss_df['potential_rr_ratio'].notna().any() else 0
+        st.metric("Avg R:R", f"{avg_rr:.2f}")
+    with col4:
+        bull_count = len(near_miss_df[near_miss_df['attempted_direction'] == 'BULL']) if 'attempted_direction' in near_miss_df.columns else 0
+        bear_count = len(near_miss_df[near_miss_df['attempted_direction'] == 'BEAR']) if 'attempted_direction' in near_miss_df.columns else 0
+        st.metric("Direction Split", f"{bull_count} Bull / {bear_count} Bear")
+
+    st.markdown("---")
+
+    # Display near-misses with expandable details
+    for idx, row in near_miss_df.head(20).iterrows():
+        timestamp = row.get('scan_timestamp', '')
+        if isinstance(timestamp, pd.Timestamp):
+            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M')
+        else:
+            timestamp_str = str(timestamp)[:16] if timestamp else 'N/A'
+
+        pair = row.get('pair', 'N/A')
+        direction = row.get('attempted_direction', 'N/A')
+        direction_icon = "+" if direction == 'BULL' else "-" if direction == 'BEAR' else "o"
+        confidence = row.get('confidence_score', 0)
+        conf_str = f"{confidence*100:.0f}%" if confidence else 'N/A'
+        rr = row.get('potential_rr_ratio', 0)
+        rr_str = f"{rr:.2f}" if rr else 'N/A'
+        session = row.get('market_session', 'N/A')
+        reason = row.get('rejection_reason', 'N/A')
+
+        expander_title = f"{direction_icon} {timestamp_str} | {pair} | {direction} | Conf: {conf_str} | R:R: {rr_str} | {session}"
+
+        with st.expander(expander_title, expanded=False):
+            detail_col1, detail_col2 = st.columns(2)
+
+            with detail_col1:
+                st.markdown("**Signal Details:**")
+                st.write(f"- **Pair:** {pair}")
+                st.write(f"- **Direction:** {direction}")
+                st.write(f"- **Confidence:** {conf_str}")
+                st.write(f"- **Session:** {session}")
+                entry = row.get('potential_entry', None)
+                if entry:
+                    st.write(f"- **Entry:** {entry:.5f}")
+                sl = row.get('potential_stop_loss', None)
+                if sl:
+                    st.write(f"- **Stop Loss:** {sl:.5f}")
+                tp = row.get('potential_take_profit', None)
+                if tp:
+                    st.write(f"- **Take Profit:** {tp:.5f}")
+
+            with detail_col2:
+                st.markdown("**Risk/Reward:**")
+                risk_pips = row.get('potential_risk_pips', None)
+                reward_pips = row.get('potential_reward_pips', None)
+                if risk_pips:
+                    st.write(f"- **Risk:** {risk_pips:.1f} pips")
+                if reward_pips:
+                    st.write(f"- **Reward:** {reward_pips:.1f} pips")
+                st.write(f"- **R:R Ratio:** {rr_str}")
+
+                st.markdown("**Market Context:**")
+                ema_dist = row.get('ema_distance_pips', None)
+                if ema_dist:
+                    st.write(f"- **EMA Distance:** {ema_dist:.1f} pips")
+                pullback = row.get('pullback_depth', None)
+                if pullback:
+                    st.write(f"- **Pullback Depth:** {pullback*100:.1f}%")
+                fib_zone = row.get('fib_zone', None)
+                if fib_zone:
+                    st.write(f"- **Fib Zone:** {fib_zone}")
+
+            # Rejection reason
+            st.markdown("**Rejection Reason:**")
+            st.warning(reason)
+
+    # Export button
+    st.markdown("---")
+    csv = near_miss_df.to_csv(index=False)
+    st.download_button(
+        label="Export Near-Misses to CSV",
+        data=csv,
+        file_name=f"smc_near_misses_{days}days.csv",
+        mime="text/csv"
+    )
+
+
+def _render_scanner_efficiency(days: int):
+    """Render scanner redundancy analysis sub-tab"""
+    st.subheader("Scan Redundancy Analysis")
+    st.caption("Understand how often candles are re-scanned and whether decisions change")
+
+    conn = get_psycopg2_connection("trading")
+    if not conn:
+        st.error("Database connection failed")
+        return
+
+    try:
+        # Query for redundancy analysis
+        redundancy_query = """
+        WITH candle_scans AS (
+            SELECT
+                scan_timestamp,
+                epic,
+                pair,
+                rejection_stage,
+                rejection_reason,
+                created_at,
+                ROW_NUMBER() OVER (PARTITION BY scan_timestamp, epic ORDER BY created_at ASC) as scan_num,
+                COUNT(*) OVER (PARTITION BY scan_timestamp, epic) as total_scans,
+                LAG(rejection_stage) OVER (PARTITION BY scan_timestamp, epic ORDER BY created_at) as prev_stage
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+        )
+        SELECT * FROM candle_scans
+        ORDER BY scan_timestamp DESC, epic, created_at
+        """
+        df = pd.read_sql_query(redundancy_query, conn, params=[days])
+
+        if df.empty:
+            st.info("No data available for redundancy analysis.")
+            return
+
+        # Calculate key metrics
+        unique_candles = df.groupby(['scan_timestamp', 'epic']).ngroups
+        total_scans = len(df)
+        redundant_scans = total_scans - unique_candles
+
+        # State changes
+        df['stage_changed'] = (df['rejection_stage'] != df['prev_stage']) & df['prev_stage'].notna()
+        state_changes = df['stage_changed'].sum()
+        candles_with_changes = df[df['stage_changed']].groupby(['scan_timestamp', 'epic']).ngroups
+
+        # Average scans per candle
+        scans_per_candle = df.groupby(['scan_timestamp', 'epic'])['total_scans'].first()
+        avg_scans = scans_per_candle.mean()
+        max_scans = scans_per_candle.max()
+
+        # Summary metrics
+        st.markdown("### Summary")
+        col1, col2, col3, col4, col5 = st.columns(5)
+
+        with col1:
+            st.metric("Unique Candles", f"{unique_candles:,}", help="Number of distinct candle+pair combinations analyzed")
+
+        with col2:
+            st.metric("Avg Scans/Candle", f"{avg_scans:.1f}", help="How many times each candle is scanned on average")
+
+        with col3:
+            redundant_pct = (redundant_scans / total_scans * 100) if total_scans > 0 else 0
+            st.metric("Redundant Scans", f"{redundant_pct:.0f}%", help="% of scans that re-analyzed the same candle")
+
+        with col4:
+            st.metric(
+                "State Changes",
+                f"{state_changes:,}",
+                delta=f"{candles_with_changes} candles" if candles_with_changes > 0 else None,
+                delta_color="normal",
+                help="Times the rejection stage changed between scans of the same candle"
+            )
+
+        with col5:
+            change_rate = (candles_with_changes / unique_candles * 100) if unique_candles > 0 else 0
+            st.metric("Change Rate", f"{change_rate:.1f}%", help="% of candles where the rejection decision changed")
+
+        st.markdown("---")
+
+        # Charts
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("#### Scans Per Candle Distribution")
+            scans_df = scans_per_candle.reset_index(name='scan_count')
+            scans_df.columns = ['scan_timestamp', 'epic', 'scan_count']
+
+            fig_scans = px.histogram(
+                scans_df,
+                x='scan_count',
+                nbins=min(int(max_scans) + 1, 20),
+                title="How Many Times Each Candle Was Re-Scanned",
+                labels={'scan_count': 'Scans per Candle', 'count': 'Number of Candles'}
+            )
+            fig_scans.add_vline(x=avg_scans, line_dash="dash", line_color="red", annotation_text=f"Avg: {avg_scans:.1f}")
+            fig_scans.add_vline(x=7, line_dash="dot", line_color="green", annotation_text="Expected: ~7")
+            st.plotly_chart(fig_scans, use_container_width=True)
+
+        with col2:
+            st.markdown("#### State Changes by Stage")
+            if state_changes > 0:
+                changes_df = df[df['stage_changed']].groupby('rejection_stage').size().reset_index(name='changes')
+                fig_changes = px.bar(
+                    changes_df,
+                    x='rejection_stage',
+                    y='changes',
+                    title="Which Stages Had Decision Changes",
+                    labels={'rejection_stage': 'New Stage', 'changes': 'Number of Changes'}
+                )
+                st.plotly_chart(fig_changes, use_container_width=True)
+            else:
+                st.info("No state changes detected - rejection decisions are stable within candles.")
+
+        # State Changes Detail Table
+        if state_changes > 0:
+            st.markdown("---")
+            st.markdown("#### Candles with State Changes")
+            st.caption("These are edge cases where market conditions changed during a candle's lifetime")
+
+            change_details = df[df['stage_changed']][
+                ['scan_timestamp', 'epic', 'pair', 'prev_stage', 'rejection_stage', 'rejection_reason', 'created_at']
+            ].copy()
+            change_details.columns = ['Candle Time', 'Epic', 'Pair', 'Previous Stage', 'New Stage', 'New Reason', 'Changed At']
+            change_details = change_details.sort_values('Changed At', ascending=False).head(50)
+
+            st.dataframe(change_details, use_container_width=True, hide_index=True)
+
+        # Interpretation
+        st.markdown("---")
+        st.markdown("#### Interpretation")
+
+        if avg_scans <= 1.5:
+            st.success(f"**Low redundancy** ({avg_scans:.1f} scans/candle): Most candles are only scanned once.")
+        elif avg_scans <= 4:
+            st.info(f"**Moderate redundancy** ({avg_scans:.1f} scans/candle): Candles are re-scanned a few times. Normal for early-stage rejections.")
+        elif avg_scans <= 8:
+            st.warning(f"**Expected redundancy** ({avg_scans:.1f} scans/candle): Close to theoretical maximum for 2-min scanner on 15-min candles.")
+        else:
+            st.error(f"**High redundancy** ({avg_scans:.1f} scans/candle): More scans than expected. Check scanner frequency.")
+
+        if change_rate > 10:
+            st.warning(f"**High state change rate** ({change_rate:.1f}%): Many candles changed rejection stage. Market may be volatile.")
+        elif change_rate > 2:
+            st.info(f"**Normal state change rate** ({change_rate:.1f}%): Some edge cases worth investigating.")
+        else:
+            st.success(f"**Stable decisions** ({change_rate:.1f}%): Rejection decisions are consistent within candles.")
+
+    except Exception as e:
+        if "does not exist" in str(e):
+            st.info("Redundancy data not yet available. Run the scanner to collect data.")
+        else:
+            st.error(f"Error fetching redundancy data: {e}")
+    finally:
+        conn.close()
