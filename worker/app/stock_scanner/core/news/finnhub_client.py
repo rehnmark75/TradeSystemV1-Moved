@@ -429,3 +429,177 @@ class FinnhubClient:
         """Clear the response cache"""
         self._cache.clear()
         logger.info("Finnhub cache cleared")
+
+    # =========================================================================
+    # MARKET STATUS ENDPOINTS
+    # =========================================================================
+
+    async def get_market_status(
+        self,
+        exchange: str = "US",
+    ) -> Dict[str, Any]:
+        """
+        Get current market status from Finnhub.
+
+        API: /stock/market-status
+
+        Args:
+            exchange: Exchange code (US, LSE, etc.)
+
+        Returns:
+            Dict with:
+            - exchange: Exchange code
+            - holiday: Holiday name if applicable
+            - isOpen: Boolean market open status
+            - session: Current session type:
+                - "pre-market": 4:00 AM - 9:30 AM ET
+                - "regular": 9:30 AM - 4:00 PM ET
+                - "post-market": 4:00 PM - 8:00 PM ET
+                - null: Market closed
+            - timezone: Market timezone
+            - t: Unix timestamp
+        """
+        params = {"exchange": exchange}
+
+        try:
+            data = await self._request("/stock/market-status", params, use_cache=False)
+            logger.info(f"Market status for {exchange}: {data.get('session', 'closed')}")
+            return data
+        except FinnhubError as e:
+            logger.error(f"Failed to get market status: {e.message}")
+            raise
+
+    async def is_pre_market(self, exchange: str = "US") -> bool:
+        """
+        Check if market is currently in pre-market session.
+
+        Returns:
+            True if in pre-market (4:00 AM - 9:30 AM ET)
+        """
+        try:
+            status = await self.get_market_status(exchange)
+            return status.get("session") == "pre-market"
+        except FinnhubError:
+            return False
+
+    async def is_market_open(self, exchange: str = "US") -> bool:
+        """
+        Check if market is in regular trading hours.
+
+        Returns:
+            True if in regular session (9:30 AM - 4:00 PM ET)
+        """
+        try:
+            status = await self.get_market_status(exchange)
+            return status.get("session") == "regular"
+        except FinnhubError:
+            return False
+
+    # =========================================================================
+    # QUOTE ENDPOINTS
+    # =========================================================================
+
+    async def get_quote(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get real-time quote for a symbol.
+
+        API: /quote
+
+        Args:
+            symbol: Stock ticker symbol
+
+        Returns:
+            Dict with:
+            - c: Current price
+            - d: Change
+            - dp: Percent change
+            - h: High price of day
+            - l: Low price of day
+            - o: Open price of day
+            - pc: Previous close price
+            - t: Timestamp
+        """
+        params = {"symbol": symbol.upper()}
+
+        try:
+            data = await self._request("/quote", params, use_cache=False)
+            return {
+                "symbol": symbol.upper(),
+                "current_price": data.get("c"),
+                "change": data.get("d"),
+                "change_percent": data.get("dp"),
+                "high": data.get("h"),
+                "low": data.get("l"),
+                "open": data.get("o"),
+                "previous_close": data.get("pc"),
+                "timestamp": data.get("t"),
+            }
+        except FinnhubError as e:
+            logger.error(f"Failed to get quote for {symbol}: {e.message}")
+            raise
+
+    async def get_quotes_batch(
+        self,
+        symbols: List[str],
+        delay_between: float = 0.5
+    ) -> List[Dict[str, Any]]:
+        """
+        Get quotes for multiple symbols with rate limiting.
+
+        Args:
+            symbols: List of ticker symbols
+            delay_between: Delay between requests (seconds)
+
+        Returns:
+            List of quote dicts
+        """
+        quotes = []
+        for symbol in symbols:
+            try:
+                quote = await self.get_quote(symbol)
+                quotes.append(quote)
+                await asyncio.sleep(delay_between)
+            except FinnhubError as e:
+                logger.warning(f"Failed to get quote for {symbol}: {e.message}")
+                quotes.append({
+                    "symbol": symbol,
+                    "error": str(e.message),
+                })
+        return quotes
+
+    # =========================================================================
+    # NEWS SENTIMENT ENDPOINT (Premium)
+    # =========================================================================
+
+    async def get_news_sentiment(
+        self,
+        symbol: str,
+    ) -> Dict[str, Any]:
+        """
+        Get news sentiment for a symbol (Premium feature).
+
+        API: /news-sentiment
+
+        Note: This is a premium endpoint. Free tier will return 403.
+
+        Args:
+            symbol: Stock ticker symbol
+
+        Returns:
+            Dict with sentiment data including:
+            - buzz: Social media buzz metrics
+            - companyNewsScore: News sentiment score
+            - sectorAverageBullishPercent: Sector comparison
+            - sentiment: Overall sentiment data
+        """
+        params = {"symbol": symbol.upper()}
+
+        try:
+            data = await self._request("/news-sentiment", params)
+            return data
+        except FinnhubAuthError:
+            logger.warning(f"News sentiment requires premium API for {symbol}")
+            return {"error": "premium_required", "symbol": symbol}
+        except FinnhubError as e:
+            logger.error(f"Failed to get news sentiment for {symbol}: {e.message}")
+            raise

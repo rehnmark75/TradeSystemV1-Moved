@@ -74,6 +74,15 @@ except ImportError:
     PERFORMANCE_TRACKER_AVAILABLE = False
     PerformanceTracker = None
 
+# Import pre-market service
+try:
+    from stock_scanner.core.news import PreMarketService, PreMarketScanResult
+    PREMARKET_SERVICE_AVAILABLE = True
+except ImportError:
+    PREMARKET_SERVICE_AVAILABLE = False
+    PreMarketService = None
+    PreMarketScanResult = None
+
 # Import broker trade sync
 try:
     from stock_scanner.services.broker_trade_analyzer import BrokerTradeSync
@@ -137,6 +146,11 @@ class StockScheduler:
             'type': 'quick',
             'description': 'Pre-market gap and earnings scan'
         },
+        'premarket_pricing': {
+            'time': time(9, 0),       # 9:00 AM ET (30 min before market open)
+            'type': 'premarket_finnhub',
+            'description': 'Pre-market pricing & news enrichment (Finnhub)'
+        },
         'broker_sync_am': {
             'time': time(9, 30),      # 9:30 AM ET (market open)
             'type': 'broker',
@@ -175,6 +189,7 @@ class StockScheduler:
         self.zlma_strategy: ZeroLagMATrendStrategy = None
         self.scanner_manager: ScannerManager = None
         self.performance_tracker: PerformanceTracker = None
+        self.premarket_service: PreMarketService = None
         self.running = False
 
     async def setup(self):
@@ -208,6 +223,19 @@ class StockScheduler:
         if PERFORMANCE_TRACKER_AVAILABLE:
             self.performance_tracker = PerformanceTracker(self.db)
             logger.info("Performance Tracker initialized")
+
+        # Initialize pre-market service if available
+        if PREMARKET_SERVICE_AVAILABLE:
+            finnhub_api_key = os.getenv('FINNHUB_API_KEY', config.FINNHUB_API_KEY if hasattr(config, 'FINNHUB_API_KEY') else '')
+            if finnhub_api_key:
+                self.premarket_service = PreMarketService(
+                    db_manager=self.db,
+                    finnhub_api_key=finnhub_api_key,
+                    news_lookback_hours=16,  # Overnight news
+                )
+                logger.info("Pre-Market Service initialized (Finnhub)")
+            else:
+                logger.warning("Pre-Market Service skipped - FINNHUB_API_KEY not configured")
 
         logger.info("Enhanced Stock Scheduler initialized")
 
@@ -636,6 +664,88 @@ class StockScheduler:
         await self._log_pipeline_run('pre_market_scan', results, elapsed)
         return results
 
+    async def run_premarket_pricing_scan(self):
+        """
+        Pre-market pricing scan (9:00 AM ET) - 30 min before market open.
+
+        Uses Finnhub API to:
+        - Verify market is in pre-market session
+        - Fetch pre-market quotes for watchlist stocks
+        - Detect and classify gaps (vs previous close)
+        - Fetch overnight news for gapping stocks
+        - Generate pre-market signals with news context
+        - Store results for review before market open
+
+        This scan runs at 9:00 AM ET, giving 30 minutes to:
+        1. Review gap signals
+        2. Analyze news catalysts
+        3. Plan entries for market open
+        """
+        logger.info("=" * 60)
+        logger.info("PRE-MARKET PRICING SCAN - Finnhub quotes & news (9:00 AM ET)")
+        logger.info("=" * 60)
+
+        start_time = datetime.now()
+        results = {}
+
+        if not self.premarket_service:
+            logger.warning("[SKIP] Pre-market service not available - check FINNHUB_API_KEY")
+            return {'skipped': True, 'reason': 'premarket_service not initialized'}
+
+        try:
+            # Run the pre-market scan via PreMarketService
+            scan_result = await self.premarket_service.run_premarket_scan(
+                force_run=False  # Only run if actually in pre-market session
+            )
+
+            results = {
+                'is_premarket': scan_result.is_pre_market,
+                'market_status': scan_result.market_status.get('session', 'unknown'),
+                'quotes_fetched': scan_result.quotes_fetched,
+                'quotes_with_gaps': scan_result.quotes_with_gaps,
+                'total_signals': len(scan_result.signals),
+                'gap_up_signals': scan_result.gap_up_signals,
+                'gap_down_signals': scan_result.gap_down_signals,
+                'news_catalyst_signals': scan_result.news_catalyst_signals,
+                'errors': scan_result.errors,
+            }
+
+            if scan_result.is_pre_market:
+                logger.info(f"[OK] Pre-market pricing scan complete:")
+                logger.info(f"     Quotes fetched: {scan_result.quotes_fetched}")
+                logger.info(f"     Stocks with gaps (>1%): {scan_result.quotes_with_gaps}")
+                logger.info(f"     Signals generated: {len(scan_result.signals)}")
+                logger.info(f"       - Gap UP: {scan_result.gap_up_signals}")
+                logger.info(f"       - Gap DOWN: {scan_result.gap_down_signals}")
+                logger.info(f"       - News catalyst: {scan_result.news_catalyst_signals}")
+
+                # Log top signals
+                if scan_result.signals:
+                    logger.info("\n     Top Pre-Market Signals:")
+                    for signal in scan_result.signals[:5]:
+                        direction = "↑" if signal.direction == "BUY" else "↓"
+                        news_tag = f" [NEWS]" if signal.news_count > 0 else ""
+                        logger.info(
+                            f"       {direction} {signal.symbol}: "
+                            f"{signal.quote.gap_percent:+.1f}% gap, "
+                            f"{signal.strength} {signal.signal_type}{news_tag}"
+                        )
+            else:
+                logger.info("[INFO] Not in pre-market session - scan skipped")
+                logger.info(f"       Market status: {scan_result.market_status}")
+
+        except Exception as e:
+            logger.error(f"Pre-market pricing scan error: {e}")
+            results['error'] = str(e)
+            import traceback
+            traceback.print_exc()
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"\nPre-market pricing scan complete in {elapsed:.1f}s")
+
+        await self._log_pipeline_run('premarket_pricing_scan', results, elapsed)
+        return results
+
     async def run_intraday_scan(self):
         """
         Intraday scan (12:30 PM ET) - Scanner-only run for momentum plays.
@@ -1014,6 +1124,8 @@ class StockScheduler:
                 # Execute the appropriate task
                 if next_task == "pre_market":
                     await self.run_pre_market_scan()
+                elif next_task == "premarket_pricing":
+                    await self.run_premarket_pricing_scan()
                 elif next_task == "intraday":
                     await self.run_intraday_scan()
                 elif next_task == "post_market":
@@ -1067,6 +1179,8 @@ async def run_once(task: str):
                 print("Scanner manager not available")
         elif task == "premarket":
             await scheduler.run_pre_market_scan()
+        elif task == "premarketpricing":
+            await scheduler.run_premarket_pricing_scan()
         elif task == "intraday":
             await scheduler.run_intraday_scan()
         elif task == "postmarket":
@@ -1079,7 +1193,7 @@ async def run_once(task: str):
             await scheduler.run_broker_sync()
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, scanners, premarket, intraday, postmarket, weekly, fundamentals, brokersync")
+            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, scanners, premarket, premarketpricing, intraday, postmarket, weekly, fundamentals, brokersync")
     finally:
         await scheduler.cleanup()
 
@@ -1090,8 +1204,8 @@ def main():
     parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
                        choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'smc',
-                               'watchlist', 'signals', 'scanners', 'premarket', 'intraday',
-                               'postmarket', 'weekly', 'fundamentals', 'brokersync', 'status'],
+                               'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing',
+                               'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync', 'status'],
                        help='Command to execute')
     args = parser.parse_args()
 
@@ -1108,8 +1222,8 @@ def main():
             scheduler.stop()
 
     elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'smc', 'watchlist',
-                          'signals', 'scanners', 'premarket', 'intraday', 'postmarket',
-                          'weekly', 'fundamentals', 'brokersync']:
+                          'signals', 'scanners', 'premarket', 'premarketpricing', 'intraday',
+                          'postmarket', 'weekly', 'fundamentals', 'brokersync']:
         print(f"Running {args.command}...")
         asyncio.run(run_once(args.command))
 
@@ -1139,18 +1253,19 @@ def main():
         print(f"  Weekly sync: {scheduler.get_next_weekly_sync()}")
 
         print("\nAvailable commands:")
-        print("  run         - Start continuous scheduler")
-        print("  pipeline    - Run full 7-stage pipeline")
-        print("  premarket   - Run pre-market scan only")
-        print("  intraday    - Run intraday scan only")
-        print("  postmarket  - Run post-market scan only")
-        print("  scanners    - Run all scanner strategies")
-        print("  signals     - Run ZLMA strategy only")
-        print("  sync        - Sync candle data only")
-        print("  metrics     - Calculate metrics only")
-        print("  smc         - Run SMC analysis only")
-        print("  watchlist   - Build watchlist only")
-        print("  brokersync  - Sync broker trades to database")
+        print("  run              - Start continuous scheduler")
+        print("  pipeline         - Run full 7-stage pipeline")
+        print("  premarket        - Run pre-market scanner scan only")
+        print("  premarketpricing - Run Finnhub pre-market quotes & news (9:00 AM ET scan)")
+        print("  intraday         - Run intraday scan only")
+        print("  postmarket       - Run post-market scan only")
+        print("  scanners         - Run all scanner strategies")
+        print("  signals          - Run ZLMA strategy only")
+        print("  sync             - Sync candle data only")
+        print("  metrics          - Calculate metrics only")
+        print("  smc              - Run SMC analysis only")
+        print("  watchlist        - Build watchlist only")
+        print("  brokersync       - Sync broker trades to database")
 
 
 if __name__ == '__main__':

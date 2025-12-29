@@ -213,7 +213,128 @@ class ScannerManager:
         # Log summary
         self._log_scan_summary(deduplicated)
 
+        # Auto-enrich high-quality signals with news sentiment
+        if save_to_db and deduplicated:
+            await self._auto_enrich_signals_with_news(deduplicated)
+
         return deduplicated
+
+    async def _auto_enrich_signals_with_news(
+        self,
+        signals: List[SignalSetup],
+        min_tier: str = 'A',
+    ):
+        """
+        Automatically enrich high-quality signals with news sentiment.
+
+        This runs after signals are saved to database, enriching A+ and A
+        tier signals with news data from Finnhub.
+
+        Args:
+            signals: List of SignalSetup objects
+            min_tier: Minimum tier to auto-enrich (default: 'A')
+        """
+        if not NEWS_ENRICHMENT_AVAILABLE:
+            logger.debug("News enrichment not available - skipping auto-enrich")
+            return
+
+        # Get API key from config
+        try:
+            from ..config import FINNHUB_API_KEY, NEWS_LOOKBACK_DAYS, NEWS_CACHE_TTL, NEWS_MIN_ARTICLES
+        except ImportError:
+            logger.debug("Could not import config - skipping news enrichment")
+            return
+
+        if not FINNHUB_API_KEY:
+            logger.debug("FINNHUB_API_KEY not configured - skipping news enrichment")
+            return
+
+        # Filter to high-quality signals only
+        tier_order = {'D': 0, 'C': 1, 'B': 2, 'A': 3, 'A+': 4}
+        min_tier_value = tier_order.get(min_tier, 3)
+
+        high_quality = [
+            s for s in signals
+            if tier_order.get(s.quality_tier.value, 0) >= min_tier_value
+        ]
+
+        if not high_quality:
+            logger.debug("No high-quality signals to enrich with news")
+            return
+
+        logger.info(f"[NEWS] Auto-enriching {len(high_quality)} A+/A signals with news sentiment")
+
+        # Initialize enrichment service
+        enrichment_service = NewsEnrichmentService(
+            db_manager=self.db,
+            finnhub_api_key=FINNHUB_API_KEY,
+            lookback_days=NEWS_LOOKBACK_DAYS,
+            cache_ttl_hours=NEWS_CACHE_TTL // 3600,
+            min_articles=NEWS_MIN_ARTICLES,
+        )
+
+        # Convert SignalSetup to dict format for enrichment
+        # Only enrich signals from THIS scan run (most recent by created_at)
+        signals_to_enrich = []
+        scan_start_time = datetime.now() - timedelta(minutes=10)  # Signals created in last 10 min
+
+        for signal in high_quality:
+            # Look up the signal ID - must be recently created (this scan)
+            try:
+                query = """
+                    SELECT id FROM stock_scanner_signals
+                    WHERE ticker = $1
+                    AND scanner_name = $2
+                    AND created_at >= $3
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """
+                row = await self.db.fetchrow(
+                    query,
+                    signal.ticker,
+                    signal.scanner_name,
+                    scan_start_time
+                )
+                if row:
+                    signals_to_enrich.append({
+                        'id': row['id'],
+                        'ticker': signal.ticker,
+                        'quality_tier': signal.quality_tier.value,
+                    })
+            except Exception as e:
+                logger.debug(f"Could not find signal ID for {signal.ticker}: {e}")
+                continue
+
+        if not signals_to_enrich:
+            logger.debug("No signals found in DB for news enrichment")
+            return
+
+        # Enrich signals (respects rate limits and caching)
+        enrichment_results = []
+        for sig in signals_to_enrich[:20]:  # Limit to 20 per scan to respect rate limits
+            try:
+                result = await enrichment_service.enrich_signal(
+                    signal_id=sig['id'],
+                    ticker=sig['ticker'],
+                    force_refresh=False,  # Use cache if available
+                )
+                enrichment_results.append(result)
+
+                if result.success and result.sentiment:
+                    logger.info(
+                        f"  [NEWS] {sig['ticker']}: {result.sentiment.level.value} "
+                        f"({result.sentiment.score:.2f}) from {result.articles_count} articles"
+                    )
+            except Exception as e:
+                logger.warning(f"  [NEWS] {sig['ticker']}: enrichment error - {e}")
+
+        # Summary
+        successful = sum(1 for r in enrichment_results if r.success)
+        self._scan_stats['news_enrichment'] = {
+            'attempted': len(enrichment_results),
+            'successful': successful,
+        }
+        logger.info(f"[NEWS] Enrichment complete: {successful}/{len(enrichment_results)} successful")
 
     async def _run_scanner_safe(
         self,
