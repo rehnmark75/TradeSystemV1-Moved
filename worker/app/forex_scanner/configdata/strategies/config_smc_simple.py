@@ -1,12 +1,18 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.8.0 (Per-Pair Session Overrides from trade_log Analysis)
+# Version: 2.8.1 (Relaxed Filters from Rejection Outcome Analysis)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
 #   TIER 2: 15m swing break with body-close confirmation (was 1H)
 #   TIER 3: 5m pullback OR momentum continuation entry
+#
+# v2.8.1 RELAXED FILTERS (from Rejection Outcome Analysis - 6,032 signals):
+#   - MIN_CONFIDENCE_THRESHOLD: 0.50 → 0.48 (CONFIDENCE rejections: 70% WR, +582 pips)
+#   - MIN_BODY_PERCENTAGE: 0.35 → 0.20 (6-10% body range: 66% WR, +2,256 pips)
+#   - Analysis: Overall rejections had 48.3% WR with +15,624 net pips
+#   - IMPACT: Captures more profitable signals that were being over-filtered
 #
 # v2.8.0 PER-PAIR SESSION OVERRIDES (from 90-day trade_log analysis):
 #   - NEW: PAIR_SESSION_OVERRIDES dict for Asian session control per pair
@@ -92,9 +98,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.8.0"
-STRATEGY_DATE = "2025-12-28"
-STRATEGY_STATUS = "Per-Pair Session Overrides + AUDUSD/NZDUSD/EURUSD Parameter Overrides"
+STRATEGY_VERSION = "2.8.1"
+STRATEGY_DATE = "2025-12-29"
+STRATEGY_STATUS = "Relaxed confidence (48%) and body (20%) filters from rejection outcome analysis"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -195,7 +201,7 @@ FALLBACK_MIN_SWING_PIPS = 5              # Absolute minimum if ATR unavailable
 
 MOMENTUM_QUALITY_ENABLED = True          # v1.8.0: NEW - filter weak breakouts
 MIN_BREAKOUT_ATR_RATIO = 0.5             # Breakout candle range > 50% of ATR
-MIN_BODY_PERCENTAGE = 0.35               # v2.3.0: REDUCED from 0.45 - rejection analysis: 234 signals lost at 35-44%
+MIN_BODY_PERCENTAGE = 0.20               # v2.8.1: REDUCED from 0.35 - rejection analysis: 6-10% body range had 66% WR (+2,256 pips)
 
 # ============================================================================
 # v2.0.0: LIMIT ORDER CONFIGURATION
@@ -617,7 +623,7 @@ PAIR_PARAMETER_OVERRIDES = {
         'description': 'EURUSD relaxed parameters - smaller body candles',
         'overrides': {
             # Tier 2: Swing break parameters
-            'MIN_BODY_PERCENTAGE': 0.25,      # Default: 0.35 - EURUSD has smaller bodies
+            'MIN_BODY_PERCENTAGE': 0.20,      # v2.8.1: Aligned with new default (was 0.25)
             'MIN_BREAKOUT_ATR_RATIO': 0.40,   # Default: 0.50 - allow smaller breakouts
 
             # Tier 3: Entry parameters
@@ -629,7 +635,7 @@ PAIR_PARAMETER_OVERRIDES = {
         'enabled': True,
         'description': 'EURUSD relaxed parameters - smaller body candles',
         'overrides': {
-            'MIN_BODY_PERCENTAGE': 0.25,
+            'MIN_BODY_PERCENTAGE': 0.20,      # v2.8.1: Aligned with new default
             'MIN_BREAKOUT_ATR_RATIO': 0.40,
             'MOMENTUM_MIN_DEPTH': -0.60,
         },
@@ -655,7 +661,7 @@ PAIR_PARAMETER_OVERRIDES = {
         'description': 'AUDUSD relaxed parameters - outcome analysis shows 61% rejection win rate',
         'overrides': {
             # Tier 2: Swing break - relax for smaller AUDUSD breakouts
-            'MIN_BODY_PERCENTAGE': 0.25,       # Default: 0.35 - AUDUSD has smaller bodies
+            'MIN_BODY_PERCENTAGE': 0.20,       # v2.8.1: Aligned with new default (was 0.25)
             'MIN_BREAKOUT_ATR_RATIO': 0.40,    # Default: 0.50 - allow smaller breakouts
 
             # Tier 3: Pullback/Momentum - relax for AUDUSD's shallow pullbacks
@@ -664,7 +670,7 @@ PAIR_PARAMETER_OVERRIDES = {
             'FIB_PULLBACK_MAX': 0.75,          # Default: 0.70 - accept deeper pullbacks
 
             # Confidence: Lower threshold since rejections show high win rate
-            'MIN_CONFIDENCE_THRESHOLD': 0.45,  # Default: 0.50 - lower for AUDUSD
+            'MIN_CONFIDENCE_THRESHOLD': 0.45,  # Still lower than new default 0.48 for AUDUSD
         },
     },
     # Alias for pair name format
@@ -672,7 +678,7 @@ PAIR_PARAMETER_OVERRIDES = {
         'enabled': True,
         'description': 'AUDUSD relaxed parameters - outcome analysis shows 61% rejection win rate',
         'overrides': {
-            'MIN_BODY_PERCENTAGE': 0.25,
+            'MIN_BODY_PERCENTAGE': 0.20,       # v2.8.1: Aligned with new default
             'MIN_BREAKOUT_ATR_RATIO': 0.40,
             'MOMENTUM_MIN_DEPTH': -0.65,
             'FIB_PULLBACK_MIN': 0.18,
@@ -700,12 +706,12 @@ PAIR_PARAMETER_OVERRIDES = {
         'enabled': True,
         'description': 'NZDUSD relaxed parameters - CONFIDENCE stage has 100% rejection win rate',
         'overrides': {
-            # Tier 2: Slight relaxation for smaller breakouts
-            'MIN_BODY_PERCENTAGE': 0.30,       # Default: 0.35 - slight relaxation
+            # Tier 2: Aligned with new defaults
+            'MIN_BODY_PERCENTAGE': 0.20,       # v2.8.1: Aligned with new default (was 0.30)
             'MIN_BREAKOUT_ATR_RATIO': 0.45,    # Default: 0.50 - slight relaxation
 
             # Confidence: Lower threshold since CONFIDENCE rejections show 100% win rate
-            'MIN_CONFIDENCE_THRESHOLD': 0.45,  # Default: 0.50 - lower for NZDUSD
+            'MIN_CONFIDENCE_THRESHOLD': 0.45,  # Still lower than new default 0.48 for NZDUSD
         },
     },
     # Alias for pair name format
@@ -713,7 +719,7 @@ PAIR_PARAMETER_OVERRIDES = {
         'enabled': True,
         'description': 'NZDUSD relaxed parameters - CONFIDENCE stage has 100% rejection win rate',
         'overrides': {
-            'MIN_BODY_PERCENTAGE': 0.30,
+            'MIN_BODY_PERCENTAGE': 0.20,       # v2.8.1: Aligned with new default
             'MIN_BREAKOUT_ATR_RATIO': 0.45,
             'MIN_CONFIDENCE_THRESHOLD': 0.45,
         },
@@ -750,7 +756,7 @@ def get_pair_parameter(epic: str, param_name: str, default_value):
 # v1.7.0: REDUCED confidence threshold - 80% was too restrictive
 # Analysis: With wider Fib zones and better R:R, lower confidence is acceptable
 # The tight 80% threshold combined with tight Fib zones left almost no signals
-MIN_CONFIDENCE_THRESHOLD = 0.50         # v1.7.0: REDUCED from 0.80 - allow more signals
+MIN_CONFIDENCE_THRESHOLD = 0.48         # v2.8.1: REDUCED from 0.50 - rejection analysis: 48-50% confidence had 100% win rate (+600 pips)
 HIGH_CONFIDENCE_THRESHOLD = 0.75         # v1.7.0: REDUCED from 0.90 - achievable premium tier
 
 # Scoring weights (must sum to 1.0)
