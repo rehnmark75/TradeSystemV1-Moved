@@ -211,7 +211,7 @@ MIN_BODY_PERCENTAGE = 0.20               # v2.8.1: REDUCED from 0.35 - rejection
 # Auto-expire unfilled orders after configured time
 
 LIMIT_ORDER_ENABLED = True               # v2.0.0: Enable limit orders
-LIMIT_EXPIRY_MINUTES = 15                # v2.3.0: Auto-cancel after 15 min (1 candle on 15m TF)
+LIMIT_EXPIRY_MINUTES = 45                # v2.8.2: Auto-cancel after 45 min (3 candles on 15m TF) - analysis showed unfilled orders needed more time
 
 # Entry offset configuration (stop-entry style: confirm direction continuation)
 # BUY limit ABOVE price, SELL limit BELOW price (momentum confirmation)
