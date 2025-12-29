@@ -1748,7 +1748,7 @@ Regime Distribution: Trending({regime_counts['trending']}), Ranging({regime_coun
             if LOG_REGIME_COMPARISON and comparison['differs']:
                 clean_epic = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
                 adx = enhanced['trend_details'].get('adx_value', 'N/A')
-                self.logger.info(
+                self.logger.debug(
                     f"🔬 REGIME COMPARISON {clean_epic}: "
                     f"Legacy={legacy_dominant} ({legacy_confidence:.1%}) vs "
                     f"Enhanced={enhanced['structure_regime']} (ADX={adx})"
