@@ -2017,12 +2017,9 @@ class TradeValidator:
                     return False, f"SMC_STRUCTURE confidence {confidence:.1%} below SMC minimum {smc_min_confidence:.1%}"
                 return True, f"SMC_STRUCTURE confidence {confidence:.1%} meets requirements (min: {smc_min_confidence:.1%})"
 
-            # SMC_SIMPLE uses its own internal confidence threshold (50%) with 3-tier validation
+            # SMC_SIMPLE: Skip redundant check - strategy already validates via config's MIN_CONFIDENCE_THRESHOLD
             elif 'SMC_SIMPLE' in strategy or 'smc_simple' in strategy.lower():
-                smc_simple_min_confidence = 0.50  # Same as SMC_SIMPLE strategy's MIN_CONFIDENCE_THRESHOLD
-                if confidence < smc_simple_min_confidence:
-                    return False, f"SMC_SIMPLE confidence {confidence:.1%} below minimum {smc_simple_min_confidence:.1%}"
-                return True, f"SMC_SIMPLE confidence {confidence:.1%} meets requirements (min: {smc_simple_min_confidence:.1%})"
+                return True, f"SMC_SIMPLE confidence {confidence:.1%} (validated by strategy)"
 
             # EMA_DOUBLE_CONFIRMATION uses 50% minimum confidence with multi-filter validation
             elif 'EMA_DOUBLE' in strategy or 'ema_double' in strategy.lower():
@@ -2146,6 +2143,11 @@ class TradeValidator:
             # 🚀 STRATEGY TESTING MODE: Skip ONLY risk management validation
             if getattr(config, 'STRATEGY_TESTING_MODE', False):
                 return True, "Testing mode - risk management validation skipped"
+
+            # SMC_SIMPLE: Skip - strategy already validates R:R with ATR-based caps and structural stops
+            strategy = signal.get('strategy', '')
+            if 'SMC_SIMPLE' in strategy or 'smc_simple' in strategy.lower():
+                return True, "SMC_SIMPLE risk parameters (validated by strategy)"
 
             # Check if risk parameters are present
             entry_price = signal.get('entry_price')
