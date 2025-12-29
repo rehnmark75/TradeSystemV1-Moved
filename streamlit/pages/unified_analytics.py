@@ -31,6 +31,7 @@ from components.tabs import (
     render_overview_tab,
     render_strategy_performance_tab,
     render_trade_performance_tab,
+    render_unfilled_orders_tab,
 )
 
 # Configure page
@@ -6504,7 +6505,8 @@ docker exec -it postgres psql -U postgres -d trading -f /app/forex_scanner/migra
                 # Use extracted tab component
                 render_ema_double_rejections_tab()
             with rejection_tabs[2]:
-                self.render_unfilled_orders_tab()
+                # Use extracted tab component
+                render_unfilled_orders_tab()
 
         with tab_settings:
             self.render_settings_debug_tab()
