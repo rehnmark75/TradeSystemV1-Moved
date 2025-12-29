@@ -52,7 +52,7 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
     # Filters row
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        days_filter = st.selectbox("Time Period", [7, 14, 30, 60, 90], index=2, key="smc_rej_days")
+        days_filter = st.selectbox("Time Period", [3, 7, 14, 30, 60, 90], index=0, key="smc_rej_days")
     with col2:
         stage_filter = st.selectbox("Rejection Stage", stages, key="smc_rej_stage")
     with col3:

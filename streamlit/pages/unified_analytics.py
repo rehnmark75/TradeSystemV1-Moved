@@ -15,6 +15,9 @@ Architecture:
 import streamlit as st
 from datetime import datetime
 
+# Import cache warmer for faster first loads
+from services.cache_warmer import run_cache_warmup_async
+
 # Import tab components
 from components.tabs import (
     render_smc_rejections_tab,
@@ -106,6 +109,9 @@ def initialize_session_state():
 def main():
     """Main application entry point."""
     initialize_session_state()
+
+    # Pre-warm caches in background (only runs once per session)
+    run_cache_warmup_async()
 
     # App header
     st.title("Trading Analytics Hub")
