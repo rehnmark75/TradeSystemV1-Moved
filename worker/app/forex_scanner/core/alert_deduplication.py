@@ -314,9 +314,10 @@ class AlertDeduplicationManager:
         Check if epic is in trade cooldown based on actual trade_log entries.
         This prevents wasting Claude API calls on signals that will be rejected at execution.
 
-        Checks both:
-        1. Recent trade OPENINGS (prevents back-to-back entries)
-        2. Recent trade CLOSURES (allows market to settle)
+        Checks:
+        1. ACTIVE TRADES - Block if there's an open position (tracking, pending, break_even, trailing)
+        2. Recent trade OPENINGS (prevents back-to-back entries within cooldown period)
+        3. Recent trade CLOSURES (allows market to settle after close)
         """
         try:
             # Get cooldown setting - match dev-app default of 30 minutes
@@ -332,7 +333,37 @@ class AlertDeduplicationManager:
             current_time = datetime.utcnow()
             cooldown_threshold = current_time - timedelta(minutes=trade_cooldown_minutes)
 
-            # Check for recent trade OPENINGS (timestamp = when trade was opened)
+            # CRITICAL: Check for ACTIVE/OPEN trades first (any status that means position is open)
+            cursor.execute("""
+                SELECT timestamp, status, direction
+                FROM trade_log
+                WHERE symbol = %s
+                  AND status IN ('pending', 'tracking', 'break_even', 'trailing')
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """, (epic,))
+
+            active_trade = cursor.fetchone()
+
+            if active_trade:
+                opening_time = active_trade[0]
+                status = active_trade[1]
+                direction = active_trade[2]
+
+                # Handle timezone
+                if opening_time and opening_time.tzinfo is None:
+                    opening_time = opening_time.replace(tzinfo=None)
+
+                time_since_open = "unknown"
+                if opening_time and opening_time <= current_time:
+                    minutes_open = int((current_time - opening_time).total_seconds() / 60)
+                    time_since_open = f"{minutes_open}min"
+
+                cursor.close()
+                conn.close()
+                return False, f"Active {direction} trade ({status}) open for {time_since_open}"
+
+            # Check for recent trade OPENINGS within cooldown period
             cursor.execute("""
                 SELECT timestamp, status, direction
                 FROM trade_log
