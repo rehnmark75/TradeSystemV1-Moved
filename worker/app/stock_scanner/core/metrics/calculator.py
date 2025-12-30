@@ -192,6 +192,14 @@ class MetricsCalculator:
         if len(closes) >= 61:
             metrics['price_change_60d'] = round(((closes[-1] / closes[-61]) - 1) * 100, 2)
 
+        # Average daily change (5-day) - mean of absolute daily % changes
+        if len(closes) >= 6:
+            daily_changes = []
+            for i in range(-5, 0):
+                pct_change = abs((closes[i] - closes[i-1]) / closes[i-1]) * 100
+                daily_changes.append(pct_change)
+            metrics['avg_daily_change_5d'] = round(np.mean(daily_changes), 2)
+
         # Moving averages
         if len(closes) >= 20:
             sma_20 = np.mean(closes[-20:])
@@ -896,6 +904,7 @@ class MetricsCalculator:
                 atr_14, atr_percent, historical_volatility_20,
                 avg_volume_20, avg_dollar_volume, current_volume, relative_volume,
                 price_change_1d, price_change_5d, price_change_20d, price_change_60d,
+                avg_daily_change_5d,
                 sma_20, sma_50, sma_200, ema_20,
                 price_vs_sma20, price_vs_sma50, price_vs_sma200,
                 trend_strength, ma_alignment,
@@ -910,13 +919,13 @@ class MetricsCalculator:
                 perf_1w, perf_1m, perf_3m, perf_6m, perf_ytd
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18,
-                $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
-                $29, $30, $31, $32, $33, $34,
-                $35, $36, $37, $38, $39, $40,
-                $41, $42, $43, $44, $45,
-                $46, $47, $48,
-                $49, $50, $51, $52, $53
+                $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
+                $30, $31, $32, $33, $34, $35,
+                $36, $37, $38, $39, $40, $41,
+                $42, $43, $44, $45, $46,
+                $47, $48, $49,
+                $50, $51, $52, $53, $54
             )
             ON CONFLICT (ticker, calculation_date)
             DO UPDATE SET
@@ -932,6 +941,7 @@ class MetricsCalculator:
                 price_change_5d = EXCLUDED.price_change_5d,
                 price_change_20d = EXCLUDED.price_change_20d,
                 price_change_60d = EXCLUDED.price_change_60d,
+                avg_daily_change_5d = EXCLUDED.avg_daily_change_5d,
                 sma_20 = EXCLUDED.sma_20,
                 sma_50 = EXCLUDED.sma_50,
                 sma_200 = EXCLUDED.sma_200,
@@ -990,6 +1000,7 @@ class MetricsCalculator:
             metrics.get('price_change_5d'),
             metrics.get('price_change_20d'),
             metrics.get('price_change_60d'),
+            metrics.get('avg_daily_change_5d'),
             metrics.get('sma_20'),
             metrics.get('sma_50'),
             metrics.get('sma_200'),

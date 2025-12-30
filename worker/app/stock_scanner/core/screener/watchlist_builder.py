@@ -182,6 +182,7 @@ class WatchlistBuilder:
         roc_1d = float(metrics.get('price_change_1d') or 0)
         roc_5d = float(metrics.get('price_change_5d') or 0)
         roc_20d = float(metrics.get('price_change_20d') or 0)
+        avg_daily_change_5d = float(metrics.get('avg_daily_change_5d') or 0)
         trend = metrics.get('trend_strength') or 'neutral'
         ma_align = metrics.get('ma_alignment') or 'mixed'
         macd_histogram = float(metrics.get('macd_histogram') or 0)
@@ -244,6 +245,7 @@ class WatchlistBuilder:
             'avg_dollar_volume': dollar_vol,
             'relative_volume': rvol,
             'price_change_20d': roc_20d,
+            'avg_daily_change_5d': avg_daily_change_5d,
             'trend_strength': trend,
             # Enhanced signals
             'rsi_signal': rsi_signal,
@@ -538,16 +540,16 @@ class WatchlistBuilder:
                     momentum_score, relative_strength_score,
                     tier, rank_in_tier, rank_overall,
                     current_price, atr_percent, avg_dollar_volume,
-                    relative_volume, price_change_20d, trend_strength,
-                    is_new_to_tier, tier_change,
+                    relative_volume, price_change_20d, avg_daily_change_5d,
+                    trend_strength, is_new_to_tier, tier_change,
                     rsi_signal, sma20_signal, sma50_signal,
                     sma_cross_signal, macd_cross_signal,
                     high_low_signal, gap_signal, candlestick_pattern,
                     pct_from_52w_high
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                    $11, $12, $13, $14, $15, $16, $17, $18,
-                    $19, $20, $21, $22, $23, $24, $25, $26, $27
+                    $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                    $20, $21, $22, $23, $24, $25, $26, $27, $28
                 )
             """
 
@@ -568,6 +570,7 @@ class WatchlistBuilder:
                 stock['avg_dollar_volume'],
                 stock['relative_volume'],
                 stock['price_change_20d'],
+                stock.get('avg_daily_change_5d'),
                 stock['trend_strength'],
                 stock.get('is_new_to_tier', False),
                 stock.get('tier_change', 0),

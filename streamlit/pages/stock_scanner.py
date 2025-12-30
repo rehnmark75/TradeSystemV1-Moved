@@ -770,7 +770,8 @@ def render_deep_dive_tab(service):
 
     with col2:
         atr_pct = watchlist.get('atr_percent', 0) or 0
-        st.metric("ATR %", f"{atr_pct:.2f}%")
+        avg_daily = watchlist.get('avg_daily_change_5d', 0) or metrics.get('avg_daily_change_5d', 0) or 0
+        st.metric("ATR %", f"{atr_pct:.2f}%", f"Avg {avg_daily:.1f}%/day" if avg_daily else None)
 
     with col3:
         dollar_vol = watchlist.get('avg_dollar_volume', 0) or 0
