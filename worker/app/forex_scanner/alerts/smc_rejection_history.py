@@ -63,12 +63,15 @@ class SMCRejectionHistoryManager:
     STAGE_CONFIDENCE_CAP = 'CONFIDENCE_CAP'  # Confidence exceeds maximum threshold
     STAGE_VOLUME_LOW = 'VOLUME_LOW'  # Volume ratio below minimum threshold
     STAGE_VOLUME_NO_DATA = 'VOLUME_NO_DATA'  # No volume data available
+    # v2.10.0: MACD momentum alignment filter
+    STAGE_MACD_MISALIGNED = 'MACD_MISALIGNED'  # Trade direction against MACD momentum
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
         STAGE_TIER3_PULLBACK, STAGE_RISK_LIMIT, STAGE_RISK_RR, STAGE_RISK_TP,
         STAGE_CONFIDENCE, STAGE_SR_PATH_BLOCKED, STAGE_SMC_CONFLICT,
-        STAGE_CONFIDENCE_CAP, STAGE_VOLUME_LOW, STAGE_VOLUME_NO_DATA
+        STAGE_CONFIDENCE_CAP, STAGE_VOLUME_LOW, STAGE_VOLUME_NO_DATA,
+        STAGE_MACD_MISALIGNED
     ]
 
     def __init__(self, db_manager, config=None):
@@ -225,11 +228,13 @@ class SMCRejectionHistoryManager:
                     candle_5m_open, candle_5m_high, candle_5m_low, candle_5m_close, candle_5m_volume,
                     candle_15m_open, candle_15m_high, candle_15m_low, candle_15m_close, candle_15m_volume,
                     candle_4h_open, candle_4h_high, candle_4h_low, candle_4h_close, candle_4h_volume,
-                    strategy_version, strategy_config_hash, strategy_config
+                    strategy_version, strategy_config_hash, strategy_config,
+                    macd_line, macd_signal, macd_histogram, macd_aligned, macd_momentum
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s
                 )
             """
 
@@ -295,7 +300,13 @@ class SMCRejectionHistoryManager:
                     self._safe_float(data.get('candle_4h_volume')),
                     data.get('strategy_version'),
                     data.get('strategy_config_hash'),
-                    self._safe_json(data.get('strategy_config'))
+                    self._safe_json(data.get('strategy_config')),
+                    # v2.10.0: MACD data
+                    self._safe_float(data.get('macd_line')),
+                    self._safe_float(data.get('macd_signal')),
+                    self._safe_float(data.get('macd_histogram')),
+                    data.get('macd_aligned'),
+                    data.get('macd_momentum')
                 )
 
                 cursor.execute(insert_sql, values)

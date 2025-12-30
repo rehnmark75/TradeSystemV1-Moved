@@ -875,6 +875,57 @@ class SMCSimpleStrategy:
                 macd_histogram = macd_line - macd_signal
 
             # ================================================================
+            # v2.10.0: MACD MOMENTUM ALIGNMENT FILTER
+            # ================================================================
+            # Check if MACD momentum direction aligns with trade direction
+            # Analysis: BULL + bullish MACD = 71% WR, misaligned = 38% WR
+            try:
+                from configdata.strategies import config_smc_simple as smc_config
+                if hasattr(smc_config, 'is_macd_filter_enabled') and smc_config.is_macd_filter_enabled(epic):
+                    macd_aligned, macd_reason = smc_config.check_macd_alignment(
+                        direction, macd_line, macd_signal, macd_histogram
+                    )
+                    macd_momentum = 'bullish' if macd_line > macd_signal else 'bearish'
+
+                    if not macd_aligned:
+                        reason = f"MACD momentum misaligned: {direction} trade vs {macd_reason}"
+                        self.logger.info(f"\n❌ {reason}")
+                        # Build context for rejection tracking
+                        risk_result = {
+                            'entry_price': entry_price,
+                            'stop_loss': stop_loss,
+                            'take_profit': take_profit,
+                            'risk_pips': risk_pips,
+                            'reward_pips': reward_pips,
+                            'rr_ratio': rr_ratio,
+                        }
+                        context = self._collect_market_context(
+                            df_trigger, df_4h, df_entry, pip_value,
+                            ema_result=ema_result, swing_result=swing_result,
+                            pullback_result=pullback_result, risk_result=risk_result
+                        )
+                        context['confidence_score'] = confidence
+                        context['macd_line'] = macd_line
+                        context['macd_signal'] = macd_signal
+                        context['macd_histogram'] = macd_histogram
+                        context['macd_aligned'] = macd_aligned
+                        context['macd_momentum'] = macd_momentum
+                        self._track_rejection(
+                            stage='MACD_MISALIGNED',
+                            reason=reason,
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context=context
+                        )
+                        return None
+                    else:
+                        self.logger.info(f"   ✅ MACD aligned: {macd_reason}")
+            except ImportError:
+                pass  # Config not available, skip MACD filter
+
+            # ================================================================
             # v2.5.0: PAIR-SPECIFIC BLOCKING CHECK
             # ================================================================
             # Check if this signal should be blocked based on pair-specific conditions

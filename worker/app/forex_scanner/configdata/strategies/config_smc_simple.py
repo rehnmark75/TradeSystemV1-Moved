@@ -98,9 +98,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.9.0"
+STRATEGY_VERSION = "2.10.0"
 STRATEGY_DATE = "2025-12-30"
-STRATEGY_STATUS = "Data-driven optimization: disabled USDCHF, added volume/confidence filters"
+STRATEGY_STATUS = "MACD momentum alignment filter: blocks trades against MACD direction"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -854,6 +854,101 @@ ALLOW_NO_VOLUME_DATA = True              # Allow signals when volume data unavai
 
 # Confidence cap - reject overconfident signals (paradox: higher conf = worse)
 MAX_CONFIDENCE_THRESHOLD = 0.75          # Cap at 75% (42% WR above this)
+
+# ============================================================================
+# v2.10.0: MACD MOMENTUM ALIGNMENT FILTER (from 56-trade analysis Dec 2025)
+# ============================================================================
+# Analysis findings (60-day trade_log + alert_history correlation):
+#   - MACD aligned with trade direction: 60% win rate, -$12/trade avg
+#   - MACD against trade direction: 38% win rate, -$70/trade avg
+#   - BULL trades + bullish MACD momentum: 71.4% win rate, +$69 total (BEST)
+#   - BEAR trades + bearish MACD momentum: 42.9% win rate, -$492 total
+#   - Misaligned trades: 37-39% win rate, -$1,472 total
+#
+# Filter logic: Check if MACD momentum supports the trade direction
+#   - BULL signals: require bullish MACD momentum (line > signal)
+#   - BEAR signals: require bearish MACD momentum (line < signal)
+#
+# NOTE: This does NOT require a fresh MACD crossover at entry time.
+#       It simply checks the current momentum state - if MACD has been
+#       bullish for 10 candles, BULL trades pass, BEAR trades get blocked.
+#
+MACD_ALIGNMENT_FILTER_ENABLED = True     # Enable MACD momentum filter
+MACD_ALIGNMENT_MODE = 'momentum'         # 'momentum' = line vs signal direction
+                                         # 'histogram' = histogram sign only
+MACD_MIN_STRENGTH = 0.0                  # Minimum |macd_line - macd_signal| to count as aligned
+                                         # 0.0 = any alignment counts (recommended start)
+                                         # Higher values = require stronger momentum separation
+
+# Pair-specific MACD filter overrides
+# Set to False to disable MACD filter for specific pairs that behave differently
+PAIR_MACD_FILTER_OVERRIDES = {
+    # Pairs where MACD filter shows clear benefit (use default True)
+    # 'CS.D.USDJPY.MINI.IP': True,  # 40% aligned vs 20% against - big improvement
+    # 'CS.D.AUDJPY.MINI.IP': True,  # 83% aligned vs 50% against
+    # 'CS.D.EURJPY.MINI.IP': True,  # 83% aligned vs 50% against
+
+    # Pairs where MACD alignment is less predictive (might disable)
+    # 'CS.D.NZDUSD.MINI.IP': False,  # Small sample, unclear pattern
+}
+
+def is_macd_filter_enabled(epic: str) -> bool:
+    """Check if MACD filter is enabled for a specific pair."""
+    if not MACD_ALIGNMENT_FILTER_ENABLED:
+        return False
+    override = PAIR_MACD_FILTER_OVERRIDES.get(epic)
+    if override is not None:
+        return override
+    return True
+
+def check_macd_alignment(signal_type: str, macd_line: float, macd_signal: float,
+                         macd_histogram: float = None) -> tuple[bool, str]:
+    """
+    Check if MACD momentum aligns with trade direction.
+
+    This checks the CURRENT state of MACD, not whether a crossover just happened.
+    If MACD has been bullish for many candles, BULL trades pass, BEAR trades fail.
+
+    Args:
+        signal_type: 'BULL' or 'BEAR'
+        macd_line: MACD line value
+        macd_signal: MACD signal line value
+        macd_histogram: MACD histogram value (optional, for 'histogram' mode)
+
+    Returns:
+        Tuple of (is_aligned: bool, reason: str)
+    """
+    if MACD_ALIGNMENT_MODE == 'histogram':
+        # Histogram mode: check histogram sign matches direction
+        if macd_histogram is None:
+            return True, "No histogram data"
+        if signal_type == 'BULL':
+            aligned = macd_histogram > 0
+            direction = 'bullish' if macd_histogram > 0 else 'bearish'
+        else:
+            aligned = macd_histogram < 0
+            direction = 'bearish' if macd_histogram < 0 else 'bullish'
+        reason = f"MACD histogram {direction} ({macd_histogram:.6f})"
+    else:
+        # Momentum mode (default): check MACD line vs signal line
+        if macd_line is None or macd_signal is None:
+            return True, "No MACD data"
+
+        macd_diff = macd_line - macd_signal
+        min_strength = MACD_MIN_STRENGTH
+
+        if signal_type == 'BULL':
+            # BULL trade needs bullish momentum (line > signal)
+            aligned = macd_diff > min_strength
+            direction = "bullish" if macd_diff > 0 else "bearish"
+        else:
+            # BEAR trade needs bearish momentum (line < signal)
+            aligned = macd_diff < -min_strength
+            direction = "bearish" if macd_diff < 0 else "bullish"
+
+        reason = f"MACD momentum {direction} (diff={macd_diff:.6f})"
+
+    return aligned, reason
 
 # Scoring weights (must sum to 1.0)
 # v2.2.0: Balanced 5-component scoring (each 20%)
