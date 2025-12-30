@@ -9,8 +9,8 @@ This skill provides comprehensive knowledge about how candles are synthesized in
 The forex_scanner uses a **multi-layered candle synthesis architecture**:
 
 1. **Ingestion**: Real-time streaming from IG Markets API → PostgreSQL
-2. **Storage**: Normalized 5m base candles with quality scoring
-3. **Derivation**: On-demand resampling to 15m, 1h, 4h with completeness tracking
+2. **Storage**: Normalized 1m base candles with quality scoring
+3. **Derivation**: On-demand resampling to 5m, 15m, 1h, 4h with completeness tracking
 4. **Caching**: Multi-tier caching (memory, data, indicator, resampled)
 5. **Enhancement**: Dynamic technical indicators based on enabled strategies
 
@@ -47,7 +47,7 @@ CHART:EPIC:RESOLUTION → Parse Fields → INSERT INTO ig_candles
 ```sql
 CREATE TABLE ig_candles (
     start_time TIMESTAMP,
-    epic VARCHAR,          -- e.g., "CS.D.EURUSD.MINI.IP"
+    epic VARCHAR,          -- e.g., "CS.D.EURUSD.CEEM.IP"
     timeframe INTEGER,     -- Minutes: 5, 15, 60, 240, 1440
     open DECIMAL,
     high DECIMAL,
@@ -111,25 +111,32 @@ ORDER BY start_time ASC
 ## 4. Timeframe Handling & Resampling
 
 ### Base Timeframe
-The system stores **5-minute candles** as the base and derives higher timeframes through resampling.
+The system stores **1-minute candles** as the base and derives all higher timeframes through resampling.
 
 ### Timeframe Mapping
 ```python
 timeframe_map = {
-    '1m': 1,      # 1 minute
-    '5m': 5,      # 5 minutes (BASE)
-    '15m': 15,    # 15 minutes (3 x 5m)
-    '30m': 30,    # 30 minutes (6 x 5m)
-    '1h': 60,     # 1 hour (12 x 5m)
-    '4h': 240,    # 4 hours (48 x 5m)
-    '1d': 1440    # Daily (288 x 5m)
+    '1m': 1,      # 1 minute (BASE)
+    '5m': 5,      # 5 minutes (5 x 1m)
+    '15m': 15,    # 15 minutes (15 x 1m)
+    '30m': 30,    # 30 minutes (30 x 1m)
+    '1h': 60,     # 1 hour (60 x 1m)
+    '4h': 240,    # 4 hours (240 x 1m)
+    '1d': 1440    # Daily (1440 x 1m)
 }
 ```
 
 ### Resampling Methods
 
+All higher timeframes are derived from 1-minute base candles through resampling.
+
+#### 5-Minute Resampling
+**Method**: `_resample_to_5m_optimized(df)`
+- Source: 5 x 1m candles per 5m period
+
 #### 15-Minute Resampling
 **Method**: `_resample_to_15m_optimized(df)`
+- Source: 15 x 1m candles per 15m period
 
 ```python
 df.resample('15min', label='left', closed='left', origin='epoch').agg({
@@ -142,8 +149,8 @@ df.resample('15min', label='left', closed='left', origin='epoch').agg({
 ```
 
 **Quality Tracking**:
-- `actual_5m_candles`: Number of 5m candles found
-- `expected_5m_candles`: 3 (for 15m)
+- `actual_1m_candles`: Number of 1m candles found
+- `expected_1m_candles`: 15 (for 15m), 60 (for 1h), 240 (for 4h)
 - `completeness_ratio`: actual/expected
 - `is_complete`: Boolean flag
 - `trading_confidence`: 0-100 score
@@ -152,12 +159,12 @@ df.resample('15min', label='left', closed='left', origin='epoch').agg({
 
 #### 60-Minute (1H) Resampling
 **Method**: `_resample_to_60m_optimized(df)`
-- Source: 12 x 5m candles per 1H period
+- Source: 60 x 1m candles per 1H period
 - Same aggregation logic as 15m
 
 #### 4-Hour Resampling
 **Method**: `_resample_to_4h_optimized(df)`
-- Source: 48 x 5m candles per 4H period
+- Source: 240 x 1m candles per 4H period
 
 ### Resampling Principles
 ```python
@@ -176,7 +183,7 @@ origin='epoch'    # Consistent epoch-based alignment
 
 ```python
 cache: Dict[epic, Dict[timeframe, pd.DataFrame]] = {
-    'CS.D.EURUSD.MINI.IP': {
+    'CS.D.EURUSD.CEEM.IP': {
         5: DataFrame(...),    # 5m candles
         15: DataFrame(...),   # 15m candles
         60: DataFrame(...)    # 1h candles
@@ -310,7 +317,7 @@ from worker.app.forex_scanner.core.data_fetcher import DataFetcher
 
 fetcher = DataFetcher()
 df = fetcher.get_enhanced_data(
-    epic='CS.D.EURUSD.MINI.IP',
+    epic='CS.D.EURUSD.CEEM.IP',
     pair='EURUSD',
     timeframe='15m',
     lookback_hours=168
@@ -319,8 +326,8 @@ df = fetcher.get_enhanced_data(
 
 ### Manual Resampling
 ```python
-# Resample 5m to 15m
-df_15m = df_5m.resample('15min', label='left', closed='left', origin='epoch').agg({
+# Resample 1m to 15m
+df_15m = df_1m.resample('15min', label='left', closed='left', origin='epoch').agg({
     'open': 'first',
     'high': 'max',
     'low': 'min',
@@ -345,8 +352,8 @@ elif df['trading_confidence'].iloc[-1] >= 80:
 ### Check Raw Data in Database
 ```sql
 SELECT * FROM ig_candles
-WHERE epic = 'CS.D.EURUSD.MINI.IP'
-  AND timeframe = 5
+WHERE epic = 'CS.D.EURUSD.CEEM.IP'
+  AND timeframe = 1
 ORDER BY start_time DESC
 LIMIT 100;
 ```
