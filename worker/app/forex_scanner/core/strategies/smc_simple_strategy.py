@@ -187,7 +187,7 @@ class SMCSimpleStrategy:
         self.optimal_rr = getattr(smc_config, 'OPTIMAL_RR_RATIO', 2.0)
         self.max_rr_ratio = getattr(smc_config, 'MAX_RR_RATIO', 4.0)
         self.sl_buffer_pips = getattr(smc_config, 'SL_BUFFER_PIPS', 8)
-        self.min_tp_pips = getattr(smc_config, 'MIN_TP_PIPS', 15)
+        self.min_tp_pips = getattr(smc_config, 'MIN_TP_PIPS', 5)
         self.use_swing_target = getattr(smc_config, 'USE_SWING_TARGET', True)
 
         # Session Filter
