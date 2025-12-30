@@ -1098,6 +1098,12 @@ class SignalDetector:
             htf_tf = getattr(smc_simple_config, 'HTF_TIMEFRAME', '4h')
             trigger_tf = getattr(smc_simple_config, 'TRIGGER_TIMEFRAME', '1h')
             entry_tf = getattr(smc_simple_config, 'ENTRY_TIMEFRAME', '15m')
+
+            # v2.9.0: Check if epic is in ENABLED_PAIRS
+            enabled_pairs = getattr(smc_simple_config, 'ENABLED_PAIRS', [])
+            if enabled_pairs and epic not in enabled_pairs:
+                self.logger.debug(f"🚫 [SMC_SIMPLE] {epic} not in ENABLED_PAIRS, skipping")
+                return None
         except ImportError:
             htf_tf = '4h'
             trigger_tf = '1h'

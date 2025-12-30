@@ -392,7 +392,8 @@ ENABLED_PAIRS = [
     'CS.D.USDCAD.MINI.IP',
     'CS.D.NZDUSD.MINI.IP',
     'CS.D.EURJPY.MINI.IP',
-    'CS.D.GBPJPY.MINI.IP',
+    # 'CS.D.GBPJPY.MINI.IP',  # No data in 85-trade analysis - disabled until analyzed
+    'CS.D.AUDJPY.MINI.IP',  # 53% WR - requires volume filter 0.60
 ]
 
 # Pair-specific pip values (from existing config)
