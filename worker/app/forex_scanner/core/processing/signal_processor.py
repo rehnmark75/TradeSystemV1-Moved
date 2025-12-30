@@ -61,6 +61,18 @@ except ImportError:
     SMART_MONEY_AVAILABLE = False
     logging.getLogger(__name__).warning("SmartMoneyReadOnlyAnalyzer not available")
 
+# ADD: Import SMC Rejection History Manager for conflict tracking
+try:
+    from alerts.smc_rejection_history import SMCRejectionHistoryManager
+    SMC_REJECTION_AVAILABLE = True
+except ImportError:
+    try:
+        from forex_scanner.alerts.smc_rejection_history import SMCRejectionHistoryManager
+        SMC_REJECTION_AVAILABLE = True
+    except ImportError:
+        SMC_REJECTION_AVAILABLE = False
+        logging.getLogger(__name__).warning("SMCRejectionHistoryManager not available")
+
 class SignalProcessor:
     """
     Handles comprehensive signal processing including validation, enhancement,
@@ -126,7 +138,23 @@ class SignalProcessor:
             except Exception as e:
                 self.logger.warning(f"⚠️ Smart Money Analyzer initialization failed: {e}")
                 self.enable_smart_money = False
-        
+
+        # SMC CONFLICT FILTER: Initialize rejection manager and config
+        self.smc_rejection_manager = None
+        self.enable_smc_conflict_filter = getattr(config, 'SMC_CONFLICT_FILTER_ENABLED', True)
+        self.smc_min_directional_consensus = getattr(config, 'SMC_MIN_DIRECTIONAL_CONSENSUS', 0.3)
+        self.smc_reject_on_order_flow_conflict = getattr(config, 'SMC_REJECT_ORDER_FLOW_CONFLICT', True)
+        self.smc_reject_on_ranging_structure = getattr(config, 'SMC_REJECT_RANGING_STRUCTURE', True)
+        self.smc_min_structure_score = getattr(config, 'SMC_MIN_STRUCTURE_SCORE', 0.5)
+        self.smc_conflict_rejected_count = 0  # Track rejections
+
+        if SMC_REJECTION_AVAILABLE and self.enable_smc_conflict_filter and db_manager:
+            try:
+                self.smc_rejection_manager = SMCRejectionHistoryManager(db_manager)
+                self.logger.info("🛡️ SMC Conflict Filter initialized")
+            except Exception as e:
+                self.logger.warning(f"⚠️ SMC Rejection Manager initialization failed: {e}")
+
         # Processing statistics (existing + smart money stats)
         self.processed_count = 0
         self.enhanced_count = 0
@@ -158,6 +186,7 @@ class SignalProcessor:
         self.logger.info(f"   Alert history: {'✅' if alert_history else '❌'}")
         self.logger.info(f"   Database storage: {'✅' if self.save_to_database else '❌'}")
         self.logger.info(f"   Deduplication: {'✅' if self.deduplication_manager else '❌'}")
+        self.logger.info(f"   SMC Conflict Filter: {'✅' if self.enable_smc_conflict_filter else '❌'}")
         self.logger.info(f"   Claude timeout: {self.claude_timeout}s")
         self.logger.info(f"   Smart Money timeout: {self.smart_money_timeout}s")
         
@@ -402,7 +431,29 @@ class SignalProcessor:
                     self.logger.info(f"   Type: {smart_money_result.get('smart_money_type', 'Unknown')}")
                     self.logger.info(f"   Score: {smart_money_result.get('smart_money_score', 0):.3f}")
                     self.logger.info(f"   Enhanced Confidence: {smart_money_result.get('enhanced_confidence_score', confidence):.3f}")
-            
+
+                    # SMC CONFLICT FILTER: Step 6b - Check for SMC conflicts and reject if needed
+                    if self.enable_smc_conflict_filter:
+                        smc_conflict = self._check_smc_conflict(enhanced_signal, smart_money_result)
+                        if smc_conflict['should_reject']:
+                            self.logger.warning(f"⛔ SMC CONFLICT REJECTION: {epic}")
+                            self.logger.warning(f"   Reason: {smc_conflict['reason']}")
+                            self.smc_conflict_rejected_count += 1
+                            processing_result['smc_conflict_rejected'] = True
+                            processing_result['smc_conflict_reason'] = smc_conflict['reason']
+
+                            # Track rejection in database
+                            self._track_smc_conflict_rejection(
+                                enhanced_signal, smart_money_result, smc_conflict
+                            )
+
+                            # Return None to reject signal
+                            processing_result['processing_time_ms'] = int((time.time() - start_time) * 1000)
+                            enhanced_signal['processing_result'] = processing_result
+                            enhanced_signal['rejected'] = True
+                            enhanced_signal['rejection_reason'] = smc_conflict['reason']
+                            return enhanced_signal
+
             # INTEGRATION: Step 7 - Enhanced database save with deduplication and smart money
             alert_id = None
             if self.save_to_database and self.alert_history:
@@ -571,7 +622,164 @@ class SignalProcessor:
         except Exception as e:
             self.logger.error(f"❌ Smart money analysis failed: {e}")
             return None
-    
+
+    def _check_smc_conflict(self, signal: Dict, smart_money_result: Dict) -> Dict:
+        """
+        Check if SMC data conflicts with signal direction.
+
+        Checks for:
+        1. Order flow bias conflicting with signal direction
+        2. Market structure showing RANGING (no directional bias)
+        3. Low directional consensus
+        4. Structure score below threshold
+
+        Returns:
+            Dict with 'should_reject' and 'reason' fields
+        """
+        try:
+            signal_type = signal.get('signal_type', '').upper()
+            signal_direction = 'BULLISH' if signal_type in ['BUY', 'BULL'] else 'BEARISH'
+
+            # Extract SMC data from nested structure
+            sm_analysis = smart_money_result.get('smart_money_analysis', smart_money_result)
+
+            # Get market structure analysis
+            market_structure = sm_analysis.get('market_structure_analysis', {})
+            if isinstance(market_structure, str):
+                try:
+                    market_structure = json.loads(market_structure)
+                except:
+                    market_structure = {}
+
+            # Get order flow analysis
+            order_flow = sm_analysis.get('order_flow_analysis', {})
+            if isinstance(order_flow, str):
+                try:
+                    order_flow = json.loads(order_flow)
+                except:
+                    order_flow = {}
+
+            # Get confluence details
+            confluence = sm_analysis.get('confluence_details', {})
+            if isinstance(confluence, str):
+                try:
+                    confluence = json.loads(confluence)
+                except:
+                    confluence = {}
+
+            conflicts = []
+
+            # Check 1: Order flow conflict
+            if self.smc_reject_on_order_flow_conflict:
+                order_flow_bias = order_flow.get('order_flow_bias', '').upper()
+                if order_flow_bias and order_flow_bias != 'NEUTRAL':
+                    if (signal_direction == 'BULLISH' and order_flow_bias == 'BEARISH') or \
+                       (signal_direction == 'BEARISH' and order_flow_bias == 'BULLISH'):
+                        conflicts.append(f"Order flow {order_flow_bias} conflicts with {signal_direction} signal")
+
+            # Check 2: Ranging structure
+            if self.smc_reject_on_ranging_structure:
+                structure_bias = market_structure.get('current_bias', '').upper()
+                if structure_bias == 'RANGING':
+                    structure_score = market_structure.get('structure_score', 0.5)
+                    conflicts.append(f"Structure is RANGING (score: {structure_score:.2f})")
+
+            # Check 3: Low directional consensus
+            directional_consensus = confluence.get('directional_consensus', 1.0)
+            if directional_consensus < self.smc_min_directional_consensus:
+                conflicts.append(f"Directional consensus too low ({directional_consensus:.2f} < {self.smc_min_directional_consensus})")
+
+            # Check 4: Low structure score
+            structure_score = market_structure.get('structure_score', 0.5)
+            if structure_score < self.smc_min_structure_score:
+                # Only reject if also ranging or no clear direction
+                structure_bias = market_structure.get('current_bias', '').upper()
+                if structure_bias not in ['BULLISH', 'BEARISH']:
+                    conflicts.append(f"Structure score too low ({structure_score:.2f} < {self.smc_min_structure_score})")
+
+            if conflicts:
+                return {
+                    'should_reject': True,
+                    'reason': '; '.join(conflicts),
+                    'conflicts': conflicts,
+                    'order_flow_bias': order_flow.get('order_flow_bias'),
+                    'structure_bias': market_structure.get('current_bias'),
+                    'structure_score': structure_score,
+                    'directional_consensus': directional_consensus
+                }
+
+            return {'should_reject': False, 'reason': None}
+
+        except Exception as e:
+            self.logger.error(f"❌ SMC conflict check failed: {e}")
+            return {'should_reject': False, 'reason': None, 'error': str(e)}
+
+    def _track_smc_conflict_rejection(
+        self, signal: Dict, smart_money_result: Dict, smc_conflict: Dict
+    ) -> None:
+        """
+        Track SMC conflict rejection in the smc_simple_rejections table.
+        """
+        if not self.smc_rejection_manager:
+            return
+
+        try:
+            from datetime import timezone
+
+            # Extract signal data
+            epic = signal.get('epic', '')
+            pair = signal.get('pair', epic.replace('CS.D.', '').replace('.MINI.IP', ''))
+            signal_type = signal.get('signal_type', '')
+
+            # Get timestamp
+            timestamp = signal.get('timestamp')
+            if timestamp is None:
+                timestamp = datetime.now(timezone.utc)
+            elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+            # Build rejection data
+            rejection_data = {
+                'scan_timestamp': timestamp,
+                'epic': epic,
+                'pair': pair,
+                'rejection_stage': 'SMC_CONFLICT',
+                'rejection_reason': smc_conflict.get('reason', 'SMC data conflicts with signal'),
+                'attempted_direction': signal_type,
+                'strategy_version': signal.get('strategy_version', 'unknown'),
+
+                # SMC conflict details
+                'rejection_details': {
+                    'conflicts': smc_conflict.get('conflicts', []),
+                    'order_flow_bias': smc_conflict.get('order_flow_bias'),
+                    'structure_bias': smc_conflict.get('structure_bias'),
+                    'structure_score': smc_conflict.get('structure_score'),
+                    'directional_consensus': smc_conflict.get('directional_consensus'),
+                    'signal_direction': signal_type,
+                    'smart_money_score': smart_money_result.get('smart_money_score'),
+                    'enhanced_confidence': smart_money_result.get('enhanced_confidence_score'),
+                },
+
+                # Price context
+                'current_price': signal.get('entry_price'),
+                'potential_entry': signal.get('entry_price'),
+                'potential_stop_loss': signal.get('stop_loss'),
+                'potential_take_profit': signal.get('take_profit'),
+                'potential_risk_pips': signal.get('risk_pips'),
+                'potential_reward_pips': signal.get('reward_pips'),
+                'potential_rr_ratio': signal.get('rr_ratio'),
+
+                # Confidence
+                'confidence_score': signal.get('confidence_score'),
+            }
+
+            # Save rejection
+            self.smc_rejection_manager.save_rejection(rejection_data)
+            self.logger.debug(f"✅ SMC conflict rejection tracked for {epic}")
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to track SMC conflict rejection: {e}")
+
     def _merge_smart_money_results(self, signal: Dict, smart_money_result: Dict) -> Dict:
         """
         Merge smart money analysis results into signal

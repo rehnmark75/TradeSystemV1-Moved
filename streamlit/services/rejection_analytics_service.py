@@ -182,12 +182,187 @@ class RejectionAnalyticsService:
             pair_df = pd.read_sql_query(pair_query, conn, params=[days])
             stats['most_rejected_pair'] = pair_df['pair'].iloc[0] if not pair_df.empty else 'N/A'
 
+            # SMC Conflict count (new stage)
+            smc_conflict_query = """
+            SELECT COUNT(*) as smc_conflicts
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            AND rejection_stage = 'SMC_CONFLICT'
+            """
+            smc_conflict_df = pd.read_sql_query(smc_conflict_query, conn, params=[days])
+            stats['smc_conflicts'] = int(smc_conflict_df['smc_conflicts'].iloc[0]) if not smc_conflict_df.empty else 0
+
             return stats
 
         except Exception as e:
             if "does not exist" not in str(e):
                 logger.error(f"Error fetching SMC rejection stats: {e}")
-            return {'total': 0, 'unique_pairs': 0, 'by_stage': {}, 'near_misses': 0, 'most_rejected_pair': 'N/A'}
+            return {'total': 0, 'unique_pairs': 0, 'by_stage': {}, 'near_misses': 0, 'most_rejected_pair': 'N/A', 'smc_conflicts': 0}
+        finally:
+            conn.close()
+
+    @st.cache_data(ttl=300)
+    def fetch_smc_conflict_details(_self, days: int) -> pd.DataFrame:
+        """
+        Fetch SMC Conflict rejection details including order flow and structure data.
+
+        Args:
+            days: Number of days to look back
+
+        Returns:
+            DataFrame with SMC conflict rejection details
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return pd.DataFrame()
+
+        try:
+            query = """
+            SELECT
+                id,
+                scan_timestamp,
+                epic,
+                pair,
+                rejection_reason,
+                attempted_direction,
+                current_price,
+                market_hour,
+                market_session,
+                potential_entry,
+                potential_stop_loss,
+                potential_take_profit,
+                potential_risk_pips,
+                potential_reward_pips,
+                potential_rr_ratio,
+                confidence_score,
+                rejection_details
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            AND rejection_stage = 'SMC_CONFLICT'
+            ORDER BY scan_timestamp DESC
+            LIMIT 500
+            """
+            df = pd.read_sql_query(query, conn, params=[days])
+
+            # Parse rejection_details JSON for SMC-specific fields
+            if not df.empty and 'rejection_details' in df.columns:
+                import json
+                def parse_details(details):
+                    if pd.isna(details):
+                        return {}
+                    if isinstance(details, str):
+                        try:
+                            return json.loads(details)
+                        except:
+                            return {}
+                    return details if isinstance(details, dict) else {}
+
+                details_parsed = df['rejection_details'].apply(parse_details)
+                df['order_flow_bias'] = details_parsed.apply(lambda x: x.get('order_flow_bias', 'N/A'))
+                df['structure_bias'] = details_parsed.apply(lambda x: x.get('structure_bias', 'N/A'))
+                df['structure_score'] = details_parsed.apply(lambda x: x.get('structure_score'))
+                df['directional_consensus'] = details_parsed.apply(lambda x: x.get('directional_consensus'))
+                df['conflicts'] = details_parsed.apply(lambda x: x.get('conflicts', []))
+
+            return df
+
+        except Exception as e:
+            if "does not exist" in str(e):
+                logger.info("SMC Rejections table not yet created")
+            else:
+                logger.error(f"Error fetching SMC conflict details: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
+
+    @st.cache_data(ttl=300)
+    def fetch_smc_conflict_stats(_self, days: int) -> Dict[str, Any]:
+        """
+        Fetch SMC Conflict specific statistics.
+
+        Args:
+            days: Number of days to look back
+
+        Returns:
+            Dictionary with SMC conflict statistics
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return {}
+
+        try:
+            # Basic counts
+            query = """
+            SELECT
+                COUNT(*) as total,
+                COUNT(DISTINCT epic) as unique_pairs,
+                COUNT(DISTINCT market_session) as sessions_affected
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            AND rejection_stage = 'SMC_CONFLICT'
+            """
+            df = pd.read_sql_query(query, conn, params=[days])
+
+            if df.empty or df['total'].iloc[0] == 0:
+                return {
+                    'total': 0,
+                    'unique_pairs': 0,
+                    'sessions_affected': 0,
+                    'by_pair': {},
+                    'by_session': {},
+                    'conflict_types': {}
+                }
+
+            stats = {
+                'total': int(df['total'].iloc[0]),
+                'unique_pairs': int(df['unique_pairs'].iloc[0]),
+                'sessions_affected': int(df['sessions_affected'].iloc[0])
+            }
+
+            # By pair breakdown
+            pair_query = """
+            SELECT pair, COUNT(*) as count
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            AND rejection_stage = 'SMC_CONFLICT'
+            GROUP BY pair
+            ORDER BY count DESC
+            """
+            pair_df = pd.read_sql_query(pair_query, conn, params=[days])
+            stats['by_pair'] = dict(zip(pair_df['pair'], pair_df['count'])) if not pair_df.empty else {}
+
+            # By session breakdown
+            session_query = """
+            SELECT market_session, COUNT(*) as count
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            AND rejection_stage = 'SMC_CONFLICT'
+            AND market_session IS NOT NULL
+            GROUP BY market_session
+            ORDER BY count DESC
+            """
+            session_df = pd.read_sql_query(session_query, conn, params=[days])
+            stats['by_session'] = dict(zip(session_df['market_session'], session_df['count'])) if not session_df.empty else {}
+
+            # Conflict types from rejection_reason (parse the conflicts)
+            reason_query = """
+            SELECT rejection_reason, COUNT(*) as count
+            FROM smc_simple_rejections
+            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            AND rejection_stage = 'SMC_CONFLICT'
+            GROUP BY rejection_reason
+            ORDER BY count DESC
+            LIMIT 10
+            """
+            reason_df = pd.read_sql_query(reason_query, conn, params=[days])
+            stats['top_reasons'] = list(reason_df.to_dict('records')) if not reason_df.empty else []
+
+            return stats
+
+        except Exception as e:
+            if "does not exist" not in str(e):
+                logger.error(f"Error fetching SMC conflict stats: {e}")
+            return {'total': 0, 'unique_pairs': 0, 'sessions_affected': 0, 'by_pair': {}, 'by_session': {}, 'top_reasons': []}
         finally:
             conn.close()
 

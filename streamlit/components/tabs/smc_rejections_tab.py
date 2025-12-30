@@ -76,13 +76,13 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
     with col4:
         st.metric("Near-Misses", stats.get('near_misses', 0), help="Signals that reached confidence stage but were rejected")
     with col5:
-        st.metric("Most Rejected Pair", stats.get('most_rejected_pair', 'N/A'))
+        st.metric("SMC Conflicts", stats.get('smc_conflicts', 0), help="Signals rejected due to SMC data conflicts")
 
     st.markdown("---")
 
     # Sub-tabs for different analysis views
-    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6, sub_tab7 = st.tabs([
-        "Stage Breakdown", "Outcome Analysis", "S/R Path Blocking", "Time Analysis", "Market Context", "Near-Misses", "Scanner Efficiency"
+    sub_tab1, sub_tab2, sub_tab3, sub_tab4, sub_tab5, sub_tab6, sub_tab7, sub_tab8 = st.tabs([
+        "Stage Breakdown", "SMC Conflicts", "Outcome Analysis", "S/R Path Blocking", "Time Analysis", "Market Context", "Near-Misses", "Scanner Efficiency"
     ])
 
     # Fetch data from service (cached)
@@ -96,21 +96,24 @@ docker exec -it postgres psql -U postgres -d trading -f /path/to/create_smc_simp
         _render_stage_breakdown(df, stats)
 
     with sub_tab2:
-        _render_rejection_outcome_analysis(days_filter)
+        _render_smc_conflict_analysis(service, days_filter)
 
     with sub_tab3:
-        _render_sr_path_blocking(df, days_filter)
+        _render_rejection_outcome_analysis(days_filter)
 
     with sub_tab4:
-        _render_time_analysis(df)
+        _render_sr_path_blocking(df, days_filter)
 
     with sub_tab5:
-        _render_market_context(df)
+        _render_time_analysis(df)
 
     with sub_tab6:
-        _render_near_misses(df, days_filter)
+        _render_market_context(df)
 
     with sub_tab7:
+        _render_near_misses(df, days_filter)
+
+    with sub_tab8:
         _render_scanner_efficiency(days_filter)
 
 
@@ -1049,3 +1052,196 @@ def _render_scanner_efficiency(days: int):
             st.error(f"Error fetching redundancy data: {e}")
     finally:
         conn.close()
+
+
+def _render_smc_conflict_analysis(service, days_filter: int):
+    """Render SMC Conflict Analysis sub-tab"""
+    st.subheader("SMC Conflict Analysis")
+
+    st.info("""
+    **What is SMC Conflict Rejection?**
+
+    Signals are rejected when Smart Money Concepts (SMC) data conflicts with the signal direction:
+    - **Order Flow Conflict**: Order flow bias is opposite to signal direction (e.g., BEARISH flow with BULL signal)
+    - **Ranging Structure**: Market structure shows no clear directional bias (RANGING)
+    - **Low Directional Consensus**: Multiple SMC indicators disagree on direction
+    - **Low Structure Score**: Structure score below threshold with no clear bias
+
+    These filters help avoid trades where institutional activity doesn't support the signal direction.
+    """)
+
+    # Fetch SMC conflict specific stats
+    conflict_stats = service.fetch_smc_conflict_stats(days_filter)
+
+    if conflict_stats.get('total', 0) == 0:
+        st.warning("No SMC conflict rejections found for the selected period. This could mean:")
+        st.markdown("""
+        - The SMC Conflict filter is not yet enabled
+        - No signals had conflicting SMC data
+        - The filter thresholds are not triggering rejections
+        """)
+
+        # Show config info
+        with st.expander("SMC Conflict Filter Configuration"):
+            st.code("""
+# In worker/app/forex_scanner/config.py:
+SMC_CONFLICT_FILTER_ENABLED = True   # Enable SMC conflict-based signal rejection
+SMC_MIN_DIRECTIONAL_CONSENSUS = 0.3  # Minimum directional consensus (0.0-1.0)
+SMC_REJECT_ORDER_FLOW_CONFLICT = True  # Reject when order flow opposes signal
+SMC_REJECT_RANGING_STRUCTURE = True    # Reject when structure is RANGING
+SMC_MIN_STRUCTURE_SCORE = 0.5          # Minimum structure score
+            """)
+        return
+
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Total SMC Conflicts", f"{conflict_stats.get('total', 0):,}")
+    with col2:
+        st.metric("Pairs Affected", conflict_stats.get('unique_pairs', 0))
+    with col3:
+        st.metric("Sessions Affected", conflict_stats.get('sessions_affected', 0))
+    with col4:
+        # Calculate most common conflict
+        top_reasons = conflict_stats.get('top_reasons', [])
+        if top_reasons:
+            top_reason = top_reasons[0].get('rejection_reason', 'N/A')[:30]
+            st.metric("Top Conflict Type", top_reason + "...")
+        else:
+            st.metric("Top Conflict Type", "N/A")
+
+    st.markdown("---")
+
+    # Breakdown charts
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### SMC Conflicts by Currency Pair")
+        by_pair = conflict_stats.get('by_pair', {})
+        if by_pair:
+            pair_df = pd.DataFrame(list(by_pair.items()), columns=['Pair', 'Count'])
+            fig_pair = px.bar(
+                pair_df,
+                x='Pair',
+                y='Count',
+                title="SMC Conflict Rejections by Pair",
+                color='Count',
+                color_continuous_scale='Reds'
+            )
+            st.plotly_chart(fig_pair, use_container_width=True)
+        else:
+            st.info("No pair breakdown available.")
+
+    with col2:
+        st.markdown("#### SMC Conflicts by Session")
+        by_session = conflict_stats.get('by_session', {})
+        if by_session:
+            session_df = pd.DataFrame(list(by_session.items()), columns=['Session', 'Count'])
+            fig_session = px.pie(
+                session_df,
+                values='Count',
+                names='Session',
+                title="SMC Conflict Rejections by Session",
+                color_discrete_sequence=px.colors.qualitative.Set2
+            )
+            st.plotly_chart(fig_session, use_container_width=True)
+        else:
+            st.info("No session breakdown available.")
+
+    # Top conflict reasons
+    st.markdown("---")
+    st.markdown("#### Top Conflict Reasons")
+    top_reasons = conflict_stats.get('top_reasons', [])
+    if top_reasons:
+        reason_df = pd.DataFrame(top_reasons)
+        st.dataframe(
+            reason_df.rename(columns={'rejection_reason': 'Conflict Reason', 'count': 'Count'}),
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("No conflict reason breakdown available.")
+
+    # Fetch detailed SMC conflict data
+    st.markdown("---")
+    st.markdown("#### Recent SMC Conflict Rejections")
+
+    conflict_df = service.fetch_smc_conflict_details(days_filter)
+
+    if conflict_df.empty:
+        st.info("No detailed conflict data available.")
+        return
+
+    # Show detailed table with parsed SMC data
+    display_cols = ['scan_timestamp', 'pair', 'attempted_direction', 'order_flow_bias',
+                   'structure_bias', 'structure_score', 'directional_consensus',
+                   'confidence_score', 'potential_rr_ratio']
+    available_cols = [c for c in display_cols if c in conflict_df.columns]
+
+    if available_cols:
+        st.dataframe(
+            conflict_df[available_cols].head(50),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "scan_timestamp": st.column_config.DatetimeColumn("Time", format="MMM DD, HH:mm"),
+                "pair": st.column_config.TextColumn("Pair"),
+                "attempted_direction": st.column_config.TextColumn("Signal"),
+                "order_flow_bias": st.column_config.TextColumn("Order Flow"),
+                "structure_bias": st.column_config.TextColumn("Structure"),
+                "structure_score": st.column_config.NumberColumn("Struct Score", format="%.2f"),
+                "directional_consensus": st.column_config.NumberColumn("Dir Consensus", format="%.2f"),
+                "confidence_score": st.column_config.NumberColumn("Confidence", format="%.0f%%"),
+                "potential_rr_ratio": st.column_config.NumberColumn("R:R", format="%.2f")
+            }
+        )
+    else:
+        st.dataframe(conflict_df.head(50), use_container_width=True, hide_index=True)
+
+    # Analysis insights
+    st.markdown("---")
+    st.markdown("#### Insights & Recommendations")
+
+    # Check for patterns
+    if 'order_flow_bias' in conflict_df.columns:
+        order_flow_conflicts = conflict_df[conflict_df['order_flow_bias'].isin(['BEARISH', 'BULLISH'])]
+        if len(order_flow_conflicts) > 0:
+            of_pct = len(order_flow_conflicts) / len(conflict_df) * 100
+            st.markdown(f"- **{of_pct:.0f}%** of conflicts involve order flow opposing the signal direction")
+
+    if 'structure_bias' in conflict_df.columns:
+        ranging_conflicts = conflict_df[conflict_df['structure_bias'].str.upper() == 'RANGING']
+        if len(ranging_conflicts) > 0:
+            ranging_pct = len(ranging_conflicts) / len(conflict_df) * 100
+            st.markdown(f"- **{ranging_pct:.0f}%** of conflicts occur during RANGING market structure")
+
+    if 'directional_consensus' in conflict_df.columns and conflict_df['directional_consensus'].notna().any():
+        avg_consensus = conflict_df['directional_consensus'].mean()
+        st.markdown(f"- Average directional consensus at rejection: **{avg_consensus:.2f}** (threshold: 0.3)")
+
+    # Recommendations based on data
+    if conflict_stats.get('total', 0) > 20:
+        st.success("""
+        **The SMC Conflict filter is actively protecting against trades with conflicting institutional activity.**
+
+        Monitor the Outcome Analysis tab to see if these rejections are avoiding losses (would-be losers)
+        or missing profits (would-be winners). Adjust thresholds if needed.
+        """)
+    else:
+        st.info("""
+        **Low conflict rejection count.** This could indicate:
+        - Market conditions are aligned (good for trading)
+        - Thresholds may be too relaxed
+        - Filter may need more time to collect data
+        """)
+
+    # Export option
+    st.markdown("---")
+    csv = conflict_df.to_csv(index=False)
+    st.download_button(
+        label="Export SMC Conflicts to CSV",
+        data=csv,
+        file_name=f"smc_conflicts_{days_filter}days.csv",
+        mime="text/csv"
+    )
