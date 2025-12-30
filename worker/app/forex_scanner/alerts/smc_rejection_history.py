@@ -57,13 +57,18 @@ class SMCRejectionHistoryManager:
     STAGE_RISK_RR = 'RISK_RR'
     STAGE_RISK_TP = 'RISK_TP'
     STAGE_CONFIDENCE = 'CONFIDENCE'
-    STAGE_SR_PATH_BLOCKED = 'SR_PATH_BLOCKED'  # NEW: S/R blocking path to target
-    STAGE_SMC_CONFLICT = 'SMC_CONFLICT'  # NEW: SMC data conflicts with signal direction
+    STAGE_SR_PATH_BLOCKED = 'SR_PATH_BLOCKED'  # S/R blocking path to target
+    STAGE_SMC_CONFLICT = 'SMC_CONFLICT'  # SMC data conflicts with signal direction
+    # v2.9.0: New rejection stages for volume/confidence filters
+    STAGE_CONFIDENCE_CAP = 'CONFIDENCE_CAP'  # Confidence exceeds maximum threshold
+    STAGE_VOLUME_LOW = 'VOLUME_LOW'  # Volume ratio below minimum threshold
+    STAGE_VOLUME_NO_DATA = 'VOLUME_NO_DATA'  # No volume data available
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
         STAGE_TIER3_PULLBACK, STAGE_RISK_LIMIT, STAGE_RISK_RR, STAGE_RISK_TP,
-        STAGE_CONFIDENCE, STAGE_SR_PATH_BLOCKED, STAGE_SMC_CONFLICT
+        STAGE_CONFIDENCE, STAGE_SR_PATH_BLOCKED, STAGE_SMC_CONFLICT,
+        STAGE_CONFIDENCE_CAP, STAGE_VOLUME_LOW, STAGE_VOLUME_NO_DATA
     ]
 
     def __init__(self, db_manager, config=None):

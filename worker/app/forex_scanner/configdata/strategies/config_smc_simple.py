@@ -1,7 +1,7 @@
 # ============================================================================
 # SMC SIMPLE STRATEGY CONFIGURATION
 # ============================================================================
-# Version: 2.8.1 (Relaxed Filters from Rejection Outcome Analysis)
+# Version: 2.9.0 (Data-Driven Optimization from 85-trade analysis Dec 2025)
 # Description: Simplified 3-tier SMC strategy for intraday forex trading
 # Architecture:
 #   TIER 1: 4H 50 EMA for directional bias
@@ -98,9 +98,9 @@ from datetime import time
 # STRATEGY METADATA
 # ============================================================================
 STRATEGY_NAME = "SMC_SIMPLE"
-STRATEGY_VERSION = "2.8.1"
-STRATEGY_DATE = "2025-12-29"
-STRATEGY_STATUS = "Relaxed confidence (48%) and body (20%) filters from rejection outcome analysis"
+STRATEGY_VERSION = "2.9.0"
+STRATEGY_DATE = "2025-12-30"
+STRATEGY_STATUS = "Data-driven optimization: disabled USDCHF, added volume/confidence filters"
 
 # ============================================================================
 # TIER 1: 4H DIRECTIONAL BIAS (Higher Timeframe)
@@ -382,11 +382,12 @@ MAX_COOLDOWN_HOURS = 12.0                # Never more than 12 hours
 # ============================================================================
 
 # Enabled pairs (major forex pairs with good liquidity)
+# v2.9.0: USDCHF DISABLED - 11% win rate, -$142 avg loss, -$1,278 total (Dec 2025 analysis)
 ENABLED_PAIRS = [
     'CS.D.EURUSD.CEEM.IP',  # CEEM uses scaled pricing (11646 instead of 1.1646)
     'CS.D.GBPUSD.MINI.IP',
     'CS.D.USDJPY.MINI.IP',
-    'CS.D.USDCHF.MINI.IP',
+    # 'CS.D.USDCHF.MINI.IP',  # DISABLED v2.9.0: 11% WR, -$142 avg, worst performer
     'CS.D.AUDUSD.MINI.IP',
     'CS.D.USDCAD.MINI.IP',
     'CS.D.NZDUSD.MINI.IP',
@@ -618,112 +619,191 @@ def should_block_signal(epic: str, signal_data: dict) -> tuple[bool, str]:
 #   - Reducing MIN_BODY_PERCENTAGE from 0.35 to 0.25 recovers ~150 signals
 
 PAIR_PARAMETER_OVERRIDES = {
-    'CS.D.EURUSD.CEEM.IP': {
-        'enabled': True,
-        'description': 'EURUSD relaxed parameters - smaller body candles',
-        'overrides': {
-            # Tier 2: Swing break parameters
-            'MIN_BODY_PERCENTAGE': 0.20,      # v2.8.1: Aligned with new default (was 0.25)
-            'MIN_BREAKOUT_ATR_RATIO': 0.40,   # Default: 0.50 - allow smaller breakouts
-
-            # Tier 3: Entry parameters
-            'MOMENTUM_MIN_DEPTH': -0.60,      # Default: -0.50 - allow deeper momentum
-        },
-    },
-    # Alias for pair name format
-    'EURUSD': {
-        'enabled': True,
-        'description': 'EURUSD relaxed parameters - smaller body candles',
-        'overrides': {
-            'MIN_BODY_PERCENTAGE': 0.20,      # v2.8.1: Aligned with new default
-            'MIN_BREAKOUT_ATR_RATIO': 0.40,
-            'MOMENTUM_MIN_DEPTH': -0.60,
-        },
-    },
+    # ============================================================================
+    # v2.9.0: DATA-DRIVEN PAIR-SPECIFIC OVERRIDES (Dec 2025 - 85 trade analysis)
+    # ============================================================================
+    # Analysis methodology:
+    #   - 85 closed SMC_SIMPLE trades (Dec 1-30, 2025)
+    #   - Winners vs Losers comparison per epic
+    #   - Volume ratio and confidence score correlation analysis
+    #
+    # Key findings:
+    #   - Volume >= 0.50: 70%+ win rate vs 43% without
+    #   - Confidence > 0.75: 42% win rate (paradox - higher = worse)
+    #   - USDCHF: 11% WR - DISABLED entirely
+    # ============================================================================
 
     # ============================================================================
-    # v2.7.0: AUDUSD PAIR-SPECIFIC OVERRIDES
+    # TOP PERFORMERS - Keep relaxed settings (60%+ win rate)
     # ============================================================================
-    # Rejection Outcome Analysis (30 days):
-    #   - 844 rejections total, 61% would-be win rate
-    #   - TIER2_SWING: 753 rejections, 56.4% win rate - slightly too aggressive
-    #   - TIER3_PULLBACK: 66 rejections, 90.9% win rate - far too aggressive
-    #   - CONFIDENCE: 25 rejections, 100% win rate - too aggressive
-    #   - Net missed: 4,446 pips (7,290 missed - 2,844 avoided)
-    #
-    # AUDUSD characteristics:
-    #   - Lower volatility than GBP/JPY pairs
-    #   - Smaller candle bodies on breakouts
-    #   - Shallower pullbacks before continuation
-    #
+
     'CS.D.AUDUSD.MINI.IP': {
         'enabled': True,
-        'description': 'AUDUSD relaxed parameters - outcome analysis shows 61% rejection win rate',
+        'description': 'AUDUSD - TOP PERFORMER 71% WR, keep relaxed settings',
         'overrides': {
-            # Tier 2: Swing break - relax for smaller AUDUSD breakouts
-            'MIN_BODY_PERCENTAGE': 0.20,       # v2.8.1: Aligned with new default (was 0.25)
-            'MIN_BREAKOUT_ATR_RATIO': 0.40,    # Default: 0.50 - allow smaller breakouts
-
-            # Tier 3: Pullback/Momentum - relax for AUDUSD's shallow pullbacks
-            'MOMENTUM_MIN_DEPTH': -0.65,       # Default: -0.50 - allow deeper momentum continuation
-            'FIB_PULLBACK_MIN': 0.18,          # Default: 0.236 - accept shallower pullbacks
-            'FIB_PULLBACK_MAX': 0.75,          # Default: 0.70 - accept deeper pullbacks
-
-            # Confidence: Lower threshold since rejections show high win rate
-            'MIN_CONFIDENCE_THRESHOLD': 0.45,  # Still lower than new default 0.48 for AUDUSD
-        },
-    },
-    # Alias for pair name format
-    'AUDUSD': {
-        'enabled': True,
-        'description': 'AUDUSD relaxed parameters - outcome analysis shows 61% rejection win rate',
-        'overrides': {
-            'MIN_BODY_PERCENTAGE': 0.20,       # v2.8.1: Aligned with new default
+            # Keep existing relaxed settings - they're working
+            'MIN_BODY_PERCENTAGE': 0.20,
             'MIN_BREAKOUT_ATR_RATIO': 0.40,
             'MOMENTUM_MIN_DEPTH': -0.65,
             'FIB_PULLBACK_MIN': 0.18,
-            'FIB_PULLBACK_MAX': 0.75,
             'MIN_CONFIDENCE_THRESHOLD': 0.45,
+            # No volume filter - winners avg 0.49, losers avg 0.74 (paradox for this pair)
+            'MIN_VOLUME_RATIO': 0.0,
+        },
+    },
+    'AUDUSD': {
+        'enabled': True,
+        'description': 'AUDUSD - TOP PERFORMER 71% WR',
+        'overrides': {
+            'MIN_BODY_PERCENTAGE': 0.20,
+            'MIN_BREAKOUT_ATR_RATIO': 0.40,
+            'MOMENTUM_MIN_DEPTH': -0.65,
+            'FIB_PULLBACK_MIN': 0.18,
+            'MIN_CONFIDENCE_THRESHOLD': 0.45,
+            'MIN_VOLUME_RATIO': 0.0,
+        },
+    },
+
+    'CS.D.EURJPY.MINI.IP': {
+        'enabled': True,
+        'description': 'EURJPY - 64% WR, volume is KEY differentiator (W:0.67 vs L:0.25)',
+        'overrides': {
+            'MIN_VOLUME_RATIO': 0.50,  # Winners 0.67 vs Losers 0.25
+        },
+    },
+    'EURJPY': {
+        'enabled': True,
+        'description': 'EURJPY - 64% WR, volume is KEY',
+        'overrides': {
+            'MIN_VOLUME_RATIO': 0.50,
+        },
+    },
+
+    'CS.D.GBPUSD.MINI.IP': {
+        'enabled': True,
+        'description': 'GBPUSD - 63% WR, keep defaults',
+        'overrides': {},  # Use global defaults - working well
+    },
+    'GBPUSD': {
+        'enabled': True,
+        'description': 'GBPUSD - 63% WR, keep defaults',
+        'overrides': {},
+    },
+
+    'CS.D.USDCAD.MINI.IP': {
+        'enabled': True,
+        'description': 'USDCAD - 63% WR, high volume pairs win (W:0.85 vs L:1.10)',
+        'overrides': {
+            'MIN_VOLUME_RATIO': 0.50,
+        },
+    },
+    'USDCAD': {
+        'enabled': True,
+        'description': 'USDCAD - 63% WR, high volume pairs win',
+        'overrides': {
+            'MIN_VOLUME_RATIO': 0.50,
         },
     },
 
     # ============================================================================
-    # v2.7.0: NZDUSD PAIR-SPECIFIC OVERRIDES
+    # MODERATE PERFORMERS - Tighten volume filter (50-60% win rate)
     # ============================================================================
-    # Rejection Outcome Analysis (30 days):
-    #   - 562 rejections total, 56% would-be win rate
-    #   - TIER2_SWING: 429 rejections, 54.1% win rate - neutral
-    #   - TIER3_PULLBACK: 108 rejections, 53.7% win rate - neutral
-    #   - CONFIDENCE: 25 rejections, 100% win rate - too aggressive
-    #   - Net missed: 2,502 pips
-    #
-    # NZDUSD characteristics:
-    #   - Similar to AUDUSD (commodity currency)
-    #   - Lower volatility pair
-    #   - CONFIDENCE filter is blocking all winners
-    #
+
+    'CS.D.AUDJPY.MINI.IP': {
+        'enabled': True,
+        'description': 'AUDJPY - 53% WR, VOLUME IS CRITICAL (W:0.78 vs L:0.19)',
+        'overrides': {
+            'MIN_VOLUME_RATIO': 0.60,  # Winners 0.78 vs Losers 0.19 - HUGE gap
+        },
+    },
+    'AUDJPY': {
+        'enabled': True,
+        'description': 'AUDJPY - 53% WR, VOLUME IS CRITICAL',
+        'overrides': {
+            'MIN_VOLUME_RATIO': 0.60,
+        },
+    },
+
+    # ============================================================================
+    # UNDERPERFORMERS - Strict filters (< 50% win rate)
+    # ============================================================================
+
+    'CS.D.EURUSD.CEEM.IP': {
+        'enabled': True,
+        'description': 'EURUSD - 43% WR, HIGH confidence = LOSSES (W:0.68 vs L:0.75)',
+        'overrides': {
+            'MIN_BODY_PERCENTAGE': 0.25,        # Tighten from 0.20
+            'MIN_BREAKOUT_ATR_RATIO': 0.50,     # Tighten from 0.40
+            'MOMENTUM_MIN_DEPTH': -0.45,        # Tighten from -0.60
+            'MAX_CONFIDENCE_THRESHOLD': 0.70,   # Winners 0.68 vs Losers 0.75
+            'MIN_VOLUME_RATIO': 0.40,           # Losers avg 0.42
+        },
+    },
+    'EURUSD': {
+        'enabled': True,
+        'description': 'EURUSD - 43% WR, HIGH confidence = LOSSES',
+        'overrides': {
+            'MIN_BODY_PERCENTAGE': 0.25,
+            'MIN_BREAKOUT_ATR_RATIO': 0.50,
+            'MOMENTUM_MIN_DEPTH': -0.45,
+            'MAX_CONFIDENCE_THRESHOLD': 0.70,
+            'MIN_VOLUME_RATIO': 0.40,
+        },
+    },
+
     'CS.D.NZDUSD.MINI.IP': {
         'enabled': True,
-        'description': 'NZDUSD relaxed parameters - CONFIDENCE stage has 100% rejection win rate',
+        'description': 'NZDUSD - 43% WR, tighten filters (W:0.63 conf vs L:0.73)',
         'overrides': {
-            # Tier 2: Aligned with new defaults
-            'MIN_BODY_PERCENTAGE': 0.20,       # v2.8.1: Aligned with new default (was 0.30)
-            'MIN_BREAKOUT_ATR_RATIO': 0.45,    # Default: 0.50 - slight relaxation
-
-            # Confidence: Lower threshold since CONFIDENCE rejections show 100% win rate
-            'MIN_CONFIDENCE_THRESHOLD': 0.45,  # Still lower than new default 0.48 for NZDUSD
+            'MIN_BODY_PERCENTAGE': 0.25,        # Tighten
+            'MIN_BREAKOUT_ATR_RATIO': 0.50,     # Tighten from 0.45
+            'MAX_CONFIDENCE_THRESHOLD': 0.70,   # Winners 0.63 vs Losers 0.73
+            'MIN_VOLUME_RATIO': 0.35,           # Winners 0.39 vs Losers 0.14
         },
     },
-    # Alias for pair name format
     'NZDUSD': {
         'enabled': True,
-        'description': 'NZDUSD relaxed parameters - CONFIDENCE stage has 100% rejection win rate',
+        'description': 'NZDUSD - 43% WR, tighten filters',
         'overrides': {
-            'MIN_BODY_PERCENTAGE': 0.20,       # v2.8.1: Aligned with new default
-            'MIN_BREAKOUT_ATR_RATIO': 0.45,
-            'MIN_CONFIDENCE_THRESHOLD': 0.45,
+            'MIN_BODY_PERCENTAGE': 0.25,
+            'MIN_BREAKOUT_ATR_RATIO': 0.50,
+            'MAX_CONFIDENCE_THRESHOLD': 0.70,
+            'MIN_VOLUME_RATIO': 0.35,
         },
     },
+
+    'CS.D.USDJPY.MINI.IP': {
+        'enabled': True,
+        'description': 'USDJPY - 38% WR, most conservative settings needed',
+        'overrides': {
+            'MIN_BODY_PERCENTAGE': 0.30,        # Strict
+            'MIN_BREAKOUT_ATR_RATIO': 0.55,     # Strict
+            'MOMENTUM_MIN_DEPTH': -0.40,        # Less aggressive momentum
+            'FIB_PULLBACK_MIN': 0.30,           # Wait for deeper pullback
+            'MAX_CONFIDENCE_THRESHOLD': 0.70,   # Cap confidence
+            'MIN_VOLUME_RATIO': 0.40,           # Volume doesn't help much here
+            'MIN_CONFIDENCE_THRESHOLD': 0.52,   # Slightly higher floor
+        },
+    },
+    'USDJPY': {
+        'enabled': True,
+        'description': 'USDJPY - 38% WR, most conservative settings',
+        'overrides': {
+            'MIN_BODY_PERCENTAGE': 0.30,
+            'MIN_BREAKOUT_ATR_RATIO': 0.55,
+            'MOMENTUM_MIN_DEPTH': -0.40,
+            'FIB_PULLBACK_MIN': 0.30,
+            'MAX_CONFIDENCE_THRESHOLD': 0.70,
+            'MIN_VOLUME_RATIO': 0.40,
+            'MIN_CONFIDENCE_THRESHOLD': 0.52,
+        },
+    },
+
+    # ============================================================================
+    # DISABLED PAIRS (tracked here for reference)
+    # ============================================================================
+    # USDCHF: REMOVED from ENABLED_PAIRS - 11% WR, -$142 avg, -$1,278 total
+    # Do not add overrides here as the pair is completely disabled
 }
 
 def get_pair_parameter(epic: str, param_name: str, default_value):
@@ -758,6 +838,21 @@ def get_pair_parameter(epic: str, param_name: str, default_value):
 # The tight 80% threshold combined with tight Fib zones left almost no signals
 MIN_CONFIDENCE_THRESHOLD = 0.48         # v2.8.1: REDUCED from 0.50 - rejection analysis: 48-50% confidence had 100% win rate (+600 pips)
 HIGH_CONFIDENCE_THRESHOLD = 0.75         # v1.7.0: REDUCED from 0.90 - achievable premium tier
+
+# ============================================================================
+# v2.9.0: DATA-DRIVEN FILTERS (from 85-trade analysis Dec 2025)
+# ============================================================================
+# Analysis findings:
+#   - Volume >= 0.50: 70% win rate vs 43% without
+#   - Confidence > 0.75: 42% win rate (paradox - higher = worse)
+#
+# Volume ratio filter - reject low volume signals
+MIN_VOLUME_RATIO = 0.50                  # Global minimum (75% WR when >= 0.50)
+VOLUME_FILTER_ENABLED = True             # Enable/disable volume filter
+ALLOW_NO_VOLUME_DATA = True              # Allow signals when volume data unavailable
+
+# Confidence cap - reject overconfident signals (paradox: higher conf = worse)
+MAX_CONFIDENCE_THRESHOLD = 0.75          # Cap at 75% (42% WR above this)
 
 # Scoring weights (must sum to 1.0)
 # v2.2.0: Balanced 5-component scoring (each 20%)
