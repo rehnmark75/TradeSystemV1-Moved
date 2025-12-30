@@ -537,6 +537,7 @@ def render_watchlists_tab(service):
     display_df['EMA 200'] = display_df['ema_200'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
     display_df['RSI'] = display_df['rsi_14'].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else '-')
     display_df['1D Chg'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
+    display_df['Avg/Day'] = display_df['avg_daily_change_5d'].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else '-')
 
     # Days column - for crossover watchlists this is days since crossover
     display_df['Days'] = display_df['days_on_list'].apply(lambda x: f"{int(x)}d" if pd.notnull(x) else '1d')
@@ -550,21 +551,21 @@ def render_watchlists_tab(service):
     # Conditional columns based on watchlist type (no EMA columns - too cluttered)
     if selected_watchlist == 'gap_up_continuation':
         display_df['Gap %'] = display_df['gap_pct'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
-        result_df = display_df[['ticker', 'Price', 'Gap %', 'Volume', 'RSI', '1D Chg']].rename(
+        result_df = display_df[['ticker', 'Price', 'Gap %', 'Volume', 'RSI', '1D Chg', 'Avg/Day']].rename(
             columns={'ticker': 'Ticker'}
         )
     elif selected_watchlist == 'rsi_oversold_bounce':
-        result_df = display_df[['ticker', 'Price', 'RSI', 'Volume', '1D Chg']].rename(
+        result_df = display_df[['ticker', 'Price', 'RSI', 'Volume', '1D Chg', 'Avg/Day']].rename(
             columns={'ticker': 'Ticker'}
         )
     elif selected_watchlist == 'macd_bullish_cross':
         display_df['MACD'] = display_df['macd'].apply(lambda x: f"{x:.3f}" if pd.notnull(x) else '-')
-        result_df = display_df[['ticker', 'Days', 'Crossover', 'Price', 'MACD', 'Volume', 'RSI', '1D Chg']].rename(
+        result_df = display_df[['ticker', 'Days', 'Crossover', 'Price', 'MACD', 'Volume', 'RSI', '1D Chg', 'Avg/Day']].rename(
             columns={'ticker': 'Ticker'}
         )
     else:
         # EMA crossover watchlists
-        result_df = display_df[['ticker', 'Days', 'Crossover', 'Price', 'Volume', 'RSI', '1D Chg']].rename(
+        result_df = display_df[['ticker', 'Days', 'Crossover', 'Price', 'Volume', 'RSI', '1D Chg', 'Avg/Day']].rename(
             columns={'ticker': 'Ticker'}
         )
 
@@ -2274,6 +2275,9 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     news_analyzed_at = signal.get('news_analyzed_at')
     has_news = news_sentiment_score is not None
 
+    # Stock metrics
+    avg_daily_change = signal.get('avg_daily_change_5d', 0) or 0
+
     # Format claude_analyzed_at timestamp with staleness check
     analyzed_time_str = None
     analyzed_ago_str = None
@@ -2365,7 +2369,7 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{news_badge}{timestamp_part}", expanded=False):
 
         # Metrics row
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
             st.metric("Entry", f"${entry:.2f}")
         with col2:
@@ -2376,6 +2380,8 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
             st.metric("Risk", f"{risk_pct:.1f}%")
         with col5:
             st.metric("R:R", f"{rr:.1f}:1")
+        with col6:
+            st.metric("Avg Move", f"{avg_daily_change:.1f}%/d" if avg_daily_change else "-")
 
         # Setup description
         if setup:

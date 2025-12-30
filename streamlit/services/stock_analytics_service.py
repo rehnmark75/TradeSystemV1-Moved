@@ -241,7 +241,8 @@ class StockAnalyticsService:
                     ELSE NULL
                 END as risk_reward,
                 w.tier,
-                w.score
+                w.score,
+                w.avg_daily_change_5d
             FROM stock_scanner_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN stock_watchlist w ON s.ticker = w.ticker
@@ -1639,10 +1640,13 @@ Analyze and respond in this exact JSON format:
                 COALESCE(s.news_sentiment_level, n.inherited_news_level) as news_sentiment_level,
                 COALESCE(s.news_headlines_count, n.inherited_news_count) as news_headlines_count,
                 COALESCE(s.news_factors, n.inherited_news_factors) as news_factors,
-                COALESCE(s.news_analyzed_at, n.inherited_news_analyzed_at) as news_analyzed_at
+                COALESCE(s.news_analyzed_at, n.inherited_news_analyzed_at) as news_analyzed_at,
+                m.avg_daily_change_5d
             FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN latest_news n ON s.ticker = n.ticker
+            LEFT JOIN stock_screening_metrics m ON s.ticker = m.ticker
+                AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
         """
 
         # Add ORDER BY based on parameter
@@ -2809,9 +2813,12 @@ Respond in this exact JSON format:
                     (CURRENT_DATE - w.crossover_date) + 1 as days_on_list,
                     CASE WHEN s.ticker IS NOT NULL THEN true ELSE false END as has_signal,
                     s.quality_tier as signal_tier,
-                    s.signal_type
+                    s.signal_type,
+                    m.avg_daily_change_5d
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
+                LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
+                    AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
                 LEFT JOIN LATERAL (
                     SELECT ticker, quality_tier, signal_type
                     FROM stock_scanner_signals
@@ -2846,9 +2853,12 @@ Respond in this exact JSON format:
                     1 as days_on_list,
                     CASE WHEN s.ticker IS NOT NULL THEN true ELSE false END as has_signal,
                     s.quality_tier as signal_tier,
-                    s.signal_type
+                    s.signal_type,
+                    m.avg_daily_change_5d
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
+                LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
+                    AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
                 LEFT JOIN LATERAL (
                     SELECT ticker, quality_tier, signal_type
                     FROM stock_scanner_signals
