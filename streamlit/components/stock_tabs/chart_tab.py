@@ -60,7 +60,14 @@ def render_chart_tab(service):
 
         elif source == "Watchlist":
             # Watchlist type selector
-            watchlist_types = ["Tier A+/A", "Volume Breakout", "EMA Bullish", "RSI Oversold", "All Tickers"]
+            watchlist_types = [
+                "EMA 50 Cross Over",
+                "EMA 20 Cross Over",
+                "MACD Bullish Cross",
+                "Gap Up Continuation",
+                "RSI Oversold Bounce",
+                "All Tickers"
+            ]
             watchlist_type = st.selectbox(
                 "Watchlist Type",
                 watchlist_types,
@@ -173,19 +180,21 @@ def _get_watchlist_tickers(service, watchlist_type: str) -> list:
         if watchlist_type == "All Tickers":
             return service.get_all_tickers()
 
-        # Get watchlist data based on type
-        watchlist_map = {
-            "Tier A+/A": lambda: service.get_watchlist_by_tier(['A+', 'A']),
-            "Volume Breakout": lambda: service.get_watchlist_by_screen('volume_breakout'),
-            "EMA Bullish": lambda: service.get_watchlist_by_screen('ema_bullish'),
-            "RSI Oversold": lambda: service.get_watchlist_by_screen('rsi_oversold'),
+        # Map display names to database watchlist names
+        watchlist_name_map = {
+            "EMA 50 Cross Over": "ema_50_crossover",
+            "EMA 20 Cross Over": "ema_20_crossover",
+            "MACD Bullish Cross": "macd_bullish_cross",
+            "Gap Up Continuation": "gap_up_continuation",
+            "RSI Oversold Bounce": "rsi_oversold_bounce",
         }
 
-        getter = watchlist_map.get(watchlist_type)
-        if getter:
-            items = getter()
-            if items:
-                return [item.get('ticker') for item in items if item.get('ticker')]
+        watchlist_name = watchlist_name_map.get(watchlist_type)
+        if watchlist_name:
+            # get_watchlist_results returns a DataFrame
+            df = service.get_watchlist_results(watchlist_name)
+            if df is not None and not df.empty and 'ticker' in df.columns:
+                return sorted(df['ticker'].unique().tolist())
     except Exception:
         pass
 
