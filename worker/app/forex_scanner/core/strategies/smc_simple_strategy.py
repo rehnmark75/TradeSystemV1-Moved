@@ -223,6 +223,12 @@ class SMCSimpleStrategy:
         # Confidence thresholds
         self.min_confidence = getattr(smc_config, 'MIN_CONFIDENCE_THRESHOLD', 0.50)
 
+        # v2.9.0: Data-driven filters (from 85-trade analysis Dec 2025)
+        self.max_confidence = getattr(smc_config, 'MAX_CONFIDENCE_THRESHOLD', 0.75)
+        self.min_volume_ratio = getattr(smc_config, 'MIN_VOLUME_RATIO', 0.50)
+        self.volume_filter_enabled = getattr(smc_config, 'VOLUME_FILTER_ENABLED', True)
+        self.allow_no_volume_data = getattr(smc_config, 'ALLOW_NO_VOLUME_DATA', True)
+
         # v1.8.0 Phase 2: Momentum Continuation Mode
         self.momentum_mode_enabled = getattr(smc_config, 'MOMENTUM_MODE_ENABLED', True)
         self.momentum_min_depth = getattr(smc_config, 'MOMENTUM_MIN_DEPTH', -0.20)
@@ -749,6 +755,98 @@ class SMCSimpleStrategy:
                     context=context
                 )
                 return None
+
+            # ================================================================
+            # v2.9.0: CONFIDENCE CAP CHECK (Paradox: higher confidence = worse)
+            # ================================================================
+            # Analysis of 85 trades (Dec 2025) showed confidence > 0.75 had only 42% WR
+            pair_max_confidence = self._get_pair_param(epic, 'MAX_CONFIDENCE_THRESHOLD', self.max_confidence)
+            if round(confidence, 4) > pair_max_confidence:
+                reason = f"Confidence too high ({confidence*100:.0f}% > {pair_max_confidence*100:.0f}% cap)"
+                self.logger.info(f"\n❌ {reason} (paradox: high confidence = worse outcomes)")
+                # Build context for rejection tracking
+                fib_accuracy = 1.0 - min(abs(pullback_depth - 0.382) / 0.382, 1.0)
+                confidence_breakdown = {
+                    'total': confidence,
+                    'ema_alignment': min(ema_distance / (atr * 3) if atr > 0 else ema_distance / 30, 1.0) * 0.20,
+                    'swing_break_quality': 0.10,
+                    'volume_strength': (0.5 + min((volume_ratio - 1.0) / 1.0, 1.0) * 0.5) * 0.20 if volume_confirmed and volume_ratio > 1.0 else 0.04,
+                    'pullback_quality': (1.0 if in_optimal_zone and fib_accuracy > 0.7 else 0.8 if in_optimal_zone else 0.5) * 0.20,
+                    'rr_quality': min(rr_ratio / 3.0, 1.0) * 0.20,
+                }
+                risk_result = {
+                    'entry_price': entry_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'risk_pips': risk_pips,
+                    'reward_pips': reward_pips,
+                    'rr_ratio': rr_ratio,
+                }
+                context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                context['confidence_score'] = confidence
+                context['confidence_breakdown'] = confidence_breakdown
+                self._track_rejection(
+                    stage='CONFIDENCE_CAP',
+                    reason=reason,
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    direction=direction,
+                    context=context
+                )
+                return None
+
+            # ================================================================
+            # v2.9.0: VOLUME RATIO FILTER (Volume >= 0.50 has 70%+ WR)
+            # ================================================================
+            if self.volume_filter_enabled:
+                pair_min_volume = self._get_pair_param(epic, 'MIN_VOLUME_RATIO', self.min_volume_ratio)
+                if volume_ratio is not None and volume_ratio > 0:
+                    if volume_ratio < pair_min_volume:
+                        reason = f"Volume ratio too low ({volume_ratio:.2f} < {pair_min_volume:.2f} min)"
+                        self.logger.info(f"\n❌ {reason}")
+                        # Build context for rejection tracking
+                        fib_accuracy = 1.0 - min(abs(pullback_depth - 0.382) / 0.382, 1.0)
+                        confidence_breakdown = {
+                            'total': confidence,
+                            'volume_ratio': volume_ratio,
+                            'min_volume_required': pair_min_volume,
+                        }
+                        risk_result = {
+                            'entry_price': entry_price,
+                            'stop_loss': stop_loss,
+                            'take_profit': take_profit,
+                            'risk_pips': risk_pips,
+                            'reward_pips': reward_pips,
+                            'rr_ratio': rr_ratio,
+                        }
+                        context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                        context['confidence_score'] = confidence
+                        context['volume_ratio'] = volume_ratio
+                        self._track_rejection(
+                            stage='VOLUME_LOW',
+                            reason=reason,
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context=context
+                        )
+                        return None
+                elif not self.allow_no_volume_data:
+                    reason = "No volume data available (required by config)"
+                    self.logger.info(f"\n❌ {reason}")
+                    context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result)
+                    self._track_rejection(
+                        stage='VOLUME_NO_DATA',
+                        reason=reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context=context
+                    )
+                    return None
 
             self.logger.info(f"\n📊 Confidence: {confidence*100:.0f}%")
 
