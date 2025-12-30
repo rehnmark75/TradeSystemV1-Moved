@@ -232,10 +232,6 @@ class StockAnalyticsService:
                 s.news_sentiment_score,
                 s.news_sentiment_level,
                 s.news_headlines_count,
-                -- Premarket data
-                s.premarket_entry_price,
-                s.premarket_gap_percent,
-                s.premarket_updated_at,
                 CASE
                     WHEN s.signal_type = 'BUY' AND s.stop_loss > 0 AND s.entry_price > s.stop_loss THEN
                         ROUND(((s.take_profit_1 - s.entry_price) / NULLIF(s.entry_price - s.stop_loss, 0))::numeric, 1)
@@ -1635,8 +1631,6 @@ Analyze and respond in this exact JSON format:
                 s.claude_position_rec, s.claude_stop_adjustment, s.claude_time_horizon,
                 s.claude_raw_response, s.claude_analyzed_at, s.claude_tokens_used,
                 s.claude_latency_ms, s.claude_model,
-                -- Premarket data
-                s.premarket_entry_price, s.premarket_gap_percent, s.premarket_updated_at,
                 i.name as company_name,
                 COALESCE(s.news_sentiment_score, n.inherited_news_score) as news_sentiment_score,
                 COALESCE(s.news_sentiment_level, n.inherited_news_level) as news_sentiment_level,

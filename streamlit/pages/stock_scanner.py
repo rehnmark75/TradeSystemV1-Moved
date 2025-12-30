@@ -2273,12 +2273,6 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     news_analyzed_at = signal.get('news_analyzed_at')
     has_news = news_sentiment_score is not None
 
-    # Premarket data
-    premarket_entry = signal.get('premarket_entry_price')
-    premarket_gap = signal.get('premarket_gap_percent')
-    premarket_updated_at = signal.get('premarket_updated_at')
-    has_premarket = premarket_entry is not None
-
     # Format claude_analyzed_at timestamp with staleness check
     analyzed_time_str = None
     analyzed_ago_str = None
@@ -2369,42 +2363,18 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     # Use expander for each signal card (collapsed by default for easier browsing)
     with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{news_badge}{timestamp_part}", expanded=False):
 
-        # Metrics row - show premarket price if available
-        if has_premarket:
-            # Show premarket entry with gap indicator
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
-            with col1:
-                gap_color = "green" if premarket_gap and premarket_gap > 0 else "red" if premarket_gap and premarket_gap < 0 else "gray"
-                gap_arrow = "↑" if premarket_gap and premarket_gap > 0 else "↓" if premarket_gap and premarket_gap < 0 else ""
-                st.metric(
-                    "Pre-Mkt Entry",
-                    f"${float(premarket_entry):.2f}",
-                    delta=f"{gap_arrow}{abs(premarket_gap):.1f}%" if premarket_gap else None,
-                    delta_color="normal" if premarket_gap and premarket_gap > 0 else "inverse"
-                )
-            with col2:
-                st.metric("Signal Entry", f"${entry:.2f}")
-            with col3:
-                st.metric("Stop Loss", f"${stop:.2f}")
-            with col4:
-                st.metric("Target 1", f"${tp1:.2f}")
-            with col5:
-                st.metric("Risk", f"{risk_pct:.1f}%")
-            with col6:
-                st.metric("R:R", f"{rr:.1f}:1")
-        else:
-            # Standard display without premarket
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                st.metric("Entry", f"${entry:.2f}")
-            with col2:
-                st.metric("Stop Loss", f"${stop:.2f}")
-            with col3:
-                st.metric("Target 1", f"${tp1:.2f}")
-            with col4:
-                st.metric("Risk", f"{risk_pct:.1f}%")
-            with col5:
-                st.metric("R:R", f"{rr:.1f}:1")
+        # Metrics row
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Entry", f"${entry:.2f}")
+        with col2:
+            st.metric("Stop Loss", f"${stop:.2f}")
+        with col3:
+            st.metric("Target 1", f"${tp1:.2f}")
+        with col4:
+            st.metric("Risk", f"{risk_pct:.1f}%")
+        with col5:
+            st.metric("R:R", f"{rr:.1f}:1")
 
         # Setup description
         if setup:
