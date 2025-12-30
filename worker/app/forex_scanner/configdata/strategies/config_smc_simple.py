@@ -447,26 +447,26 @@ PAIR_SL_BUFFERS = {
 # v1.9.0: PAIR-SPECIFIC CONFIDENCE FLOORS
 # ============================================================================
 # Higher confidence required for volatile / difficult pairs
-# v2.1.2: REDUCED for forward testing - use strategy's MIN_CONFIDENCE_THRESHOLD (50%)
+# v2.9.0: Aligned with global MIN_CONFIDENCE_THRESHOLD = 0.48
+# Note: USDJPY has higher threshold (0.52) via PAIR_PARAMETER_OVERRIDES
 
 PAIR_MIN_CONFIDENCE = {
-    # v2.1.2: REDUCED from 70-72% to 49% for forward testing
-    # Using 49% to allow signals at exactly 50% to pass (< comparison)
-    # Re-raise after collecting live performance data
+    # v2.9.0: Use global 0.48 for most pairs (rounding fix handles edge cases)
+    # Pair-specific overrides in PAIR_PARAMETER_OVERRIDES take precedence
 
-    # Volatile JPY crosses - reduced for forward testing
-    'EURJPY': 0.49,
-    'CS.D.EURJPY.MINI.IP': 0.49,
-    'GBPJPY': 0.49,
-    'CS.D.GBPJPY.MINI.IP': 0.49,
-    'AUDJPY': 0.49,
-    'CS.D.AUDJPY.MINI.IP': 0.49,
+    # JPY crosses - use global threshold
+    'EURJPY': 0.48,
+    'CS.D.EURJPY.MINI.IP': 0.48,
+    'GBPJPY': 0.48,
+    'CS.D.GBPJPY.MINI.IP': 0.48,
+    'AUDJPY': 0.48,
+    'CS.D.AUDJPY.MINI.IP': 0.48,
 
-    # Low liquidity pairs - reduced for forward testing
-    'USDCHF': 0.49,
-    'CS.D.USDCHF.MINI.IP': 0.49,
+    # USDCHF - disabled entirely in ENABLED_PAIRS
+    'USDCHF': 0.48,
+    'CS.D.USDCHF.MINI.IP': 0.48,
 
-    # Default for others = MIN_CONFIDENCE_THRESHOLD (0.50)
+    # Default for others = MIN_CONFIDENCE_THRESHOLD (0.48)
 }
 
 # ============================================================================

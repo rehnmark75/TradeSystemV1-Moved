@@ -719,8 +719,9 @@ class SMCSimpleStrategy:
 
             # v1.9.0: Get pair-specific confidence floor or use default
             pair_min_confidence = self.pair_min_confidence.get(pair, self.pair_min_confidence.get(epic, self.min_confidence))
-            # Use round() to avoid floating-point precision issues (e.g., 0.4999 displaying as 50%)
-            if round(confidence, 4) < pair_min_confidence:
+            # v2.9.0: Use round(2) for both values to avoid floating-point precision issues
+            # (e.g., 0.4799 displaying as 48% but failing 48% threshold)
+            if round(confidence, 2) < round(pair_min_confidence, 2):
                 reason = f"Confidence too low ({confidence*100:.0f}% < {pair_min_confidence*100:.0f}%)"
                 self.logger.info(f"\n❌ {reason} (pair-specific)")
                 # Track rejection with confidence breakdown - v2.2.0: Updated breakdown
