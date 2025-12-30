@@ -302,7 +302,7 @@ class NewsEnrichmentService:
                 AND fetched_at > NOW() - INTERVAL '%s hours'
             """ % self.cache_ttl_hours
 
-            row = await self.db.fetch_one(query, ticker)
+            row = await self.db.fetchrow(query, ticker)
 
             if row and row['article_count'] >= self.min_articles:
                 # Reconstruct sentiment from cache
@@ -468,7 +468,7 @@ class NewsEnrichmentService:
                 FROM stock_scanner_signals
                 WHERE id = $1
             """
-            signal = await self.db.fetch_one(signal_query, signal_id)
+            signal = await self.db.fetchrow(signal_query, signal_id)
 
             if not signal:
                 return {"error": "Signal not found"}
@@ -485,7 +485,7 @@ class NewsEnrichmentService:
                 ORDER BY published_at DESC
                 LIMIT 10
             """
-            articles = await self.db.fetch_all(articles_query, ticker)
+            articles = await self.db.fetch(articles_query, ticker)
 
             return {
                 "signal_id": signal_id,
