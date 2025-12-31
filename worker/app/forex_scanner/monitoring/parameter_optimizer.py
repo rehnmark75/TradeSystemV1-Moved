@@ -47,48 +47,59 @@ logger = logging.getLogger(__name__)
 
 
 # Mapping from rejection stages to adjustable parameters
+# Only stages with attempted_direction can be analyzed for outcomes:
+# - SESSION, COOLDOWN, TIER1_EMA reject before direction is known (can't analyze)
+# - TIER2_SWING, TIER3_PULLBACK, RISK_LIMIT, CONFIDENCE, VOLUME_LOW, MACD_MISALIGNED have direction (can analyze)
 STAGE_PARAMETER_MAPPINGS = {
-    'TIER1_EMA': {
-        'global_params': ['min_distance_from_ema_pips', 'ema_buffer_pips'],
-        'pair_params': ['near_ema_confidence', 'far_ema_confidence'],
-        'relax_action': {'ema_buffer_pips': -0.5, 'min_distance_from_ema_pips': -0.5},
-        'tighten_action': {'ema_buffer_pips': +0.5, 'min_distance_from_ema_pips': +0.5},
-    },
     'TIER2_SWING': {
         'global_params': ['min_body_percentage', 'min_breakout_atr_ratio'],
         'pair_params': ['parameter_overrides.MIN_BODY_PERCENTAGE', 'parameter_overrides.MIN_BREAKOUT_ATR_RATIO'],
         'relax_action': {'min_body_percentage': -0.05, 'min_breakout_atr_ratio': -0.05},
         'tighten_action': {'min_body_percentage': +0.05, 'min_breakout_atr_ratio': +0.05},
+        'description': 'Minimum candle body percentage for swing break',
     },
     'TIER3_PULLBACK': {
         'global_params': ['fib_pullback_min', 'fib_pullback_max', 'momentum_min_depth'],
         'pair_params': ['parameter_overrides.FIB_PULLBACK_MIN', 'parameter_overrides.MOMENTUM_MIN_DEPTH'],
         'relax_action': {'fib_pullback_min': -0.02, 'fib_pullback_max': +0.05, 'momentum_min_depth': -0.1},
         'tighten_action': {'fib_pullback_min': +0.02, 'fib_pullback_max': -0.05, 'momentum_min_depth': +0.1},
+        'description': 'Fibonacci pullback depth requirements',
     },
     'CONFIDENCE': {
         'global_params': ['min_confidence_threshold'],
         'pair_params': ['min_confidence'],
         'relax_action': {'min_confidence_threshold': -0.02},
         'tighten_action': {'min_confidence_threshold': +0.02},
+        'description': 'Minimum confidence score threshold',
+    },
+    'CONFIDENCE_CAP': {
+        'global_params': ['min_confidence_threshold'],
+        'pair_params': ['min_confidence'],
+        'relax_action': {'min_confidence_threshold': -0.02},
+        'tighten_action': {'min_confidence_threshold': +0.02},
+        'description': 'Confidence cap threshold',
     },
     'VOLUME_LOW': {
         'global_params': ['min_volume_ratio'],
         'pair_params': ['min_volume_ratio'],
         'relax_action': {'min_volume_ratio': -0.05},
         'tighten_action': {'min_volume_ratio': +0.05},
+        'description': 'Minimum volume ratio filter',
     },
     'MACD_MISALIGNED': {
         'global_params': ['macd_alignment_filter_enabled'],
         'pair_params': ['macd_filter_enabled'],
-        'relax_action': {'macd_filter_enabled': False},  # Disable if rejecting too many winners
-        'tighten_action': {'macd_filter_enabled': True},
+        'relax_action': {'macd_alignment_filter_enabled': False},  # Disable if rejecting too many winners
+        'tighten_action': {'macd_alignment_filter_enabled': True},
+        'is_boolean': True,
+        'description': 'MACD alignment filter',
     },
-    'RISK_RR': {
+    'RISK_LIMIT': {
         'global_params': ['min_rr_ratio'],
         'pair_params': [],
         'relax_action': {'min_rr_ratio': -0.1},
         'tighten_action': {'min_rr_ratio': +0.1},
+        'description': 'Minimum risk-reward ratio',
     },
 }
 

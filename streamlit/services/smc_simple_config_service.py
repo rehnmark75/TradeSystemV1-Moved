@@ -447,21 +447,53 @@ def _generate_recommendations(
     pair_override_map = {o['epic']: o for o in pair_overrides}
 
     # Stage-based recommendations
+    # Maps rejection stages to the parameters that control them
+    # Only stages with attempted_direction can be analyzed for outcomes:
+    # - SESSION, COOLDOWN, TIER1_EMA reject before direction is known
+    # - TIER2_SWING, TIER3_PULLBACK, RISK_LIMIT, CONFIDENCE, VOLUME_LOW, MACD_MISALIGNED have direction
     STAGE_MAPPINGS = {
         'CONFIDENCE': {
             'param': 'min_confidence_threshold',
             'relax_delta': -0.02,
             'tighten_delta': +0.02,
+            'description': 'Minimum confidence score threshold',
+        },
+        'CONFIDENCE_CAP': {
+            'param': 'min_confidence_threshold',  # Same param, different stage
+            'relax_delta': -0.02,
+            'tighten_delta': +0.02,
+            'description': 'Confidence cap threshold',
         },
         'TIER2_SWING': {
             'param': 'min_body_percentage',
             'relax_delta': -0.05,
             'tighten_delta': +0.05,
+            'description': 'Minimum candle body percentage for swing break',
         },
         'TIER3_PULLBACK': {
             'param': 'fib_pullback_min',
             'relax_delta': -0.02,
             'tighten_delta': +0.02,
+            'description': 'Minimum Fibonacci pullback level',
+        },
+        'VOLUME_LOW': {
+            'param': 'min_volume_ratio',
+            'relax_delta': -0.05,
+            'tighten_delta': +0.05,
+            'description': 'Minimum volume ratio filter',
+        },
+        'MACD_MISALIGNED': {
+            'param': 'macd_alignment_filter_enabled',
+            'relax_delta': False,  # Disable filter
+            'tighten_delta': True,  # Enable filter
+            'is_boolean': True,
+            'description': 'MACD alignment filter',
+        },
+        'RISK_LIMIT': {
+            'param': 'min_rr_ratio',
+            'relax_delta': -0.1,
+            'tighten_delta': +0.1,
+            'description': 'Minimum risk-reward ratio',
         },
     }
 
@@ -482,13 +514,24 @@ def _generate_recommendations(
         if current_val is None:
             continue
 
+        # Handle boolean vs numeric parameters
+        is_boolean = mapping.get('is_boolean', False)
+
         # Convert Decimal if needed
-        if isinstance(current_val, Decimal):
+        if not is_boolean and isinstance(current_val, Decimal):
             current_val = float(current_val)
 
         if win_rate > 60:
             # Too aggressive - relax
-            new_val = round(current_val + mapping['relax_delta'], 3)
+            if is_boolean:
+                new_val = mapping['relax_delta']  # Boolean value directly
+            else:
+                new_val = round(current_val + mapping['relax_delta'], 3)
+
+            # Skip if no change needed
+            if new_val == current_val:
+                continue
+
             recommendations.append({
                 'scope': 'global',
                 'target': param,
@@ -499,10 +542,19 @@ def _generate_recommendations(
                 'confidence': min(total / 100, 1.0),
                 'impact_pips': missed_pips,
                 'stage': stage_name,
+                'description': mapping.get('description', ''),
             })
         elif win_rate < 40:
             # Working well - could tighten
-            new_val = round(current_val + mapping['tighten_delta'], 3)
+            if is_boolean:
+                new_val = mapping['tighten_delta']  # Boolean value directly
+            else:
+                new_val = round(current_val + mapping['tighten_delta'], 3)
+
+            # Skip if no change needed
+            if new_val == current_val:
+                continue
+
             recommendations.append({
                 'scope': 'global',
                 'target': param,
@@ -513,6 +565,7 @@ def _generate_recommendations(
                 'confidence': min(total / 100, 1.0),
                 'impact_pips': avoided_pips,
                 'stage': stage_name,
+                'description': mapping.get('description', ''),
             })
 
     # Pair-based recommendations
