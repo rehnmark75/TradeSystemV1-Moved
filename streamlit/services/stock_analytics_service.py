@@ -1600,6 +1600,8 @@ Analyze and respond in this exact JSON format:
         # Also inherit news sentiment from most recent analyzed signal for the same ticker
         # Note: We explicitly list columns (excluding news_*) to avoid duplicate column names
         # when using COALESCE for inherited news data
+        # days_active shows how many unique days the signal has been firing (persistence indicator)
+        # Note: signal_persistence uses status filter only (not date filters) to show total persistence
         query = f"""
             WITH latest_signals AS (
                 SELECT DISTINCT ON (ticker, scanner_name)
@@ -1607,6 +1609,16 @@ Analyze and respond in this exact JSON format:
                 FROM stock_scanner_signals
                 WHERE {where_clause}
                 ORDER BY ticker, scanner_name, signal_timestamp DESC
+            ),
+            signal_persistence AS (
+                SELECT
+                    ticker,
+                    scanner_name,
+                    COUNT(DISTINCT DATE(signal_timestamp)) as days_active,
+                    MIN(DATE(signal_timestamp)) as first_signal_date
+                FROM stock_scanner_signals
+                WHERE status = 'active'
+                GROUP BY ticker, scanner_name
             ),
             latest_news AS (
                 SELECT DISTINCT ON (ticker)
@@ -1641,10 +1653,13 @@ Analyze and respond in this exact JSON format:
                 COALESCE(s.news_headlines_count, n.inherited_news_count) as news_headlines_count,
                 COALESCE(s.news_factors, n.inherited_news_factors) as news_factors,
                 COALESCE(s.news_analyzed_at, n.inherited_news_analyzed_at) as news_analyzed_at,
-                m.avg_daily_change_5d
+                m.avg_daily_change_5d,
+                COALESCE(p.days_active, 1) as days_active,
+                p.first_signal_date
             FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN latest_news n ON s.ticker = n.ticker
+            LEFT JOIN signal_persistence p ON s.ticker = p.ticker AND s.scanner_name = p.scanner_name
             LEFT JOIN stock_screening_metrics m ON s.ticker = m.ticker
                 AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
         """
@@ -2703,26 +2718,41 @@ Respond in this exact JSON format:
         tier_filter = "('A+', 'A')" if min_tier == 'A' else "('A+')" if min_tier == 'A+' else "('A+', 'A', 'B')"
 
         query = f"""
-            SELECT
-                s.id,
-                s.ticker,
-                i.name as company_name,
-                s.signal_type,
-                s.composite_score,
-                s.quality_tier,
-                s.scanner_name,
-                s.entry_price,
-                s.stop_loss,
-                s.take_profit_1,
-                s.risk_reward_ratio,
-                s.claude_grade,
-                s.claude_action,
-                s.signal_timestamp
-            FROM stock_scanner_signals s
-            LEFT JOIN stock_instruments i ON s.ticker = i.ticker
-            WHERE s.status = 'active'
-            AND s.quality_tier IN {tier_filter}
-            ORDER BY s.composite_score DESC, s.signal_timestamp DESC
+            WITH signal_persistence AS (
+                SELECT
+                    ticker,
+                    scanner_name,
+                    COUNT(DISTINCT DATE(signal_timestamp)) as days_active
+                FROM stock_scanner_signals
+                WHERE status = 'active'
+                AND quality_tier IN {tier_filter}
+                GROUP BY ticker, scanner_name
+            )
+            SELECT * FROM (
+                SELECT DISTINCT ON (s.ticker, s.scanner_name)
+                    s.id,
+                    s.ticker,
+                    i.name as company_name,
+                    s.signal_type,
+                    s.composite_score,
+                    s.quality_tier,
+                    s.scanner_name,
+                    s.entry_price,
+                    s.stop_loss,
+                    s.take_profit_1,
+                    s.risk_reward_ratio,
+                    s.claude_grade,
+                    s.claude_action,
+                    s.signal_timestamp,
+                    COALESCE(p.days_active, 1) as days_active
+                FROM stock_scanner_signals s
+                LEFT JOIN stock_instruments i ON s.ticker = i.ticker
+                LEFT JOIN signal_persistence p ON s.ticker = p.ticker AND s.scanner_name = p.scanner_name
+                WHERE s.status = 'active'
+                AND s.quality_tier IN {tier_filter}
+                ORDER BY s.ticker, s.scanner_name, s.signal_timestamp DESC
+            ) deduped
+            ORDER BY composite_score DESC, signal_timestamp DESC
             LIMIT %s
         """
         return _self._execute_query(query, (limit,))
