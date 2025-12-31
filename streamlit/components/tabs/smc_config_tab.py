@@ -628,7 +628,8 @@ def render_pair_overrides(config: Dict[str, Any]):
                 help=f"{'Inherited from global (block_asian={global_block_asian})' if asian_override_value is None else 'Explicit override for this pair'}",
                 key=f"override_asian_{selected_pair}"
             )
-            if not _values_equal(new_allow_asian, existing.get('allow_asian_session')):
+            # Compare against effective value to avoid false positives when inheriting
+            if not _values_equal(new_allow_asian, asian_effective):
                 override_changes['allow_asian_session'] = new_allow_asian
 
             # SL Buffer - inherit from global
@@ -642,7 +643,8 @@ def render_pair_overrides(config: Dict[str, Any]):
                 help=f"{'Inherited from global (' + str(global_sl_buffer) + ')' if sl_override_value is None else 'Explicit override for this pair'}",
                 key=f"override_sl_{selected_pair}"
             )
-            if not _values_equal(new_sl_buffer, existing.get('sl_buffer_pips')):
+            # Compare against effective value to avoid false positives when inheriting
+            if not _values_equal(new_sl_buffer, sl_effective):
                 override_changes['sl_buffer_pips'] = new_sl_buffer
 
         with col2:
@@ -657,7 +659,8 @@ def render_pair_overrides(config: Dict[str, Any]):
                 help=f"{'Inherited from global (' + str(global_min_conf) + ')' if conf_override_value is None else 'Explicit override for this pair'}",
                 key=f"override_conf_{selected_pair}"
             )
-            if not _values_equal(new_min_conf, existing.get('min_confidence')):
+            # Compare against effective value to avoid false positives when inheriting
+            if not _values_equal(new_min_conf, conf_effective):
                 override_changes['min_confidence'] = new_min_conf
 
             # MACD Filter - inherit from global
@@ -670,7 +673,8 @@ def render_pair_overrides(config: Dict[str, Any]):
                 help=f"{'Inherited from global (' + str(global_macd) + ')' if macd_override_value is None else 'Explicit override for this pair'}",
                 key=f"override_macd_{selected_pair}"
             )
-            if not _values_equal(new_macd, existing.get('macd_filter_enabled')):
+            # Compare against effective value to avoid false positives when inheriting
+            if not _values_equal(new_macd, macd_effective):
                 override_changes['macd_filter_enabled'] = new_macd
 
         # Dynamic confidence thresholds (absolute values, not adjustments)
@@ -681,54 +685,62 @@ def render_pair_overrides(config: Dict[str, Any]):
             # High Volume Confidence - pair-specific (default: 0.45)
             vol_conf_value = existing.get('high_volume_confidence')
             vol_conf_default = 0.45
+            vol_conf_effective = float(vol_conf_value) if vol_conf_value is not None else vol_conf_default
             new_vol_conf = st.number_input(
                 "High Volume Confidence",
-                value=float(vol_conf_value) if vol_conf_value is not None else vol_conf_default,
+                value=vol_conf_effective,
                 min_value=0.0, max_value=1.0, step=0.01,
                 help=f"{'Using default (' + str(vol_conf_default) + ')' if vol_conf_value is None else 'Explicit value for this pair'}",
                 key=f"override_vol_conf_{selected_pair}"
             )
-            if not _values_equal(new_vol_conf, existing.get('high_volume_confidence')):
+            # Compare against effective value to avoid false positives
+            if not _values_equal(new_vol_conf, vol_conf_effective):
                 override_changes['high_volume_confidence'] = new_vol_conf
 
             # Low ATR Confidence - pair-specific (default: 0.44)
             low_atr_value = existing.get('low_atr_confidence')
             low_atr_default = 0.44
+            low_atr_effective = float(low_atr_value) if low_atr_value is not None else low_atr_default
             new_low_atr = st.number_input(
                 "Low ATR Confidence",
-                value=float(low_atr_value) if low_atr_value is not None else low_atr_default,
+                value=low_atr_effective,
                 min_value=0.0, max_value=1.0, step=0.01,
                 help=f"{'Using default (' + str(low_atr_default) + ')' if low_atr_value is None else 'Explicit value for this pair'}",
                 key=f"override_low_atr_{selected_pair}"
             )
-            if not _values_equal(new_low_atr, existing.get('low_atr_confidence')):
+            # Compare against effective value to avoid false positives
+            if not _values_equal(new_low_atr, low_atr_effective):
                 override_changes['low_atr_confidence'] = new_low_atr
 
         with col4:
             # High ATR Confidence - pair-specific (default: 0.52)
             high_atr_value = existing.get('high_atr_confidence')
             high_atr_default = 0.52
+            high_atr_effective = float(high_atr_value) if high_atr_value is not None else high_atr_default
             new_high_atr = st.number_input(
                 "High ATR Confidence",
-                value=float(high_atr_value) if high_atr_value is not None else high_atr_default,
+                value=high_atr_effective,
                 min_value=0.0, max_value=1.0, step=0.01,
                 help=f"{'Using default (' + str(high_atr_default) + ')' if high_atr_value is None else 'Explicit value for this pair'}",
                 key=f"override_high_atr_{selected_pair}"
             )
-            if not _values_equal(new_high_atr, existing.get('high_atr_confidence')):
+            # Compare against effective value to avoid false positives
+            if not _values_equal(new_high_atr, high_atr_effective):
                 override_changes['high_atr_confidence'] = new_high_atr
 
             # Near EMA Confidence - pair-specific (default: 0.44)
             near_ema_value = existing.get('near_ema_confidence')
             near_ema_default = 0.44
+            near_ema_effective = float(near_ema_value) if near_ema_value is not None else near_ema_default
             new_near_ema = st.number_input(
                 "Near EMA Confidence",
-                value=float(near_ema_value) if near_ema_value is not None else near_ema_default,
+                value=near_ema_effective,
                 min_value=0.0, max_value=1.0, step=0.01,
                 help=f"{'Using default (' + str(near_ema_default) + ')' if near_ema_value is None else 'Explicit value for this pair'}",
                 key=f"override_near_ema_{selected_pair}"
             )
-            if not _values_equal(new_near_ema, existing.get('near_ema_confidence')):
+            # Compare against effective value to avoid false positives
+            if not _values_equal(new_near_ema, near_ema_effective):
                 override_changes['near_ema_confidence'] = new_near_ema
 
         # Advanced parameter overrides (JSON)
