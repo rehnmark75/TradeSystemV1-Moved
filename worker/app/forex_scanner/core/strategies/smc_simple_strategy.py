@@ -639,7 +639,7 @@ class SMCSimpleStrategy:
                     pair=pair,
                     candle_timestamp=candle_timestamp,
                     direction=direction,
-                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result)
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, direction=direction)
                 )
                 return None
 
@@ -685,7 +685,7 @@ class SMCSimpleStrategy:
                     pair=pair,
                     candle_timestamp=candle_timestamp,
                     direction=direction,
-                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result)
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, direction=direction)
                 )
                 return None
 
@@ -794,7 +794,7 @@ class SMCSimpleStrategy:
                         pair=pair,
                         candle_timestamp=candle_timestamp,
                         direction=direction,
-                        context={**self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result), **risk_context}
+                        context={**self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, direction=direction), **risk_context}
                     )
                     return None
                 if risk_pips > self.max_risk_after_offset_pips:
@@ -813,7 +813,7 @@ class SMCSimpleStrategy:
                         pair=pair,
                         candle_timestamp=candle_timestamp,
                         direction=direction,
-                        context={**self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result), **risk_context}
+                        context={**self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, direction=direction), **risk_context}
                     )
                     return None
 
@@ -850,7 +850,7 @@ class SMCSimpleStrategy:
                     pair=pair,
                     candle_timestamp=candle_timestamp,
                     direction=direction,
-                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
                 )
                 return None
 
@@ -876,7 +876,7 @@ class SMCSimpleStrategy:
                     pair=pair,
                     candle_timestamp=candle_timestamp,
                     direction=direction,
-                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
                 )
                 return None
 
@@ -1014,7 +1014,7 @@ class SMCSimpleStrategy:
                     'reward_pips': reward_pips,
                     'rr_ratio': rr_ratio,
                 }
-                context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
                 context['confidence_score'] = confidence
                 context['confidence_breakdown'] = confidence_breakdown
                 self._track_rejection(
@@ -1054,7 +1054,7 @@ class SMCSimpleStrategy:
                     'reward_pips': reward_pips,
                     'rr_ratio': rr_ratio,
                 }
-                context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
                 context['confidence_score'] = confidence
                 context['confidence_breakdown'] = confidence_breakdown
                 self._track_rejection(
@@ -1092,7 +1092,7 @@ class SMCSimpleStrategy:
                             'reward_pips': reward_pips,
                             'rr_ratio': rr_ratio,
                         }
-                        context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result)
+                        context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
                         context['confidence_score'] = confidence
                         context['volume_ratio'] = volume_ratio
                         self._track_rejection(
@@ -1173,7 +1173,8 @@ class SMCSimpleStrategy:
                         context = self._collect_market_context(
                             df_trigger, df_4h, df_entry, pip_value,
                             ema_result=ema_result, swing_result=swing_result,
-                            pullback_result=pullback_result, risk_result=risk_result
+                            pullback_result=pullback_result, risk_result=risk_result,
+                            direction=direction
                         )
                         context['confidence_score'] = confidence
                         context['macd_line'] = macd_line
@@ -2701,7 +2702,8 @@ class SMCSimpleStrategy:
         ema_result: Optional[Dict] = None,
         swing_result: Optional[Dict] = None,
         pullback_result: Optional[Dict] = None,
-        risk_result: Optional[Dict] = None
+        risk_result: Optional[Dict] = None,
+        direction: Optional[str] = None
     ) -> Dict:
         """
         Collect market context at the point of rejection.
@@ -2709,6 +2711,37 @@ class SMCSimpleStrategy:
         Returns a dictionary with all available market state data.
         """
         context = {}
+
+        # MACD indicators (calculate from df_trigger if available)
+        if df_trigger is not None and len(df_trigger) > 0:
+            macd_line = 0.0
+            macd_signal = 0.0
+            macd_histogram = 0.0
+            if 'macd_line' in df_trigger.columns:
+                macd_line = float(df_trigger['macd_line'].iloc[-1]) if pd.notna(df_trigger['macd_line'].iloc[-1]) else 0.0
+                macd_signal = float(df_trigger['macd_signal'].iloc[-1]) if 'macd_signal' in df_trigger.columns and pd.notna(df_trigger['macd_signal'].iloc[-1]) else 0.0
+                macd_histogram = float(df_trigger['macd_histogram'].iloc[-1]) if 'macd_histogram' in df_trigger.columns and pd.notna(df_trigger['macd_histogram'].iloc[-1]) else 0.0
+            elif len(df_trigger) >= 26:
+                # Calculate MACD if not in dataframe
+                close = df_trigger['close']
+                ema_12 = close.ewm(span=12, adjust=False).mean()
+                ema_26 = close.ewm(span=26, adjust=False).mean()
+                macd_line = float(ema_12.iloc[-1] - ema_26.iloc[-1])
+                signal_line = (ema_12 - ema_26).ewm(span=9, adjust=False).mean()
+                macd_signal = float(signal_line.iloc[-1])
+                macd_histogram = macd_line - macd_signal
+
+            if macd_line != 0.0 or macd_signal != 0.0:
+                context['macd_line'] = macd_line
+                context['macd_signal'] = macd_signal
+                context['macd_histogram'] = macd_histogram
+                macd_momentum = 'bullish' if macd_line > macd_signal else 'bearish'
+                context['macd_momentum'] = macd_momentum
+                # Check alignment with trade direction if available
+                if direction:
+                    is_aligned = (direction == 'BULL' and macd_momentum == 'bullish') or \
+                                 (direction == 'BEAR' and macd_momentum == 'bearish')
+                    context['macd_aligned'] = is_aligned
 
         # Get current price from entry df or trigger df
         current_df = df_entry if df_entry is not None and len(df_entry) > 0 else df_trigger

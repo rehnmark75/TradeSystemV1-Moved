@@ -85,7 +85,12 @@ class RejectionAnalyticsService:
                 sr_blocking_type,
                 sr_blocking_distance_pips,
                 sr_path_blocked_pct,
-                target_distance_pips
+                target_distance_pips,
+                macd_line,
+                macd_signal,
+                macd_histogram,
+                macd_aligned,
+                macd_momentum
             FROM smc_simple_rejections
             WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
             """

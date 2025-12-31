@@ -732,7 +732,8 @@ def _render_macd_analysis(df: pd.DataFrame):
     has_macd_aligned = 'macd_aligned' in df.columns and df['macd_aligned'].notna().any()
 
     if not has_macd:
-        st.info("No MACD data available yet. MACD columns will populate once the scanner runs with v2.10.0+")
+        st.info("No MACD data available yet. MACD data will populate as new rejections are logged by the scanner. "
+                "Existing rejections recorded before v2.10.0 will not have MACD data.")
         return
 
     # Filter for rows with MACD data
