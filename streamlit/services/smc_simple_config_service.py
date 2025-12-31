@@ -451,6 +451,15 @@ def _generate_recommendations(
     # Only stages with attempted_direction can be analyzed for outcomes:
     # - SESSION, COOLDOWN, TIER1_EMA reject before direction is known
     # - TIER2_SWING, TIER3_PULLBACK, RISK_LIMIT, CONFIDENCE, VOLUME_LOW, MACD_MISALIGNED have direction
+    # Parameter bounds to prevent over-optimization
+    PARAM_BOUNDS = {
+        'min_confidence_threshold': {'min': 0.40, 'max': 0.60},
+        'min_body_percentage': {'min': 0.10, 'max': 0.50},
+        'fib_pullback_min': {'min': 0.15, 'max': 0.40},
+        'min_volume_ratio': {'min': 0.30, 'max': 0.80},
+        'min_rr_ratio': {'min': 1.0, 'max': 2.5},
+    }
+
     STAGE_MAPPINGS = {
         'CONFIDENCE': {
             'param': 'min_confidence_threshold',
@@ -521,15 +530,22 @@ def _generate_recommendations(
         if not is_boolean and isinstance(current_val, Decimal):
             current_val = float(current_val)
 
+        # Get bounds for this parameter
+        bounds = PARAM_BOUNDS.get(param, {})
+        param_min = bounds.get('min', float('-inf'))
+        param_max = bounds.get('max', float('inf'))
+
         if win_rate > 60:
             # Too aggressive - relax
             if is_boolean:
                 new_val = mapping['relax_delta']  # Boolean value directly
             else:
                 new_val = round(current_val + mapping['relax_delta'], 3)
+                # Apply bounds
+                new_val = max(param_min, new_val)
 
-            # Skip if no change needed
-            if new_val == current_val:
+            # Skip if no change needed or already at bound
+            if new_val == current_val or (not is_boolean and current_val <= param_min):
                 continue
 
             recommendations.append({
@@ -550,9 +566,11 @@ def _generate_recommendations(
                 new_val = mapping['tighten_delta']  # Boolean value directly
             else:
                 new_val = round(current_val + mapping['tighten_delta'], 3)
+                # Apply bounds
+                new_val = min(param_max, new_val)
 
-            # Skip if no change needed
-            if new_val == current_val:
+            # Skip if no change needed or already at bound
+            if new_val == current_val or (not is_boolean and current_val >= param_max):
                 continue
 
             recommendations.append({
@@ -591,7 +609,14 @@ def _generate_recommendations(
             current_conf = override.get('min_confidence') or global_min_conf
             if isinstance(current_conf, Decimal):
                 current_conf = float(current_conf)
-            new_conf = max(0.40, current_conf - 0.03)
+
+            # Bounds: don't go below 0.40 (absolute minimum safe threshold)
+            MIN_CONFIDENCE_FLOOR = 0.40
+            new_conf = max(MIN_CONFIDENCE_FLOOR, current_conf - 0.03)
+
+            # Skip if already at floor or change is negligible
+            if current_conf <= MIN_CONFIDENCE_FLOOR or abs(new_conf - current_conf) < 0.01:
+                continue
 
             recommendations.append({
                 'scope': 'pair',
@@ -611,7 +636,14 @@ def _generate_recommendations(
             current_vol = override.get('min_volume_ratio') or global_min_vol
             if isinstance(current_vol, Decimal):
                 current_vol = float(current_vol)
-            new_vol = min(0.80, current_vol + 0.05)
+
+            # Bounds: don't go above 0.80 (would filter too many signals)
+            MAX_VOLUME_CEILING = 0.80
+            new_vol = min(MAX_VOLUME_CEILING, current_vol + 0.05)
+
+            # Skip if already at ceiling or change is negligible
+            if current_vol >= MAX_VOLUME_CEILING or abs(new_vol - current_vol) < 0.01:
+                continue
 
             recommendations.append({
                 'scope': 'pair',
