@@ -351,3 +351,330 @@ def get_effective_config_for_pair(epic: str) -> Dict[str, Any]:
             effective.update(param_overrides)
 
     return effective
+
+
+# ============================================================================
+# PARAMETER OPTIMIZER FUNCTIONS
+# ============================================================================
+
+def fetch_optimizer_recommendations(days: int = 30) -> Dict[str, Any]:
+    """
+    Fetch parameter optimization recommendations from the FastAPI rejection outcome API.
+
+    Returns:
+        Dictionary with recommendations and metadata
+    """
+    import os
+    import requests
+
+    fastapi_url = os.getenv('FASTAPI_URL', 'http://fastapi-dev:8000')
+    api_key = os.getenv('FASTAPI_API_KEY', '436abe054a074894a0517e5172f0e5b6')
+    headers = {
+        'X-APIM-Gateway': 'verified',
+        'X-API-KEY': api_key
+    }
+
+    result = {
+        'recommendations': [],
+        'stage_metrics': [],
+        'pair_metrics': [],
+        'error': None
+    }
+
+    try:
+        # Fetch stage metrics
+        stage_resp = requests.get(
+            f"{fastapi_url}/api/rejection-outcomes/win-rate-by-stage",
+            params={'days': days},
+            headers=headers,
+            timeout=30
+        )
+        if stage_resp.ok:
+            result['stage_metrics'] = stage_resp.json()
+
+        # Fetch pair metrics
+        pair_resp = requests.get(
+            f"{fastapi_url}/api/rejection-outcomes/by-pair",
+            params={'days': days},
+            headers=headers,
+            timeout=30
+        )
+        if pair_resp.ok:
+            result['pair_metrics'] = pair_resp.json()
+
+        # Fetch parameter suggestions
+        suggest_resp = requests.get(
+            f"{fastapi_url}/api/rejection-outcomes/parameter-suggestions",
+            params={'days': days},
+            headers=headers,
+            timeout=30
+        )
+        if suggest_resp.ok:
+            result['suggestions'] = suggest_resp.json()
+
+        # Generate recommendations from the data
+        result['recommendations'] = _generate_recommendations(
+            result['stage_metrics'],
+            result['pair_metrics'],
+            days
+        )
+
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch recommendations: {e}")
+        result['error'] = str(e)
+    except Exception as e:
+        logger.error(f"Error generating recommendations: {e}")
+        result['error'] = str(e)
+
+    return result
+
+
+def _generate_recommendations(
+    stage_metrics: List[Dict],
+    pair_metrics: List[Dict],
+    days: int
+) -> List[Dict[str, Any]]:
+    """Generate actionable recommendations from metrics data."""
+    from decimal import Decimal
+
+    recommendations = []
+    config = get_global_config()
+    if not config:
+        return recommendations
+
+    config_id = config.get('id')
+    pair_overrides = get_pair_overrides(config_id) if config_id else []
+    pair_override_map = {o['epic']: o for o in pair_overrides}
+
+    # Stage-based recommendations
+    STAGE_MAPPINGS = {
+        'CONFIDENCE': {
+            'param': 'min_confidence_threshold',
+            'relax_delta': -0.02,
+            'tighten_delta': +0.02,
+        },
+        'TIER2_SWING': {
+            'param': 'min_body_percentage',
+            'relax_delta': -0.05,
+            'tighten_delta': +0.05,
+        },
+        'TIER3_PULLBACK': {
+            'param': 'fib_pullback_min',
+            'relax_delta': -0.02,
+            'tighten_delta': +0.02,
+        },
+    }
+
+    for stage in stage_metrics:
+        stage_name = stage.get('rejection_stage', '')
+        win_rate = stage.get('would_be_win_rate', 50)
+        total = stage.get('total_analyzed', 0)
+        missed_pips = stage.get('missed_profit_pips', 0)
+        avoided_pips = stage.get('avoided_loss_pips', 0)
+
+        if total < 20 or stage_name not in STAGE_MAPPINGS:
+            continue
+
+        mapping = STAGE_MAPPINGS[stage_name]
+        param = mapping['param']
+        current_val = config.get(param)
+
+        if current_val is None:
+            continue
+
+        # Convert Decimal if needed
+        if isinstance(current_val, Decimal):
+            current_val = float(current_val)
+
+        if win_rate > 60:
+            # Too aggressive - relax
+            new_val = round(current_val + mapping['relax_delta'], 3)
+            recommendations.append({
+                'scope': 'global',
+                'target': param,
+                'current_value': current_val,
+                'recommended_value': new_val,
+                'action': 'relax',
+                'reason': f"{stage_name} rejects {win_rate:.0f}% would-be winners ({total} samples, {missed_pips:.0f} missed pips)",
+                'confidence': min(total / 100, 1.0),
+                'impact_pips': missed_pips,
+                'stage': stage_name,
+            })
+        elif win_rate < 40:
+            # Working well - could tighten
+            new_val = round(current_val + mapping['tighten_delta'], 3)
+            recommendations.append({
+                'scope': 'global',
+                'target': param,
+                'current_value': current_val,
+                'recommended_value': new_val,
+                'action': 'tighten',
+                'reason': f"{stage_name} correctly filters {100-win_rate:.0f}% losers ({total} samples, {avoided_pips:.0f} avoided pips)",
+                'confidence': min(total / 100, 1.0),
+                'impact_pips': avoided_pips,
+                'stage': stage_name,
+            })
+
+    # Pair-based recommendations
+    global_min_conf = float(config.get('min_confidence_threshold', 0.48))
+    global_min_vol = float(config.get('min_volume_ratio', 0.5))
+
+    for pair_info in pair_metrics:
+        epic = pair_info.get('epic', '')
+        pair = pair_info.get('pair', '')
+        win_rate = pair_info.get('would_be_win_rate', 50)
+        total = pair_info.get('total_analyzed', 0)
+        status = pair_info.get('status', 'NEUTRAL')
+        missed_pips = pair_info.get('missed_profit_pips', 0)
+        avoided_pips = pair_info.get('avoided_loss_pips', 0)
+
+        if total < 15:
+            continue
+
+        override = pair_override_map.get(epic, {})
+
+        if status == 'TOO_AGGRESSIVE' and win_rate > 60:
+            # Relax confidence for this pair
+            current_conf = override.get('min_confidence') or global_min_conf
+            if isinstance(current_conf, Decimal):
+                current_conf = float(current_conf)
+            new_conf = max(0.40, current_conf - 0.03)
+
+            recommendations.append({
+                'scope': 'pair',
+                'target': (epic, 'min_confidence'),
+                'pair_name': pair,
+                'current_value': current_conf,
+                'recommended_value': round(new_conf, 3),
+                'action': 'relax',
+                'reason': f"{pair} filters reject {win_rate:.0f}% would-be winners ({total} samples)",
+                'confidence': min(total / 50, 1.0),
+                'impact_pips': missed_pips,
+                'stage': 'PAIR_SPECIFIC',
+            })
+
+        elif status == 'WORKING_WELL' and win_rate < 40:
+            # Tighten volume filter for this pair
+            current_vol = override.get('min_volume_ratio') or global_min_vol
+            if isinstance(current_vol, Decimal):
+                current_vol = float(current_vol)
+            new_vol = min(0.80, current_vol + 0.05)
+
+            recommendations.append({
+                'scope': 'pair',
+                'target': (epic, 'min_volume_ratio'),
+                'pair_name': pair,
+                'current_value': current_vol,
+                'recommended_value': round(new_vol, 2),
+                'action': 'tighten',
+                'reason': f"{pair} filters are protective ({100-win_rate:.0f}% losers filtered)",
+                'confidence': min(total / 50, 1.0),
+                'impact_pips': avoided_pips,
+                'stage': 'PAIR_SPECIFIC',
+            })
+
+    return recommendations
+
+
+def apply_optimizer_recommendations(
+    recommendations: List[Dict[str, Any]],
+    updated_by: str = 'parameter_optimizer'
+) -> Dict[str, Any]:
+    """
+    Apply parameter optimization recommendations to the database.
+
+    Returns:
+        Dictionary with success status and details
+    """
+    result = {
+        'success': True,
+        'applied_count': 0,
+        'failed_count': 0,
+        'details': []
+    }
+
+    if not recommendations:
+        return result
+
+    config = get_global_config()
+    if not config:
+        result['success'] = False
+        result['error'] = 'No active configuration found'
+        return result
+
+    config_id = config['id']
+
+    for rec in recommendations:
+        try:
+            if rec['scope'] == 'global':
+                param = rec['target']
+                new_value = rec['recommended_value']
+                reason = f"Auto-optimized: {rec['reason'][:100]}"
+
+                success = save_global_config(
+                    config_id,
+                    {param: new_value},
+                    updated_by,
+                    reason
+                )
+
+                if success:
+                    result['applied_count'] += 1
+                    result['details'].append({
+                        'type': 'global',
+                        'param': param,
+                        'old': rec['current_value'],
+                        'new': new_value,
+                        'success': True
+                    })
+                else:
+                    result['failed_count'] += 1
+                    result['details'].append({
+                        'type': 'global',
+                        'param': param,
+                        'success': False,
+                        'error': 'Save failed'
+                    })
+
+            elif rec['scope'] == 'pair':
+                epic, param = rec['target']
+                new_value = rec['recommended_value']
+                reason = f"Auto-optimized: {rec['reason'][:100]}"
+
+                success = save_pair_override(
+                    config_id,
+                    epic,
+                    {param: new_value},
+                    updated_by,
+                    reason
+                )
+
+                if success:
+                    result['applied_count'] += 1
+                    result['details'].append({
+                        'type': 'pair',
+                        'epic': epic,
+                        'param': param,
+                        'old': rec['current_value'],
+                        'new': new_value,
+                        'success': True
+                    })
+                else:
+                    result['failed_count'] += 1
+                    result['details'].append({
+                        'type': 'pair',
+                        'epic': epic,
+                        'param': param,
+                        'success': False,
+                        'error': 'Save failed'
+                    })
+
+        except Exception as e:
+            result['failed_count'] += 1
+            result['details'].append({
+                'error': str(e),
+                'recommendation': rec
+            })
+
+    result['success'] = result['failed_count'] == 0
+    return result
