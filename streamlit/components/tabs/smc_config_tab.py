@@ -643,9 +643,13 @@ def render_pair_overrides(config: Dict[str, Any]):
             if not _values_equal(new_min_conf, existing.get('min_confidence')):
                 override_changes['min_confidence'] = new_min_conf
 
+            # Use pair override if set, otherwise inherit from global config
+            macd_override_value = existing.get('macd_filter_enabled')
+            macd_effective = macd_override_value if macd_override_value is not None else config.get('macd_alignment_filter_enabled', True)
             new_macd = st.checkbox(
                 "MACD Filter Enabled",
-                value=existing.get('macd_filter_enabled', True),
+                value=macd_effective,
+                help="Unchecked = inherits global setting" if macd_override_value is None else "Explicit override for this pair",
                 key=f"override_macd_{selected_pair}"
             )
             if not _values_equal(new_macd, existing.get('macd_filter_enabled')):
