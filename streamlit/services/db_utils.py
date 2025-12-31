@@ -52,6 +52,8 @@ def _get_connection_string(db_type: str = "trading") -> str:
         return os.getenv("CONFIG_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/forex_config")
     elif db_type == "stocks":
         return os.getenv("STOCKS_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/stocks")
+    elif db_type == "strategy_config":
+        return os.getenv("STRATEGY_CONFIG_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/strategy_config")
 
     return os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/forex")
 

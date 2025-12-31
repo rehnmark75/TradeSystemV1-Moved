@@ -140,7 +140,184 @@ class SMCSimpleStrategy:
         self.logger.info("=" * 60)
 
     def _load_config(self):
-        """Load configuration from config object"""
+        """Load configuration from database service (with in-memory cache fallback)"""
+        # Try database-driven config first
+        try:
+            from forex_scanner.services.smc_simple_config_service import (
+                get_smc_simple_config_service,
+                SMCSimpleConfig
+            )
+
+            service = get_smc_simple_config_service()
+            config = service.get_config()
+
+            # Store service reference for per-pair lookups
+            self._config_service = service
+            self._using_database_config = True
+
+            # Map config object to instance attributes
+            self.strategy_version = config.version
+            self.strategy_name = config.strategy_name
+
+            # TIER 1: HTF Settings
+            self.htf_timeframe = config.htf_timeframe
+            self.ema_period = config.ema_period
+            self.ema_buffer_pips = config.ema_buffer_pips
+            self.require_close_beyond_ema = config.require_close_beyond_ema
+            self.min_distance_from_ema = config.min_distance_from_ema_pips
+
+            # TIER 2: Trigger Settings
+            self.trigger_tf = config.trigger_timeframe
+            self.swing_lookback = config.swing_lookback_bars
+            self.swing_strength = config.swing_strength_bars
+            self.require_body_close = config.require_body_close_break
+            self.wick_tolerance_pips = config.wick_tolerance_pips
+
+            # Volume confirmation
+            self.volume_enabled = config.volume_confirmation_enabled
+            self.volume_sma_period = config.volume_sma_period
+            self.volume_multiplier = config.volume_spike_multiplier
+
+            # TIER 3: Entry Settings
+            self.entry_tf = config.entry_timeframe
+            self.pullback_enabled = config.pullback_enabled
+            self.fib_min = config.fib_pullback_min
+            self.fib_max = config.fib_pullback_max
+            self.fib_optimal = (config.fib_optimal_zone_min, config.fib_optimal_zone_max)
+            self.max_pullback_wait = config.max_pullback_wait_bars
+            self.pullback_confirm_bars = config.pullback_confirmation_bars
+
+            # Risk Management
+            self.min_rr_ratio = config.min_rr_ratio
+            self.optimal_rr = config.optimal_rr_ratio
+            self.max_rr_ratio = config.max_rr_ratio
+            self.sl_buffer_pips = config.sl_buffer_pips
+            self.min_tp_pips = config.min_tp_pips
+            self.use_swing_target = config.use_swing_target
+
+            # Session Filter
+            self.session_filter_enabled = config.session_filter_enabled
+            self.block_asian = config.block_asian_session
+
+            # Signal Limits
+            self.cooldown_hours = config.signal_cooldown_hours
+
+            # v3.0.0: Adaptive Cooldown Configuration
+            self.adaptive_cooldown_enabled = config.adaptive_cooldown_enabled
+            self.base_cooldown_hours = config.base_cooldown_hours
+            self.cooldown_after_win_multiplier = config.cooldown_after_win_multiplier
+            self.cooldown_after_loss_multiplier = config.cooldown_after_loss_multiplier
+            self.consecutive_loss_penalty_hours = config.consecutive_loss_penalty_hours
+            self.max_consecutive_losses_before_block = config.max_consecutive_losses_before_block
+            self.consecutive_loss_block_hours = config.consecutive_loss_block_hours
+            self.win_rate_lookback_trades = config.win_rate_lookback_trades
+            self.high_win_rate_threshold = config.high_win_rate_threshold
+            self.low_win_rate_threshold = config.low_win_rate_threshold
+            self.critical_win_rate_threshold = config.critical_win_rate_threshold
+            self.high_win_rate_cooldown_reduction = config.high_win_rate_cooldown_reduction
+            self.low_win_rate_cooldown_increase = config.low_win_rate_cooldown_increase
+            self.high_volatility_atr_multiplier = config.high_volatility_atr_multiplier
+            self.volatility_cooldown_adjustment = config.volatility_cooldown_adjustment
+            self.strong_trend_cooldown_reduction = config.strong_trend_cooldown_reduction
+            self.session_change_reset_cooldown = config.session_change_reset_cooldown
+            self.min_cooldown_hours = config.min_cooldown_hours
+            self.max_cooldown_hours = config.max_cooldown_hours
+
+            # Confidence thresholds
+            self.min_confidence = config.min_confidence_threshold
+
+            # v2.9.0: Data-driven filters
+            self.max_confidence = config.max_confidence_threshold
+            self.min_volume_ratio = config.min_volume_ratio
+            self.volume_filter_enabled = config.volume_filter_enabled
+            self.allow_no_volume_data = config.allow_no_volume_data
+
+            # v1.8.0 Phase 2: Momentum Continuation Mode
+            self.momentum_mode_enabled = config.momentum_mode_enabled
+            self.momentum_min_depth = config.momentum_min_depth
+            self.momentum_max_depth = config.momentum_max_depth
+            self.momentum_confidence_penalty = config.momentum_confidence_penalty
+
+            # v1.8.0 Phase 2: ATR-based Swing Validation
+            self.use_atr_swing_validation = config.use_atr_swing_validation
+            self.atr_period = config.atr_period
+            self.min_swing_atr_multiplier = config.min_swing_atr_multiplier
+            self.fallback_min_swing_pips = config.fallback_min_swing_pips
+
+            # v1.8.0 Phase 2: Momentum Quality Filter
+            self.momentum_quality_enabled = config.momentum_quality_enabled
+            self.min_breakout_atr_ratio = config.min_breakout_atr_ratio
+            self.min_body_percentage = config.min_body_percentage
+
+            # v1.9.0: Pair-specific SL buffers and confidence floors (now from DB)
+            self.pair_sl_buffers = {}  # Loaded from per-pair overrides in DB
+            self.pair_min_confidence = {}  # Loaded from per-pair overrides in DB
+            self.sl_atr_multiplier = config.sl_atr_multiplier
+            self.use_atr_stop = config.use_atr_stop
+
+            # v2.11.0: Dynamic confidence thresholds
+            self.volume_adjusted_confidence_enabled = config.volume_adjusted_confidence_enabled
+            self.high_volume_threshold = config.high_volume_threshold
+            self.pair_high_volume_confidence = {}  # From DB per-pair overrides
+            self.atr_adjusted_confidence_enabled = config.atr_adjusted_confidence_enabled
+            self.low_atr_threshold = config.low_atr_threshold
+            self.high_atr_threshold = config.high_atr_threshold
+            self.pair_low_atr_confidence = {}  # From DB per-pair overrides
+            self.pair_high_atr_confidence = {}  # From DB per-pair overrides
+            self.ema_distance_adjusted_confidence_enabled = config.ema_distance_adjusted_confidence_enabled
+            self.near_ema_threshold_pips = config.near_ema_threshold_pips
+            self.far_ema_threshold_pips = config.far_ema_threshold_pips
+            self.pair_near_ema_confidence = {}  # From DB per-pair overrides
+            self.pair_far_ema_confidence = {}  # From DB per-pair overrides
+
+            # v2.0.0: Limit Order Configuration
+            self.limit_order_enabled = config.limit_order_enabled
+            self.limit_expiry_minutes = config.limit_expiry_minutes
+            self.pullback_offset_atr_factor = config.pullback_offset_atr_factor
+            self.pullback_offset_min_pips = config.pullback_offset_min_pips
+            self.pullback_offset_max_pips = config.pullback_offset_max_pips
+            self.momentum_offset_pips = config.momentum_offset_pips
+            self.min_risk_after_offset_pips = config.min_risk_after_offset_pips
+            self.max_risk_after_offset_pips = config.max_risk_after_offset_pips
+
+            # v2.4.0: ATR-based SL cap
+            self.max_sl_atr_multiplier = config.max_sl_atr_multiplier
+            self.max_sl_absolute_pips = config.max_sl_absolute_pips
+
+            # v2.1.0: Dynamic Swing Lookback Configuration
+            self.use_dynamic_swing_lookback = config.use_dynamic_swing_lookback
+            self.swing_lookback_atr_low = config.swing_lookback_atr_low
+            self.swing_lookback_atr_high = config.swing_lookback_atr_high
+            self.swing_lookback_min = config.swing_lookback_min
+            self.swing_lookback_max = config.swing_lookback_max
+
+            # Debug
+            self.debug_logging = config.enable_debug_logging
+
+            # v2.2.0: Rejection Tracking
+            self.rejection_tracking_enabled = config.rejection_tracking_enabled
+            self.rejection_log_to_console = config.rejection_log_to_console
+
+            # v2.6.0: Pair-specific parameter overrides (now from DB)
+            self.pair_parameter_overrides = {}  # Loaded from DB per-pair overrides
+
+            # Store config for helper functions
+            self._db_config = config
+
+            self.logger.info(f"✅ SMC Simple config v{config.version} loaded from DATABASE (source: {config.source})")
+            return
+
+        except Exception as e:
+            self.logger.warning(f"Database config unavailable: {e}, falling back to file config")
+            self._using_database_config = False
+            self._config_service = None
+            self._db_config = None
+
+        # Fallback to file-based config
+        self._load_config_from_file()
+
+    def _load_config_from_file(self):
+        """Load configuration from file (fallback when database unavailable)"""
         # Import config module
         try:
             from configdata.strategies import config_smc_simple as smc_config
@@ -149,6 +326,10 @@ class SMCSimpleStrategy:
                 from forex_scanner.configdata.strategies import config_smc_simple as smc_config
             except ImportError:
                 from ..configdata.strategies import config_smc_simple as smc_config
+
+        self._using_database_config = False
+        self._config_service = None
+        self._db_config = None
 
         # Strategy metadata
         self.strategy_version = getattr(smc_config, 'STRATEGY_VERSION', '1.0.0')
@@ -305,6 +486,7 @@ class SMCSimpleStrategy:
     def _get_pair_param(self, epic: str, param_name: str, default_value):
         """
         Get parameter with pair-specific override if configured.
+        Uses database service if available, otherwise falls back to file config.
 
         Args:
             epic: The trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
@@ -314,6 +496,11 @@ class SMCSimpleStrategy:
         Returns:
             The overridden value if configured, otherwise the default value
         """
+        # Use database config service if available
+        if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+            return self._db_config.get_for_pair(epic, param_name, default_value)
+
+        # Fallback to file-based overrides
         config = self.pair_parameter_overrides.get(epic)
         if config and config.get('enabled', False):
             overrides = config.get('overrides', {})

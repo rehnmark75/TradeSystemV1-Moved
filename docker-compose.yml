@@ -158,6 +158,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - STRATEGY_CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/strategy_config
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
       - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
@@ -214,6 +215,7 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+      - STRATEGY_CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/strategy_config
       - ORDER_API_URL=http://fastapi-dev:8000/orders
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}

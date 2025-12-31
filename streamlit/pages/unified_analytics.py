@@ -31,6 +31,7 @@ from components.tabs import (
     render_market_intelligence_tab,
     render_breakeven_optimizer_tab,
     render_trade_analysis_tab,
+    render_smc_config_tab,
 )
 
 # Configure page
@@ -172,7 +173,15 @@ def main():
             render_unfilled_orders_tab()
 
     with tab_settings:
-        render_settings_tab()
+        # Sub-tabs for settings and configuration
+        settings_tabs = st.tabs([
+            "General",
+            "SMC Config"
+        ])
+        with settings_tabs[0]:
+            render_settings_tab()
+        with settings_tabs[1]:
+            render_smc_config_tab()
 
     # Footer
     st.markdown("---")
