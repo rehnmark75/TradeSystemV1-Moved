@@ -438,7 +438,13 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
 
     timestamp_part = f" | 📅 {signal_time_str}" if signal_time_str else ""
 
-    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{news_badge}{timestamp_part}", expanded=False):
+    # Days active badge - shows persistence (signal firing multiple days)
+    days_active = signal.get('days_active', 1)
+    days_badge = ""
+    if days_active and days_active > 1:
+        days_badge = f" | 🔥 {days_active}d"
+
+    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{news_badge}{days_badge}{timestamp_part}", expanded=False):
 
         # Metrics row
         col1, col2, col3, col4, col5, col6 = st.columns(6)

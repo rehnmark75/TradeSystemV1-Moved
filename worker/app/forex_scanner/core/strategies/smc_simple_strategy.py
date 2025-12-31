@@ -252,6 +252,25 @@ class SMCSimpleStrategy:
         self.sl_atr_multiplier = getattr(smc_config, 'SL_ATR_MULTIPLIER', 1.2)
         self.use_atr_stop = getattr(smc_config, 'USE_ATR_STOP', True)
 
+        # v2.11.0: Volume-adjusted confidence thresholds (per-pair)
+        self.volume_adjusted_confidence_enabled = getattr(smc_config, 'VOLUME_ADJUSTED_CONFIDENCE_ENABLED', True)
+        self.high_volume_threshold = getattr(smc_config, 'HIGH_VOLUME_THRESHOLD', 0.70)
+        self.pair_high_volume_confidence = getattr(smc_config, 'PAIR_HIGH_VOLUME_CONFIDENCE', {})
+
+        # v2.11.0: ATR-adjusted confidence thresholds (per-pair)
+        self.atr_adjusted_confidence_enabled = getattr(smc_config, 'ATR_ADJUSTED_CONFIDENCE_ENABLED', True)
+        self.low_atr_threshold = getattr(smc_config, 'LOW_ATR_THRESHOLD', 0.0004)
+        self.high_atr_threshold = getattr(smc_config, 'HIGH_ATR_THRESHOLD', 0.0008)
+        self.pair_low_atr_confidence = getattr(smc_config, 'PAIR_LOW_ATR_CONFIDENCE', {})
+        self.pair_high_atr_confidence = getattr(smc_config, 'PAIR_HIGH_ATR_CONFIDENCE', {})
+
+        # v2.11.0: EMA distance-adjusted confidence thresholds (per-pair)
+        self.ema_distance_adjusted_confidence_enabled = getattr(smc_config, 'EMA_DISTANCE_ADJUSTED_CONFIDENCE_ENABLED', True)
+        self.near_ema_threshold_pips = getattr(smc_config, 'NEAR_EMA_THRESHOLD_PIPS', 20)
+        self.far_ema_threshold_pips = getattr(smc_config, 'FAR_EMA_THRESHOLD_PIPS', 30)
+        self.pair_near_ema_confidence = getattr(smc_config, 'PAIR_NEAR_EMA_CONFIDENCE', {})
+        self.pair_far_ema_confidence = getattr(smc_config, 'PAIR_FAR_EMA_CONFIDENCE', {})
+
         # v2.0.0: Limit Order Configuration
         self.limit_order_enabled = getattr(smc_config, 'LIMIT_ORDER_ENABLED', True)
         self.limit_expiry_minutes = getattr(smc_config, 'LIMIT_EXPIRY_MINUTES', 6)
@@ -717,13 +736,78 @@ class SMCSimpleStrategy:
                 confidence -= self.momentum_confidence_penalty
                 self.logger.info(f"   ⚠️  Momentum entry penalty: -{self.momentum_confidence_penalty*100:.0f}%")
 
-            # v1.9.0: Get pair-specific confidence floor or use default
+            # v2.11.0: Dynamic confidence threshold based on EMA distance, ATR, and Volume
+            # Priority: EMA distance > ATR > Volume > Pair-specific > Default
+            # EMA distance is the strongest predictor of CONFIDENCE rejection outcomes
             pair_min_confidence = self.pair_min_confidence.get(pair, self.pair_min_confidence.get(epic, self.min_confidence))
+            adjustment_type = "pair-specific"
+
+            # v2.11.0: EMA distance-adjusted confidence threshold (HIGHEST PRIORITY)
+            # Near EMA (trend-aligned) = lower threshold, Far from EMA (extended) = higher threshold
+            if self.ema_distance_adjusted_confidence_enabled and ema_distance is not None:
+                ema_distance_pips = ema_distance / pip_value
+                if ema_distance_pips < self.near_ema_threshold_pips:
+                    # Near EMA - trend aligned, high win rate
+                    near_ema_confidence = self.pair_near_ema_confidence.get(
+                        pair, self.pair_near_ema_confidence.get(epic)
+                    )
+                    if near_ema_confidence is not None:
+                        pair_min_confidence = near_ema_confidence
+                        adjustment_type = "near-EMA"
+                        self.logger.info(f"   📍 Near-EMA threshold: {near_ema_confidence*100:.0f}% (EMA dist={ema_distance_pips:.1f} < {self.near_ema_threshold_pips})")
+                elif ema_distance_pips >= self.far_ema_threshold_pips:
+                    # Far from EMA - overextended, low win rate
+                    far_ema_confidence = self.pair_far_ema_confidence.get(
+                        pair, self.pair_far_ema_confidence.get(epic)
+                    )
+                    if far_ema_confidence is not None:
+                        pair_min_confidence = far_ema_confidence
+                        adjustment_type = "far-EMA"
+                        self.logger.info(f"   🚀 Far-EMA threshold: {far_ema_confidence*100:.0f}% (EMA dist={ema_distance_pips:.1f} >= {self.far_ema_threshold_pips})")
+
+            # v2.11.0: ATR-adjusted confidence threshold (only if EMA didn't adjust)
+            # In calm markets (low ATR), lower the threshold - price is more predictable
+            # In volatile markets (high ATR), raise the threshold - need higher confidence
+            if adjustment_type == "pair-specific" and self.atr_adjusted_confidence_enabled and atr is not None:
+                if atr < self.low_atr_threshold:
+                    # Calm market - check for lower threshold
+                    low_atr_confidence = self.pair_low_atr_confidence.get(
+                        pair, self.pair_low_atr_confidence.get(epic)
+                    )
+                    if low_atr_confidence is not None:
+                        pair_min_confidence = low_atr_confidence
+                        adjustment_type = "low-ATR"
+                        self.logger.info(f"   📉 Low-ATR threshold: {low_atr_confidence*100:.0f}% (ATR={atr:.5f} < {self.low_atr_threshold})")
+                elif atr >= self.high_atr_threshold:
+                    # Volatile market - check for higher threshold
+                    high_atr_confidence = self.pair_high_atr_confidence.get(
+                        pair, self.pair_high_atr_confidence.get(epic)
+                    )
+                    if high_atr_confidence is not None:
+                        pair_min_confidence = high_atr_confidence
+                        adjustment_type = "high-ATR"
+                        self.logger.info(f"   📈 High-ATR threshold: {high_atr_confidence*100:.0f}% (ATR={atr:.5f} >= {self.high_atr_threshold})")
+
+            # v2.11.0: Volume-adjusted confidence threshold (only if EMA and ATR didn't adjust)
+            # When volume is high, use a lower confidence threshold for pairs that perform well
+            if (adjustment_type == "pair-specific" and
+                self.volume_adjusted_confidence_enabled and
+                volume_ratio is not None and
+                volume_ratio >= self.high_volume_threshold):
+                # Check if this pair has a volume-adjusted threshold
+                high_vol_confidence = self.pair_high_volume_confidence.get(
+                    pair, self.pair_high_volume_confidence.get(epic)
+                )
+                if high_vol_confidence is not None:
+                    pair_min_confidence = high_vol_confidence
+                    adjustment_type = "high-volume"
+                    self.logger.info(f"   📊 Volume-adjusted threshold: {high_vol_confidence*100:.0f}% (vol={volume_ratio:.2f} >= {self.high_volume_threshold})")
+
             # v2.9.0: Use round(2) for both values to avoid floating-point precision issues
             # (e.g., 0.4799 displaying as 48% but failing 48% threshold)
             if round(confidence, 2) < round(pair_min_confidence, 2):
                 reason = f"Confidence too low ({confidence*100:.0f}% < {pair_min_confidence*100:.0f}%)"
-                self.logger.info(f"\n❌ {reason} (pair-specific)")
+                self.logger.info(f"\n❌ {reason} ({adjustment_type})")
                 # Track rejection with confidence breakdown - v2.2.0: Updated breakdown
                 fib_accuracy = 1.0 - min(abs(pullback_depth - 0.382) / 0.382, 1.0)
                 confidence_breakdown = {

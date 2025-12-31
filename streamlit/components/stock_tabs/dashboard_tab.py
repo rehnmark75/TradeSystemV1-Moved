@@ -120,6 +120,7 @@ def render_dashboard_tab(service):
                 score = signal.get('composite_score', 0)
                 entry = signal.get('entry_price', 0)
                 scanner = signal.get('scanner_name', '').replace('_', ' ').title()
+                days_active = signal.get('days_active', 1)
 
                 sig_class = "signal-card-buy" if sig_type == "BUY" else "signal-card-sell"
                 sig_color = "#28a745" if sig_type == "BUY" else "#dc3545"
@@ -133,10 +134,15 @@ def render_dashboard_tab(service):
                     grade_color = grade_colors.get(claude_grade, '#6c757d')
                     claude_badge = f'<span style="background-color: {grade_color}; color: white; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; margin-left: 5px;">{claude_grade}</span>'
 
+                # Days active badge - shows signal persistence
+                days_badge = ""
+                if days_active and days_active > 1:
+                    days_badge = f'<span style="background-color: #fd7e14; color: white; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; margin-left: 5px;">🔥 {days_active}d</span>'
+
                 st.markdown(f"""
                 <div class="signal-card {sig_class}">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span><b>{ticker}</b> <span style="color: {sig_color};">{sig_type}</span>{claude_badge}</span>
+                        <span><b>{ticker}</b> <span style="color: {sig_color};">{sig_type}</span>{claude_badge}{days_badge}</span>
                         <span class="tier-badge {tier_class}">{quality_tier}</span>
                     </div>
                     <div style="font-size: 0.85rem; color: #555;">

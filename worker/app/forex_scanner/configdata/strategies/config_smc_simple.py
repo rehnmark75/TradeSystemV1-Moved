@@ -470,6 +470,219 @@ PAIR_MIN_CONFIDENCE = {
 }
 
 # ============================================================================
+# v2.11.0: VOLUME-ADJUSTED CONFIDENCE THRESHOLDS (Per-Pair)
+# ============================================================================
+# Data-driven analysis from 30-day rejection outcomes (Dec 2025):
+#
+# KEY FINDING: High volume (>=0.7) CONFIDENCE rejections show dramatically
+# different win rates by pair:
+#
+# | Pair   | High Vol WR | Low Vol WR | Recommendation                    |
+# |--------|-------------|------------|-----------------------------------|
+# | AUDUSD | 100%        | 100%       | Lower threshold to 0.45 @ vol>=0.7|
+# | NZDUSD | 100%        | 100%       | Lower threshold to 0.45 @ vol>=0.7|
+# | EURJPY | 0%          | 11%        | KEEP strict - volume doesn't help |
+#
+# When volume_ratio >= HIGH_VOLUME_THRESHOLD, use reduced confidence floor.
+# This allows high-probability setups through when volume confirms the move.
+#
+HIGH_VOLUME_THRESHOLD = 0.70            # Volume ratio considered "high"
+VOLUME_ADJUSTED_CONFIDENCE_ENABLED = True
+
+# Per-pair confidence when volume >= HIGH_VOLUME_THRESHOLD
+# Format: 'PAIR': confidence_threshold_when_high_volume
+# If pair not listed, uses standard PAIR_MIN_CONFIDENCE (no volume adjustment)
+PAIR_HIGH_VOLUME_CONFIDENCE = {
+    # AUDUSD: 100% WR on high-vol CONFIDENCE rejections - lower threshold
+    'AUDUSD': 0.45,
+    'CS.D.AUDUSD.MINI.IP': 0.45,
+
+    # NZDUSD: 100% WR on high-vol CONFIDENCE rejections - lower threshold
+    'NZDUSD': 0.45,
+    'CS.D.NZDUSD.MINI.IP': 0.45,
+
+    # EURUSD: Test with moderate reduction (needs more data)
+    'EURUSD': 0.46,
+    'CS.D.EURUSD.CEEM.IP': 0.46,
+    'CS.D.EURUSD.MINI.IP': 0.46,
+
+    # GBPUSD: Test with moderate reduction (needs more data)
+    'GBPUSD': 0.46,
+    'CS.D.GBPUSD.MINI.IP': 0.46,
+
+    # JPY pairs - NO volume adjustment (EURJPY showed 0% WR even with high volume)
+    # These pairs are explicitly NOT listed = use standard threshold regardless of volume
+    # 'EURJPY': DO NOT ADD - high volume didn't help win rate
+    # 'GBPJPY': DO NOT ADD - insufficient data, keep conservative
+    # 'USDJPY': DO NOT ADD - insufficient data, keep conservative
+    # 'AUDJPY': DO NOT ADD - insufficient data, keep conservative
+}
+
+# ============================================================================
+# v2.11.0: ATR-ADJUSTED CONFIDENCE THRESHOLDS (Per-Pair)
+# ============================================================================
+# Data-driven analysis from 30-day rejection outcomes (Dec 2025):
+#
+# CRITICAL FINDING: ATR level at rejection dramatically affects outcome:
+#
+# | ATR Level              | CONFIDENCE Win Rate | Sample     |
+# |------------------------|---------------------|------------|
+# | LOW (<0.0004)          | 100% (42W/0L)       | ALL winners missed! |
+# | MEDIUM (0.0004-0.0008) | 100% (8W/0L)        | ALL winners missed! |
+# | HIGH (>=0.0008)        | 8.3% (2W/22L)       | Correctly rejected  |
+#
+# Per-pair breakdown:
+# | Pair   | ATR   | Win Rate | Action                          |
+# |--------|-------|----------|----------------------------------|
+# | AUDUSD | LOW   | 100%     | Lower threshold in calm markets  |
+# | NZDUSD | LOW   | 100%     | Lower threshold in calm markets  |
+# | EURJPY | HIGH  | 8.3%     | Keep strict in volatile markets  |
+#
+# LOGIC: In calm markets (low ATR), price moves are more predictable,
+#        so lower confidence signals still have high win rates.
+#        In volatile markets (high ATR), require higher confidence.
+#
+LOW_ATR_THRESHOLD = 0.0004              # ATR below this = "calm market"
+HIGH_ATR_THRESHOLD = 0.0008             # ATR above this = "volatile market"
+ATR_ADJUSTED_CONFIDENCE_ENABLED = True
+
+# Per-pair confidence when ATR < LOW_ATR_THRESHOLD (calm market)
+# Format: 'PAIR': confidence_threshold_in_calm_market
+# If pair not listed, uses standard PAIR_MIN_CONFIDENCE (no ATR adjustment)
+PAIR_LOW_ATR_CONFIDENCE = {
+    # AUDUSD: 100% WR on low-ATR CONFIDENCE rejections - lower threshold
+    'AUDUSD': 0.44,
+    'CS.D.AUDUSD.MINI.IP': 0.44,
+
+    # NZDUSD: 100% WR on low-ATR CONFIDENCE rejections - lower threshold
+    'NZDUSD': 0.44,
+    'CS.D.NZDUSD.MINI.IP': 0.44,
+
+    # EURUSD: Test with moderate reduction (needs more data)
+    'EURUSD': 0.45,
+    'CS.D.EURUSD.CEEM.IP': 0.45,
+    'CS.D.EURUSD.MINI.IP': 0.45,
+
+    # GBPUSD: Test with moderate reduction (needs more data)
+    'GBPUSD': 0.45,
+    'CS.D.GBPUSD.MINI.IP': 0.45,
+
+    # JPY pairs - NO ATR adjustment (EURJPY showed 8.3% WR even in low ATR context)
+    # These pairs are explicitly NOT listed = use standard threshold regardless of ATR
+    # 'EURJPY': DO NOT ADD - high ATR correlates with losses
+    # 'GBPJPY': DO NOT ADD - insufficient data, keep conservative
+    # 'USDJPY': DO NOT ADD - insufficient data, keep conservative
+    # 'AUDJPY': DO NOT ADD - insufficient data, keep conservative
+}
+
+# Per-pair confidence when ATR >= HIGH_ATR_THRESHOLD (volatile market)
+# INCREASE threshold for volatile conditions to be more selective
+PAIR_HIGH_ATR_CONFIDENCE = {
+    # EURJPY: 8.3% WR in high ATR - INCREASE threshold to block more
+    'EURJPY': 0.52,
+    'CS.D.EURJPY.MINI.IP': 0.52,
+
+    # Other JPY pairs - be more cautious in high volatility
+    'GBPJPY': 0.52,
+    'CS.D.GBPJPY.MINI.IP': 0.52,
+    'USDJPY': 0.52,
+    'CS.D.USDJPY.MINI.IP': 0.52,
+    'AUDJPY': 0.52,
+    'CS.D.AUDJPY.MINI.IP': 0.52,
+
+    # Major pairs - slight increase in volatile conditions
+    'EURUSD': 0.50,
+    'CS.D.EURUSD.CEEM.IP': 0.50,
+    'CS.D.EURUSD.MINI.IP': 0.50,
+    'GBPUSD': 0.50,
+    'CS.D.GBPUSD.MINI.IP': 0.50,
+
+    # AUDUSD/NZDUSD - keep standard threshold even in high ATR (not enough data)
+    # Not listed = use standard threshold
+}
+
+# ============================================================================
+# v2.11.0: EMA DISTANCE-ADJUSTED CONFIDENCE THRESHOLDS (Per-Pair)
+# ============================================================================
+# Data-driven analysis from 30-day rejection outcomes (Dec 2025):
+#
+# CRITICAL FINDING: EMA distance dramatically affects CONFIDENCE rejection outcomes:
+#
+# | EMA Zone          | CONFIDENCE Win Rate | Sample     |
+# |-------------------|---------------------|------------|
+# | NEAR (<20 pips)   | 100% (42W/0L)       | ALL winners missed! |
+# | MEDIUM (20-30)    | 44.4% (8W/10L)      | Borderline          |
+# | FAR (30-40)       | 0% (0W/6L)          | Correctly rejected  |
+# | EXTENDED (40+)    | 25% (2W/6L)         | Correctly rejected  |
+#
+# Per-pair breakdown:
+# | Pair   | EMA Zone   | Win Rate | Action                         |
+# |--------|------------|----------|--------------------------------|
+# | AUDUSD | NEAR <20   | 100%     | Lower threshold near EMA       |
+# | AUDUSD | MEDIUM     | 100%     | Lower threshold medium EMA     |
+# | NZDUSD | NEAR <20   | 100%     | Lower threshold near EMA       |
+# | EURJPY | MEDIUM     | 0%       | INCREASE threshold             |
+# | EURJPY | FAR 30+    | 14%      | INCREASE threshold             |
+#
+# LOGIC: Signals near the EMA (price aligned with trend) are higher probability.
+#        Signals far from EMA (overextended) are lower probability.
+#
+NEAR_EMA_THRESHOLD_PIPS = 20            # Below this = "near EMA" (trend-aligned)
+FAR_EMA_THRESHOLD_PIPS = 30             # Above this = "far from EMA" (extended)
+EMA_DISTANCE_ADJUSTED_CONFIDENCE_ENABLED = True
+
+# Per-pair confidence when EMA distance < NEAR_EMA_THRESHOLD_PIPS (trend-aligned)
+# Format: 'PAIR': confidence_threshold_when_near_ema
+# If pair not listed, uses standard PAIR_MIN_CONFIDENCE (no EMA adjustment)
+PAIR_NEAR_EMA_CONFIDENCE = {
+    # AUDUSD: 100% WR on NEAR EMA CONFIDENCE rejections - lower threshold
+    'AUDUSD': 0.44,
+    'CS.D.AUDUSD.MINI.IP': 0.44,
+
+    # NZDUSD: 100% WR on NEAR EMA CONFIDENCE rejections - lower threshold
+    'NZDUSD': 0.44,
+    'CS.D.NZDUSD.MINI.IP': 0.44,
+
+    # EURUSD: Test with moderate reduction (needs more data)
+    'EURUSD': 0.45,
+    'CS.D.EURUSD.CEEM.IP': 0.45,
+    'CS.D.EURUSD.MINI.IP': 0.45,
+
+    # GBPUSD: Test with moderate reduction (needs more data)
+    'GBPUSD': 0.45,
+    'CS.D.GBPUSD.MINI.IP': 0.45,
+
+    # JPY pairs - NO EMA distance adjustment (EURJPY still had 0% WR near EMA)
+    # These pairs are explicitly NOT listed = use standard threshold
+}
+
+# Per-pair confidence when EMA distance >= FAR_EMA_THRESHOLD_PIPS (overextended)
+# INCREASE threshold for extended conditions - need more confidence when chasing
+PAIR_FAR_EMA_CONFIDENCE = {
+    # EURJPY: 0% WR at MEDIUM, 14% at FAR - INCREASE threshold significantly
+    'EURJPY': 0.55,
+    'CS.D.EURJPY.MINI.IP': 0.55,
+
+    # Other JPY pairs - be more cautious when extended from EMA
+    'GBPJPY': 0.52,
+    'CS.D.GBPJPY.MINI.IP': 0.52,
+    'USDJPY': 0.52,
+    'CS.D.USDJPY.MINI.IP': 0.52,
+    'AUDJPY': 0.52,
+    'CS.D.AUDJPY.MINI.IP': 0.52,
+
+    # Major pairs - slight increase when overextended
+    'EURUSD': 0.50,
+    'CS.D.EURUSD.CEEM.IP': 0.50,
+    'CS.D.EURUSD.MINI.IP': 0.50,
+    'GBPUSD': 0.50,
+    'CS.D.GBPUSD.MINI.IP': 0.50,
+
+    # AUDUSD/NZDUSD - keep standard threshold even when extended (100% WR at medium)
+    # Not listed = use standard threshold
+}
+
+# ============================================================================
 # v2.5.0: PAIR-SPECIFIC BLOCKING CONDITIONS
 # ============================================================================
 # Block signals for specific pairs when certain unfavorable conditions combine.

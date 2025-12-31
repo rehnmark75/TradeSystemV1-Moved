@@ -12,6 +12,7 @@ Architecture:
 - scanner_performance_tab: Per-scanner backtest metrics and drill-down
 - deep_dive_tab: Comprehensive analysis for individual stocks
 - broker_stats_tab: Real trading performance from RoboMarkets
+- chart_tab: Interactive charting with EMAs, MACD, and Volume
 """
 
 from .dashboard_tab import render_dashboard_tab
@@ -20,6 +21,7 @@ from .watchlists_tab import render_watchlists_tab
 from .scanner_performance_tab import render_scanner_performance_tab
 from .deep_dive_tab import render_deep_dive_tab
 from .broker_stats_tab import render_broker_stats_tab
+from .chart_tab import render_chart_tab
 
 __all__ = [
     'render_dashboard_tab',
@@ -28,4 +30,5 @@ __all__ = [
     'render_scanner_performance_tab',
     'render_deep_dive_tab',
     'render_broker_stats_tab',
+    'render_chart_tab',
 ]
