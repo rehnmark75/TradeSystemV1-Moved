@@ -18,3 +18,5 @@ mplfinance>=0.12.10b0
 matplotlib>=3.7.0
 # News sentiment analysis
 vaderSentiment>=3.3.2
+# Mermaid diagram rendering
+streamlit-mermaid>=0.2.0
