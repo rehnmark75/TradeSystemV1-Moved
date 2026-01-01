@@ -18,8 +18,8 @@ DAILY_RETENTION=7    # Keep 7 daily backups
 WEEKLY_RETENTION=4   # Keep 4 weekly backups (Sundays)
 MONTHLY_RETENTION=12 # Keep 12 monthly backups (1st of month)
 
-# Databases to backup
-DATABASES=("forex" "forex_config")
+# Databases to backup (all 4 databases)
+DATABASES=("forex" "forex_config" "stocks" "strategy_config")
 
 # Color codes for output
 RED='\033[0;31m'

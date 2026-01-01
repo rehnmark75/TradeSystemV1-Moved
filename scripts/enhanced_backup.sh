@@ -33,25 +33,76 @@ mkdir -p "${BACKUP_DIR}"
 # ======================
 echo -e "${BLUE}📊 Backing up PostgreSQL databases...${NC}"
 
-# Backup forex database
-echo "  → Backing up forex database..."
-if docker exec "${POSTGRES_CONTAINER}" pg_dump -U "${POSTGRES_USER}" -d forex --verbose --clean --if-exists --create --format=plain > "${BACKUP_DIR}/forex_backup_${TIMESTAMP}.sql" 2>/dev/null; then
-    gzip "${BACKUP_DIR}/forex_backup_${TIMESTAMP}.sql"
-    echo -e "${GREEN}  ✅ Forex database backed up${NC}"
-else
-    echo -e "${RED}  ❌ Forex database backup failed${NC}"
+# All databases to backup (includes tables, views, functions, triggers, sequences, indexes)
+DATABASES=("forex" "forex_config" "stocks" "strategy_config")
+
+# pg_dump options explanation:
+# --verbose: Show progress
+# --clean: Include DROP statements before CREATE
+# --if-exists: Add IF EXISTS to DROP statements
+# --create: Include CREATE DATABASE statement
+# --format=plain: SQL script format (readable, portable)
+# --no-owner: Don't include ownership commands (for portability)
+# --no-privileges: Don't include GRANT/REVOKE (for portability)
+# Note: pg_dump automatically includes ALL schema objects:
+#   - Tables with data
+#   - Views (including materialized views)
+#   - Functions and procedures
+#   - Triggers
+#   - Sequences
+#   - Indexes
+#   - Constraints (foreign keys, unique, check)
+#   - Custom types and domains
+#   - Extensions
+
+backup_single_database() {
+    local db_name=$1
+    echo "  → Backing up ${db_name} database..."
+
+    # pg_dump with comprehensive options for complete backup:
+    # - Tables, data, indexes, constraints
+    # - Views (regular and materialized)
+    # - Functions, procedures, triggers
+    # - Sequences, custom types, domains
+    # - Extensions (uuid-ossp, etc.)
+    if docker exec "${POSTGRES_CONTAINER}" pg_dump \
+        -U "${POSTGRES_USER}" \
+        -d "${db_name}" \
+        --verbose \
+        --clean \
+        --if-exists \
+        --create \
+        --format=plain \
+        --no-owner \
+        --no-privileges \
+        > "${BACKUP_DIR}/${db_name}_backup_${TIMESTAMP}.sql" 2>/dev/null; then
+
+        gzip "${BACKUP_DIR}/${db_name}_backup_${TIMESTAMP}.sql"
+
+        # Show what was backed up
+        local size=$(stat -f%z "${BACKUP_DIR}/${db_name}_backup_${TIMESTAMP}.sql.gz" 2>/dev/null || stat -c%s "${BACKUP_DIR}/${db_name}_backup_${TIMESTAMP}.sql.gz")
+        echo -e "${GREEN}  ✅ ${db_name} database backed up ($(numfmt --to=iec ${size}))${NC}"
+        return 0
+    else
+        echo -e "${RED}  ❌ ${db_name} database backup failed${NC}"
+        return 1
+    fi
+}
+
+# Backup all databases
+BACKUP_FAILED=0
+for db in "${DATABASES[@]}"; do
+    if ! backup_single_database "${db}"; then
+        BACKUP_FAILED=1
+    fi
+done
+
+if [[ ${BACKUP_FAILED} -eq 1 ]]; then
+    echo -e "${RED}❌ One or more database backups failed${NC}"
     exit 1
 fi
 
-# Backup forex_config database
-echo "  → Backing up forex_config database..."
-if docker exec "${POSTGRES_CONTAINER}" pg_dump -U "${POSTGRES_USER}" -d forex_config --verbose --clean --if-exists --create --format=plain > "${BACKUP_DIR}/forex_config_backup_${TIMESTAMP}.sql" 2>/dev/null; then
-    gzip "${BACKUP_DIR}/forex_config_backup_${TIMESTAMP}.sql"
-    echo -e "${GREEN}  ✅ Forex_config database backed up${NC}"
-else
-    echo -e "${RED}  ❌ Forex_config database backup failed${NC}"
-    exit 1
-fi
+echo -e "${GREEN}✅ All ${#DATABASES[@]} databases backed up successfully${NC}"
 
 # ======================
 # 2. Vector Database
@@ -172,15 +223,25 @@ echo -e "${BLUE}🕐 Timestamp:${NC} ${TIMESTAMP}"
 echo
 echo -e "${BLUE}🔍 Verifying backup integrity...${NC}"
 
-# Verify PostgreSQL backups
-for db_backup in "${BACKUP_DIR}"/forex*_${TIMESTAMP}.sql.gz; do
+# Verify all PostgreSQL database backups
+for db in "${DATABASES[@]}"; do
+    db_backup="${BACKUP_DIR}/${db}_backup_${TIMESTAMP}.sql.gz"
     if [[ -f "$db_backup" ]]; then
         if gzip -t "$db_backup" 2>/dev/null; then
-            echo -e "${GREEN}  ✅ $(basename "$db_backup") - integrity OK${NC}"
+            # Verify SQL content contains pg_dump header (check first 50 lines for flexibility)
+            if zcat "$db_backup" | head -50 | grep -q "PostgreSQL database dump"; then
+                echo -e "${GREEN}  ✅ $(basename "$db_backup") - integrity OK${NC}"
+            else
+                echo -e "${RED}  ❌ $(basename "$db_backup") - SQL content invalid${NC}"
+                exit 1
+            fi
         else
-            echo -e "${RED}  ❌ $(basename "$db_backup") - integrity FAILED${NC}"
+            echo -e "${RED}  ❌ $(basename "$db_backup") - gzip integrity FAILED${NC}"
             exit 1
         fi
+    else
+        echo -e "${RED}  ❌ ${db}_backup_${TIMESTAMP}.sql.gz - file missing${NC}"
+        exit 1
     fi
 done
 
