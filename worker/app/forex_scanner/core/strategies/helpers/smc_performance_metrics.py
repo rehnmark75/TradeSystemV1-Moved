@@ -208,8 +208,10 @@ class SMCPerformanceMetricsCalculator:
             metrics.volume_quality_score = vol_profile['quality_score']
 
             self.logger.debug(
-                f"Metrics calculated for {epic}: ER={metrics.efficiency_ratio:.3f}, "
-                f"Regime={metrics.market_regime}, BB%={metrics.bb_width_percentile:.1f}"
+                f"Metrics calculated for {epic}: "
+                f"ER={metrics.efficiency_ratio if metrics.efficiency_ratio is not None else 'N/A'}, "
+                f"Regime={metrics.market_regime}, "
+                f"BB%={metrics.bb_width_percentile if metrics.bb_width_percentile is not None else 'N/A'}"
             )
 
         except Exception as e:

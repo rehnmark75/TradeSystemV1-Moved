@@ -2943,9 +2943,11 @@ class SMCSimpleStrategy:
             signal['adx_trend_strength'] = metrics.adx_trend_strength
 
             if self.debug_logging:
+                er_str = f"{metrics.efficiency_ratio:.3f}" if metrics.efficiency_ratio is not None else "N/A"
+                eq_str = f"{metrics.entry_quality_score:.2f}" if metrics.entry_quality_score is not None else "N/A"
                 self.logger.debug(
-                    f"📊 Performance metrics added: ER={metrics.efficiency_ratio:.3f}, "
-                    f"Regime={metrics.market_regime}, EntryQuality={metrics.entry_quality_score:.2f}"
+                    f"📊 Performance metrics added: ER={er_str}, "
+                    f"Regime={metrics.market_regime}, EntryQuality={eq_str}"
                 )
 
         except ImportError as e:
