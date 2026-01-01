@@ -213,6 +213,9 @@ class ReversalScanner(BaseScanner):
         lows = np.array([float(c['low']) for c in candles])
         volumes = np.array([float(c['volume']) for c in candles])
 
+        # Get the actual candle timestamp for signal_timestamp
+        candle_timestamp = candles[-1].get('timestamp') if candles else None
+
         # Get candidate data for scoring
         candidate = await self._get_candidate_data(ticker, calculation_date)
         if not candidate:
@@ -312,6 +315,7 @@ class ReversalScanner(BaseScanner):
             ticker=ticker,
             scanner_name=self.scanner_name,
             signal_type=SignalType.BUY,
+            signal_timestamp=candle_timestamp if candle_timestamp else datetime.now(),
             entry_price=entry,
             stop_loss=stop,
             take_profit_1=tp1,

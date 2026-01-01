@@ -355,7 +355,7 @@ class StockScheduler:
             results['watchlist'] = {'error': str(e)}
 
         # === STAGE 6: ZLMA Strategy Signals ===
-        logger.info("\n[STAGE 6/7] Running ZLMA strategy...")
+        logger.info("\n[STAGE 6/10] Running ZLMA strategy...")
         try:
             signals = await self.zlma_strategy.scan_all_stocks()
             results['zlma_signals'] = {
@@ -370,7 +370,7 @@ class StockScheduler:
             results['zlma_signals'] = {'error': str(e)}
 
         # === STAGE 7: All Scanner Strategies ===
-        logger.info("\n[STAGE 7/9] Running all scanner strategies...")
+        logger.info("\n[STAGE 7/10] Running all scanner strategies...")
         try:
             if self.scanner_manager:
                 scanner_signals = await self.scanner_manager.run_all_scanners()
@@ -389,8 +389,25 @@ class StockScheduler:
             logger.error(f"[FAIL] Scanner Signals: {e}")
             results['scanner_signals'] = {'error': str(e)}
 
-        # === STAGE 8: Performance Tracking ===
-        logger.info("\n[STAGE 8/9] Updating signal performance...")
+        # === STAGE 8: Watchlist Scanner (5 predefined screens) ===
+        logger.info("\n[STAGE 8/10] Running watchlist scanner (5 predefined screens)...")
+        try:
+            if self.scanner_manager:
+                watchlist_results = await self.scanner_manager.run_watchlist_scanner()
+                results['watchlist_scanner'] = watchlist_results
+                total_wl = sum(watchlist_results.values())
+                logger.info(f"[OK] Watchlist Scanner: {total_wl} total matches")
+                for wl_name, count in watchlist_results.items():
+                    logger.info(f"     {wl_name}: {count}")
+            else:
+                logger.warning("[SKIP] Scanner Manager not available for watchlist scan")
+                results['watchlist_scanner'] = {'skipped': True}
+        except Exception as e:
+            logger.error(f"[FAIL] Watchlist Scanner: {e}")
+            results['watchlist_scanner'] = {'error': str(e)}
+
+        # === STAGE 9: Performance Tracking ===
+        logger.info("\n[STAGE 9/10] Updating signal performance...")
         try:
             if self.performance_tracker:
                 status_updates = await self.performance_tracker.update_signal_statuses()
@@ -404,8 +421,8 @@ class StockScheduler:
             logger.error(f"[FAIL] Performance Tracking: {e}")
             results['performance'] = {'error': str(e)}
 
-        # === STAGE 9: Claude AI Analysis ===
-        logger.info("\n[STAGE 9/9] Running Claude AI analysis on top signals...")
+        # === STAGE 10: Claude AI Analysis ===
+        logger.info("\n[STAGE 10/10] Running Claude AI analysis on top signals...")
         try:
             if not config.CLAUDE_ANALYSIS_ENABLED:
                 logger.info("[SKIP] Claude Analysis disabled in config")
@@ -1247,6 +1264,9 @@ def main():
         print("  5. watchlist  - Build tiered, scored watchlist")
         print("  6. zlma       - Run ZLMA strategy")
         print("  7. scanners   - Run all scanner strategies")
+        print("  8. watchlist_screens - Run 5 predefined watchlist screens")
+        print("  9. performance - Update signal performance tracking")
+        print("  10. claude    - Run Claude AI analysis on top signals")
 
         print(f"\nNext scheduled tasks:")
         print(f"  Full pipeline: {scheduler.get_next_pipeline()}")
@@ -1254,7 +1274,7 @@ def main():
 
         print("\nAvailable commands:")
         print("  run              - Start continuous scheduler")
-        print("  pipeline         - Run full 7-stage pipeline")
+        print("  pipeline         - Run full 10-stage pipeline")
         print("  premarket        - Run pre-market scanner scan only")
         print("  premarketpricing - Run Finnhub pre-market quotes & news (9:00 AM ET scan)")
         print("  intraday         - Run intraday scan only")

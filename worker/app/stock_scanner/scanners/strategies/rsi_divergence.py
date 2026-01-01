@@ -239,6 +239,7 @@ class RSIDivergenceScanner(BaseScanner):
         candidate['price_current_low'] = lows[current_idx]
         candidate['price_prior_low'] = lows[prior_idx]
         candidate['divergence_bars'] = current_idx - prior_idx
+        candidate['candle_timestamp'] = candles[-1].get('timestamp') if candles else None
 
         return self._create_signal(candidate, SignalType.BUY)
 
@@ -300,6 +301,7 @@ class RSIDivergenceScanner(BaseScanner):
         candidate['price_current_high'] = highs[current_idx]
         candidate['price_prior_high'] = highs[prior_idx]
         candidate['divergence_bars'] = current_idx - prior_idx
+        candidate['candle_timestamp'] = candles[-1].get('timestamp') if candles else None
 
         return self._create_signal(candidate, SignalType.SELL)
 
@@ -515,6 +517,7 @@ class RSIDivergenceScanner(BaseScanner):
             ticker=candidate['ticker'],
             scanner_name=self.scanner_name,
             signal_type=signal_type,
+            signal_timestamp=candidate.get('candle_timestamp') or datetime.now(),
             entry_price=entry,
             stop_loss=stop,
             take_profit_1=tp1,

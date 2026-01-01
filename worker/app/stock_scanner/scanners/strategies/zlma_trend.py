@@ -247,6 +247,7 @@ class ZLMATrendScanner(BaseScanner):
         candidate['ema_value'] = current_ema
         candidate['atr_value'] = current_atr
         candidate['crossover_strength'] = crossover_strength
+        candidate['candle_timestamp'] = candles[-1].get('timestamp') if candles else None
 
         # Calculate entry levels
         entry, stop, tp1, tp2 = self._calculate_entry_levels(candidate, signal_type)
@@ -280,6 +281,7 @@ class ZLMATrendScanner(BaseScanner):
             ticker=ticker,
             scanner_name=self.scanner_name,
             signal_type=signal_type,
+            signal_timestamp=candidate.get('candle_timestamp') or datetime.now(),
             entry_price=entry,
             stop_loss=stop,
             take_profit_1=tp1,

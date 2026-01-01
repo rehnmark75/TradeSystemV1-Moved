@@ -10,7 +10,7 @@ Unified view of all scanner signals with:
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
 
@@ -133,7 +133,7 @@ def render_signals_tab(service):
     with col1:
         date_from = st.date_input(
             "Signal Date From",
-            value=datetime.now().date(),
+            value=datetime.now().date() - timedelta(days=1),
             help="Filter signals detected from this date"
         )
 

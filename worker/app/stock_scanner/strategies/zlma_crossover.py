@@ -243,7 +243,7 @@ class ZLMACrossoverStrategy:
         signal = ZLMASignal(
             ticker=ticker,
             signal_type='BUY',
-            signal_timestamp=current['timestamp'] if 'timestamp' in current else datetime.now(),
+            signal_timestamp=current['timestamp'] if pd.notna(current.get('timestamp')) else datetime.now(),
             entry_price=entry_price,
             stop_loss_price=round(stop_loss_price, 4),
             take_profit_price=round(take_profit_price, 4),

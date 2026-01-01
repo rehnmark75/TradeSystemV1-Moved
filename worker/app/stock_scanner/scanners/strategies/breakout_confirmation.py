@@ -223,6 +223,7 @@ class BreakoutConfirmationScanner(BaseScanner):
             ticker=breakout_signal.ticker,
             scanner_name=self.scanner_name,
             signal_type=signal_type,
+            signal_timestamp=breakout_signal.signal_timestamp,
             entry_price=Decimal(str(round(entry, 4))),
             stop_loss=Decimal(str(round(stop, 4))),
             take_profit_1=Decimal(str(round(breakout_signal.take_profit_price, 4))),

@@ -161,10 +161,10 @@ class WatchlistScanner:
         """
         query = """
             DELETE FROM stock_watchlist_results
-            WHERE crossover_date < CURRENT_DATE - $1::interval
+            WHERE crossover_date < CURRENT_DATE - INTERVAL '1 day' * $1
             OR status = 'expired'
         """
-        result = await self.db.execute(query, f'{max_age_days} days')
+        result = await self.db.execute(query, max_age_days)
         # Extract count from result if available
         try:
             count = int(result.split()[-1]) if result else 0
@@ -263,6 +263,16 @@ class WatchlistScanner:
                 price = float(latest['close'])
                 volume = int(latest['volume'])
 
+                # Get the actual candle date (for accurate crossover_date)
+                candle_timestamp = latest.get('timestamp')
+                if candle_timestamp is not None:
+                    if hasattr(candle_timestamp, 'date'):
+                        actual_candle_date = candle_timestamp.date()
+                    else:
+                        actual_candle_date = scan_date
+                else:
+                    actual_candle_date = scan_date
+
                 # Get indicators (note: BacktestDataProvider uses 'rsi' not 'rsi_14')
                 ema_20 = float(latest.get('ema_20', 0))
                 ema_50 = float(latest.get('ema_50', 0))
@@ -274,6 +284,7 @@ class WatchlistScanner:
 
                 # Previous values for crossover detection
                 prev_macd = float(prev.get('macd', 0))
+                prev_macd_signal = float(prev.get('macd_signal', prev.get('signal', 0)))
 
                 # Gap and change calculations
                 gap_pct = ((latest['open'] - prev['close']) / prev['close'] * 100) if prev['close'] > 0 else 0
@@ -310,16 +321,16 @@ class WatchlistScanner:
 
                 if ticker in existing_entries[wl_name]:
                     # Existing entry - check if still valid
-                    seen_tickers[wl_name].add(ticker)
                     if still_valid:
                         # Continue tracking with original crossover_date
+                        seen_tickers[wl_name].add(ticker)
                         existing = existing_entries[wl_name][ticker]
                         results[wl_name].append(make_result(wl_name, existing.crossover_date))
                         continued[wl_name] += 1
-                    # If not valid, don't add to results (will be expired later)
+                    # If not valid, don't add to seen_tickers (will be expired later)
                 elif is_new_crossover:
-                    # New crossover today
-                    results[wl_name].append(make_result(wl_name, scan_date))
+                    # New crossover - use actual candle date, not scan date
+                    results[wl_name].append(make_result(wl_name, actual_candle_date))
                     new_crossovers[wl_name] += 1
 
                 # 2. EMA 20 Crossover
@@ -328,28 +339,32 @@ class WatchlistScanner:
                 still_valid = self._check_still_above_ema(price, ema_20, ema_200)
 
                 if ticker in existing_entries[wl_name]:
-                    seen_tickers[wl_name].add(ticker)
                     if still_valid:
+                        seen_tickers[wl_name].add(ticker)
                         existing = existing_entries[wl_name][ticker]
                         results[wl_name].append(make_result(wl_name, existing.crossover_date))
                         continued[wl_name] += 1
+                    # If not valid, don't add to seen_tickers (will be expired later)
                 elif is_new_crossover:
-                    results[wl_name].append(make_result(wl_name, scan_date))
+                    # New crossover - use actual candle date, not scan date
+                    results[wl_name].append(make_result(wl_name, actual_candle_date))
                     new_crossovers[wl_name] += 1
 
-                # 3. MACD Bullish Cross
+                # 3. MACD Bullish Cross (MACD crosses above Signal line)
                 wl_name = 'macd_bullish_cross'
-                is_new_crossover = self._check_macd_bullish_cross(price, ema_200, macd, prev_macd)
-                still_valid = self._check_macd_still_positive(price, ema_200, macd)
+                is_new_crossover = self._check_macd_bullish_cross(price, ema_200, macd, macd_signal, prev_macd, prev_macd_signal)
+                still_valid = self._check_macd_still_bullish(price, ema_200, macd, macd_signal)
 
                 if ticker in existing_entries[wl_name]:
-                    seen_tickers[wl_name].add(ticker)
                     if still_valid:
+                        seen_tickers[wl_name].add(ticker)
                         existing = existing_entries[wl_name][ticker]
                         results[wl_name].append(make_result(wl_name, existing.crossover_date))
                         continued[wl_name] += 1
+                    # If not valid, don't add to seen_tickers (will be expired later)
                 elif is_new_crossover:
-                    results[wl_name].append(make_result(wl_name, scan_date))
+                    # New crossover - use actual candle date, not scan date
+                    results[wl_name].append(make_result(wl_name, actual_candle_date))
                     new_crossovers[wl_name] += 1
 
                 # ===== EVENT WATCHLISTS (single-day, no tracking) =====
@@ -401,16 +416,17 @@ class WatchlistScanner:
             return False
         return price > ema and price > ema_200
 
-    def _check_macd_still_positive(
+    def _check_macd_still_bullish(
         self,
         price: float,
         ema_200: float,
-        macd: float
+        macd: float,
+        macd_signal: float
     ) -> bool:
-        """Check if MACD is still positive and price above EMA 200 (continuation check)."""
+        """Check if MACD is still above Signal line and price above EMA 200 (continuation check)."""
         if ema_200 <= 0:
             return False
-        return macd > 0 and price > ema_200
+        return macd > macd_signal and price > ema_200
 
     def _check_ema_50_crossover(
         self,
@@ -479,11 +495,13 @@ class WatchlistScanner:
         price: float,
         ema_200: float,
         macd: float,
-        prev_macd: float
+        macd_signal: float,
+        prev_macd: float,
+        prev_macd_signal: float
     ) -> bool:
         """
         Check MACD bullish cross criteria:
-        - MACD crosses from negative to positive
+        - MACD crosses above Signal line (today MACD > Signal, yesterday MACD < Signal)
         - Price > EMA 200 (uptrend confirmation)
         """
         if ema_200 <= 0:
@@ -493,12 +511,12 @@ class WatchlistScanner:
         if price <= ema_200:
             return False
 
-        # MACD must be positive now
-        if macd <= 0:
+        # MACD must be above Signal line now
+        if macd <= macd_signal:
             return False
 
-        # MACD was negative before (cross)
-        if prev_macd >= 0:
+        # MACD was below Signal line before (crossover)
+        if prev_macd >= prev_macd_signal:
             return False
 
         return True
