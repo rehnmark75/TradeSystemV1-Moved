@@ -1392,6 +1392,21 @@ class SMCSimpleStrategy:
             # Update cooldown (use candle timestamp for backtest compatibility)
             self._update_cooldown(pair, candle_dt)
 
+            # ================================================================
+            # PERFORMANCE METRICS: Calculate enhanced metrics for analysis
+            # ================================================================
+            try:
+                signal = self._add_performance_metrics(
+                    signal=signal,
+                    df_entry=entry_df,
+                    df_trigger=df_trigger,
+                    df_4h=df_4h,
+                    epic=epic
+                )
+            except Exception as metrics_error:
+                # Don't fail the signal if metrics calculation fails
+                self.logger.warning(f"⚠️ Performance metrics calculation failed: {metrics_error}")
+
             return signal
 
         except Exception as e:
@@ -2850,6 +2865,153 @@ class SMCSimpleStrategy:
             vol_col = 'ltv' if 'ltv' in df_4h.columns else 'volume' if 'volume' in df_4h.columns else None
             if vol_col:
                 context['candle_4h_volume'] = float(df_4h[vol_col].iloc[-1])
+
+        # ================================================================
+        # PERFORMANCE METRICS for rejection analysis
+        # ================================================================
+        context = self._add_performance_metrics_to_rejection(
+            context, df_trigger, df_4h, df_entry
+        )
+
+        return context
+
+    def _add_performance_metrics(
+        self,
+        signal: Dict,
+        df_entry: Optional[pd.DataFrame],
+        df_trigger: pd.DataFrame,
+        df_4h: pd.DataFrame,
+        epic: str
+    ) -> Dict:
+        """
+        Add enhanced performance metrics to signal for analysis.
+
+        This method calculates additional metrics (Efficiency Ratio, Market Regime,
+        Entry Quality, etc.) and adds them to the signal dict without affecting
+        the core signal detection logic.
+
+        Args:
+            signal: The signal dict to enhance
+            df_entry: Entry timeframe data (5m)
+            df_trigger: Trigger timeframe data (15m)
+            df_4h: 4H timeframe data
+            epic: Trading pair epic code
+
+        Returns:
+            Enhanced signal dict with performance_metrics added
+        """
+        try:
+            # Lazy import to avoid circular dependencies
+            from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
+                get_performance_metrics_calculator
+            )
+
+            calculator = get_performance_metrics_calculator(self.logger)
+
+            # Calculate full metrics
+            metrics = calculator.calculate_metrics(
+                df_5m=df_entry,
+                df_15m=df_trigger,
+                df_4h=df_4h,
+                signal_data=signal,
+                epic=epic
+            )
+
+            # Add metrics to signal as nested dict
+            metrics_dict = metrics.to_json_safe()
+            signal['performance_metrics'] = metrics_dict
+
+            # Also add key metrics as top-level fields for easier database storage
+            signal['efficiency_ratio'] = metrics.efficiency_ratio
+            signal['market_regime_detected'] = metrics.market_regime
+            signal['regime_confidence'] = metrics.regime_confidence
+            signal['bb_width_percentile'] = metrics.bb_width_percentile
+            signal['atr_percentile'] = metrics.atr_percentile
+            signal['volatility_state'] = metrics.volatility_state
+            signal['entry_quality_score'] = metrics.entry_quality_score
+            signal['distance_from_optimal_fib'] = metrics.distance_from_optimal_fib
+            signal['entry_candle_momentum'] = metrics.entry_candle_momentum
+            signal['mtf_confluence_score'] = metrics.mtf_confluence_score
+            signal['htf_candle_position'] = metrics.htf_candle_position
+            signal['all_timeframes_aligned'] = metrics.all_timeframes_aligned
+            signal['volume_at_swing_break'] = metrics.volume_at_swing_break
+            signal['volume_trend'] = metrics.volume_trend
+            signal['volume_quality_score'] = metrics.volume_quality_score
+            signal['adx_value'] = metrics.adx_value
+            signal['adx_plus_di'] = metrics.adx_plus_di
+            signal['adx_minus_di'] = metrics.adx_minus_di
+            signal['adx_trend_strength'] = metrics.adx_trend_strength
+
+            if self.debug_logging:
+                self.logger.debug(
+                    f"📊 Performance metrics added: ER={metrics.efficiency_ratio:.3f}, "
+                    f"Regime={metrics.market_regime}, EntryQuality={metrics.entry_quality_score:.2f}"
+                )
+
+        except ImportError as e:
+            self.logger.debug(f"Performance metrics module not available: {e}")
+        except Exception as e:
+            self.logger.warning(f"Failed to add performance metrics: {e}")
+
+        return signal
+
+    def _add_performance_metrics_to_rejection(
+        self,
+        context: Dict,
+        df_trigger: Optional[pd.DataFrame],
+        df_4h: Optional[pd.DataFrame],
+        df_entry: Optional[pd.DataFrame] = None
+    ) -> Dict:
+        """
+        Add quick performance metrics to rejection context.
+
+        This is a lighter-weight version for rejections where we may not
+        have all data available.
+
+        Args:
+            context: Existing rejection context dict
+            df_trigger: Trigger timeframe data
+            df_4h: 4H timeframe data
+            df_entry: Optional entry timeframe data
+
+        Returns:
+            Context dict with performance metrics added
+        """
+        try:
+            from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
+                get_performance_metrics_calculator
+            )
+
+            calculator = get_performance_metrics_calculator(self.logger)
+
+            # Use the most available dataframe
+            df_primary = df_entry if df_entry is not None and len(df_entry) > 0 else df_trigger
+
+            if df_primary is not None and len(df_primary) >= 20:
+                quick_metrics = calculator.calculate_quick_metrics(df_primary)
+
+                context['efficiency_ratio'] = quick_metrics.get('efficiency_ratio')
+                context['market_regime_detected'] = quick_metrics.get('market_regime')
+                context['atr_percentile'] = quick_metrics.get('atr_percentile')
+                context['volatility_state'] = quick_metrics.get('volatility_state')
+
+                # Also calculate BB percentile if possible
+                if df_4h is not None:
+                    full_metrics = calculator.calculate_metrics(
+                        df_5m=df_entry,
+                        df_15m=df_trigger,
+                        df_4h=df_4h
+                    )
+                    context['bb_width_percentile'] = full_metrics.bb_width_percentile
+                    context['adx_value'] = full_metrics.adx_value
+                    context['adx_trend_strength'] = full_metrics.adx_trend_strength
+                    context['performance_metrics'] = full_metrics.to_json_safe()
+
+        except ImportError:
+            pass  # Module not available
+        except Exception as e:
+            if self.debug_logging:
+                self.logger.debug(f"Failed to add rejection metrics: {e}")
 
         return context
 
