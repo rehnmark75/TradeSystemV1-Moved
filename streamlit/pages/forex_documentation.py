@@ -108,6 +108,7 @@ def render_sidebar_navigation():
         ("🗄️ Database Schema", "database"),
         ("📈 SMC Simple Strategy", "strategy"),
         ("⚙️ Configuration Guide", "config"),
+        ("🔧 Parameter Optimizer", "optimizer"),
     ]
 
     selected = st.sidebar.radio(
@@ -962,6 +963,203 @@ docker exec postgres psql -U postgres -d forex -c "SELECT * FROM trade_log ORDER
         """, language="bash")
 
 
+def render_optimizer_section():
+    """Section 9: Parameter Optimizer."""
+    st.markdown('<div class="section-header"><h2>🔧 Parameter Optimizer</h2></div>', unsafe_allow_html=True)
+
+    st.markdown("""
+    The **Parameter Optimizer** automatically analyzes rejection outcomes and generates
+    recommendations to adjust SMC Simple strategy parameters. It helps optimize filter
+    thresholds based on actual trade performance data.
+    """)
+
+    st.markdown("### How It Works")
+    render_mermaid("""
+flowchart TB
+    subgraph Data["Data Collection"]
+        REJ["smc_rejection_outcomes<br/>Table"]
+        OUT["Outcome Analysis<br/>(WIN/LOSS/PENDING)"]
+    end
+
+    subgraph Analysis["Performance Analysis"]
+        STAGE["Stage-Level Analysis<br/>Win rates per rejection stage"]
+        PAIR["Pair-Level Analysis<br/>Win rates per currency pair"]
+    end
+
+    subgraph Recommendations["Recommendation Engine"]
+        RELAX["RELAX Filter<br/>Win rate > 55%<br/>= Lower threshold"]
+        TIGHTEN["TIGHTEN Filter<br/>Win rate < 45%<br/>= Raise threshold"]
+        SKIP["NO CHANGE<br/>45-55% win rate<br/>or at bounds"]
+    end
+
+    subgraph Apply["Apply Changes"]
+        DB["Update strategy_config DB"]
+        AUDIT["Create audit record"]
+    end
+
+    REJ --> OUT
+    OUT --> STAGE
+    OUT --> PAIR
+    STAGE --> RELAX
+    STAGE --> TIGHTEN
+    STAGE --> SKIP
+    PAIR --> RELAX
+    PAIR --> TIGHTEN
+    RELAX --> DB
+    TIGHTEN --> DB
+    DB --> AUDIT
+    """, height=500)
+
+    st.markdown("### Analyzable Rejection Stages")
+    st.markdown("""
+    The optimizer analyzes rejections that have an `attempted_direction` field,
+    allowing outcome correlation with market movement:
+
+    | Stage | Parameter Affected | Relax Delta | Tighten Delta |
+    |-------|-------------------|-------------|---------------|
+    | CONFIDENCE | `min_confidence_threshold` | -0.02 | +0.02 |
+    | CONFIDENCE_CAP | `min_confidence_threshold` | -0.02 | +0.02 |
+    | TIER2_SWING | `min_body_percentage` | -0.05 | +0.05 |
+    | TIER3_PULLBACK | `fib_pullback_min` | -0.02 | +0.02 |
+    | VOLUME_LOW | `min_volume_ratio` | -0.05 | +0.05 |
+    | MACD_MISALIGNED | `macd_alignment_filter_enabled` | False | True |
+    | RISK_LIMIT | `min_rr_ratio` | -0.1 | +0.1 |
+
+    **Non-analyzable stages** (no direction data): SESSION, COOLDOWN, TIER1_EMA
+    """)
+
+    st.markdown("### Parameter Bounds")
+    st.markdown("""
+    To prevent over-optimization (infinite adjustment loops), each parameter has
+    minimum and maximum bounds:
+
+    | Parameter | Min | Max |
+    |-----------|-----|-----|
+    | `min_confidence_threshold` | 0.40 | 0.60 |
+    | `min_body_percentage` | 0.10 | 0.50 |
+    | `fib_pullback_min` | 0.15 | 0.40 |
+    | `min_volume_ratio` | 0.30 | 0.80 |
+    | `min_rr_ratio` | 1.0 | 2.5 |
+
+    When a parameter reaches its bound, the optimizer skips further adjustments
+    in that direction and notes "at minimum/maximum bound" in the skip reason.
+    """)
+
+    st.markdown("### Using the Optimizer")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("""
+        **Streamlit UI** (Recommended)
+        1. Navigate to **Unified Analytics**
+        2. Go to **Settings** → **SMC Config**
+        3. Select **Parameter Optimizer** tab
+        4. Set analysis period (days)
+        5. Click **Fetch Recommendations**
+        6. Review recommendations
+        7. Click **Apply Recommendations**
+        """)
+
+    with col2:
+        st.markdown("""
+        **CLI Usage**
+        ```bash
+        # Dry run (view recommendations)
+        docker exec task-worker python \\
+          /app/forex_scanner/monitoring/parameter_optimizer.py \\
+          --days 30
+
+        # Apply recommendations
+        docker exec task-worker python \\
+          /app/forex_scanner/monitoring/parameter_optimizer.py \\
+          --days 30 --apply
+
+        # Export SQL only
+        docker exec task-worker python \\
+          /app/forex_scanner/monitoring/parameter_optimizer.py \\
+          --days 30 --export-sql
+        ```
+        """)
+
+    st.markdown("### Recommendation Logic")
+    st.markdown("""
+    The optimizer uses these thresholds to determine actions:
+
+    | Win Rate | Action | Reasoning |
+    |----------|--------|-----------|
+    | > 55% | **RELAX** filter | High win rate suggests filter is too strict |
+    | < 45% | **TIGHTEN** filter | Low win rate suggests filter is too loose |
+    | 45-55% | **NO CHANGE** | Win rate is acceptable |
+    | At bound | **SKIP** | Parameter already at min/max limit |
+    | < 10 samples | **SKIP** | Insufficient data for reliable recommendation |
+    """)
+
+    st.markdown("### Output Example")
+    with st.expander("View Sample Optimizer Output"):
+        st.code("""
+=== SMC Simple Parameter Optimizer ===
+Analysis Period: 30 days
+Mode: DRY-RUN (preview only)
+
+--- Stage-Level Analysis ---
+Stage: CONFIDENCE
+  Total: 45, Won: 28, Lost: 17
+  Win Rate: 62.22%
+  Recommendation: RELAX - Lower min_confidence_threshold by 0.02
+  Current: 0.46, Proposed: 0.44
+
+Stage: VOLUME_LOW
+  Total: 23, Won: 8, Lost: 15
+  Win Rate: 34.78%
+  Recommendation: TIGHTEN - Raise min_volume_ratio by 0.05
+  Current: 0.50, Proposed: 0.55
+
+--- Pair-Level Analysis ---
+Epic: CS.D.EURUSD.MINI.IP
+  Total: 67, Won: 41, Lost: 26
+  Win Rate: 61.19%
+  Recommendation: RELAX - Lower min_confidence_threshold by 0.02
+  Current: 0.44, Proposed: 0.42
+  Note: Already at minimum bound (0.40), skipping
+
+--- Summary ---
+Recommendations generated: 2
+Skipped (at bounds): 1
+To apply changes, run with --apply flag
+        """, language="text")
+
+    st.markdown("### Key Files")
+    st.markdown("""
+    | File | Location | Purpose |
+    |------|----------|---------|
+    | `parameter_optimizer.py` | worker/app/forex_scanner/monitoring/ | CLI optimizer tool |
+    | `smc_simple_config_service.py` | streamlit/services/ | Service functions with bounds |
+    | `smc_config_tab.py` | streamlit/components/tabs/ | Parameter Optimizer UI tab |
+    | `rejection_outcome_analyzer.py` | worker/app/forex_scanner/monitoring/ | Outcome data collector |
+    """)
+
+    st.markdown("### Scheduled Optimization")
+    st.markdown("""
+    The rejection outcome analyzer runs daily at 3 AM via cron job:
+
+    ```bash
+    0 3 * * * docker exec task-worker python /app/forex_scanner/monitoring/rejection_outcome_analyzer.py
+    ```
+
+    This populates the `smc_rejection_outcomes` table that the optimizer uses for analysis.
+    You can run the optimizer manually after the analyzer to get fresh recommendations.
+    """)
+
+    st.markdown("""
+    <div class="info-box">
+    <strong>💡 Best Practice:</strong> Review recommendations before applying. The optimizer
+    provides data-driven suggestions, but market conditions change. Consider running in
+    dry-run mode first and reviewing the win rate statistics before making changes.
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def main():
     """Main application entry point."""
     render_header()
@@ -986,6 +1184,8 @@ def main():
         render_strategy_section()
     elif selected_section == "⚙️ Configuration Guide":
         render_config_section()
+    elif selected_section == "🔧 Parameter Optimizer":
+        render_optimizer_section()
 
     # Footer
     st.markdown("---")
