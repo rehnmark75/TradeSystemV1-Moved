@@ -57,7 +57,7 @@ MARKET_SCHEDULES = {
     },
 }
 
-# US market holidays 2024-2025 (add more as needed)
+# US market holidays 2024-2026 (add more as needed)
 US_HOLIDAYS = [
     # 2024
     datetime(2024, 1, 1),    # New Year's Day
@@ -81,6 +81,17 @@ US_HOLIDAYS = [
     datetime(2025, 9, 1),    # Labor Day
     datetime(2025, 11, 27),  # Thanksgiving
     datetime(2025, 12, 25),  # Christmas
+    # 2026
+    datetime(2026, 1, 1),    # New Year's Day
+    datetime(2026, 1, 19),   # MLK Day (3rd Monday)
+    datetime(2026, 2, 16),   # Presidents Day (3rd Monday)
+    datetime(2026, 4, 3),    # Good Friday
+    datetime(2026, 5, 25),   # Memorial Day (last Monday)
+    datetime(2026, 6, 19),   # Juneteenth
+    datetime(2026, 7, 3),    # Independence Day (observed - July 4 is Saturday)
+    datetime(2026, 9, 7),    # Labor Day (1st Monday)
+    datetime(2026, 11, 26),  # Thanksgiving (4th Thursday)
+    datetime(2026, 12, 25),  # Christmas
 ]
 
 
@@ -379,3 +390,53 @@ def should_scan_stocks() -> bool:
         return True
 
     return False
+
+
+def is_trading_day(dt: datetime = None) -> bool:
+    """
+    Check if a given date is a trading day (weekday and not a holiday).
+
+    Args:
+        dt: Date to check (defaults to today in ET)
+
+    Returns:
+        True if it's a trading day, False otherwise
+    """
+    if dt is None:
+        dt = _checker._get_exchange_time(Exchange.NYSE)
+
+    # Check if it's a weekend
+    if dt.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        return False
+
+    # Check if it's a holiday
+    if _checker.is_holiday(Exchange.NYSE, dt):
+        return False
+
+    return True
+
+
+def get_last_trading_day(dt: datetime = None) -> datetime:
+    """
+    Get the most recent trading day (excluding today if market hasn't closed).
+
+    Args:
+        dt: Reference date (defaults to now in ET)
+
+    Returns:
+        datetime of the last trading day
+    """
+    if dt is None:
+        dt = _checker._get_exchange_time(Exchange.NYSE)
+
+    # Start from yesterday
+    check_date = dt - timedelta(days=1)
+
+    # Go back until we find a trading day
+    for _ in range(7):  # Max 7 days back (should never need more)
+        if is_trading_day(check_date):
+            return check_date
+        check_date -= timedelta(days=1)
+
+    # Fallback (shouldn't happen)
+    return dt - timedelta(days=1)

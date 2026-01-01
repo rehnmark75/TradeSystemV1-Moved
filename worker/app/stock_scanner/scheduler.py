@@ -58,6 +58,7 @@ from stock_scanner.core.screener.watchlist_builder import WatchlistBuilder
 from stock_scanner.core.smc.smc_stock_analyzer import SMCStockAnalyzer
 from stock_scanner.core.fundamentals.fundamentals_fetcher import FundamentalsFetcher
 from stock_scanner.strategies.zlma_trend import ZeroLagMATrendStrategy
+from stock_scanner.core.detection.market_hours import is_trading_day, get_last_trading_day
 
 # Import scanner manager for running all scanners
 try:
@@ -1045,13 +1046,18 @@ class StockScheduler:
 
         This handles the case where the scheduler starts after the scheduled time
         (e.g., after a weekend or restart). If the task hasn't run today, run it now.
+
+        Respects market holidays - won't run on non-trading days.
         """
         now = datetime.now(self.ET)
         today = now.date()
-        is_trading_day = now.weekday() < 6  # Mon-Sat (Saturday runs for Friday EOD data)
 
-        if not is_trading_day:
-            logger.info("Sunday - skipping missed task check")
+        # Check if today is a trading day (weekday + not a holiday)
+        if not is_trading_day(now):
+            if now.weekday() >= 5:
+                logger.info("Weekend - skipping missed task check")
+            else:
+                logger.info("Market holiday - skipping missed task check")
             return
 
         # Check if full_pipeline has run today
@@ -1087,26 +1093,31 @@ class StockScheduler:
 
         Returns:
             Tuple of (task_name, next_time)
+
+        Note: Skips weekends and market holidays when scheduling.
         """
         now = datetime.now(self.ET)
         today = now.date()
 
         candidates = []
 
-        # Always add daily scans - they run Mon-Fri
-        # If today is a weekend, schedule for next Monday
+        # Always add daily scans - they run on trading days only
+        # If today is not a trading day, schedule for next trading day
         for task_name, config in self.SCHEDULE.items():
             target = datetime.combine(today, config['time'])
             target = self.ET.localize(target)
 
-            # If it's Sunday or we've passed the time, find next valid slot
-            if now >= target or now.weekday() >= 6:
-                # Schedule for tomorrow (or today if Sunday and time hasn't passed)
+            # If we've passed the time or today is not a trading day, find next valid slot
+            if now >= target or not is_trading_day(now):
+                # Start from tomorrow
                 if now >= target:
                     target += timedelta(days=1)
-                # Skip Sunday only
-                while target.weekday() >= 6:
+                # Skip weekends and holidays
+                max_attempts = 10  # Safety limit
+                attempts = 0
+                while not is_trading_day(target) and attempts < max_attempts:
                     target += timedelta(days=1)
+                    attempts += 1
 
             candidates.append((task_name, target))
 
