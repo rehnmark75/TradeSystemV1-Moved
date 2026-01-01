@@ -177,13 +177,23 @@ def _render_sector_heatmap(df: pd.DataFrame) -> None:
     # Create horizontal bar chart for sector RS
     fig = go.Figure()
 
+    # Handle missing rs_vs_spy - fill with 1.0 (neutral) if missing
+    df_work = df.copy()
+    if 'rs_vs_spy' not in df_work.columns:
+        df_work['rs_vs_spy'] = 1.0
+    df_work['rs_vs_spy'] = df_work['rs_vs_spy'].fillna(1.0)
+
+    if 'sector_stage' not in df_work.columns:
+        df_work['sector_stage'] = 'unknown'
+    df_work['sector_stage'] = df_work['sector_stage'].fillna('unknown')
+
     # Sort by RS
-    df_sorted = df.sort_values('rs_vs_spy', ascending=True)
+    df_sorted = df_work.sort_values('rs_vs_spy', ascending=True)
 
     # Color based on RS value
     colors = []
     for rs in df_sorted['rs_vs_spy']:
-        if rs is None:
+        if pd.isna(rs) or rs is None:
             colors.append('#9E9E9E')
         elif rs > 1.1:
             colors.append('#00C853')
@@ -199,7 +209,7 @@ def _render_sector_heatmap(df: pd.DataFrame) -> None:
         y=df_sorted['sector'],
         orientation='h',
         marker_color=colors,
-        text=[f"{rs:.2f}" if rs else "N/A" for rs in df_sorted['rs_vs_spy']],
+        text=[f"{rs:.2f}" if pd.notna(rs) else "N/A" for rs in df_sorted['rs_vs_spy']],
         textposition='auto',
         hovertemplate="<b>%{y}</b><br>RS vs SPY: %{x:.2f}<br>Stage: %{customdata}<extra></extra>",
         customdata=df_sorted['sector_stage']
@@ -232,15 +242,34 @@ def _render_sector_details(df: pd.DataFrame, service: Any) -> None:
     # Create styled table
     st.markdown("#### Sector Details")
 
-    # Display columns
-    cols = ['sector', 'sector_etf', 'rs_vs_spy', 'rs_percentile', 'rs_trend', 'sector_return_20d', 'sector_stage', 'stocks_in_sector']
+    # Display columns - only use columns that exist
+    all_cols = ['sector', 'sector_etf', 'rs_vs_spy', 'rs_percentile', 'rs_trend', 'sector_return_20d', 'sector_stage', 'stocks_in_sector']
+    available_cols = [c for c in all_cols if c in df.columns]
 
-    display_df = df[cols].copy()
-    display_df.columns = ['Sector', 'ETF', 'RS vs SPY', 'RS %ile', 'Trend', '20D Return', 'Stage', 'Stocks']
+    if not available_cols:
+        st.info("Sector data not available yet.")
+        return
 
-    # Format numeric columns
-    display_df['RS vs SPY'] = display_df['RS vs SPY'].apply(lambda x: f"{x:.2f}" if x else "N/A")
-    display_df['20D Return'] = display_df['20D Return'].apply(lambda x: f"{x:+.1f}%" if x else "N/A")
+    display_df = df[available_cols].copy()
+
+    # Rename columns
+    col_rename = {
+        'sector': 'Sector',
+        'sector_etf': 'ETF',
+        'rs_vs_spy': 'RS vs SPY',
+        'rs_percentile': 'RS %ile',
+        'rs_trend': 'Trend',
+        'sector_return_20d': '20D Return',
+        'sector_stage': 'Stage',
+        'stocks_in_sector': 'Stocks'
+    }
+    display_df = display_df.rename(columns={k: v for k, v in col_rename.items() if k in display_df.columns})
+
+    # Format numeric columns if they exist
+    if 'RS vs SPY' in display_df.columns:
+        display_df['RS vs SPY'] = display_df['RS vs SPY'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+    if '20D Return' in display_df.columns:
+        display_df['20D Return'] = display_df['20D Return'].apply(lambda x: f"{x:+.1f}%" if pd.notna(x) else "N/A")
 
     # Style the dataframe
     def style_rs_trend(val):
@@ -299,18 +328,40 @@ def _render_rs_leaders(service: Any) -> None:
     rs_leaders = service.get_rs_leaders(min_rs_percentile=min_rs, limit=30)
 
     if rs_leaders.empty:
-        st.info("No stocks found meeting the RS criteria. Try lowering the minimum percentile.")
+        st.info("No stocks found meeting the RS criteria. RS data may not be calculated yet, or try lowering the minimum percentile.")
         return
 
-    # Display table
-    display_cols = ['ticker', 'name', 'sector', 'current_price', 'rs_percentile', 'rs_trend', 'price_change_20d', 'trend_strength', 'pct_from_52w_high']
-    display_df = rs_leaders[display_cols].copy()
-    display_df.columns = ['Ticker', 'Name', 'Sector', 'Price', 'RS %ile', 'RS Trend', '20D Chg', 'Trend', '% from 52W High']
+    # Display table - only use columns that exist
+    all_cols = ['ticker', 'name', 'sector', 'current_price', 'rs_percentile', 'rs_trend', 'price_change_20d', 'trend_strength', 'pct_from_52w_high']
+    available_cols = [c for c in all_cols if c in rs_leaders.columns]
 
-    # Format
-    display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:.2f}" if x else "N/A")
-    display_df['20D Chg'] = display_df['20D Chg'].apply(lambda x: f"{x:+.1f}%" if x else "N/A")
-    display_df['% from 52W High'] = display_df['% from 52W High'].apply(lambda x: f"{x:.1f}%" if x else "N/A")
+    if not available_cols:
+        st.info("RS data not available yet.")
+        return
+
+    display_df = rs_leaders[available_cols].copy()
+
+    # Rename columns
+    col_rename = {
+        'ticker': 'Ticker',
+        'name': 'Name',
+        'sector': 'Sector',
+        'current_price': 'Price',
+        'rs_percentile': 'RS %ile',
+        'rs_trend': 'RS Trend',
+        'price_change_20d': '20D Chg',
+        'trend_strength': 'Trend',
+        'pct_from_52w_high': '% from 52W High'
+    }
+    display_df = display_df.rename(columns={k: v for k, v in col_rename.items() if k in display_df.columns})
+
+    # Format columns if they exist
+    if 'Price' in display_df.columns:
+        display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:.2f}" if pd.notna(x) else "N/A")
+    if '20D Chg' in display_df.columns:
+        display_df['20D Chg'] = display_df['20D Chg'].apply(lambda x: f"{x:+.1f}%" if pd.notna(x) else "N/A")
+    if '% from 52W High' in display_df.columns:
+        display_df['% from 52W High'] = display_df['% from 52W High'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
 
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 

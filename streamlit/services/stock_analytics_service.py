@@ -3116,6 +3116,7 @@ Respond in this exact JSON format:
         Returns:
             Dict with regime, SPY metrics, breadth indicators, and strategy recommendations
         """
+        # First try to get from market_context table
         query = """
             SELECT
                 calculation_date,
@@ -3150,7 +3151,154 @@ Respond in this exact JSON format:
             if result.get('recommended_strategies') and isinstance(result['recommended_strategies'], str):
                 result['recommended_strategies'] = json.loads(result['recommended_strategies'])
             return result
-        return {}
+
+        # Fallback: Calculate from existing stock data
+        return _self._calculate_market_regime_fallback()
+
+    def _calculate_market_regime_fallback(_self) -> Dict[str, Any]:
+        """
+        Calculate market regime from existing stock screening metrics.
+
+        This is used when the market_context table is empty.
+        """
+        # Get SPY metrics if available
+        spy_query = """
+            SELECT
+                current_price,
+                ema_50,
+                ema_200,
+                trend_strength,
+                atr_percent
+            FROM stock_screening_metrics
+            WHERE ticker = 'SPY'
+            AND calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+            LIMIT 1
+        """
+        spy_result = _self._execute_query(spy_query, ())
+
+        # Get breadth from all stocks
+        breadth_query = """
+            SELECT
+                COUNT(*) FILTER (WHERE current_price > ema_200) as above_200,
+                COUNT(*) FILTER (WHERE current_price > ema_50) as above_50,
+                COUNT(*) FILTER (WHERE current_price > ema_20) as above_20,
+                COUNT(*) FILTER (WHERE trend_strength IN ('strong_up', 'up')) as bullish,
+                COUNT(*) FILTER (WHERE trend_strength IN ('strong_down', 'down')) as bearish,
+                COUNT(*) as total,
+                AVG(atr_percent) as avg_atr
+            FROM stock_screening_metrics
+            WHERE calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+        """
+        breadth_result = _self._execute_query(breadth_query, ())
+
+        if not spy_result and not breadth_result:
+            return {}
+
+        # Build regime data from available metrics
+        result = {}
+
+        if spy_result:
+            spy = spy_result[0]
+            spy_price = float(spy.get('current_price', 0) or 0)
+            spy_sma50 = float(spy.get('ema_50', 0) or 0)
+            spy_sma200 = float(spy.get('ema_200', 0) or 0)
+
+            result['spy_price'] = spy_price
+            result['spy_sma50'] = spy_sma50
+            result['spy_sma200'] = spy_sma200
+
+            # Calculate percentages
+            if spy_sma50 > 0:
+                result['spy_vs_sma50_pct'] = ((spy_price - spy_sma50) / spy_sma50) * 100
+            if spy_sma200 > 0:
+                result['spy_vs_sma200_pct'] = ((spy_price - spy_sma200) / spy_sma200) * 100
+
+            # Determine trend
+            trend = spy.get('trend_strength', 'sideways')
+            if trend in ('strong_up', 'up'):
+                result['spy_trend'] = 'rising'
+            elif trend in ('strong_down', 'down'):
+                result['spy_trend'] = 'falling'
+            else:
+                result['spy_trend'] = 'flat'
+
+            # Determine regime
+            above_50 = spy_price > spy_sma50 if spy_sma50 > 0 else False
+            above_200 = spy_price > spy_sma200 if spy_sma200 > 0 else False
+            sma50_above_200 = spy_sma50 > spy_sma200 if spy_sma50 > 0 and spy_sma200 > 0 else False
+
+            if above_200 and above_50 and sma50_above_200:
+                result['market_regime'] = 'bull_confirmed'
+            elif above_200 and (not above_50 or not sma50_above_200):
+                result['market_regime'] = 'bull_weakening'
+            elif not above_200 and (above_50 or sma50_above_200):
+                result['market_regime'] = 'bear_weakening'
+            else:
+                result['market_regime'] = 'bear_confirmed'
+
+        if breadth_result:
+            b = breadth_result[0]
+            total = int(b.get('total', 1) or 1)
+
+            result['pct_above_sma200'] = (int(b.get('above_200', 0) or 0) / total) * 100 if total > 0 else 0
+            result['pct_above_sma50'] = (int(b.get('above_50', 0) or 0) / total) * 100 if total > 0 else 0
+            result['pct_above_sma20'] = (int(b.get('above_20', 0) or 0) / total) * 100 if total > 0 else 0
+
+            advancing = int(b.get('bullish', 0) or 0)
+            declining = int(b.get('bearish', 0) or 0)
+            result['advancing_count'] = advancing
+            result['declining_count'] = declining
+            result['ad_ratio'] = advancing / declining if declining > 0 else advancing
+
+            avg_atr = float(b.get('avg_atr', 0) or 0)
+            result['avg_atr_pct'] = avg_atr
+
+            if avg_atr < 2:
+                result['volatility_regime'] = 'low'
+            elif avg_atr < 4:
+                result['volatility_regime'] = 'normal'
+            elif avg_atr < 6:
+                result['volatility_regime'] = 'high'
+            else:
+                result['volatility_regime'] = 'extreme'
+
+            # Placeholder for high/low counts
+            result['new_highs_count'] = 0
+            result['new_lows_count'] = 0
+            result['high_low_ratio'] = 1.0
+
+        # Strategy recommendations based on regime
+        regime = result.get('market_regime', 'unknown')
+        if regime == 'bull_confirmed':
+            result['recommended_strategies'] = {
+                'trend_following': 0.8,
+                'breakout': 0.7,
+                'pullback': 0.6,
+                'mean_reversion': 0.2
+            }
+        elif regime == 'bull_weakening':
+            result['recommended_strategies'] = {
+                'trend_following': 0.5,
+                'breakout': 0.4,
+                'pullback': 0.7,
+                'mean_reversion': 0.4
+            }
+        elif regime == 'bear_weakening':
+            result['recommended_strategies'] = {
+                'trend_following': 0.3,
+                'breakout': 0.3,
+                'pullback': 0.5,
+                'mean_reversion': 0.6
+            }
+        else:
+            result['recommended_strategies'] = {
+                'trend_following': 0.2,
+                'breakout': 0.2,
+                'pullback': 0.3,
+                'mean_reversion': 0.7
+            }
+
+        return result
 
     @st.cache_data(ttl=300)
     def get_sector_analysis(_self) -> pd.DataFrame:
@@ -3189,7 +3337,121 @@ Respond in this exact JSON format:
                     lambda x: json.loads(x) if isinstance(x, str) else x
                 )
             return df
-        return pd.DataFrame()
+
+        # Fallback: Calculate from stock fundamentals and metrics
+        return _self._calculate_sector_analysis_fallback()
+
+    def _calculate_sector_analysis_fallback(_self) -> pd.DataFrame:
+        """
+        Calculate sector analysis from existing stock data.
+
+        This is used when the sector_analysis table is empty.
+        """
+        # Sector ETF mapping
+        sector_etfs = {
+            'Technology': 'XLK',
+            'Health Care': 'XLV',
+            'Financials': 'XLF',
+            'Consumer Discretionary': 'XLY',
+            'Communication Services': 'XLC',
+            'Industrials': 'XLI',
+            'Consumer Staples': 'XLP',
+            'Energy': 'XLE',
+            'Utilities': 'XLU',
+            'Real Estate': 'XLRE',
+            'Materials': 'XLB',
+        }
+
+        query = """
+            SELECT
+                i.sector,
+                COUNT(*) as stocks_in_sector,
+                AVG(m.rs_vs_spy) as avg_rs,
+                AVG(m.rs_percentile) as avg_rs_percentile,
+                COUNT(*) FILTER (WHERE m.current_price > m.ema_50) * 100.0 / NULLIF(COUNT(*), 0) as pct_above_sma50,
+                COUNT(*) FILTER (WHERE m.trend_strength IN ('strong_up', 'up')) * 100.0 / NULLIF(COUNT(*), 0) as pct_bullish_trend,
+                AVG(m.price_change_1d) as sector_return_1d,
+                AVG(m.price_change_5d) as sector_return_5d,
+                AVG(m.price_change_20d) as sector_return_20d
+            FROM stock_instruments i
+            JOIN stock_screening_metrics m ON i.ticker = m.ticker
+            WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+              AND i.sector IS NOT NULL
+              AND i.sector != ''
+            GROUP BY i.sector
+            ORDER BY avg_rs DESC NULLS LAST
+        """
+        results = _self._execute_query(query, ())
+
+        if not results:
+            return pd.DataFrame()
+
+        sectors = []
+        for r in results:
+            sector = r.get('sector')
+            avg_rs = r.get('avg_rs')
+            avg_rs_pct = r.get('avg_rs_percentile')
+
+            # Determine sector stage based on RS and trend
+            pct_bullish = r.get('pct_bullish_trend', 0) or 0
+            if avg_rs and avg_rs > 1.0:
+                if pct_bullish > 50:
+                    stage = 'leading'
+                else:
+                    stage = 'weakening'
+            else:
+                if pct_bullish > 40:
+                    stage = 'improving'
+                else:
+                    stage = 'lagging'
+
+            # Get top stocks in sector
+            top_stocks = _self._get_top_stocks_in_sector(sector, limit=5)
+
+            sectors.append({
+                'sector': sector,
+                'sector_etf': sector_etfs.get(sector, ''),
+                'rs_vs_spy': avg_rs,
+                'rs_percentile': int(avg_rs_pct) if avg_rs_pct else None,
+                'rs_trend': 'stable',  # Would need historical data for trend
+                'sector_return_1d': r.get('sector_return_1d'),
+                'sector_return_5d': r.get('sector_return_5d'),
+                'sector_return_20d': r.get('sector_return_20d'),
+                'stocks_in_sector': r.get('stocks_in_sector', 0),
+                'pct_above_sma50': r.get('pct_above_sma50'),
+                'pct_bullish_trend': r.get('pct_bullish_trend'),
+                'sector_stage': stage,
+                'top_stocks': top_stocks,
+            })
+
+        return pd.DataFrame(sectors)
+
+    def _get_top_stocks_in_sector(_self, sector: str, limit: int = 5) -> list:
+        """Get top stocks in a sector by RS percentile."""
+        query = """
+            SELECT
+                m.ticker,
+                m.rs_percentile,
+                m.rs_trend,
+                m.current_price
+            FROM stock_screening_metrics m
+            JOIN stock_instruments i ON m.ticker = i.ticker
+            WHERE i.sector = %s
+              AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+              AND m.rs_percentile IS NOT NULL
+            ORDER BY m.rs_percentile DESC
+            LIMIT %s
+        """
+        results = _self._execute_query(query, (sector, limit))
+        return [
+            {
+                'ticker': r.get('ticker'),
+                'rs_percentile': r.get('rs_percentile'),
+                'rs_trend': r.get('rs_trend'),
+                'price': float(r.get('current_price')) if r.get('current_price') else None
+            }
+            for r in results
+        ] if results else []
 
     @st.cache_data(ttl=300)
     def get_rs_leaders(_self, min_rs_percentile: int = 70, limit: int = 50) -> pd.DataFrame:
