@@ -174,6 +174,20 @@ def render_watchlists_tab(service):
     # Days column - for crossover watchlists this is days since crossover
     display_df['Days'] = display_df['days_on_list'].apply(lambda x: f"{int(x)}d" if pd.notnull(x) else '1d')
 
+    # In Trade column - shows if stock has open broker position with profit
+    def format_trade_status(row):
+        if row.get('in_trade'):
+            profit = row.get('trade_profit', 0) or 0
+            side = row.get('trade_side', 'BUY')
+            side_icon = '📈' if side == 'BUY' else '📉'
+            if profit >= 0:
+                return f"{side_icon} +${profit:.0f}"
+            else:
+                return f"{side_icon} -${abs(profit):.0f}"
+        return ''
+
+    display_df['Trade'] = display_df.apply(format_trade_status, axis=1)
+
     # Crossover date formatting for crossover watchlists
     if 'crossover_date' in display_df.columns and is_crossover:
         display_df['Crossover'] = display_df['crossover_date'].apply(
@@ -181,25 +195,32 @@ def render_watchlists_tab(service):
         )
 
     # Conditional columns based on watchlist type
+    # Include Trade column if any stocks are in trade
+    has_trades = display_df['Trade'].any()
+
     if selected_watchlist == 'gap_up_continuation':
         display_df['Gap %'] = display_df['gap_pct'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
-        result_df = display_df[['ticker', 'Price', 'Gap %', 'Volume', 'RSI', '1D Chg', 'Avg/Day']].rename(
-            columns={'ticker': 'Ticker'}
-        )
+        cols = ['ticker', 'Price', 'Gap %', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+        if has_trades:
+            cols.insert(1, 'Trade')
+        result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
     elif selected_watchlist == 'rsi_oversold_bounce':
-        result_df = display_df[['ticker', 'Price', 'RSI', 'Volume', '1D Chg', 'Avg/Day']].rename(
-            columns={'ticker': 'Ticker'}
-        )
+        cols = ['ticker', 'Price', 'RSI', 'Volume', '1D Chg', 'Avg/Day']
+        if has_trades:
+            cols.insert(1, 'Trade')
+        result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
     elif selected_watchlist == 'macd_bullish_cross':
         display_df['MACD'] = display_df['macd'].apply(lambda x: f"{x:.3f}" if pd.notnull(x) else '-')
-        result_df = display_df[['ticker', 'Days', 'Crossover', 'Price', 'MACD', 'Volume', 'RSI', '1D Chg', 'Avg/Day']].rename(
-            columns={'ticker': 'Ticker'}
-        )
+        cols = ['ticker', 'Days', 'Crossover', 'Price', 'MACD', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+        if has_trades:
+            cols.insert(1, 'Trade')
+        result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
     else:
         # EMA crossover watchlists
-        result_df = display_df[['ticker', 'Days', 'Crossover', 'Price', 'Volume', 'RSI', '1D Chg', 'Avg/Day']].rename(
-            columns={'ticker': 'Ticker'}
-        )
+        cols = ['ticker', 'Days', 'Crossover', 'Price', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+        if has_trades:
+            cols.insert(1, 'Trade')
+        result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
 
     # Style functions
     def style_change(val):
@@ -232,6 +253,16 @@ def render_watchlists_tab(service):
             pass
         return ''
 
+    def style_trade(val):
+        """Style the trade column - green for profit, red for loss"""
+        if not val:
+            return ''
+        if '+$' in str(val):
+            return 'background-color: #d4edda; color: #155724; font-weight: bold;'
+        elif '-$' in str(val):
+            return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+        return ''
+
     styled_df = result_df.style.map(style_change, subset=['1D Chg'])
     if 'Days' in result_df.columns:
         styled_df = styled_df.map(style_days, subset=['Days'])
@@ -239,6 +270,8 @@ def render_watchlists_tab(service):
         styled_df = styled_df.map(style_rsi, subset=['RSI'])
     if 'Gap %' in result_df.columns:
         styled_df = styled_df.map(style_change, subset=['Gap %'])
+    if 'Trade' in result_df.columns:
+        styled_df = styled_df.map(style_trade, subset=['Trade'])
 
     st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
 

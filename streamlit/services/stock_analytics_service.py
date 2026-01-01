@@ -1631,6 +1631,16 @@ Analyze and respond in this exact JSON format:
                 FROM stock_scanner_signals
                 WHERE news_sentiment_score IS NOT NULL
                 ORDER BY ticker, news_analyzed_at DESC
+            ),
+            open_trades AS (
+                SELECT DISTINCT
+                    SPLIT_PART(ticker, '.', 1) as ticker,
+                    side,
+                    profit,
+                    open_price,
+                    current_price
+                FROM broker_trades
+                WHERE status = 'open'
             )
             SELECT
                 s.id, s.signal_timestamp, s.scanner_name, s.ticker, s.signal_type,
@@ -1655,13 +1665,19 @@ Analyze and respond in this exact JSON format:
                 COALESCE(s.news_analyzed_at, n.inherited_news_analyzed_at) as news_analyzed_at,
                 m.avg_daily_change_5d,
                 COALESCE(p.days_active, 1) as days_active,
-                p.first_signal_date
+                p.first_signal_date,
+                CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
+                t.side as trade_side,
+                t.profit as trade_profit,
+                t.open_price as trade_open_price,
+                t.current_price as trade_current_price
             FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN latest_news n ON s.ticker = n.ticker
             LEFT JOIN signal_persistence p ON s.ticker = p.ticker AND s.scanner_name = p.scanner_name
             LEFT JOIN stock_screening_metrics m ON s.ticker = m.ticker
                 AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+            LEFT JOIN open_trades t ON s.ticker = t.ticker
         """
 
         # Add ORDER BY based on parameter
@@ -2824,6 +2840,16 @@ Respond in this exact JSON format:
         if watchlist_name in crossover_watchlists:
             # For crossover watchlists: show all active entries, calculate days from crossover_date
             query = """
+                WITH open_trades AS (
+                    SELECT DISTINCT
+                        SPLIT_PART(ticker, '.', 1) as ticker,
+                        side,
+                        profit,
+                        open_price,
+                        current_price
+                    FROM broker_trades
+                    WHERE status = 'open'
+                )
                 SELECT
                     w.ticker,
                     i.name,
@@ -2844,7 +2870,10 @@ Respond in this exact JSON format:
                     CASE WHEN s.ticker IS NOT NULL THEN true ELSE false END as has_signal,
                     s.quality_tier as signal_tier,
                     s.signal_type,
-                    m.avg_daily_change_5d
+                    m.avg_daily_change_5d,
+                    CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
+                    t.side as trade_side,
+                    t.profit as trade_profit
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
                 LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -2856,6 +2885,7 @@ Respond in this exact JSON format:
                     ORDER BY composite_score DESC
                     LIMIT 1
                 ) s ON true
+                LEFT JOIN open_trades t ON w.ticker = t.ticker
                 WHERE w.watchlist_name = %s
                 AND w.status = 'active'
                 ORDER BY w.volume DESC
@@ -2864,6 +2894,16 @@ Respond in this exact JSON format:
         else:
             # For event watchlists: show entries for specific date, days is always 1
             query = """
+                WITH open_trades AS (
+                    SELECT DISTINCT
+                        SPLIT_PART(ticker, '.', 1) as ticker,
+                        side,
+                        profit,
+                        open_price,
+                        current_price
+                    FROM broker_trades
+                    WHERE status = 'open'
+                )
                 SELECT
                     w.ticker,
                     i.name,
@@ -2884,7 +2924,10 @@ Respond in this exact JSON format:
                     CASE WHEN s.ticker IS NOT NULL THEN true ELSE false END as has_signal,
                     s.quality_tier as signal_tier,
                     s.signal_type,
-                    m.avg_daily_change_5d
+                    m.avg_daily_change_5d,
+                    CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
+                    t.side as trade_side,
+                    t.profit as trade_profit
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
                 LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -2896,6 +2939,7 @@ Respond in this exact JSON format:
                     ORDER BY composite_score DESC
                     LIMIT 1
                 ) s ON true
+                LEFT JOIN open_trades t ON w.ticker = t.ticker
                 WHERE w.watchlist_name = %s
                 AND w.scan_date = COALESCE(%s::date, (
                     SELECT MAX(scan_date)

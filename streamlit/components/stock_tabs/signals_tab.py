@@ -444,7 +444,16 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     if days_active and days_active > 1:
         days_badge = f" | 🔥 {days_active}d"
 
-    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{news_badge}{days_badge}{timestamp_part}", expanded=False):
+    # In trade badge - shows if stock has an open broker position
+    in_trade = signal.get('in_trade', False)
+    trade_badge = ""
+    if in_trade:
+        trade_profit = signal.get('trade_profit', 0) or 0
+        profit_color = 'green' if trade_profit >= 0 else 'red'
+        profit_sign = '+' if trade_profit >= 0 else ''
+        trade_badge = f" | 💼 :{profit_color}[{profit_sign}${trade_profit:.2f}]"
+
+    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{news_badge}{days_badge}{trade_badge}{timestamp_part}", expanded=False):
 
         # Metrics row
         col1, col2, col3, col4, col5, col6 = st.columns(6)
