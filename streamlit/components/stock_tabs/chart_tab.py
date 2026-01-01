@@ -34,6 +34,7 @@ from .deep_dive_tab import (
     _render_score_breakdown,
     _render_signal_history,
 )
+from .position_calculator import render_inline_position_calculator
 
 
 def render_chart_tab(service):
@@ -263,23 +264,62 @@ def render_chart_tab(service):
             _render_active_signal_section(active_signal, metrics)
             st.markdown("")
 
-        # SECTION 5: Technical + SMC Analysis
+        # SECTION 5: Position Calculator
+        _render_position_calculator_section(selected_ticker, metrics, active_signal)
+
+        st.markdown("---")
+
+        # SECTION 6: Technical + SMC Analysis
         _render_technical_and_smc_analysis(metrics, fundamentals, active_signal)
 
         st.markdown("---")
 
-        # SECTION 6: Fundamentals
+        # SECTION 7: Fundamentals
         _render_fundamentals_section(fundamentals)
 
         st.markdown("---")
 
-        # SECTION 7: Score Breakdown
+        # SECTION 8: Score Breakdown
         if watchlist:
             _render_score_breakdown(watchlist)
             st.markdown("---")
 
-        # SECTION 8: Scanner Signal History
+        # SECTION 9: Scanner Signal History
         _render_signal_history(scanner_signals)
+
+
+def _render_position_calculator_section(ticker: str, metrics: dict, active_signal: dict = None) -> None:
+    """
+    Render the position calculator section in the chart analysis.
+
+    Uses total account value from session state and either:
+    - Active signal's entry/stop if available
+    - Current price with ATR-based stop as defaults
+
+    Args:
+        ticker: Stock ticker symbol
+        metrics: Dict with current_price, atr_percent, etc.
+        active_signal: Optional active signal with entry_price, stop_loss
+    """
+    # Get values from signal if available, otherwise from metrics
+    if active_signal:
+        suggested_entry = float(active_signal.get('entry_price', 0)) or None
+        suggested_stop = float(active_signal.get('stop_loss', 0)) or None
+    else:
+        suggested_entry = None
+        suggested_stop = None
+
+    current_price = float(metrics.get('current_price', 0)) if metrics.get('current_price') else None
+    atr_percent = float(metrics.get('atr_percent', 0)) if metrics.get('atr_percent') else None
+
+    # Render the inline calculator
+    render_inline_position_calculator(
+        ticker=ticker,
+        current_price=current_price,
+        suggested_entry=suggested_entry,
+        suggested_stop=suggested_stop,
+        atr_percent=atr_percent
+    )
 
 
 def _get_signal_tickers(service) -> list:

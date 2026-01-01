@@ -202,7 +202,7 @@ def _render_stock_header(ticker, instrument, watchlist, fundamentals, metrics):
     </div>
     """, unsafe_allow_html=True)
 
-    # Key metrics row
+    # Key metrics row 1
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
@@ -228,6 +228,43 @@ def _render_stock_header(ticker, instrument, watchlist, fundamentals, metrics):
         market_cap = fundamentals.get('market_cap')
         cap_str = f"${market_cap}" if market_cap else "N/A"
         st.metric("Market Cap", cap_str)
+
+    # Key metrics row 2 - Relative Strength
+    rs_percentile = metrics.get('rs_percentile')
+    rs_trend = metrics.get('rs_trend')
+    rs_vs_spy = metrics.get('rs_vs_spy')
+
+    if rs_percentile is not None:
+        col1, col2, col3, col4, col5 = st.columns(5)
+
+        with col1:
+            # RS Percentile with color-coded delta
+            rs_label = "Elite" if rs_percentile >= 90 else "Strong" if rs_percentile >= 70 else "Average" if rs_percentile >= 40 else "Weak"
+            st.metric("RS Percentile", f"{rs_percentile}", rs_label)
+
+        with col2:
+            # RS vs SPY ratio
+            if rs_vs_spy:
+                rs_delta = "Outperforming" if rs_vs_spy > 1.0 else "Underperforming" if rs_vs_spy < 1.0 else None
+                st.metric("RS vs SPY", f"{rs_vs_spy:.2f}", rs_delta)
+            else:
+                st.metric("RS vs SPY", "N/A")
+
+        with col3:
+            # RS Trend
+            trend_icon = "↑" if rs_trend == 'improving' else "↓" if rs_trend == 'deteriorating' else "→"
+            trend_label = rs_trend.capitalize() if rs_trend else "N/A"
+            st.metric("RS Trend", f"{trend_icon} {trend_label}")
+
+        with col4:
+            # 20-day price change
+            change_20d = metrics.get('price_change_20d', 0) or 0
+            st.metric("20D Change", f"{change_20d:+.1f}%")
+
+        with col5:
+            # Trend strength
+            trend_strength = metrics.get('trend_strength', '') or watchlist.get('trend_strength', '')
+            st.metric("Trend", trend_strength or "N/A")
 
 
 def _render_claude_analysis_section(service, ticker, active_signal, metrics, fundamentals, candles):

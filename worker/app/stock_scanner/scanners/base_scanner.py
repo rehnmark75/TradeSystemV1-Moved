@@ -420,6 +420,8 @@ class BaseScanner(ABC):
 
         saved_count = 0
 
+        # Use ON CONFLICT with the unique index (ticker, scanner_name, signal_date)
+        # to prevent duplicate signals for the same ticker/scanner/day
         insert_query = """
             INSERT INTO stock_scanner_signals (
                 signal_timestamp, scanner_name, ticker, signal_type,
@@ -433,7 +435,25 @@ class BaseScanner(ABC):
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
             )
-            ON CONFLICT DO NOTHING
+            ON CONFLICT (ticker, scanner_name, signal_date) DO UPDATE SET
+                -- Update if we get a higher quality signal on the same day
+                composite_score = CASE
+                    WHEN EXCLUDED.composite_score > stock_scanner_signals.composite_score
+                    THEN EXCLUDED.composite_score
+                    ELSE stock_scanner_signals.composite_score
+                END,
+                quality_tier = CASE
+                    WHEN EXCLUDED.composite_score > stock_scanner_signals.composite_score
+                    THEN EXCLUDED.quality_tier
+                    ELSE stock_scanner_signals.quality_tier
+                END,
+                entry_price = CASE
+                    WHEN EXCLUDED.composite_score > stock_scanner_signals.composite_score
+                    THEN EXCLUDED.entry_price
+                    ELSE stock_scanner_signals.entry_price
+                END,
+                updated_at = NOW()
+            WHERE stock_scanner_signals.status = 'active'
             RETURNING id
         """
 
