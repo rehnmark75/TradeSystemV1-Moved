@@ -53,6 +53,7 @@ from stock_scanner.core.database.async_database_manager import AsyncDatabaseMana
 from stock_scanner.core.data_fetcher import StockDataFetcher
 from stock_scanner.core.synthesis.daily_synthesizer import DailyCandleSynthesizer
 from stock_scanner.core.metrics.calculator import MetricsCalculator
+from stock_scanner.scripts.populate_rs import RSPopulator
 from stock_scanner.core.screener.watchlist_builder import WatchlistBuilder
 from stock_scanner.core.smc.smc_stock_analyzer import SMCStockAnalyzer
 from stock_scanner.core.fundamentals.fundamentals_fetcher import FundamentalsFetcher
@@ -183,6 +184,7 @@ class StockScheduler:
         self.fetcher: StockDataFetcher = None
         self.synthesizer: DailyCandleSynthesizer = None
         self.calculator: MetricsCalculator = None
+        self.rs_populator: RSPopulator = None
         self.smc_analyzer: SMCStockAnalyzer = None
         self.fundamentals: FundamentalsFetcher = None
         self.watchlist_builder: WatchlistBuilder = None
@@ -207,6 +209,7 @@ class StockScheduler:
         )
         self.synthesizer = DailyCandleSynthesizer(db_manager=self.db)
         self.calculator = MetricsCalculator(db_manager=self.db)
+        self.rs_populator = RSPopulator(db=self.db)
         self.smc_analyzer = SMCStockAnalyzer(db_manager=self.db)
         self.fundamentals = FundamentalsFetcher(db_manager=self.db)
         self.watchlist_builder = WatchlistBuilder(db_manager=self.db)
@@ -318,7 +321,7 @@ class StockScheduler:
             results['synthesis'] = {'error': str(e)}
 
         # === STAGE 3: Calculate Metrics ===
-        logger.info("\n[STAGE 3/6] Calculating screening metrics...")
+        logger.info("\n[STAGE 3/11] Calculating screening metrics...")
         try:
             metrics_stats = await self.calculator.calculate_all_metrics()
             results['metrics'] = metrics_stats
@@ -327,8 +330,24 @@ class StockScheduler:
             logger.error(f"[FAIL] Metrics: {e}")
             results['metrics'] = {'error': str(e)}
 
-        # === STAGE 4: SMC Analysis ===
-        logger.info("\n[STAGE 4/6] Running SMC analysis...")
+        # === STAGE 4: Relative Strength (RS) Calculation ===
+        logger.info("\n[STAGE 4/11] Calculating Relative Strength vs SPY...")
+        try:
+            rs_stats = await self.rs_populator.populate_rs()
+            results['rs'] = rs_stats
+            if 'error' in rs_stats:
+                logger.warning(f"[WARN] RS: {rs_stats['error']}")
+            else:
+                logger.info(f"[OK] RS: {rs_stats['updated']} stocks updated")
+                logger.info(f"     Elite (90+): {rs_stats['distribution']['elite_90+']}, "
+                           f"Strong (70-89): {rs_stats['distribution']['strong_70-89']}, "
+                           f"Weak (<40): {rs_stats['distribution']['weak_0-39']}")
+        except Exception as e:
+            logger.error(f"[FAIL] RS: {e}")
+            results['rs'] = {'error': str(e)}
+
+        # === STAGE 5: SMC Analysis ===
+        logger.info("\n[STAGE 5/11] Running SMC analysis...")
         try:
             smc_stats = await self.smc_analyzer.run_analysis_pipeline()
             results['smc'] = smc_stats
@@ -340,8 +359,8 @@ class StockScheduler:
             logger.error(f"[FAIL] SMC: {e}")
             results['smc'] = {'error': str(e)}
 
-        # === STAGE 5: Build Watchlist ===
-        logger.info("\n[STAGE 5/6] Building watchlist...")
+        # === STAGE 6: Build Watchlist ===
+        logger.info("\n[STAGE 6/11] Building watchlist...")
         try:
             watchlist_stats = await self.watchlist_builder.build_watchlist()
             results['watchlist'] = watchlist_stats
@@ -1183,6 +1202,8 @@ async def run_once(task: str):
             await scheduler.synthesizer.synthesize_all_daily()
         elif task == "metrics":
             await scheduler.calculator.calculate_all_metrics()
+        elif task == "rs":
+            await scheduler.rs_populator.populate_rs()
         elif task == "smc":
             await scheduler.smc_analyzer.run_analysis_pipeline()
         elif task == "watchlist":
@@ -1210,7 +1231,7 @@ async def run_once(task: str):
             await scheduler.run_broker_sync()
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, smc, watchlist, signals, scanners, premarket, premarketpricing, intraday, postmarket, weekly, fundamentals, brokersync")
+            print("Available: pipeline, sync, synthesize, metrics, rs, smc, watchlist, signals, scanners, premarket, premarketpricing, intraday, postmarket, weekly, fundamentals, brokersync")
     finally:
         await scheduler.cleanup()
 
@@ -1220,7 +1241,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
-                       choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'smc',
+                       choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'smc',
                                'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing',
                                'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync', 'status'],
                        help='Command to execute')
@@ -1238,7 +1259,7 @@ def main():
             print("\nShutdown requested...")
             scheduler.stop()
 
-    elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'smc', 'watchlist',
+    elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'smc', 'watchlist',
                           'signals', 'scanners', 'premarket', 'premarketpricing', 'intraday',
                           'postmarket', 'weekly', 'fundamentals', 'brokersync']:
         print(f"Running {args.command}...")
@@ -1260,13 +1281,14 @@ def main():
         print("  1. sync       - Fetch 1H candles from yfinance")
         print("  2. synthesize - Aggregate 1H -> Daily candles")
         print("  3. metrics    - Calculate ATR, volume, momentum")
-        print("  4. smc        - Smart Money Concepts analysis")
-        print("  5. watchlist  - Build tiered, scored watchlist")
-        print("  6. zlma       - Run ZLMA strategy")
-        print("  7. scanners   - Run all scanner strategies")
-        print("  8. watchlist_screens - Run 5 predefined watchlist screens")
-        print("  9. performance - Update signal performance tracking")
-        print("  10. claude    - Run Claude AI analysis on top signals")
+        print("  4. rs         - Calculate Relative Strength vs SPY")
+        print("  5. smc        - Smart Money Concepts analysis")
+        print("  6. watchlist  - Build tiered, scored watchlist")
+        print("  7. zlma       - Run ZLMA strategy")
+        print("  8. scanners   - Run all scanner strategies")
+        print("  9. watchlist_screens - Run 5 predefined watchlist screens")
+        print("  10. performance - Update signal performance tracking")
+        print("  11. claude    - Run Claude AI analysis on top signals")
 
         print(f"\nNext scheduled tasks:")
         print(f"  Full pipeline: {scheduler.get_next_pipeline()}")
@@ -1274,7 +1296,7 @@ def main():
 
         print("\nAvailable commands:")
         print("  run              - Start continuous scheduler")
-        print("  pipeline         - Run full 10-stage pipeline")
+        print("  pipeline         - Run full 11-stage pipeline")
         print("  premarket        - Run pre-market scanner scan only")
         print("  premarketpricing - Run Finnhub pre-market quotes & news (9:00 AM ET scan)")
         print("  intraday         - Run intraday scan only")
@@ -1283,6 +1305,7 @@ def main():
         print("  signals          - Run ZLMA strategy only")
         print("  sync             - Sync candle data only")
         print("  metrics          - Calculate metrics only")
+        print("  rs               - Calculate Relative Strength vs SPY")
         print("  smc              - Run SMC analysis only")
         print("  watchlist        - Build watchlist only")
         print("  brokersync       - Sync broker trades to database")

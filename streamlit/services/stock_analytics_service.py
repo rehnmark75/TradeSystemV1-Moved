@@ -3477,6 +3477,13 @@ Respond in this exact JSON format:
 
         Returns:
             Dict with SMC zones, BOS/CHOCH events, and current analysis
+            in the format expected by the chart component:
+            - trend: SMC trend direction
+            - bias: Market bias
+            - confluence_score: SMC confluence score
+            - premium_discount_zone: Current zone
+            - order_blocks: List of order block dicts
+            - bos_choch_events: List of BOS/CHOCH events
         """
         query = """
             SELECT
@@ -3498,15 +3505,93 @@ Respond in this exact JSON format:
                 nearest_ob_type,
                 nearest_ob_price,
                 nearest_ob_distance,
-                smc_confluence_score
+                smc_confluence_score,
+                current_price
             FROM stock_screening_metrics
             WHERE ticker = %s
               AND calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
         """
         results = _self._execute_query(query, (ticker,))
-        if results:
-            return results[0]
-        return {}
+        if not results:
+            return {}
+
+        row = results[0]
+
+        # Transform to format expected by chart component
+        smc_data = {
+            'trend': row.get('smc_trend', 'Unknown'),
+            'bias': row.get('smc_bias', 'Unknown'),
+            'confluence_score': row.get('smc_confluence_score', 0),
+            'premium_discount_zone': row.get('premium_discount_zone', 'Unknown'),
+            'zone_position': row.get('zone_position'),
+            'swing_high': row.get('swing_high'),
+            'swing_low': row.get('swing_low'),
+            'swing_high_date': row.get('swing_high_date'),
+            'swing_low_date': row.get('swing_low_date'),
+            'weekly_range_high': row.get('weekly_range_high'),
+            'weekly_range_low': row.get('weekly_range_low'),
+            'order_blocks': [],
+            'bos_choch_events': []
+        }
+
+        # Build order blocks from nearest OB data
+        # Create a supply/demand zone from swing high/low
+        swing_high = row.get('swing_high')
+        swing_low = row.get('swing_low')
+        current_price = row.get('current_price')
+        nearest_ob_type = row.get('nearest_ob_type')
+        nearest_ob_price = row.get('nearest_ob_price')
+
+        if swing_high and swing_low:
+            range_size = float(swing_high) - float(swing_low)
+            zone_buffer = range_size * 0.03  # 3% buffer for zones
+
+            # Add supply zone (around swing high)
+            smc_data['order_blocks'].append({
+                'type': 'bearish',
+                'price_high': float(swing_high),
+                'price_low': float(swing_high) - zone_buffer,
+                'strength': 'strong'
+            })
+
+            # Add demand zone (around swing low)
+            smc_data['order_blocks'].append({
+                'type': 'bullish',
+                'price_high': float(swing_low) + zone_buffer,
+                'price_low': float(swing_low),
+                'strength': 'strong'
+            })
+
+            # Add nearest order block if different from swing levels
+            if nearest_ob_price and nearest_ob_type:
+                ob_price = float(nearest_ob_price)
+                if abs(ob_price - float(swing_high)) > zone_buffer and abs(ob_price - float(swing_low)) > zone_buffer:
+                    smc_data['order_blocks'].append({
+                        'type': nearest_ob_type.lower() if nearest_ob_type else 'bullish',
+                        'price_high': ob_price + zone_buffer/2,
+                        'price_low': ob_price - zone_buffer/2,
+                        'strength': 'moderate'
+                    })
+
+        # Build BOS/CHOCH events list
+        if row.get('last_bos_type') and row.get('last_bos_price'):
+            smc_data['bos_choch_events'].append({
+                'event_type': f"BOS ({row.get('last_bos_type')})",
+                'price': float(row.get('last_bos_price')),
+                'date': row.get('last_bos_date')
+            })
+
+        if row.get('last_choch_type') and row.get('last_choch_date'):
+            # CHOCH doesn't have a specific price in the DB, use swing level
+            choch_price = swing_high if row.get('last_choch_type') == 'Bearish' else swing_low
+            if choch_price:
+                smc_data['bos_choch_events'].append({
+                    'event_type': f"CHOCH ({row.get('last_choch_type')})",
+                    'price': float(choch_price),
+                    'date': row.get('last_choch_date')
+                })
+
+        return smc_data
 
     @st.cache_data(ttl=300)
     def get_position_sizing_data(_self, ticker: str) -> Dict[str, Any]:

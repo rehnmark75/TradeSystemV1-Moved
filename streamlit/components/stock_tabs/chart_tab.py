@@ -210,8 +210,17 @@ def render_chart_tab(service):
         _render_mtf_charts(service, selected_ticker, df, lookback_days, show_macd, show_volume, smc_data)
     else:
         # Standard single chart layout
-        charts = _build_charts(df, show_macd, show_volume, smc_data)
-        renderLightweightCharts(charts, f"stock-chart-{selected_ticker}")
+        try:
+            charts = _build_charts(df, show_macd, show_volume, smc_data)
+            renderLightweightCharts(charts, f"stock-chart-{selected_ticker}")
+        except Exception as chart_error:
+            # If chart fails with SMC, try without SMC overlays
+            if smc_data:
+                st.warning("SMC overlays caused a rendering issue. Showing chart without SMC zones.")
+                charts = _build_charts(df, show_macd, show_volume, None)
+                renderLightweightCharts(charts, f"stock-chart-{selected_ticker}-fallback")
+            else:
+                st.error(f"Chart rendering failed: {chart_error}")
 
     # ==========================================================================
     # DEEP DIVE ANALYSIS SECTIONS
@@ -390,8 +399,13 @@ def _build_price_chart(df: pd.DataFrame, smc_data: dict = None) -> dict:
 
     # Add SMC overlays if data available
     if smc_data:
-        smc_series = _build_smc_overlays(df, smc_data)
-        series.extend(smc_series)
+        try:
+            smc_series = _build_smc_overlays(df, smc_data)
+            if smc_series:
+                series.extend(smc_series)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to add SMC overlays: {e}")
 
     # Add EMA lines
     ema_configs = [
@@ -633,6 +647,7 @@ def _build_smc_overlays(df: pd.DataFrame, smc_data: dict) -> list:
     Build SMC overlay series for the chart.
 
     Adds order block zones as horizontal lines to visualize supply/demand areas.
+    Uses multiple data points along the line to ensure proper rendering.
     """
     series = []
 
@@ -643,59 +658,104 @@ def _build_smc_overlays(df: pd.DataFrame, smc_data: dict) -> list:
     if df.empty:
         return series
 
-    min_time = int(pd.Timestamp(df['timestamp'].min()).timestamp())
-    max_time = int(pd.Timestamp(df['timestamp'].max()).timestamp())
+    try:
+        # Ensure we have valid timestamps
+        timestamps = df['timestamp'].dropna()
+        if timestamps.empty:
+            return series
 
-    # Add Order Blocks as horizontal line series
-    order_blocks = smc_data.get('order_blocks', [])
-
-    if order_blocks:
-        for i, ob in enumerate(order_blocks[:10]):  # Limit to 10 order blocks
-            ob_type = ob.get('type', 'bullish')
-            price_top = float(ob.get('price_high', 0)) if ob.get('price_high') else None
-            price_bottom = float(ob.get('price_low', 0)) if ob.get('price_low') else None
-
-            if not price_top or not price_bottom:
+        # Get all timestamps from the dataframe for the horizontal lines
+        # Using actual candle timestamps ensures proper rendering
+        time_points = []
+        for ts in timestamps:
+            try:
+                time_val = int(pd.Timestamp(ts).timestamp())
+                if time_val > 0:
+                    time_points.append(time_val)
+            except (ValueError, TypeError):
                 continue
 
-            # Color based on type (bullish = demand zone, bearish = supply zone)
-            line_color = '#26a69a' if ob_type.lower() == 'bullish' else '#ef5350'
+        if len(time_points) < 2:
+            return series
 
-            # Add top line (supply/demand zone upper boundary)
-            ob_top_data = [
-                {"time": min_time, "value": price_top},
-                {"time": max_time, "value": price_top}
-            ]
-            series.append({
-                "type": "Line",
-                "data": ob_top_data,
-                "options": {
-                    "color": line_color,
-                    "lineWidth": 1,
-                    "lineStyle": 2,  # Dashed
-                    "priceLineVisible": False,
-                    "lastValueVisible": False,
-                    "crosshairMarkerVisible": False
-                }
-            })
+        # Sort and deduplicate time points
+        time_points = sorted(set(time_points))
 
-            # Add bottom line (supply/demand zone lower boundary)
-            ob_bottom_data = [
-                {"time": min_time, "value": price_bottom},
-                {"time": max_time, "value": price_bottom}
-            ]
-            series.append({
-                "type": "Line",
-                "data": ob_bottom_data,
-                "options": {
-                    "color": line_color,
-                    "lineWidth": 1,
-                    "lineStyle": 2,  # Dashed
-                    "priceLineVisible": False,
-                    "lastValueVisible": False,
-                    "crosshairMarkerVisible": False
-                }
-            })
+        # Sample every 5th point to reduce data size while keeping line smooth
+        if len(time_points) > 20:
+            sampled_times = time_points[::5]
+            # Always include first and last
+            if time_points[0] not in sampled_times:
+                sampled_times.insert(0, time_points[0])
+            if time_points[-1] not in sampled_times:
+                sampled_times.append(time_points[-1])
+            time_points = sorted(sampled_times)
+
+        # Add Order Blocks as horizontal line series
+        order_blocks = smc_data.get('order_blocks', [])
+
+        if order_blocks:
+            for i, ob in enumerate(order_blocks[:6]):  # Limit to 6 order blocks (3 zones * 2 lines)
+                ob_type = ob.get('type', 'bullish')
+
+                # Safely get and validate price values
+                try:
+                    price_high = ob.get('price_high')
+                    price_low = ob.get('price_low')
+
+                    if price_high is None or price_low is None:
+                        continue
+
+                    price_top = float(price_high)
+                    price_bottom = float(price_low)
+
+                    # Validate prices are positive and reasonable
+                    if price_top <= 0 or price_bottom <= 0:
+                        continue
+                    if pd.isna(price_top) or pd.isna(price_bottom):
+                        continue
+
+                except (ValueError, TypeError):
+                    continue
+
+                # Color based on type (bullish = demand zone, bearish = supply zone)
+                # Use solid colors (not semi-transparent) for better Linux compatibility
+                line_color = '#26a69a' if ob_type.lower() == 'bullish' else '#ef5350'
+
+                # Build horizontal line data with multiple points (more robust rendering)
+                ob_top_data = [{"time": t, "value": price_top} for t in time_points]
+                ob_bottom_data = [{"time": t, "value": price_bottom} for t in time_points]
+
+                # Add top line (supply/demand zone upper boundary)
+                # Note: Removed lineStyle to avoid Linux rendering issues
+                series.append({
+                    "type": "Line",
+                    "data": ob_top_data,
+                    "options": {
+                        "color": line_color,
+                        "lineWidth": 1,
+                        "priceLineVisible": False,
+                        "lastValueVisible": False
+                    }
+                })
+
+                # Add bottom line (supply/demand zone lower boundary)
+                series.append({
+                    "type": "Line",
+                    "data": ob_bottom_data,
+                    "options": {
+                        "color": line_color,
+                        "lineWidth": 1,
+                        "priceLineVisible": False,
+                        "lastValueVisible": False
+                    }
+                })
+
+    except Exception as e:
+        # Log error but don't crash the chart
+        import logging
+        logging.getLogger(__name__).warning(f"Error building SMC overlays: {e}")
+        return []
 
     return series
 
@@ -714,8 +774,14 @@ def _render_mtf_charts(service, ticker: str, daily_df: pd.DataFrame, lookback_da
 
     if weekly_df is None or weekly_df.empty:
         st.warning("Weekly data not available - showing daily chart only")
-        charts = _build_charts(daily_df, show_macd, show_volume, smc_data)
-        renderLightweightCharts(charts, f"stock-chart-{ticker}")
+        try:
+            charts = _build_charts(daily_df, show_macd, show_volume, smc_data)
+            renderLightweightCharts(charts, f"stock-chart-{ticker}")
+        except Exception as e:
+            if smc_data:
+                st.warning("SMC overlays caused a rendering issue. Showing chart without SMC zones.")
+                charts = _build_charts(daily_df, show_macd, show_volume, None)
+                renderLightweightCharts(charts, f"stock-chart-{ticker}-fallback")
         return
 
     # Calculate indicators for weekly
@@ -727,8 +793,14 @@ def _render_mtf_charts(service, ticker: str, daily_df: pd.DataFrame, lookback_da
 
     with col1:
         st.markdown("#### Daily Chart")
-        daily_charts = _build_charts(daily_df, show_macd, show_volume, smc_data)
-        renderLightweightCharts(daily_charts, f"stock-chart-daily-{ticker}")
+        try:
+            daily_charts = _build_charts(daily_df, show_macd, show_volume, smc_data)
+            renderLightweightCharts(daily_charts, f"stock-chart-daily-{ticker}")
+        except Exception as e:
+            if smc_data:
+                st.warning("SMC overlays caused a rendering issue. Showing chart without SMC zones.")
+                daily_charts = _build_charts(daily_df, show_macd, show_volume, None)
+                renderLightweightCharts(daily_charts, f"stock-chart-daily-{ticker}-fallback")
 
     with col2:
         st.markdown("#### Weekly Chart")
