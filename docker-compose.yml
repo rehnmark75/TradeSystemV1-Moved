@@ -350,6 +350,11 @@ services:
       - MONTHLY_RETENTION=12
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
+      # Azure Blob Storage configuration
+      - AZURE_STORAGE_ACCOUNT=klirrbackup
+      - AZURE_STORAGE_KEY=${AZURE_STORAGE_KEY}
+      - AZURE_STORAGE_CONTAINER=klirrbackup
+      - AZURE_RETENTION_DAYS=60
     volumes:
       - ./scripts:/scripts:ro
       - /media/hr/TradeSystemBackup/TradeSystemV1-Backups/postgresbackup:/app/postgresbackup
@@ -362,7 +367,8 @@ services:
       - postgres
     command: >
       sh -c "
-        apt-get update && apt-get install -y docker.io bc findutils curl &&
+        apt-get update && apt-get install -y docker.io bc findutils curl gpg lsb-release &&
+        curl -sL https://aka.ms/InstallAzureCLIDeb | bash &&
         while true; do
           echo 'Running scheduled enhanced backup...' &&
           /scripts/enhanced_backup.sh &&

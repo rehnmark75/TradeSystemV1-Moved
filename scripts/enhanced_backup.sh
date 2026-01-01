@@ -228,8 +228,9 @@ for db in "${DATABASES[@]}"; do
     db_backup="${BACKUP_DIR}/${db}_backup_${TIMESTAMP}.sql.gz"
     if [[ -f "$db_backup" ]]; then
         if gzip -t "$db_backup" 2>/dev/null; then
-            # Verify SQL content contains pg_dump header (check first 50 lines for flexibility)
-            if zcat "$db_backup" | head -50 | grep -q "PostgreSQL database dump"; then
+            # Verify SQL content contains pg_dump header
+            # Use a subshell to avoid pipefail issues with head closing pipe early
+            if (zcat "$db_backup" 2>/dev/null || true) | head -50 | grep -q "PostgreSQL database dump"; then
                 echo -e "${GREEN}  ✅ $(basename "$db_backup") - integrity OK${NC}"
             else
                 echo -e "${RED}  ❌ $(basename "$db_backup") - SQL content invalid${NC}"
@@ -256,10 +257,109 @@ if [[ -f "${BACKUP_DIR}/additional_backup_${TIMESTAMP}.tar.gz" ]]; then
 fi
 
 # ======================
-# 8. Cleanup Old Backups (Retention Policy)
+# 8. Upload to Azure Blob Storage
+# ======================
+upload_to_azure() {
+    # Check if Azure credentials are configured
+    if [[ -z "${AZURE_STORAGE_ACCOUNT:-}" ]] || [[ -z "${AZURE_STORAGE_KEY:-}" ]]; then
+        echo -e "${YELLOW}  ⚠️  Azure credentials not configured, skipping cloud upload${NC}"
+        return 0
+    fi
+
+    echo -e "${BLUE}☁️  Uploading backups to Azure Blob Storage...${NC}"
+    echo "  → Storage Account: ${AZURE_STORAGE_ACCOUNT}"
+    echo "  → Container: ${AZURE_STORAGE_CONTAINER:-klirrbackup}"
+
+    local container="${AZURE_STORAGE_CONTAINER:-klirrbackup}"
+    local upload_count=0
+    local upload_failed=0
+
+    # Upload all backup files from today's folder
+    for file in "${BACKUP_DIR}"/*_${TIMESTAMP}*; do
+        if [[ -f "$file" ]]; then
+            local filename=$(basename "$file")
+            local blob_path="${DATE_FOLDER}/${filename}"
+            local file_size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")
+
+            echo "  → Uploading ${filename} ($(numfmt --to=iec ${file_size}))..."
+            if az storage blob upload \
+                --account-name "${AZURE_STORAGE_ACCOUNT}" \
+                --account-key "${AZURE_STORAGE_KEY}" \
+                --container-name "${container}" \
+                --name "${blob_path}" \
+                --file "$file" \
+                --overwrite true \
+                --only-show-errors 2>/dev/null; then
+                echo -e "${GREEN}    ✅ Uploaded ${filename}${NC}"
+                upload_count=$((upload_count + 1))
+            else
+                echo -e "${RED}    ❌ Failed to upload ${filename}${NC}"
+                upload_failed=$((upload_failed + 1))
+            fi
+        fi
+    done
+
+    if [[ ${upload_failed} -gt 0 ]]; then
+        echo -e "${YELLOW}  ⚠️  ${upload_count} files uploaded, ${upload_failed} failed${NC}"
+    else
+        echo -e "${GREEN}  ✅ All ${upload_count} backup files uploaded to Azure${NC}"
+    fi
+}
+
+echo
+upload_to_azure
+
+# ======================
+# 9. Azure Retention Cleanup (60 days)
+# ======================
+cleanup_azure_old_backups() {
+    # Check if Azure credentials are configured
+    if [[ -z "${AZURE_STORAGE_ACCOUNT:-}" ]] || [[ -z "${AZURE_STORAGE_KEY:-}" ]]; then
+        return 0
+    fi
+
+    local retention_days="${AZURE_RETENTION_DAYS:-60}"
+    local cutoff_date=$(date -d "${retention_days} days ago" '+%Y-%m-%d' 2>/dev/null)
+    local container="${AZURE_STORAGE_CONTAINER:-klirrbackup}"
+
+    echo
+    echo -e "${BLUE}🧹 Cleaning up Azure backups older than ${retention_days} days (before ${cutoff_date})...${NC}"
+
+    local deleted_count=0
+
+    # Get list of all blobs and filter by date
+    az storage blob list \
+        --account-name "${AZURE_STORAGE_ACCOUNT}" \
+        --account-key "${AZURE_STORAGE_KEY}" \
+        --container-name "${container}" \
+        --query "[].name" -o tsv 2>/dev/null | \
+    while read -r blob_name; do
+        # Extract date from blob path (format: YYYY-MM-DD/filename)
+        local blob_date=$(echo "${blob_name}" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}' || echo "")
+
+        if [[ -n "${blob_date}" ]] && [[ "${blob_date}" < "${cutoff_date}" ]]; then
+            echo "  → Deleting old backup: ${blob_name}"
+            if az storage blob delete \
+                --account-name "${AZURE_STORAGE_ACCOUNT}" \
+                --account-key "${AZURE_STORAGE_KEY}" \
+                --container-name "${container}" \
+                --name "${blob_name}" \
+                --only-show-errors 2>/dev/null; then
+                deleted_count=$((deleted_count + 1))
+            fi
+        fi
+    done
+
+    echo -e "${GREEN}  ✅ Azure cleanup completed${NC}"
+}
+
+cleanup_azure_old_backups
+
+# ======================
+# 10. Cleanup Old Local Backups (Retention Policy)
 # ======================
 echo
-echo -e "${BLUE}🧹 Applying retention policy...${NC}"
+echo -e "${BLUE}🧹 Applying local retention policy...${NC}"
 
 # Retention settings
 DAILY_RETENTION=7    # Keep 7 daily backups
