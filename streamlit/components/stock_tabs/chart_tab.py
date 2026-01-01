@@ -167,6 +167,8 @@ def render_chart_tab(service):
     with config_col2:
         show_volume = st.checkbox("Show Volume", value=True, key="chart_show_volume")
         show_macd = st.checkbox("Show MACD", value=True, key="chart_show_macd")
+        show_smc = st.checkbox("Show SMC (Smart Money)", value=False, key="chart_show_smc")
+        show_mtf = st.checkbox("Show Multi-Timeframe", value=False, key="chart_show_mtf")
 
     # Fetch candle data (extra for EMA 200 warmup)
     with st.spinner(f"Loading {selected_ticker} chart data..."):
@@ -193,11 +195,23 @@ def render_chart_tab(service):
         st.warning("Not enough data after indicator calculation")
         return
 
-    # Build and render charts
-    charts = _build_charts(df, show_macd, show_volume)
+    # Fetch SMC data if enabled
+    smc_data = None
+    if show_smc:
+        with st.spinner("Loading SMC zones..."):
+            smc_data = service.get_smc_zones_for_ticker(selected_ticker)
+            if smc_data:
+                # Show SMC summary above chart
+                _render_smc_summary(smc_data)
 
-    # Render with unique key
-    renderLightweightCharts(charts, f"stock-chart-{selected_ticker}")
+    # Build and render charts
+    if show_mtf:
+        # Multi-timeframe layout
+        _render_mtf_charts(service, selected_ticker, df, lookback_days, show_macd, show_volume, smc_data)
+    else:
+        # Standard single chart layout
+        charts = _build_charts(df, show_macd, show_volume, smc_data)
+        renderLightweightCharts(charts, f"stock-chart-{selected_ticker}")
 
     # ==========================================================================
     # DEEP DIVE ANALYSIS SECTIONS
@@ -323,12 +337,12 @@ def _calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _build_charts(df: pd.DataFrame, show_macd: bool, show_volume: bool) -> list:
+def _build_charts(df: pd.DataFrame, show_macd: bool, show_volume: bool, smc_data: dict = None) -> list:
     """Build chart configurations for Lightweight Charts."""
     charts = []
 
     # Price chart with candlesticks and EMAs
-    price_chart = _build_price_chart(df)
+    price_chart = _build_price_chart(df, smc_data)
     charts.append(price_chart)
 
     # MACD chart
@@ -344,8 +358,8 @@ def _build_charts(df: pd.DataFrame, show_macd: bool, show_volume: bool) -> list:
     return charts
 
 
-def _build_price_chart(df: pd.DataFrame) -> dict:
-    """Build the main price chart with candlesticks and EMAs."""
+def _build_price_chart(df: pd.DataFrame, smc_data: dict = None) -> dict:
+    """Build the main price chart with candlesticks, EMAs, and optional SMC overlays."""
     # Prepare candle data
     candles = []
     for row in df.itertuples():
@@ -373,6 +387,11 @@ def _build_price_chart(df: pd.DataFrame) -> dict:
             }
         }
     ]
+
+    # Add SMC overlays if data available
+    if smc_data:
+        smc_series = _build_smc_overlays(df, smc_data)
+        series.extend(smc_series)
 
     # Add EMA lines
     ema_configs = [
@@ -569,3 +588,225 @@ def _build_volume_chart(df: pd.DataFrame) -> dict:
     return {"chart": chart_config, "series": series}
 
 
+# =============================================================================
+# SMC (Smart Money Concepts) Visualization
+# =============================================================================
+
+def _render_smc_summary(smc_data: dict) -> None:
+    """Render SMC analysis summary above the chart."""
+    if not smc_data:
+        return
+
+    trend = smc_data.get('trend', 'Unknown')
+    bias = smc_data.get('bias', 'Unknown')
+    confluence_score = smc_data.get('confluence_score', 0)
+    zone = smc_data.get('premium_discount_zone', 'Unknown')
+    order_blocks = smc_data.get('order_blocks', [])
+    bos_choch_events = smc_data.get('bos_choch_events', [])
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        st.metric("SMC Trend", trend)
+
+    with col2:
+        st.metric("Bias", bias)
+
+    with col3:
+        st.metric("Zone", zone)
+
+    with col4:
+        st.metric("Confluence", f"{confluence_score:.0f}" if confluence_score else "N/A")
+
+    with col5:
+        st.metric("Order Blocks", len(order_blocks) if order_blocks else 0)
+
+    # Show recent BOS/CHOCH events
+    if bos_choch_events:
+        recent_events = bos_choch_events[:3]
+        events_text = " | ".join([f"{e.get('event_type', 'BOS')} @ ${e.get('price', 0):.2f}" for e in recent_events])
+        st.caption(f"Recent Events: {events_text}")
+
+
+def _build_smc_overlays(df: pd.DataFrame, smc_data: dict) -> list:
+    """
+    Build SMC overlay series for the chart.
+
+    Adds order block zones as horizontal lines to visualize supply/demand areas.
+    """
+    series = []
+
+    if not smc_data:
+        return series
+
+    # Get the chart's time range
+    if df.empty:
+        return series
+
+    min_time = int(pd.Timestamp(df['timestamp'].min()).timestamp())
+    max_time = int(pd.Timestamp(df['timestamp'].max()).timestamp())
+
+    # Add Order Blocks as horizontal line series
+    order_blocks = smc_data.get('order_blocks', [])
+
+    if order_blocks:
+        for i, ob in enumerate(order_blocks[:10]):  # Limit to 10 order blocks
+            ob_type = ob.get('type', 'bullish')
+            price_top = float(ob.get('price_high', 0)) if ob.get('price_high') else None
+            price_bottom = float(ob.get('price_low', 0)) if ob.get('price_low') else None
+
+            if not price_top or not price_bottom:
+                continue
+
+            # Color based on type (bullish = demand zone, bearish = supply zone)
+            line_color = '#26a69a' if ob_type.lower() == 'bullish' else '#ef5350'
+
+            # Add top line (supply/demand zone upper boundary)
+            ob_top_data = [
+                {"time": min_time, "value": price_top},
+                {"time": max_time, "value": price_top}
+            ]
+            series.append({
+                "type": "Line",
+                "data": ob_top_data,
+                "options": {
+                    "color": line_color,
+                    "lineWidth": 1,
+                    "lineStyle": 2,  # Dashed
+                    "priceLineVisible": False,
+                    "lastValueVisible": False,
+                    "crosshairMarkerVisible": False
+                }
+            })
+
+            # Add bottom line (supply/demand zone lower boundary)
+            ob_bottom_data = [
+                {"time": min_time, "value": price_bottom},
+                {"time": max_time, "value": price_bottom}
+            ]
+            series.append({
+                "type": "Line",
+                "data": ob_bottom_data,
+                "options": {
+                    "color": line_color,
+                    "lineWidth": 1,
+                    "lineStyle": 2,  # Dashed
+                    "priceLineVisible": False,
+                    "lastValueVisible": False,
+                    "crosshairMarkerVisible": False
+                }
+            })
+
+    return series
+
+
+# =============================================================================
+# Multi-Timeframe Charts
+# =============================================================================
+
+def _render_mtf_charts(service, ticker: str, daily_df: pd.DataFrame, lookback_days: int, show_macd: bool, show_volume: bool, smc_data: dict = None) -> None:
+    """
+    Render multi-timeframe chart layout with Daily and Weekly views plus trend alignment.
+    """
+    # Fetch weekly data
+    with st.spinner("Loading multi-timeframe data..."):
+        weekly_df = service.get_weekly_candles(ticker, weeks=52)
+
+    if weekly_df is None or weekly_df.empty:
+        st.warning("Weekly data not available - showing daily chart only")
+        charts = _build_charts(daily_df, show_macd, show_volume, smc_data)
+        renderLightweightCharts(charts, f"stock-chart-{ticker}")
+        return
+
+    # Calculate indicators for weekly
+    weekly_df = _calculate_indicators(weekly_df)
+    weekly_df = weekly_df.tail(int(lookback_days / 5)).reset_index(drop=True)  # Approximate weeks
+
+    # Create two-column layout
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.markdown("#### Daily Chart")
+        daily_charts = _build_charts(daily_df, show_macd, show_volume, smc_data)
+        renderLightweightCharts(daily_charts, f"stock-chart-daily-{ticker}")
+
+    with col2:
+        st.markdown("#### Weekly Chart")
+        weekly_charts = _build_charts(weekly_df, False, False, None)  # Simplified weekly chart
+        renderLightweightCharts(weekly_charts, f"stock-chart-weekly-{ticker}")
+
+    # Trend Alignment Summary
+    st.markdown("---")
+    _render_trend_alignment(daily_df, weekly_df, ticker)
+
+
+def _render_trend_alignment(daily_df: pd.DataFrame, weekly_df: pd.DataFrame, ticker: str) -> None:
+    """Render trend alignment indicator across timeframes."""
+    st.markdown("#### Trend Alignment")
+
+    # Calculate trend direction for each timeframe
+    def get_trend(df: pd.DataFrame, ema_col: str) -> str:
+        if df.empty or ema_col not in df.columns:
+            return "Unknown"
+        last_price = df['close'].iloc[-1] if not df.empty else 0
+        last_ema = df[ema_col].iloc[-1] if ema_col in df.columns and not pd.isna(df[ema_col].iloc[-1]) else 0
+        if last_price > last_ema * 1.02:
+            return "Bullish"
+        elif last_price < last_ema * 0.98:
+            return "Bearish"
+        else:
+            return "Neutral"
+
+    # Daily trends
+    daily_ema20_trend = get_trend(daily_df, 'ema_20')
+    daily_ema50_trend = get_trend(daily_df, 'ema_50')
+    daily_ema200_trend = get_trend(daily_df, 'ema_200')
+
+    # Weekly trends
+    weekly_ema20_trend = get_trend(weekly_df, 'ema_20')
+    weekly_ema50_trend = get_trend(weekly_df, 'ema_50')
+
+    # Trend colors
+    def trend_color(trend: str) -> str:
+        return 'green' if trend == 'Bullish' else ('red' if trend == 'Bearish' else 'orange')
+
+    def trend_icon(trend: str) -> str:
+        return '↑' if trend == 'Bullish' else ('↓' if trend == 'Bearish' else '→')
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        tc = trend_color(daily_ema20_trend)
+        st.markdown(f"**Daily EMA20:** :{tc}[{trend_icon(daily_ema20_trend)} {daily_ema20_trend}]")
+
+    with col2:
+        tc = trend_color(daily_ema50_trend)
+        st.markdown(f"**Daily EMA50:** :{tc}[{trend_icon(daily_ema50_trend)} {daily_ema50_trend}]")
+
+    with col3:
+        tc = trend_color(daily_ema200_trend)
+        st.markdown(f"**Daily EMA200:** :{tc}[{trend_icon(daily_ema200_trend)} {daily_ema200_trend}]")
+
+    with col4:
+        tc = trend_color(weekly_ema20_trend)
+        st.markdown(f"**Weekly EMA20:** :{tc}[{trend_icon(weekly_ema20_trend)} {weekly_ema20_trend}]")
+
+    with col5:
+        tc = trend_color(weekly_ema50_trend)
+        st.markdown(f"**Weekly EMA50:** :{tc}[{trend_icon(weekly_ema50_trend)} {weekly_ema50_trend}]")
+
+    # Overall alignment score
+    trends = [daily_ema20_trend, daily_ema50_trend, daily_ema200_trend, weekly_ema20_trend, weekly_ema50_trend]
+    bullish_count = sum(1 for t in trends if t == 'Bullish')
+    bearish_count = sum(1 for t in trends if t == 'Bearish')
+
+    if bullish_count >= 4:
+        st.success(f"**{ticker}**: Strong bullish alignment ({bullish_count}/5 timeframes bullish)")
+    elif bearish_count >= 4:
+        st.error(f"**{ticker}**: Strong bearish alignment ({bearish_count}/5 timeframes bearish)")
+    elif bullish_count >= 3:
+        st.info(f"**{ticker}**: Moderate bullish bias ({bullish_count}/5 timeframes bullish)")
+    elif bearish_count >= 3:
+        st.warning(f"**{ticker}**: Moderate bearish bias ({bearish_count}/5 timeframes bearish)")
+    else:
+        st.caption(f"**{ticker}**: Mixed signals - no clear alignment")

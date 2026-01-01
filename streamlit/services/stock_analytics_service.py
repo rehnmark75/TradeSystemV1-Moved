@@ -1540,6 +1540,9 @@ Analyze and respond in this exact JSON format:
         claude_analyzed_only: bool = False,
         signal_date_from: str = None,
         signal_date_to: str = None,
+        min_rs_percentile: int = None,
+        max_rs_percentile: int = None,
+        rs_trend: str = None,
         limit: int = 100,
         order_by: str = 'score'
     ) -> List[Dict[str, Any]]:
@@ -1554,6 +1557,9 @@ Analyze and respond in this exact JSON format:
             claude_analyzed_only: Only show signals with Claude analysis
             signal_date_from: Filter signals from this date (str: YYYY-MM-DD)
             signal_date_to: Filter signals up to this date (str: YYYY-MM-DD)
+            min_rs_percentile: Minimum RS percentile (0-100)
+            max_rs_percentile: Maximum RS percentile (0-100)
+            rs_trend: Filter by RS trend ('improving', 'stable', 'deteriorating')
             limit: Maximum results
             order_by: 'score' (default) or 'timestamp' for most recent first
 
@@ -1594,6 +1600,15 @@ Analyze and respond in this exact JSON format:
             conditions.append("DATE(signal_timestamp) <= %s")
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        # RS filters (applied after join with metrics table)
+        rs_conditions = []
+        if min_rs_percentile is not None:
+            rs_conditions.append(f"m.rs_percentile >= {min_rs_percentile}")
+        if max_rs_percentile is not None:
+            rs_conditions.append(f"m.rs_percentile <= {max_rs_percentile}")
+        if rs_trend:
+            rs_conditions.append(f"m.rs_trend = '{rs_trend}'")
 
         # Use a subquery to get only the latest signal per ticker/scanner combination
         # This prevents showing stale signals when a new scan has been run
@@ -1670,7 +1685,13 @@ Analyze and respond in this exact JSON format:
                 t.side as trade_side,
                 t.profit as trade_profit,
                 t.open_price as trade_open_price,
-                t.current_price as trade_current_price
+                t.current_price as trade_current_price,
+                m.rs_vs_spy,
+                m.rs_percentile,
+                m.rs_trend,
+                sa.rs_vs_spy as sector_rs,
+                sa.sector_stage,
+                i.sector
             FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN latest_news n ON s.ticker = n.ticker
@@ -1678,7 +1699,13 @@ Analyze and respond in this exact JSON format:
             LEFT JOIN stock_screening_metrics m ON s.ticker = m.ticker
                 AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
             LEFT JOIN open_trades t ON s.ticker = t.ticker
+            LEFT JOIN sector_analysis sa ON i.sector = sa.sector
+                AND sa.calculation_date = (SELECT MAX(calculation_date) FROM sector_analysis)
         """
+
+        # Add RS filter conditions if any
+        if rs_conditions:
+            query += "\n            WHERE " + " AND ".join(rs_conditions)
 
         # Add ORDER BY based on parameter
         if order_by == 'timestamp':
@@ -2871,6 +2898,9 @@ Respond in this exact JSON format:
                     s.quality_tier as signal_tier,
                     s.signal_type,
                     m.avg_daily_change_5d,
+                    m.rs_percentile,
+                    m.rs_trend,
+                    m.rs_vs_spy,
                     CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
                     t.side as trade_side,
                     t.profit as trade_profit
@@ -2925,6 +2955,9 @@ Respond in this exact JSON format:
                     s.quality_tier as signal_tier,
                     s.signal_type,
                     m.avg_daily_change_5d,
+                    m.rs_percentile,
+                    m.rs_trend,
+                    m.rs_vs_spy,
                     CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
                     t.side as trade_side,
                     t.profit as trade_profit
@@ -3070,6 +3103,355 @@ Respond in this exact JSON format:
         """
         results = _self._execute_query(query, ())
         return [r['ticker'] for r in results]
+
+    # =========================================================================
+    # RELATIVE STRENGTH & MARKET CONTEXT
+    # =========================================================================
+
+    @st.cache_data(ttl=300)
+    def get_market_regime(_self) -> Dict[str, Any]:
+        """
+        Get current market regime and breadth indicators.
+
+        Returns:
+            Dict with regime, SPY metrics, breadth indicators, and strategy recommendations
+        """
+        query = """
+            SELECT
+                calculation_date,
+                market_regime,
+                spy_price,
+                spy_sma50,
+                spy_sma200,
+                spy_vs_sma50_pct,
+                spy_vs_sma200_pct,
+                spy_trend,
+                pct_above_sma200,
+                pct_above_sma50,
+                pct_above_sma20,
+                new_highs_count,
+                new_lows_count,
+                high_low_ratio,
+                advancing_count,
+                declining_count,
+                ad_ratio,
+                avg_atr_pct,
+                volatility_regime,
+                recommended_strategies
+            FROM market_context
+            ORDER BY calculation_date DESC
+            LIMIT 1
+        """
+        results = _self._execute_query(query, ())
+        if results:
+            import json
+            result = results[0]
+            # Parse JSONB if needed
+            if result.get('recommended_strategies') and isinstance(result['recommended_strategies'], str):
+                result['recommended_strategies'] = json.loads(result['recommended_strategies'])
+            return result
+        return {}
+
+    @st.cache_data(ttl=300)
+    def get_sector_analysis(_self) -> pd.DataFrame:
+        """
+        Get sector rotation analysis with RS rankings.
+
+        Returns:
+            DataFrame with sector metrics sorted by RS vs SPY
+        """
+        query = """
+            SELECT
+                sector,
+                sector_etf,
+                sector_return_1d,
+                sector_return_5d,
+                sector_return_20d,
+                rs_vs_spy,
+                rs_percentile,
+                rs_trend,
+                stocks_in_sector,
+                pct_above_sma50,
+                pct_bullish_trend,
+                top_stocks,
+                sector_stage
+            FROM sector_analysis
+            WHERE calculation_date = (SELECT MAX(calculation_date) FROM sector_analysis)
+            ORDER BY rs_vs_spy DESC
+        """
+        results = _self._execute_query(query, ())
+        if results:
+            import json
+            df = pd.DataFrame(results)
+            # Parse JSONB columns
+            if 'top_stocks' in df.columns:
+                df['top_stocks'] = df['top_stocks'].apply(
+                    lambda x: json.loads(x) if isinstance(x, str) else x
+                )
+            return df
+        return pd.DataFrame()
+
+    @st.cache_data(ttl=300)
+    def get_rs_leaders(_self, min_rs_percentile: int = 70, limit: int = 50) -> pd.DataFrame:
+        """
+        Get stocks with strong relative strength.
+
+        Args:
+            min_rs_percentile: Minimum RS percentile (default 70 = top 30%)
+            limit: Maximum results
+
+        Returns:
+            DataFrame with RS leaders
+        """
+        query = """
+            SELECT
+                m.ticker,
+                i.name,
+                i.sector,
+                m.current_price,
+                m.rs_vs_spy,
+                m.rs_percentile,
+                m.rs_trend,
+                m.price_change_20d,
+                m.trend_strength,
+                m.ma_alignment,
+                m.atr_percent,
+                m.rsi_14,
+                m.pct_from_52w_high
+            FROM stock_screening_metrics m
+            JOIN stock_instruments i ON m.ticker = i.ticker
+            WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+              AND m.rs_percentile >= %s
+              AND m.rs_percentile IS NOT NULL
+            ORDER BY m.rs_percentile DESC
+            LIMIT %s
+        """
+        results = _self._execute_query(query, (min_rs_percentile, limit))
+        return pd.DataFrame(results) if results else pd.DataFrame()
+
+    @st.cache_data(ttl=300)
+    def get_smc_zones_for_ticker(_self, ticker: str) -> Dict[str, Any]:
+        """
+        Get Smart Money Concepts data for a specific ticker.
+
+        Returns:
+            Dict with SMC zones, BOS/CHOCH events, and current analysis
+        """
+        query = """
+            SELECT
+                smc_trend,
+                smc_bias,
+                last_bos_type,
+                last_bos_date,
+                last_bos_price,
+                last_choch_type,
+                last_choch_date,
+                swing_high,
+                swing_low,
+                swing_high_date,
+                swing_low_date,
+                premium_discount_zone,
+                zone_position,
+                weekly_range_high,
+                weekly_range_low,
+                nearest_ob_type,
+                nearest_ob_price,
+                nearest_ob_distance,
+                smc_confluence_score
+            FROM stock_screening_metrics
+            WHERE ticker = %s
+              AND calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+        """
+        results = _self._execute_query(query, (ticker,))
+        if results:
+            return results[0]
+        return {}
+
+    @st.cache_data(ttl=300)
+    def get_position_sizing_data(_self, ticker: str) -> Dict[str, Any]:
+        """
+        Get data needed for position sizing calculations.
+
+        Args:
+            ticker: Stock ticker
+
+        Returns:
+            Dict with current price, ATR, recent signals with stop loss levels
+        """
+        # Get current price and ATR
+        metrics_query = """
+            SELECT
+                current_price,
+                atr_14,
+                atr_percent,
+                avg_daily_change_5d
+            FROM stock_screening_metrics
+            WHERE ticker = %s
+              AND calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+        """
+        metrics = _self._execute_query(metrics_query, (ticker,))
+
+        # Get most recent signal with stop loss
+        signal_query = """
+            SELECT
+                entry_price,
+                stop_loss,
+                take_profit_1,
+                risk_reward_ratio,
+                risk_percent
+            FROM stock_scanner_signals
+            WHERE ticker = %s
+              AND status = 'active'
+            ORDER BY signal_timestamp DESC
+            LIMIT 1
+        """
+        signals = _self._execute_query(signal_query, (ticker,))
+
+        result = {
+            'ticker': ticker,
+            'metrics': metrics[0] if metrics else {},
+            'signal': signals[0] if signals else {}
+        }
+
+        # Calculate suggested stop based on ATR if no signal
+        if metrics and not signals:
+            atr = float(metrics[0].get('atr_14') or 0)
+            price = float(metrics[0].get('current_price') or 0)
+            if atr > 0 and price > 0:
+                result['suggested_stop_long'] = round(price - (2 * atr), 2)
+                result['suggested_stop_short'] = round(price + (2 * atr), 2)
+
+        return result
+
+    @st.cache_data(ttl=60)
+    def get_custom_screen_results(_self, filters: List[Dict], sort_by: str = 'rs_percentile', limit: int = 100) -> pd.DataFrame:
+        """
+        Execute a custom screen with flexible filters.
+
+        Args:
+            filters: List of filter dicts with 'field', 'operator', 'value'
+                     e.g., [{"field": "rs_percentile", "operator": ">=", "value": 80}]
+            sort_by: Column to sort by (default: rs_percentile)
+            limit: Maximum results
+
+        Returns:
+            DataFrame with matching stocks
+        """
+        # Base query
+        base_query = """
+            SELECT
+                m.ticker,
+                i.name,
+                i.sector,
+                m.current_price,
+                m.rs_vs_spy,
+                m.rs_percentile,
+                m.rs_trend,
+                m.price_change_1d,
+                m.price_change_5d,
+                m.price_change_20d,
+                m.trend_strength,
+                m.ma_alignment,
+                m.rsi_14,
+                m.atr_percent,
+                m.relative_volume,
+                m.smc_trend,
+                m.smc_confluence_score,
+                m.pct_from_52w_high
+            FROM stock_screening_metrics m
+            JOIN stock_instruments i ON m.ticker = i.ticker
+            WHERE m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+        """
+
+        conditions = []
+        params = []
+
+        # Valid operators
+        valid_operators = {'=', '!=', '>', '>=', '<', '<=', 'IN', 'LIKE', 'ILIKE'}
+
+        for f in filters:
+            field = f.get('field', '')
+            operator = f.get('operator', '=')
+            value = f.get('value')
+
+            # Sanitize field name (only allow known columns)
+            allowed_fields = {
+                'rs_percentile', 'rs_vs_spy', 'rs_trend', 'price_change_1d', 'price_change_5d',
+                'price_change_20d', 'trend_strength', 'ma_alignment', 'rsi_14', 'atr_percent',
+                'relative_volume', 'smc_trend', 'smc_confluence_score', 'pct_from_52w_high',
+                'sector', 'current_price'
+            }
+
+            if field not in allowed_fields:
+                continue
+
+            if operator.upper() not in valid_operators:
+                continue
+
+            # Build condition
+            if operator.upper() == 'IN':
+                if isinstance(value, list):
+                    placeholders = ', '.join(['%s'] * len(value))
+                    conditions.append(f"m.{field} IN ({placeholders})")
+                    params.extend(value)
+            else:
+                conditions.append(f"m.{field} {operator} %s")
+                params.append(value)
+
+        # Add conditions to query
+        if conditions:
+            base_query += " AND " + " AND ".join(conditions)
+
+        # Add sorting
+        if sort_by in ['rs_percentile', 'rs_vs_spy', 'price_change_20d', 'rsi_14', 'atr_percent', 'relative_volume']:
+            base_query += f" ORDER BY m.{sort_by} DESC NULLS LAST"
+        else:
+            base_query += " ORDER BY m.rs_percentile DESC NULLS LAST"
+
+        base_query += f" LIMIT {limit}"
+
+        results = _self._execute_query(base_query, tuple(params) if params else None)
+        return pd.DataFrame(results) if results else pd.DataFrame()
+
+    @st.cache_data(ttl=300)
+    def get_hourly_candles(_self, ticker: str, days: int = 30) -> pd.DataFrame:
+        """Get hourly candle data for multi-timeframe charting."""
+        query = """
+            SELECT
+                timestamp,
+                open,
+                high,
+                low,
+                close,
+                volume
+            FROM stock_candles
+            WHERE ticker = %s
+              AND timestamp >= NOW() - INTERVAL '%s days'
+            ORDER BY timestamp ASC
+        """
+        results = _self._execute_query(query % ('%s', days), (ticker,))
+        return pd.DataFrame(results) if results else pd.DataFrame()
+
+    @st.cache_data(ttl=300)
+    def get_weekly_candles(_self, ticker: str, weeks: int = 52) -> pd.DataFrame:
+        """Get weekly candle data synthesized from daily."""
+        query = """
+            SELECT
+                date_trunc('week', timestamp) as timestamp,
+                (array_agg(open ORDER BY timestamp))[1] as open,
+                MAX(high) as high,
+                MIN(low) as low,
+                (array_agg(close ORDER BY timestamp DESC))[1] as close,
+                SUM(volume) as volume
+            FROM stock_candles_synthesized
+            WHERE ticker = %s
+              AND timeframe = '1d'
+              AND timestamp >= NOW() - INTERVAL '%s weeks'
+            GROUP BY date_trunc('week', timestamp)
+            ORDER BY timestamp ASC
+        """
+        results = _self._execute_query(query % ('%s', weeks), (ticker,))
+        return pd.DataFrame(results) if results else pd.DataFrame()
 
 
 # Service instance - no caching to allow code changes to take effect

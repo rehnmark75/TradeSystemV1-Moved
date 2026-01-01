@@ -61,6 +61,46 @@ SCANNER_ICONS = {
     'Wyckoff Spring': '🌱',
 }
 
+# RS Percentile color coding
+RS_COLORS = {
+    'elite': '#28a745',      # 90+ green
+    'strong': '#17a2b8',     # 70-89 blue
+    'average': '#ffc107',    # 40-69 yellow
+    'weak': '#dc3545',       # <40 red
+}
+
+RS_TREND_ICONS = {
+    'improving': '↗️',
+    'stable': '➡️',
+    'deteriorating': '↘️',
+}
+
+def _get_rs_color(percentile: int) -> str:
+    """Get color for RS percentile value."""
+    if percentile is None:
+        return '#6c757d'
+    if percentile >= 90:
+        return RS_COLORS['elite']
+    elif percentile >= 70:
+        return RS_COLORS['strong']
+    elif percentile >= 40:
+        return RS_COLORS['average']
+    else:
+        return RS_COLORS['weak']
+
+def _get_rs_label(percentile: int) -> str:
+    """Get label for RS percentile value."""
+    if percentile is None:
+        return '-'
+    if percentile >= 90:
+        return 'Elite'
+    elif percentile >= 70:
+        return 'Strong'
+    elif percentile >= 40:
+        return 'Average'
+    else:
+        return 'Weak'
+
 
 def render_signals_tab(service):
     """Render the All Signals tab - unified view of all scanner signals."""
@@ -127,7 +167,7 @@ def render_signals_tab(service):
             ["All Signals", "Claude Analyzed Only", "A+ Grade", "A Grade", "B Grade", "STRONG BUY", "BUY"]
         )
 
-    # Filters - Row 2: Date range filters
+    # Filters - Row 2: Date range and RS filters
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -145,10 +185,18 @@ def render_signals_tab(service):
         )
 
     with col3:
-        st.empty()
+        rs_filter = st.selectbox(
+            "Relative Strength",
+            ["All RS", "Elite (90+)", "Strong (70+)", "Average (40+)", "Weak (<40)"],
+            help="Filter by Relative Strength percentile vs SPY"
+        )
 
     with col4:
-        st.empty()
+        rs_trend_filter = st.selectbox(
+            "RS Trend",
+            ["All Trends", "Improving", "Stable", "Deteriorating"],
+            help="Filter by RS momentum direction"
+        )
 
     # Get filtered signals
     scanner_name = None if scanner_filter == "All Scanners" else scanner_filter
@@ -165,6 +213,23 @@ def render_signals_tab(service):
     elif claude_filter in ["B Grade"]:
         min_claude_grade = "B"
 
+    # RS filter mapping
+    min_rs_percentile = None
+    max_rs_percentile = None
+    if rs_filter == "Elite (90+)":
+        min_rs_percentile = 90
+    elif rs_filter == "Strong (70+)":
+        min_rs_percentile = 70
+    elif rs_filter == "Average (40+)":
+        min_rs_percentile = 40
+    elif rs_filter == "Weak (<40)":
+        max_rs_percentile = 39
+
+    # RS trend filter
+    rs_trend = None
+    if rs_trend_filter != "All Trends":
+        rs_trend = rs_trend_filter.lower()
+
     signals = service.get_scanner_signals(
         scanner_name=scanner_name,
         status=status,
@@ -173,6 +238,9 @@ def render_signals_tab(service):
         claude_analyzed_only=claude_analyzed_only,
         signal_date_from=str(date_from) if date_from else None,
         signal_date_to=str(date_to) if date_to else None,
+        min_rs_percentile=min_rs_percentile,
+        max_rs_percentile=max_rs_percentile,
+        rs_trend=rs_trend,
         limit=100
     )
 
@@ -366,6 +434,12 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     else:
         factors_str = str(factors) if factors else ''
 
+    # Relative Strength data
+    rs_percentile = signal.get('rs_percentile')
+    rs_trend = signal.get('rs_trend')
+    sector = signal.get('sector')
+    sector_stage = signal.get('sector_stage')
+
     # Signal timestamp
     signal_timestamp = signal.get('signal_timestamp')
     if signal_timestamp:
@@ -453,7 +527,19 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
         profit_sign = '+' if trade_profit >= 0 else ''
         trade_badge = f" | 💼 :{profit_color}[{profit_sign}${trade_profit:.2f}]"
 
-    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{claude_badge}{news_badge}{days_badge}{trade_badge}{timestamp_part}", expanded=False):
+    # RS badge - shows relative strength percentile and trend
+    rs_badge = ""
+    if rs_percentile is not None:
+        rs_label = _get_rs_label(rs_percentile)
+        rs_trend_icon = RS_TREND_ICONS.get(rs_trend, '')
+        if rs_percentile >= 70:
+            rs_badge = f" | RS: :green[{rs_percentile}]{rs_trend_icon}"
+        elif rs_percentile >= 40:
+            rs_badge = f" | RS: :orange[{rs_percentile}]{rs_trend_icon}"
+        else:
+            rs_badge = f" | RS: :red[{rs_percentile}]{rs_trend_icon}"
+
+    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{rs_badge}{claude_badge}{news_badge}{days_badge}{trade_badge}{timestamp_part}", expanded=False):
 
         # Metrics row
         col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -475,6 +561,22 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
 
         if factors_str:
             st.caption(f"**Factors:** {factors_str}")
+
+        # Relative Strength Section (if data available)
+        if rs_percentile is not None:
+            st.markdown("---")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                rs_color = _get_rs_color(rs_percentile)
+                st.markdown(f"**RS Percentile:** <span style='color: {rs_color}; font-weight: bold;'>{rs_percentile}</span>", unsafe_allow_html=True)
+            with col2:
+                trend_icon = RS_TREND_ICONS.get(rs_trend, '')
+                st.markdown(f"**RS Trend:** {trend_icon} {rs_trend or 'N/A'}")
+            with col3:
+                st.markdown(f"**Sector:** {sector or 'N/A'}")
+            with col4:
+                stage_color = {'leading': 'green', 'improving': 'blue', 'weakening': 'orange', 'lagging': 'red'}.get(sector_stage, 'gray')
+                st.markdown(f"**Sector Stage:** :{stage_color}[{sector_stage or 'N/A'}]")
 
         # Claude AI Analysis Section
         if has_claude:
@@ -597,6 +699,81 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
                             st.markdown(f"- :gray[•] {factor}")
         else:
             st.caption("📰 *No news data yet - click 'Enrich with News' to fetch*")
+
+        # Position Calculator Section
+        st.markdown("---")
+        if st.checkbox(f"📐 Calculate Position Size", key=f"pos_calc_{signal_id}", value=False):
+            _render_inline_position_calculator(ticker, entry, stop, signal_id)
+
+
+def _render_inline_position_calculator(ticker: str, entry: float, stop: float, signal_id: int) -> None:
+    """Render an inline position calculator for a signal."""
+    # Initialize session state for account size if not already set
+    if 'account_size' not in st.session_state:
+        st.session_state.account_size = 25000.0
+    if 'risk_percent' not in st.session_state:
+        st.session_state.risk_percent = 1.0
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        account_size = st.number_input(
+            "Account Size ($)",
+            min_value=1000.0,
+            max_value=10000000.0,
+            value=st.session_state.account_size,
+            step=1000.0,
+            format="%.0f",
+            key=f"account_{signal_id}"
+        )
+        st.session_state.account_size = account_size
+
+    with col2:
+        risk_pct = st.number_input(
+            "Risk Per Trade (%)",
+            min_value=0.1,
+            max_value=10.0,
+            value=st.session_state.risk_percent,
+            step=0.1,
+            format="%.1f",
+            key=f"risk_{signal_id}"
+        )
+        st.session_state.risk_percent = risk_pct
+
+    # Calculate position size
+    if entry > 0 and stop > 0 and entry != stop:
+        risk_per_share = abs(entry - stop)
+        risk_dollars = account_size * (risk_pct / 100)
+        shares = int(risk_dollars / risk_per_share)
+        position_value = shares * entry
+        position_pct = (position_value / account_size) * 100
+
+        # Determine trade direction
+        is_long = stop < entry
+        target_price = entry + (2 * risk_per_share) if is_long else entry - (2 * risk_per_share)
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Shares to Buy", f"{shares:,}")
+        with col2:
+            st.metric("Position Value", f"${position_value:,.0f}")
+        with col3:
+            st.metric("Dollar Risk", f"${risk_dollars:,.0f}")
+        with col4:
+            st.metric("Position %", f"{position_pct:.1f}%")
+
+        # Warnings
+        if position_pct > 25:
+            st.error("Position > 25% of account - HIGH CONCENTRATION")
+        elif position_pct > 15:
+            st.warning("Position > 15% of account - moderate concentration")
+
+        if shares < 1:
+            st.error("Cannot buy even 1 share with this risk amount")
+
+        # Trade summary
+        st.success(f"**{ticker}**: Buy {shares:,} shares @ ${entry:.2f} | Stop ${stop:.2f} | Target ${target_price:.2f} (2R)")
 
 
 def _signals_to_csv(signals: List[Dict]) -> str:

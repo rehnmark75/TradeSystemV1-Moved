@@ -28,6 +28,8 @@ from components.stock_tabs import (
     render_scanner_performance_tab,
     render_broker_stats_tab,
     render_chart_tab,
+    render_market_context_tab,
+    render_screener_builder_tab,
 )
 
 # Page configuration
@@ -188,11 +190,13 @@ def main():
     """Main application entry point."""
     service = get_stock_service()
 
-    # Create tabs - 6-tab structure (Deep Dive merged into Chart)
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    # Create tabs - 8-tab structure with Custom Screener
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📊 Dashboard",
         "📡 Signals",
         "📋 Watchlists",
+        "🌍 Market Context",
+        "🔍 Custom Screener",
         "📈 Scanner Performance",
         "💹 Broker Stats",
         "📉 Chart & Analysis"
@@ -208,12 +212,18 @@ def main():
         render_watchlists_tab(service)
 
     with tab4:
-        render_scanner_performance_tab(service)
+        render_market_context_tab(service)
 
     with tab5:
-        render_broker_stats_tab()
+        render_screener_builder_tab(service)
 
     with tab6:
+        render_scanner_performance_tab(service)
+
+    with tab7:
+        render_broker_stats_tab()
+
+    with tab8:
         render_chart_tab(service)
 
 

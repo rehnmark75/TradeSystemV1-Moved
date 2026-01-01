@@ -1,7 +1,7 @@
 """
 Signal Scanner Strategies
 
-7 consolidated scanners (TREND_REVERSAL removed - PF 1.09 too low):
+8 consolidated scanners:
 
 Backtested & Optimized (PF > 1.5):
 - ZLMATrendScanner: Zero-Lag MA crossover (PF 1.55, WR 50%)
@@ -9,10 +9,11 @@ Backtested & Optimized (PF > 1.5):
 - EMAPullbackScanner: EMA cascade pullback (PF 2.02)
 - ReversalScanner: Capitulation + mean reversion + Wyckoff springs (PF 2.44)
 
-Other Strategies (lower PF, included for diversity):
+Other Strategies:
 - BreakoutConfirmationScanner: 52W high breakouts with volume
 - GapAndGoScanner: Gap continuation plays
 - RSIDivergenceScanner: Price/RSI divergence reversals
+- PocketPivotScanner: Institutional accumulation patterns (O'Neil methodology)
 """
 
 # Backtested & optimized strategies (PF > 1.5)
@@ -21,10 +22,11 @@ from .macd_momentum import MACDMomentumScanner
 from .ema_pullback import EMAPullbackScanner
 from .reversal_scanner import ReversalScanner
 
-# Other strategies (lower PF)
+# Other strategies
 from .breakout_confirmation import BreakoutConfirmationScanner
 from .gap_and_go import GapAndGoScanner
 from .rsi_divergence import RSIDivergenceScanner
+from .pocket_pivot import PocketPivotScanner
 
 __all__ = [
     # Backtested & optimized (PF > 1.5)
@@ -36,4 +38,5 @@ __all__ = [
     'BreakoutConfirmationScanner',
     'GapAndGoScanner',
     'RSIDivergenceScanner',
+    'PocketPivotScanner',
 ]

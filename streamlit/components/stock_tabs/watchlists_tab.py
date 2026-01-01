@@ -13,6 +13,26 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date
 
+# RS Percentile color helpers
+def _get_rs_color(percentile):
+    """Get color for RS percentile value."""
+    if percentile is None or pd.isna(percentile):
+        return '#6c757d'
+    if percentile >= 90:
+        return '#28a745'  # Elite - green
+    elif percentile >= 70:
+        return '#17a2b8'  # Strong - blue
+    elif percentile >= 40:
+        return '#ffc107'  # Average - yellow
+    else:
+        return '#dc3545'  # Weak - red
+
+RS_TREND_ICONS = {
+    'improving': '↗️',
+    'stable': '➡️',
+    'deteriorating': '↘️',
+}
+
 
 # Watchlist definitions - matches worker/app/stock_scanner/scanners/watchlist_scanner.py
 WATCHLIST_DEFINITIONS = {
@@ -174,6 +194,19 @@ def render_watchlists_tab(service):
     # Days column - for crossover watchlists this is days since crossover
     display_df['Days'] = display_df['days_on_list'].apply(lambda x: f"{int(x)}d" if pd.notnull(x) else '1d')
 
+    # RS Percentile column - color-coded relative strength
+    if 'rs_percentile' in display_df.columns:
+        def format_rs(row):
+            rs = row.get('rs_percentile')
+            trend = row.get('rs_trend', '')
+            if pd.isna(rs) or rs is None:
+                return '-'
+            icon = RS_TREND_ICONS.get(trend, '')
+            return f"{int(rs)}{icon}"
+        display_df['RS'] = display_df.apply(format_rs, axis=1)
+    else:
+        display_df['RS'] = '-'
+
     # In Trade column - shows if stock has open broker position with profit
     def format_trade_status(row):
         if row.get('in_trade'):
@@ -200,24 +233,24 @@ def render_watchlists_tab(service):
 
     if selected_watchlist == 'gap_up_continuation':
         display_df['Gap %'] = display_df['gap_pct'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
-        cols = ['ticker', 'Price', 'Gap %', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+        cols = ['ticker', 'RS', 'Price', 'Gap %', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
         if has_trades:
             cols.insert(1, 'Trade')
         result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
     elif selected_watchlist == 'rsi_oversold_bounce':
-        cols = ['ticker', 'Price', 'RSI', 'Volume', '1D Chg', 'Avg/Day']
+        cols = ['ticker', 'RS', 'Price', 'RSI', 'Volume', '1D Chg', 'Avg/Day']
         if has_trades:
             cols.insert(1, 'Trade')
         result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
     elif selected_watchlist == 'macd_bullish_cross':
         display_df['MACD'] = display_df['macd'].apply(lambda x: f"{x:.3f}" if pd.notnull(x) else '-')
-        cols = ['ticker', 'Days', 'Crossover', 'Price', 'MACD', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+        cols = ['ticker', 'RS', 'Days', 'Crossover', 'Price', 'MACD', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
         if has_trades:
             cols.insert(1, 'Trade')
         result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
     else:
         # EMA crossover watchlists
-        cols = ['ticker', 'Days', 'Crossover', 'Price', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+        cols = ['ticker', 'RS', 'Days', 'Crossover', 'Price', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
         if has_trades:
             cols.insert(1, 'Trade')
         result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
@@ -263,6 +296,25 @@ def render_watchlists_tab(service):
             return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
         return ''
 
+    def style_rs(val):
+        """Style the RS column based on percentile value"""
+        if val == '-' or not val:
+            return ''
+        try:
+            # Extract number from string like "85↗️"
+            rs = int(''.join(filter(str.isdigit, str(val))))
+            if rs >= 90:
+                return 'background-color: #d4edda; color: #155724; font-weight: bold;'  # Elite - green
+            elif rs >= 70:
+                return 'background-color: #d1ecf1; color: #0c5460; font-weight: bold;'  # Strong - blue
+            elif rs >= 40:
+                return 'background-color: #fff3cd; color: #856404;'  # Average - yellow
+            else:
+                return 'background-color: #f8d7da; color: #721c24;'  # Weak - red
+        except (ValueError, TypeError):
+            pass
+        return ''
+
     styled_df = result_df.style.map(style_change, subset=['1D Chg'])
     if 'Days' in result_df.columns:
         styled_df = styled_df.map(style_days, subset=['Days'])
@@ -272,6 +324,8 @@ def render_watchlists_tab(service):
         styled_df = styled_df.map(style_change, subset=['Gap %'])
     if 'Trade' in result_df.columns:
         styled_df = styled_df.map(style_trade, subset=['Trade'])
+    if 'RS' in result_df.columns:
+        styled_df = styled_df.map(style_rs, subset=['RS'])
 
     st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
 
