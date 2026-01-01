@@ -35,7 +35,7 @@ COMMENT ON COLUMN alert_history.market_regime_detected IS
     'Detected market regime: trending, ranging, breakout, high_volatility, unknown';
 
 ALTER TABLE alert_history
-ADD COLUMN IF NOT EXISTS regime_confidence DECIMAL(4,3);
+ADD COLUMN IF NOT EXISTS regime_confidence DECIMAL(5,4);
 
 COMMENT ON COLUMN alert_history.regime_confidence IS
     'Confidence score (0-1) for market regime classification';
