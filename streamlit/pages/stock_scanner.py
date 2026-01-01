@@ -26,7 +26,6 @@ from components.stock_tabs import (
     render_signals_tab,
     render_watchlists_tab,
     render_scanner_performance_tab,
-    render_deep_dive_tab,
     render_broker_stats_tab,
     render_chart_tab,
 )
@@ -189,15 +188,14 @@ def main():
     """Main application entry point."""
     service = get_stock_service()
 
-    # Create tabs - 7-tab structure
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    # Create tabs - 6-tab structure (Deep Dive merged into Chart)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Dashboard",
         "📡 Signals",
         "📋 Watchlists",
         "📈 Scanner Performance",
-        "🔍 Deep Dive",
         "💹 Broker Stats",
-        "📉 Chart"
+        "📉 Chart & Analysis"
     ])
 
     with tab1:
@@ -213,12 +211,9 @@ def main():
         render_scanner_performance_tab(service)
 
     with tab5:
-        render_deep_dive_tab(service)
-
-    with tab6:
         render_broker_stats_tab()
 
-    with tab7:
+    with tab6:
         render_chart_tab(service)
 
 

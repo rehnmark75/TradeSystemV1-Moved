@@ -290,10 +290,10 @@ def render_watchlists_tab(service):
         st.caption("Paste into TradingView watchlist")
 
     with col2:
-        st.markdown("### Open in Deep Dive")
+        st.markdown("### Open Chart & Analysis")
         if ticker_list:
             selected_ticker = st.selectbox("Select stock for analysis", ticker_list, key="watchlist_deep_dive")
-            if st.button("🔍 Open Deep Dive", key="open_deep_dive"):
-                st.session_state.deep_dive_ticker = selected_ticker
-                st.session_state.current_deep_dive_ticker = selected_ticker
-                st.info(f"Switch to Deep Dive tab to see analysis for {selected_ticker}")
+            if st.button("📈 Open Chart & Analysis", key="open_chart_analysis"):
+                st.session_state.chart_ticker = selected_ticker
+                st.session_state.current_chart_ticker = selected_ticker
+                st.info(f"Switch to **Chart** tab to see chart and analysis for {selected_ticker}")

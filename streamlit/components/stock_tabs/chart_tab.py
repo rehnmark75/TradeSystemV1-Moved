@@ -1,13 +1,20 @@
 """
 Stock Scanner Chart Tab
 
-Interactive stock charting with:
+Interactive stock charting with Deep Dive analysis:
 - Stock selection from signals, watchlists, or manual entry
 - Lightweight Charts (TradingView-like) visualization
 - EMAs (20, 50, 100, 200)
 - MACD with histogram
 - Volume subplot
-- 90-day default lookback
+- Deep Dive analysis sections below chart:
+  - Claude AI Analysis
+  - News Sentiment
+  - Active Signal Card
+  - Technical + SMC Analysis
+  - Fundamentals
+  - Score Breakdown
+  - Signal History
 """
 
 import streamlit as st
@@ -16,24 +23,56 @@ import numpy as np
 from datetime import datetime, timedelta
 from streamlit_lightweight_charts_ntf import renderLightweightCharts
 
+# Import deep dive helper functions
+from .deep_dive_tab import (
+    _render_stock_header,
+    _render_claude_analysis_section,
+    _render_news_sentiment_section,
+    _render_active_signal_section,
+    _render_technical_and_smc_analysis,
+    _render_fundamentals_section,
+    _render_score_breakdown,
+    _render_signal_history,
+)
+
 
 def render_chart_tab(service):
     """
-    Render the Chart tab with interactive stock charting.
+    Render the Chart tab with interactive stock charting and Deep Dive analysis.
 
     Features:
     - Stock selection from signals, watchlists, or manual entry
     - Candlestick chart with EMAs (20, 50, 100, 200)
     - MACD indicator panel
     - Volume panel
+    - Deep Dive analysis sections below chart
     """
-    st.header("Stock Chart")
-    st.markdown("*Interactive charting with technical indicators*")
+    st.header("Stock Chart & Analysis")
+    st.markdown("*Interactive charting with comprehensive stock analysis*")
+
+    # Initialize session state for Claude analysis (needed for deep dive sections)
+    if 'deep_dive_claude_analysis' not in st.session_state:
+        st.session_state.deep_dive_claude_analysis = {}
+
+    # Check if navigated from another tab (watchlist, signals, etc.)
+    navigated_ticker = st.session_state.get('chart_ticker', None)
+    if navigated_ticker:
+        st.session_state.current_chart_ticker = navigated_ticker
+        st.session_state.chart_ticker = None  # Clear after use
 
     # Stock Selection Section
     st.subheader("Select Stock")
 
-    source_col, ticker_col = st.columns([1, 2])
+    source_col, ticker_col, clear_col = st.columns([1, 2, 0.5])
+
+    # Check if we have a pre-selected ticker from navigation
+    current_ticker = st.session_state.get('current_chart_ticker', None)
+
+    with clear_col:
+        if current_ticker:
+            if st.button("🔄 Clear", key="clear_chart_ticker"):
+                st.session_state.current_chart_ticker = None
+                st.rerun()
 
     with source_col:
         source = st.radio(
@@ -43,10 +82,12 @@ def render_chart_tab(service):
             key="chart_source"
         )
 
-    selected_ticker = None
+    selected_ticker = current_ticker  # Start with navigated ticker if available
 
     with ticker_col:
-        if source == "Signals":
+        if current_ticker:
+            st.info(f"Viewing: **{current_ticker}** (from navigation)")
+        elif source == "Signals":
             # Get active signal tickers
             signal_tickers = _get_signal_tickers(service)
             if signal_tickers:
@@ -106,7 +147,7 @@ def render_chart_tab(service):
                         st.warning(f"Ticker '{manual_input}' not found in database")
 
     if not selected_ticker:
-        st.info("Select a stock to view chart")
+        st.info("Select a stock to view chart and analysis")
         return
 
     st.markdown("---")
@@ -158,8 +199,64 @@ def render_chart_tab(service):
     # Render with unique key
     renderLightweightCharts(charts, f"stock-chart-{selected_ticker}")
 
-    # Display current price info
-    _render_price_info(df, selected_ticker)
+    # ==========================================================================
+    # DEEP DIVE ANALYSIS SECTIONS
+    # ==========================================================================
+    st.markdown("---")
+    st.markdown("## 🔍 Stock Analysis")
+
+    # Fetch all additional stock data for deep dive analysis
+    with st.spinner(f"Loading analysis data for {selected_ticker}..."):
+        data = service.get_stock_details(selected_ticker)
+        candles_90d = service.get_daily_candles(selected_ticker, days=90)
+        scanner_signals = service.get_scanner_signals_for_ticker(selected_ticker, limit=10)
+        fundamentals = service.get_full_fundamentals(selected_ticker)
+
+    if not data or not data.get('instrument'):
+        st.warning(f"Limited analysis data available for '{selected_ticker}'")
+    else:
+        instrument = data.get('instrument', {})
+        metrics = data.get('metrics', {})
+        watchlist = data.get('watchlist', {})
+        active_signal = scanner_signals[0] if scanner_signals else None
+
+        # SECTION 1: Header with Sector/Industry
+        _render_stock_header(selected_ticker, instrument, watchlist, fundamentals, metrics)
+
+        st.markdown("---")
+
+        # SECTION 2: Claude AI Analysis
+        _render_claude_analysis_section(service, selected_ticker, active_signal, metrics, fundamentals, candles_90d)
+
+        st.markdown("---")
+
+        # SECTION 3: News Sentiment
+        _render_news_sentiment_section(service, selected_ticker, active_signal, scanner_signals)
+
+        st.markdown("---")
+
+        # SECTION 4: Active Signal Card
+        if active_signal:
+            _render_active_signal_section(active_signal, metrics)
+            st.markdown("")
+
+        # SECTION 5: Technical + SMC Analysis
+        _render_technical_and_smc_analysis(metrics, fundamentals, active_signal)
+
+        st.markdown("---")
+
+        # SECTION 6: Fundamentals
+        _render_fundamentals_section(fundamentals)
+
+        st.markdown("---")
+
+        # SECTION 7: Score Breakdown
+        if watchlist:
+            _render_score_breakdown(watchlist)
+            st.markdown("---")
+
+        # SECTION 8: Scanner Signal History
+        _render_signal_history(scanner_signals)
 
 
 def _get_signal_tickers(service) -> list:
@@ -472,70 +569,3 @@ def _build_volume_chart(df: pd.DataFrame) -> dict:
     return {"chart": chart_config, "series": series}
 
 
-def _render_price_info(df: pd.DataFrame, ticker: str):
-    """Render current price information below the chart."""
-    if df.empty:
-        return
-
-    latest = df.iloc[-1]
-
-    st.markdown("---")
-    st.subheader("Current Data")
-
-    # OHLCV row
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-
-    with col1:
-        st.metric("Open", f"${latest['open']:.2f}")
-    with col2:
-        st.metric("High", f"${latest['high']:.2f}")
-    with col3:
-        st.metric("Low", f"${latest['low']:.2f}")
-    with col4:
-        st.metric("Close", f"${latest['close']:.2f}")
-    with col5:
-        change = latest['close'] - latest['open']
-        change_pct = (change / latest['open'] * 100) if latest['open'] != 0 else 0
-        st.metric("Change", f"${change:+.2f}", f"{change_pct:+.2f}%")
-    with col6:
-        vol = latest.get('volume', 0)
-        if vol >= 1_000_000:
-            vol_str = f"{vol/1_000_000:.1f}M"
-        elif vol >= 1_000:
-            vol_str = f"{vol/1_000:.1f}K"
-        else:
-            vol_str = f"{vol:.0f}"
-        st.metric("Volume", vol_str)
-
-    # EMA values row
-    st.markdown("**Moving Averages**")
-    ema_col1, ema_col2, ema_col3, ema_col4 = st.columns(4)
-
-    with ema_col1:
-        if pd.notna(latest.get('ema_20')):
-            st.metric("EMA 20", f"${latest['ema_20']:.2f}")
-    with ema_col2:
-        if pd.notna(latest.get('ema_50')):
-            st.metric("EMA 50", f"${latest['ema_50']:.2f}")
-    with ema_col3:
-        if pd.notna(latest.get('ema_100')):
-            st.metric("EMA 100", f"${latest['ema_100']:.2f}")
-    with ema_col4:
-        if pd.notna(latest.get('ema_200')):
-            st.metric("EMA 200", f"${latest['ema_200']:.2f}")
-
-    # MACD values row
-    st.markdown("**MACD Indicator**")
-    macd_col1, macd_col2, macd_col3 = st.columns(3)
-
-    with macd_col1:
-        if pd.notna(latest.get('macd_line')):
-            st.metric("MACD Line", f"{latest['macd_line']:.4f}")
-    with macd_col2:
-        if pd.notna(latest.get('macd_signal')):
-            st.metric("Signal Line", f"{latest['macd_signal']:.4f}")
-    with macd_col3:
-        if pd.notna(latest.get('macd_hist')):
-            hist_val = latest['macd_hist']
-            hist_trend = "Bullish" if hist_val > 0 else "Bearish"
-            st.metric("Histogram", f"{hist_val:.4f}", hist_trend)
