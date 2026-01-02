@@ -157,6 +157,9 @@ class ScannerConfig:
     enable_multi_timeframe_analysis: bool = False
     min_confluence_score: float = 0.30
 
+    # ENABLED STRATEGIES (replaces config.py flags)
+    enabled_strategies: List[str] = field(default_factory=list)
+
     # ADVANCED DEDUPLICATION SETTINGS
     enable_alert_deduplication: bool = True
     signal_hash_cache_expiry_minutes: int = 15
@@ -442,7 +445,7 @@ class ScannerConfigService:
 
         # Handle JSONB fields (lists)
         jsonb_list_fields = [
-            'claude_chart_timeframes', 'claude_vision_strategies'
+            'claude_chart_timeframes', 'claude_vision_strategies', 'enabled_strategies'
         ]
 
         for field_name in jsonb_list_fields:

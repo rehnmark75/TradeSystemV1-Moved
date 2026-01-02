@@ -197,97 +197,56 @@ USE_SIGNAL_PROCESSOR = True  # Enable SignalProcessor for Smart Money
 #   - Required updating for every new strategy
 #   - Case-sensitive exact matching only
 #
-# NEW SOLUTION: Intelligent pattern matching against config flags
-#   - Automatically detects enabled strategies from *_STRATEGY = True flags  
-#   - Handles case variations, abbreviations, and common naming patterns
-#   - Self-maintaining - no manual updates needed
-#   - Uses fuzzy matching: 'EMA', 'ema', 'Simple_EMA' all work if SIMPLE_EMA_STRATEGY = True
+# =============================================================================
+# STRATEGY ENABLED CHECK - SIMPLIFIED (Database-driven)
+# =============================================================================
+# Currently only SMC_SIMPLE is active. Other strategies are legacy/disabled.
+# Future strategies will be managed via database: scanner_global_config.enabled_strategies
 
 def get_enabled_strategy_flags():
     """
-    Get all enabled strategy flags from config.
-    Returns a list of strategy flag names that are set to True.
+    Get enabled strategies from database, fallback to config flags.
+    Returns list of enabled strategy names.
     """
-    import sys
-    current_module = sys.modules[__name__]
-    enabled_flags = []
-    
-    # Find all variables ending in _STRATEGY that are set to True
-    for name in dir(current_module):
-        if name.endswith('_STRATEGY') or name.endswith('_STRATEGY_ENABLED'):
-            try:
-                value = getattr(current_module, name, False)
-                if value is True:
-                    enabled_flags.append(name)
-            except:
-                continue
-    
-    return enabled_flags
+    # Try database first
+    try:
+        from forex_scanner.services.scanner_config_service import get_scanner_config
+        config = get_scanner_config()
+        if config.enabled_strategies:
+            return config.enabled_strategies
+    except Exception:
+        pass
+
+    # Fallback: return currently active strategy
+    return ['SMC_SIMPLE']
+
 
 def is_strategy_enabled(strategy_name: str) -> bool:
     """
-    Check if a strategy is enabled using fuzzy matching against config flags.
-    No hardcoded mappings needed - uses intelligent pattern matching.
+    Check if a strategy is enabled.
+    Simple check - normalizes name and checks against enabled list.
     """
     if not strategy_name:
         return False
-    
-    # Get enabled strategy flags
-    enabled_flags = get_enabled_strategy_flags()
-    if not enabled_flags:
-        return True  # If no flags found, allow all (safe default)
-    
-    # Normalize strategy name for comparison
-    strategy_normalized = strategy_name.upper().strip()
-    
-    # Remove common variations and prefixes/suffixes
-    strategy_clean = strategy_normalized
-    for prefix in ['CS.D.', 'SIMPLE_', 'STANDARD_']:
-        strategy_clean = strategy_clean.replace(prefix, '')
-    for suffix in ['.MINI.IP', '_STRATEGY', '_ENABLED']:
-        strategy_clean = strategy_clean.replace(suffix, '')
-    
-    # Try multiple matching approaches
-    for flag in enabled_flags:
-        flag_clean = flag.upper().replace('_STRATEGY', '').replace('_ENABLED', '')
-        
-        # Approach 1: Exact match after cleanup
-        if strategy_clean == flag_clean:
+
+    enabled = get_enabled_strategy_flags()
+
+    # Normalize for comparison
+    normalized = strategy_name.upper().replace('_STRATEGY', '').replace('_ENABLED', '').strip()
+
+    for s in enabled:
+        s_normalized = s.upper().replace('_STRATEGY', '').replace('_ENABLED', '').strip()
+        if normalized == s_normalized or normalized in s_normalized or s_normalized in normalized:
             return True
-        
-        # Approach 2: Strategy name contained in flag
-        if strategy_clean in flag_clean or flag_clean in strategy_clean:
-            return True
-        
-        # Approach 3: Handle common abbreviations and variations
-        strategy_variations = {
-            'EMA': ['SIMPLE_EMA', 'MOVING_AVERAGE'],
-            'MACD': ['MACD_EMA', 'STANDARD_MACD'],
-            'ZERO_LAG': ['ZEROLAG', 'ZERO_LAG_SQUEEZE'],
-            'BB': ['BOLLINGER', 'BOLLINGER_SUPERTREND'],
-            'SUPERTREND': ['BOLLINGER_SUPERTREND'],
-            'SMC': ['SMART_MONEY'],
-        }
-        
-        for key, variations in strategy_variations.items():
-            if strategy_clean == key or strategy_clean in variations:
-                if key in flag_clean or any(var in flag_clean for var in variations):
-                    return True
-    
+
     return False
+
 
 def get_enabled_strategies():
     """
-    Get a list of enabled strategies for backward compatibility.
-    This is mainly for logging and debugging purposes.
+    Get list of enabled strategy names for logging/debugging.
     """
-    flags = get_enabled_strategy_flags()
-    # Extract readable strategy names from flags
-    strategy_names = []
-    for flag in flags:
-        name = flag.replace('_STRATEGY', '').replace('_ENABLED', '').replace('_', ' ').title()
-        strategy_names.append(name)
-    return strategy_names
+    return get_enabled_strategy_flags()
 
 # =============================================================================
 
