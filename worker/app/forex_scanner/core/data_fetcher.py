@@ -76,14 +76,14 @@ class DataFetcher:
         self._cache_timeout = 150  # 5 minutes
 
     def _load_fallback_config(self):
-        """Load fallback config from config.py"""
-        self.cache_enabled = getattr(system_config, 'ENABLE_DATA_CACHE', False)
-        self.reduced_lookback = getattr(system_config, 'REDUCED_LOOKBACK_HOURS', True)
-        self.lazy_indicators = getattr(system_config, 'LAZY_INDICATOR_LOADING', True)
-        self.batch_size = getattr(system_config, 'DATA_BATCH_SIZE', 10000)
-        self.enable_support_resistance = getattr(system_config, 'ENABLE_SUPPORT_RESISTANCE', True)
-        self.enable_volume_analysis = getattr(system_config, 'ENABLE_VOLUME_ANALYSIS', True)
-        self.enable_behavior_analysis = getattr(system_config, 'ENABLE_BEHAVIOR_ANALYSIS', False)
+        """Load hardcoded fallback defaults when database is unavailable"""
+        self.cache_enabled = False
+        self.reduced_lookback = True
+        self.lazy_indicators = True
+        self.batch_size = 10000
+        self.enable_support_resistance = True
+        self.enable_volume_analysis = True
+        self.enable_behavior_analysis = False
         
         # Pre-calculated indicators cache
         self._indicator_cache = {}

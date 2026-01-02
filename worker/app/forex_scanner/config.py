@@ -140,29 +140,8 @@ USE_BID_ADJUSTMENT = False  # whether to adjust BID prices to MID
 # =============================================================================
 # DEPRECATED: DATA FETCHER OPTIMIZATION - NOW IN DATABASE
 # =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > Data Fetcher
-# -----------------------------------------------------------------------------
-# ENABLE_DATA_CACHE = False
-# REDUCED_LOOKBACK_HOURS = True
-# LAZY_INDICATOR_LOADING = True
-# DATA_BATCH_SIZE = 10000
-# ENABLE_SUPPORT_RESISTANCE = True
-# ENABLE_VOLUME_ANALYSIS = True
-# ENABLE_BEHAVIOR_ANALYSIS = False
-
-# Legacy fallback values (used if database unavailable)
-ENABLE_DATA_CACHE = False
-REDUCED_LOOKBACK_HOURS = True
-LAZY_INDICATOR_LOADING = True
-DATA_BATCH_SIZE = 10000
-ENABLE_SUPPORT_RESISTANCE = True
-ENABLE_VOLUME_ANALYSIS = True
-ENABLE_BEHAVIOR_ANALYSIS = False
-
-# Signal Strategy Mode (legacy, unused)
-# REQUIRE_VOLUME_CONFIRMATION = False
-# REQUIRE_NEW_CROSSOVER = False
+# Migrated to strategy_config.scanner_global_config
+# Fallback defaults are in data_fetcher.py._load_fallback_config()
 
 # Combined Strategy Settings - REMOVED: Strategy was disabled and unused, cleaned up codebase
   
