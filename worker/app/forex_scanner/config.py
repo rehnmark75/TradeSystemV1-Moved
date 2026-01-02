@@ -58,6 +58,17 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localho
 # CLAUDE_API_KEY is provided via environment variable or Azure Key Vault
 CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY', None)  # None if not available
 
+# ================== MinIO Configuration ==================
+# Object storage for Claude vision analysis charts (30-day retention)
+MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'minio:9000')
+MINIO_ACCESS_KEY = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
+MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY', 'minioadmin123')
+MINIO_BUCKET_NAME = os.getenv('MINIO_BUCKET_NAME', 'claude-charts')
+MINIO_SECURE = os.getenv('MINIO_SECURE', 'false').lower() == 'true'
+MINIO_CHART_RETENTION_DAYS = int(os.getenv('MINIO_CHART_RETENTION_DAYS', '30'))
+MINIO_ENABLED = os.getenv('MINIO_ENABLED', 'true').lower() == 'true'  # Set False to use disk storage
+MINIO_PUBLIC_URL = os.getenv('MINIO_PUBLIC_URL', f"http://{MINIO_ENDPOINT}")
+
 # Extended PAIR_INFO in config.py to include JPY pairs
 
 # Pair Information for Pip Calculation

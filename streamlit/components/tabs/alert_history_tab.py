@@ -151,20 +151,37 @@ def _render_alert_row(row: pd.Series):
                 st.info(reason)
 
         with chart_col:
-            # Try to load chart image
-            alert_id = row.get('id', None)
-            chart_path = _get_vision_chart_path(
-                row.get('epic', ''),
-                row.get('alert_timestamp'),
-                alert_id
-            )
+            st.markdown("**Chart Image:**")
 
-            if chart_path and os.path.exists(chart_path):
-                st.markdown("**Chart Image:**")
-                st.image(chart_path, caption="Vision Analysis Chart", use_container_width=True)
+            # Priority 1: Use MinIO URL from database if available
+            chart_url = row.get('vision_chart_url', None)
+            if chart_url and not pd.isna(chart_url) and not chart_url.startswith('file://'):
+                try:
+                    st.image(chart_url, caption="Vision Analysis Chart", use_container_width=True)
+                except Exception as e:
+                    # URL might have expired (30-day retention) - show fallback message
+                    st.warning(f"Chart expired or unavailable (MinIO URL returned error)")
+
+            # Priority 2: Fallback to disk storage for older records
             else:
-                st.markdown("**Chart Image:**")
-                st.info("No chart available (vision analysis not used or chart not saved)")
+                alert_id = row.get('id', None)
+                chart_path = _get_vision_chart_path(
+                    row.get('epic', ''),
+                    row.get('alert_timestamp'),
+                    alert_id
+                )
+
+                if chart_path and os.path.exists(chart_path):
+                    st.image(chart_path, caption="Vision Analysis Chart", use_container_width=True)
+                elif chart_url and chart_url.startswith('file://'):
+                    # Handle file:// URL format from disk fallback
+                    local_path = chart_url.replace('file://', '')
+                    if os.path.exists(local_path):
+                        st.image(local_path, caption="Vision Analysis Chart", use_container_width=True)
+                    else:
+                        st.info("Chart not available (file not found)")
+                else:
+                    st.info("No chart available (vision analysis not used or chart expired)")
 
         # Full raw response in a separate section
         raw_response = row.get('claude_raw_response', '')

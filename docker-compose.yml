@@ -120,10 +120,32 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./postgres:/var/lib/postgresql/data 
+      - ./postgres:/var/lib/postgresql/data
     networks:
       - lab-net
-  
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"    # API
+      - "9001:9001"    # Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - lab-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin
@@ -166,10 +188,15 @@ services:
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-d4thb4pr01qnn6lkv89gd4thb4pr01qnn6lkv8a0}
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin123}
+      - MINIO_BUCKET_NAME=claude-charts
+      - MINIO_PUBLIC_URL=http://localhost:9000
     volumes:
       - ./streamlit:/app:cached
       - ./logs:/logs:ro  # Read-only for safety
-      - ./worker/app/claude_analysis_enhanced:/app/claude_analysis_enhanced:ro  # Vision analysis charts
+      - ./worker/app/claude_analysis_enhanced:/app/claude_analysis_enhanced:ro  # Vision analysis charts (fallback)
       - ./worker/app/forex_scanner:/app/forex_scanner:ro  # Strategy config files
       - ./dev-app/config.py:/app/trailing_config.py:ro  # Trailing stop config (source of truth from fastapi-dev)
     working_dir: /app
@@ -178,6 +205,7 @@ services:
     depends_on:
       - fastapi-dev
       - fastapi-prod
+      - minio
   tradingview:
     build:
       context: ./tradingview
@@ -226,11 +254,16 @@ services:
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-d4thb4pr01qnn6lkv89gd4thb4pr01qnn6lkv8a0}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin123}
+      - MINIO_BUCKET_NAME=claude-charts
     networks:
       - lab-net
     depends_on:
       - postgres
       - vector-db
+      - minio
 
   stock-scheduler:
     build:
@@ -385,6 +418,7 @@ services:
 
 volumes:
   pgadmin_data:
+  minio_data:
 
 networks:
   lab-net:

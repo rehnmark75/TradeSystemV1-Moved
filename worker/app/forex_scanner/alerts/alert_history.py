@@ -513,7 +513,7 @@ class AlertHistoryManager:
                         ob_proximity_score, nearest_ob_distance_pips,
                         liquidity_sweep_detected, liquidity_sweep_type, liquidity_sweep_quality,
                         claude_analysis, claude_score, claude_decision, claude_approved,
-                        claude_reason, claude_mode, claude_raw_response,
+                        claude_reason, claude_mode, claude_raw_response, vision_chart_url,
                         alert_message, alert_level,
                         signal_hash, data_source, market_timestamp, cooldown_key,
                         strategy_config_hash,
@@ -548,7 +548,7 @@ class AlertHistoryManager:
                         %(ob_proximity_score)s, %(nearest_ob_distance_pips)s,
                         %(liquidity_sweep_detected)s, %(liquidity_sweep_type)s, %(liquidity_sweep_quality)s,
                         %(claude_analysis)s, %(claude_score)s, %(claude_decision)s, %(claude_approved)s,
-                        %(claude_reason)s, %(claude_mode)s, %(claude_raw_response)s,
+                        %(claude_reason)s, %(claude_mode)s, %(claude_raw_response)s, %(vision_chart_url)s,
                         %(alert_message)s, %(alert_level)s,
                         %(signal_hash)s, %(data_source)s, %(market_timestamp)s, %(cooldown_key)s,
                         %(strategy_config_hash)s,
@@ -1022,7 +1022,8 @@ class AlertHistoryManager:
             'claude_approved': None,
             'claude_reason': None,
             'claude_mode': None,
-            'claude_raw_response': None
+            'claude_raw_response': None,
+            'vision_chart_url': None  # MinIO URL for vision analysis chart
         }
         
         try:
@@ -1056,7 +1057,8 @@ class AlertHistoryManager:
                     'claude_approved': claude_result.get('decision') == 'APPROVE' if claude_result.get('decision') else None,
                     'claude_reason': claude_result.get('reason'),
                     'claude_mode': claude_result.get('mode', 'minimal'),
-                    'claude_raw_response': claude_result.get('raw_response', str(claude_result))
+                    'claude_raw_response': claude_result.get('raw_response', str(claude_result)),
+                    'vision_chart_url': claude_result.get('vision_chart_url')  # MinIO chart URL
                 })
                 
             # Priority 2: Check if signal already has Claude data embedded
@@ -1073,7 +1075,8 @@ class AlertHistoryManager:
                         'claude_approved': embedded_claude.get('decision') == 'APPROVE' if embedded_claude.get('decision') else None,
                         'claude_reason': embedded_claude.get('reason'),
                         'claude_mode': embedded_claude.get('mode', 'minimal'),
-                        'claude_raw_response': embedded_claude.get('raw_response')
+                        'claude_raw_response': embedded_claude.get('raw_response'),
+                        'vision_chart_url': embedded_claude.get('vision_chart_url')  # MinIO chart URL
                     })
                 
                 # Handle direct Claude fields in signal

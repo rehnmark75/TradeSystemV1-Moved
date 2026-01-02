@@ -67,6 +67,7 @@ class AlertHistoryService:
                 claude_reason,
                 claude_mode,
                 claude_raw_response,
+                vision_chart_url,
                 status,
                 alert_level
             FROM alert_history

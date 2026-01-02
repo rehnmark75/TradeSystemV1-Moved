@@ -31,6 +31,14 @@ try:
 except ImportError:
     CHART_GENERATOR_AVAILABLE = False
 
+# Try to import MinIO client
+try:
+    from forex_scanner.services.minio_client import get_minio_client
+    MINIO_CLIENT_AVAILABLE = True
+except ImportError:
+    MINIO_CLIENT_AVAILABLE = False
+    get_minio_client = None
+
 
 class ClaudeAnalyzer:
     """
@@ -74,6 +82,21 @@ class ClaudeAnalyzer:
             except Exception as e:
                 self.logger.warning(f"⚠️ Failed to initialize chart generator: {e}")
 
+        # MinIO client for chart storage
+        self.minio_client = None
+        self.minio_enabled = getattr(config, 'MINIO_ENABLED', True)
+        if MINIO_CLIENT_AVAILABLE and self.minio_enabled:
+            try:
+                self.minio_client = get_minio_client()
+                if self.minio_client.is_available:
+                    self.logger.info("✅ MinIO client initialized for chart storage")
+                else:
+                    self.logger.warning("⚠️ MinIO client not available - using disk storage")
+                    self.minio_client = None
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to initialize MinIO client: {e}")
+                self.minio_client = None
+
         # Save directory for analysis artifacts
         self.save_directory = save_directory
 
@@ -82,6 +105,7 @@ class ClaudeAnalyzer:
 
         self.logger.info(f"✅ Claude Analyzer initialized - Advanced prompts: {self.use_advanced_prompts}, Level: {self.analysis_level}")
         self.logger.info(f"   Vision API: {'Enabled' if self.use_vision_api and self.chart_generator else 'Disabled'}")
+        self.logger.info(f"   Chart Storage: {'MinIO' if self.minio_client else 'Disk'}")
     
     def analyze_signal_minimal(self, signal: Dict, save_to_file: bool = None) -> Optional[Dict]:
         """
@@ -404,18 +428,21 @@ class ClaudeAnalyzer:
                     'analysis_timestamp': datetime.now().isoformat(),
                     'vision_used': chart_generated,
                     'chart_generated': chart_generated,
-                    'tokens_used': tokens_used
+                    'tokens_used': tokens_used,
+                    'vision_chart_url': None  # Will be populated if chart is uploaded to MinIO
                 }
 
-                # Save artifacts to disk with alert_id prefix
+                # Save artifacts (chart to MinIO, optionally other files to disk)
                 if save_to_file and self.save_vision_artifacts:
-                    self._save_vision_analysis_artifacts(
+                    chart_url = self._save_vision_analysis_artifacts(
                         signal=signal,
                         result=result,
                         chart_base64=chart_base64,
                         prompt=prompt,
                         alert_id=alert_id
                     )
+                    if chart_url:
+                        result['vision_chart_url'] = chart_url
 
                 return result
             else:
@@ -556,112 +583,78 @@ class ClaudeAnalyzer:
         chart_base64: str,
         prompt: str,
         alert_id: int = None
-    ) -> None:
+    ) -> Optional[str]:
         """
-        Save vision analysis artifacts to disk with alert_id prefix.
+        Save vision analysis chart to MinIO (or disk as fallback).
 
-        Saves:
-        1. Chart image as PNG file
-        2. Signal data as JSON file
-        3. Prompt text file
-        4. Analysis result as JSON file
+        Primary storage is MinIO with 30-day retention. Text files (signal, prompt, result)
+        are no longer saved as this data is already stored in the database.
 
         Args:
             signal: Signal dictionary
             result: Analysis result dictionary
             chart_base64: Base64-encoded chart image
-            prompt: Prompt text sent to Claude
+            prompt: Prompt text sent to Claude (not saved - already in DB)
             alert_id: Alert ID for file naming prefix
-        """
-        try:
-            # Create vision analysis directory
-            vision_dir = os.path.join(self.save_directory, 'vision_analysis')
-            os.makedirs(vision_dir, exist_ok=True)
 
-            # Generate filename prefix
-            epic = signal.get('epic', 'unknown').replace('.', '_')
+        Returns:
+            MinIO URL of the uploaded chart, or None if upload failed
+        """
+        chart_url = None
+
+        try:
+            # Generate filename components
+            epic = signal.get('epic', 'unknown').replace('.', '_').replace(':', '_')
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
             if alert_id:
-                prefix = f"{alert_id}_{epic}_{timestamp}"
+                object_name = f"{alert_id}_{epic}_{timestamp}_chart.png"
             else:
-                prefix = f"{epic}_{timestamp}"
+                object_name = f"{epic}_{timestamp}_chart.png"
 
-            # 1. Save chart image as PNG
-            if chart_base64:
-                chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
+            # Upload chart to MinIO if available
+            if chart_base64 and self.minio_client and self.minio_client.is_available:
+                try:
+                    chart_bytes = base64.b64decode(chart_base64)
+                    chart_url = self.minio_client.upload_chart(chart_bytes, object_name)
+                    if chart_url:
+                        self.logger.info(f"📊 Chart uploaded to MinIO: {object_name}")
+                    else:
+                        self.logger.warning("⚠️ MinIO upload returned no URL - falling back to disk")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ MinIO upload failed: {e} - falling back to disk")
+
+            # Fallback to disk storage if MinIO upload failed or not available
+            if chart_base64 and not chart_url:
+                vision_dir = os.path.join(self.save_directory, 'vision_analysis')
+                os.makedirs(vision_dir, exist_ok=True)
+                chart_path = os.path.join(vision_dir, object_name)
                 try:
                     chart_bytes = base64.b64decode(chart_base64)
                     with open(chart_path, 'wb') as f:
                         f.write(chart_bytes)
-                    self.logger.info(f"📊 Chart saved: {chart_path}")
+                    self.logger.info(f"📊 Chart saved to disk: {chart_path}")
+                    # Return local path for fallback (Streamlit can still read it)
+                    chart_url = f"file://{chart_path}"
                 except Exception as e:
-                    self.logger.warning(f"⚠️ Failed to save chart: {e}")
+                    self.logger.warning(f"⚠️ Failed to save chart to disk: {e}")
 
-            # 2. Save signal data as JSON
-            signal_path = os.path.join(vision_dir, f"{prefix}_signal.json")
-            try:
-                # Create a serializable copy of signal
-                signal_data = self._make_json_serializable(signal)
-                with open(signal_path, 'w', encoding='utf-8') as f:
-                    json.dump(signal_data, f, indent=2, default=str)
-                self.logger.info(f"📝 Signal data saved: {signal_path}")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Failed to save signal data: {e}")
+            # NOTE: Text files (_signal.json, _prompt.txt, _result.json) are no longer saved.
+            # All this data is already stored in the alert_history database table:
+            # - signal data -> strategy_indicators JSON column
+            # - result data -> claude_score, claude_decision, claude_reason columns
+            # - prompt can be regenerated from signal if needed
 
-            # 3. Save prompt text
-            prompt_path = os.path.join(vision_dir, f"{prefix}_prompt.txt")
-            try:
-                with open(prompt_path, 'w', encoding='utf-8') as f:
-                    f.write(f"═══════════════════════════════════════════════════════════════\n")
-                    f.write(f"CLAUDE VISION ANALYSIS PROMPT\n")
-                    f.write(f"═══════════════════════════════════════════════════════════════\n")
-                    f.write(f"Alert ID: {alert_id}\n")
-                    f.write(f"Epic: {signal.get('epic', 'Unknown')}\n")
-                    f.write(f"Strategy: {signal.get('strategy', 'Unknown')}\n")
-                    f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write(f"Chart Included: {chart_base64 is not None}\n")
-                    f.write(f"═══════════════════════════════════════════════════════════════\n\n")
-                    f.write(prompt)
-                self.logger.info(f"📝 Prompt saved: {prompt_path}")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Failed to save prompt: {e}")
+            if chart_url:
+                self.logger.info(f"✅ Vision chart saved: {object_name}")
+            else:
+                self.logger.warning("⚠️ No chart was saved (no base64 data or storage failed)")
 
-            # 4. Save analysis result as JSON
-            result_path = os.path.join(vision_dir, f"{prefix}_result.json")
-            try:
-                result_data = {
-                    'alert_id': alert_id,
-                    'epic': signal.get('epic'),
-                    'signal_type': signal.get('signal_type'),
-                    'strategy': signal.get('strategy'),
-                    'analysis_timestamp': result.get('analysis_timestamp'),
-                    'score': result.get('score'),
-                    'decision': result.get('decision'),
-                    'approved': result.get('approved'),
-                    'reason': result.get('reason'),
-                    'vision_used': result.get('vision_used'),
-                    'chart_generated': result.get('chart_generated'),
-                    'tokens_used': result.get('tokens_used'),
-                    'mode': result.get('mode'),
-                    'raw_response': result.get('raw_response'),
-                    'files': {
-                        'chart': f"{prefix}_chart.png" if chart_base64 else None,
-                        'signal': f"{prefix}_signal.json",
-                        'prompt': f"{prefix}_prompt.txt",
-                        'result': f"{prefix}_result.json"
-                    }
-                }
-                with open(result_path, 'w', encoding='utf-8') as f:
-                    json.dump(result_data, f, indent=2)
-                self.logger.info(f"📝 Analysis result saved: {result_path}")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Failed to save result: {e}")
-
-            self.logger.info(f"✅ Vision analysis artifacts saved with prefix: {prefix}")
+            return chart_url
 
         except Exception as e:
             self.logger.error(f"❌ Failed to save vision analysis artifacts: {e}")
+            return None
 
     def _make_json_serializable(self, obj: Dict) -> Dict:
         """
