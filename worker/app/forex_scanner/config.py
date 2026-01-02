@@ -112,25 +112,30 @@ EPIC_LIST: List[str] = [
     'CS.D.AUDJPY.MINI.IP'
 ]
 
-# Scanner Settings
-SCAN_INTERVAL = 120  # seconds between scans
+# =============================================================================
+# DEPRECATED: SCANNER CORE SETTINGS - NOW IN DATABASE
+# =============================================================================
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config
+#
+# To access settings programmatically:
+#   from forex_scanner.services.scanner_config_service import get_scanner_config
+#   config = get_scanner_config()
+#   print(config.scan_interval)
+#
+# The following values are kept for reference only and are NOT used by the scanner.
+# -----------------------------------------------------------------------------
+# SCAN_INTERVAL = 120  # MIGRATED to database
+# MIN_CONFIDENCE = 0.40  # MIGRATED to database
+# DEFAULT_TIMEFRAME = '15m'  # MIGRATED to database
+# USE_1M_BASE_SYNTHESIS = True  # MIGRATED to database
+# SCAN_ALIGN_TO_BOUNDARIES = True  # MIGRATED to database
+# SCAN_BOUNDARY_OFFSET_SECONDS = 60  # MIGRATED to database
+# =============================================================================
+
+# Non-migrated scanner settings (still used from config.py)
 SPREAD_PIPS = 1.5   # default spread for BID/ASK adjustment
-
 USE_BID_ADJUSTMENT = False  # whether to adjust BID prices to MID
-DEFAULT_TIMEFRAME = '15m'  # Default timeframe for signals ('5m', '15m', '1h')
-
-# =============================================================================
-# 1M BASE CANDLE SYNTHESIS CONFIGURATION
-# =============================================================================
-# When enabled, synthesizes 15m/1h/4h candles from 1m base instead of 5m base.
-# Benefits: Better gap resilience (1 gap = 6.7% vs 33%), fresher data, precise boundaries
-USE_1M_BASE_SYNTHESIS = True  # Master switch: False=5m base (default), True=1m base
-
-# Boundary-aligned scanning: align scans to 15m candle close times (:00, :15, :30, :45)
-SCAN_ALIGN_TO_BOUNDARIES = True  # When True, scans at :01, :16, :31, :46 (after boundary)
-SCAN_BOUNDARY_OFFSET_SECONDS = 60  # Seconds after boundary to scan (allows data to settle)
-# Signal confidence threshold - scanner-level filter (should be below strategy thresholds)
-MIN_CONFIDENCE = 0.40  # 40% - low to let strategies control their own thresholds (SMC_SIMPLE uses 48%)
 #=============================================================================
 # DATA FETCHER OPTIMIZATION CONFIGURATION
 # =============================================================================
@@ -279,20 +284,15 @@ def get_enabled_strategies():
 # =============================================================================
 
 # =================================================================
-# DUPLICATE DETECTION CONFIGURATION
+# DEPRECATED: DUPLICATE DETECTION CONFIGURATION - NOW IN DATABASE
 # =================================================================
-
-# Enable/disable duplicate detection entirely
-ENABLE_DUPLICATE_CHECK = True  # Set to False to disable duplicate checking
-
-# Duplicate detection sensitivity
-# 'strict' - Very precise matching (price + confidence + epic + signal_type + strategy)
-# 'smart' - Balanced matching (epic + signal_type + strategy + rounded confidence) 
-# 'loose' - Basic matching (epic + signal_type only)
-DUPLICATE_SENSITIVITY = 'smart'
-
-# Signal cooldown period in minutes
-SIGNAL_COOLDOWN_MINUTES = 15
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > Duplicate Detection
+# -----------------------------------------------------------------------------
+# ENABLE_DUPLICATE_CHECK = True  # MIGRATED to database
+# DUPLICATE_SENSITIVITY = 'smart'  # MIGRATED to database
+# SIGNAL_COOLDOWN_MINUTES = 15  # MIGRATED to database
+# =================================================================
 
 # =============================================================================
 # EMA200 DISTANCE VALIDATION
@@ -301,43 +301,36 @@ SIGNAL_COOLDOWN_MINUTES = 15
 
 
 # =============================================================================
-# ADX TREND STRENGTH FILTER (PHASE 2)
+# DEPRECATED: ADX TREND STRENGTH FILTER - NOW IN DATABASE
+# =============================================================================
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > ADX Filter
+# -----------------------------------------------------------------------------
+# ADX_FILTER_ENABLED = False  # MIGRATED to database
+# ADX_FILTER_MODE = 'moderate'  # MIGRATED to database
+# ADX_PERIOD = 14  # MIGRATED to database
+# ADX_THRESHOLDS = {...}  # MIGRATED to database as JSONB
+# ADX_PAIR_MULTIPLIERS = {...}  # MIGRATED to database as JSONB
+# ADX_GRACE_PERIOD_BARS = 2  # MIGRATED to database
 # =============================================================================
 
-# Enable/disable ADX trend strength filtering
-ADX_FILTER_ENABLED = False
-
-# ADX threshold levels for trend strength classification
-ADX_THRESHOLDS = {
+# LEGACY: Kept for backward compatibility during transition - DO NOT USE
+ADX_THRESHOLDS_LEGACY = {
     'STRONG_TREND': 25.0,      # ADX > 25 = Strong trend (allow signals)
     'MODERATE_TREND': 22.0,    # ADX 20-25 = Moderate trend (conditional)
     'WEAK_TREND': 15.0,        # ADX < 20 = Weak/ranging market (filter out)
     'VERY_WEAK': 10.0          # ADX < 15 = Very weak trend (definitely filter)
 }
 
-# ADX filter behavior modes (maps to STRONG_TREND, MODERATE_TREND, WEAK_TREND thresholds above)
-# 'strict' - Only allow signals during STRONG trends (ADX > STRONG_TREND = 25)
-# 'moderate' - Allow signals during MODERATE+ trends (ADX > MODERATE_TREND = 20) 
-# 'permissive' - Allow signals during WEAK+ trends (ADX > WEAK_TREND = 15)
-# 'disabled' - ADX calculated but not used for filtering
-ADX_FILTER_MODE = 'moderate'
-
-# ADX calculation period (standard is 14)
-ADX_PERIOD = 14
-
-# Pair-specific ADX adjustments (some pairs trend differently)
-ADX_PAIR_MULTIPLIERS = {
-    'EURUSD': 1.0,     # EUR/USD - standard ADX behavior
-    'GBPUSD': 0.9,     # GBP/USD - slightly more volatile, lower threshold
-    'USDJPY': 1.1,     # USD/JPY - requires stronger trends
-    'EURJPY': 0.85,    # EUR/JPY - cross pairs trend more aggressively
-    'GBPJPY': 0.8,     # GBP/JPY - very volatile cross
-    'USDCHF': 1.0,     # USD/CHF - reduced from 1.2 (was too restrictive, blocking valid trades)
-    'DEFAULT': 1.0     # Default multiplier for other pairs
+# LEGACY: These are kept only for backward compatibility during transition
+# All ADX settings should now be read from database via get_scanner_config()
+ADX_FILTER_MODE_LEGACY = 'moderate'
+ADX_PERIOD_LEGACY = 14
+ADX_PAIR_MULTIPLIERS_LEGACY = {
+    'EURUSD': 1.0, 'GBPUSD': 0.9, 'USDJPY': 1.1,
+    'EURJPY': 0.85, 'GBPJPY': 0.8, 'USDCHF': 1.0, 'DEFAULT': 1.0
 }
-
-# Grace period: Allow signals during temporary ADX dips if recent trend was strong
-ADX_GRACE_PERIOD_BARS = 2  # Allow 2 bars of weak ADX if previous trend was strong
+ADX_GRACE_PERIOD_BARS_LEGACY = 2
 
 # =============================================================================
 # USDCHF PAIR-SPECIFIC OPTIMIZATION (v2.6.0 - 2025-12-23)
@@ -695,29 +688,42 @@ CLAUDE_ANALYSIS_MODE = "disabled"  # or "full", 'disabled'
 ENABLE_ORDER_EXECUTION = True  # Set to True when ready for live trading
 MAX_SIGNALS_PER_HOUR = 10  # Rate limiting
 
-# Risk Management
-POSITION_SIZE_PERCENT = 1.0  # % of account per trade
-STOP_LOSS_PIPS = 5
-TAKE_PROFIT_PIPS = 15
-MAX_OPEN_POSITIONS = 3
+# =============================================================================
+# DEPRECATED: RISK MANAGEMENT - NOW IN DATABASE
+# =============================================================================
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > Risk Management
+# -----------------------------------------------------------------------------
+# POSITION_SIZE_PERCENT = 1.0  # MIGRATED to database
+# STOP_LOSS_PIPS = 5  # MIGRATED to database
+# TAKE_PROFIT_PIPS = 15  # MIGRATED to database
+# MAX_OPEN_POSITIONS = 3  # MIGRATED to database
+# =============================================================================
 
-# Timezone Settings
+# Timezone Settings (NOT migrated - infrastructure setting)
 USER_TIMEZONE = 'Europe/Stockholm'  # Your local timezone
 DATABASE_TIMEZONE = 'UTC'           # Database timezone (IG data is in UTC)
 MARKET_OPEN_HOUR_LOCAL = 8          # Local time
 MARKET_CLOSE_HOUR_LOCAL = 22        # Local time
 
-# Trading Schedule (24/5 forex hours)
-TRADING_HOURS = {
-    'start_hour': 0,    # 24/7 (midnight)
-    'end_hour': 23,     # 24/7 (11 PM) 
-    'enabled_days': [0, 1, 2, 3, 4, 6],  # Monday-Friday + Sunday evening
-    'enable_24_5': True  # True = 24/5 forex hours, False = use start/end hours
-}
+# =============================================================================
+# DEPRECATED: TRADING HOURS - NOW IN DATABASE
+# =============================================================================
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > Trading Hours
+# -----------------------------------------------------------------------------
+# TRADING_HOURS = {...}  # MIGRATED: trading_start_hour, trading_end_hour
+# RESPECT_MARKET_HOURS = False  # MIGRATED to database
+# WEEKEND_SCANNING = False  # MIGRATED to database
+# =============================================================================
 
-# Market Hours Settings
-RESPECT_MARKET_HOURS = False  # Set to False for 24/5 scanning
-WEEKEND_SCANNING = False      # Set to True to scan weekends too
+# LEGACY: Kept for backward compatibility during transition
+TRADING_HOURS_LEGACY = {
+    'start_hour': 0,
+    'end_hour': 23,
+    'enabled_days': [0, 1, 2, 3, 4, 6],
+    'enable_24_5': True
+}
 
 # Notification Settings
 NOTIFICATIONS = {
@@ -1513,45 +1519,37 @@ STRATEGY_CONFIG_MODULES = {
 }
 
 # =============================================================================
-# 🚨 CRITICAL SAFETY FILTERS CONFIGURATION
-# Add this section to your config.py to prevent invalid trades
+# DEPRECATED: CRITICAL SAFETY FILTERS - NOW IN DATABASE
+# =============================================================================
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > Safety Filters
+# -----------------------------------------------------------------------------
+# ENABLE_CRITICAL_SAFETY_FILTERS = True  # MIGRATED to database
+# ENABLE_EMA200_CONTRADICTION_FILTER = True  # MIGRATED to database
+# ENABLE_EMA_STACK_CONTRADICTION_FILTER = True  # MIGRATED to database
+# REQUIRE_INDICATOR_CONSENSUS = True  # MIGRATED to database
+# MIN_CONFIRMING_INDICATORS = 1  # MIGRATED to database
+# ENABLE_EMERGENCY_CIRCUIT_BREAKER = True  # MIGRATED to database
+# MAX_CONTRADICTIONS_ALLOWED = 5  # MIGRATED to database
+# EMA200_MINIMUM_MARGIN = 0.002  # MIGRATED to database
+# SAFETY_FILTER_LOG_LEVEL = 'ERROR'  # MIGRATED to database
+# SAFETY_FILTER_PRESETS = {...}  # MIGRATED to database as JSONB
 # =============================================================================
 
-# Master switch for all critical safety filters
-ENABLE_CRITICAL_SAFETY_FILTERS = True
-
-# EMA 200 Trend Filter (Prevents contra-trend signals)
-ENABLE_EMA200_CONTRADICTION_FILTER = True
-EMA200_MINIMUM_MARGIN = 0.002  # 0.2% - Minimum margin required for contra-trend signals
-
-
-# EMA Stack Alignment Filter (Prevents perfect stack contradictions)
-ENABLE_EMA_STACK_CONTRADICTION_FILTER = True
-
-# Multi-Indicator Consensus Requirement
-REQUIRE_INDICATOR_CONSENSUS = True
-MIN_CONFIRMING_INDICATORS = 1  # At least 1 indicator must confirm
-
-
-# Emergency Circuit Breaker
-ENABLE_EMERGENCY_CIRCUIT_BREAKER = True
-MAX_CONTRADICTIONS_ALLOWED = 5  # Reject signals with more than this many critical contradictions
-
-# Safety Filter Logging
-SAFETY_FILTER_LOG_LEVEL = 'ERROR'  # Log all rejections as errors for visibility
+# Safety Filter Logging (NOT migrated - logging infrastructure)
 LOG_REJECTION_DETAILS = True  # Log detailed rejection information
 
 # Override for emergency situations (set to False in emergencies)
 EMERGENCY_BYPASS_SAFETY_FILTERS = False
 
-# Statistics tracking
+# Statistics tracking (runtime state - not config)
 TRACK_SAFETY_FILTER_STATS = True
 SAFETY_FILTER_STATS = {
     'total_signals_processed': 0,
     'total_rejections': 0,
     'rejections_by_filter': {
         'ema200_trend': 0,
-        'macd_momentum': 0, 
+        'macd_momentum': 0,
         'ema_stack': 0,
         'consensus': 0,
         'circuit_breaker': 0
@@ -1559,11 +1557,14 @@ SAFETY_FILTER_STATS = {
 }
 
 # =============================================================================
-# SAFETY FILTER PRESETS
+# LEGACY: SAFETY FILTER PRESETS - NOW IN DATABASE
+# =============================================================================
+# These presets have been migrated to strategy_config.scanner_global_config
+# as the safety_filter_presets JSONB column. DO NOT modify here.
 # =============================================================================
 
-# Preset configurations for different risk levels
-SAFETY_FILTER_PRESETS = {
+# LEGACY: Kept for backward compatibility during transition - DO NOT USE
+SAFETY_FILTER_PRESETS_LEGACY = {
     'strict': {
         'ENABLE_EMA200_CONTRADICTION_FILTER': True,
         'ENABLE_EMA_STACK_CONTRADICTION_FILTER': True,

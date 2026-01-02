@@ -131,6 +131,21 @@ except ImportError as e:
             print(f"  {path}")
         raise
 
+# Import scanner config service for database-driven configuration
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config, get_scanner_config_service
+    SCANNER_CONFIG_AVAILABLE = True
+    print("✅ Scanner config service loaded - using database configuration")
+except ImportError:
+    try:
+        from services.scanner_config_service import get_scanner_config, get_scanner_config_service
+        SCANNER_CONFIG_AVAILABLE = True
+        print("✅ Scanner config service loaded - using database configuration")
+    except ImportError as e:
+        SCANNER_CONFIG_AVAILABLE = False
+        print(f"⚠️ Scanner config service not available: {e}")
+        print("⚠️ This is expected on first run - will use legacy config.py values")
+
 
 class TradingSystem:
     """
@@ -207,7 +222,19 @@ class TradingSystem:
             )
             self.logger.info(f"🔧 Claude from config: {self.enable_claude_analysis}")
         
-        self.scan_interval = scan_interval or getattr(config, 'SCAN_INTERVAL', 60)
+        # Get scan_interval from database config service (fail-fast if not available)
+        if SCANNER_CONFIG_AVAILABLE:
+            try:
+                scanner_config = get_scanner_config()
+                self.scan_interval = scan_interval or scanner_config.scan_interval
+                self.logger.info(f"[CONFIG:{scanner_config.source.upper()}] Scan interval: {self.scan_interval}s")
+            except Exception as e:
+                self.logger.error(f"[CONFIG:FAIL] Cannot load scanner config from database: {e}")
+                raise RuntimeError(f"Scanner configuration required from database: {e}")
+        else:
+            # Scanner config service not available - this should not happen in production
+            self.logger.error("[CONFIG:FAIL] Scanner config service not available")
+            raise RuntimeError("Scanner config service is required - database must be configured")
         
         # ADDED: Debug configuration detection
         self.logger.info("🔧 TradingSystem Configuration Detection:")
