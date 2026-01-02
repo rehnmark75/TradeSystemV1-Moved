@@ -63,7 +63,8 @@ trade_scan.py (entry point)
 |---------|------|-----------|
 | **Live scanner entry** | `worker/app/trade_scan.py` | task-worker |
 | **Backtest entry** | `worker/app/forex_scanner/bt.py` | task-worker |
-| **Strategy config** | `worker/app/forex_scanner/config.py` | task-worker |
+| **Strategy config (LEGACY)** | `worker/app/forex_scanner/config.py` | task-worker |
+| **SMC Config Service** | `worker/app/forex_scanner/services/smc_simple_config_service.py` | task-worker |
 | **Orchestrator** | `worker/app/forex_scanner/core/trading/trading_orchestrator.py` | task-worker |
 | **Scanner** | `worker/app/forex_scanner/core/scanner.py` | task-worker |
 | **Signal detector** | `worker/app/forex_scanner/core/signal_detector.py` | task-worker |
@@ -127,6 +128,67 @@ For detailed information, see these docs (read with Read tool when needed):
 - **Database-Driven**: The system uses dynamic, optimized parameters from PostgreSQL
 - **Modular Design**: New strategies follow lightweight configuration patterns
 - **Real-time Intelligence**: Market analysis and trade context evaluation available
+
+---
+
+## 🗄️ Database-Driven Configuration (SMC Simple Strategy)
+
+**Source of Truth**: `strategy_config` database (NOT config files!)
+
+The SMC Simple strategy reads ALL configuration from the database, including per-pair overrides.
+
+### Database Tables (in `strategy_config` database):
+| Table | Purpose |
+|-------|---------|
+| `smc_simple_global_config` | Global strategy parameters (~80 settings) |
+| `smc_simple_pair_overrides` | Per-pair parameter overrides (SL/TP, confidence, etc.) |
+| `smc_simple_config_audit` | Change history for auditing |
+| `smc_simple_parameter_metadata` | UI metadata for parameter display |
+
+### Key Per-Pair Settings:
+- `fixed_stop_loss_pips` - Per-pair stop loss override
+- `fixed_take_profit_pips` - Per-pair take profit override
+- `min_confidence` - Per-pair minimum confidence threshold
+- `max_confidence` - Per-pair maximum confidence cap
+- `sl_buffer_pips` - Per-pair SL buffer
+- `macd_filter_enabled` - Per-pair MACD filter toggle
+
+### Config Service:
+```python
+from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+
+config = get_smc_simple_config()  # Loads from database with caching
+sl = config.get_pair_fixed_stop_loss('CS.D.EURUSD.CEEM.IP')  # Per-pair or global fallback
+tp = config.get_pair_fixed_take_profit('CS.D.EURUSD.CEEM.IP')
+```
+
+### Updating Configuration:
+```bash
+# Set global SL/TP defaults
+docker exec postgres psql -U postgres -d strategy_config -c "
+UPDATE smc_simple_global_config
+SET fixed_stop_loss_pips = 9, fixed_take_profit_pips = 15
+WHERE is_active = TRUE;"
+
+# Set per-pair override
+docker exec postgres psql -U postgres -d strategy_config -c "
+UPDATE smc_simple_pair_overrides
+SET fixed_stop_loss_pips = 12, fixed_take_profit_pips = 20
+WHERE epic = 'CS.D.USDJPY.MINI.IP';"
+
+# View current per-pair settings
+docker exec postgres psql -U postgres -d strategy_config -c "
+SELECT epic, fixed_stop_loss_pips, fixed_take_profit_pips, min_confidence
+FROM smc_simple_pair_overrides ORDER BY epic;"
+```
+
+### Migrations:
+Located in `worker/app/forex_scanner/migrations/`:
+- `create_strategy_config_db.sql` - Initial schema
+- `add_fixed_sl_tp_columns.sql` - Per-pair SL/TP support
+- `add_max_confidence_to_pair_overrides.sql` - Confidence cap
+
+**DO NOT** edit `worker/app/forex_scanner/config.py` or `configdata/strategies/config_smc_simple.py` for SMC Simple settings - these are LEGACY fallbacks only!
 
 ---
 

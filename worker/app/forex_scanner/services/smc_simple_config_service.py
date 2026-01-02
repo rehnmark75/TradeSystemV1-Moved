@@ -108,6 +108,11 @@ class SMCSimpleConfig:
     tp_structure_lookback: int = 50
     risk_per_trade_pct: float = 1.0
 
+    # FIXED SL/TP OVERRIDE (per-pair configurable)
+    fixed_sl_tp_override_enabled: bool = True
+    fixed_stop_loss_pips: float = 9.0
+    fixed_take_profit_pips: float = 15.0
+
     # SESSION FILTER
     session_filter_enabled: bool = True
     london_session_start: dt_time = field(default_factory=lambda: dt_time(7, 0))
@@ -315,6 +320,34 @@ class SMCSimpleConfig:
             if override.get('min_volume_ratio') is not None:
                 return override['min_volume_ratio']
         return self.min_volume_ratio
+
+    def get_pair_fixed_stop_loss(self, epic: str) -> float:
+        """Get fixed stop loss in pips for a specific pair.
+
+        Returns pair-specific value if set, otherwise global default.
+        Returns None if fixed_sl_tp_override_enabled is False.
+        """
+        if not self.fixed_sl_tp_override_enabled:
+            return None
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('fixed_stop_loss_pips') is not None:
+                return float(override['fixed_stop_loss_pips'])
+        return self.fixed_stop_loss_pips
+
+    def get_pair_fixed_take_profit(self, epic: str) -> float:
+        """Get fixed take profit in pips for a specific pair.
+
+        Returns pair-specific value if set, otherwise global default.
+        Returns None if fixed_sl_tp_override_enabled is False.
+        """
+        if not self.fixed_sl_tp_override_enabled:
+            return None
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('fixed_take_profit_pips') is not None:
+                return float(override['fixed_take_profit_pips'])
+        return self.fixed_take_profit_pips
 
     def get_dynamic_confidence(
         self,
@@ -631,6 +664,7 @@ class SMCSimpleConfigService:
             'min_rr_ratio', 'optimal_rr_ratio', 'max_rr_ratio',
             'sl_buffer_pips', 'sl_atr_multiplier', 'use_atr_stop',
             'min_tp_pips', 'use_swing_target', 'tp_structure_lookback', 'risk_per_trade_pct',
+            'fixed_sl_tp_override_enabled', 'fixed_stop_loss_pips', 'fixed_take_profit_pips',
             'session_filter_enabled', 'block_asian_session',
             'max_concurrent_signals', 'signal_cooldown_hours',
             'min_confidence_threshold', 'max_confidence_threshold', 'high_confidence_threshold',
@@ -743,6 +777,8 @@ class SMCSimpleConfigService:
                 'far_ema_confidence': row.get('far_ema_confidence'),
                 'macd_filter_enabled': row.get('macd_filter_enabled'),
                 'blocking_conditions': row.get('blocking_conditions'),
+                'fixed_stop_loss_pips': row.get('fixed_stop_loss_pips'),
+                'fixed_take_profit_pips': row.get('fixed_take_profit_pips'),
             }
 
         return config

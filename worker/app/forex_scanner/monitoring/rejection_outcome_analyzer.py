@@ -40,8 +40,12 @@ import os
 from sqlalchemy import create_engine, text
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/forex")
-FIXED_STOP_LOSS_PIPS = 9
-FIXED_TAKE_PROFIT_PIPS = 15
+
+# DEPRECATED: These are now loaded from database via get_smc_simple_config()
+# Keeping as fallback defaults only
+_DEFAULT_FIXED_STOP_LOSS_PIPS = 9
+_DEFAULT_FIXED_TAKE_PROFIT_PIPS = 15
+
 PAIR_INFO = {
     'CS.D.EURUSD.CEEM.IP': {'pair': 'EURUSD', 'pip_multiplier': 10000},
     'CS.D.GBPUSD.MINI.IP': {'pair': 'GBPUSD', 'pip_multiplier': 10000},
@@ -154,9 +158,18 @@ class RejectionOutcomeAnalyzer:
         self.db_manager = db_manager or SimpleDatabaseManager(DATABASE_URL)
         self.logger = logging.getLogger(__name__)
 
-        # Configuration
-        self.fixed_sl_pips = FIXED_STOP_LOSS_PIPS  # 9 pips
-        self.fixed_tp_pips = FIXED_TAKE_PROFIT_PIPS  # 15 pips
+        # Configuration - load from database with fallback to defaults
+        self.fixed_sl_pips = _DEFAULT_FIXED_STOP_LOSS_PIPS
+        self.fixed_tp_pips = _DEFAULT_FIXED_TAKE_PROFIT_PIPS
+        self._smc_config = None
+        try:
+            from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+            self._smc_config = get_smc_simple_config()
+            self.fixed_sl_pips = self._smc_config.fixed_stop_loss_pips or _DEFAULT_FIXED_STOP_LOSS_PIPS
+            self.fixed_tp_pips = self._smc_config.fixed_take_profit_pips or _DEFAULT_FIXED_TAKE_PROFIT_PIPS
+            self.logger.info("Loaded SL/TP config from database")
+        except Exception as e:
+            self.logger.warning(f"Could not load database config, using defaults: {e}")
 
         # Analysis window: How long to look for outcome (hours after rejection)
         self.max_analysis_hours = 48  # 48 hours max
@@ -175,6 +188,19 @@ class RejectionOutcomeAnalyzer:
         """Get pip value (price movement per pip) for an epic"""
         multiplier = self.get_pip_multiplier(epic)
         return 1.0 / multiplier
+
+    def get_pair_sl_tp(self, epic: str) -> tuple:
+        """Get SL/TP for a specific pair (per-pair or global fallback).
+
+        Returns:
+            tuple: (sl_pips, tp_pips)
+        """
+        if self._smc_config:
+            sl = self._smc_config.get_pair_fixed_stop_loss(epic)
+            tp = self._smc_config.get_pair_fixed_take_profit(epic)
+            if sl and tp:
+                return (sl, tp)
+        return (self.fixed_sl_pips, self.fixed_tp_pips)
 
     def get_unanalyzed_rejections(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
         """

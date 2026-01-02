@@ -42,11 +42,14 @@ except ImportError as e:
     }
 
 # ================== FIXED SL/TP OVERRIDE ==================
-# Temporary testing mode - overrides strategy-calculated SL/TP
-# Set FIXED_SL_TP_OVERRIDE_ENABLED = False to use strategy values
-FIXED_SL_TP_OVERRIDE_ENABLED = True
-FIXED_STOP_LOSS_PIPS = 9             # Fixed SL in pips (when override enabled) - v2.9.0: reduced from 9 for 1:1 R:R
-FIXED_TAKE_PROFIT_PIPS = 15          # Fixed TP in pips (when override enabled) - v2.9.0: reduced from 15 for 1:1 R:R
+# DEPRECATED: These settings are now managed via the database (strategy_config.smc_simple_global_config)
+# Use Streamlit UI -> SMC Config -> Global Settings -> Risk Management to configure
+# Or update directly in database: UPDATE smc_simple_global_config SET fixed_stop_loss_pips = X WHERE is_active = TRUE
+# Keeping these for backwards compatibility - will be removed in future version
+# ---
+# FIXED_SL_TP_OVERRIDE_ENABLED = True
+# FIXED_STOP_LOSS_PIPS = 9             # Fixed SL in pips (when override enabled)
+# FIXED_TAKE_PROFIT_PIPS = 15          # Fixed TP in pips (when override enabled)
 
 # Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/forex")

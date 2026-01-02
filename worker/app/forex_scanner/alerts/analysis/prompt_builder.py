@@ -1017,24 +1017,25 @@ Be concise but thorough. The Silver Bullet strategy is TIME-SENSITIVE - quality 
                 reward_pips = risk_mgmt.get('reward_pips', reward_pips)
                 rr_ratio = risk_mgmt.get('rr_ratio', rr_ratio)
 
-            # Check if fixed SL/TP override is enabled
+            # Check if fixed SL/TP override is enabled (from database config)
             fixed_sl_tp_enabled = False
             fixed_sl_note = ""
             try:
-                from config import (
-                    FIXED_SL_TP_OVERRIDE_ENABLED,
-                    FIXED_STOP_LOSS_PIPS,
-                    FIXED_TAKE_PROFIT_PIPS
-                )
-                if FIXED_SL_TP_OVERRIDE_ENABLED:
+                from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+                smc_config = get_smc_simple_config()
+                epic = signal.get('epic', '')
+                if smc_config.fixed_sl_tp_override_enabled:
                     fixed_sl_tp_enabled = True
-                    # Override with fixed values for display
-                    risk_pips = FIXED_STOP_LOSS_PIPS
-                    reward_pips = FIXED_TAKE_PROFIT_PIPS
-                    rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
-                    fixed_sl_note = f"\n⚠️ **FIXED SL/TP MODE ACTIVE**: All trades use SL={FIXED_STOP_LOSS_PIPS} pips, TP={FIXED_TAKE_PROFIT_PIPS} pips (R:R={rr_ratio:.2f}:1) regardless of strategy calculation."
-            except ImportError:
-                pass
+                    # Get per-pair SL/TP (falls back to global if not set)
+                    fixed_sl = smc_config.get_pair_fixed_stop_loss(epic)
+                    fixed_tp = smc_config.get_pair_fixed_take_profit(epic)
+                    if fixed_sl and fixed_tp:
+                        risk_pips = fixed_sl
+                        reward_pips = fixed_tp
+                        rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
+                        fixed_sl_note = f"\n⚠️ **FIXED SL/TP MODE ACTIVE**: All trades use SL={fixed_sl} pips, TP={fixed_tp} pips (R:R={rr_ratio:.2f}:1) regardless of strategy calculation."
+            except Exception:
+                pass  # Database config not available, skip fixed SL/TP note
 
             # Opposite swing for SL reference
             opposite_swing = signal.get('opposite_swing', 0)

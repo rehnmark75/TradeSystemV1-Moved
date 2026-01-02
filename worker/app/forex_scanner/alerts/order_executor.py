@@ -302,24 +302,27 @@ class OrderExecutor:
             else:
                 self.logger.debug(f"📋 Using strategy-provided limit_distance: {limit_distance} pips")
 
-            # === FIXED SL/TP OVERRIDE (for testing) ===
+            # === FIXED SL/TP OVERRIDE (database-driven, per-pair configurable) ===
             try:
-                from config import (
-                    FIXED_SL_TP_OVERRIDE_ENABLED,
-                    FIXED_STOP_LOSS_PIPS,
-                    FIXED_TAKE_PROFIT_PIPS
-                )
-                if FIXED_SL_TP_OVERRIDE_ENABLED:
-                    original_sl = stop_distance
-                    original_tp = limit_distance
-                    stop_distance = FIXED_STOP_LOSS_PIPS
-                    limit_distance = FIXED_TAKE_PROFIT_PIPS
-                    self.logger.info(
-                        f"🔒 FIXED SL/TP OVERRIDE: SL {original_sl}→{stop_distance}, "
-                        f"TP {original_tp}→{limit_distance} pips"
-                    )
-            except ImportError:
-                pass  # Config not available, use strategy values
+                from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+
+                smc_config = get_smc_simple_config()
+                if smc_config.fixed_sl_tp_override_enabled:
+                    # Get per-pair SL/TP (falls back to global if not set)
+                    pair_sl = smc_config.get_pair_fixed_stop_loss(internal_epic)
+                    pair_tp = smc_config.get_pair_fixed_take_profit(internal_epic)
+
+                    if pair_sl is not None and pair_tp is not None:
+                        original_sl = stop_distance
+                        original_tp = limit_distance
+                        stop_distance = pair_sl
+                        limit_distance = pair_tp
+                        self.logger.info(
+                            f"🔒 FIXED SL/TP OVERRIDE [{internal_epic}]: SL {original_sl}→{stop_distance}, "
+                            f"TP {original_tp}→{limit_distance} pips (from database)"
+                        )
+            except Exception as e:
+                self.logger.debug(f"Database config not available, using strategy values: {e}")
 
             # ✅ SAFETY VALIDATION: Ensure reasonable SL/TP values
             # For all pairs, stop_distance and limit_distance should be in reasonable pip/point range

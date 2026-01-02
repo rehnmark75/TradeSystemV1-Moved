@@ -290,6 +290,44 @@ def render_global_settings(config: Dict[str, Any]):
 
     # Risk Management
     with st.expander("Risk Management", expanded=False):
+        # Fixed SL/TP Override Section
+        st.markdown("**Fixed SL/TP Override**")
+        st.caption("When enabled, uses fixed SL/TP values instead of strategy-calculated ones. Can be overridden per-pair.")
+        col_fixed1, col_fixed2, col_fixed3 = st.columns(3)
+        with col_fixed1:
+            new_fixed_enabled = st.checkbox(
+                "Fixed SL/TP Override Enabled",
+                value=bool(config.get('fixed_sl_tp_override_enabled', True)),
+                help="Master switch: use fixed SL/TP values",
+                key="fixed_sl_tp_override_enabled"
+            )
+            if not _values_equal(new_fixed_enabled, config.get('fixed_sl_tp_override_enabled')):
+                st.session_state.smc_pending_changes['fixed_sl_tp_override_enabled'] = new_fixed_enabled
+
+        with col_fixed2:
+            new_fixed_sl = st.number_input(
+                "Fixed Stop Loss (pips)",
+                value=float(config.get('fixed_stop_loss_pips', 9.0)),
+                min_value=1.0, max_value=50.0, step=0.5,
+                help="Default fixed stop loss (can be overridden per-pair)",
+                key="fixed_stop_loss_pips"
+            )
+            if not _values_equal(new_fixed_sl, config.get('fixed_stop_loss_pips')):
+                st.session_state.smc_pending_changes['fixed_stop_loss_pips'] = new_fixed_sl
+
+        with col_fixed3:
+            new_fixed_tp = st.number_input(
+                "Fixed Take Profit (pips)",
+                value=float(config.get('fixed_take_profit_pips', 15.0)),
+                min_value=1.0, max_value=100.0, step=0.5,
+                help="Default fixed take profit (can be overridden per-pair)",
+                key="fixed_take_profit_pips"
+            )
+            if not _values_equal(new_fixed_tp, config.get('fixed_take_profit_pips')):
+                st.session_state.smc_pending_changes['fixed_take_profit_pips'] = new_fixed_tp
+
+        st.divider()
+        st.markdown("**Dynamic SL Settings**")
         col1, col2, col3 = st.columns(3)
         with col1:
             new_sl_atr = st.number_input(
@@ -683,6 +721,36 @@ def render_pair_overrides(config: Dict[str, Any]):
                 override_changes['sl_buffer_pips'] = new_sl_buffer
 
         with col2:
+            # Fixed Stop Loss - inherit from global
+            fixed_sl_override_value = existing.get('fixed_stop_loss_pips')
+            global_fixed_sl = config.get('fixed_stop_loss_pips', 9.0)
+            fixed_sl_effective = float(fixed_sl_override_value) if fixed_sl_override_value is not None else float(global_fixed_sl)
+            new_fixed_sl = st.number_input(
+                "Fixed Stop Loss (pips)",
+                value=fixed_sl_effective,
+                min_value=1.0, max_value=50.0, step=0.5,
+                help=f"{'Inherited from global (' + str(global_fixed_sl) + ')' if fixed_sl_override_value is None else 'Explicit override for this pair'}",
+                key=f"override_fixed_sl_{selected_pair}"
+            )
+            if not _values_equal(new_fixed_sl, fixed_sl_effective):
+                override_changes['fixed_stop_loss_pips'] = new_fixed_sl
+
+            # Fixed Take Profit - inherit from global
+            fixed_tp_override_value = existing.get('fixed_take_profit_pips')
+            global_fixed_tp = config.get('fixed_take_profit_pips', 15.0)
+            fixed_tp_effective = float(fixed_tp_override_value) if fixed_tp_override_value is not None else float(global_fixed_tp)
+            new_fixed_tp = st.number_input(
+                "Fixed Take Profit (pips)",
+                value=fixed_tp_effective,
+                min_value=1.0, max_value=100.0, step=0.5,
+                help=f"{'Inherited from global (' + str(global_fixed_tp) + ')' if fixed_tp_override_value is None else 'Explicit override for this pair'}",
+                key=f"override_fixed_tp_{selected_pair}"
+            )
+            if not _values_equal(new_fixed_tp, fixed_tp_effective):
+                override_changes['fixed_take_profit_pips'] = new_fixed_tp
+
+        col_conf1, col_conf2 = st.columns(2)
+        with col_conf1:
             # Min Confidence - inherit from global
             conf_override_value = existing.get('min_confidence')
             global_min_conf = config.get('min_confidence_threshold', 0.48)
@@ -713,6 +781,7 @@ def render_pair_overrides(config: Dict[str, Any]):
             if not _values_equal(new_max_conf, max_conf_effective):
                 override_changes['max_confidence'] = new_max_conf
 
+        with col_conf2:
             # MACD Filter - inherit from global
             macd_override_value = existing.get('macd_filter_enabled')
             global_macd = config.get('macd_alignment_filter_enabled', True)
@@ -858,6 +927,8 @@ def render_pair_overrides(config: Dict[str, Any]):
             'is_enabled': True,
             'allow_asian_session': False,
             'sl_buffer_pips': config.get('sl_buffer_pips', 6),
+            'fixed_stop_loss_pips': config.get('fixed_stop_loss_pips', 9.0),
+            'fixed_take_profit_pips': config.get('fixed_take_profit_pips', 15.0),
             'min_confidence': config.get('min_confidence_threshold', 0.48),
             'max_confidence': config.get('max_confidence_threshold', 0.75),
             'macd_filter_enabled': True,
@@ -883,12 +954,30 @@ def render_pair_overrides(config: Dict[str, Any]):
             )
 
         with col2:
+            new_override['fixed_stop_loss_pips'] = st.number_input(
+                "Fixed Stop Loss (pips)",
+                value=float(config.get('fixed_stop_loss_pips', 9.0)),
+                min_value=1.0, max_value=50.0, step=0.5,
+                help="Fixed stop loss override for this pair",
+                key=f"new_fixed_sl_{selected_pair}"
+            )
+            new_override['fixed_take_profit_pips'] = st.number_input(
+                "Fixed Take Profit (pips)",
+                value=float(config.get('fixed_take_profit_pips', 15.0)),
+                min_value=1.0, max_value=100.0, step=0.5,
+                help="Fixed take profit override for this pair",
+                key=f"new_fixed_tp_{selected_pair}"
+            )
+
+        col3, col4 = st.columns(2)
+        with col3:
             new_override['min_confidence'] = st.number_input(
                 "Min Confidence",
                 value=float(config.get('min_confidence_threshold', 0.48)),
                 min_value=0.0, max_value=1.0, step=0.01,
                 key=f"new_conf_{selected_pair}"
             )
+        with col4:
             new_override['max_confidence'] = st.number_input(
                 "Max Confidence Cap",
                 value=float(config.get('max_confidence_threshold', 0.75)),
@@ -917,8 +1006,9 @@ def render_pair_overrides(config: Dict[str, Any]):
     st.markdown("**All Existing Overrides**")
     if overrides:
         df = pd.DataFrame(overrides)
-        display_cols = ['epic', 'is_enabled', 'allow_asian_session', 'sl_buffer_pips',
-                       'min_confidence', 'max_confidence', 'macd_filter_enabled', 'description']
+        display_cols = ['epic', 'is_enabled', 'fixed_stop_loss_pips', 'fixed_take_profit_pips',
+                       'sl_buffer_pips', 'min_confidence', 'max_confidence',
+                       'allow_asian_session', 'macd_filter_enabled', 'description']
         available_cols = [c for c in display_cols if c in df.columns]
         st.dataframe(df[available_cols], use_container_width=True)
     else:
