@@ -1237,12 +1237,52 @@ class TradeValidator:
             if details.get('path_blocking'):
                 signal['sr_path_blocking'] = details['path_blocking']
 
+            # ================================================================
+            # POPULATE strategy_indicators.dataframe_analysis.sr_data
+            # This structure is used by:
+            # - forex_chart_generator.py for drawing S/R lines on charts
+            # - prompt_builder.py for Claude vision analysis context
+            # ================================================================
+            nearest_support = details.get('nearest_support')
+            nearest_resistance = details.get('nearest_resistance')
+            current_price = details.get('current_price')
+            pip_size = 0.01 if 'JPY' in epic.upper() else 0.0001
+
+            # Calculate distances in pips
+            distance_to_support_pips = 0.0
+            distance_to_resistance_pips = 0.0
+            if current_price:
+                if nearest_support:
+                    distance_to_support_pips = round((current_price - nearest_support) / pip_size, 1)
+                if nearest_resistance:
+                    distance_to_resistance_pips = round((nearest_resistance - current_price) / pip_size, 1)
+
+            # Build sr_data structure
+            sr_data = {
+                'nearest_support': nearest_support,
+                'nearest_resistance': nearest_resistance,
+                'distance_to_support_pips': distance_to_support_pips,
+                'distance_to_resistance_pips': distance_to_resistance_pips,
+                'support_levels': details.get('support_levels', []),
+                'resistance_levels': details.get('resistance_levels', []),
+                'current_price': current_price,
+            }
+
+            # Ensure strategy_indicators exists and has dataframe_analysis
+            if 'strategy_indicators' not in signal:
+                signal['strategy_indicators'] = {}
+            if 'dataframe_analysis' not in signal['strategy_indicators']:
+                signal['strategy_indicators']['dataframe_analysis'] = {}
+
+            # Add sr_data to strategy_indicators for chart generator and prompt builder
+            signal['strategy_indicators']['dataframe_analysis']['sr_data'] = sr_data
+
             # Log S/R analysis details for debugging
-            if details.get('nearest_support') or details.get('nearest_resistance'):
+            if nearest_support or nearest_resistance:
                 self.logger.debug(f"🔍 S/R Analysis for {epic}: "
-                                f"Support: {details.get('nearest_support')}, "
-                                f"Resistance: {details.get('nearest_resistance')}, "
-                                f"Current: {details.get('current_price')}")
+                                f"Support: {nearest_support}, "
+                                f"Resistance: {nearest_resistance}, "
+                                f"Current: {current_price}")
 
             # Log path blocking details if present
             path_blocking = details.get('path_blocking', {})

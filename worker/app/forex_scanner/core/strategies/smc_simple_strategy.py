@@ -1411,6 +1411,21 @@ class SMCSimpleStrategy:
                 # Don't fail the signal if metrics calculation fails
                 self.logger.warning(f"⚠️ Performance metrics calculation failed: {metrics_error}")
 
+            # ================================================================
+            # SMC DATA: Detect FVGs and Order Blocks for chart visualization
+            # ================================================================
+            try:
+                signal = self._add_smc_chart_data(
+                    signal=signal,
+                    df_trigger=df_trigger,
+                    df_entry=entry_df,
+                    epic=epic,
+                    pip_value=pip_value
+                )
+            except Exception as smc_error:
+                # Don't fail the signal if SMC data detection fails
+                self.logger.warning(f"⚠️ SMC chart data detection failed: {smc_error}")
+
             return signal
 
         except Exception as e:
@@ -3171,6 +3186,122 @@ class SMCSimpleStrategy:
             # Never let this break the strategy
             if self.debug_logging:
                 self.logger.debug(f"Extended indicator extraction failed (non-critical): {e}")
+
+    def _add_smc_chart_data(
+        self,
+        signal: Dict,
+        df_trigger: pd.DataFrame,
+        df_entry: pd.DataFrame,
+        epic: str,
+        pip_value: float
+    ) -> Dict:
+        """
+        Add FVG and Order Block data to signal for chart visualization.
+
+        This data is used by the chart generator to draw institutional
+        price zones that provide visual context for Claude's analysis.
+
+        Args:
+            signal: Signal dict to enhance
+            df_trigger: 15m trigger timeframe data
+            df_entry: 5m entry timeframe data
+            epic: Currency pair epic
+            pip_value: Pip value for the pair
+
+        Returns:
+            Enhanced signal with smc_data
+        """
+        try:
+            from forex_scanner.core.strategies.helpers.smc_fair_value_gaps import SMCFairValueGaps
+            from forex_scanner.core.strategies.helpers.smc_order_blocks import SMCOrderBlocks
+
+            smc_data = {
+                'fvg_data': {'active_fvgs': []},
+                'order_block_data': {'active_order_blocks': []}
+            }
+
+            # Configuration for FVG/OB detection
+            config = {
+                'epic': epic,
+                'pair': epic.split('.')[2] if '.' in epic else epic,
+                'pip_value': pip_value,
+                'fvg_min_size': 3,  # Minimum 3 pips for FVG
+                'fvg_max_age': 30,  # Max 30 bars old
+                'order_block_length': 3,
+                'order_block_volume_factor': 1.3,
+                'bos_threshold': pip_value * 5,
+                'max_order_blocks': 3
+            }
+
+            # Detect FVGs on trigger timeframe (15m)
+            try:
+                fvg_detector = SMCFairValueGaps(logger=self.logger)
+                df_with_fvgs = fvg_detector.detect_fair_value_gaps(df_trigger.copy(), config)
+
+                # Get active FVGs
+                active_fvgs = []
+                for fvg in fvg_detector.fair_value_gaps:
+                    if fvg.status.value in ['active', 'partially_filled']:
+                        active_fvgs.append({
+                            'high': fvg.high_price,
+                            'low': fvg.low_price,
+                            'type': fvg.gap_type.value,
+                            'start_index': fvg.start_index,
+                            'size_pips': fvg.gap_size_pips,
+                            'significance': fvg.significance,
+                            'fill_percentage': fvg.fill_percentage
+                        })
+
+                smc_data['fvg_data']['active_fvgs'] = active_fvgs[:5]  # Limit to 5
+                self.logger.debug(f"Detected {len(active_fvgs)} active FVGs for chart")
+
+            except Exception as fvg_error:
+                self.logger.debug(f"FVG detection skipped: {fvg_error}")
+
+            # Detect Order Blocks on trigger timeframe (15m)
+            try:
+                ob_detector = SMCOrderBlocks(logger=self.logger)
+                df_with_obs = ob_detector.detect_order_blocks(df_trigger.copy(), config)
+
+                # Get active Order Blocks
+                active_obs = []
+                for ob in ob_detector.order_blocks:
+                    if ob.still_valid:
+                        active_obs.append({
+                            'high': ob.high_price,
+                            'low': ob.low_price,
+                            'type': ob.block_type.value,
+                            'start_index': ob.start_index,
+                            'end_index': ob.end_index,
+                            'strength': ob.strength.value,
+                            'confidence': ob.confidence,
+                            'has_fvg_support': ob.has_fvg_support
+                        })
+
+                smc_data['order_block_data']['active_order_blocks'] = active_obs[:3]  # Limit to 3
+                self.logger.debug(f"Detected {len(active_obs)} active Order Blocks for chart")
+
+            except Exception as ob_error:
+                self.logger.debug(f"Order Block detection skipped: {ob_error}")
+
+            # Add to signal
+            signal['smc_data'] = smc_data
+
+        except ImportError as ie:
+            # FVG/OB helpers not available - not critical
+            self.logger.debug(f"SMC helpers not available: {ie}")
+            signal['smc_data'] = {
+                'fvg_data': {'active_fvgs': []},
+                'order_block_data': {'active_order_blocks': []}
+            }
+        except Exception as e:
+            self.logger.debug(f"SMC chart data extraction failed: {e}")
+            signal['smc_data'] = {
+                'fvg_data': {'active_fvgs': []},
+                'order_block_data': {'active_order_blocks': []}
+            }
+
+        return signal
 
     def _safe_float(self, value) -> Optional[float]:
         """Safely convert value to float, returning None on failure."""

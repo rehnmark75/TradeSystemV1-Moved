@@ -74,7 +74,14 @@ class ForexChartGenerator:
         'swing_high': '#ff9800',     # Orange for swing high
         'swing_low': '#2196f3',      # Blue for swing low
         'fib_zone': '#ffeb3b40',     # Semi-transparent yellow for Fib zone
-        'order_block': '#ffeb3b',    # Yellow for order blocks
+        'order_block_bull': '#4caf5040',  # Semi-transparent green for bullish OB
+        'order_block_bear': '#f4433640',  # Semi-transparent red for bearish OB
+        'order_block_border_bull': '#4caf50',  # Green border for bullish OB
+        'order_block_border_bear': '#f44336',  # Red border for bearish OB
+        'fvg_bull': '#2196f330',      # Semi-transparent blue for bullish FVG
+        'fvg_bear': '#ff980030',      # Semi-transparent orange for bearish FVG
+        'fvg_border_bull': '#2196f3', # Blue border for bullish FVG
+        'fvg_border_bear': '#ff9800', # Orange border for bearish FVG
         'bos_bull': '#00e676',       # Green for bullish BOS
         'bos_bear': '#ff1744',       # Red for bearish BOS
         'support': '#4caf50',        # Green for support levels
@@ -187,17 +194,19 @@ class ForexChartGenerator:
                 if tf == '15m' and strategy_indicators:
                     self._add_support_resistance_levels(ax, df, strategy_indicators)
 
-                # Add signal levels on 15m (swing break timeframe) for context
-                if tf == '15m' and signal:
-                    self._add_signal_levels(ax, df, signal)
+                # Add FVG zones on 15m and 5m (institutional imbalances)
+                if tf in ['15m', '5m'] and signal:
+                    self._add_fvg_zones(ax, df, signal, tf)
 
-                # Add signal levels on entry timeframe (5m)
+                # Add Order Block zones on 15m and 5m (institutional order areas)
+                if tf in ['15m', '5m'] and signal:
+                    self._add_order_block_zones(ax, df, signal, tf)
+
+                # Add entry type annotation on 5m (entry timeframe)
                 if tf == '5m' and signal:
-                    self._add_signal_levels(ax, df, signal)
-                    # Add entry type annotation on 5m (entry timeframe)
                     self._add_entry_type_annotation(ax, df, signal, strategy_indicators)
 
-                # Add SMC annotations
+                # Add SMC annotations (swing levels, BOS)
                 if smc_data and tf in ['15m', '5m']:
                     self._add_smc_annotations(ax, df, signal, smc_data, tf)
 
@@ -541,6 +550,251 @@ class ForexChartGenerator:
 
         except Exception as e:
             logger.warning(f"Error adding S/R levels: {e}")
+
+    def _add_fvg_zones(
+        self,
+        ax,
+        df: pd.DataFrame,
+        signal: Dict[str, Any],
+        timeframe: str
+    ) -> None:
+        """
+        Add Fair Value Gap (FVG) zones as rectangles on the chart.
+
+        FVGs represent institutional imbalances where price moved too fast,
+        leaving gaps that often get filled later.
+
+        Args:
+            ax: Matplotlib axis
+            df: DataFrame with OHLC data
+            signal: Signal data containing FVG information
+            timeframe: Current timeframe being plotted
+        """
+        try:
+            # Get FVG data from signal
+            smc_data = signal.get('smc_data', {})
+            fvg_data = smc_data.get('fvg_data', {})
+
+            # Also check strategy_indicators for FVG data
+            strategy_indicators = signal.get('strategy_indicators', {})
+            dataframe_analysis = strategy_indicators.get('dataframe_analysis', {})
+
+            # Get active FVGs list
+            active_fvgs = fvg_data.get('active_fvgs', [])
+
+            # Also check for FVG columns in the dataframe itself
+            if not active_fvgs and 'fvg_high' in df.columns:
+                # Extract FVGs from dataframe
+                for i in range(len(df)):
+                    row = df.iloc[i]
+                    if pd.notna(row.get('fvg_high')) and pd.notna(row.get('fvg_low')):
+                        fvg_type = 'bullish' if row.get('fvg_bullish', False) else 'bearish'
+                        active_fvgs.append({
+                            'high': row['fvg_high'],
+                            'low': row['fvg_low'],
+                            'type': fvg_type,
+                            'start_index': i,
+                            'significance': row.get('fvg_significance', 0.5)
+                        })
+
+            if not active_fvgs:
+                return
+
+            x_min = 0
+            x_max = len(df) - 1
+
+            fvg_count = 0
+            max_fvgs = 5  # Limit to avoid chart clutter
+
+            for fvg in active_fvgs:
+                if fvg_count >= max_fvgs:
+                    break
+
+                fvg_high = fvg.get('high') or fvg.get('high_price')
+                fvg_low = fvg.get('low') or fvg.get('low_price')
+                fvg_type = fvg.get('type') or fvg.get('gap_type', 'bullish')
+
+                if not fvg_high or not fvg_low:
+                    continue
+
+                # Determine if FVG is within visible price range
+                price_min = df['Low'].min()
+                price_max = df['High'].max()
+
+                if fvg_low > price_max or fvg_high < price_min:
+                    continue  # FVG outside visible range
+
+                # Get start index for the rectangle (or use recent portion of chart)
+                start_idx = fvg.get('start_index', max(0, x_max - 30))
+
+                # Determine colors based on FVG type
+                if 'bull' in str(fvg_type).lower():
+                    fill_color = self.COLORS['fvg_bull']
+                    border_color = self.COLORS['fvg_border_bull']
+                    label = f'Bull FVG'
+                else:
+                    fill_color = self.COLORS['fvg_bear']
+                    border_color = self.COLORS['fvg_border_bear']
+                    label = f'Bear FVG'
+
+                # Draw FVG as a rectangle spanning from start_index to end of chart
+                rect = plt.Rectangle(
+                    (start_idx, fvg_low),
+                    x_max - start_idx,
+                    fvg_high - fvg_low,
+                    facecolor=fill_color,
+                    edgecolor=border_color,
+                    linewidth=1.5,
+                    alpha=0.6,
+                    label=label if fvg_count == 0 else None  # Only label first
+                )
+                ax.add_patch(rect)
+
+                # Add small label
+                mid_price = (fvg_high + fvg_low) / 2
+                ax.annotate(
+                    'FVG',
+                    xy=(x_max - 2, mid_price),
+                    fontsize=7,
+                    color=border_color,
+                    fontweight='bold',
+                    ha='right',
+                    va='center',
+                    alpha=0.8
+                )
+
+                fvg_count += 1
+
+            if fvg_count > 0:
+                logger.debug(f"Drew {fvg_count} FVG zones on {timeframe} chart")
+
+        except Exception as e:
+            logger.warning(f"Error adding FVG zones: {e}")
+
+    def _add_order_block_zones(
+        self,
+        ax,
+        df: pd.DataFrame,
+        signal: Dict[str, Any],
+        timeframe: str
+    ) -> None:
+        """
+        Add Order Block zones as shaded rectangles on the chart.
+
+        Order Blocks represent areas where institutions placed large orders,
+        often acting as strong support/resistance zones.
+
+        Args:
+            ax: Matplotlib axis
+            df: DataFrame with OHLC data
+            signal: Signal data containing Order Block information
+            timeframe: Current timeframe being plotted
+        """
+        try:
+            # Get Order Block data from signal
+            smc_data = signal.get('smc_data', {})
+            ob_data = smc_data.get('order_block_data', {})
+
+            # Get active order blocks list
+            active_obs = ob_data.get('active_order_blocks', [])
+
+            # Also check for OB columns in the dataframe itself
+            if not active_obs and 'order_block_high' in df.columns:
+                for i in range(len(df)):
+                    row = df.iloc[i]
+                    if pd.notna(row.get('order_block_high')) and pd.notna(row.get('order_block_low')):
+                        ob_type = 'bullish' if row.get('order_block_bullish', False) else 'bearish'
+                        active_obs.append({
+                            'high': row['order_block_high'],
+                            'low': row['order_block_low'],
+                            'type': ob_type,
+                            'start_index': i,
+                            'strength': row.get('order_block_strength', 'medium'),
+                            'confidence': row.get('order_block_confidence', 0.5)
+                        })
+
+            if not active_obs:
+                return
+
+            x_min = 0
+            x_max = len(df) - 1
+
+            ob_count = 0
+            max_obs = 3  # Limit to avoid chart clutter (OBs are larger zones)
+
+            for ob in active_obs:
+                if ob_count >= max_obs:
+                    break
+
+                ob_high = ob.get('high') or ob.get('high_price')
+                ob_low = ob.get('low') or ob.get('low_price')
+                ob_type = ob.get('type') or ob.get('block_type', 'bullish')
+
+                if not ob_high or not ob_low:
+                    continue
+
+                # Determine if OB is within visible price range
+                price_min = df['Low'].min()
+                price_max = df['High'].max()
+
+                if ob_low > price_max or ob_high < price_min:
+                    continue  # OB outside visible range
+
+                # Get start and end index for the rectangle
+                start_idx = ob.get('start_index', max(0, x_max - 40))
+                end_idx = ob.get('end_index', start_idx + 5)
+
+                # Determine colors based on OB type
+                if 'bull' in str(ob_type).lower():
+                    fill_color = self.COLORS['order_block_bull']
+                    border_color = self.COLORS['order_block_border_bull']
+                    label = 'Bull OB'
+                else:
+                    fill_color = self.COLORS['order_block_bear']
+                    border_color = self.COLORS['order_block_border_bear']
+                    label = 'Bear OB'
+
+                # Draw Order Block as a rectangle
+                # OBs extend from their formation point to current price
+                rect = plt.Rectangle(
+                    (start_idx, ob_low),
+                    x_max - start_idx,
+                    ob_high - ob_low,
+                    facecolor=fill_color,
+                    edgecolor=border_color,
+                    linewidth=2,
+                    linestyle='--',
+                    alpha=0.5,
+                    label=label if ob_count == 0 else None
+                )
+                ax.add_patch(rect)
+
+                # Add label on the left side of the OB
+                mid_price = (ob_high + ob_low) / 2
+                ax.annotate(
+                    'OB',
+                    xy=(start_idx + 1, mid_price),
+                    fontsize=8,
+                    color=border_color,
+                    fontweight='bold',
+                    ha='left',
+                    va='center',
+                    alpha=0.9,
+                    bbox=dict(
+                        boxstyle='round,pad=0.2',
+                        facecolor='white',
+                        edgecolor=border_color,
+                        alpha=0.7
+                    )
+                )
+
+                ob_count += 1
+
+            if ob_count > 0:
+                logger.debug(f"Drew {ob_count} Order Block zones on {timeframe} chart")
+
+        except Exception as e:
+            logger.warning(f"Error adding Order Block zones: {e}")
 
     def _add_fib_zone(self, ax, df: pd.DataFrame, signal: Dict[str, Any]) -> None:
         """Add Fibonacci optimal zone shading (38.2% - 61.8%)"""
