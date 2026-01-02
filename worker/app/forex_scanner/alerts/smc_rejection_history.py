@@ -209,6 +209,8 @@ class SMCRejectionHistoryManager:
             conn = self._get_connection()
             cursor = conn.cursor()
 
+            # Use ON CONFLICT DO NOTHING to silently skip duplicates
+            # Duplicates are identified by (scan_timestamp, epic, rejection_stage, attempted_direction)
             insert_sql = """
                 INSERT INTO smc_simple_rejections (
                     scan_timestamp, epic, pair,
@@ -236,6 +238,7 @@ class SMCRejectionHistoryManager:
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s
                 )
+                ON CONFLICT DO NOTHING
             """
 
             for data in self._batch_buffer:

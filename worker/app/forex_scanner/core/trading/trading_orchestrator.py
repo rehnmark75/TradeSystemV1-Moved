@@ -61,7 +61,10 @@ try:
     
     # Import AlertHistoryManager for database operations
     from alerts.alert_history import AlertHistoryManager
-    
+
+    # Import RejectionOutcomeAnalyzer for automatic outcome analysis
+    from monitoring.rejection_outcome_analyzer import RejectionOutcomeAnalyzer
+
     print("✅ Successfully imported all trading modules including AlertHistoryManager")
 except ImportError:
     from forex_scanner import config
@@ -91,6 +94,14 @@ except ImportError:
     except ImportError as e:
         print(f"⚠️ AlertHistoryManager not available: {e}")
         AlertHistoryManager = None
+
+    # Import RejectionOutcomeAnalyzer for automatic outcome analysis
+    try:
+        from forex_scanner.monitoring.rejection_outcome_analyzer import RejectionOutcomeAnalyzer
+        print("✅ Successfully imported RejectionOutcomeAnalyzer")
+    except ImportError as e:
+        print(f"⚠️ RejectionOutcomeAnalyzer not available: {e}")
+        RejectionOutcomeAnalyzer = None
 
 
 class TradingOrchestrator:
@@ -281,7 +292,20 @@ class TradingOrchestrator:
         
         # ENHANCED: Configure Claude settings after initialization
         self._configure_advanced_claude_features()
-        
+
+        # Initialize RejectionOutcomeAnalyzer for automatic outcome analysis
+        self.outcome_analyzer = None
+        self._last_outcome_analysis = None
+        self._outcome_analysis_interval_hours = 1  # Run every hour
+        try:
+            if RejectionOutcomeAnalyzer is not None:
+                self.outcome_analyzer = RejectionOutcomeAnalyzer()
+                self.logger.info("✅ RejectionOutcomeAnalyzer initialized for automatic outcome tracking")
+            else:
+                self.logger.warning("⚠️ RejectionOutcomeAnalyzer not available")
+        except Exception as e:
+            self.logger.warning(f"⚠️ RejectionOutcomeAnalyzer initialization failed: {e}")
+
         self.logger.info("🎯 TradingOrchestrator initialized with ENHANCED modular Claude integration")
         self.logger.info(f"   Intelligence mode: {self.intelligence_mode}")
         self.logger.info(f"   Intelligence preset: {self.intelligence_preset}")
@@ -1568,6 +1592,9 @@ class TradingOrchestrator:
                 # Perform scan (which now includes intelligence filtering, enhanced Claude analysis, and saves all signals to database)
                 signals = self.scan_once()
 
+                # Run periodic maintenance tasks (outcome analysis, cleanup, etc.)
+                self._run_periodic_maintenance()
+
                 # Wait for next scan - use boundary alignment if enabled
                 if self.running:
                     if boundary_aligned:
@@ -1587,6 +1614,57 @@ class TradingOrchestrator:
         finally:
             self.stop()
     
+    def _run_periodic_maintenance(self):
+        """
+        Run periodic maintenance tasks (outcome analysis, cleanup, etc.)
+        Called after each scan cycle. Tasks have their own interval tracking.
+        """
+        try:
+            self._run_outcome_analysis_if_due()
+        except Exception as e:
+            # Don't let maintenance failures disrupt scanning
+            self.logger.debug(f"Periodic maintenance error (non-critical): {e}")
+
+    def _run_outcome_analysis_if_due(self):
+        """
+        Run rejection outcome analysis if enough time has passed since last run.
+        Analyzes recent rejections to determine if they would have been profitable.
+        """
+        if not self.outcome_analyzer:
+            return
+
+        now = datetime.now()
+
+        # Check if it's time to run (every hour by default)
+        if self._last_outcome_analysis is not None:
+            hours_since_last = (now - self._last_outcome_analysis).total_seconds() / 3600
+            if hours_since_last < self._outcome_analysis_interval_hours:
+                return
+
+        try:
+            self.logger.info("📊 Running automatic rejection outcome analysis...")
+
+            # Analyze rejections from the last 3 days that haven't been analyzed yet
+            stats = self.outcome_analyzer.run_daily_analysis(days_back=3, dry_run=False)
+
+            self._last_outcome_analysis = now
+
+            # Only log if we actually analyzed something
+            if stats.get('total_analyzed', 0) > 0:
+                win_rate = stats.get('would_be_win_rate', 0)
+                self.logger.info(
+                    f"📊 Outcome analysis complete: {stats['total_analyzed']} rejections analyzed, "
+                    f"{stats.get('winners', 0)} would-be winners, {stats.get('losers', 0)} would-be losers "
+                    f"({win_rate:.1f}% win rate)"
+                )
+            else:
+                self.logger.debug("📊 Outcome analysis: no new rejections to analyze")
+
+        except Exception as e:
+            # Log at debug level to avoid log spam
+            self.logger.debug(f"Outcome analysis skipped: {e}")
+            self._last_outcome_analysis = now  # Still update time to avoid retry spam
+
     def stop_scanning(self):
         """Stop continuous scanning"""
         self.logger.info("🛑 Stopping scanning...")
