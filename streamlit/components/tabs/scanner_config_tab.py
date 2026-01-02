@@ -8,6 +8,7 @@ Renders configuration management UI for global scanner settings with:
 - Trading Hours: Session controls, cutoff times
 - Safety Filters: EMA200 filter, circuit breaker, presets
 - ADX Filter: Trend strength filter settings
+- SMC Conflict Filter: Smart Money Concepts signal filtering
 - Audit Trail: Change history and tracking
 """
 
@@ -69,6 +70,7 @@ def render_scanner_config_tab():
         "Trading Hours",
         "Safety Filters",
         "ADX Filter",
+        "SMC Conflict",
         "Audit Trail"
     ])
 
@@ -91,6 +93,9 @@ def render_scanner_config_tab():
         render_adx_settings(config)
 
     with sub_tabs[6]:
+        render_smc_conflict_settings(config)
+
+    with sub_tabs[7]:
         render_audit_trail()
 
 
@@ -860,6 +865,117 @@ def render_adx_settings(config: Dict[str, Any]):
     render_save_section(config, 'adx', updated_by)
 
 
+def render_smc_conflict_settings(config: Dict[str, Any]):
+    """Render SMC Conflict Filter settings"""
+    st.subheader("SMC Conflict Filter")
+    st.markdown("Smart Money Concepts analysis and signal filtering based on order flow and structure")
+
+    updated_by = st.session_state.get('scanner_config_user', 'streamlit_user')
+
+    if 'scanner_pending_changes' not in st.session_state:
+        st.session_state.scanner_pending_changes = {}
+
+    # Main toggles
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Smart Money Analysis**")
+
+        new_smc_readonly = st.checkbox(
+            "Enable Smart Money Read-Only Analysis",
+            value=config.get('smart_money_readonly_enabled', True),
+            help="Enable smart money analysis for signals (read-only, no trading decisions)",
+            key="smart_money_readonly_enabled"
+        )
+        if not values_equal(new_smc_readonly, config.get('smart_money_readonly_enabled')):
+            st.session_state.scanner_pending_changes['smart_money_readonly_enabled'] = new_smc_readonly
+
+        new_analysis_timeout = st.number_input(
+            "Analysis Timeout (seconds)",
+            value=_get_float(config, 'smart_money_analysis_timeout', 5.0),
+            min_value=1.0, max_value=30.0, step=0.5,
+            format="%.1f",
+            help="Timeout for smart money analysis",
+            key="smart_money_analysis_timeout"
+        )
+        if not values_equal(new_analysis_timeout, config.get('smart_money_analysis_timeout')):
+            st.session_state.scanner_pending_changes['smart_money_analysis_timeout'] = new_analysis_timeout
+
+    with col2:
+        st.markdown("**Conflict Filter**")
+
+        new_conflict_enabled = st.checkbox(
+            "Enable SMC Conflict Filter",
+            value=config.get('smc_conflict_filter_enabled', True),
+            help="Reject signals when SMC data conflicts with signal direction",
+            key="smc_conflict_filter_enabled"
+        )
+        if not values_equal(new_conflict_enabled, config.get('smc_conflict_filter_enabled')):
+            st.session_state.scanner_pending_changes['smc_conflict_filter_enabled'] = new_conflict_enabled
+
+        new_order_flow_reject = st.checkbox(
+            "Reject Order Flow Conflicts",
+            value=config.get('smc_reject_order_flow_conflict', True),
+            help="Reject signals when order flow opposes signal direction",
+            key="smc_reject_order_flow_conflict"
+        )
+        if not values_equal(new_order_flow_reject, config.get('smc_reject_order_flow_conflict')):
+            st.session_state.scanner_pending_changes['smc_reject_order_flow_conflict'] = new_order_flow_reject
+
+        new_ranging_reject = st.checkbox(
+            "Reject Ranging Structure",
+            value=config.get('smc_reject_ranging_structure', True),
+            help="Reject signals when market structure is RANGING",
+            key="smc_reject_ranging_structure"
+        )
+        if not values_equal(new_ranging_reject, config.get('smc_reject_ranging_structure')):
+            st.session_state.scanner_pending_changes['smc_reject_ranging_structure'] = new_ranging_reject
+
+    st.divider()
+
+    # Thresholds
+    st.markdown("**Consensus Thresholds**")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        new_directional_consensus = st.slider(
+            "Min Directional Consensus",
+            min_value=0.0, max_value=1.0, step=0.05,
+            value=_get_float(config, 'smc_min_directional_consensus', 0.3),
+            help="Minimum directional consensus score (0.0 = none, 1.0 = full agreement)",
+            key="smc_min_directional_consensus"
+        )
+        if not values_equal(new_directional_consensus, config.get('smc_min_directional_consensus')):
+            st.session_state.scanner_pending_changes['smc_min_directional_consensus'] = new_directional_consensus
+
+    with col2:
+        new_structure_score = st.slider(
+            "Min Structure Score",
+            min_value=0.0, max_value=1.0, step=0.05,
+            value=_get_float(config, 'smc_min_structure_score', 0.5),
+            help="Minimum market structure score required for signals",
+            key="smc_min_structure_score"
+        )
+        if not values_equal(new_structure_score, config.get('smc_min_structure_score')):
+            st.session_state.scanner_pending_changes['smc_min_structure_score'] = new_structure_score
+
+    # Info box
+    with st.expander("About SMC Conflict Filter", expanded=False):
+        st.markdown("""
+        The SMC Conflict Filter rejects signals when Smart Money Concepts data contradicts the signal direction:
+
+        - **Order Flow Conflict**: Reject when institutional order flow opposes the signal
+        - **Ranging Structure**: Reject when market is in a ranging/consolidation phase
+        - **Directional Consensus**: Minimum agreement between SMC indicators (FVGs, OBs, liquidity)
+        - **Structure Score**: Overall market structure quality score
+
+        Lower thresholds = more permissive (more signals allowed)
+        Higher thresholds = more strict (fewer, higher-quality signals)
+        """)
+
+    render_save_section(config, 'smc_conflict', updated_by)
+
+
 def render_audit_trail():
     """Render audit trail tab"""
     st.subheader("Configuration Audit Trail")
@@ -871,7 +987,7 @@ def render_audit_trail():
     with col2:
         category_filter = st.selectbox(
             "Filter by Category",
-            options=['All', 'core', 'dedup', 'risk', 'trading_hours', 'safety', 'adx'],
+            options=['All', 'core', 'dedup', 'risk', 'trading_hours', 'safety', 'adx', 'smc_conflict'],
             index=0
         )
 

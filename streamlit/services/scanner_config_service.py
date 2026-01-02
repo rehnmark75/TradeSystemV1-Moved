@@ -134,6 +134,12 @@ def get_config_by_category(category: str) -> Dict[str, Any]:
         'adx': [
             'adx_filter_enabled', 'adx_filter_mode', 'adx_period', 'adx_grace_period_bars',
             'adx_thresholds', 'adx_pair_multipliers'
+        ],
+        'smc_conflict': [
+            'smart_money_readonly_enabled', 'smart_money_analysis_timeout',
+            'smc_conflict_filter_enabled', 'smc_min_directional_consensus',
+            'smc_reject_order_flow_conflict', 'smc_reject_ranging_structure',
+            'smc_min_structure_score'
         ]
     }
 

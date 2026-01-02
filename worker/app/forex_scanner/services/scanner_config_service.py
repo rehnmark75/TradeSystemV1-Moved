@@ -131,6 +131,15 @@ class ScannerConfig:
     safety_filter_presets: Dict[str, Dict] = field(default_factory=dict)
     large_candle_filter_presets: Dict[str, Dict] = field(default_factory=dict)
 
+    # SMC CONFLICT FILTER SETTINGS
+    smart_money_readonly_enabled: bool = False
+    smart_money_analysis_timeout: float = 0.0
+    smc_conflict_filter_enabled: bool = False
+    smc_min_directional_consensus: float = 0.0
+    smc_reject_order_flow_conflict: bool = False
+    smc_reject_ranging_structure: bool = False
+    smc_min_structure_score: float = 0.0
+
     # METADATA (set by service, not from DB)
     source: str = ""  # 'database' or 'cache'
     loaded_at: Optional[datetime] = None
@@ -350,6 +359,10 @@ class ScannerConfigService:
             'movement_lookback_periods', 'large_candle_filter_cooldown', 'ema200_minimum_margin',
             'safety_filter_log_level', 'excessive_movement_threshold_pips',
             'adx_filter_enabled', 'adx_filter_mode', 'adx_period', 'adx_grace_period_bars',
+            'smart_money_readonly_enabled', 'smart_money_analysis_timeout',
+            'smc_conflict_filter_enabled', 'smc_min_directional_consensus',
+            'smc_reject_order_flow_conflict', 'smc_reject_ranging_structure',
+            'smc_min_structure_score',
         ]
 
         # Fields that should be integers

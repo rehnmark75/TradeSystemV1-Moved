@@ -169,17 +169,25 @@ STRATEGY_WEIGHT_ZERO_LAG = 0.0         # Zero Lag EMA weight (if enabled)
 # SignalProcessor Configuration
 USE_SIGNAL_PROCESSOR = True  # Enable SignalProcessor for Smart Money
 
-# Smart Money Read-Only Analyzer Configuration
-SMART_MONEY_READONLY_ENABLED = True  # Enable smart money analysis for signals
-SMART_MONEY_ANALYSIS_TIMEOUT = 5.0   # Timeout for smart money analysis (seconds)
-
-# SMC Conflict Filter Configuration
-# These settings control rejection of signals when SMC data conflicts with signal direction
-SMC_CONFLICT_FILTER_ENABLED = True   # Enable SMC conflict-based signal rejection
-SMC_MIN_DIRECTIONAL_CONSENSUS = 0.3  # Minimum directional consensus (0.0-1.0)
-SMC_REJECT_ORDER_FLOW_CONFLICT = True  # Reject when order flow opposes signal
-SMC_REJECT_RANGING_STRUCTURE = True    # Reject when structure is RANGING
-SMC_MIN_STRUCTURE_SCORE = 0.5          # Minimum structure score for non-directional bias
+# =============================================================================
+# DEPRECATED: SMC CONFLICT FILTER SETTINGS - NOW IN DATABASE
+# =============================================================================
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > SMC Conflict
+#
+# To access settings programmatically:
+#   from forex_scanner.services.scanner_config_service import get_scanner_config
+#   config = get_scanner_config()
+#   print(config.smc_conflict_filter_enabled)
+# -----------------------------------------------------------------------------
+# SMART_MONEY_READONLY_ENABLED = True  # MIGRATED to database
+# SMART_MONEY_ANALYSIS_TIMEOUT = 5.0   # MIGRATED to database
+# SMC_CONFLICT_FILTER_ENABLED = True   # MIGRATED to database
+# SMC_MIN_DIRECTIONAL_CONSENSUS = 0.3  # MIGRATED to database
+# SMC_REJECT_ORDER_FLOW_CONFLICT = True  # MIGRATED to database
+# SMC_REJECT_RANGING_STRUCTURE = True    # MIGRATED to database
+# SMC_MIN_STRUCTURE_SCORE = 0.5          # MIGRATED to database
+# =============================================================================
 
 # DEPRECATED: SELECTED_STRATEGIES hardcoded list replaced with dynamic detection
 # 
