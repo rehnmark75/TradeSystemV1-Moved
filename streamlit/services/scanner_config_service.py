@@ -100,7 +100,8 @@ def get_config_by_category(category: str) -> Dict[str, Any]:
     category_fields = {
         'core': [
             'scan_interval', 'min_confidence', 'default_timeframe',
-            'use_1m_base_synthesis', 'scan_align_to_boundaries', 'scan_boundary_offset_seconds'
+            'use_1m_base_synthesis', 'scan_align_to_boundaries', 'scan_boundary_offset_seconds',
+            'enable_multi_timeframe_analysis', 'min_confluence_score'
         ],
         'dedup': [
             'enable_duplicate_check', 'duplicate_sensitivity', 'signal_cooldown_minutes',
@@ -109,7 +110,8 @@ def get_config_by_category(category: str) -> Dict[str, Any]:
             'confidence_similarity_threshold', 'deduplication_preset', 'use_database_dedup_check',
             'database_dedup_window_minutes', 'enable_signal_hash_check', 'deduplication_debug_mode',
             'enable_price_similarity_check', 'enable_strategy_cooldowns', 'deduplication_lookback_hours',
-            'deduplication_presets'
+            'deduplication_presets', 'enable_alert_deduplication', 'signal_hash_cache_expiry_minutes',
+            'max_signal_hash_cache_size', 'enable_time_based_hash_components'
         ],
         'risk': [
             'position_size_percent', 'stop_loss_pips', 'take_profit_pips', 'max_open_positions',
@@ -145,7 +147,7 @@ def get_config_by_category(category: str) -> Dict[str, Any]:
             'require_claude_approval', 'claude_fail_secure', 'claude_model',
             'min_claude_quality_score', 'claude_include_chart', 'claude_chart_timeframes',
             'claude_vision_enabled', 'claude_vision_strategies', 'claude_validate_in_backtest',
-            'save_claude_rejections', 'claude_save_vision_artifacts', 'claude_vision_save_directory'
+            'save_claude_rejections', 'claude_save_vision_artifacts'
         ]
     }
 

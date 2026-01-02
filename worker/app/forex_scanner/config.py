@@ -894,111 +894,70 @@ MIN_VOLUME_RATIO = 1.2             # Minimum volume confirmation
 # TRADING_START_HOUR = 0  # MIGRATED to database
 # TRADING_END_HOUR = 23  # MIGRATED to database
 
-# Claude Analysis directory (kept for backward compatibility)
-CLAUDE_ANALYSIS_DIR = 'claude_analysis'  # Directory for saved analyses
+# CLAUDE_ANALYSIS_DIR - REMOVED (results now stored in database/MinIO)
 
-# Multi-Timeframe Analysis Settings
-ENABLE_MULTI_TIMEFRAME_ANALYSIS = False
-MIN_CONFLUENCE_SCORE = 0.3  # Minimum confluence score to accept signals
-CONFLUENCE_TIMEFRAMES = ['5m', '15m', '1h']  # Timeframes to analyze
-CONFLUENCE_WEIGHT_IN_CONFIDENCE = 0.2  # How much confluence affects final confidence
+# =============================================================================
+# DEPRECATED: MULTI-TIMEFRAME ANALYSIS - NOW IN DATABASE
+# =============================================================================
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > Core Settings
+# -----------------------------------------------------------------------------
+# ENABLE_MULTI_TIMEFRAME_ANALYSIS = False  # MIGRATED to database
+# MIN_CONFLUENCE_SCORE = 0.3  # MIGRATED to database
 
-# Individual timeframe weights for confluence calculation
-TIMEFRAME_WEIGHTS = {
-    '5m': 0.2,   # Lower weight for noise-prone shorter timeframe
-    '15m': 0.4,  # Medium weight for your current default
-    '1h': 0.4    # Higher weight for more stable longer timeframe
-}
+# DEPRECATED: Unused MTF settings - never referenced in code
+# CONFLUENCE_TIMEFRAMES = ['5m', '15m', '1h']  # UNUSED - never referenced
+# CONFLUENCE_WEIGHT_IN_CONFIDENCE = 0.2  # UNUSED - never referenced
+# TIMEFRAME_WEIGHTS = {...}  # UNUSED - never referenced
+# =============================================================================
 
-# Alert Deduplication Configuration
-ALERT_COOLDOWN_MINUTES = 5       # Minutes between same epic+signal alerts (reduced from 15 - hash check disabled)
-STRATEGY_COOLDOWN_MINUTES = 3    # Strategy-specific cooldown (reduced from 10)
-GLOBAL_COOLDOWN_SECONDS = 30            # Global cooldown between any alerts
-MAX_ALERTS_PER_HOUR = 50        # Global hourly alert limit
-MAX_ALERTS_PER_EPIC_HOUR = 6    # Per-epic hourly alert limit
-ENABLE_ALERT_DEDUPLICATION = True  # Master switch for deduplication
+# =============================================================================
+# DEPRECATED: ALERT DEDUPLICATION - NOW IN DATABASE
+# =============================================================================
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > Duplicate Detection
+# -----------------------------------------------------------------------------
+# ALERT_COOLDOWN_MINUTES = 5  # MIGRATED to database
+# STRATEGY_COOLDOWN_MINUTES = 3  # MIGRATED to database
+# GLOBAL_COOLDOWN_SECONDS = 30  # MIGRATED to database
+# MAX_ALERTS_PER_HOUR = 50  # MIGRATED to database
+# MAX_ALERTS_PER_EPIC_HOUR = 6  # MIGRATED to database
+# ENABLE_ALERT_DEDUPLICATION = True  # MIGRATED to database
+# TRADE_COOLDOWN_ENABLED = True  # MIGRATED to database
+# TRADE_COOLDOWN_MINUTES = 30  # MIGRATED to database
+# SIGNAL_HASH_CACHE_EXPIRY_MINUTES = 15  # MIGRATED to database
+# MAX_SIGNAL_HASH_CACHE_SIZE = 1000  # MIGRATED to database
+# ENABLE_SIGNAL_HASH_CHECK = False  # MIGRATED to database
+# ENABLE_TIME_BASED_HASH_COMPONENTS = False  # MIGRATED to database
+# USE_DATABASE_DEDUP_CHECK = True  # MIGRATED to database
+# DATABASE_DEDUP_WINDOW_MINUTES = 15  # MIGRATED to database
 
-# Trade Cooldown Configuration (prevents signals for epics with recent trades)
-# This check queries trade_log table to prevent wasting Claude API calls
-TRADE_COOLDOWN_ENABLED = True    # Enable trade cooldown check before signal processing
-TRADE_COOLDOWN_MINUTES = 30      # Cooldown after trade open/close (must match dev-app)
+# DEPRECATED: Unused deduplication settings - never referenced in code
+# PRICE_SIMILARITY_THRESHOLD = 0.0002  # UNUSED - never referenced
+# CONFIDENCE_SIMILARITY_THRESHOLD = 0.05  # UNUSED - never referenced
+# SIGNAL_HASH_CACHE_SIZE = 1000  # UNUSED - superseded by MAX_SIGNAL_HASH_CACHE_SIZE
+# DEDUPLICATION_DEBUG_MODE = False  # UNUSED - never referenced
+# DEDUPLICATION_CLEANUP_INTERVAL = 100  # UNUSED - never referenced
+# ENABLE_PRICE_SIMILARITY_CHECK = True  # UNUSED - never referenced
+# ENABLE_STRATEGY_COOLDOWNS = True  # UNUSED - never referenced
+# ENABLE_ENHANCED_HASH_DETECTION = True  # UNUSED - never referenced
+# DEDUPLICATION_LOOKBACK_HOURS = 2  # UNUSED - never referenced
+# DEDUPLICATION_CACHE_CLEANUP_HOURS = 4  # UNUSED - never referenced
+# INCLUDE_INDICATORS_IN_HASH = True  # UNUSED - never referenced
+# PRICE_DECIMAL_PRECISION = 5  # UNUSED - never referenced
+# CONFIDENCE_DECIMAL_PRECISION = 4  # UNUSED - never referenced
 
-# Rate limiting settings
-MAX_ALERTS_PER_HOUR = 50                # Global hourly alert limit
-MAX_ALERTS_PER_EPIC_HOUR = 6            # Per-epic hourly alert limit
+# DEPRECATED: Preset dictionaries - never loaded or used
+# DEDUPLICATION_STRICT = {...}  # UNUSED - never referenced
+# DEDUPLICATION_STANDARD = {...}  # UNUSED - never referenced
+# DEDUPLICATION_RELAXED = {...}  # UNUSED - never referenced
+# DEDUPLICATION_PRESET = 'standard'  # UNUSED - never referenced
+# =============================================================================
 
-# Similarity detection settings
-PRICE_SIMILARITY_THRESHOLD = 0.0002     # Price similarity threshold (2 pips for most pairs)
-CONFIDENCE_SIMILARITY_THRESHOLD = 0.05  # 5% confidence similarity threshold
-
-# Cache and performance settings
-SIGNAL_HASH_CACHE_SIZE = 1000           # How many signal hashes to keep in memory
-SIGNAL_HASH_CACHE_EXPIRY_MINUTES = 15   # Minutes before cache entries expire (matches database check)
-MAX_SIGNAL_HASH_CACHE_SIZE = 1000       # Max cache size before forced cleanup
-ENABLE_SIGNAL_HASH_CHECK = False        # Master switch - Completely disable hash duplicate check (cooldown layer sufficient)
-ENABLE_TIME_BASED_HASH_COMPONENTS = False # Disabled - Hash check too strict, blocking valid signals. Rely on cooldown layer instead.
-DEDUPLICATION_DEBUG_MODE = False        # Enable verbose deduplication logging
-DEDUPLICATION_CLEANUP_INTERVAL = 100    # Clean cache every N checks
-
-# Enhanced deduplication features
-ENABLE_PRICE_SIMILARITY_CHECK = True    # Check for similar price signals
-ENABLE_STRATEGY_COOLDOWNS = True        # Enable strategy-specific cooldowns
-ENABLE_ENHANCED_HASH_DETECTION = True   # Use enhanced hash generation
-
-# Advanced deduplication settings
-DEDUPLICATION_LOOKBACK_HOURS = 2        # How far back to check for duplicates
-DEDUPLICATION_CACHE_CLEANUP_HOURS = 4   # When to clean up old cache entries
-
-# Database deduplication settings
-USE_DATABASE_DEDUP_CHECK = True         # Check database for recent duplicates
-DATABASE_DEDUP_WINDOW_MINUTES = 15      # Database check window
-
-# Signal hash configuration
-INCLUDE_INDICATORS_IN_HASH = True       # Include technical indicators in hash
-PRICE_DECIMAL_PRECISION = 5             # Decimal places for price hashing
-CONFIDENCE_DECIMAL_PRECISION = 4        # Decimal places for confidence hashing
-
-# ========================================================================
-# DEDUPLICATION PRESETS
-# ========================================================================
-# Pre-configured deduplication settings for different use cases
-
-# Strict deduplication - fewer signals, less noise
-DEDUPLICATION_STRICT = {
-    'ALERT_COOLDOWN_MINUTES': 10,
-    'STRATEGY_COOLDOWN_MINUTES': 5,
-    'MAX_ALERTS_PER_HOUR': 30,
-    'MAX_ALERTS_PER_EPIC_HOUR': 3,
-    'PRICE_SIMILARITY_THRESHOLD': 0.0005,  # 5 pips
-    'CONFIDENCE_SIMILARITY_THRESHOLD': 0.02  # 2%
-}
-
-# Standard deduplication - balanced filtering (DEFAULT)
-DEDUPLICATION_STANDARD = {
-    'ALERT_COOLDOWN_MINUTES': 5,
-    'STRATEGY_COOLDOWN_MINUTES': 3,
-    'MAX_ALERTS_PER_HOUR': 50,
-    'MAX_ALERTS_PER_EPIC_HOUR': 6,
-    'PRICE_SIMILARITY_THRESHOLD': 0.0002,  # 2 pips
-    'CONFIDENCE_SIMILARITY_THRESHOLD': 0.05  # 5%
-}
-
-# Relaxed deduplication - more signals, some duplicates allowed
-DEDUPLICATION_RELAXED = {
-    'ALERT_COOLDOWN_MINUTES': 2,
-    'STRATEGY_COOLDOWN_MINUTES': 1,
-    'MAX_ALERTS_PER_HOUR': 100,
-    'MAX_ALERTS_PER_EPIC_HOUR': 12,
-    'PRICE_SIMILARITY_THRESHOLD': 0.0001,  # 1 pip
-    'CONFIDENCE_SIMILARITY_THRESHOLD': 0.1  # 10%
-}
-
-# Set the active deduplication preset
-DEDUPLICATION_PRESET = 'standard'  # Options: 'strict', 'standard', 'relaxed'
-
-# Claude Analysis Settings (legacy - see CLAUDE TRADE VALIDATION section for main settings)
-CLAUDE_MIN_SCORE_THRESHOLD = 6
-# MIN_CLAUDE_QUALITY_SCORE moved to CLAUDE TRADE VALIDATION section
+# DEPRECATED: Claude Analysis Settings moved to database
+# See: Streamlit > Settings > Scanner Config > Claude AI tab
+# Database column: min_claude_quality_score (default: 6)
+# CLAUDE_MIN_SCORE_THRESHOLD = 6  # DEPRECATED - use min_claude_quality_score in database
 
 # Add these configuration settings to your config.py file
 
@@ -1520,7 +1479,7 @@ LARGE_CANDLE_FILTER_PRESETS = {
 # CLAUDE_VISION_ENABLED = True  # MIGRATED to database
 # CLAUDE_VISION_STRATEGIES = ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']  # MIGRATED (JSONB)
 # CLAUDE_SAVE_VISION_ARTIFACTS = True  # MIGRATED to database
-# CLAUDE_VISION_SAVE_DIRECTORY = 'claude_analysis_enhanced/vision_analysis'  # MIGRATED
+# CLAUDE_VISION_SAVE_DIRECTORY - REMOVED (results now stored in database/MinIO)
 # SAVE_CLAUDE_REJECTIONS = True  # MIGRATED to database
 # CLAUDE_VALIDATE_IN_BACKTEST = False  # MIGRATED to database
 # =============================================================================

@@ -24,6 +24,14 @@ except ImportError:
     from forex_scanner import config
 from .validation.timestamp_validator import TimestampValidator
 
+# Try to import scanner config service for database-driven settings
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
+except ImportError:
+    SCANNER_CONFIG_AVAILABLE = False
+    get_scanner_config = None
+
 # Try to import chart generator
 try:
     from .forex_chart_generator import ForexChartGenerator
@@ -68,10 +76,26 @@ class ClaudeAnalyzer:
         self.use_advanced_prompts = getattr(config, 'USE_ADVANCED_CLAUDE_PROMPTS', True)
         self.analysis_level = getattr(config, 'CLAUDE_ANALYSIS_LEVEL', 'institutional')  # institutional, hedge_fund, prop_trader, risk_manager
 
-        # ENHANCED: Vision API configuration
-        self.use_vision_api = getattr(config, 'CLAUDE_VISION_ENABLED', True)
-        self.vision_strategies = getattr(config, 'CLAUDE_VISION_STRATEGIES', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
-        self.save_vision_artifacts = getattr(config, 'CLAUDE_SAVE_VISION_ARTIFACTS', True)
+        # ENHANCED: Vision API configuration - NOW READS FROM DATABASE
+        # Try to get settings from database first, fall back to config.py defaults
+        if SCANNER_CONFIG_AVAILABLE and get_scanner_config:
+            try:
+                scanner_cfg = get_scanner_config()
+                self.use_vision_api = scanner_cfg.claude_vision_enabled
+                self.vision_strategies = scanner_cfg.claude_vision_strategies or ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']
+                self.save_vision_artifacts = scanner_cfg.claude_save_vision_artifacts
+                self.logger.info(f"[CONFIG:DB] Vision settings loaded from database - enabled={self.use_vision_api}, strategies={self.vision_strategies}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to load vision settings from database: {e}, using defaults")
+                self.use_vision_api = getattr(config, 'CLAUDE_VISION_ENABLED', True)
+                self.vision_strategies = getattr(config, 'CLAUDE_VISION_STRATEGIES', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
+                self.save_vision_artifacts = getattr(config, 'CLAUDE_SAVE_VISION_ARTIFACTS', True)
+        else:
+            # Fall back to config.py (legacy)
+            self.use_vision_api = getattr(config, 'CLAUDE_VISION_ENABLED', True)
+            self.vision_strategies = getattr(config, 'CLAUDE_VISION_STRATEGIES', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
+            self.save_vision_artifacts = getattr(config, 'CLAUDE_SAVE_VISION_ARTIFACTS', True)
+            self.logger.info("[CONFIG:LEGACY] Vision settings loaded from config.py (database service not available)")
 
         # ENHANCED: Chart generator initialization
         self.chart_generator = None

@@ -152,7 +152,19 @@ class ScannerConfig:
     claude_validate_in_backtest: bool = False
     save_claude_rejections: bool = False
     claude_save_vision_artifacts: bool = False
-    claude_vision_save_directory: str = ""
+
+    # MULTI-TIMEFRAME ANALYSIS SETTINGS
+    enable_multi_timeframe_analysis: bool = False
+    min_confluence_score: float = 0.30
+
+    # ADVANCED DEDUPLICATION SETTINGS
+    enable_alert_deduplication: bool = True
+    signal_hash_cache_expiry_minutes: int = 15
+    max_signal_hash_cache_size: int = 1000
+    enable_signal_hash_check: bool = False
+    enable_time_based_hash_components: bool = False
+    use_database_dedup_check: bool = True
+    database_dedup_window_minutes: int = 15
 
     # METADATA (set by service, not from DB)
     source: str = ""  # 'database' or 'cache'
@@ -380,7 +392,12 @@ class ScannerConfigService:
             'require_claude_approval', 'claude_fail_secure', 'claude_model',
             'min_claude_quality_score', 'claude_include_chart', 'claude_vision_enabled',
             'claude_validate_in_backtest', 'save_claude_rejections',
-            'claude_save_vision_artifacts', 'claude_vision_save_directory',
+            'claude_save_vision_artifacts',
+            'enable_multi_timeframe_analysis', 'min_confluence_score',
+            'enable_alert_deduplication', 'signal_hash_cache_expiry_minutes',
+            'max_signal_hash_cache_size', 'enable_signal_hash_check',
+            'enable_time_based_hash_components', 'use_database_dedup_check',
+            'database_dedup_window_minutes',
         ]
 
         # Fields that should be integers
@@ -395,6 +412,7 @@ class ScannerConfigService:
             'consecutive_large_candles_threshold', 'movement_lookback_periods',
             'large_candle_filter_cooldown', 'excessive_movement_threshold_pips',
             'adx_period', 'adx_grace_period_bars', 'min_claude_quality_score',
+            'signal_hash_cache_expiry_minutes', 'max_signal_hash_cache_size',
         }
 
         for field_name in direct_fields:

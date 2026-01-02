@@ -198,6 +198,33 @@ def render_core_settings(config: Dict[str, Any]):
         if not values_equal(new_boundary_offset, config.get('scan_boundary_offset_seconds')):
             st.session_state.scanner_pending_changes['scan_boundary_offset_seconds'] = new_boundary_offset
 
+    st.divider()
+
+    # Multi-Timeframe Analysis Section
+    st.markdown("**Multi-Timeframe Analysis**")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        new_enable_mtf = st.checkbox(
+            "Enable Multi-Timeframe Analysis",
+            value=config.get('enable_multi_timeframe_analysis', False),
+            help="Analyze signals across multiple timeframes for confluence",
+            key="enable_multi_timeframe_analysis"
+        )
+        if not values_equal(new_enable_mtf, config.get('enable_multi_timeframe_analysis')):
+            st.session_state.scanner_pending_changes['enable_multi_timeframe_analysis'] = new_enable_mtf
+
+    with col2:
+        new_min_confluence = st.slider(
+            "Min Confluence Score",
+            min_value=0.0, max_value=1.0, step=0.05,
+            value=_get_float(config, 'min_confluence_score', 0.30),
+            help="Minimum confluence score required across timeframes",
+            key="min_confluence_score"
+        )
+        if not values_equal(new_min_confluence, config.get('min_confluence_score')):
+            st.session_state.scanner_pending_changes['min_confluence_score'] = new_min_confluence
+
     # Save section
     render_save_section(config, 'core', updated_by)
 
@@ -377,6 +404,61 @@ def render_dedup_settings(config: Dict[str, Any]):
             )
             if not values_equal(new_debug, config.get('deduplication_debug_mode')):
                 st.session_state.scanner_pending_changes['deduplication_debug_mode'] = new_debug
+
+    # Signal Hash Cache Settings
+    with st.expander("Signal Hash Cache Settings", expanded=False):
+        st.markdown("Configure in-memory signal hash caching for deduplication")
+
+        new_enable_alert_dedup = st.checkbox(
+            "Enable Alert Deduplication",
+            value=config.get('enable_alert_deduplication', True),
+            help="Master switch for alert deduplication system",
+            key="enable_alert_deduplication"
+        )
+        if not values_equal(new_enable_alert_dedup, config.get('enable_alert_deduplication')):
+            st.session_state.scanner_pending_changes['enable_alert_deduplication'] = new_enable_alert_dedup
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            new_hash_cache_expiry = st.number_input(
+                "Hash Cache Expiry (minutes)",
+                value=_get_int(config, 'signal_hash_cache_expiry_minutes', 15),
+                min_value=5, max_value=60, step=5,
+                help="Time before cached signal hashes expire",
+                key="signal_hash_cache_expiry_minutes"
+            )
+            if not values_equal(new_hash_cache_expiry, config.get('signal_hash_cache_expiry_minutes')):
+                st.session_state.scanner_pending_changes['signal_hash_cache_expiry_minutes'] = new_hash_cache_expiry
+
+            new_max_cache_size = st.number_input(
+                "Max Cache Size",
+                value=_get_int(config, 'max_signal_hash_cache_size', 1000),
+                min_value=100, max_value=5000, step=100,
+                help="Maximum in-memory signal hash cache entries",
+                key="max_signal_hash_cache_size"
+            )
+            if not values_equal(new_max_cache_size, config.get('max_signal_hash_cache_size')):
+                st.session_state.scanner_pending_changes['max_signal_hash_cache_size'] = new_max_cache_size
+
+        with col2:
+            new_enable_hash_check = st.checkbox(
+                "Enable Signal Hash Check",
+                value=config.get('enable_signal_hash_check', False),
+                help="Check signal hash for exact duplicates (disabled: cooldown sufficient)",
+                key="enable_signal_hash_check"
+            )
+            if not values_equal(new_enable_hash_check, config.get('enable_signal_hash_check')):
+                st.session_state.scanner_pending_changes['enable_signal_hash_check'] = new_enable_hash_check
+
+            new_time_hash = st.checkbox(
+                "Enable Time-Based Hash Components",
+                value=config.get('enable_time_based_hash_components', False),
+                help="Include time bucket in hash (can be too strict)",
+                key="enable_time_based_hash_components"
+            )
+            if not values_equal(new_time_hash, config.get('enable_time_based_hash_components')):
+                st.session_state.scanner_pending_changes['enable_time_based_hash_components'] = new_time_hash
 
     render_save_section(config, 'dedup', updated_by)
 
@@ -1104,10 +1186,6 @@ def render_claude_validation_settings(config: Dict[str, Any]):
         if isinstance(current_strategies, str):
             current_strategies = json.loads(current_strategies)
         st.markdown(f"**Vision Strategies:** {', '.join(current_strategies)}")
-
-        # Save directory
-        current_dir = config.get('claude_vision_save_directory', 'claude_analysis_enhanced/vision_analysis')
-        st.markdown(f"**Save Directory:** `{current_dir}`")
 
     # Info box
     with st.expander("About Claude Trade Validation", expanded=False):
