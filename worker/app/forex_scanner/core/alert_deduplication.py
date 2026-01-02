@@ -71,6 +71,7 @@ class AlertDeduplicationManager:
         # In-memory caches for performance
         self._recent_signals_cache = {}  # {epic: {signal_type: last_timestamp}}
         self._signal_hash_cache = {}  # Dict of {hash: timestamp} for time-aware expiry
+        self._cooldown_key_cache = {}  # {cooldown_key: timestamp} for race condition prevention
         self._cache_expiry_minutes = getattr(config, 'SIGNAL_HASH_CACHE_EXPIRY_MINUTES', 15)
         self._max_cache_size = getattr(config, 'MAX_SIGNAL_HASH_CACHE_SIZE', 1000)
         self._enable_hash_check = getattr(config, 'ENABLE_SIGNAL_HASH_CHECK', True)
@@ -278,33 +279,49 @@ class AlertDeduplicationManager:
     def _check_cooldown_periods(self, cooldown_key: str) -> Tuple[bool, str]:
         """Check time-based cooldown periods"""
         try:
+            now = datetime.now()
+            cooldown_seconds = self.config.epic_signal_cooldown_minutes * 60
+
+            # FIRST: Check in-memory cache to prevent race conditions
+            # This catches duplicate signals that arrive within milliseconds of each other
+            if cooldown_key in self._cooldown_key_cache:
+                cache_timestamp = self._cooldown_key_cache[cooldown_key]
+                time_diff = (now - cache_timestamp).total_seconds()
+                remaining = cooldown_seconds - time_diff
+
+                if remaining > 0:
+                    self.logger.debug(f"🚫 Cooldown blocked by in-memory cache: {cooldown_key}")
+                    return False, f"Cooldown active (cache): {remaining:.0f}s remaining"
+
+            # SECOND: Check database for recent alerts with same cooldown key
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
-            # Check for recent alerts with same cooldown key
+
             cursor.execute("""
                 SELECT alert_timestamp, epic, signal_type, strategy
-                FROM alert_history 
-                WHERE cooldown_key = %s 
+                FROM alert_history
+                WHERE cooldown_key = %s
                 AND alert_timestamp >= %s
                 ORDER BY alert_timestamp DESC
                 LIMIT 1
-            """, (cooldown_key, datetime.now() - timedelta(minutes=self.config.epic_signal_cooldown_minutes)))
-            
+            """, (cooldown_key, now - timedelta(minutes=self.config.epic_signal_cooldown_minutes)))
+
             result = cursor.fetchone()
             cursor.close()
             conn.close()
-            
+
             if result:
                 last_alert_time = result[0]
-                time_diff = datetime.now() - last_alert_time
-                remaining_cooldown = self.config.epic_signal_cooldown_minutes * 60 - time_diff.total_seconds()
-                
+                time_diff = now - last_alert_time
+                remaining_cooldown = cooldown_seconds - time_diff.total_seconds()
+
                 if remaining_cooldown > 0:
+                    # Update cache from database to prevent future race conditions
+                    self._cooldown_key_cache[cooldown_key] = last_alert_time
                     return False, f"Cooldown active: {remaining_cooldown:.0f}s remaining"
-            
+
             return True, ""
-            
+
         except Exception as e:
             self.logger.error(f"Error checking cooldown periods: {e}")
             return True, ""  # Allow on error
@@ -493,6 +510,7 @@ class AlertDeduplicationManager:
         # All checks passed - update caches
         current_time = datetime.now()
         self._signal_hash_cache[signal_hash] = current_time
+        self._cooldown_key_cache[cooldown_key] = current_time  # Prevent race condition duplicates
         self._hourly_alert_count += 1
 
         # Update in-memory cache
