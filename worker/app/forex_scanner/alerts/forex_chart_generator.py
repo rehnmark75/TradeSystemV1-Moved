@@ -583,19 +583,28 @@ class ForexChartGenerator:
             active_fvgs = fvg_data.get('active_fvgs', [])
 
             # Also check for FVG columns in the dataframe itself
+            # FIXED: Deduplicate FVGs - only create one entry per unique high/low price pair
             if not active_fvgs and 'fvg_high' in df.columns:
-                # Extract FVGs from dataframe
+                seen_fvgs = set()  # Track unique FVGs by (high, low, type) tuple
                 for i in range(len(df)):
                     row = df.iloc[i]
                     if pd.notna(row.get('fvg_high')) and pd.notna(row.get('fvg_low')):
+                        fvg_high = row['fvg_high']
+                        fvg_low = row['fvg_low']
                         fvg_type = 'bullish' if row.get('fvg_bullish', False) else 'bearish'
-                        active_fvgs.append({
-                            'high': row['fvg_high'],
-                            'low': row['fvg_low'],
-                            'type': fvg_type,
-                            'start_index': i,
-                            'significance': row.get('fvg_significance', 0.5)
-                        })
+
+                        # Create unique key for this FVG
+                        fvg_key = (round(fvg_high, 5), round(fvg_low, 5), fvg_type)
+
+                        if fvg_key not in seen_fvgs:
+                            seen_fvgs.add(fvg_key)
+                            active_fvgs.append({
+                                'high': fvg_high,
+                                'low': fvg_low,
+                                'type': fvg_type,
+                                'start_index': i,  # First occurrence = start of FVG
+                                'significance': row.get('fvg_significance', 0.5)
+                            })
 
             if not active_fvgs:
                 return
@@ -697,21 +706,32 @@ class ForexChartGenerator:
 
             # Get active order blocks list
             active_obs = ob_data.get('active_order_blocks', [])
+            logger.info(f"📊 [CHART] Drawing OBs - from smc_data: {len(active_obs)}, will check df columns: {'order_block_high' in df.columns}")
 
             # Also check for OB columns in the dataframe itself
+            # FIXED: Deduplicate OBs - only create one entry per unique high/low price pair
             if not active_obs and 'order_block_high' in df.columns:
+                seen_obs = set()  # Track unique OBs by (high, low, type) tuple
                 for i in range(len(df)):
                     row = df.iloc[i]
                     if pd.notna(row.get('order_block_high')) and pd.notna(row.get('order_block_low')):
+                        ob_high = row['order_block_high']
+                        ob_low = row['order_block_low']
                         ob_type = 'bullish' if row.get('order_block_bullish', False) else 'bearish'
-                        active_obs.append({
-                            'high': row['order_block_high'],
-                            'low': row['order_block_low'],
-                            'type': ob_type,
-                            'start_index': i,
-                            'strength': row.get('order_block_strength', 'medium'),
-                            'confidence': row.get('order_block_confidence', 0.5)
-                        })
+
+                        # Create unique key for this OB
+                        ob_key = (round(ob_high, 5), round(ob_low, 5), ob_type)
+
+                        if ob_key not in seen_obs:
+                            seen_obs.add(ob_key)
+                            active_obs.append({
+                                'high': ob_high,
+                                'low': ob_low,
+                                'type': ob_type,
+                                'start_index': i,  # First occurrence = start of OB
+                                'strength': row.get('order_block_strength', 'medium'),
+                                'confidence': row.get('order_block_confidence', 0.5)
+                            })
 
             if not active_obs:
                 return

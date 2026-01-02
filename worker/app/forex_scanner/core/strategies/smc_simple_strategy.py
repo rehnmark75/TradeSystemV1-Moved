@@ -3253,10 +3253,10 @@ class SMCSimpleStrategy:
                         })
 
                 smc_data['fvg_data']['active_fvgs'] = active_fvgs[:5]  # Limit to 5
-                self.logger.debug(f"Detected {len(active_fvgs)} active FVGs for chart")
+                self.logger.info(f"📊 [CHART] Detected {len(active_fvgs)} active FVGs for chart visualization")
 
             except Exception as fvg_error:
-                self.logger.debug(f"FVG detection skipped: {fvg_error}")
+                self.logger.warning(f"⚠️ [CHART] FVG detection failed: {fvg_error}")
 
             # Detect Order Blocks on trigger timeframe (15m)
             try:
@@ -3279,10 +3279,10 @@ class SMCSimpleStrategy:
                         })
 
                 smc_data['order_block_data']['active_order_blocks'] = active_obs[:3]  # Limit to 3
-                self.logger.debug(f"Detected {len(active_obs)} active Order Blocks for chart")
+                self.logger.info(f"📊 [CHART] Detected {len(active_obs)} active Order Blocks for chart visualization")
 
             except Exception as ob_error:
-                self.logger.debug(f"Order Block detection skipped: {ob_error}")
+                self.logger.warning(f"⚠️ [CHART] Order Block detection failed: {ob_error}")
 
             # Add to signal
             signal['smc_data'] = smc_data
