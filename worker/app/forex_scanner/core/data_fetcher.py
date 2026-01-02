@@ -52,7 +52,8 @@ class DataFetcher:
         self.volume_analyzer = VolumeAnalyzer()
         self.behavior_analyzer = BehaviorAnalyzer()
         self.timezone_manager = TimezoneManager(user_timezone)
-        
+        self.logger = logging.getLogger(__name__)
+
         # Performance optimizations - try database first, fallback to config.py
         if SCANNER_CONFIG_AVAILABLE:
             try:
@@ -74,6 +75,7 @@ class DataFetcher:
         # Cache for recently fetched data
         self._data_cache = {}
         self._cache_timeout = 150  # 5 minutes
+        self._indicator_cache = {}
 
     def _load_fallback_config(self):
         """Load hardcoded fallback defaults when database is unavailable"""
@@ -84,20 +86,6 @@ class DataFetcher:
         self.enable_support_resistance = True
         self.enable_volume_analysis = True
         self.enable_behavior_analysis = False
-        
-        # Pre-calculated indicators cache
-        self._indicator_cache = {}
-        
-        self.logger = logging.getLogger(__name__)
-        self.logger.info(f"🌍 Enhanced data fetcher initialized with timezone: {user_timezone}")
-        self.logger.info(f"   Cache enabled: {self.cache_enabled}")
-        self.logger.info(f"   Reduced lookback: {self.reduced_lookback}")
-        self.logger.info(f"   Lazy indicators: {self.lazy_indicators}")
-        self.logger.info(f"   Batch size: {self.batch_size}")
-        self.logger.info(f"   KAMA support: {'✅' if getattr(config, 'KAMA_STRATEGY', False) else '❌'}")
-        
-        # FIXED: Log strategy enablement status at startup
-        self._log_strategy_status()
     
     def _log_strategy_status(self):
         """Log the current strategy enablement status for debugging"""
