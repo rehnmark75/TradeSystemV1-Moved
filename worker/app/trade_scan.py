@@ -213,14 +213,24 @@ class TradingSystem:
             self.enable_claude_analysis = enable_claude_analysis
             self.logger.info(f"🔧 Claude explicitly set to: {enable_claude_analysis}")
         else:
-            # Check multiple possible config variable names
-            self.enable_claude_analysis = (
-                getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False) or
-                getattr(config, 'CLAUDE_ANALYSIS_ENABLED', False) or
-                getattr(config, 'USE_CLAUDE_ANALYSIS', False) or
-                getattr(config, 'CLAUDE_ANALYSIS_MODE', 'disabled') != 'disabled'
-            )
-            self.logger.info(f"🔧 Claude from config: {self.enable_claude_analysis}")
+            # Try to get from database first (require_claude_approval)
+            if SCANNER_CONFIG_AVAILABLE:
+                try:
+                    scanner_cfg = get_scanner_config()
+                    self.enable_claude_analysis = scanner_cfg.require_claude_approval
+                    self.logger.info(f"🔧 Claude from database: {self.enable_claude_analysis}")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Failed to get Claude setting from database: {e}")
+                    self.enable_claude_analysis = False
+            else:
+                # Legacy fallback to config.py
+                self.enable_claude_analysis = (
+                    getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False) or
+                    getattr(config, 'CLAUDE_ANALYSIS_ENABLED', False) or
+                    getattr(config, 'USE_CLAUDE_ANALYSIS', False) or
+                    getattr(config, 'CLAUDE_ANALYSIS_MODE', 'disabled') != 'disabled'
+                )
+                self.logger.info(f"🔧 Claude from config (legacy): {self.enable_claude_analysis}")
         
         # Get scan_interval from database config service (fail-fast if not available)
         if SCANNER_CONFIG_AVAILABLE:
