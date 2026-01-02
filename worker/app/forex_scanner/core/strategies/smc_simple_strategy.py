@@ -1032,7 +1032,11 @@ class SMCSimpleStrategy:
             # v2.9.0: CONFIDENCE CAP CHECK (Paradox: higher confidence = worse)
             # ================================================================
             # Analysis of 85 trades (Dec 2025) showed confidence > 0.75 had only 42% WR
-            pair_max_confidence = self._get_pair_param(epic, 'MAX_CONFIDENCE_THRESHOLD', self.max_confidence)
+            # v2.11.1: Use database service method if available (supports per-pair override)
+            if self._using_database_config and self._db_config:
+                pair_max_confidence = self._db_config.get_pair_max_confidence(epic)
+            else:
+                pair_max_confidence = self._get_pair_param(epic, 'MAX_CONFIDENCE_THRESHOLD', self.max_confidence)
             if round(confidence, 4) > pair_max_confidence:
                 reason = f"Confidence too high ({confidence*100:.0f}% > {pair_max_confidence*100:.0f}% cap)"
                 self.logger.info(f"\n❌ {reason} (paradox: high confidence = worse outcomes)")

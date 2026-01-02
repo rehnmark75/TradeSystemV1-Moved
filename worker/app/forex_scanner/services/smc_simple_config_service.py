@@ -300,6 +300,14 @@ class SMCSimpleConfig:
                 return override['min_confidence']
         return self.min_confidence_threshold
 
+    def get_pair_max_confidence(self, epic: str) -> float:
+        """Get maximum confidence cap for a specific pair (confidence paradox filter)"""
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('max_confidence') is not None:
+                return override['max_confidence']
+        return self.max_confidence_threshold
+
     def get_pair_min_volume_ratio(self, epic: str) -> float:
         """Get minimum volume ratio for a specific pair"""
         if epic in self._pair_overrides:
@@ -726,6 +734,7 @@ class SMCSimpleConfigService:
                 'allow_asian_session': row.get('allow_asian_session'),
                 'sl_buffer_pips': row.get('sl_buffer_pips'),
                 'min_confidence': row.get('min_confidence'),
+                'max_confidence': row.get('max_confidence'),
                 'min_volume_ratio': row.get('min_volume_ratio'),
                 'high_volume_confidence': row.get('high_volume_confidence'),
                 'low_atr_confidence': row.get('low_atr_confidence'),
@@ -763,7 +772,7 @@ class SMCSimpleConfigService:
                 effective.update(overrides['parameter_overrides'])
 
             # Apply specific override fields
-            for field_name in ['sl_buffer_pips', 'min_confidence', 'allow_asian_session',
+            for field_name in ['sl_buffer_pips', 'min_confidence', 'max_confidence', 'allow_asian_session',
                               'min_volume_ratio', 'macd_filter_enabled']:
                 if overrides.get(field_name) is not None:
                     effective[field_name] = overrides[field_name]

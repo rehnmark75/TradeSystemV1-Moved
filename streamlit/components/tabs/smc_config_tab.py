@@ -391,15 +391,42 @@ def render_global_settings(config: Dict[str, Any]):
 
     # Confidence Scoring
     with st.expander("Confidence Scoring", expanded=False):
-        new_min_conf = st.number_input(
-            "Min Confidence Threshold",
-            value=float(config.get('min_confidence_threshold', 0.48)),
-            min_value=0.0, max_value=1.0, step=0.01,
-            help="Minimum confidence score for trade entry",
-            key="min_confidence_threshold"
-        )
-        if not _values_equal(new_min_conf, config.get('min_confidence_threshold')):
-            st.session_state.smc_pending_changes['min_confidence_threshold'] = new_min_conf
+        st.markdown("**Confidence Thresholds**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            new_min_conf = st.number_input(
+                "Min Confidence Threshold",
+                value=float(config.get('min_confidence_threshold', 0.48)),
+                min_value=0.0, max_value=1.0, step=0.01,
+                help="Minimum confidence score for trade entry",
+                key="min_confidence_threshold"
+            )
+            if not _values_equal(new_min_conf, config.get('min_confidence_threshold')):
+                st.session_state.smc_pending_changes['min_confidence_threshold'] = new_min_conf
+
+        with col2:
+            new_max_conf = st.number_input(
+                "Max Confidence Cap",
+                value=float(config.get('max_confidence_threshold', 0.75)),
+                min_value=0.0, max_value=1.0, step=0.01,
+                help="Maximum confidence cap - signals above this are rejected (paradox: high confidence = worse outcomes)",
+                key="max_confidence_threshold"
+            )
+            if not _values_equal(new_max_conf, config.get('max_confidence_threshold')):
+                st.session_state.smc_pending_changes['max_confidence_threshold'] = new_max_conf
+
+        with col3:
+            new_high_conf = st.number_input(
+                "High Confidence Threshold",
+                value=float(config.get('high_confidence_threshold', 0.75)),
+                min_value=0.0, max_value=1.0, step=0.01,
+                help="Threshold for marking signals as 'high confidence' (informational)",
+                key="high_confidence_threshold"
+            )
+            if not _values_equal(new_high_conf, config.get('high_confidence_threshold')):
+                st.session_state.smc_pending_changes['high_confidence_threshold'] = new_high_conf
+
+        st.caption("⚠️ Analysis of 85 trades (Dec 2025) showed confidence > 75% had only 42% win rate. The Max Confidence Cap prevents overconfident signals.")
 
         st.markdown("**Confidence Weights**")
         conf_weights = config.get('confidence_weights', {})
@@ -669,6 +696,21 @@ def render_pair_overrides(config: Dict[str, Any]):
             if not _values_equal(new_min_conf, conf_effective):
                 override_changes['min_confidence'] = new_min_conf
 
+            # Max Confidence Cap - inherit from global
+            max_conf_override_value = existing.get('max_confidence')
+            global_max_conf = config.get('max_confidence_threshold', 0.75)
+            max_conf_effective = float(max_conf_override_value) if max_conf_override_value is not None else float(global_max_conf)
+            new_max_conf = st.number_input(
+                "Max Confidence Cap",
+                value=max_conf_effective,
+                min_value=0.0, max_value=1.0, step=0.01,
+                help=f"{'Inherited from global (' + str(global_max_conf) + ')' if max_conf_override_value is None else 'Explicit override for this pair'} - Signals above this are rejected",
+                key=f"override_max_conf_{selected_pair}"
+            )
+            # Compare against effective value to avoid false positives when inheriting
+            if not _values_equal(new_max_conf, max_conf_effective):
+                override_changes['max_confidence'] = new_max_conf
+
             # MACD Filter - inherit from global
             macd_override_value = existing.get('macd_filter_enabled')
             global_macd = config.get('macd_alignment_filter_enabled', True)
@@ -814,7 +856,8 @@ def render_pair_overrides(config: Dict[str, Any]):
             'is_enabled': True,
             'allow_asian_session': False,
             'sl_buffer_pips': config.get('sl_buffer_pips', 6),
-            'min_confidence': config.get('min_confidence', 0.48),
+            'min_confidence': config.get('min_confidence_threshold', 0.48),
+            'max_confidence': config.get('max_confidence_threshold', 0.75),
             'macd_filter_enabled': True,
         }
 
@@ -831,18 +874,25 @@ def render_pair_overrides(config: Dict[str, Any]):
                 min_value=0.0, max_value=30.0, step=0.5,
                 key=f"new_sl_{selected_pair}"
             )
-
-        with col2:
-            new_override['min_confidence'] = st.number_input(
-                "Min Confidence",
-                value=float(config.get('min_confidence', 0.48)),
-                min_value=0.0, max_value=1.0, step=0.01,
-                key=f"new_conf_{selected_pair}"
-            )
             new_override['macd_filter_enabled'] = st.checkbox(
                 "MACD Filter Enabled",
                 value=True,
                 key=f"new_macd_{selected_pair}"
+            )
+
+        with col2:
+            new_override['min_confidence'] = st.number_input(
+                "Min Confidence",
+                value=float(config.get('min_confidence_threshold', 0.48)),
+                min_value=0.0, max_value=1.0, step=0.01,
+                key=f"new_conf_{selected_pair}"
+            )
+            new_override['max_confidence'] = st.number_input(
+                "Max Confidence Cap",
+                value=float(config.get('max_confidence_threshold', 0.75)),
+                min_value=0.0, max_value=1.0, step=0.01,
+                help="Signals above this are rejected (paradox: high confidence = worse outcomes)",
+                key=f"new_max_conf_{selected_pair}"
             )
 
         new_override['description'] = st.text_input(
@@ -866,7 +916,7 @@ def render_pair_overrides(config: Dict[str, Any]):
     if overrides:
         df = pd.DataFrame(overrides)
         display_cols = ['epic', 'is_enabled', 'allow_asian_session', 'sl_buffer_pips',
-                       'min_confidence', 'macd_filter_enabled', 'description']
+                       'min_confidence', 'max_confidence', 'macd_filter_enabled', 'description']
         available_cols = [c for c in display_cols if c in df.columns]
         st.dataframe(df[available_cols], use_container_width=True)
     else:

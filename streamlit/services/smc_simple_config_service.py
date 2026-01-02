@@ -336,7 +336,7 @@ def get_effective_config_for_pair(epic: str) -> Dict[str, Any]:
     override = get_pair_override(config['id'], epic)
     if override:
         # Apply simple overrides
-        for field in ['sl_buffer_pips', 'min_confidence', 'allow_asian_session',
+        for field in ['sl_buffer_pips', 'min_confidence', 'max_confidence', 'allow_asian_session',
                      'min_volume_ratio', 'macd_filter_enabled',
                      'high_volume_confidence', 'low_atr_confidence',
                      'high_atr_confidence', 'near_ema_confidence', 'far_ema_confidence']:
