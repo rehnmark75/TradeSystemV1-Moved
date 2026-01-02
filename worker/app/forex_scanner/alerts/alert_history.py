@@ -516,7 +516,21 @@ class AlertHistoryManager:
                         claude_reason, claude_mode, claude_raw_response,
                         alert_message, alert_level,
                         signal_hash, data_source, market_timestamp, cooldown_key,
-                        strategy_config_hash
+                        strategy_config_hash,
+                        efficiency_ratio, market_regime_detected, regime_confidence,
+                        bb_width_percentile, atr_percentile, volatility_state,
+                        entry_quality_score, distance_from_optimal_fib, entry_candle_momentum,
+                        mtf_confluence_score, htf_candle_position, all_timeframes_aligned,
+                        volume_at_swing_break, volume_trend, volume_quality_score,
+                        adx_value, adx_plus_di, adx_minus_di, adx_trend_strength,
+                        performance_metrics,
+                        kama_value, kama_er, kama_trend, kama_signal,
+                        bb_upper, bb_middle, bb_lower, bb_width, bb_percent_b, price_vs_bb,
+                        stoch_k, stoch_d, stoch_zone,
+                        supertrend_value, supertrend_direction,
+                        rsi_zone, rsi_divergence,
+                        ema_9, ema_21, ema_50, ema_200, price_vs_ema_200, ema_stack_order,
+                        candle_body_pips, candle_upper_wick_pips, candle_lower_wick_pips, candle_type
                     ) VALUES (
                         %(alert_timestamp)s,
                         %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(price)s, %(bid_price)s, %(ask_price)s,
@@ -537,7 +551,21 @@ class AlertHistoryManager:
                         %(claude_reason)s, %(claude_mode)s, %(claude_raw_response)s,
                         %(alert_message)s, %(alert_level)s,
                         %(signal_hash)s, %(data_source)s, %(market_timestamp)s, %(cooldown_key)s,
-                        %(strategy_config_hash)s
+                        %(strategy_config_hash)s,
+                        %(efficiency_ratio)s, %(market_regime_detected)s, %(regime_confidence)s,
+                        %(bb_width_percentile)s, %(atr_percentile)s, %(volatility_state)s,
+                        %(entry_quality_score)s, %(distance_from_optimal_fib)s, %(entry_candle_momentum)s,
+                        %(mtf_confluence_score)s, %(htf_candle_position)s, %(all_timeframes_aligned)s,
+                        %(volume_at_swing_break)s, %(volume_trend)s, %(volume_quality_score)s,
+                        %(adx_value)s, %(adx_plus_di)s, %(adx_minus_di)s, %(adx_trend_strength)s,
+                        %(performance_metrics)s,
+                        %(kama_value)s, %(kama_er)s, %(kama_trend)s, %(kama_signal)s,
+                        %(bb_upper)s, %(bb_middle)s, %(bb_lower)s, %(bb_width)s, %(bb_percent_b)s, %(price_vs_bb)s,
+                        %(stoch_k)s, %(stoch_d)s, %(stoch_zone)s,
+                        %(supertrend_value)s, %(supertrend_direction)s,
+                        %(rsi_zone)s, %(rsi_divergence)s,
+                        %(ema_9)s, %(ema_21)s, %(ema_50)s, %(ema_200)s, %(price_vs_ema_200)s, %(ema_stack_order)s,
+                        %(candle_body_pips)s, %(candle_upper_wick_pips)s, %(candle_lower_wick_pips)s, %(candle_type)s
                     ) RETURNING id
                 '''
                 
@@ -1369,6 +1397,69 @@ class AlertHistoryManager:
                 'liquidity_sweep_type': liquidity_sweep_type,
                 'liquidity_sweep_quality': liquidity_sweep_quality,
 
+                # Performance Metrics (v2.11.0)
+                'efficiency_ratio': signal.get('efficiency_ratio'),
+                'market_regime_detected': signal.get('market_regime_detected'),
+                'regime_confidence': signal.get('regime_confidence'),
+                'bb_width_percentile': signal.get('bb_width_percentile'),
+                'atr_percentile': signal.get('atr_percentile'),
+                'volatility_state': signal.get('volatility_state'),
+                'entry_quality_score': signal.get('entry_quality_score'),
+                'distance_from_optimal_fib': signal.get('distance_from_optimal_fib'),
+                'entry_candle_momentum': signal.get('entry_candle_momentum'),
+                'mtf_confluence_score': signal.get('mtf_confluence_score'),
+                'htf_candle_position': signal.get('htf_candle_position'),
+                'all_timeframes_aligned': signal.get('all_timeframes_aligned'),
+                'volume_at_swing_break': signal.get('volume_at_swing_break'),
+                'volume_trend': signal.get('volume_trend'),
+                'volume_quality_score': signal.get('volume_quality_score'),
+                'adx_value': signal.get('adx_value'),
+                'adx_plus_di': signal.get('adx_plus_di'),
+                'adx_minus_di': signal.get('adx_minus_di'),
+                'adx_trend_strength': signal.get('adx_trend_strength'),
+                'performance_metrics': None,  # Will be set below if available
+
+                # Extended Indicators (v2.12.0) - KAMA
+                'kama_value': signal.get('kama_value'),
+                'kama_er': signal.get('kama_er'),
+                'kama_trend': signal.get('kama_trend'),
+                'kama_signal': signal.get('kama_signal'),
+
+                # Bollinger Bands
+                'bb_upper': signal.get('bb_upper'),
+                'bb_middle': signal.get('bb_middle'),
+                'bb_lower': signal.get('bb_lower'),
+                'bb_width': signal.get('bb_width'),
+                'bb_percent_b': signal.get('bb_percent_b'),
+                'price_vs_bb': signal.get('price_vs_bb'),
+
+                # Stochastic
+                'stoch_k': signal.get('stoch_k'),
+                'stoch_d': signal.get('stoch_d'),
+                'stoch_zone': signal.get('stoch_zone'),
+
+                # Supertrend
+                'supertrend_value': signal.get('supertrend_value'),
+                'supertrend_direction': signal.get('supertrend_direction'),
+
+                # RSI Extended
+                'rsi_zone': signal.get('rsi_zone'),
+                'rsi_divergence': signal.get('rsi_divergence'),
+
+                # EMA Stack
+                'ema_9': signal.get('ema_9'),
+                'ema_21': signal.get('ema_21'),
+                'ema_50': signal.get('ema_50'),
+                'ema_200': signal.get('ema_200'),
+                'price_vs_ema_200': signal.get('price_vs_ema_200'),
+                'ema_stack_order': signal.get('ema_stack_order'),
+
+                # Candle Analysis
+                'candle_body_pips': signal.get('candle_body_pips'),
+                'candle_upper_wick_pips': signal.get('candle_upper_wick_pips'),
+                'candle_lower_wick_pips': signal.get('candle_lower_wick_pips'),
+                'candle_type': signal.get('candle_type'),
+
                 # Deduplication
                 'signal_hash': signal_hash,
                 'data_source': data_source,
@@ -1457,6 +1548,21 @@ class AlertHistoryManager:
                 self.logger.warning(f"⚠️ Error serializing validation_details: {e}")
                 alert_data['validation_details'] = str(validation_details) if validation_details else None
 
+            # Clean and serialize performance_metrics (v2.11.0)
+            try:
+                perf_metrics = signal.get('performance_metrics')
+                if perf_metrics is not None:
+                    cleaned_metrics = safe_json_serialize(perf_metrics)
+                    if isinstance(cleaned_metrics, (dict, list)):
+                        alert_data['performance_metrics'] = json.dumps(cleaned_metrics)
+                    else:
+                        alert_data['performance_metrics'] = None
+                else:
+                    alert_data['performance_metrics'] = None
+            except Exception as e:
+                self.logger.warning(f"⚠️ Error serializing performance_metrics: {e}")
+                alert_data['performance_metrics'] = None
+
             # ================================
             # HANDLE DATETIME CONVERSIONS
             # ================================
@@ -1476,11 +1582,23 @@ class AlertHistoryManager:
             numeric_fields = [
                 'confidence_score', 'price', 'bid_price', 'ask_price', 'spread_pips',
                 'ema_short', 'ema_long', 'ema_trend', 'macd_line', 'macd_signal', 'macd_histogram',
-                'adx', 'adx_plus', 'adx_minus', 'rsi', 'atr',  # NEW: Technical indicators
+                'adx', 'adx_plus', 'adx_minus', 'rsi', 'atr',  # Technical indicators
                 'volume', 'volume_ratio', 'nearest_support', 'nearest_resistance',
                 'distance_to_support_pips', 'distance_to_resistance_pips', 'risk_reward_ratio',
                 'signal_strength', 'technical_score',
-                'swing_proximity_distance', 'directional_consensus'  # NEW: Validation/market bias fields
+                'swing_proximity_distance', 'directional_consensus',  # Validation/market bias fields
+                # Performance metrics (v2.11.0)
+                'efficiency_ratio', 'regime_confidence', 'bb_width_percentile', 'atr_percentile',
+                'entry_quality_score', 'distance_from_optimal_fib', 'entry_candle_momentum',
+                'mtf_confluence_score', 'volume_at_swing_break', 'volume_quality_score',
+                'adx_value', 'adx_plus_di', 'adx_minus_di',
+                # Extended indicators (v2.12.0)
+                'kama_value', 'kama_er',
+                'bb_upper', 'bb_middle', 'bb_lower', 'bb_width', 'bb_percent_b',
+                'stoch_k', 'stoch_d',
+                'supertrend_value',
+                'ema_9', 'ema_21', 'ema_50', 'ema_200',
+                'candle_body_pips', 'candle_upper_wick_pips', 'candle_lower_wick_pips'
             ]
             
             for field in numeric_fields:

@@ -231,12 +231,14 @@ class SMCRejectionHistoryManager:
                     candle_15m_open, candle_15m_high, candle_15m_low, candle_15m_close, candle_15m_volume,
                     candle_4h_open, candle_4h_high, candle_4h_low, candle_4h_close, candle_4h_volume,
                     strategy_version, strategy_config_hash, strategy_config,
-                    macd_line, macd_signal, macd_histogram, macd_aligned, macd_momentum
+                    macd_line, macd_signal, macd_histogram, macd_aligned, macd_momentum,
+                    efficiency_ratio, market_regime_detected, bb_width_percentile,
+                    volatility_state, adx_value, adx_trend_strength, performance_metrics
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT DO NOTHING
             """
@@ -309,7 +311,15 @@ class SMCRejectionHistoryManager:
                     self._safe_float(data.get('macd_signal')),
                     self._safe_float(data.get('macd_histogram')),
                     data.get('macd_aligned'),
-                    data.get('macd_momentum')
+                    data.get('macd_momentum'),
+                    # v2.11.0: Performance metrics
+                    self._safe_float(data.get('efficiency_ratio')),
+                    data.get('market_regime_detected'),
+                    self._safe_float(data.get('bb_width_percentile')),
+                    data.get('volatility_state'),
+                    self._safe_float(data.get('adx_value')),
+                    data.get('adx_trend_strength'),
+                    self._safe_json(data.get('performance_metrics'))
                 )
 
                 cursor.execute(insert_sql, values)

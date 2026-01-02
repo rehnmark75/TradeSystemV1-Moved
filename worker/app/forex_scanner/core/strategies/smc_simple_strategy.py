@@ -2946,6 +2946,9 @@ class SMCSimpleStrategy:
             signal['adx_minus_di'] = metrics.adx_minus_di
             signal['adx_trend_strength'] = metrics.adx_trend_strength
 
+            # Extract extended indicators from DataFrames (non-invasive)
+            self._extract_extended_indicators(signal, df_entry, df_trigger, df_4h)
+
             if self.debug_logging:
                 er_str = f"{metrics.efficiency_ratio:.3f}" if metrics.efficiency_ratio is not None else "N/A"
                 eq_str = f"{metrics.entry_quality_score:.2f}" if metrics.entry_quality_score is not None else "N/A"
@@ -3020,6 +3023,171 @@ class SMCSimpleStrategy:
                 self.logger.debug(f"Failed to add rejection metrics: {e}")
 
         return context
+
+    def _extract_extended_indicators(
+        self,
+        signal: Dict,
+        df_entry: Optional[pd.DataFrame],
+        df_trigger: Optional[pd.DataFrame],
+        df_4h: Optional[pd.DataFrame]
+    ) -> None:
+        """
+        Extract extended indicator values from DataFrames for trade analysis.
+
+        This method is NON-INVASIVE - it only reads from DataFrames and adds
+        to the signal dict. It cannot break the strategy as it's wrapped in
+        try/except and only runs after signal detection is complete.
+
+        Extracts: KAMA, Bollinger Bands, Stochastic, Supertrend, EMAs, RSI zones
+        """
+        try:
+            # Use trigger timeframe as primary source
+            df = df_trigger if df_trigger is not None and len(df_trigger) > 0 else df_entry
+            if df is None or len(df) == 0:
+                return
+
+            latest = df.iloc[-1]
+            price = signal.get('entry_price', latest.get('close', 0))
+
+            # Get pip size for calculations
+            epic = signal.get('epic', '')
+            pip_size = 0.01 if 'JPY' in epic else 0.0001
+
+            # === KAMA Indicators ===
+            # KAMA columns are named kama_{period}, kama_{period}_er, etc.
+            for period in [10, 21]:
+                kama_col = f'kama_{period}'
+                if kama_col in df.columns:
+                    signal['kama_value'] = self._safe_float(latest.get(kama_col))
+                    signal['kama_er'] = self._safe_float(latest.get(f'{kama_col}_er'))
+                    signal['kama_trend'] = latest.get(f'{kama_col}_trend')
+                    signal['kama_signal'] = latest.get(f'{kama_col}_signal')
+                    break
+
+            # === Bollinger Bands ===
+            if 'bb_upper' in df.columns:
+                bb_upper = self._safe_float(latest.get('bb_upper'))
+                bb_lower = self._safe_float(latest.get('bb_lower'))
+                signal['bb_upper'] = bb_upper
+                signal['bb_lower'] = bb_lower
+
+                # Calculate middle and width
+                if bb_upper and bb_lower:
+                    signal['bb_middle'] = (bb_upper + bb_lower) / 2
+                    signal['bb_width'] = bb_upper - bb_lower
+
+                    # %B indicator: (price - lower) / (upper - lower)
+                    bb_range = bb_upper - bb_lower
+                    if bb_range > 0:
+                        signal['bb_percent_b'] = (price - bb_lower) / bb_range
+
+                    # Price position relative to bands
+                    if price > bb_upper:
+                        signal['price_vs_bb'] = 'above_upper'
+                    elif price < bb_lower:
+                        signal['price_vs_bb'] = 'below_lower'
+                    else:
+                        signal['price_vs_bb'] = 'in_band'
+
+            # === Stochastic ===
+            if 'stoch_k' in df.columns:
+                stoch_k = self._safe_float(latest.get('stoch_k'))
+                stoch_d = self._safe_float(latest.get('stoch_d'))
+                signal['stoch_k'] = stoch_k
+                signal['stoch_d'] = stoch_d
+
+                if stoch_k is not None:
+                    if stoch_k > 80:
+                        signal['stoch_zone'] = 'overbought'
+                    elif stoch_k < 20:
+                        signal['stoch_zone'] = 'oversold'
+                    else:
+                        signal['stoch_zone'] = 'neutral'
+
+            # === Supertrend ===
+            if 'supertrend' in df.columns:
+                signal['supertrend_value'] = self._safe_float(latest.get('supertrend'))
+                signal['supertrend_direction'] = int(latest.get('supertrend_direction', 0)) if pd.notna(latest.get('supertrend_direction')) else None
+
+            # === RSI Zone ===
+            rsi = self._safe_float(latest.get('rsi'))
+            if rsi is not None:
+                signal['rsi'] = rsi  # Also ensure RSI is in signal
+                if rsi > 70:
+                    signal['rsi_zone'] = 'overbought'
+                elif rsi < 30:
+                    signal['rsi_zone'] = 'oversold'
+                else:
+                    signal['rsi_zone'] = 'neutral'
+
+            # === EMA Stack ===
+            ema_values = {}
+            for ema_period in [9, 21, 50, 200]:
+                col_name = f'ema_{ema_period}'
+                if col_name in df.columns:
+                    val = self._safe_float(latest.get(col_name))
+                    signal[col_name] = val
+                    if val is not None:
+                        ema_values[ema_period] = val
+
+            # Price vs EMA 200
+            if 200 in ema_values:
+                signal['price_vs_ema_200'] = 'above' if price > ema_values[200] else 'below'
+
+            # EMA stack order (bullish = 9 > 21 > 50 > 200)
+            if len(ema_values) >= 3:
+                sorted_emas = sorted(ema_values.items(), key=lambda x: x[1], reverse=True)
+                sorted_periods = [p for p, v in sorted_emas]
+
+                # Check if shorter EMAs are above longer ones (bullish)
+                if sorted_periods == sorted(sorted_periods):  # Ascending order of periods
+                    signal['ema_stack_order'] = 'bullish'
+                elif sorted_periods == sorted(sorted_periods, reverse=True):  # Descending
+                    signal['ema_stack_order'] = 'bearish'
+                else:
+                    signal['ema_stack_order'] = 'mixed'
+
+            # === Candle Analysis ===
+            if all(col in df.columns for col in ['open', 'high', 'low', 'close']):
+                o, h, l, c = latest['open'], latest['high'], latest['low'], latest['close']
+
+                body = abs(c - o)
+                upper_wick = h - max(o, c)
+                lower_wick = min(o, c) - l
+
+                signal['candle_body_pips'] = body / pip_size
+                signal['candle_upper_wick_pips'] = upper_wick / pip_size
+                signal['candle_lower_wick_pips'] = lower_wick / pip_size
+
+                # Candle type
+                if body < (h - l) * 0.1:
+                    signal['candle_type'] = 'doji'
+                elif c > o:
+                    signal['candle_type'] = 'bullish'
+                else:
+                    signal['candle_type'] = 'bearish'
+
+        except Exception as e:
+            # Never let this break the strategy
+            if self.debug_logging:
+                self.logger.debug(f"Extended indicator extraction failed (non-critical): {e}")
+
+    def _safe_float(self, value) -> Optional[float]:
+        """Safely convert value to float, returning None on failure."""
+        if value is None or (hasattr(value, '__len__') and len(value) == 0):
+            return None
+        try:
+            import numpy as np
+            if isinstance(value, (np.integer, np.floating)):
+                result = float(value)
+            else:
+                result = float(value)
+            # Handle NaN
+            if result != result:  # NaN check
+                return None
+            return result
+        except (TypeError, ValueError):
+            return None
 
     def flush_rejections(self) -> bool:
         """Flush any pending rejections to database. Call this at end of scan cycle."""
