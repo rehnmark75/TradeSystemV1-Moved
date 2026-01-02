@@ -137,23 +137,32 @@ EPIC_LIST: List[str] = [
 SPREAD_PIPS = 1.5   # default spread for BID/ASK adjustment
 USE_BID_ADJUSTMENT = False  # whether to adjust BID prices to MID
 #=============================================================================
-# DATA FETCHER OPTIMIZATION CONFIGURATION
 # =============================================================================
+# DEPRECATED: DATA FETCHER OPTIMIZATION - NOW IN DATABASE
+# =============================================================================
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > Data Fetcher
+# -----------------------------------------------------------------------------
+# ENABLE_DATA_CACHE = False
+# REDUCED_LOOKBACK_HOURS = True
+# LAZY_INDICATOR_LOADING = True
+# DATA_BATCH_SIZE = 10000
+# ENABLE_SUPPORT_RESISTANCE = True
+# ENABLE_VOLUME_ANALYSIS = True
+# ENABLE_BEHAVIOR_ANALYSIS = False
 
-# Enable optimizations
-ENABLE_DATA_CACHE = False          # 5-minute data caching (DISABLED for fresh data)
-REDUCED_LOOKBACK_HOURS = True      # Use smart lookback times
-LAZY_INDICATOR_LOADING = True      # Load indicators on demand
-DATA_BATCH_SIZE = 10000           # Batch size for query results (increased for 1H resampling from 5m data)
-
-# Conditional indicators (disable unused ones)
+# Legacy fallback values (used if database unavailable)
+ENABLE_DATA_CACHE = False
+REDUCED_LOOKBACK_HOURS = True
+LAZY_INDICATOR_LOADING = True
+DATA_BATCH_SIZE = 10000
 ENABLE_SUPPORT_RESISTANCE = True
 ENABLE_VOLUME_ANALYSIS = True
-ENABLE_BEHAVIOR_ANALYSIS = False   # Disable if not used
+ENABLE_BEHAVIOR_ANALYSIS = False
 
-# Signal Strategy Mode
-REQUIRE_VOLUME_CONFIRMATION = False # Disabled in simple mode
-REQUIRE_NEW_CROSSOVER = False  # Disabled in simple mode
+# Signal Strategy Mode (legacy, unused)
+# REQUIRE_VOLUME_CONFIRMATION = False
+# REQUIRE_NEW_CROSSOVER = False
 
 # Combined Strategy Settings - REMOVED: Strategy was disabled and unused, cleaned up codebase
   

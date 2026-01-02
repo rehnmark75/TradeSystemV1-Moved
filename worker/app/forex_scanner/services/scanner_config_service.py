@@ -160,6 +160,15 @@ class ScannerConfig:
     # ENABLED STRATEGIES (replaces config.py flags)
     enabled_strategies: List[str] = field(default_factory=list)
 
+    # DATA FETCHER OPTIMIZATION SETTINGS
+    enable_data_cache: bool = False
+    reduced_lookback_hours: bool = True
+    lazy_indicator_loading: bool = True
+    data_batch_size: int = 10000
+    enable_support_resistance: bool = True
+    enable_volume_analysis: bool = True
+    enable_behavior_analysis: bool = False
+
     # ADVANCED DEDUPLICATION SETTINGS
     enable_alert_deduplication: bool = True
     signal_hash_cache_expiry_minutes: int = 15

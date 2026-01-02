@@ -34,6 +34,14 @@ except ImportError:
     from forex_scanner.configdata import config
     from forex_scanner import config as system_config
 
+# Import scanner config service for database-driven settings
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
+except ImportError:
+    SCANNER_CONFIG_AVAILABLE = False
+    get_scanner_config = None
+
 
 class DataFetcher:
     """Enhanced data fetcher with KAMA support and performance optimizations"""
@@ -45,15 +53,37 @@ class DataFetcher:
         self.behavior_analyzer = BehaviorAnalyzer()
         self.timezone_manager = TimezoneManager(user_timezone)
         
-        # Performance optimizations (use system_config for performance settings)
-        self.cache_enabled = getattr(system_config, 'ENABLE_DATA_CACHE', True)
-        self.reduced_lookback = getattr(system_config, 'REDUCED_LOOKBACK_HOURS', True)
-        self.lazy_indicators = getattr(system_config, 'LAZY_INDICATOR_LOADING', True)
-        self.batch_size = getattr(system_config, 'DATA_BATCH_SIZE', 2000)
-        
+        # Performance optimizations - try database first, fallback to config.py
+        if SCANNER_CONFIG_AVAILABLE:
+            try:
+                scanner_cfg = get_scanner_config()
+                self.cache_enabled = scanner_cfg.enable_data_cache
+                self.reduced_lookback = scanner_cfg.reduced_lookback_hours
+                self.lazy_indicators = scanner_cfg.lazy_indicator_loading
+                self.batch_size = scanner_cfg.data_batch_size
+                self.enable_support_resistance = scanner_cfg.enable_support_resistance
+                self.enable_volume_analysis = scanner_cfg.enable_volume_analysis
+                self.enable_behavior_analysis = scanner_cfg.enable_behavior_analysis
+                logging.getLogger(__name__).debug("[CONFIG:DB] DataFetcher settings loaded from database")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"[CONFIG:DB] Failed to load DataFetcher settings: {e}")
+                self._load_fallback_config()
+        else:
+            self._load_fallback_config()
+
         # Cache for recently fetched data
         self._data_cache = {}
         self._cache_timeout = 150  # 5 minutes
+
+    def _load_fallback_config(self):
+        """Load fallback config from config.py"""
+        self.cache_enabled = getattr(system_config, 'ENABLE_DATA_CACHE', False)
+        self.reduced_lookback = getattr(system_config, 'REDUCED_LOOKBACK_HOURS', True)
+        self.lazy_indicators = getattr(system_config, 'LAZY_INDICATOR_LOADING', True)
+        self.batch_size = getattr(system_config, 'DATA_BATCH_SIZE', 10000)
+        self.enable_support_resistance = getattr(system_config, 'ENABLE_SUPPORT_RESISTANCE', True)
+        self.enable_volume_analysis = getattr(system_config, 'ENABLE_VOLUME_ANALYSIS', True)
+        self.enable_behavior_analysis = getattr(system_config, 'ENABLE_BEHAVIOR_ANALYSIS', False)
         
         # Pre-calculated indicators cache
         self._indicator_cache = {}
@@ -332,20 +362,20 @@ class DataFetcher:
                 self.logger.debug("⏩ Two-Pole Oscillator indicators skipped (disabled in config.py)")
             
             
-            # Add other indicators conditionally using methods that actually exist
-            if getattr(config, 'ENABLE_SUPPORT_RESISTANCE', True):
+            # Add other indicators conditionally using instance settings (from database)
+            if self.enable_support_resistance:
                 try:
                     df_enhanced = self.technical_analyzer.add_support_resistance_to_df(df_enhanced, pair)
                 except AttributeError:
                     self.logger.debug("Support/resistance method not available, skipping")
-            
-            if getattr(config, 'ENABLE_VOLUME_ANALYSIS', True):
+
+            if self.enable_volume_analysis:
                 try:
                     df_enhanced = self.volume_analyzer.add_volume_analysis(df_enhanced)
                 except AttributeError:
                     self.logger.debug("Volume analysis method not available, skipping")
-            
-            if getattr(config, 'ENABLE_BEHAVIOR_ANALYSIS', True):
+
+            if self.enable_behavior_analysis:
                 try:
                     df_enhanced = self.behavior_analyzer.add_behavior_patterns(df_enhanced)
                 except AttributeError:
