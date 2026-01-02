@@ -18,16 +18,22 @@ try:
 except ImportError:
     from forex_scanner import config
 
+# Import scanner config service for database-driven settings
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
+except ImportError:
+    SCANNER_CONFIG_AVAILABLE = False
+
 
 @dataclass
 class AlertCooldownConfig:
-    """Configuration for alert cooldown periods - now reads from config.py"""
-    # ✅ NOW READS FROM CONFIG.PY INSTEAD OF HARDCODED VALUES
-    epic_signal_cooldown_minutes: int = getattr(config, 'ALERT_COOLDOWN_MINUTES', 5)
-    strategy_cooldown_minutes: int = getattr(config, 'STRATEGY_COOLDOWN_MINUTES', 3)
-    global_cooldown_seconds: int = getattr(config, 'GLOBAL_COOLDOWN_SECONDS', 30)
-    max_alerts_per_hour: int = getattr(config, 'MAX_ALERTS_PER_HOUR', 50)
-    max_alerts_per_epic_hour: int = getattr(config, 'MAX_ALERTS_PER_EPIC_HOUR', 6)
+    """Configuration for alert cooldown periods - now reads from database"""
+    epic_signal_cooldown_minutes: int = 5
+    strategy_cooldown_minutes: int = 3
+    global_cooldown_seconds: int = 30
+    max_alerts_per_hour: int = 50
+    max_alerts_per_epic_hour: int = 6
 
 
 class AlertDeduplicationManager:
@@ -41,12 +47,35 @@ class AlertDeduplicationManager:
     
     def __init__(self, db_manager, config_override: AlertCooldownConfig = None):
         self.db_manager = db_manager
-        
-        # ✅ ENHANCED CONFIG HANDLING - Use config.py values by default
+        self.logger = logging.getLogger(__name__)
+
+        # ✅ ENHANCED CONFIG HANDLING - Use database values by default
         if config_override:
             self.config = config_override
+        elif SCANNER_CONFIG_AVAILABLE:
+            # Read from database
+            try:
+                scanner_cfg = get_scanner_config()
+                self.config = AlertCooldownConfig(
+                    epic_signal_cooldown_minutes=scanner_cfg.alert_cooldown_minutes,
+                    strategy_cooldown_minutes=scanner_cfg.strategy_cooldown_minutes,
+                    global_cooldown_seconds=scanner_cfg.global_cooldown_seconds,
+                    max_alerts_per_hour=scanner_cfg.max_alerts_per_hour,
+                    max_alerts_per_epic_hour=scanner_cfg.max_alerts_per_epic_hour
+                )
+                self.logger.info("[CONFIG:DB] Deduplication config loaded from database")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to load deduplication config from database: {e}")
+                # Fall back to config.py
+                self.config = AlertCooldownConfig(
+                    epic_signal_cooldown_minutes=getattr(config, 'ALERT_COOLDOWN_MINUTES', 5),
+                    strategy_cooldown_minutes=getattr(config, 'STRATEGY_COOLDOWN_MINUTES', 3),
+                    global_cooldown_seconds=getattr(config, 'GLOBAL_COOLDOWN_SECONDS', 30),
+                    max_alerts_per_hour=getattr(config, 'MAX_ALERTS_PER_HOUR', 50),
+                    max_alerts_per_epic_hour=getattr(config, 'MAX_ALERTS_PER_EPIC_HOUR', 6)
+                )
         else:
-            # Create config from config.py values
+            # Legacy fallback to config.py
             self.config = AlertCooldownConfig(
                 epic_signal_cooldown_minutes=getattr(config, 'ALERT_COOLDOWN_MINUTES', 5),
                 strategy_cooldown_minutes=getattr(config, 'STRATEGY_COOLDOWN_MINUTES', 3),
@@ -54,8 +83,6 @@ class AlertDeduplicationManager:
                 max_alerts_per_hour=getattr(config, 'MAX_ALERTS_PER_HOUR', 50),
                 max_alerts_per_epic_hour=getattr(config, 'MAX_ALERTS_PER_EPIC_HOUR', 6)
             )
-            
-        self.logger = logging.getLogger(__name__)
         
         # ✅ LOG THE ACTUAL CONFIGURATION BEING USED
         self.logger.info("🛡️ Alert deduplication manager initialized")

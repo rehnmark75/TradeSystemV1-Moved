@@ -899,6 +899,39 @@ class AlertHistoryManager:
             self.logger.warning(f"⚠️ Error updating Claude analysis summary: {e}")
             # Don't raise - this is secondary functionality, main alert save should continue
 
+    def update_alert_vision_chart_url(self, alert_id: int, chart_url: str) -> bool:
+        """
+        Update the vision_chart_url for an existing alert.
+
+        Args:
+            alert_id: The ID of the alert to update
+            chart_url: The URL/path to the vision chart image
+
+        Returns:
+            True if update was successful, False otherwise
+        """
+        try:
+            def update_chart_url_operation(conn, cursor):
+                cursor.execute('''
+                    UPDATE alert_history
+                    SET vision_chart_url = %s
+                    WHERE id = %s
+                ''', (chart_url, alert_id))
+
+                rows_affected = cursor.rowcount
+                if rows_affected > 0:
+                    self.logger.debug(f"✅ Updated vision_chart_url for alert #{alert_id}")
+                    return True
+                else:
+                    self.logger.warning(f"⚠️ No alert found with id #{alert_id} to update vision_chart_url")
+                    return False
+
+            return self._execute_with_connection(update_chart_url_operation, f"update vision_chart_url for alert #{alert_id}")
+
+        except Exception as e:
+            self.logger.error(f"❌ Error updating vision_chart_url for alert #{alert_id}: {e}")
+            return False
+
     def _extract_market_intelligence_data(self, signal: Dict) -> Dict:
         """
         Extract market intelligence data from signal and incorporate into strategy_metadata

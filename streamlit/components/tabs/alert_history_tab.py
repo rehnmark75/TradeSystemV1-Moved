@@ -157,10 +157,14 @@ def _render_alert_row(row: pd.Series):
             chart_url = row.get('vision_chart_url', None)
             if chart_url and not pd.isna(chart_url) and not chart_url.startswith('file://'):
                 try:
-                    st.image(chart_url, caption="Vision Analysis Chart", use_container_width=True)
+                    # Fetch image server-side since minio:9000 is not accessible from browser
+                    import urllib.request
+                    with urllib.request.urlopen(chart_url, timeout=10) as response:
+                        image_bytes = response.read()
+                    st.image(image_bytes, caption="Vision Analysis Chart", use_container_width=True)
                 except Exception as e:
                     # URL might have expired (30-day retention) - show fallback message
-                    st.warning(f"Chart expired or unavailable (MinIO URL returned error)")
+                    st.warning(f"Chart expired or unavailable: {e}")
 
             # Priority 2: Fallback to disk storage for older records
             else:

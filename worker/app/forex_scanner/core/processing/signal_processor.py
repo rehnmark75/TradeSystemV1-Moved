@@ -73,6 +73,13 @@ except ImportError:
         SMC_REJECTION_AVAILABLE = False
         logging.getLogger(__name__).warning("SMCRejectionHistoryManager not available")
 
+# Import scanner config service for database-driven settings
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
+except ImportError:
+    SCANNER_CONFIG_AVAILABLE = False
+
 class SignalProcessor:
     """
     Handles comprehensive signal processing including validation, enhancement,
@@ -99,8 +106,45 @@ class SignalProcessor:
         self.data_fetcher = data_fetcher  # ADD: Store data_fetcher
         self.logger = logger or logging.getLogger(__name__)
         
-        # Configuration (existing)
-        self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.7)
+        # Configuration - read from database when available
+        if SCANNER_CONFIG_AVAILABLE:
+            try:
+                scanner_cfg = get_scanner_config()
+                self.min_confidence = scanner_cfg.min_confidence
+                self.enable_deduplication = scanner_cfg.enable_duplicate_check
+                self.enable_smart_money = scanner_cfg.smart_money_readonly_enabled
+                self.smart_money_timeout = scanner_cfg.smart_money_analysis_timeout
+                self.enable_smc_conflict_filter = scanner_cfg.smc_conflict_filter_enabled
+                self.smc_min_directional_consensus = scanner_cfg.smc_min_directional_consensus
+                self.smc_reject_on_order_flow_conflict = scanner_cfg.smc_reject_order_flow_conflict
+                self.smc_reject_on_ranging_structure = scanner_cfg.smc_reject_ranging_structure
+                self.smc_min_structure_score = scanner_cfg.smc_min_structure_score
+                self.logger.info(f"[CONFIG:DB] SignalProcessor config loaded from database")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to load SignalProcessor config from database: {e}")
+                # Fall back to config.py
+                self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.7)
+                self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True)
+                self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', True)
+                self.smart_money_timeout = getattr(config, 'SMART_MONEY_ANALYSIS_TIMEOUT', 5.0)
+                self.enable_smc_conflict_filter = getattr(config, 'SMC_CONFLICT_FILTER_ENABLED', True)
+                self.smc_min_directional_consensus = getattr(config, 'SMC_MIN_DIRECTIONAL_CONSENSUS', 0.3)
+                self.smc_reject_on_order_flow_conflict = getattr(config, 'SMC_REJECT_ORDER_FLOW_CONFLICT', True)
+                self.smc_reject_on_ranging_structure = getattr(config, 'SMC_REJECT_RANGING_STRUCTURE', True)
+                self.smc_min_structure_score = getattr(config, 'SMC_MIN_STRUCTURE_SCORE', 0.5)
+        else:
+            # Legacy fallback to config.py
+            self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.7)
+            self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True)
+            self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', True)
+            self.smart_money_timeout = getattr(config, 'SMART_MONEY_ANALYSIS_TIMEOUT', 5.0)
+            self.enable_smc_conflict_filter = getattr(config, 'SMC_CONFLICT_FILTER_ENABLED', True)
+            self.smc_min_directional_consensus = getattr(config, 'SMC_MIN_DIRECTIONAL_CONSENSUS', 0.3)
+            self.smc_reject_on_order_flow_conflict = getattr(config, 'SMC_REJECT_ORDER_FLOW_CONFLICT', True)
+            self.smc_reject_on_ranging_structure = getattr(config, 'SMC_REJECT_RANGING_STRUCTURE', True)
+            self.smc_min_structure_score = getattr(config, 'SMC_MIN_STRUCTURE_SCORE', 0.5)
+
+        # Settings that remain in config.py (not migrated to database)
         self.claude_analysis_mode = getattr(config, 'CLAUDE_ANALYSIS_MODE', 'minimal')
         self.claude_strategic_focus = getattr(config, 'CLAUDE_STRATEGIC_FOCUS', None)
         self.claude_timeout = getattr(config, 'CLAUDE_TIMEOUT_SECONDS', 30)
@@ -113,11 +157,10 @@ class SignalProcessor:
             self.selected_strategies = getattr(config, 'SELECTED_STRATEGIES', ['EMA', 'MACD', 'Combined'])
         self.duplicate_window_hours = getattr(config, 'DUPLICATE_WINDOW_HOURS', 24)
         self.save_to_database = getattr(config, 'SAVE_TO_DATABASE', True)
-        
+
         # INTEGRATION: Initialize deduplication manager
         self.deduplication_manager = None
-        self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True)
-        
+
         if self.enable_deduplication and db_manager:
             try:
                 self.deduplication_manager = AlertDeduplicationManager(db_manager)
@@ -125,12 +168,10 @@ class SignalProcessor:
             except Exception as e:
                 self.logger.error(f"❌ Failed to initialize deduplication manager: {e}")
                 self.enable_deduplication = False
-        
+
         # SMART MONEY INTEGRATION: Initialize Smart Money Analyzer
         self.smart_money_analyzer = None
-        self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', True)
-        self.smart_money_timeout = getattr(config, 'SMART_MONEY_ANALYSIS_TIMEOUT', 5.0)
-        
+
         if SMART_MONEY_AVAILABLE and self.enable_smart_money and data_fetcher:
             try:
                 self.smart_money_analyzer = SmartMoneyReadOnlyAnalyzer(data_fetcher)
@@ -139,13 +180,8 @@ class SignalProcessor:
                 self.logger.warning(f"⚠️ Smart Money Analyzer initialization failed: {e}")
                 self.enable_smart_money = False
 
-        # SMC CONFLICT FILTER: Initialize rejection manager and config
+        # SMC CONFLICT FILTER: Initialize rejection manager
         self.smc_rejection_manager = None
-        self.enable_smc_conflict_filter = getattr(config, 'SMC_CONFLICT_FILTER_ENABLED', True)
-        self.smc_min_directional_consensus = getattr(config, 'SMC_MIN_DIRECTIONAL_CONSENSUS', 0.3)
-        self.smc_reject_on_order_flow_conflict = getattr(config, 'SMC_REJECT_ORDER_FLOW_CONFLICT', True)
-        self.smc_reject_on_ranging_structure = getattr(config, 'SMC_REJECT_RANGING_STRUCTURE', True)
-        self.smc_min_structure_score = getattr(config, 'SMC_MIN_STRUCTURE_SCORE', 0.5)
         self.smc_conflict_rejected_count = 0  # Track rejections
 
         if SMC_REJECTION_AVAILABLE and self.enable_smc_conflict_filter and db_manager:

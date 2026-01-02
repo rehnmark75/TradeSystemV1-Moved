@@ -73,6 +73,14 @@ except ImportError:
     MARKET_INTELLIGENCE_AVAILABLE = False
     logging.warning("⚠️ Market intelligence not available - signals will be saved without market context")
 
+# Import scanner config service for database-driven settings
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
+except ImportError:
+    SCANNER_CONFIG_AVAILABLE = False
+    logging.warning("⚠️ Scanner config service not available - using config.py fallbacks")
+
 
 class TradeValidator:
     """
@@ -147,9 +155,21 @@ class TradeValidator:
             ENHANCED_SR_VALIDATOR_AVAILABLE
         )
         
-        # NEW: Claude filtering configuration
-        self.enable_claude_filtering = bool(getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False))
-        self.min_claude_score = int(getattr(config, 'MIN_CLAUDE_QUALITY_SCORE', 6))
+        # NEW: Claude filtering configuration - read from database
+        if SCANNER_CONFIG_AVAILABLE:
+            try:
+                scanner_cfg = get_scanner_config()
+                self.enable_claude_filtering = bool(scanner_cfg.require_claude_approval)
+                self.min_claude_score = int(scanner_cfg.min_claude_quality_score)
+                self.logger.info(f"[CONFIG:DB] Claude filtering: {self.enable_claude_filtering}, min_score: {self.min_claude_score}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to load Claude config from database: {e}, using defaults")
+                self.enable_claude_filtering = False
+                self.min_claude_score = 6
+        else:
+            # Legacy fallback
+            self.enable_claude_filtering = bool(getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False))
+            self.min_claude_score = int(getattr(config, 'MIN_CLAUDE_QUALITY_SCORE', 6))
 
         # NEW: Economic news filtering configuration
         self.enable_news_filtering = (
@@ -803,7 +823,7 @@ class TradeValidator:
         chart_base64: str,
         prompt: str,
         alert_id: int = None
-    ) -> None:
+    ) -> Optional[str]:
         """
         Save vision analysis artifacts (chart, prompt, result) to disk.
 
@@ -813,6 +833,9 @@ class TradeValidator:
             chart_base64: Base64-encoded chart image (or None)
             prompt: Prompt text sent to Claude
             alert_id: Optional alert ID for file naming
+
+        Returns:
+            Chart file path if saved, None otherwise
         """
         try:
             import base64
@@ -912,8 +935,15 @@ class TradeValidator:
             if files_saved:
                 self.logger.info(f"✅ Vision artifacts saved: {', '.join(files_saved)}")
 
+            # Return the chart path if it was saved
+            if chart_base64:
+                chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
+                return chart_path
+
         except Exception as e:
             self.logger.error(f"❌ Failed to save vision artifacts: {e}")
+
+        return None
 
     def _normalize_confidence_threshold(self, threshold: float) -> float:
         """

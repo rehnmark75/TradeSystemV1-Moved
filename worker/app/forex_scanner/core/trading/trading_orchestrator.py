@@ -103,6 +103,22 @@ except ImportError:
         print(f"⚠️ RejectionOutcomeAnalyzer not available: {e}")
         RejectionOutcomeAnalyzer = None
 
+# Import scanner config service for database-driven settings
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
+except ImportError:
+    SCANNER_CONFIG_AVAILABLE = False
+
+# Import MinIO client for chart storage
+try:
+    from forex_scanner.services.minio_client import upload_vision_chart, get_minio_client
+    MINIO_AVAILABLE = True
+except ImportError:
+    MINIO_AVAILABLE = False
+    upload_vision_chart = None
+    get_minio_client = None
+
 
 class TradingOrchestrator:
     """
@@ -162,8 +178,18 @@ class TradingOrchestrator:
         self.intelligence_threshold = intelligence_threshold or self._get_intelligence_threshold()
         self.enable_market_intelligence = enable_market_intelligence
         
-        # ENHANCED CLAUDE CONFIGURATION
-        self.enable_claude = enable_claude_analysis if enable_claude_analysis is not None else getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)
+        # ENHANCED CLAUDE CONFIGURATION - read from database
+        if enable_claude_analysis is not None:
+            self.enable_claude = enable_claude_analysis
+        elif SCANNER_CONFIG_AVAILABLE:
+            try:
+                scanner_cfg = get_scanner_config()
+                self.enable_claude = scanner_cfg.require_claude_approval
+            except Exception:
+                self.enable_claude = getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)
+        else:
+            self.enable_claude = getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)
+
         self.claude_analysis_mode = claude_analysis_mode or getattr(config, 'CLAUDE_ANALYSIS_MODE', 'minimal')
         self.claude_analysis_level = claude_analysis_level or getattr(config, 'CLAUDE_ANALYSIS_LEVEL', 'institutional')
         self.use_advanced_claude_prompts = use_advanced_claude_prompts if use_advanced_claude_prompts is not None else getattr(config, 'USE_ADVANCED_CLAUDE_PROMPTS', True)
@@ -755,14 +781,18 @@ class TradingOrchestrator:
         alert_id: int,
         signal: Dict,
         claude_result: Dict
-    ) -> None:
+    ) -> Optional[str]:
         """
         Save vision analysis artifacts (chart, prompt, result) to disk with alert_id prefix.
+        Also updates the alert_history record with the chart URL.
 
         Args:
             alert_id: Database alert ID for file naming
             signal: Signal dictionary
             claude_result: Claude analysis result containing _vision_artifacts
+
+        Returns:
+            Chart file path if saved, None otherwise
         """
         try:
             import base64
@@ -782,16 +812,32 @@ class TradingOrchestrator:
             prefix = f"{alert_id}_{epic}_{timestamp}"
 
             files_saved = []
+            minio_chart_url = None
 
-            # 1. Save chart image as PNG
+            # 1. Save chart image - try MinIO first, then fall back to disk
             if chart_base64:
-                chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
                 try:
                     chart_bytes = base64.b64decode(chart_base64)
-                    with open(chart_path, 'wb') as f:
-                        f.write(chart_bytes)
-                    files_saved.append(f"{prefix}_chart.png")
-                    self.logger.info(f"📊 Chart saved: {chart_path}")
+
+                    # Try MinIO upload first
+                    if MINIO_AVAILABLE and upload_vision_chart:
+                        minio_chart_url = upload_vision_chart(
+                            chart_bytes,
+                            alert_id,
+                            signal.get('epic', 'unknown'),
+                            timestamp
+                        )
+                        if minio_chart_url:
+                            self.logger.info(f"📊 Chart uploaded to MinIO: {minio_chart_url}")
+                            files_saved.append(f"{prefix}_chart.png (MinIO)")
+
+                    # Fall back to disk if MinIO fails or unavailable
+                    if not minio_chart_url:
+                        chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
+                        with open(chart_path, 'wb') as f:
+                            f.write(chart_bytes)
+                        files_saved.append(f"{prefix}_chart.png")
+                        self.logger.info(f"📊 Chart saved to disk: {chart_path}")
                 except Exception as e:
                     self.logger.warning(f"⚠️ Failed to save chart: {e}")
 
@@ -867,8 +913,27 @@ class TradingOrchestrator:
             if '_vision_artifacts' in claude_result:
                 del claude_result['_vision_artifacts']
 
+            # Update alert_history with vision_chart_url if chart was saved
+            if chart_base64 and self.alert_history_manager:
+                try:
+                    # Use MinIO URL if available, otherwise use disk path
+                    if minio_chart_url:
+                        chart_url = minio_chart_url
+                    else:
+                        chart_url = f"file://{vision_dir}/{prefix}_chart.png"
+
+                    self.alert_history_manager.update_alert_vision_chart_url(alert_id, chart_url)
+                    self.logger.info(f"✅ Updated alert #{alert_id} with vision_chart_url: {chart_url}")
+                    return chart_url
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Failed to update vision_chart_url in database: {e}")
+                    return minio_chart_url or f"{prefix}_chart.png"
+
+            return minio_chart_url
+
         except Exception as e:
             self.logger.error(f"❌ Failed to save vision artifacts: {e}")
+            return None
 
     def _parse_claude_string_response(self, claude_string: str) -> Dict:
         """
@@ -1175,7 +1240,15 @@ class TradingOrchestrator:
             # FIXED: Skip IntegrationManager Claude if TradeValidator already did Claude analysis
             # This prevents duplicate API calls and wasted tokens
             claude_results = {}
-            trade_validator_did_claude = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
+            # Check from database first
+            if SCANNER_CONFIG_AVAILABLE:
+                try:
+                    scanner_cfg = get_scanner_config()
+                    trade_validator_did_claude = scanner_cfg.require_claude_approval
+                except Exception:
+                    trade_validator_did_claude = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
+            else:
+                trade_validator_did_claude = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
 
             if trade_validator_did_claude:
                 # TradeValidator already did Claude analysis - use its results, skip IntegrationManager

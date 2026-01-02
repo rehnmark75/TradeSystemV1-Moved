@@ -71,6 +71,13 @@ except ImportError:
         MarketIntelligenceEngine = None
         MarketIntelligenceHistoryManager = None
 
+# Import scanner config service for database-driven settings
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
+except ImportError:
+    SCANNER_CONFIG_AVAILABLE = False
+
 
 class IntelligentForexScanner:
     """
@@ -913,6 +920,13 @@ class ForexScanner(IntelligentForexScanner):
         if enable_claude_analysis is not None:
             # Use the explicitly passed value
             self.enable_claude_analysis = enable_claude_analysis
+        elif SCANNER_CONFIG_AVAILABLE:
+            # Read from database
+            try:
+                scanner_cfg = get_scanner_config()
+                self.enable_claude_analysis = scanner_cfg.require_claude_approval
+            except Exception:
+                self.enable_claude_analysis = getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)
         else:
             # Read from config with fallback to False
             self.enable_claude_analysis = getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)

@@ -20,6 +20,13 @@ try:
 except ImportError:
     from forex_scanner import config
 
+# Import scanner config service for database-driven settings
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
+except ImportError:
+    SCANNER_CONFIG_AVAILABLE = False
+
 # Market hours validation
 try:
     from utils.timezone_utils import is_market_hours
@@ -302,8 +309,18 @@ class IntegrationManager:
         because TradeValidator already handles Claude analysis in that case.
         """
         # CRITICAL GUARD: Prevent duplicate Claude calls
-        # If TradeValidator handles Claude (REQUIRE_CLAUDE_APPROVAL=True), skip this entirely
-        if getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False):
+        # If TradeValidator handles Claude (require_claude_approval=True), skip this entirely
+        require_claude_approval = False
+        if SCANNER_CONFIG_AVAILABLE:
+            try:
+                scanner_cfg = get_scanner_config()
+                require_claude_approval = scanner_cfg.require_claude_approval
+            except Exception:
+                pass
+        else:
+            require_claude_approval = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
+
+        if require_claude_approval:
             self.logger.debug("🚫 IntegrationManager Claude BLOCKED: TradeValidator handles Claude analysis")
             return signals
 
@@ -476,7 +493,17 @@ class IntegrationManager:
         because TradeValidator already handles Claude analysis in that case.
         """
         # CRITICAL GUARD: Prevent duplicate Claude calls
-        if getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False):
+        require_claude_approval = False
+        if SCANNER_CONFIG_AVAILABLE:
+            try:
+                scanner_cfg = get_scanner_config()
+                require_claude_approval = scanner_cfg.require_claude_approval
+            except Exception:
+                pass
+        else:
+            require_claude_approval = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
+
+        if require_claude_approval:
             self.logger.debug("🚫 IntegrationManager analysis BLOCKED: TradeValidator handles Claude")
             return None
 
@@ -485,9 +512,16 @@ class IntegrationManager:
             strategy = signal.get('strategy', '').upper()
             use_vision = hasattr(self.claude_analyzer, 'analyze_signal_with_vision')
 
-            # Check if this strategy supports vision
+            # Check if this strategy supports vision - get from database
             if use_vision:
-                vision_strategies = getattr(self.claude_analyzer, 'vision_strategies', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
+                if SCANNER_CONFIG_AVAILABLE:
+                    try:
+                        scanner_cfg = get_scanner_config()
+                        vision_strategies = scanner_cfg.claude_vision_strategies or ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']
+                    except Exception:
+                        vision_strategies = getattr(self.claude_analyzer, 'vision_strategies', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
+                else:
+                    vision_strategies = getattr(self.claude_analyzer, 'vision_strategies', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
                 strategy_supports_vision = any(vs.upper() in strategy for vs in vision_strategies)
 
                 if strategy_supports_vision:
