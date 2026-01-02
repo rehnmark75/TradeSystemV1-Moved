@@ -9,6 +9,7 @@ Renders configuration management UI for global scanner settings with:
 - Safety Filters: EMA200 filter, circuit breaker, presets
 - ADX Filter: Trend strength filter settings
 - SMC Conflict Filter: Smart Money Concepts signal filtering
+- Claude Validation: AI-powered trade validation settings
 - Audit Trail: Change history and tracking
 """
 
@@ -71,6 +72,7 @@ def render_scanner_config_tab():
         "Safety Filters",
         "ADX Filter",
         "SMC Conflict",
+        "Claude AI",
         "Audit Trail"
     ])
 
@@ -96,6 +98,9 @@ def render_scanner_config_tab():
         render_smc_conflict_settings(config)
 
     with sub_tabs[7]:
+        render_claude_validation_settings(config)
+
+    with sub_tabs[8]:
         render_audit_trail()
 
 
@@ -976,6 +981,155 @@ def render_smc_conflict_settings(config: Dict[str, Any]):
     render_save_section(config, 'smc_conflict', updated_by)
 
 
+def render_claude_validation_settings(config: Dict[str, Any]):
+    """Render Claude AI Trade Validation settings"""
+    st.subheader("Claude AI Trade Validation")
+    st.markdown("AI-powered trade validation using Claude for signal quality assessment")
+
+    updated_by = st.session_state.get('scanner_config_user', 'streamlit_user')
+
+    if 'scanner_pending_changes' not in st.session_state:
+        st.session_state.scanner_pending_changes = {}
+
+    # Master switches
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Master Controls**")
+
+        new_require_approval = st.checkbox(
+            "Require Claude Approval",
+            value=config.get('require_claude_approval', True),
+            help="Trades must be approved by Claude before execution",
+            key="require_claude_approval"
+        )
+        if not values_equal(new_require_approval, config.get('require_claude_approval')):
+            st.session_state.scanner_pending_changes['require_claude_approval'] = new_require_approval
+
+        new_fail_secure = st.checkbox(
+            "Fail-Secure Mode",
+            value=config.get('claude_fail_secure', True),
+            help="Block trades on ANY Claude error (recommended for safety)",
+            key="claude_fail_secure"
+        )
+        if not values_equal(new_fail_secure, config.get('claude_fail_secure')):
+            st.session_state.scanner_pending_changes['claude_fail_secure'] = new_fail_secure
+
+        new_save_rejections = st.checkbox(
+            "Save Claude Rejections",
+            value=config.get('save_claude_rejections', True),
+            help="Log rejected signals to alert_history table for analysis",
+            key="save_claude_rejections"
+        )
+        if not values_equal(new_save_rejections, config.get('save_claude_rejections')):
+            st.session_state.scanner_pending_changes['save_claude_rejections'] = new_save_rejections
+
+        new_validate_backtest = st.checkbox(
+            "Validate in Backtest",
+            value=config.get('claude_validate_in_backtest', False),
+            help="Use Claude validation in backtest mode (uses API calls)",
+            key="claude_validate_in_backtest"
+        )
+        if not values_equal(new_validate_backtest, config.get('claude_validate_in_backtest')):
+            st.session_state.scanner_pending_changes['claude_validate_in_backtest'] = new_validate_backtest
+
+    with col2:
+        st.markdown("**Model & Quality**")
+
+        model_options = ['haiku', 'sonnet', 'sonnet-old', 'opus']
+        current_model = config.get('claude_model', 'sonnet')
+        new_model = st.selectbox(
+            "Claude Model",
+            options=model_options,
+            index=model_options.index(current_model) if current_model in model_options else 1,
+            help="Model to use for trade validation",
+            key="claude_model"
+        )
+        if new_model != current_model:
+            st.session_state.scanner_pending_changes['claude_model'] = new_model
+
+        new_min_score = st.slider(
+            "Minimum Quality Score",
+            min_value=1, max_value=10, step=1,
+            value=_get_int(config, 'min_claude_quality_score', 6),
+            help="Minimum Claude score (1-10) to approve trade",
+            key="min_claude_quality_score"
+        )
+        if not values_equal(new_min_score, config.get('min_claude_quality_score')):
+            st.session_state.scanner_pending_changes['min_claude_quality_score'] = new_min_score
+
+    st.divider()
+
+    # Vision settings
+    st.markdown("**Vision Analysis (Chart-Based)**")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        new_include_chart = st.checkbox(
+            "Include Chart in Analysis",
+            value=config.get('claude_include_chart', True),
+            help="Send chart image for visual analysis",
+            key="claude_include_chart"
+        )
+        if not values_equal(new_include_chart, config.get('claude_include_chart')):
+            st.session_state.scanner_pending_changes['claude_include_chart'] = new_include_chart
+
+        new_vision_enabled = st.checkbox(
+            "Enable Vision API",
+            value=config.get('claude_vision_enabled', True),
+            help="Enable Claude Vision API for chart analysis",
+            key="claude_vision_enabled"
+        )
+        if not values_equal(new_vision_enabled, config.get('claude_vision_enabled')):
+            st.session_state.scanner_pending_changes['claude_vision_enabled'] = new_vision_enabled
+
+        new_save_artifacts = st.checkbox(
+            "Save Vision Artifacts",
+            value=config.get('claude_save_vision_artifacts', True),
+            help="Save chart, prompt, and signal data to disk for analysis",
+            key="claude_save_vision_artifacts"
+        )
+        if not values_equal(new_save_artifacts, config.get('claude_save_vision_artifacts')):
+            st.session_state.scanner_pending_changes['claude_save_vision_artifacts'] = new_save_artifacts
+
+    with col2:
+        # Display current timeframes
+        current_timeframes = config.get('claude_chart_timeframes', ['4h', '1h', '15m'])
+        if isinstance(current_timeframes, str):
+            current_timeframes = json.loads(current_timeframes)
+        st.markdown(f"**Chart Timeframes:** {', '.join(current_timeframes)}")
+
+        # Display current vision strategies
+        current_strategies = config.get('claude_vision_strategies', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
+        if isinstance(current_strategies, str):
+            current_strategies = json.loads(current_strategies)
+        st.markdown(f"**Vision Strategies:** {', '.join(current_strategies)}")
+
+        # Save directory
+        current_dir = config.get('claude_vision_save_directory', 'claude_analysis_enhanced/vision_analysis')
+        st.markdown(f"**Save Directory:** `{current_dir}`")
+
+    # Info box
+    with st.expander("About Claude Trade Validation", expanded=False):
+        st.markdown("""
+        Claude Trade Validation uses AI to assess trade quality before execution:
+
+        - **Require Claude Approval**: When enabled, all trades must be approved by Claude
+        - **Fail-Secure Mode**: Block trades if Claude errors occur (recommended)
+        - **Quality Score**: Minimum score (1-10) required to approve a trade
+        - **Vision Analysis**: Send chart images for visual pattern recognition
+
+        **Model Selection:**
+        - `haiku`: Fastest, cheapest, good for simple checks
+        - `sonnet`: Balanced speed/quality (recommended)
+        - `opus`: Highest quality, slower, more expensive
+
+        **Note:** API calls consume tokens. Disable 'Validate in Backtest' to save costs.
+        """)
+
+    render_save_section(config, 'claude_validation', updated_by)
+
+
 def render_audit_trail():
     """Render audit trail tab"""
     st.subheader("Configuration Audit Trail")
@@ -987,7 +1141,7 @@ def render_audit_trail():
     with col2:
         category_filter = st.selectbox(
             "Filter by Category",
-            options=['All', 'core', 'dedup', 'risk', 'trading_hours', 'safety', 'adx', 'smc_conflict'],
+            options=['All', 'core', 'dedup', 'risk', 'trading_hours', 'safety', 'adx', 'smc_conflict', 'claude_validation'],
             index=0
         )
 

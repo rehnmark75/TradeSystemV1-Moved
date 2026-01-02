@@ -687,11 +687,18 @@ LOOKBACK_HOURS_5M = 1000
 LOOKBACK_HOURS_15M = 1000 
 LOOKBACK_HOURS_1H = 200
 
-# Alert Settings
-ENABLE_CLAUDE_ANALYSIS = False
-CLAUDE_ANALYSIS_ENABLED = False
-USE_CLAUDE_ANALYSIS = False
-CLAUDE_ANALYSIS_MODE = "disabled"  # or "full", 'disabled'
+# =============================================================================
+# DEPRECATED: LEGACY CLAUDE ANALYSIS SWITCHES - REMOVED
+# =============================================================================
+# These redundant switches have been consolidated into the database.
+# See: Streamlit > Settings > Scanner Config > Claude AI
+# Use: require_claude_approval, claude_vision_enabled, etc.
+# -----------------------------------------------------------------------------
+# ENABLE_CLAUDE_ANALYSIS = False  # REMOVED - use require_claude_approval
+# CLAUDE_ANALYSIS_ENABLED = False  # REMOVED - duplicate
+# USE_CLAUDE_ANALYSIS = False  # REMOVED - duplicate
+# CLAUDE_ANALYSIS_MODE = "disabled"  # REMOVED - use database settings
+# =============================================================================
 
 ENABLE_ORDER_EXECUTION = True  # Set to True when ready for live trading
 MAX_SIGNALS_PER_HOUR = 10  # Rate limiting
@@ -873,22 +880,21 @@ HEARTBEAT_DB_CHECK = True              # Enable DB health check in heartbeat
 
 # Enhanced Trading Configuration
 # MIN_CONFIDENCE_FOR_TRADING removed - use MIN_CONFIDENCE_FOR_ORDERS instead
-# NOTE: REQUIRE_CLAUDE_APPROVAL and MIN_CLAUDE_QUALITY_SCORE moved to
-# "CLAUDE TRADE VALIDATION - FAIL SECURE MODE" section below (line ~1590)
-CLAUDE_MIN_CONFIDENCE_THRESHOLD = 0.8  # 80%+ confidence only
+# NOTE: Claude settings moved to database - see Scanner Config > Claude AI
 MAX_SIGNALS_PER_DAY = 20           # Daily signal limit
-SIGNAL_COOLDOWN_MINUTES = 15       # Cooldown between signals per pair
 MIN_VOLUME_RATIO = 1.2             # Minimum volume confirmation
-CLAUDE_ANALYSIS_MODE = 'strategic_minimal'
-CLAUDE_STRATEGIC_FOCUS = 'learning'
 
-# Trading Hours
-RESPECT_TRADING_HOURS = False
-TRADING_START_HOUR = 0             # Local time
-TRADING_END_HOUR = 23              # Local time
+# DEPRECATED: These Claude settings are now in database
+# CLAUDE_MIN_CONFIDENCE_THRESHOLD = 0.8  # MIGRATED - use min_claude_quality_score
+# CLAUDE_ANALYSIS_MODE = 'strategic_minimal'  # REMOVED
+# CLAUDE_STRATEGIC_FOCUS = 'learning'  # REMOVED
 
+# Trading Hours (DEPRECATED - now in database)
+# RESPECT_TRADING_HOURS = False  # MIGRATED to database
+# TRADING_START_HOUR = 0  # MIGRATED to database
+# TRADING_END_HOUR = 23  # MIGRATED to database
 
-# Claude Analysis
+# Claude Analysis directory (kept for backward compatibility)
 CLAUDE_ANALYSIS_DIR = 'claude_analysis'  # Directory for saved analyses
 
 # Multi-Timeframe Analysis Settings
@@ -1176,243 +1182,27 @@ SR_MIN_FLIP_STRENGTH = 0.6           # Minimum strength to consider a level flip
 
 
 # =============================================================================
-# ENHANCED CLAUDE API CONFIGURATION ADDITIONS
-# Add these to your existing config.py file
+# DEPRECATED: LEGACY ENHANCED CLAUDE CONFIGURATION - REMOVED
 # =============================================================================
-
-# Enhanced Claude Analysis Configuration
-CLAUDE_ENHANCED_MODE = True                    # Enable enhanced parsing and validation
-CLAUDE_TECHNICAL_VALIDATION = True             # Enable pre-validation before Claude calls
-CLAUDE_COMPLETE_DATAFRAME_ANALYSIS = True     # Use complete DataFrame indicators
-
-# Enhanced Response Parsing Settings
-CLAUDE_PARSE_FALLBACK_ENABLED = True          # Enable fallback parsing for varied responses
-CLAUDE_NATURAL_LANGUAGE_PARSING = True        # Parse natural language responses
-CLAUDE_STRUCTURED_FORMAT_PRIORITY = True      # Try structured format first
-
-# Technical Validation Thresholds (Enhanced Detection)
-CLAUDE_EMA_VALIDATION_ENABLED = True          # Enable EMA alignment validation
-CLAUDE_KAMA_EFFICIENCY_MIN = 0.3               # Minimum KAMA efficiency ratio
-
-# Signal Classification Verification
-CLAUDE_SIGNAL_CLASSIFICATION_CHECK = True     # Allow Claude to override system classification
-CLAUDE_CONFLICT_LOGGING = True                # Log classification conflicts
-CLAUDE_AGREEMENT_THRESHOLD = 0.8              # Threshold for system-Claude agreement
-
-# Complete DataFrame Analysis Settings
-CLAUDE_USE_ALL_INDICATORS = True              # Include all available technical indicators
-CLAUDE_CROSS_VALIDATION_ENABLED = True       # Enable cross-indicator validation
-CLAUDE_INDICATOR_WEIGHTS = {                  # Weights for different indicator types
-    'EMA': 0.3,                               # Medium weight for EMA (trend direction)
-    'KAMA': 0.2,                              # Lower weight for KAMA (efficiency)
-    'OTHER': 0.1                              # Minimal weight for other indicators
-}
-
-# Enhanced Prompt Configuration
-CLAUDE_DETAILED_PROMPTS = True                # Use detailed technical prompts
-CLAUDE_MARKET_CONTEXT_ANALYSIS = True        # Include market context in analysis
-CLAUDE_INCLUDE_FUTURE_ANALYSIS = False       # Include forward-looking analysis (for backtesting)
-
-# Validation Rules Configuration
-CLAUDE_VALIDATION_RULES = {
-    'require_supporting_indicators': True,     # Require at least one supporting indicator
-    'reject_critical_contradictions': True,   # Reject signals with critical contradictions
-    'allow_minor_conflicts': True,            # Allow signals with minor indicator conflicts
-    'minimum_validation_points': 1           # Minimum supporting technical factors required
-}
-
-# Enhanced File Saving Settings
-CLAUDE_ENHANCED_SAVING = True                 # Enable enhanced analysis file saving
-CLAUDE_SAVE_CLASSIFICATION_CONFLICTS = True  # Save files when Claude disagrees with system
-CLAUDE_SAVE_VALIDATION_FAILURES = True      # Save files when technical validation fails
-CLAUDE_SAVE_DIRECTORY = "claude_analysis_enhanced"  # Enhanced analysis directory
-
-# Performance and Error Handling
-CLAUDE_ROBUST_ERROR_HANDLING = True          # Enable robust error handling
-CLAUDE_MULTIPLE_PARSE_ATTEMPTS = True        # Try multiple parsing methods
-CLAUDE_GRACEFUL_DEGRADATION = True           # Gracefully handle partial failures
-
-# Integration with Existing Settings
-CLAUDE_RESPECT_EXISTING_THRESHOLDS = True    # Respect existing MIN_CONFIDENCE settings
-CLAUDE_OVERRIDE_LOW_QUALITY = True           # Override system for low-quality signals
-
-# Backtesting and Analysis Settings
-CLAUDE_TIMESTAMP_ANALYSIS_ENABLED = True     # Enable timestamp-based analysis
-CLAUDE_FUTURE_PERFORMANCE_TRACKING = True    # Track forward-looking performance
-CLAUDE_PIP_CALCULATION_ENABLED = True        # Calculate pip movements for analysis
-
-# Debug and Logging Settings
-CLAUDE_DEBUG_TECHNICAL_VALIDATION = True     # Debug technical validation steps
-CLAUDE_LOG_INDICATOR_ANALYSIS = True         # Log individual indicator analysis
-CLAUDE_LOG_PARSING_STEPS = True              # Log response parsing steps
-CLAUDE_VERBOSE_CONFLICT_LOGGING = False      # Detailed conflict logging (can be noisy)
-
-# Strategy-Specific Claude Settings
-CLAUDE_STRATEGY_SPECIFIC_ANALYSIS = {
-    'EMA': {
-        'require_alignment_check': True,
-        'allow_transition_signals': True,
-        'minimum_separation_pips': 2.0
-    },
-    'KAMA': {
-        'minimum_efficiency_ratio': 0.3,
-        'require_trend_confirmation': True,
-        'allow_low_efficiency_signals': False
-    },
-    'COMBINED': {
-        'require_majority_agreement': True,
-        'minimum_supporting_strategies': 2,
-        'conflict_resolution_method': 'claude_override'
-    }
-}
-
-# Adaptive Analysis Settings
-CLAUDE_ADAPTIVE_ANALYSIS = True              # Enable adaptive analysis based on market conditions
-CLAUDE_MARKET_CONDITION_WEIGHTS = {
-    'trending': 1.2,                         # Boost confidence in trending markets
-    'ranging': 0.8,                          # Reduce confidence in ranging markets
-    'high_volatility': 0.9,                  # Slight reduction in high volatility
-    'low_volatility': 1.1                    # Slight boost in low volatility
-}
-
-# Quality Assurance Settings
-CLAUDE_QUALITY_CHECKS = {
-    'minimum_indicators_for_analysis': 3,    # Minimum indicators required for analysis
-    'require_price_data': True,              # Require valid price data
-    'validate_epic_format': True,            # Validate epic format
-    'check_timestamp_validity': True,        # Check timestamp validity
-    'require_strategy_identification': True  # Require strategy identification
-}
-
-# API Optimization Settings
-CLAUDE_API_OPTIMIZATIONS = {
-    'cache_similar_analyses': False,         # Cache similar analyses (experimental)
-    'batch_similar_signals': False,         # Batch similar signals (experimental)
-    'parallel_processing': False,           # Parallel processing (experimental)
-    'rate_limit_handling': True,            # Handle rate limits gracefully
-    'retry_on_failure': True,               # Retry failed API calls
-    'max_retries': 2                        # Maximum retry attempts
-}
-
-# Compatibility Settings
-CLAUDE_BACKWARD_COMPATIBILITY = True        # Maintain backward compatibility
-CLAUDE_LEGACY_METHOD_SUPPORT = True        # Support legacy analysis methods
-CLAUDE_MIGRATION_MODE = False              # Migration mode for existing systems
-
-# Helper Functions for Enhanced Claude Configuration
-
-def get_claude_validation_config(strategy: str) -> dict:
-    """Get validation configuration for specific strategy"""
-    return CLAUDE_STRATEGY_SPECIFIC_ANALYSIS.get(strategy, {})
-
-def is_claude_enhanced_mode() -> bool:
-    """Check if Claude enhanced mode is enabled"""
-    return CLAUDE_ENHANCED_MODE and CLAUDE_TECHNICAL_VALIDATION
-
-def get_claude_indicator_requirements(strategy: str) -> list:
-    """Get required indicators for Claude analysis based on strategy"""
-    requirements = {
-        'EMA': ['ema_21', 'ema_50', 'ema_200', 'price'],
-        'KAMA': ['kama_value', 'efficiency_ratio', 'ema_200'],
-        'COMBINED': ['ema_21', 'ema_50', 'ema_200', 'price']
-    }
-    return requirements.get(strategy, ['price'])
-
-
-
+# This entire section (~240 lines) has been removed as it was experimental/unused.
+# Claude trade validation is now controlled via database settings.
+# See: Streamlit > Settings > Scanner Config > Claude AI
+#
+# Key active settings now in database:
+#   - require_claude_approval: Master switch for Claude validation
+#   - claude_fail_secure: Fail-secure mode (block on errors)
+#   - claude_model: Model selection (haiku/sonnet/opus)
+#   - min_claude_quality_score: Minimum approval score (1-10)
+#   - claude_vision_enabled: Enable chart-based analysis
+#   - claude_chart_timeframes: Timeframes for chart generation
+#   - claude_vision_strategies: Strategies that use vision
+#
+# To access programmatically:
+#   from forex_scanner.services.scanner_config_service import get_scanner_config
+#   config = get_scanner_config()
+#   if config.require_claude_approval:
+#       # Use Claude validation
 # =============================================================================
-# ENHANCED CLAUDE PRESETS
-# =============================================================================
-
-CLAUDE_ANALYSIS_PRESETS = {
-    'strict': {
-        'CLAUDE_TECHNICAL_VALIDATION': True,
-        'CLAUDE_AGREEMENT_THRESHOLD': 0.9,
-        'require_supporting_indicators': True,
-        'minimum_validation_points': 2
-    },
-    'balanced': {
-        'CLAUDE_TECHNICAL_VALIDATION': True,
-        'CLAUDE_AGREEMENT_THRESHOLD': 0.8,
-        'require_supporting_indicators': True,
-        'minimum_validation_points': 1
-    },
-    'permissive': {
-        'CLAUDE_TECHNICAL_VALIDATION': True,
-        'CLAUDE_AGREEMENT_THRESHOLD': 0.7,
-        'require_supporting_indicators': False,
-        'minimum_validation_points': 1
-    },
-    'learning': {
-        'CLAUDE_TECHNICAL_VALIDATION': False,        # No pre-validation
-        'CLAUDE_SAVE_ALL_ANALYSES': True,           # Save everything for learning
-        'CLAUDE_DETAILED_LOGGING': True,           # Maximum logging
-        'CLAUDE_CONFLICT_LOGGING': True            # Log all conflicts
-    }
-}
-
-# Set active preset
-CLAUDE_ACTIVE_PRESET = 'balanced'  # Options: 'strict', 'balanced', 'permissive', 'learning'
-
-def apply_claude_preset(preset_name: str):
-    """Apply a Claude analysis preset"""
-    if preset_name in CLAUDE_ANALYSIS_PRESETS:
-        preset = CLAUDE_ANALYSIS_PRESETS[preset_name]
-        globals().update(preset)
-        print(f"✅ Applied Claude preset: {preset_name}")
-        return True
-    else:
-        print(f"❌ Unknown Claude preset: {preset_name}")
-        return False
-
-# =============================================================================
-# CLAUDE INTEGRATION WITH EXISTING SYSTEMS
-# =============================================================================
-
-# Integration with existing confidence systems
-CLAUDE_CONFIDENCE_INTEGRATION = {
-    'boost_high_claude_scores': True,        # Boost confidence for high Claude scores
-    'penalize_low_claude_scores': True,      # Penalize confidence for low Claude scores
-    'claude_score_weight': 0.2,              # Weight of Claude score in final confidence
-    'min_claude_score_for_boost': 7,        # Minimum Claude score for confidence boost
-    'max_claude_score_penalty': 0.1         # Maximum confidence penalty
-}
-
-
-# Integration with deduplication
-CLAUDE_DEDUPLICATION_INTEGRATION = {
-    'include_claude_score_in_hash': True,    # Include Claude score in deduplication hash
-    'claude_decision_affects_dedup': True,   # Claude decision affects deduplication
-    'separate_claude_approved_signals': True # Separate tracking for Claude-approved signals
-}
-
-# =============================================================================
-# MONITORING AND STATISTICS
-# =============================================================================
-
-# Claude Performance Monitoring
-CLAUDE_PERFORMANCE_TRACKING = {
-    'track_response_times': True,            # Track Claude API response times
-    'track_parsing_success_rate': True,     # Track parsing success rates
-    'track_agreement_rates': True,          # Track system-Claude agreement rates
-    'track_validation_failures': True,      # Track technical validation failures
-    'save_performance_stats': True,         # Save performance statistics
-    'performance_report_interval': 100      # Generate reports every N analyses
-}
-
-# Statistical Analysis Settings
-CLAUDE_STATISTICS = {
-    'calculate_prediction_accuracy': True,   # Calculate prediction accuracy over time
-    'track_strategy_specific_performance': True,  # Track per-strategy performance
-    'monitor_classification_conflicts': True,     # Monitor classification conflicts
-    'analyze_market_condition_performance': True  # Analyze performance by market conditions
-}
-
-print("✅ Enhanced Claude API configuration loaded")
-print(f"🔧 Technical validation: {'enabled' if CLAUDE_TECHNICAL_VALIDATION else 'disabled'}")
-print(f"📊 Complete DataFrame analysis: {'enabled' if CLAUDE_COMPLETE_DATAFRAME_ANALYSIS else 'disabled'}")
-print(f"🎯 Active preset: {CLAUDE_ACTIVE_PRESET}")
-print(f"📁 Analysis directory: {CLAUDE_SAVE_DIRECTORY}")
 
 # =============================================================================
 # ENHANCED LOGGING CONFIGURATION
@@ -1709,42 +1499,33 @@ LARGE_CANDLE_FILTER_PRESETS = {
     }
 }
 
-# Advanced Claude Analysis Configuration
-USE_ADVANCED_CLAUDE_PROMPTS = True  # Enable institutional-grade analysis
-CLAUDE_ANALYSIS_LEVEL = 'prop_trader'  # or 'hedge_fund', 'prop_trader', 'risk_manager'
-
 # =============================================================================
-# CLAUDE TRADE VALIDATION - FAIL SECURE MODE
+# DEPRECATED: CLAUDE TRADE VALIDATION - NOW IN DATABASE
 # =============================================================================
-# These settings control Claude AI trade validation behavior
+# These settings have been migrated to strategy_config.scanner_global_config
+# See: Streamlit > Settings > Scanner Config > Claude AI
+#
+# To access settings programmatically:
+#   from forex_scanner.services.scanner_config_service import get_scanner_config
+#   config = get_scanner_config()
+#   if config.require_claude_approval:
+#       ...
+# -----------------------------------------------------------------------------
+# REQUIRE_CLAUDE_APPROVAL = True  # MIGRATED to database
+# CLAUDE_FAIL_SECURE = True  # MIGRATED to database
+# CLAUDE_MODEL = 'sonnet'  # MIGRATED to database
+# MIN_CLAUDE_QUALITY_SCORE = 6  # MIGRATED to database
+# CLAUDE_INCLUDE_CHART = True  # MIGRATED to database
+# CLAUDE_CHART_TIMEFRAMES = ['4h', '1h', '15m']  # MIGRATED to database (JSONB)
+# CLAUDE_VISION_ENABLED = True  # MIGRATED to database
+# CLAUDE_VISION_STRATEGIES = ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']  # MIGRATED (JSONB)
+# CLAUDE_SAVE_VISION_ARTIFACTS = True  # MIGRATED to database
+# CLAUDE_VISION_SAVE_DIRECTORY = 'claude_analysis_enhanced/vision_analysis'  # MIGRATED
+# SAVE_CLAUDE_REJECTIONS = True  # MIGRATED to database
+# CLAUDE_VALIDATE_IN_BACKTEST = False  # MIGRATED to database
+# =============================================================================
 
-# Master switches
-REQUIRE_CLAUDE_APPROVAL = True          # v2.1.3: ENABLED - Claude must approve trades before execution
-CLAUDE_FAIL_SECURE = True               # CRITICAL: Block trades on ANY Claude error (fail-secure)
-
-# Model configuration
-CLAUDE_MODEL = 'sonnet'                 # Options: 'haiku', 'sonnet', 'sonnet-old', 'opus'
-
-# Vision analysis (chart-based)
-CLAUDE_INCLUDE_CHART = True             # Send chart image for vision analysis
-CLAUDE_CHART_TIMEFRAMES = ['4h', '1h', '15m']  # Timeframes to include in chart
-
-# ENHANCED: Vision API configuration
-CLAUDE_VISION_ENABLED = True            # Enable vision API for chart analysis
-CLAUDE_VISION_STRATEGIES = ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']  # Strategies that use vision
-CLAUDE_SAVE_VISION_ARTIFACTS = True     # Save chart, prompt, signal data to disk
-CLAUDE_VISION_SAVE_DIRECTORY = 'claude_analysis_enhanced/vision_analysis'  # Vision artifacts directory
-
-# Quality thresholds
-MIN_CLAUDE_QUALITY_SCORE = 6            # Minimum Claude score (1-10) to approve trade
-
-# Rejection logging
-SAVE_CLAUDE_REJECTIONS = True           # Log rejected signals to alert_history table
-
-# Backtest mode behavior
-CLAUDE_VALIDATE_IN_BACKTEST = False     # Skip Claude validation in backtest mode (saves API calls)
-
-# Rate limiting (built into API client, these are informational)
+# Rate limiting (kept as constants - not tunable)
 CLAUDE_MAX_REQUESTS_PER_MINUTE = 50
 CLAUDE_MAX_REQUESTS_PER_DAY = 1000
 CLAUDE_MIN_CALL_INTERVAL = 1.2          # Seconds between API calls

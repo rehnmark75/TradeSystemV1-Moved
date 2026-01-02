@@ -23,7 +23,7 @@ import json
 import copy
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from threading import RLock
 from contextlib import contextmanager
@@ -139,6 +139,20 @@ class ScannerConfig:
     smc_reject_order_flow_conflict: bool = False
     smc_reject_ranging_structure: bool = False
     smc_min_structure_score: float = 0.0
+
+    # CLAUDE TRADE VALIDATION SETTINGS
+    require_claude_approval: bool = False
+    claude_fail_secure: bool = False
+    claude_model: str = ""
+    min_claude_quality_score: int = 0
+    claude_include_chart: bool = False
+    claude_chart_timeframes: List[str] = field(default_factory=list)
+    claude_vision_enabled: bool = False
+    claude_vision_strategies: List[str] = field(default_factory=list)
+    claude_validate_in_backtest: bool = False
+    save_claude_rejections: bool = False
+    claude_save_vision_artifacts: bool = False
+    claude_vision_save_directory: str = ""
 
     # METADATA (set by service, not from DB)
     source: str = ""  # 'database' or 'cache'
@@ -363,6 +377,10 @@ class ScannerConfigService:
             'smc_conflict_filter_enabled', 'smc_min_directional_consensus',
             'smc_reject_order_flow_conflict', 'smc_reject_ranging_structure',
             'smc_min_structure_score',
+            'require_claude_approval', 'claude_fail_secure', 'claude_model',
+            'min_claude_quality_score', 'claude_include_chart', 'claude_vision_enabled',
+            'claude_validate_in_backtest', 'save_claude_rejections',
+            'claude_save_vision_artifacts', 'claude_vision_save_directory',
         ]
 
         # Fields that should be integers
@@ -376,7 +394,7 @@ class ScannerConfigService:
             'trade_cooldown_minutes', 'min_confirming_indicators', 'max_contradictions_allowed',
             'consecutive_large_candles_threshold', 'movement_lookback_periods',
             'large_candle_filter_cooldown', 'excessive_movement_threshold_pips',
-            'adx_period', 'adx_grace_period_bars',
+            'adx_period', 'adx_grace_period_bars', 'min_claude_quality_score',
         }
 
         for field_name in direct_fields:
@@ -391,13 +409,25 @@ class ScannerConfigService:
 
                 setattr(config, field_name, value)
 
-        # Handle JSONB fields
-        jsonb_fields = [
+        # Handle JSONB fields (dicts)
+        jsonb_dict_fields = [
             'adx_thresholds', 'adx_pair_multipliers',
             'deduplication_presets', 'safety_filter_presets', 'large_candle_filter_presets'
         ]
 
-        for field_name in jsonb_fields:
+        for field_name in jsonb_dict_fields:
+            if field_name in row and row[field_name] is not None:
+                value = row[field_name]
+                if isinstance(value, str):
+                    value = json.loads(value)
+                setattr(config, field_name, value)
+
+        # Handle JSONB fields (lists)
+        jsonb_list_fields = [
+            'claude_chart_timeframes', 'claude_vision_strategies'
+        ]
+
+        for field_name in jsonb_list_fields:
             if field_name in row and row[field_name] is not None:
                 value = row[field_name]
                 if isinstance(value, str):

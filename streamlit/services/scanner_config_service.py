@@ -140,6 +140,12 @@ def get_config_by_category(category: str) -> Dict[str, Any]:
             'smc_conflict_filter_enabled', 'smc_min_directional_consensus',
             'smc_reject_order_flow_conflict', 'smc_reject_ranging_structure',
             'smc_min_structure_score'
+        ],
+        'claude_validation': [
+            'require_claude_approval', 'claude_fail_secure', 'claude_model',
+            'min_claude_quality_score', 'claude_include_chart', 'claude_chart_timeframes',
+            'claude_vision_enabled', 'claude_vision_strategies', 'claude_validate_in_backtest',
+            'save_claude_rejections', 'claude_save_vision_artifacts', 'claude_vision_save_directory'
         ]
     }
 
