@@ -1,45 +1,18 @@
 # config.py
 """
 Configuration settings for the Forex Scanner
+
+NOTE: Most settings have been migrated to database (strategy_config.scanner_global_config)
+Only SMC_SIMPLE strategy is active. Legacy strategies (EMA, MACD, etc.) are disabled.
 """
 import os
 from typing import List
 
-# Import EMA strategy-specific configurations for MACD momentum filter
-try:
-    from configdata.strategies.config_ema_strategy import (
-        MACD_MOMENTUM_FILTER_ENABLED,
-        MACD_VALIDATION_MODE,
-        MACD_TREND_SENSITIVITY,
-        MACD_HISTOGRAM_LOOKBACK,
-        MACD_MIN_SLOPE_THRESHOLD,
-        MACD_SENSITIVITY_SETTINGS,
-        MACD_VALIDATION_MODES,
-        MACD_MOMENTUM_DEBUG_LOGGING
-    )
-except ImportError as e:
-    # Fallback configurations if import fails
-    print(f"Warning: Could not import EMA strategy MACD config: {e}")
-    MACD_MOMENTUM_FILTER_ENABLED = True
-    MACD_VALIDATION_MODE = 'strict_blocking'  # Changed from 'slope_aware' to be more strict
-    MACD_TREND_SENSITIVITY = 'normal'
-    MACD_HISTOGRAM_LOOKBACK = 3  # Changed from 1 to 3 for better trend detection
-    MACD_MIN_SLOPE_THRESHOLD = 0.00005  # More sensitive threshold
-    MACD_MOMENTUM_DEBUG_LOGGING = True
-    MACD_SENSITIVITY_SETTINGS = {
-        'normal': {
-            'lookback': 3,
-            'min_slope': 0.00005,
-            'description': 'Balanced - moderate sensitivity to momentum changes'
-        }
-    }
-    MACD_VALIDATION_MODES = {
-        'strict_blocking': {
-            'description': 'Block signals when MACD momentum opposes signal direction',
-            'allow_neutral': True,
-            'block_opposite': True
-        }
-    }
+# =============================================================================
+# LEGACY: EMA Strategy MACD settings (EMA strategy is DISABLED)
+# =============================================================================
+# These are only loaded if EMA strategy is re-enabled in the future.
+# The EMA strategy files use getattr() with defaults, so these can be removed.
 
 # ================== FIXED SL/TP OVERRIDE ==================
 # DEPRECATED: These settings are now managed via the database (strategy_config.smc_simple_global_config)
