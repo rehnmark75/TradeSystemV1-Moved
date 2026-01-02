@@ -222,30 +222,15 @@ def get_enabled_strategy_flags():
 
 
 def is_strategy_enabled(strategy_name: str) -> bool:
-    """
-    Check if a strategy is enabled.
-    Simple check - normalizes name and checks against enabled list.
-    """
+    """Check if a strategy is enabled. Currently only SMC_SIMPLE is active."""
     if not strategy_name:
         return False
-
-    enabled = get_enabled_strategy_flags()
-
-    # Normalize for comparison
     normalized = strategy_name.upper().replace('_STRATEGY', '').replace('_ENABLED', '').strip()
-
-    for s in enabled:
-        s_normalized = s.upper().replace('_STRATEGY', '').replace('_ENABLED', '').strip()
-        if normalized == s_normalized or normalized in s_normalized or s_normalized in normalized:
-            return True
-
-    return False
+    return 'SMC_SIMPLE' in normalized or normalized in 'SMC_SIMPLE'
 
 
 def get_enabled_strategies():
-    """
-    Get list of enabled strategy names for logging/debugging.
-    """
+    """Get list of enabled strategy names."""
     return get_enabled_strategy_flags()
 
 # =============================================================================
