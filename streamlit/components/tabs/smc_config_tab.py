@@ -31,11 +31,13 @@ from services.smc_simple_config_service import (
 
 def _values_equal(new_val, old_val, tolerance: float = 1e-9) -> bool:
     """Compare values with tolerance for floating point precision issues."""
+    from decimal import Decimal
     if new_val is None and old_val is None:
         return True
     if new_val is None or old_val is None:
         return False
-    if isinstance(new_val, (int, float)) and isinstance(old_val, (int, float)):
+    # Handle numeric types including Decimal from database
+    if isinstance(new_val, (int, float, Decimal)) and isinstance(old_val, (int, float, Decimal)):
         return abs(float(new_val) - float(old_val)) < tolerance
     return new_val == old_val
 
@@ -332,19 +334,19 @@ def render_global_settings(config: Dict[str, Any]):
                 st.session_state.smc_pending_changes['max_sl_absolute_pips'] = new_max_sl
 
         with col3:
-            new_tp_ratio = st.number_input(
-                "TP/SL Ratio",
-                value=float(config.get('tp_sl_ratio', 2.0)),
+            new_optimal_rr = st.number_input(
+                "Optimal R:R Ratio",
+                value=float(config.get('optimal_rr_ratio', 2.5)),
                 min_value=1.0, max_value=5.0, step=0.1,
-                help="Take profit to stop loss ratio",
-                key="tp_ratio"
+                help="Optimal risk-reward ratio target",
+                key="optimal_rr_ratio"
             )
-            if not _values_equal(new_tp_ratio, config.get('tp_sl_ratio')):
-                st.session_state.smc_pending_changes['tp_sl_ratio'] = new_tp_ratio
+            if not _values_equal(new_optimal_rr, config.get('optimal_rr_ratio')):
+                st.session_state.smc_pending_changes['optimal_rr_ratio'] = new_optimal_rr
 
             new_min_rr = st.number_input(
                 "Min R:R Ratio",
-                value=float(config.get('min_rr_ratio', 1.0)),
+                value=float(config.get('min_rr_ratio', 1.5)),
                 min_value=0.5, max_value=3.0, step=0.1,
                 help="Minimum risk-reward ratio",
                 key="min_rr"
