@@ -222,29 +222,7 @@ def get_enabled_strategies():
 # ADX_FILTER_ENABLED = False  # MIGRATED to database
 # ADX_FILTER_MODE = 'moderate'  # MIGRATED to database
 # ADX_PERIOD = 14  # MIGRATED to database
-# ADX_THRESHOLDS = {...}  # MIGRATED to database as JSONB
-# ADX_PAIR_MULTIPLIERS = {...}  # MIGRATED to database as JSONB
-# ADX_GRACE_PERIOD_BARS = 2  # MIGRATED to database
-# =============================================================================
-
-# LEGACY: Kept for backward compatibility during transition - DO NOT USE
-ADX_THRESHOLDS_LEGACY = {
-    'STRONG_TREND': 25.0,      # ADX > 25 = Strong trend (allow signals)
-    'MODERATE_TREND': 22.0,    # ADX 20-25 = Moderate trend (conditional)
-    'WEAK_TREND': 15.0,        # ADX < 20 = Weak/ranging market (filter out)
-    'VERY_WEAK': 10.0          # ADX < 15 = Very weak trend (definitely filter)
-}
-
-# LEGACY: These are kept only for backward compatibility during transition
-# All ADX settings should now be read from database via get_scanner_config()
-ADX_FILTER_MODE_LEGACY = 'moderate'
-ADX_PERIOD_LEGACY = 14
-ADX_PAIR_MULTIPLIERS_LEGACY = {
-    'EURUSD': 1.0, 'GBPUSD': 0.9, 'USDJPY': 1.1,
-    'EURJPY': 0.85, 'GBPJPY': 0.8, 'USDCHF': 1.0, 'DEFAULT': 1.0
-}
-ADX_GRACE_PERIOD_BARS_LEGACY = 2
-
+# ADX settings migrated to database (scanner_global_config)
 # =============================================================================
 # USDCHF PAIR-SPECIFIC OPTIMIZATION (v2.6.0 - 2025-12-23)
 # =============================================================================
