@@ -1,15 +1,33 @@
 # configdata/market_intelligence_config.py
 """
-Market Intelligence Configuration
-Centralized configuration for all market intelligence features, analysis, and filtering.
+LEGACY - Market Intelligence Configuration
+
+!! DEPRECATED AS OF 2026-01-03 !!
+
+Intelligence settings have been MIGRATED to the database:
+- Database: strategy_config
+- Tables: intelligence_global_config, intelligence_presets, intelligence_regime_modifiers
+
+To configure intelligence settings:
+1. Use Streamlit UI: Settings -> Intelligence Config tab
+2. Or directly in database:
+   docker exec postgres psql -U postgres -d strategy_config -c "
+   SELECT parameter_name, parameter_value FROM intelligence_global_config ORDER BY category, display_order;"
+
+This file is kept ONLY as a fallback when database is unavailable.
+The IntelligenceConfigService reads from database first, then falls back to this file.
+
+For the current active preset and settings, check the database:
+   docker exec postgres psql -U postgres -d strategy_config -c "
+   SELECT parameter_value FROM intelligence_global_config WHERE parameter_name = 'intelligence_preset';"
 """
 
 # =============================================================================
-# MARKET INTELLIGENCE CORE CONFIGURATION
+# LEGACY FALLBACK CONFIGURATION (only used when database is unavailable)
 # =============================================================================
 
-# IMMEDIATE FIX: Start with minimal intelligence to get signals flowing
-INTELLIGENCE_PRESET = 'minimal'  # Change from default restrictive settings
+# Default preset (database overrides this)
+INTELLIGENCE_PRESET = 'collect_only'  # collect_only = full engine, no filtering
 
 # Available presets (order from most to least permissive):
 # - 'disabled': No intelligence filtering (maximum signals)
@@ -90,6 +108,19 @@ INTELLIGENCE_PRESETS = {
             'confidence_filter': True,
         },
         'description': 'Consistent with backtesting environment'
+    },
+
+    'collect_only': {
+        'threshold': 0.0,  # No filtering - collect data only
+        'use_intelligence_engine': True,  # Run engine for data collection
+        'components_enabled': {
+            'market_regime_filter': False,
+            'volatility_filter': False,
+            'volume_filter': False,
+            'time_filter': False,
+            'confidence_filter': False,
+        },
+        'description': 'Full engine running for data collection, no signal filtering'
     }
 }
 

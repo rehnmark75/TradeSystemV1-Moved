@@ -13,16 +13,20 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 import json
 
+from .market_intelligence import MarketIntelligenceEngine
+
+# Import database-driven intelligence config
 try:
-    from .market_intelligence import MarketIntelligenceEngine
-    from configdata.market_intelligence_config import (
-        REGIME_STRATEGY_CONFIDENCE_MODIFIERS,
-        ENABLE_PROBABILISTIC_CONFIDENCE_MODIFIERS,
-        MIN_CONFIDENCE_MODIFIER
-    )
+    from forex_scanner.services.intelligence_config_service import get_intelligence_config
+    HAS_DB_CONFIG = True
 except ImportError:
-    # Fallback imports
-    pass
+    HAS_DB_CONFIG = False
+    get_intelligence_config = None
+
+# Default fallback values
+REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {}
+ENABLE_PROBABILISTIC_CONFIDENCE_MODIFIERS = True
+MIN_CONFIDENCE_MODIFIER = 0.3
 
 
 class CachedMarketIntelligenceEngine:

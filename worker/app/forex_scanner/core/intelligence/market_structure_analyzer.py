@@ -19,7 +19,13 @@ from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
 
-from configdata import config
+# Import database-driven intelligence config service
+try:
+    from forex_scanner.services.intelligence_config_service import get_intelligence_config
+    HAS_DB_CONFIG = True
+except ImportError:
+    HAS_DB_CONFIG = False
+    get_intelligence_config = None
 
 
 class StructureType(Enum):
@@ -79,21 +85,39 @@ class MarketStructureAnalyzer:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        
-        # Configuration parameters
-        self.swing_lookback = getattr(config, 'STRUCTURE_SWING_LOOKBACK', 5)
-        self.min_swing_strength = getattr(config, 'STRUCTURE_MIN_SWING_STRENGTH', 0.3)
-        self.bos_confirmation_pips = getattr(config, 'STRUCTURE_BOS_CONFIRMATION_PIPS', 5)
-        self.choch_lookback_periods = getattr(config, 'STRUCTURE_CHOCH_LOOKBACK', 20)
-        self.require_close_confirmation = getattr(config, 'STRUCTURE_REQUIRE_CLOSE', True)
-        
+
+        # Load configuration from database service
+        self._load_config()
+
         # Performance limits
         self.max_structure_events = 20
         self.max_swing_points = 30
-        
+
         # State tracking
         self.structure_history = {}  # epic -> analysis dict
         self.swing_points_cache = {}  # epic -> list of swing points
+
+    def _load_config(self):
+        """Load configuration from database or use defaults"""
+        # Default values
+        self.swing_lookback = 5
+        self.min_swing_strength = 0.3
+        self.bos_confirmation_pips = 5
+        self.choch_lookback_periods = 20
+        self.require_close_confirmation = True
+
+        if HAS_DB_CONFIG:
+            try:
+                config = get_intelligence_config()
+                if config:
+                    # Access dataclass attributes directly with getattr for safety
+                    self.swing_lookback = getattr(config, 'structure_swing_lookback', 5)
+                    self.min_swing_strength = getattr(config, 'structure_min_swing_strength', 0.3)
+                    self.bos_confirmation_pips = getattr(config, 'structure_bos_confirmation_pips', 5)
+                    self.choch_lookback_periods = getattr(config, 'structure_choch_lookback', 20)
+                    self.require_close_confirmation = getattr(config, 'structure_require_close', True)
+            except Exception as e:
+                self.logger.debug(f"Using default structure config: {e}")
         
         self.logger.info("🏗️ MarketStructureAnalyzer initialized (Enhanced)")
         self.logger.debug(f"   Swing lookback: {self.swing_lookback}")

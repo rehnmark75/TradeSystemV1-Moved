@@ -161,9 +161,17 @@ class IntelligenceFallbackManager:
         strategy = signal.get('strategy', 'Unknown')
         confidence_modifier = self.cached_engine.get_fast_confidence_modifier(strategy)
 
-        # Check minimum threshold
-        from configdata.market_intelligence_config import MIN_CONFIDENCE_MODIFIER
-        if confidence_modifier < MIN_CONFIDENCE_MODIFIER:
+        # Check minimum threshold - get from database config
+        min_modifier = 0.3  # Default
+        try:
+            from forex_scanner.services.intelligence_config_service import get_intelligence_config
+            config = get_intelligence_config()
+            if config:
+                min_modifier = getattr(config, 'min_confidence_modifier', 0.3)
+        except Exception:
+            pass
+
+        if confidence_modifier < min_modifier:
             raise Exception(f"Confidence modifier {confidence_modifier:.1%} below minimum")
 
         signal['market_intelligence_confidence_modifier'] = confidence_modifier

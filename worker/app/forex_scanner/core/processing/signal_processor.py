@@ -58,8 +58,12 @@ try:
     from core.smart_money_readonly_analyzer import SmartMoneyReadOnlyAnalyzer
     SMART_MONEY_AVAILABLE = True
 except ImportError:
-    SMART_MONEY_AVAILABLE = False
-    logging.getLogger(__name__).warning("SmartMoneyReadOnlyAnalyzer not available")
+    try:
+        from forex_scanner.core.smart_money_readonly_analyzer import SmartMoneyReadOnlyAnalyzer
+        SMART_MONEY_AVAILABLE = True
+    except ImportError:
+        SMART_MONEY_AVAILABLE = False
+        logging.getLogger(__name__).debug("SmartMoneyReadOnlyAnalyzer not available - using fallback")
 
 # ADD: Import SMC Rejection History Manager for conflict tracking
 try:

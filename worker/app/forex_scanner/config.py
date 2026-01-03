@@ -723,10 +723,17 @@ def reset_safety_filter_stats():
 
 
 # =============================================================================
-# MARKET INTELLIGENCE IMPORT
+# MARKET INTELLIGENCE - DATABASE DRIVEN
 # =============================================================================
 
-from configdata.market_intelligence_config import *
+# Intelligence config is now read from database via IntelligenceConfigService
+# These are minimal fallback defaults only - actual values come from:
+#   Database: strategy_config.intelligence_global_config
+#   Service: forex_scanner.services.intelligence_config_service
+
+INTELLIGENCE_PRESET = 'collect_only'
+INTELLIGENCE_MODE = 'live_only'
+ENABLE_MARKET_INTELLIGENCE = True
 
 # =============================================================================
 # END OF CONFIG

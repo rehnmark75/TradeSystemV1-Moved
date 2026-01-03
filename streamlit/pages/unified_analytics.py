@@ -33,6 +33,7 @@ from components.tabs import (
     render_trade_analysis_tab,
     render_smc_config_tab,
     render_scanner_config_tab,
+    render_intelligence_config_tab,
 )
 
 # Configure page
@@ -178,7 +179,8 @@ def main():
         settings_tabs = st.tabs([
             "General",
             "SMC Config",
-            "Scanner Config"
+            "Scanner Config",
+            "Intelligence Config"
         ])
         with settings_tabs[0]:
             render_settings_tab()
@@ -186,6 +188,8 @@ def main():
             render_smc_config_tab()
         with settings_tabs[2]:
             render_scanner_config_tab()
+        with settings_tabs[3]:
+            render_intelligence_config_tab()
 
     # Footer
     st.markdown("---")

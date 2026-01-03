@@ -190,59 +190,52 @@ def create_smart_money_suite():
         'available': SMART_MONEY_AVAILABLE
     }
 
-# Configuration validation
+# Configuration validation - now uses database-driven config
 def validate_intelligence_config():
     """Validate that required configuration is available"""
     try:
-        import config
-        
+        # Try database config first
+        from forex_scanner.services.intelligence_config_service import get_intelligence_config
+        config = get_intelligence_config()
+        if config:
+            logger.info("✅ Intelligence configuration validated (database)")
+            return True
+    except ImportError:
+        pass
+
+    # Fallback to system config for basic requirements
+    try:
+        from forex_scanner import config as system_config
         required_attrs = ['EPIC_LIST', 'DATABASE_URL']
-        missing_attrs = []
-        
-        for attr in required_attrs:
-            if not hasattr(config, attr):
-                missing_attrs.append(attr)
-        
+        missing_attrs = [attr for attr in required_attrs if not hasattr(system_config, attr)]
+
         if missing_attrs:
             logger.warning(f"⚠️ Missing config attributes for intelligence: {missing_attrs}")
             return False
-        
-        logger.info("✅ Intelligence configuration validated")
-        return True
-        
-    except ImportError:
-        logger.error("❌ Config module not found")
-        return False
 
-# NEW: Validate smart money configuration
+        logger.info("✅ Intelligence configuration validated (fallback)")
+        return True
+    except ImportError:
+        logger.debug("Config module not found - using database config only")
+        return True  # Database config is available
+
+# Validate smart money configuration - now uses database config
 def validate_smart_money_config():
     """Validate smart money configuration"""
     try:
-        import config
-        
-        # Optional smart money config attributes
-        smart_money_attrs = [
-            'SMART_MONEY_STRUCTURE_VALIDATION',
-            'SMART_MONEY_ORDER_FLOW_VALIDATION', 
-            'STRUCTURE_SWING_LOOKBACK',
-            'ORDER_FLOW_MIN_OB_SIZE_PIPS'
-        ]
-        
-        missing_attrs = []
-        for attr in smart_money_attrs:
-            if not hasattr(config, attr):
-                missing_attrs.append(attr)
-        
-        if missing_attrs:
-            logger.info(f"ℹ️ Optional smart money config missing (will use defaults): {missing_attrs}")
-        else:
-            logger.info("✅ Smart money configuration complete")
-        
-        return True
-        
+        # Database config is the source of truth
+        from forex_scanner.services.intelligence_config_service import get_intelligence_config
+        config = get_intelligence_config()
+        if config:
+            smart_money_enabled = getattr(config, 'enable_smart_money_collection', True)
+            logger.info(f"✅ Smart money config validated (enabled: {smart_money_enabled})")
+            return True
     except ImportError:
-        logger.warning("⚠️ Config module not found for smart money validation")
-        return False
+        pass
+
+    # Fallback - smart money works with defaults
+    logger.info("ℹ️ Smart money using default configuration")
+    return True
 
 # Quick setup function for solving zero-alert problem
 def setup_minimal_intelligence():

@@ -84,6 +84,17 @@ except ImportError:
     except ImportError:
         CONFIG_SERVICES_AVAILABLE = False
 
+# Import intelligence config service for cleanup settings
+try:
+    from forex_scanner.services.intelligence_config_service import get_intelligence_config
+    INTELLIGENCE_CONFIG_SERVICE_AVAILABLE = True
+except ImportError:
+    try:
+        from services.intelligence_config_service import get_intelligence_config
+        INTELLIGENCE_CONFIG_SERVICE_AVAILABLE = True
+    except ImportError:
+        INTELLIGENCE_CONFIG_SERVICE_AVAILABLE = False
+
 
 class IntelligentForexScanner:
     """
@@ -514,8 +525,12 @@ class IntelligentForexScanner:
             # ADD: Generate and store market intelligence for this scan cycle
             self._capture_scan_market_intelligence(scan_start, clean_signals)
 
+            # Periodic cleanup of old intelligence records (once per ~24 hours)
+            # At ~600 scans/day (every 2.5 minutes), check every 500 scans
+            self._maybe_cleanup_old_intelligence_records()
+
             return clean_signals
-            
+
         except Exception as e:
             self.logger.error(f"❌ Scan error: {e}")
             self.stats['errors'] += 1
@@ -749,6 +764,45 @@ class IntelligentForexScanner:
             self.logger.error(f"❌ Error capturing market intelligence: {e}")
             import traceback
             self.logger.debug(f"   Traceback: {traceback.format_exc()}")
+
+    def _maybe_cleanup_old_intelligence_records(self):
+        """
+        Periodically cleanup old intelligence records to prevent database bloat.
+
+        Runs once every ~500 scans (approximately once per day at 2.5 minute intervals).
+        Uses retention days from database config (default: 60 days).
+        """
+        # Only run every 500 scans (~24 hours at 2.5 min intervals)
+        if self.stats['scans_completed'] % 500 != 0:
+            return
+
+        # Skip if no market intelligence history manager
+        if not self.market_intelligence_history:
+            return
+
+        try:
+            # Get retention days from database config
+            retention_days = 60  # Default
+            if INTELLIGENCE_CONFIG_SERVICE_AVAILABLE:
+                try:
+                    intel_config = get_intelligence_config()
+                    retention_days = intel_config.intelligence_cleanup_days
+                except Exception:
+                    pass
+
+            # Run cleanup
+            deleted_count = self.market_intelligence_history.cleanup_old_records(
+                days_to_keep=retention_days
+            )
+
+            if deleted_count and deleted_count > 0:
+                self.logger.info(
+                    f"Cleaned {deleted_count} old intelligence records "
+                    f"(keeping {retention_days} days)"
+                )
+
+        except Exception as e:
+            self.logger.warning(f"Intelligence cleanup failed: {e}")
 
     def _calculate_boundary_aligned_sleep(self, scan_duration: float) -> float:
         """
