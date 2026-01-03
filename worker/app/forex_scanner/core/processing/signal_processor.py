@@ -97,6 +97,7 @@ class SignalProcessor:
                  alert_history=None,
                  db_manager=None,
                  data_fetcher=None,  # ADD: data_fetcher parameter for smart money
+                 deduplication_manager=None,  # ADD: accept external deduplication manager
                  logger: Optional[logging.Logger] = None):
         
         self.claude_analyzer = claude_analyzer
@@ -158,16 +159,18 @@ class SignalProcessor:
         self.duplicate_window_hours = getattr(config, 'DUPLICATE_WINDOW_HOURS', 24)
         self.save_to_database = getattr(config, 'SAVE_TO_DATABASE', True)
 
-        # INTEGRATION: Initialize deduplication manager
-        self.deduplication_manager = None
+        # INTEGRATION: Use passed deduplication manager or create new one
+        self.deduplication_manager = deduplication_manager
 
-        if self.enable_deduplication and db_manager:
+        if self.enable_deduplication and not self.deduplication_manager and db_manager:
             try:
                 self.deduplication_manager = AlertDeduplicationManager(db_manager)
                 self.logger.info("🛡️ Deduplication manager initialized")
             except Exception as e:
                 self.logger.error(f"❌ Failed to initialize deduplication manager: {e}")
                 self.enable_deduplication = False
+        elif self.deduplication_manager:
+            self.logger.debug("🛡️ Using shared deduplication manager")
 
         # SMART MONEY INTEGRATION: Initialize Smart Money Analyzer
         self.smart_money_analyzer = None

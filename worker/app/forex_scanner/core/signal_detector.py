@@ -66,13 +66,26 @@ class SignalDetector:
         self.price_adjuster = PriceAdjuster()
         self.logger = logging.getLogger(__name__)
         
-        # Initialize strategies
-        self.ema_strategy = EMAStrategy(data_fetcher=self.data_fetcher)
-        # MACD strategy will be created per-epic with optimized parameters
-        self.macd_strategy = None  # Will be created when needed with epic parameter
-        self.macd_strategies_cache = {}  # Cache epic-specific strategies
-        # self.combined_strategy = CombinedStrategy(data_fetcher=self.data_fetcher)  # Removed - strategy was disabled
-        # 🔥 Initialize Scalping strategy with mode from config (if enabled)
+        # Initialize strategies conditionally based on config flags
+        # EMA Strategy (legacy - disabled by default, replaced by SMC_SIMPLE)
+        if getattr(config, 'EMA_STRATEGY_ENABLED', False):
+            self.ema_strategy = EMAStrategy(data_fetcher=self.data_fetcher)
+            self.logger.info("✅ EMA Strategy initialized")
+        else:
+            self.ema_strategy = None
+            self.logger.info("⚪ EMA Strategy disabled")
+
+        # MACD strategy will be created per-epic with optimized parameters (if enabled)
+        if getattr(config, 'MACD_STRATEGY_ENABLED', False):
+            self.macd_strategy = None  # Will be created when needed with epic parameter
+            self.macd_strategies_cache = {}  # Cache epic-specific strategies
+            self.logger.info("✅ MACD Strategy enabled (lazy-load)")
+        else:
+            self.macd_strategy = None
+            self.macd_strategies_cache = {}
+            self.logger.info("⚪ MACD Strategy disabled")
+
+        # Scalping strategy with mode from config (if enabled)
         if getattr(config, 'SCALPING_STRATEGY_ENABLED', False):
             try:
                 from configdata.strategies.config_scalping_strategy import SCALPING_MODE

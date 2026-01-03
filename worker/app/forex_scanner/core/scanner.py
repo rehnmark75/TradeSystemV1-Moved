@@ -112,16 +112,28 @@ class IntelligentForexScanner:
         
         # Initialize signal detector
         self.signal_detector = self._initialize_signal_detector(db_manager, user_timezone)
-        
-        # ADD: Initialize SignalProcessor for Smart Money analysis
+
+        # Initialize deduplication manager FIRST (shared with SignalProcessor)
+        self.deduplication_manager = None
+        self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True) and DEDUP_AVAILABLE
+
+        if self.enable_deduplication and db_manager and DEDUP_AVAILABLE:
+            try:
+                self.deduplication_manager = AlertDeduplicationManager(db_manager)
+                self.logger.info("🛡️ Deduplication manager initialized")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Could not initialize deduplication: {e}")
+                self.enable_deduplication = False
+
+        # Initialize SignalProcessor for Smart Money analysis (pass shared dedup manager)
         self.signal_processor = None
         self.use_signal_processor = getattr(config, 'USE_SIGNAL_PROCESSOR', True) and SIGNAL_PROCESSOR_AVAILABLE
-        
+
         if self.use_signal_processor and SIGNAL_PROCESSOR_AVAILABLE:
             try:
                 # Get data_fetcher from signal_detector if available
                 data_fetcher = getattr(self.signal_detector, 'data_fetcher', None)
-                
+
                 # If no data_fetcher from signal_detector, create one
                 if not data_fetcher and db_manager:
                     try:
@@ -133,35 +145,24 @@ class IntelligentForexScanner:
                             data_fetcher = DataFetcher(db_manager)
                         except ImportError:
                             self.logger.warning("DataFetcher not available for SignalProcessor")
-                
-                # Initialize SignalProcessor with all available components
+
+                # Initialize SignalProcessor with shared deduplication manager
                 self.signal_processor = SignalProcessor(
                     db_manager=db_manager,
                     data_fetcher=data_fetcher,  # CRITICAL for Smart Money!
                     alert_history=getattr(self, 'alert_history', None),
                     claude_analyzer=getattr(self, 'claude_analyzer', None),
-                    notification_manager=getattr(self, 'notification_manager', None)
+                    notification_manager=getattr(self, 'notification_manager', None),
+                    deduplication_manager=self.deduplication_manager  # Pass shared instance
                 )
-                
+
                 self.logger.info("📊 SignalProcessor initialized")
                 self.logger.info(f"   Smart Money: {'✅' if self.signal_processor.smart_money_analyzer else '❌'}")
                 self.logger.info(f"   Data Fetcher: {'✅' if data_fetcher else '❌'}")
-                
+
             except Exception as e:
                 self.logger.warning(f"⚠️ Could not initialize SignalProcessor: {e}")
                 self.use_signal_processor = False
-        
-        # Initialize optional deduplication (keep existing code)
-        self.deduplication_manager = None
-        self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True) and DEDUP_AVAILABLE
-        
-        if self.enable_deduplication and db_manager and DEDUP_AVAILABLE:
-            try:
-                self.deduplication_manager = AlertDeduplicationManager(db_manager)
-                self.logger.info("✅ Deduplication manager initialized")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Could not initialize deduplication: {e}")
-                self.enable_deduplication = False
         
         # Initialize optional smart money (keep for backward compatibility)
         self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', False) and SMART_MONEY_AVAILABLE

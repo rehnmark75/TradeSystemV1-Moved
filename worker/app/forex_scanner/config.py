@@ -363,10 +363,10 @@ DYNAMIC_CONFIG_COMMANDS = {
 }
 
 # Enable EMA Strategy
-EMA_STRATEGY = False  # Core EMA strategy
+EMA_STRATEGY_ENABLED = False  # Legacy EMA crossover strategy (disabled - using SMC_SIMPLE)
 
 # Enable MACD Strategy
-MACD_STRATEGY = False  # Core MACD strategy
+MACD_STRATEGY_ENABLED = False  # Core MACD strategy (disabled - using SMC_SIMPLE)
 
 # Enable Scalping Strategy (Linda Raschke MACD 3-10-16)
 SCALPING_STRATEGY_ENABLED = False  # 🔥 Linda Raschke MACD 3-10-16 adaptive scalping

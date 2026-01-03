@@ -1631,9 +1631,8 @@ class TradingOrchestrator:
         use_1m_base = getattr(config, 'USE_1M_BASE_SYNTHESIS', False)
         boundary_aligned = getattr(config, 'SCAN_ALIGN_TO_BOUNDARIES', False)
 
-        self.logger.info(f"🚀 Trading session started: {self.session_id}")
-        self.logger.info(f"   Start time: {datetime.now()}")
-        self.logger.info(f"   Scan interval: {self.scan_interval}s")
+        # Note: session_manager.start_session() already logs session start details
+        # Log additional orchestrator-specific info only
         self.logger.info(f"   1m Base Synthesis: {'✅ Enabled' if use_1m_base else '❌ Disabled (5m base)'}")
         self.logger.info(f"   Boundary Scanning: {'✅ Enabled' if boundary_aligned else '❌ Disabled'}")
         self.logger.info(f"   Intelligence preset: {self.intelligence_preset}")
@@ -1655,8 +1654,8 @@ class TradingOrchestrator:
             self.test_claude_configuration()
 
         if self.performance_tracker:
+            # Note: reset_session_metrics() logs its own "Session metrics reset" message
             self.performance_tracker.reset_session_metrics()
-            self.logger.info("🔄 Session metrics reset")
 
         self.running = True
 
@@ -1964,14 +1963,10 @@ class TradingOrchestrator:
             
             # Log environment information
             self._log_docker_environment()
-            
-            # Test NEW validator configuration before starting
-            self.test_validator_configuration()
-            
-            # ENHANCED: Test Claude configuration before starting
-            if self.enable_claude:
-                self.test_claude_configuration()
-            
+
+            # Note: test_validator_configuration() and test_claude_configuration()
+            # are called by start_continuous_scan(), so we don't need to call them here
+
             return self.start_continuous_scan()
             
         except KeyboardInterrupt:

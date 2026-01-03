@@ -421,13 +421,13 @@ class TradingSystem:
     def start_docker_mode(self):
         """
         Start Docker deployment mode with continuous operation
-        
+
         This is the main mode used when the container starts with no arguments.
         Includes heartbeat logging and graceful shutdown handling.
         """
         try:
             self.logger.info("🐳 Starting Docker deployment mode...")
-            self._log_docker_environment()
+            # Note: Docker environment is logged by orchestrator.start_docker_mode()
             return self.orchestrator.start_docker_mode()
         except Exception as e:
             self.logger.error(f"❌ Error in Docker mode: {e}")
