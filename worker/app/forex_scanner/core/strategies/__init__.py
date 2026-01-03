@@ -1,44 +1,16 @@
 # core/strategies/__init__.py
 """
 Trading Strategies Module
+
+NOTE: After January 2026 cleanup, only SMC Simple strategy is active.
+Legacy strategies have been archived to forex_scanner/archive/disabled_strategies/
 """
 
 from .base_strategy import BaseStrategy
-from .ema_strategy import EMAStrategy, create_ema_strategy
-from .macd_strategy import MACDStrategy
-# from .combined_strategy import CombinedStrategy  # Removed - strategy was disabled and unused
-from .bb_supertrend_strategy import BollingerSupertrendStrategy
-from .kama_strategy import KAMAStrategy
-from .zero_lag_strategy import ZeroLagStrategy
-from .momentum_strategy import MomentumStrategy
-# from .smc_strategy import SMCStrategy, create_smc_strategy  # Removed - legacy strategy, SMCStrategyFast is in production
-from .smc_strategy_fast import SMCStrategyFast, create_smc_strategy_fast
-from .smc_structure_strategy import SMCStructureStrategy, create_smc_structure_strategy
-from .mean_reversion_strategy import MeanReversionStrategy, create_mean_reversion_strategy
-from .ichimoku_strategy import IchimokuStrategy
-from .ranging_market_strategy import RangingMarketStrategy
-from .scalping_strategy import ScalpingStrategy
-from .volume_profile_strategy import VolumeProfileStrategy
-from .ema_double_confirmation_strategy import EMADoubleConfirmationStrategy
+from .smc_simple_strategy import SMCSimpleStrategy, create_smc_simple_strategy
+
 __all__ = [
     'BaseStrategy',
-    'EMAStrategy',
-    'MACDStrategy',
-    # 'CombinedStrategy',  # Removed - strategy was disabled and unused
-    'BollingerSupertrendStrategy',
-    'KAMAStrategy',
-    'ZeroLagStrategy',
-    'MomentumStrategy',
-    # 'SMCStrategy', 'create_smc_strategy',  # Removed - legacy strategy
-    'SMCStrategyFast',
-    'create_smc_strategy_fast',
-    'SMCStructureStrategy',
-    'create_smc_structure_strategy',
-    'MeanReversionStrategy',
-    'create_mean_reversion_strategy',
-    'IchimokuStrategy',
-    'RangingMarketStrategy',
-    'ScalpingStrategy',
-    'VolumeProfileStrategy',
-    'EMADoubleConfirmationStrategy'
+    'SMCSimpleStrategy',
+    'create_smc_simple_strategy',
 ]

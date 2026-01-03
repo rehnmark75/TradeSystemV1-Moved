@@ -53,28 +53,14 @@ def main():
                 print("📊 Testing all currency pairs")
                 # Don't add --epic, let it default to all
 
-            # Handle strategy shortcuts (based on actual strategies in core/strategies/)
-            elif arg.upper() in ["EMA", "MACD", "BB", "SMC", "SMC_STRUCTURE", "SMC_PURE", "MOMENTUM", "ICHIMOKU", "KAMA", "ZEROLAG", "MEANREV", "RANGING", "SCALPING", "VP", "VOLUME_PROFILE", "EMA_DOUBLE", "EDC", "SILVER_BULLET", "SB"]:
+            # Handle strategy shortcuts
+            # NOTE: After January 2026 cleanup, only SMC_SIMPLE is active
+            # Other strategies have been archived to forex_scanner/archive/disabled_strategies/
+            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA"]:
                 strategy_mapping = {
-                    "EMA": "EMA",
-                    "MACD": "MACD",
-                    "BB": "BOLLINGER_SUPERTREND",
-                    "SMC": "SMC_FAST",
-                    "SMC_STRUCTURE": "SMC_STRUCTURE",
-                    "SMC_PURE": "SMC_STRUCTURE",
-                    "MOMENTUM": "MOMENTUM",
-                    "ICHIMOKU": "ICHIMOKU",
-                    "KAMA": "KAMA",
-                    "ZEROLAG": "ZERO_LAG",
-                    "MEANREV": "MEAN_REVERSION",
-                    "RANGING": "RANGING_MARKET",
-                    "SCALPING": "SCALPING",
-                    "VP": "VOLUME_PROFILE",
-                    "VOLUME_PROFILE": "VOLUME_PROFILE",
-                    "EMA_DOUBLE": "EMA_DOUBLE_CONFIRMATION",
-                    "EDC": "EMA_DOUBLE_CONFIRMATION",
-                    "SILVER_BULLET": "SILVER_BULLET",
-                    "SB": "SILVER_BULLET"
+                    "SMC": "SMC_SIMPLE",
+                    "SMC_SIMPLE": "SMC_SIMPLE",
+                    "SMC_EMA": "SMC_SIMPLE",
                 }
                 strategy_name = strategy_mapping[arg.upper()]
                 processed_args.extend(["--strategy", strategy_name])
