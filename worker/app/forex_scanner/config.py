@@ -2,49 +2,40 @@
 """
 Configuration settings for the Forex Scanner
 
-NOTE: Most settings have been migrated to database (strategy_config.scanner_global_config)
-Only SMC_SIMPLE strategy is active. Legacy strategies (EMA, MACD, etc.) are disabled.
+NOTE: Most strategy settings are in database (strategy_config schema).
+Only SMC_SIMPLE strategy is active. See docs/adding_new_strategy.md for new strategies.
+
+Environment variables take precedence where applicable.
+Database settings are loaded via scanner_config_service.py at runtime.
 """
 import os
 from typing import List
 
 # =============================================================================
-# LEGACY: EMA Strategy MACD settings (EMA strategy is DISABLED)
+# ENVIRONMENT VARIABLES (Infrastructure)
 # =============================================================================
-# These are only loaded if EMA strategy is re-enabled in the future.
-# The EMA strategy files use getattr() with defaults, so these can be removed.
 
-# ================== FIXED SL/TP OVERRIDE ==================
-# DEPRECATED: These settings are now managed via the database (strategy_config.smc_simple_global_config)
-# Use Streamlit UI -> SMC Config -> Global Settings -> Risk Management to configure
-# Or update directly in database: UPDATE smc_simple_global_config SET fixed_stop_loss_pips = X WHERE is_active = TRUE
-# Keeping these for backwards compatibility - will be removed in future version
-# ---
-# FIXED_SL_TP_OVERRIDE_ENABLED = True
-# FIXED_STOP_LOSS_PIPS = 9             # Fixed SL in pips (when override enabled)
-# FIXED_TAKE_PROFIT_PIPS = 15          # Fixed TP in pips (when override enabled)
-
-# Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/forex")
+CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY', None)
 
-# API Keys
-# CLAUDE_API_KEY is provided via environment variable or Azure Key Vault
-CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY', None)  # None if not available
-
-# ================== MinIO Configuration ==================
-# Object storage for Claude vision analysis charts (30-day retention)
+# MinIO Object Storage (for Claude vision charts)
 MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'minio:9000')
 MINIO_ACCESS_KEY = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
 MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY', 'minioadmin123')
 MINIO_BUCKET_NAME = os.getenv('MINIO_BUCKET_NAME', 'claude-charts')
 MINIO_SECURE = os.getenv('MINIO_SECURE', 'false').lower() == 'true'
 MINIO_CHART_RETENTION_DAYS = int(os.getenv('MINIO_CHART_RETENTION_DAYS', '30'))
-MINIO_ENABLED = os.getenv('MINIO_ENABLED', 'true').lower() == 'true'  # Set False to use disk storage
+MINIO_ENABLED = os.getenv('MINIO_ENABLED', 'true').lower() == 'true'
 MINIO_PUBLIC_URL = os.getenv('MINIO_PUBLIC_URL', f"http://{MINIO_ENDPOINT}")
 
-# Extended PAIR_INFO in config.py to include JPY pairs
+# Order Execution API
+ORDER_API_URL = os.getenv('ORDER_API_URL', "http://fastapi-dev:8000/orders/place-order")
+API_SUBSCRIPTION_KEY = os.getenv('API_SUBSCRIPTION_KEY', "436abe054a074894a0517e5172f0e5b6")
 
-# Pair Information for Pip Calculation
+# =============================================================================
+# PAIR METADATA (Used by pip calculations and order mapping)
+# =============================================================================
+
 PAIR_INFO = {
     # Major USD pairs
     'CS.D.EURUSD.CEEM.IP': {'pair': 'EURUSD', 'pip_multiplier': 10000},
@@ -53,8 +44,7 @@ PAIR_INFO = {
     'CS.D.NZDUSD.MINI.IP': {'pair': 'NZDUSD', 'pip_multiplier': 10000},
     'CS.D.USDCHF.MINI.IP': {'pair': 'USDCHF', 'pip_multiplier': 10000},
     'CS.D.USDCAD.MINI.IP': {'pair': 'USDCAD', 'pip_multiplier': 10000},
-    
-    # JPY pairs - all use 100 pip multiplier
+    # JPY pairs (100 pip multiplier)
     'CS.D.USDJPY.MINI.IP': {'pair': 'USDJPY', 'pip_multiplier': 100},
     'CS.D.EURJPY.MINI.IP': {'pair': 'EURJPY', 'pip_multiplier': 100},
     'CS.D.GBPJPY.MINI.IP': {'pair': 'GBPJPY', 'pip_multiplier': 100},
@@ -62,114 +52,74 @@ PAIR_INFO = {
     'CS.D.CADJPY.MINI.IP': {'pair': 'CADJPY', 'pip_multiplier': 100},
     'CS.D.CHFJPY.MINI.IP': {'pair': 'CHFJPY', 'pip_multiplier': 100},
     'CS.D.NZDJPY.MINI.IP': {'pair': 'NZDJPY', 'pip_multiplier': 100},
-    
-    # Cross pairs (if you add them later)
+    # Cross pairs
     'CS.D.EURGBP.MINI.IP': {'pair': 'EURGBP', 'pip_multiplier': 10000},
     'CS.D.EURAUD.MINI.IP': {'pair': 'EURAUD', 'pip_multiplier': 10000},
     'CS.D.GBPAUD.MINI.IP': {'pair': 'GBPAUD', 'pip_multiplier': 10000}
 }
 
-# Updated EPIC_LIST to include JPY pairs (if you want to trade them)
 EPIC_LIST: List[str] = [
-    # Current pairs
     'CS.D.EURUSD.CEEM.IP',
-    'CS.D.GBPUSD.MINI.IP', 
+    'CS.D.GBPUSD.MINI.IP',
     'CS.D.USDJPY.MINI.IP',
     'CS.D.AUDUSD.MINI.IP',
     'CS.D.USDCHF.MINI.IP',
     'CS.D.USDCAD.MINI.IP',
     'CS.D.NZDUSD.MINI.IP',
-    
-    # Additional JPY pairs
     'CS.D.EURJPY.MINI.IP',
     'CS.D.AUDJPY.MINI.IP'
 ]
 
-# =============================================================================
-# DEPRECATED: SCANNER CORE SETTINGS - NOW IN DATABASE
-# =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config
-#
-# To access settings programmatically:
-#   from forex_scanner.services.scanner_config_service import get_scanner_config
-#   config = get_scanner_config()
-#   print(config.scan_interval)
-#
-# The following values are kept for reference only and are NOT used by the scanner.
-# -----------------------------------------------------------------------------
-# SCAN_INTERVAL = 120  # MIGRATED to database
-# MIN_CONFIDENCE = 0.40  # MIGRATED to database
-# DEFAULT_TIMEFRAME = '15m'  # MIGRATED to database
-# USE_1M_BASE_SYNTHESIS = True  # MIGRATED to database
-# SCAN_ALIGN_TO_BOUNDARIES = True  # MIGRATED to database
-# SCAN_BOUNDARY_OFFSET_SECONDS = 60  # MIGRATED to database
-# =============================================================================
+# Epic mapping (scanner epic -> trading API epic)
+EPIC_MAP = {
+    "CS.D.EURUSD.CEEM.IP": "EURUSD.1.MINI",
+    "CS.D.GBPUSD.MINI.IP": "GBPUSD.1.MINI",
+    "CS.D.USDJPY.MINI.IP": "USDJPY.100.MINI",
+    "CS.D.AUDUSD.MINI.IP": "AUDUSD.1.MINI",
+    "CS.D.USDCAD.MINI.IP": "USDCAD.1.MINI",
+    "CS.D.EURJPY.MINI.IP": "EURJPY.100.MINI",
+    "CS.D.AUDJPY.MINI.IP": "AUDJPY.100.MINI",
+    "CS.D.NZDUSD.MINI.IP": "NZDUSD.1.MINI",
+    "CS.D.USDCHF.MINI.IP": "USDCHF.1.MINI"
+}
 
-# Non-migrated scanner settings (still used from config.py)
-SPREAD_PIPS = 1.5   # default spread for BID/ASK adjustment
-USE_BID_ADJUSTMENT = False  # whether to adjust BID prices to MID
-#=============================================================================
-# =============================================================================
-# DEPRECATED: DATA FETCHER OPTIMIZATION - NOW IN DATABASE
-# =============================================================================
-# Migrated to strategy_config.scanner_global_config
-# Fallback defaults are in data_fetcher.py._load_fallback_config()
+REVERSE_EPIC_MAP = {v: k for k, v in EPIC_MAP.items()}
 
-# Combined Strategy Settings - REMOVED: Strategy was disabled and unused, cleaned up codebase
-  
-STRATEGY_WEIGHT_KAMA = 0.0             # KAMA strategy weight (if enabled)
-#STRATEGY_WEIGHT_BB_SUPERTREND = 0.20    # BB+SuperTrend weight (if enabled)
-#STRATEGY_WEIGHT_MOMENTUM_BIAS = 0.05    # Momentum Bias weight (if enabled)
-STRATEGY_WEIGHT_ZERO_LAG = 0.0         # Zero Lag EMA weight (if enabled)
-
-# Advanced Combination Rules - REMOVED: Combined strategy removed, these are no longer used
-
-# Strategy Selection for Enhanced Signal Processing Pipeline, name must match strategy name for it to be included in the
-
-# SignalProcessor Configuration
-USE_SIGNAL_PROCESSOR = True  # Enable SignalProcessor for Smart Money
+# Trading blacklist (scan but don't trade)
+TRADING_BLACKLIST = {}
 
 # =============================================================================
-# DEPRECATED: SMC CONFLICT FILTER SETTINGS - NOW IN DATABASE
+# STRATEGY ENABLED FLAGS
 # =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > SMC Conflict
-#
-# To access settings programmatically:
-#   from forex_scanner.services.scanner_config_service import get_scanner_config
-#   config = get_scanner_config()
-#   print(config.smc_conflict_filter_enabled)
-# -----------------------------------------------------------------------------
-# SMART_MONEY_READONLY_ENABLED = True  # MIGRATED to database
-# SMART_MONEY_ANALYSIS_TIMEOUT = 5.0   # MIGRATED to database
-# SMC_CONFLICT_FILTER_ENABLED = True   # MIGRATED to database
-# SMC_MIN_DIRECTIONAL_CONSENSUS = 0.3  # MIGRATED to database
-# SMC_REJECT_ORDER_FLOW_CONFLICT = True  # MIGRATED to database
-# SMC_REJECT_RANGING_STRUCTURE = True    # MIGRATED to database
-# SMC_MIN_STRUCTURE_SCORE = 0.5          # MIGRATED to database
-# =============================================================================
+# Only SMC_SIMPLE is active. Others are disabled/archived.
 
-# DEPRECATED: SELECTED_STRATEGIES hardcoded list replaced with dynamic detection
-# 
-# OLD PROBLEM: Required manual maintenance of strategy name variations:
-#   SELECTED_STRATEGIES = ['Combined', 'combined', 'COMBINED', 'EMA', 'ema', ...]
-#   - Broke when strategy names changed
-#   - Required updating for every new strategy
-#   - Case-sensitive exact matching only
-#
-# =============================================================================
-# STRATEGY ENABLED CHECK - SIMPLIFIED (Database-driven)
-# =============================================================================
-# Currently only SMC_SIMPLE is active. Other strategies are legacy/disabled.
-# Future strategies will be managed via database: scanner_global_config.enabled_strategies
+# Active strategy
+SMC_SIMPLE_STRATEGY = True
+
+# Disabled strategies (archived in forex_scanner/archive/disabled_strategies/)
+EMA_STRATEGY_ENABLED = False
+MACD_STRATEGY_ENABLED = False
+SCALPING_STRATEGY_ENABLED = False
+KAMA_STRATEGY = False
+SMC_STRATEGY = False
+SMC_STRUCTURE_STRATEGY = False
+ICHIMOKU_CLOUD_STRATEGY = False
+MEAN_REVERSION_STRATEGY = False
+RANGING_MARKET_STRATEGY = False
+VOLUME_PROFILE_STRATEGY = False
+EMA_DOUBLE_CONFIRMATION_STRATEGY = False
+SILVER_BULLET_STRATEGY = False
+BOLLINGER_SUPERTREND_STRATEGY = False
+ZERO_LAG_STRATEGY = False
+ZERO_LAG_STRATEGY_ENABLED = False
+USE_ZERO_LAG_STRATEGY = False
+MOMENTUM_STRATEGY = False
+MOMENTUM_STRATEGY_ENABLED = False
+USE_MOMENTUM_STRATEGY = False
+
 
 def get_enabled_strategy_flags():
-    """
-    Get enabled strategies from database, fallback to config flags.
-    Returns list of enabled strategy names.
-    """
-    # Try database first
+    """Get enabled strategies from database, fallback to config flags."""
     try:
         from forex_scanner.services.scanner_config_service import get_scanner_config
         config = get_scanner_config()
@@ -177,8 +127,6 @@ def get_enabled_strategy_flags():
             return config.enabled_strategies
     except Exception:
         pass
-
-    # Fallback: return currently active strategy
     return ['SMC_SIMPLE']
 
 
@@ -194,64 +142,18 @@ def get_enabled_strategies():
     """Get list of enabled strategy names."""
     return get_enabled_strategy_flags()
 
-# =============================================================================
-
-# =================================================================
-# DEPRECATED: DUPLICATE DETECTION CONFIGURATION - NOW IN DATABASE
-# =================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > Duplicate Detection
-# -----------------------------------------------------------------------------
-# ENABLE_DUPLICATE_CHECK = True  # MIGRATED to database
-# DUPLICATE_SENSITIVITY = 'smart'  # MIGRATED to database
-# SIGNAL_COOLDOWN_MINUTES = 15  # MIGRATED to database
-# =================================================================
 
 # =============================================================================
-# EMA200 DISTANCE VALIDATION
+# PAIR-SPECIFIC SETTINGS (USDCHF optimization)
 # =============================================================================
 
+USDCHF_BLOCKED_HOURS_UTC = [7, 8, 9, 10, 11, 17]
+USDCHF_PREFERRED_HOURS_UTC = [1, 4, 13, 14, 15, 22]
+USDCHF_MIN_STOP_LOSS_PIPS = 18
+USDCHF_SL_BUFFER_PIPS = 5
+ENABLE_USDCHF_HOUR_FILTER = True
+ENABLE_USDCHF_MIN_SL_FILTER = True
 
-
-# =============================================================================
-# DEPRECATED: ADX TREND STRENGTH FILTER - NOW IN DATABASE
-# =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > ADX Filter
-# -----------------------------------------------------------------------------
-# ADX_FILTER_ENABLED = False  # MIGRATED to database
-# ADX_FILTER_MODE = 'moderate'  # MIGRATED to database
-# ADX_PERIOD = 14  # MIGRATED to database
-# ADX settings migrated to database (scanner_global_config)
-# =============================================================================
-# USDCHF PAIR-SPECIFIC OPTIMIZATION (v2.6.0 - 2025-12-23)
-# =============================================================================
-# Analysis Results:
-# - Win rate: 40.7% (37 wins / 52 losses)
-# - Total P&L: -4,917 SEK
-# - Root cause: Stops too tight (9-13 pips), wrong trading hours, poor R:R
-# - 100% loss rate during 8-11 UTC (Asian close/London open transition)
-# - 83% loss rate at 17 UTC
-# - Best performance: 1, 4, 13-15 UTC (US session)
-
-# USDCHF Blocked Trading Hours (UTC) - 100% loss rate during these hours
-USDCHF_BLOCKED_HOURS_UTC = [7, 8, 9, 10, 11, 17]  # Asian close / London open overlap
-
-# USDCHF Preferred Trading Hours (UTC) - Best historical performance
-USDCHF_PREFERRED_HOURS_UTC = [1, 4, 13, 14, 15, 22]  # US session focus
-
-# USDCHF Minimum Stop Loss (pips) - Prevent stops that are too tight
-# Analysis showed 57% of losses from 8-13 pip stops (noise stopouts)
-USDCHF_MIN_STOP_LOSS_PIPS = 18  # Minimum 18 pips for USDCHF
-
-# USDCHF Stop Loss Buffer (additional pips added to calculated SL)
-USDCHF_SL_BUFFER_PIPS = 5  # Extra buffer for CHF volatility
-
-# Enable/disable USDCHF-specific filters
-ENABLE_USDCHF_HOUR_FILTER = True  # Block trading during bad hours
-ENABLE_USDCHF_MIN_SL_FILTER = True  # Enforce minimum stop loss
-
-# Pair-specific settings dictionary (extensible for other pairs)
 PAIR_SPECIFIC_SETTINGS = {
     'USDCHF': {
         'blocked_hours_utc': USDCHF_BLOCKED_HOURS_UTC,
@@ -261,25 +163,25 @@ PAIR_SPECIFIC_SETTINGS = {
         'enable_hour_filter': ENABLE_USDCHF_HOUR_FILTER,
         'enable_min_sl_filter': ENABLE_USDCHF_MIN_SL_FILTER,
     },
-    # Add other pair-specific settings here as needed
 }
+
 
 def get_pair_settings(pair: str) -> dict:
     """Get pair-specific settings, returns empty dict if none defined."""
-    # Normalize pair name (handle both 'USDCHF' and 'CS.D.USDCHF.MINI.IP' formats)
     pair_clean = pair.upper()
     for known_pair in PAIR_SPECIFIC_SETTINGS:
         if known_pair in pair_clean:
             return PAIR_SPECIFIC_SETTINGS[known_pair]
     return {}
 
+
 def is_pair_hour_blocked(pair: str, hour_utc: int) -> bool:
     """Check if trading is blocked for a pair at given UTC hour."""
     settings = get_pair_settings(pair)
     if not settings.get('enable_hour_filter', False):
         return False
-    blocked_hours = settings.get('blocked_hours_utc', [])
-    return hour_utc in blocked_hours
+    return hour_utc in settings.get('blocked_hours_utc', [])
+
 
 def get_pair_min_stop_loss(pair: str) -> float:
     """Get minimum stop loss for a pair, returns 0 if no minimum defined."""
@@ -288,334 +190,81 @@ def get_pair_min_stop_loss(pair: str) -> float:
         return 0.0
     return settings.get('min_stop_loss_pips', 0.0)
 
-# ==============================================
-# DATA QUALITY AND INTEGRITY SETTINGS
-# ==============================================
-
-# Enable data quality filtering (recommended for live trading)
-ENABLE_DATA_QUALITY_FILTERING = False
-
-# Maximum allowed price discrepancy for trading (in pips)
-MAX_PRICE_DISCREPANCY_PIPS = 10.0
-
-# Minimum quality score for trading (0.0 to 1.0)
-MIN_QUALITY_SCORE_FOR_TRADING = 0.5
-
-# Data quality monitoring settings
-DATA_QUALITY_MONITORING_ENABLED = True
-DATA_QUALITY_LOG_LEVEL = 'WARNING'  # INFO, WARNING, ERROR
-
-# Trading safety settings
-TRADING_SAFETY_CHECKS_ENABLED = True
-BLOCK_TRADING_ON_DATA_ISSUES = True  # Block trades when data quality is poor
-
-# Time-based trading controls (Weekend protection)
-ENABLE_TRADING_TIME_CONTROLS = True    # Enable/disable time-based trading controls
-TRADING_CUTOFF_TIME_UTC = 20           # No new trades after this hour UTC (20:00 UTC)
-# Note: Position closure happens in fastapi-dev container at 20:30 UTC on Fridays
-
-# ==============================================
-# STREAM VS API VALIDATION SETTINGS
-# ==============================================
-
-# Enable real-time stream validation against IG REST API
-ENABLE_STREAM_API_VALIDATION = True
-
-# Delay before validating completed candles (seconds)
-STREAM_VALIDATION_DELAY_SECONDS = 45
-
-# Validation frequency (validate every Nth candle to respect rate limits)  
-STREAM_VALIDATION_FREQUENCY = 3
-
-# Automatic price correction for critical discrepancies
-ENABLE_AUTOMATIC_PRICE_CORRECTION = True
-
-# Thresholds for validation discrepancy classification (in pips)
-STREAM_VALIDATION_THRESHOLDS = {
-    'MINOR': 1.0,      # 1 pip - acceptable variance
-    'MODERATE': 3.0,   # 3 pips - worth noting
-    'MAJOR': 10.0,     # 10 pips - significant issue  
-    'CRITICAL': 25.0   # 25+ pips - critical data integrity problem
-}
 
 # =============================================================================
-# CLI COMMAND CONFIGURATIONS
+# SCANNER CORE SETTINGS (Infrastructure - not strategy-specific)
 # =============================================================================
 
-# Dynamic configuration commands
-DYNAMIC_CONFIG_COMMANDS = {
-    'show_configs': {
-        'enabled': True,
-        'description': 'Show current dynamic configurations'
-    },
-    'config_performance': {
-        'enabled': True,
-        'description': 'Show configuration performance statistics'
-    },
-    'optimize_configs': {
-        'enabled': True,
-        'description': 'Optimize configurations for specific epics'
-    },
-    'market_analysis': {
-        'enabled': True,
-        'description': 'Show market condition analysis'
-    }
-}
+SPREAD_PIPS = 1.5
+USE_BID_ADJUSTMENT = False
+USE_SIGNAL_PROCESSOR = True
 
-# Enable EMA Strategy
-EMA_STRATEGY_ENABLED = False  # Legacy EMA crossover strategy (disabled - using SMC_SIMPLE)
-
-# Enable MACD Strategy
-MACD_STRATEGY_ENABLED = False  # Core MACD strategy (disabled - using SMC_SIMPLE)
-
-# Enable Scalping Strategy (Linda Raschke MACD 3-10-16)
-SCALPING_STRATEGY_ENABLED = False  # 🔥 Linda Raschke MACD 3-10-16 adaptive scalping
-
-# Enable KAMA Strategy
-KAMA_STRATEGY = False  # ENABLED - Phase 1 optimization complete, ready for testing
-
-# Enable SMC Strategies
-# NOTE: There are 3 SMC strategies:
-#   - SMC_STRATEGY (old): smc_strategy_fast.py - LEGACY, deprecated
-#   - SMC_STRUCTURE_STRATEGY: smc_structure_strategy.py - Complex 17+ filter approach
-#   - SMC_SIMPLE_STRATEGY (new): smc_simple_strategy.py - v1.0.0 Simple 3-tier EMA approach
-SMC_STRATEGY = False  # OLD SMC strategy (deprecated - use SMC_STRUCTURE_STRATEGY instead)
-SMC_STRUCTURE_STRATEGY = False  # Complex SMC Structure strategy (disabled - testing SMC_SIMPLE)
-SMC_SIMPLE_STRATEGY = True  # NEW SMC Simple strategy v1.0.0 (3-tier: 4H EMA → 1H swing → 15m entry)
-
-# Enable Ichimoku Cloud Strategy
-ICHIMOKU_CLOUD_STRATEGY = False  # Ichimoku Kinko Hyo strategy
-
-# Mean Reversion Strategy
-MEAN_REVERSION_STRATEGY = False  # Multi-oscillator mean reversion strategy
-
-# Strategy Configurations - Additional strategies
-RANGING_MARKET_STRATEGY = False  # Multi-oscillator ranging market strategy - Re-enabled, ADX filter removed from strategy
-
-# Volume Profile Strategy
-VOLUME_PROFILE_STRATEGY = False  # Institutional Volume-by-Price analysis strategy
-
-# EMA Double Confirmation Strategy
-EMA_DOUBLE_CONFIRMATION_STRATEGY = False  # DISABLED: Claude consistently rejects these signals
-
-# ICT Silver Bullet Strategy
-# Time-based SMC strategy trading during specific windows (3-4AM, 10-11AM, 2-3PM NY)
-# Looks for liquidity sweeps + FVG entries
-SILVER_BULLET_STRATEGY = False  # ICT Silver Bullet - disabled by default for testing
-
-# KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
-
+# Strategy weights (legacy - only SMC_SIMPLE is active)
+STRATEGY_WEIGHT_KAMA = 0.0
+STRATEGY_WEIGHT_ZERO_LAG = 0.0
 
 # =============================================================================
-# LOGGING CONFIGURATIONS
+# TRADING SETTINGS
 # =============================================================================
 
-# Dynamic configuration logging
-DYNAMIC_CONFIG_LOG_LEVEL = 'INFO'        # Log level for dynamic config messages
-LOG_CONFIG_SELECTIONS = True             # Log configuration selections
-LOG_PERFORMANCE_UPDATES = True           # Log performance updates
-LOG_MARKET_CONDITIONS = True             # Log market condition analysis
+AUTO_TRADING_ENABLED = True
+ENABLE_ORDER_EXECUTION = True
+
+# Position sizing (fixed at 1 mini lot)
+DEFAULT_POSITION_SIZE = 1.0
+FIXED_POSITION_SIZE = 1.0
+BASE_POSITION_SIZE = 1.0
+MIN_POSITION_SIZE = 0.01
+MAX_POSITION_SIZE = 1.0
+
+# Risk management
+ACCOUNT_BALANCE = 10000
+RISK_PER_TRADE = 0.02
+RISK_PER_TRADE_PERCENT = 0.02
+MAX_RISK_PER_TRADE = 30
+MAX_DAILY_TRADES = 10
+MAX_CONCURRENT_POSITIONS = 3
+MAX_SIGNALS_PER_HOUR = 10
+MAX_SIGNALS_PER_DAY = 20
+SIGNAL_COOLDOWN_MINUTES = 15
+
+# Order parameters
+DEFAULT_STOP_DISTANCE = 20
+DEFAULT_RISK_REWARD = 2.0
+PIP_VALUE = 1.0
+ORDER_LABEL_PREFIX = "ForexScanner"
+DYNAMIC_STOPS = True
+CONFIDENCE_BASED_SIZING = False
+
+# Order retry/circuit breaker
+ORDER_MAX_RETRIES = 3
+ORDER_RETRY_BASE_DELAY = 2.0
+ORDER_CONNECT_TIMEOUT = 10.0
+ORDER_READ_TIMEOUT = 45.0
+ORDER_CIRCUIT_BREAKER_THRESHOLD = 5
+ORDER_CIRCUIT_BREAKER_RECOVERY = 300.0
+
+# Claude rate limiting
+CLAUDE_MAX_REQUESTS_PER_MINUTE = 50
+CLAUDE_MAX_REQUESTS_PER_DAY = 1000
+CLAUDE_MIN_CALL_INTERVAL = 1.2
 
 # =============================================================================
-# INTEGRATION SETTINGS
+# TIMEZONE AND SCHEDULING
 # =============================================================================
 
-# Scanner integration
-SCANNER_USE_DYNAMIC_EMA = True           # Use dynamic EMA in scanner
-SCANNER_CONFIG_REFRESH_ON_SCAN = False   # Refresh config on each scan (expensive)
+USER_TIMEZONE = 'Europe/Stockholm'
+DATABASE_TIMEZONE = 'UTC'
+MARKET_OPEN_HOUR_LOCAL = 8
+MARKET_CLOSE_HOUR_LOCAL = 22
+TRADING_CUTOFF_TIME_UTC = 20
+ENABLE_TRADING_TIME_CONTROLS = True
 
-# Backtesting integration
-BACKTEST_USE_DYNAMIC_EMA = False         # Use dynamic EMA in backtesting (experimental)
-BACKTEST_COMPARE_CONFIGS = True          # Enable configuration comparison in backtests
+SCHEDULED_SCAN_INTERVAL_MINUTES = 1
+HEARTBEAT_INTERVAL_SECONDS = 30
+HEARTBEAT_DB_CHECK = True
 
-# Web interface integration
-WEB_INTERFACE_SHOW_DYNAMIC_STATUS = True # Show dynamic config status in web interface
-WEB_INTERFACE_ALLOW_CONFIG_OVERRIDE = True # Allow manual config override in web interface
-
-# Scalping Strategy Configuration moved to configdata/strategies/config_scalping_strategy.py
-
-# Multi-Timeframe Strategy Mapping
-STRATEGY_TIMEFRAME_MAP = {
-    '1m': ['scalping', 'aggressive'],
-    '5m': ['scalping', 'default', 'aggressive'],
-    '15m': ['default', 'conservative'],
-    '1h': ['swing', 'conservative'],
-    '4h': ['swing', 'crypto'],
-    '1d': ['swing', 'crypto']
-}
-
-# Dynamic Risk Management
-RISK_MANAGEMENT_CONFIG = {
-    'scalping': {
-        'max_risk_per_trade': 0.5,  # 0.5% per trade
-        'stop_loss_pips': 8,
-        'take_profit_pips': 12,
-        'max_trades_per_hour': 3
-    },
-    'swing': {
-        'max_risk_per_trade': 2.0,  # 2% per trade
-        'stop_loss_pips': 30,
-        'take_profit_pips': 60,
-        'max_trades_per_day': 2
-    },
-    'conservative': {
-        'max_risk_per_trade': 1.0,  # 1% per trade
-        'stop_loss_pips': 20,
-        'take_profit_pips': 40,
-        'max_trades_per_day': 3
-    }
-}
-
-# Market Condition Adaptive Settings
-MARKET_CONDITION_CONFIG = {
-    'trending': {
-        'ema_config': 'aggressive',
-        'confidence_boost': 0.1,
-        'volume_multiplier': 1.2
-    },
-    'ranging': {
-        'ema_config': 'conservative',
-        'confidence_penalty': 0.05,
-        'require_strong_breakout': True
-    },
-    'high_volatility': {
-        'ema_config': 'conservative',
-        'min_confidence': 0.8,
-        'reduce_position_size': 0.5
-    },
-    'low_volatility': {
-        'ema_config': 'aggressive',
-        'min_confidence': 0.6,
-        'increase_position_size': 1.2
-    }
-}
-
-# Time-based Strategy Selection
-TIME_BASED_CONFIG = {
-    'london_session': {
-        'preferred_pairs': ['GBPUSD', 'EURGBP', 'GBPJPY'],
-        'strategy_boost': 'aggressive',
-        'volume_threshold_multiplier': 1.5
-    },
-    'ny_session': {
-        'preferred_pairs': ['EURUSD', 'USDCAD', 'USDJPY'],
-        'strategy_boost': 'default',
-        'volume_threshold_multiplier': 1.3
-    },
-    'asian_session': {
-        'preferred_pairs': ['USDJPY', 'AUDUSD', 'NZDUSD'],
-        'strategy_boost': 'conservative',
-        'volume_threshold_multiplier': 0.8
-    },
-    'overlap_sessions': {
-        'strategy_boost': 'aggressive',
-        'volume_threshold_multiplier': 2.0,
-        'confidence_boost': 0.15
-    }
-}
-
-# Performance Optimization Settings
-PERFORMANCE_CONFIG = {
-    'enable_parallel_processing': True,
-    'max_worker_threads': 4,
-    'cache_indicators': True,
-    'cache_duration_minutes': 5,
-    'batch_process_signals': True,
-    'lazy_load_historical_data': True
-}
-
-# Advanced Filtering
-ADVANCED_FILTERING = {
-    'bollinger_bands': {
-        'enabled': True,
-        'period': 14,                    # ✅ UPDATED: was 20
-        'std_dev': 1.8,                  # ✅ UPDATED: was 2
-        'extremes_only': False,
-        'middle_band_filter': True
-    },
-    'atr_filter': {
-        'enabled': True,
-        'period': 8,                     # ✅ UPDATED: was 14 (to match Supertrend period)
-        'min_atr_multiplier': 0.5,
-        'max_atr_multiplier': 3.0
-    },
-    'rsi_confirmation': {
-        'enabled': False,
-        'period': 14,
-        'overbought': 70,
-        'oversold': 30,
-        'require_divergence': False
-    }
-}
-
-MIN_BARS_FOR_SIGNAL = 50  # Minimum bars needed for signal generation
-
-# Signal Quality Settings
-ALLOW_TRANSITION_SIGNALS = True # Allow signals during trend transitions
-REQUIRE_VOLUME_CONFIRMATION = False  # Enable/disable volume filter
-MIN_VOLUME_RATIO = 0.5         # Minimum volume (110% of 20-period average)
-REQUIRE_NEW_CROSSOVER = False
-ENABLE_BB_FILTER = False
-ENABLE_BB_EXTREMES_FILTER = False          # Enable BB extremes filter
-BB_DISTANCE_THRESHOLD_PCT = 0.01           # Distance threshold (0.1% = very close)
-ENABLE_CANDLE_COLOR_FILTER = False
-
-# Enhanced EMA Detection Settings
-USE_ENHANCED_EMA_LOGIC = True     # Use previous proven logic
-EMA_EPSILON = 1e-4                # Noise filtering buffer (0.0001)
-REQUIRE_PRICE_VS_EMA21 = False     # Require price relationship with EMA 21
-
-# Data Fetching
-LOOKBACK_HOURS_5M = 1000
-LOOKBACK_HOURS_15M = 1000 
-LOOKBACK_HOURS_1H = 200
-
-# =============================================================================
-# DEPRECATED: LEGACY CLAUDE ANALYSIS SWITCHES - REMOVED
-# =============================================================================
-# These redundant switches have been consolidated into the database.
-# See: Streamlit > Settings > Scanner Config > Claude AI
-# Use: require_claude_approval, claude_vision_enabled, etc.
-# -----------------------------------------------------------------------------
-# ENABLE_CLAUDE_ANALYSIS = False  # REMOVED - use require_claude_approval
-# CLAUDE_ANALYSIS_ENABLED = False  # REMOVED - duplicate
-# USE_CLAUDE_ANALYSIS = False  # REMOVED - duplicate
-# CLAUDE_ANALYSIS_MODE = "disabled"  # REMOVED - use database settings
-# =============================================================================
-
-ENABLE_ORDER_EXECUTION = True  # Set to True when ready for live trading
-MAX_SIGNALS_PER_HOUR = 10  # Rate limiting
-
-# =============================================================================
-# DEPRECATED: RISK MANAGEMENT - NOW IN DATABASE
-# =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > Risk Management
-# -----------------------------------------------------------------------------
-# POSITION_SIZE_PERCENT = 1.0  # MIGRATED to database
-# STOP_LOSS_PIPS = 5  # MIGRATED to database
-# TAKE_PROFIT_PIPS = 15  # MIGRATED to database
-# MAX_OPEN_POSITIONS = 3  # MIGRATED to database
-# =============================================================================
-
-# Timezone Settings (NOT migrated - infrastructure setting)
-USER_TIMEZONE = 'Europe/Stockholm'  # Your local timezone
-DATABASE_TIMEZONE = 'UTC'           # Database timezone (IG data is in UTC)
-MARKET_OPEN_HOUR_LOCAL = 8          # Local time
-MARKET_CLOSE_HOUR_LOCAL = 22        # Local time
-
-# =============================================================================
-# DEPRECATED: TRADING HOURS - NOW IN DATABASE
-# =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > Trading Hours
-# -----------------------------------------------------------------------------
-# TRADING_HOURS = {...}  # MIGRATED: trading_start_hour, trading_end_hour
-# RESPECT_MARKET_HOURS = False  # MIGRATED to database
-# WEEKEND_SCANNING = False  # MIGRATED to database
-# =============================================================================
-
-# LEGACY: Kept for backward compatibility during transition
+# Legacy trading hours (kept for backward compatibility)
 TRADING_HOURS_LEGACY = {
     'start_hour': 0,
     'end_hour': 23,
@@ -623,459 +272,89 @@ TRADING_HOURS_LEGACY = {
     'enable_24_5': True
 }
 
-# Notification Settings
-NOTIFICATIONS = {
-    'console': True,
-    'file': True,
-    'email': False,
-    'webhook': False
-}
-
-# Logging
-LOG_LEVEL = 'INFO'
-LOG_FILE = 'forex_scanner.log'
-
-# Backtesting
-DEFAULT_BACKTEST_DAYS = 30
-BACKTEST_LOOKBACK_BARS = 1000
-
-# Performance Thresholds
-VOLUME_SPIKE_THRESHOLD = 1.0  # 2x average volume
-CONSOLIDATION_THRESHOLD_PIPS = 5 # 20 original
-REJECTION_WICK_THRESHOLD = 0.1  # 50% of candle range
-
 # =============================================================================
-# MARKET INTELLIGENCE CONFIGURATION
+# SIGNAL QUALITY SETTINGS
 # =============================================================================
 
-# Import all market intelligence configurations from dedicated config module
-from configdata.market_intelligence_config import *
+MIN_BARS_FOR_SIGNAL = 50
+ALLOW_TRANSITION_SIGNALS = True
+REQUIRE_VOLUME_CONFIRMATION = False
+MIN_VOLUME_RATIO = 0.5
+REQUIRE_NEW_CROSSOVER = False
+ENABLE_BB_FILTER = False
+ENABLE_BB_EXTREMES_FILTER = False
+BB_DISTANCE_THRESHOLD_PCT = 0.01
+ENABLE_CANDLE_COLOR_FILTER = False
 
-# =============================================================================
-# ORDER EXECUTION CONFIGURATION
-# =============================================================================
-
-# Enable/disable automatic order execution
-AUTO_TRADING_ENABLED = True  # Set to True to enable live trading #
-SIGNAL_COOLDOWN_MINUTES = 15  
-# Position sizing - ALWAYS use 1.0 for live trading
-DEFAULT_POSITION_SIZE = 1.0  # Fixed position size: 1 mini lot
-ACCOUNT_BALANCE = 10000      # Account balance for risk calculation
-RISK_PER_TRADE = 0.02        # 2% risk per trade
-MAX_POSITION_SIZE = 1.0      # Maximum position size
-
-# Order parameters
-DEFAULT_STOP_DISTANCE = 20   # Stop loss distance in pips
-DEFAULT_RISK_REWARD = 2.0    # Risk:reward ratio for take profit
-
-# Your existing API configuration
-ORDER_API_URL = "http://fastapi-dev:8000/orders/place-order"  # Update if hosted elsewhere
-API_SUBSCRIPTION_KEY = "436abe054a074894a0517e5172f0e5b6"
-
-# Epic mapping (internal scanner epic -> external API epic) ← FIXED COMMENT
-EPIC_MAP = {
-    "CS.D.EURUSD.CEEM.IP": "EURUSD.1.MINI",
-    "CS.D.GBPUSD.MINI.IP": "GBPUSD.1.MINI",
-    "CS.D.USDJPY.MINI.IP": "USDJPY.100.MINI",
-    "CS.D.AUDUSD.MINI.IP": "AUDUSD.1.MINI",
-    "CS.D.USDCAD.MINI.IP": "USDCAD.1.MINI",
-    "CS.D.EURJPY.MINI.IP": "EURJPY.100.MINI",
-    "CS.D.AUDJPY.MINI.IP": "AUDJPY.100.MINI",
-    "CS.D.NZDUSD.MINI.IP": "NZDUSD.1.MINI",
-    "CS.D.USDCHF.MINI.IP": "USDCHF.1.MINI"
-}
-
-# Trading blacklist - epics to scan but NOT trade
-TRADING_BLACKLIST = {
-    #"CS.D.EURUSD.CEEM.IP": "No trading permissions for FX_NOR exchange",
-    # Add other blocked epics here as needed
-}
-
-# FIXED: Create correct reverse mapping for order executor
-REVERSE_EPIC_MAP = {}
-for scanner_epic, api_epic in EPIC_MAP.items():  # ← FIXED variable names
-    REVERSE_EPIC_MAP[api_epic] = scanner_epic
-
-
-
-# Trading parameters
-DEFAULT_RISK_REWARD = 2.0          # 2:1 risk/reward ratio
-DEFAULT_STOP_DISTANCE = 20         # Default stop loss in pips
-DEFAULT_POSITION_SIZE = 1.0       # None = use broker default, or set specific size
-DYNAMIC_STOPS = True               # Adjust stops based on signal confidence
-
-# Risk management
-MAX_DAILY_TRADES = 10              # Maximum trades per day
-MAX_CONCURRENT_POSITIONS = 3       # Maximum open positions
-
-# Order labeling
-ORDER_LABEL_PREFIX = "ForexScanner"  # Prefix for order labels
-
-# =============================================================================
-# POSITION SIZING & RISK MANAGEMENT
-# =============================================================================
-
-# POSITION SIZING METHOD (choose one)
-# ------------------------------------
-
-# Method 1: Fixed Position Size (simplest) - ALWAYS use 1.0
-FIXED_POSITION_SIZE = 1.0   # Fixed: 1 mini lot
-# Note: DEFAULT_POSITION_SIZE is defined above at line 649 as 1.0
-
-# Method 2: Risk-Based Position Sizing (RECOMMENDED)
-RISK_PER_TRADE_PERCENT = 0.02  # Risk 2% of account per trade
-ACCOUNT_BALANCE = 10000        # Your account balance in account currency
-PIP_VALUE = 1.0               # Value per pip (depends on broker/pair)
-
-# Method 3: Confidence-Based Position Sizing
-CONFIDENCE_BASED_SIZING = False  # DISABLED - always use fixed 1.0
-BASE_POSITION_SIZE = 1.0         # Base size: 1 mini lot
-
-# STOP LOSS MANAGEMENT
-# --------------------
-DYNAMIC_STOPS = True           # Adjust stops based on signal confidence
-DEFAULT_STOP_DISTANCE = 20     # Default stop in pips
-
-# POSITION LIMITS
-# ---------------
-MIN_POSITION_SIZE = 0.01       # Minimum position size
-MAX_POSITION_SIZE = 1.0        # Maximum position size
-MAX_RISK_PER_TRADE = 30       # Maximum $ risk per trade
-MAX_DAILY_TRADES = 10          # Maximum trades per day
-MAX_CONCURRENT_POSITIONS = 3   # Maximum open positions
-
-# SIGNAL REQUIREMENTS
-# -------------------
-
-# =============================================================================
-# DIRECTION MAPPING (automatic)
-# =============================================================================
-# Scanner Signal → Trading Direction
-# 'BULL' signal → 'BUY' order
-# 'BEAR' signal → 'SELL' order
-
-# Docker and Scheduling Configuration
-SCHEDULED_SCAN_INTERVAL_MINUTES = 1    # How often to scan (minutes)
-HEARTBEAT_INTERVAL_SECONDS = 30        # Heartbeat frequency (seconds)
-
-# Alternative database check for heartbeat
-HEARTBEAT_DB_CHECK = True              # Enable DB health check in heartbeat
-
-# Enhanced Trading Configuration
-# MIN_CONFIDENCE_FOR_TRADING removed - use MIN_CONFIDENCE_FOR_ORDERS instead
-# NOTE: Claude settings moved to database - see Scanner Config > Claude AI
-MAX_SIGNALS_PER_DAY = 20           # Daily signal limit
-MIN_VOLUME_RATIO = 1.2             # Minimum volume confirmation
-
-# DEPRECATED: These Claude settings are now in database
-# CLAUDE_MIN_CONFIDENCE_THRESHOLD = 0.8  # MIGRATED - use min_claude_quality_score
-# CLAUDE_ANALYSIS_MODE = 'strategic_minimal'  # REMOVED
-# CLAUDE_STRATEGIC_FOCUS = 'learning'  # REMOVED
-
-# Trading Hours (DEPRECATED - now in database)
-# RESPECT_TRADING_HOURS = False  # MIGRATED to database
-# TRADING_START_HOUR = 0  # MIGRATED to database
-# TRADING_END_HOUR = 23  # MIGRATED to database
-
-# CLAUDE_ANALYSIS_DIR - REMOVED (results now stored in database/MinIO)
-
-# =============================================================================
-# DEPRECATED: MULTI-TIMEFRAME ANALYSIS - NOW IN DATABASE
-# =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > Core Settings
-# -----------------------------------------------------------------------------
-# ENABLE_MULTI_TIMEFRAME_ANALYSIS = False  # MIGRATED to database
-# MIN_CONFLUENCE_SCORE = 0.3  # MIGRATED to database
-
-# DEPRECATED: Unused MTF settings - never referenced in code
-# CONFLUENCE_TIMEFRAMES = ['5m', '15m', '1h']  # UNUSED - never referenced
-# CONFLUENCE_WEIGHT_IN_CONFIDENCE = 0.2  # UNUSED - never referenced
-# TIMEFRAME_WEIGHTS = {...}  # UNUSED - never referenced
-# =============================================================================
-
-# =============================================================================
-# DEPRECATED: ALERT DEDUPLICATION - NOW IN DATABASE
-# =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > Duplicate Detection
-# -----------------------------------------------------------------------------
-# ALERT_COOLDOWN_MINUTES = 5  # MIGRATED to database
-# STRATEGY_COOLDOWN_MINUTES = 3  # MIGRATED to database
-# GLOBAL_COOLDOWN_SECONDS = 30  # MIGRATED to database
-# MAX_ALERTS_PER_HOUR = 50  # MIGRATED to database
-# MAX_ALERTS_PER_EPIC_HOUR = 6  # MIGRATED to database
-# ENABLE_ALERT_DEDUPLICATION = True  # MIGRATED to database
-# TRADE_COOLDOWN_ENABLED = True  # MIGRATED to database
-# TRADE_COOLDOWN_MINUTES = 30  # MIGRATED to database
-# SIGNAL_HASH_CACHE_EXPIRY_MINUTES = 15  # MIGRATED to database
-# MAX_SIGNAL_HASH_CACHE_SIZE = 1000  # MIGRATED to database
-# ENABLE_SIGNAL_HASH_CHECK = False  # MIGRATED to database
-# ENABLE_TIME_BASED_HASH_COMPONENTS = False  # MIGRATED to database
-# USE_DATABASE_DEDUP_CHECK = True  # MIGRATED to database
-# DATABASE_DEDUP_WINDOW_MINUTES = 15  # MIGRATED to database
-
-# DEPRECATED: Unused deduplication settings - never referenced in code
-# PRICE_SIMILARITY_THRESHOLD = 0.0002  # UNUSED - never referenced
-# CONFIDENCE_SIMILARITY_THRESHOLD = 0.05  # UNUSED - never referenced
-# SIGNAL_HASH_CACHE_SIZE = 1000  # UNUSED - superseded by MAX_SIGNAL_HASH_CACHE_SIZE
-# DEDUPLICATION_DEBUG_MODE = False  # UNUSED - never referenced
-# DEDUPLICATION_CLEANUP_INTERVAL = 100  # UNUSED - never referenced
-# ENABLE_PRICE_SIMILARITY_CHECK = True  # UNUSED - never referenced
-# ENABLE_STRATEGY_COOLDOWNS = True  # UNUSED - never referenced
-# ENABLE_ENHANCED_HASH_DETECTION = True  # UNUSED - never referenced
-# DEDUPLICATION_LOOKBACK_HOURS = 2  # UNUSED - never referenced
-# DEDUPLICATION_CACHE_CLEANUP_HOURS = 4  # UNUSED - never referenced
-# INCLUDE_INDICATORS_IN_HASH = True  # UNUSED - never referenced
-# PRICE_DECIMAL_PRECISION = 5  # UNUSED - never referenced
-# CONFIDENCE_DECIMAL_PRECISION = 4  # UNUSED - never referenced
-
-# DEPRECATED: Preset dictionaries - never loaded or used
-# DEDUPLICATION_STRICT = {...}  # UNUSED - never referenced
-# DEDUPLICATION_STANDARD = {...}  # UNUSED - never referenced
-# DEDUPLICATION_RELAXED = {...}  # UNUSED - never referenced
-# DEDUPLICATION_PRESET = 'standard'  # UNUSED - never referenced
-# =============================================================================
-
-# DEPRECATED: Claude Analysis Settings moved to database
-# See: Streamlit > Settings > Scanner Config > Claude AI tab
-# Database column: min_claude_quality_score (default: 6)
-# CLAUDE_MIN_SCORE_THRESHOLD = 6  # DEPRECATED - use min_claude_quality_score in database
-
-# Add these configuration settings to your config.py file
-
-# ===== ENHANCED STRATEGY SYSTEM CONFIGURATION =====
-
-# Enhanced Signal Detection Configuration
-#SIGNAL_DETECTION_MODE = 'ensamble'  # 'single_best', 'combined', 'ensemble', 'adaptive'
-
-# Ensemble Strategy Configuration
-#ENSEMBLE_AGGREGATION_METHOD = 'weighted_mean'  # 'weighted_mean', 'majority_vote', 'confidence_weighted', 'adaptive'
-#ENSEMBLE_MIN_STRATEGIES = 2
-#ENSEMBLE_CONSENSUS_THRESHOLD = 0.6
-#ENSEMBLE_MIN_CONFIDENCE = 0.65
-
-# Ensemble Strategy Weights (all strategies included)
-#ENSEMBLE_WEIGHT_EMA = 0.25
-#ENSEMBLE_WEIGHT_SCALPING = 0.2
-#ENSEMBLE_WEIGHT_KAMA = 0.15
-#ENSEMBLE_WEIGHT_BB_SUPERTREND = 0.15
-
-# KAMA Strategy Configuration moved to configdata/strategies/config_kama_strategy.py
-
-
-
-
-
-
-
-
-# ===== BB SUPERTREND STRATEGY CONFIGURATION =====
-BOLLINGER_SUPERTREND_STRATEGY = False
-
-# BB SuperTrend Strategy Configuration moved to configdata/strategies/config_bb_supertrend_strategy.py
-
-
-
-# Market Strategy Selector Configuration
-MARKET_STRATEGY_HISTORICAL_WEIGHT = 0.25
-MARKET_STRATEGY_PERFORMANCE_DECAY = 0.1
-
-# Adaptive Detection Thresholds
-ADAPTIVE_HIGH_VOLATILITY_THRESHOLD = 1.5
-ADAPTIVE_LOW_VOLATILITY_THRESHOLD = 0.5
-ADAPTIVE_TREND_STRENGTH_THRESHOLD = 0.7
-
-MIN_MARKET_EFFICIENCY = 0.02  # Was 0.1 - much more permissive  
-
-EMA_STRICT_ALIGNMENT = False  # Don't require perfect alignment
-EMERGENCY_DEBUG_MODE = True  # Enable emergency signal generation
-BACKTEST_MODE_RELAXED = True  # Boost signals in backtesting
-
-# =============================================================================
-# EMA 200 TREND FILTER SETTINGS
-# =============================================================================
-
-# Always ensure EMA 200 is calculated for trend filtering (regardless of dynamic config)
+# EMA settings
+USE_ENHANCED_EMA_LOGIC = True
+EMA_EPSILON = 1e-4
+REQUIRE_PRICE_VS_EMA21 = False
 ALWAYS_INCLUDE_EMA200 = True
-
-# Enable EMA 200 trend filter in TradeValidator
 ENABLE_EMA200_TREND_FILTER = True
 
-# Explanation:
-# - ema_trend: Dynamic period based on strategy config (50, 200, 21, etc.)
-# - ema_200: Always EMA 200 period for consistent trend filtering
-# - This separation allows strategies to use optimal dynamic periods
-#   while maintaining consistent trend-based filtering
+# Performance thresholds
+VOLUME_SPIKE_THRESHOLD = 1.0
+CONSOLIDATION_THRESHOLD_PIPS = 5
+REJECTION_WICK_THRESHOLD = 0.1
 
+# Data fetching lookbacks
+LOOKBACK_HOURS_5M = 1000
+LOOKBACK_HOURS_15M = 1000
+LOOKBACK_HOURS_1H = 200
 
-# ADD these settings to config.py
+# =============================================================================
+# DATA QUALITY AND VALIDATION
+# =============================================================================
 
-# Market Closure and Timestamp Validation Settings
-# These settings control how the system handles market closure and timestamp issues
+ENABLE_DATA_QUALITY_FILTERING = False
+MAX_PRICE_DISCREPANCY_PIPS = 10.0
+MIN_QUALITY_SCORE_FOR_TRADING = 0.5
+DATA_QUALITY_MONITORING_ENABLED = True
+DATA_QUALITY_LOG_LEVEL = 'WARNING'
+TRADING_SAFETY_CHECKS_ENABLED = True
+BLOCK_TRADING_ON_DATA_ISSUES = True
 
-# Market Closure Behavior
-MARKET_CLOSURE_SETTINGS = {
-    'save_signals_when_closed': True,     # Save signals even when market is closed
-    'execute_signals_when_closed': False, # Don't execute trades when market is closed
-    'log_market_status': True,           # Log market open/close status
-    'queue_signals_for_open': True,      # Queue signals for execution when market opens
+# Stream validation
+ENABLE_STREAM_API_VALIDATION = True
+STREAM_VALIDATION_DELAY_SECONDS = 45
+STREAM_VALIDATION_FREQUENCY = 3
+ENABLE_AUTOMATIC_PRICE_CORRECTION = True
+STREAM_VALIDATION_THRESHOLDS = {
+    'MINOR': 1.0,
+    'MODERATE': 3.0,
+    'MAJOR': 10.0,
+    'CRITICAL': 25.0
 }
 
-# Timestamp Validation Settings
-TIMESTAMP_VALIDATION_SETTINGS = {
-    'fix_epoch_timestamps': True,        # Convert 1970 timestamps to None
-    'log_timestamp_issues': True,        # Log but don't reject on timestamp issues
-    'allow_none_timestamps': True,       # Allow signals with None timestamps
-    'validate_against_current_time': True, # Use current time for market validation
-    'reject_future_timestamps': False,   # Allow future timestamps (clock skew)
-}
-
-# Forex Market Hours (UTC)
-FOREX_MARKET_HOURS = {
-    'open_day': 0,        # Monday (0=Monday, 6=Sunday)
-    'open_hour': 22,      # 22:00 UTC Sunday (actually Monday in some timezones)
-    'close_day': 4,       # Friday
-    'close_hour': 22,     # 22:00 UTC Friday
-    'timezone': 'UTC',    # Reference timezone
-}
-
-# Alert Processing Configuration
-ALERT_PROCESSING = {
-    'process_during_closure': True,       # Process and save alerts during market closure
-    'mark_closure_status': True,         # Mark alerts with market status
-    'enhanced_logging': True,            # Enhanced logging for debugging
-    'separate_closure_queue': False,     # Don't use separate queue (save to main table)
-}
-
-# Backward Compatibility
-# These ensure existing code continues to work
-SAVE_ALERTS_WHEN_MARKET_CLOSED = MARKET_CLOSURE_SETTINGS['save_signals_when_closed']
-LOG_TIMESTAMP_CONVERSIONS = TIMESTAMP_VALIDATION_SETTINGS['log_timestamp_issues']
-VALIDATE_MARKET_HOURS = True  # Keep existing behavior but improve implementation
-
-# Add this function to config.py for easy access
-def is_market_open_now() -> bool:
-    """
-    Check if forex market is currently open based on UTC time
-    
-    Returns:
-        bool: True if market is open, False if closed
-    """
-    from datetime import datetime, timezone
-    
-    current_utc = datetime.now(timezone.utc)
-    weekday = current_utc.weekday()  # 0=Monday, 6=Sunday
-    hour = current_utc.hour
-    
-    # Market is closed from Friday 22:00 UTC to Sunday 22:00 UTC
-    if weekday == 5:  # Saturday
-        return False
-    elif weekday == 6:  # Sunday
-        return hour >= 22  # Open after 22:00 UTC
-    elif weekday == 4:  # Friday
-        return hour < 22   # Closed after 22:00 UTC
-    
-    # Market is open Monday-Thursday and Friday before 22:00, Sunday after 22:00
-    return True
-
-def get_market_status_info() -> dict:
-    """
-    Get detailed market status information
-    
-    Returns:
-        dict: Market status details
-    """
-    from datetime import datetime, timezone
-    
-    current_utc = datetime.now(timezone.utc)
-    is_open = is_market_open_now()
-    
-    weekday_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    
-    return {
-        'is_open': is_open,
-        'current_time_utc': current_utc.strftime('%Y-%m-%d %H:%M:%S UTC'),
-        'weekday': weekday_names[current_utc.weekday()],
-        'hour_utc': current_utc.hour,
-        'status': 'OPEN' if is_open else 'CLOSED',
-        'settings': MARKET_CLOSURE_SETTINGS
-    }
-
-
-# Support/Resistance Validation
-ENABLE_SR_VALIDATION = True
-SR_LEFT_BARS = 15
-SR_RIGHT_BARS = 15
-SR_VOLUME_THRESHOLD = 20.0
-SR_LEVEL_TOLERANCE_PIPS = 3.0
-SR_MIN_LEVEL_DISTANCE_PIPS = 20.0
-SR_ANALYSIS_TIMEFRAME = '15m'
-SR_LOOKBACK_HOURS = 72
-MIN_BARS_FOR_SR_ANALYSIS = 100
-SR_CACHE_DURATION_MINUTES = 10
-
-# Enhanced S/R Validation with Level Flip Detection
-ENABLE_ENHANCED_SR_VALIDATION = True  # Use enhanced validator with SMC integration
-SR_RECENT_FLIP_BARS = 50             # Consider flips within last 50 bars as "recent"
-SR_MIN_FLIP_STRENGTH = 0.6           # Minimum strength to consider a level flip significant
-
-
-
-
 # =============================================================================
-# DEPRECATED: LEGACY ENHANCED CLAUDE CONFIGURATION - REMOVED
-# =============================================================================
-# This entire section (~240 lines) has been removed as it was experimental/unused.
-# Claude trade validation is now controlled via database settings.
-# See: Streamlit > Settings > Scanner Config > Claude AI
-#
-# Key active settings now in database:
-#   - require_claude_approval: Master switch for Claude validation
-#   - claude_fail_secure: Fail-secure mode (block on errors)
-#   - claude_model: Model selection (haiku/sonnet/opus)
-#   - min_claude_quality_score: Minimum approval score (1-10)
-#   - claude_vision_enabled: Enable chart-based analysis
-#   - claude_chart_timeframes: Timeframes for chart generation
-#   - claude_vision_strategies: Strategies that use vision
-#
-# To access programmatically:
-#   from forex_scanner.services.scanner_config_service import get_scanner_config
-#   config = get_scanner_config()
-#   if config.require_claude_approval:
-#       # Use Claude validation
+# LOGGING CONFIGURATION
 # =============================================================================
 
-# =============================================================================
-# ENHANCED LOGGING CONFIGURATION
-# =============================================================================
-
-# Logging levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_LEVEL = 'INFO'
-
-# Log directory (relative to project root)
+LOG_FILE = 'forex_scanner.log'
 LOG_DIR = 'logs'
-
-# Log file retention (days)
 LOG_RETENTION_DAYS = 30
-
-# Enable separate log files for different components
-ENABLE_SIGNAL_LOGGING = True      # Separate file for signal-related logs
-ENABLE_ERROR_LOGGING = True       # Separate file for errors only
-ENABLE_PERFORMANCE_LOGGING = True # Separate file for performance metrics
-ENABLE_DEBUG_LOGGING = True       # Detailed debug file
-
-# Log file size limits
-MAX_LOG_FILE_SIZE = 50 * 1024 * 1024  # 50MB for debug logs
-MAX_DEBUG_FILES = 3                    # Keep 3 rotating debug files
-
-# Console logging (what appears in Docker logs)
+LOG_TIMEZONE = 'Europe/Stockholm'
 CONSOLE_LOG_LEVEL = 'INFO'
-
-# Detailed logging format (includes function names and line numbers)
 DETAILED_LOGGING = True
+COMPRESS_OLD_LOGS = True
 
-# Log filters - keywords that will be captured in specific log files
+MAX_LOG_FILE_SIZE = 50 * 1024 * 1024
+MAX_DEBUG_FILES = 3
+
+ENABLE_SIGNAL_LOGGING = True
+ENABLE_ERROR_LOGGING = True
+ENABLE_PERFORMANCE_LOGGING = True
+ENABLE_DEBUG_LOGGING = True
+
+# Dynamic config logging
+DYNAMIC_CONFIG_LOG_LEVEL = 'INFO'
+LOG_CONFIG_SELECTIONS = True
+LOG_PERFORMANCE_UPDATES = True
+LOG_MARKET_CONDITIONS = True
+
+# Log filters
 SIGNAL_LOG_KEYWORDS = [
     'signal', 'BEAR', 'BUY', 'SELL', 'Final Signal', 'Final Confidence',
     'Strategy signals', 'STRATEGY BREAKDOWN', 'Final Strategy',
@@ -1089,236 +368,41 @@ PERFORMANCE_LOG_KEYWORDS = [
     'initialized', 'startup', 'shutdown'
 ]
 
-# Timezone for log timestamps (useful for international deployment)
-LOG_TIMEZONE = 'Europe/Stockholm'
-
-# Enable log file compression for old files (saves disk space)
-COMPRESS_OLD_LOGS = True
-
-# Smart Money Configuration moved to configdata/strategies/config_smc_strategy.py
-
-ZERO_LAG_STRATEGY = False
-# MOMENTUM_BIAS_STRATEGY removed - legacy strategy replaced by MOMENTUM_STRATEGY
-MOMENTUM_STRATEGY = False
-
-ZERO_LAG_STRATEGY_ENABLED = False
-# MOMENTUM_BIAS_STRATEGY_ENABLED removed - legacy strategy replaced by MOMENTUM_STRATEGY
-MOMENTUM_STRATEGY_ENABLED = False
-USE_ZERO_LAG_STRATEGY = False
-# USE_MOMENTUM_BIAS_STRATEGY removed - legacy strategy replaced by MOMENTUM_STRATEGY
-USE_MOMENTUM_STRATEGY = False
-
-
-# Strategy indicator requirements mapping
-STRATEGY_INDICATOR_MAP = {
-    'ema': ['ema'],
-    'macd': ['macd'],
-    'kama': ['kama'],
-    'bb_supertrend': ['bb_supertrend'],
-    'momentum_bias': ['momentum_bias'],      # NEW
-    'momentum': ['momentum'],               # NEW
-    'zero_lag': ['zero_lag_ema'],           # NEW
-    'volume': ['volume'],
-    'support_resistance': ['support_resistance'],
-    'behavior': ['behavior']
-}
-
-# Required Indicators for Data Fetcher (new section)
-#REQUIRED_INDICATORS_BY_STRATEGY = {
-#    'ema': ['ema', 'close', 'high', 'low'],
-#    'macd': ['macd', 'ema', 'close'],
-#    'kama': ['kama', 'close', 'high', 'low'],
-#    'momentum_bias': ['momentum_bias', 'close', 'high', 'low'],
-#    'zero_lag_ema': ['zero_lag', 'close', 'high', 'low'],
-#    'bb_supertrend': ['bb_supertrend', 'close', 'high', 'low', 'volume'],
-#    'combined': ['ema', 'macd', 'kama', 'momentum_bias', 'zero_lag', 'bb_supertrend']
-#}
-
-REQUIRED_INDICATORS_BY_STRATEGY = {
-    'ema': ['ema', 'close', 'high', 'low'],
-    'macd': ['macd', 'ema', 'close'],
-    'kama': ['kama', 'close', 'high', 'low'] if KAMA_STRATEGY else [],
-    # 'momentum_bias' removed - legacy strategy replaced by momentum
-    'momentum': ['momentum', 'close', 'high', 'low', 'volume'] if MOMENTUM_STRATEGY else [],
-    'zero_lag_ema': ['zero_lag', 'close', 'high', 'low'] if ZERO_LAG_STRATEGY else [],
-    'bb_supertrend': ['bb_supertrend', 'close', 'high', 'low', 'volume'] if BOLLINGER_SUPERTREND_STRATEGY else [],
-    # CRITICAL FIX: Only include enabled strategies in combined
-    'combined': (['ema', 'macd'] +
-                (['kama'] if KAMA_STRATEGY else []) +
-                # momentum_bias removed - legacy strategy replaced by momentum
-                (['momentum'] if MOMENTUM_STRATEGY else []) +
-                (['zero_lag'] if ZERO_LAG_STRATEGY else []) +
-                (['bb_supertrend'] if BOLLINGER_SUPERTREND_STRATEGY else []))
-}
-
-# Strategy Configuration Files (new section)
-STRATEGY_CONFIG_MODULES = {
-    'momentum_bias': 'configdata.config_momentum_bias',
-    'momentum': 'configdata.strategies.config_momentum_strategy',
-    'zero_lag_ema': 'configdata.config_zerolag_strategy'
-}
-
-# =============================================================================
-# DEPRECATED: CRITICAL SAFETY FILTERS - NOW IN DATABASE
-# =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > Safety Filters
-# -----------------------------------------------------------------------------
-# ENABLE_CRITICAL_SAFETY_FILTERS = True  # MIGRATED to database
-# ENABLE_EMA200_CONTRADICTION_FILTER = True  # MIGRATED to database
-# ENABLE_EMA_STACK_CONTRADICTION_FILTER = True  # MIGRATED to database
-# REQUIRE_INDICATOR_CONSENSUS = True  # MIGRATED to database
-# MIN_CONFIRMING_INDICATORS = 1  # MIGRATED to database
-# ENABLE_EMERGENCY_CIRCUIT_BREAKER = True  # MIGRATED to database
-# MAX_CONTRADICTIONS_ALLOWED = 5  # MIGRATED to database
-# EMA200_MINIMUM_MARGIN = 0.002  # MIGRATED to database
-# SAFETY_FILTER_LOG_LEVEL = 'ERROR'  # MIGRATED to database
-# SAFETY_FILTER_PRESETS = {...}  # MIGRATED to database as JSONB
-# =============================================================================
-
-# Safety Filter Logging (NOT migrated - logging infrastructure)
-LOG_REJECTION_DETAILS = True  # Log detailed rejection information
-
-# Override for emergency situations (set to False in emergencies)
+# Rejection logging
+LOG_REJECTION_DETAILS = True
 EMERGENCY_BYPASS_SAFETY_FILTERS = False
-
-# Statistics tracking (runtime state - not config)
 TRACK_SAFETY_FILTER_STATS = True
-SAFETY_FILTER_STATS = {
-    'total_signals_processed': 0,
-    'total_rejections': 0,
-    'rejections_by_filter': {
-        'ema200_trend': 0,
-        'macd_momentum': 0,
-        'ema_stack': 0,
-        'consensus': 0,
-        'circuit_breaker': 0
-    }
-}
 
 # =============================================================================
-# LEGACY: SAFETY FILTER PRESETS - NOW IN DATABASE
-# =============================================================================
-# These presets have been migrated to strategy_config.scanner_global_config
-# as the safety_filter_presets JSONB column. DO NOT modify here.
+# SUPPORT/RESISTANCE SETTINGS
 # =============================================================================
 
-# LEGACY: Kept for backward compatibility during transition - DO NOT USE
-SAFETY_FILTER_PRESETS_LEGACY = {
-    'strict': {
-        'ENABLE_EMA200_CONTRADICTION_FILTER': True,
-        'ENABLE_EMA_STACK_CONTRADICTION_FILTER': True,
-        'REQUIRE_INDICATOR_CONSENSUS': True,
-        'MAX_CONTRADICTIONS_ALLOWED': 0,  # No contradictions allowed
-        'EMA200_MINIMUM_MARGIN': 0.001,   # 0.1% - Very strict
-    },
-    
-    'balanced': {
-        'ENABLE_EMA200_CONTRADICTION_FILTER': True,
-        'ENABLE_EMA_STACK_CONTRADICTION_FILTER': True,
-        'REQUIRE_INDICATOR_CONSENSUS': True,
-        'MAX_CONTRADICTIONS_ALLOWED': 5,  # 1 contradiction allowed
-        'EMA200_MINIMUM_MARGIN': 0.002,   # 0.2% - Balanced
-    },
-    
-    'permissive': {
-        'ENABLE_EMA200_CONTRADICTION_FILTER': True,
-        'ENABLE_MACD_CONTRADICTION_FILTER': False,  # Disabled
-        'ENABLE_EMA_STACK_CONTRADICTION_FILTER': False,  # Disabled
-        'REQUIRE_INDICATOR_CONSENSUS': False,
-        'MAX_CONTRADICTIONS_ALLOWED': 2,  # 2 contradictions allowed
-        'EMA200_MINIMUM_MARGIN': 0.005,   # 0.5% - Very permissive
-    },
-    
-    'emergency': {
-        # Only the most critical filters enabled
-        'ENABLE_EMA200_CONTRADICTION_FILTER': True,
-        'ENABLE_EMA_STACK_CONTRADICTION_FILTER': False, 
-        'REQUIRE_INDICATOR_CONSENSUS': False,
-        'MAX_CONTRADICTIONS_ALLOWED': 3,  # Very permissive
-        'EMA200_MINIMUM_MARGIN': 0.01,    # 1% - Emergency only
-    }
-}
-
-# Active preset (change this to switch safety levels)
-ACTIVE_SAFETY_PRESET = 'balanced'  # Options: 'strict', 'balanced', 'permissive', 'emergency'
-
-# Helper function to apply safety preset
-def apply_safety_preset(preset_name: str):
-    """Apply a safety filter preset configuration"""
-    if preset_name in SAFETY_FILTER_PRESETS:
-        preset = SAFETY_FILTER_PRESETS[preset_name]
-        globals().update(preset)
-        print(f"✅ Applied safety preset: {preset_name}")
-        
-        # Log the configuration
-        print(f"   EMA200 Filter: {'ON' if preset.get('ENABLE_EMA200_CONTRADICTION_FILTER') else 'OFF'}")
-        print(f"   EMA Stack Filter: {'ON' if preset.get('ENABLE_EMA_STACK_CONTRADICTION_FILTER') else 'OFF'}")
-        print(f"   Max Contradictions: {preset.get('MAX_CONTRADICTIONS_ALLOWED', 'N/A')}")
-        
-        return True
-    else:
-        print(f"❌ Unknown safety preset: {preset_name}")
-        print(f"   Available presets: {', '.join(SAFETY_FILTER_PRESETS.keys())}")
-        return False
-
-# Apply the active preset on module load
-try:
-    apply_safety_preset(ACTIVE_SAFETY_PRESET)
-except Exception as e:
-    print(f"Warning: Failed to apply safety preset {ACTIVE_SAFETY_PRESET}: {e}")
+ENABLE_SR_VALIDATION = True
+SR_LEFT_BARS = 15
+SR_RIGHT_BARS = 15
+SR_VOLUME_THRESHOLD = 20.0
+SR_LEVEL_TOLERANCE_PIPS = 3.0
+SR_MIN_LEVEL_DISTANCE_PIPS = 20.0
+SR_ANALYSIS_TIMEFRAME = '15m'
+SR_LOOKBACK_HOURS = 72
+MIN_BARS_FOR_SR_ANALYSIS = 100
+SR_CACHE_DURATION_MINUTES = 10
+ENABLE_ENHANCED_SR_VALIDATION = True
+SR_RECENT_FLIP_BARS = 50
+SR_MIN_FLIP_STRENGTH = 0.6
 
 # =============================================================================
-# DEBUGGING AND MONITORING FUNCTIONS
+# LARGE CANDLE FILTER
 # =============================================================================
 
-def get_safety_filter_stats():
-    """Get current safety filter statistics"""
-    return SAFETY_FILTER_STATS.copy()
-
-def reset_safety_filter_stats():
-    """Reset safety filter statistics"""
-    global SAFETY_FILTER_STATS
-    SAFETY_FILTER_STATS = {
-        'total_signals_processed': 0,
-        'total_rejections': 0,
-        'rejections_by_filter': {
-            'ema200_trend': 0,
-            'macd_momentum': 0,
-            'ema_stack': 0, 
-            'consensus': 0,
-            'circuit_breaker': 0
-        }
-    }
-    print("✅ Safety filter statistics reset")
-
-# =============================================================================
-# LARGE CANDLE MOVEMENT FILTER SETTINGS
-# =============================================================================
-
-# Enable/disable large candle filtering
 ENABLE_LARGE_CANDLE_FILTER = True
-
-# Large candle detection - candles larger than this multiple of ATR are considered "large"
-LARGE_CANDLE_ATR_MULTIPLIER = 2.5  # 2.5x ATR = large candle
-
-# Consecutive large candles threshold  
-CONSECUTIVE_LARGE_CANDLES_THRESHOLD = 2  # Block if 2+ large candles recently
-
-# Movement analysis periods
-MOVEMENT_LOOKBACK_PERIODS = 3  # Check last 5 candles
-
-# Excessive movement threshold in pips
-EXCESSIVE_MOVEMENT_THRESHOLD_PIPS = 15  # 15+ pips in lookback period
-
-# Cooldown after large candle (periods to wait)
-LARGE_CANDLE_FILTER_COOLDOWN = 3  # Wait 3 periods after large candle
-
-# Parabolic movement sensitivity
-PARABOLIC_ACCELERATION_THRESHOLD = 1.5  # 50% acceleration in movement
-
-# Filter strictness presets
-LARGE_CANDLE_FILTER_PRESET = 'balanced'  # 'strict', 'balanced', 'permissive'
+LARGE_CANDLE_ATR_MULTIPLIER = 2.5
+CONSECUTIVE_LARGE_CANDLES_THRESHOLD = 2
+MOVEMENT_LOOKBACK_PERIODS = 3
+EXCESSIVE_MOVEMENT_THRESHOLD_PIPS = 15
+LARGE_CANDLE_FILTER_COOLDOWN = 3
+PARABOLIC_ACCELERATION_THRESHOLD = 1.5
+LARGE_CANDLE_FILTER_PRESET = 'balanced'
 
 LARGE_CANDLE_FILTER_PRESETS = {
     'strict': {
@@ -1342,72 +426,308 @@ LARGE_CANDLE_FILTER_PRESETS = {
 }
 
 # =============================================================================
-# DEPRECATED: CLAUDE TRADE VALIDATION - NOW IN DATABASE
-# =============================================================================
-# These settings have been migrated to strategy_config.scanner_global_config
-# See: Streamlit > Settings > Scanner Config > Claude AI
-#
-# To access settings programmatically:
-#   from forex_scanner.services.scanner_config_service import get_scanner_config
-#   config = get_scanner_config()
-#   if config.require_claude_approval:
-#       ...
-# -----------------------------------------------------------------------------
-# REQUIRE_CLAUDE_APPROVAL = True  # MIGRATED to database
-# CLAUDE_FAIL_SECURE = True  # MIGRATED to database
-# CLAUDE_MODEL = 'sonnet'  # MIGRATED to database
-# MIN_CLAUDE_QUALITY_SCORE = 6  # MIGRATED to database
-# CLAUDE_INCLUDE_CHART = True  # MIGRATED to database
-# CLAUDE_CHART_TIMEFRAMES = ['4h', '1h', '15m']  # MIGRATED to database (JSONB)
-# CLAUDE_VISION_ENABLED = True  # MIGRATED to database
-# CLAUDE_VISION_STRATEGIES = ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']  # MIGRATED (JSONB)
-# CLAUDE_SAVE_VISION_ARTIFACTS = True  # MIGRATED to database
-# CLAUDE_VISION_SAVE_DIRECTORY - REMOVED (results now stored in database/MinIO)
-# SAVE_CLAUDE_REJECTIONS = True  # MIGRATED to database
-# CLAUDE_VALIDATE_IN_BACKTEST = False  # MIGRATED to database
+# MULTI-TIMEFRAME ANALYSIS
 # =============================================================================
 
-# Rate limiting (kept as constants - not tunable)
-CLAUDE_MAX_REQUESTS_PER_MINUTE = 50
-CLAUDE_MAX_REQUESTS_PER_DAY = 1000
-CLAUDE_MIN_CALL_INTERVAL = 1.2          # Seconds between API calls
-
-# Multi-Timeframe Analysis Configuration
-ENABLE_MTF_ANALYSIS = True  # Enable/disable MTF analysis
+ENABLE_MTF_ANALYSIS = True
 
 MTF_CONFIG = {
-    'require_alignment': True,      # Require timeframe alignment
-    'min_aligned_timeframes': 2,    # Minimum aligned TFs
-    'check_timeframes': ['5m', '15m', '1h'],  # TFs to analyze
-    'alignment_threshold': 0.6,     # Minimum alignment score
-    'confidence_boost_max': 0.15    # Max confidence boost for alignment
+    'require_alignment': True,
+    'min_aligned_timeframes': 2,
+    'check_timeframes': ['5m', '15m', '1h'],
+    'alignment_threshold': 0.6,
+    'confidence_boost_max': 0.15
 }
 
-# Timeframe hierarchy for trend validation
 TIMEFRAME_HIERARCHY = {
-    '1m': ['5m', '15m'],    # 1m signals check 5m and 15m
-    '5m': ['15m', '1h'],    # 5m signals check 15m and 1h
-    '15m': ['1h', '4h'],    # 15m signals check 1h and 4h
-    '30m': ['1h', '4h'],    # 30m signals check 1h and 4h
-    '1h': ['4h', '1d']      # 1h signals check 4h and daily
+    '1m': ['5m', '15m'],
+    '5m': ['15m', '1h'],
+    '15m': ['1h', '4h'],
+    '30m': ['1h', '4h'],
+    '1h': ['4h', '1d']
 }
 
-# Retry settings
-ORDER_MAX_RETRIES = 3
-ORDER_RETRY_BASE_DELAY = 2.0
-ORDER_CONNECT_TIMEOUT = 10.0
-ORDER_READ_TIMEOUT = 45.0
+STRATEGY_TIMEFRAME_MAP = {
+    '1m': ['scalping', 'aggressive'],
+    '5m': ['scalping', 'default', 'aggressive'],
+    '15m': ['default', 'conservative'],
+    '1h': ['swing', 'conservative'],
+    '4h': ['swing', 'crypto'],
+    '1d': ['swing', 'crypto']
+}
 
-# Circuit breaker
-ORDER_CIRCUIT_BREAKER_THRESHOLD = 5
-ORDER_CIRCUIT_BREAKER_RECOVERY = 300.0
+# =============================================================================
+# ADVANCED FILTERING
+# =============================================================================
+
+ADVANCED_FILTERING = {
+    'bollinger_bands': {
+        'enabled': True,
+        'period': 14,
+        'std_dev': 1.8,
+        'extremes_only': False,
+        'middle_band_filter': True
+    },
+    'atr_filter': {
+        'enabled': True,
+        'period': 8,
+        'min_atr_multiplier': 0.5,
+        'max_atr_multiplier': 3.0
+    },
+    'rsi_confirmation': {
+        'enabled': False,
+        'period': 14,
+        'overbought': 70,
+        'oversold': 30,
+        'require_divergence': False
+    }
+}
+
+# Adaptive detection
+ADAPTIVE_HIGH_VOLATILITY_THRESHOLD = 1.5
+ADAPTIVE_LOW_VOLATILITY_THRESHOLD = 0.5
+ADAPTIVE_TREND_STRENGTH_THRESHOLD = 0.7
+MIN_MARKET_EFFICIENCY = 0.02
+EMA_STRICT_ALIGNMENT = False
+EMERGENCY_DEBUG_MODE = True
+BACKTEST_MODE_RELAXED = True
+
+# =============================================================================
+# NOTIFICATIONS
+# =============================================================================
+
+NOTIFICATIONS = {
+    'console': True,
+    'file': True,
+    'email': False,
+    'webhook': False
+}
+
+# =============================================================================
+# BACKTESTING
+# =============================================================================
+
+DEFAULT_BACKTEST_DAYS = 30
+BACKTEST_LOOKBACK_BARS = 1000
+
+# Integration settings
+SCANNER_USE_DYNAMIC_EMA = True
+SCANNER_CONFIG_REFRESH_ON_SCAN = False
+BACKTEST_USE_DYNAMIC_EMA = False
+BACKTEST_COMPARE_CONFIGS = True
+WEB_INTERFACE_SHOW_DYNAMIC_STATUS = True
+WEB_INTERFACE_ALLOW_CONFIG_OVERRIDE = True
+
+# =============================================================================
+# MARKET HOURS AND CLOSURE
+# =============================================================================
+
+MARKET_CLOSURE_SETTINGS = {
+    'save_signals_when_closed': True,
+    'execute_signals_when_closed': False,
+    'log_market_status': True,
+    'queue_signals_for_open': True,
+}
+
+TIMESTAMP_VALIDATION_SETTINGS = {
+    'fix_epoch_timestamps': True,
+    'log_timestamp_issues': True,
+    'allow_none_timestamps': True,
+    'validate_against_current_time': True,
+    'reject_future_timestamps': False,
+}
+
+FOREX_MARKET_HOURS = {
+    'open_day': 0,
+    'open_hour': 22,
+    'close_day': 4,
+    'close_hour': 22,
+    'timezone': 'UTC',
+}
+
+ALERT_PROCESSING = {
+    'process_during_closure': True,
+    'mark_closure_status': True,
+    'enhanced_logging': True,
+    'separate_closure_queue': False,
+}
+
+SAVE_ALERTS_WHEN_MARKET_CLOSED = MARKET_CLOSURE_SETTINGS['save_signals_when_closed']
+LOG_TIMESTAMP_CONVERSIONS = TIMESTAMP_VALIDATION_SETTINGS['log_timestamp_issues']
+VALIDATE_MARKET_HOURS = True
+
+
+def is_market_open_now() -> bool:
+    """Check if forex market is currently open based on UTC time."""
+    from datetime import datetime, timezone
+
+    current_utc = datetime.now(timezone.utc)
+    weekday = current_utc.weekday()
+    hour = current_utc.hour
+
+    if weekday == 5:  # Saturday
+        return False
+    elif weekday == 6:  # Sunday
+        return hour >= 22
+    elif weekday == 4:  # Friday
+        return hour < 22
+
+    return True
+
+
+def get_market_status_info() -> dict:
+    """Get detailed market status information."""
+    from datetime import datetime, timezone
+
+    current_utc = datetime.now(timezone.utc)
+    is_open = is_market_open_now()
+    weekday_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+    return {
+        'is_open': is_open,
+        'current_time_utc': current_utc.strftime('%Y-%m-%d %H:%M:%S UTC'),
+        'weekday': weekday_names[current_utc.weekday()],
+        'hour_utc': current_utc.hour,
+        'status': 'OPEN' if is_open else 'CLOSED',
+        'settings': MARKET_CLOSURE_SETTINGS
+    }
 
 
 # =============================================================================
-# ADDITIONAL CONFIGURATION SETTINGS  
+# DYNAMIC CLI COMMANDS
 # =============================================================================
 
-import logging
+DYNAMIC_CONFIG_COMMANDS = {
+    'show_configs': {'enabled': True, 'description': 'Show current dynamic configurations'},
+    'config_performance': {'enabled': True, 'description': 'Show configuration performance statistics'},
+    'optimize_configs': {'enabled': True, 'description': 'Optimize configurations for specific epics'},
+    'market_analysis': {'enabled': True, 'description': 'Show market condition analysis'}
+}
 
-# Zero Lag MTF Validation Settings moved to configdata/strategies/config_zerolag_strategy.py
+# =============================================================================
+# STRATEGY INDICATOR MAPPING (Legacy - for disabled strategies)
+# =============================================================================
 
+STRATEGY_INDICATOR_MAP = {
+    'ema': ['ema'],
+    'macd': ['macd'],
+    'kama': ['kama'],
+    'bb_supertrend': ['bb_supertrend'],
+    'momentum': ['momentum'],
+    'zero_lag': ['zero_lag_ema'],
+    'volume': ['volume'],
+    'support_resistance': ['support_resistance'],
+    'behavior': ['behavior']
+}
+
+REQUIRED_INDICATORS_BY_STRATEGY = {
+    'ema': ['ema', 'close', 'high', 'low'],
+    'macd': ['macd', 'ema', 'close'],
+    'kama': [],
+    'momentum': [],
+    'zero_lag_ema': [],
+    'bb_supertrend': [],
+    'combined': ['ema', 'macd']
+}
+
+STRATEGY_CONFIG_MODULES = {
+    'momentum': 'configdata.strategies.config_momentum_strategy',
+    'zero_lag_ema': 'configdata.config_zerolag_strategy'
+}
+
+# =============================================================================
+# RISK MANAGEMENT PRESETS (Legacy)
+# =============================================================================
+
+RISK_MANAGEMENT_CONFIG = {
+    'scalping': {
+        'max_risk_per_trade': 0.5,
+        'stop_loss_pips': 8,
+        'take_profit_pips': 12,
+        'max_trades_per_hour': 3
+    },
+    'swing': {
+        'max_risk_per_trade': 2.0,
+        'stop_loss_pips': 30,
+        'take_profit_pips': 60,
+        'max_trades_per_day': 2
+    },
+    'conservative': {
+        'max_risk_per_trade': 1.0,
+        'stop_loss_pips': 20,
+        'take_profit_pips': 40,
+        'max_trades_per_day': 3
+    }
+}
+
+MARKET_CONDITION_CONFIG = {
+    'trending': {'ema_config': 'aggressive', 'confidence_boost': 0.1, 'volume_multiplier': 1.2},
+    'ranging': {'ema_config': 'conservative', 'confidence_penalty': 0.05, 'require_strong_breakout': True},
+    'high_volatility': {'ema_config': 'conservative', 'min_confidence': 0.8, 'reduce_position_size': 0.5},
+    'low_volatility': {'ema_config': 'aggressive', 'min_confidence': 0.6, 'increase_position_size': 1.2}
+}
+
+TIME_BASED_CONFIG = {
+    'london_session': {'preferred_pairs': ['GBPUSD', 'EURGBP', 'GBPJPY'], 'strategy_boost': 'aggressive', 'volume_threshold_multiplier': 1.5},
+    'ny_session': {'preferred_pairs': ['EURUSD', 'USDCAD', 'USDJPY'], 'strategy_boost': 'default', 'volume_threshold_multiplier': 1.3},
+    'asian_session': {'preferred_pairs': ['USDJPY', 'AUDUSD', 'NZDUSD'], 'strategy_boost': 'conservative', 'volume_threshold_multiplier': 0.8},
+    'overlap_sessions': {'strategy_boost': 'aggressive', 'volume_threshold_multiplier': 2.0, 'confidence_boost': 0.15}
+}
+
+PERFORMANCE_CONFIG = {
+    'enable_parallel_processing': True,
+    'max_worker_threads': 4,
+    'cache_indicators': True,
+    'cache_duration_minutes': 5,
+    'batch_process_signals': True,
+    'lazy_load_historical_data': True
+}
+
+# =============================================================================
+# SAFETY FILTER STATS (Runtime state)
+# =============================================================================
+
+SAFETY_FILTER_STATS = {
+    'total_signals_processed': 0,
+    'total_rejections': 0,
+    'rejections_by_filter': {
+        'ema200_trend': 0,
+        'macd_momentum': 0,
+        'ema_stack': 0,
+        'consensus': 0,
+        'circuit_breaker': 0
+    }
+}
+
+
+def get_safety_filter_stats():
+    """Get current safety filter statistics."""
+    return SAFETY_FILTER_STATS.copy()
+
+
+def reset_safety_filter_stats():
+    """Reset safety filter statistics."""
+    global SAFETY_FILTER_STATS
+    SAFETY_FILTER_STATS = {
+        'total_signals_processed': 0,
+        'total_rejections': 0,
+        'rejections_by_filter': {
+            'ema200_trend': 0,
+            'macd_momentum': 0,
+            'ema_stack': 0,
+            'consensus': 0,
+            'circuit_breaker': 0
+        }
+    }
+    print("Safety filter statistics reset")
+
+
+# =============================================================================
+# MARKET INTELLIGENCE IMPORT
+# =============================================================================
+
+from configdata.market_intelligence_config import *
+
+# =============================================================================
+# END OF CONFIG
+# =============================================================================
