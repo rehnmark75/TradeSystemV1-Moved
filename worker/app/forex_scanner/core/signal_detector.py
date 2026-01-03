@@ -330,10 +330,18 @@ class SignalDetector:
             self.silver_bullet_strategy = None
             self.logger.info("⚪ Silver Bullet strategy disabled")
 
-        # Initialize analysis components
-        self.backtest_engine = BacktestEngine(self.data_fetcher)
+        # Initialize analysis components (backtest_engine is lazy-loaded to avoid duplicate strategy initialization)
+        self._backtest_engine = None  # Lazy-loaded on first use
         self.performance_analyzer = PerformanceAnalyzer()
         self.signal_analyzer = SignalAnalyzer()
+
+    @property
+    def backtest_engine(self):
+        """Lazy-load BacktestEngine only when needed to avoid duplicate strategy initialization during live trading"""
+        if self._backtest_engine is None:
+            self.logger.info("📊 Lazy-loading BacktestEngine for backtest operations...")
+            self._backtest_engine = BacktestEngine(self.data_fetcher)
+        return self._backtest_engine
 
     # =========================================================================
     # BACKTEST FORCE-INITIALIZATION METHODS

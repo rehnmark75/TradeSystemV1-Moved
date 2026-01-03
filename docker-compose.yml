@@ -183,7 +183,6 @@ services:
       - STRATEGY_CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/strategy_config
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
-      - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
       - SYSTEM_MONITOR_URL=http://system-monitor:8095
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-d4thb4pr01qnn6lkv89gd4thb4pr01qnn6lkv8a0}
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
@@ -206,30 +205,6 @@ services:
       - fastapi-dev
       - fastapi-prod
       - minio
-  tradingview:
-    build:
-      context: ./tradingview
-      dockerfile: Dockerfile.tradingview
-    container_name: tradingview
-    restart: unless-stopped
-    ports:
-      - "8080:8080"  # FastAPI API server only (Streamlit integrated with main streamlit container)
-    volumes:
-      - ./logs/tradingview:/app/logs
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
-      - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
-      - PYTHONPATH=/app:/app/mcp:/app/strategy_bridge
-    networks:
-      - lab-net
-    depends_on:
-      - postgres
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   task-worker:
     build:
@@ -248,8 +223,6 @@ services:
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
-      - VECTOR_DB_URL=http://vector-db:8090
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
@@ -262,7 +235,6 @@ services:
       - lab-net
     depends_on:
       - postgres
-      - vector-db
       - minio
 
   stock-scheduler:
@@ -283,34 +255,6 @@ services:
       - lab-net
     depends_on:
       - postgres
-
-  vector-db:
-    build:
-      context: ./vector-db
-    container_name: vector-db
-    restart: unless-stopped
-    ports:
-      - "8090:8090"
-    volumes:
-      - ./vector-db/data:/app/data
-      - ./vector-db/vectordb:/app/vectordb
-      - ./logs/vector-db:/app/logs
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
-      - TRADINGVIEW_API_URL=http://tradingview:8080/api/tvscripts
-      - CHROMA_HOST=0.0.0.0
-      - CHROMA_PORT=8090
-    networks:
-      - lab-net
-    depends_on:
-      - postgres
-      - tradingview
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
   economic-calendar:
     build:
