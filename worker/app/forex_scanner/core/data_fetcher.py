@@ -159,10 +159,10 @@ class DataFetcher:
             config_key = f"{epic}_{tuple(ema_periods)}_{config_source}"
             
             if config_key not in self._logged_ema_configs:
-                # First time seeing this configuration - log at INFO level
+                # First time seeing this configuration - log at DEBUG level
                 self.logger.debug(f"🎯 EMA configuration for {epic}:")
                 self.logger.debug(f"   Periods: {ema_periods}")
-                self.logger.info(f"   Source: {config_source}")
+                self.logger.debug(f"   Source: {config_source}")
                 
                 # Mark this config as logged
                 self._logged_ema_configs.add(config_key)
@@ -252,8 +252,8 @@ class DataFetcher:
             
             if active_config_name in ema_configs:
                 return f"config.py (preset: {active_config_name})"
-            
-            return "hardcoded default"
+
+            return "standard (21/50/200)"
             
         except:
             return "unknown"
@@ -1152,9 +1152,10 @@ class DataFetcher:
                 except Exception as e:
                     self.logger.warning(f"⚠️ Configdata convenience method failed: {e}")
 
-            # FINAL: Ultimate fallback to match configdata default
-            default_periods = [21, 50, 200]  # Match configdata default
-            self.logger.warning(f"🔧 Using hardcoded default EMA config for {epic}: {default_periods}")
+            # FINAL: Standard EMA periods for trend filtering
+            # These are used by all strategies for trend direction (EMA disabled, SMC uses these)
+            default_periods = [21, 50, 200]
+            self.logger.debug(f"📊 Using standard EMA periods for {epic}: {default_periods}")
             return default_periods
 
         except Exception as e:
