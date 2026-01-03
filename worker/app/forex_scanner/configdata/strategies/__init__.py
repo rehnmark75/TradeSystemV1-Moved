@@ -10,17 +10,40 @@ Legacy strategy configs have been archived to forex_scanner/archive/legacy_confi
 from .config_smc_simple import *
 
 # Import main config flags for strategy enablement
-try:
-    from forex_scanner.config import SMC_SIMPLE_STRATEGY
-except ImportError:
+# Use importlib to handle circular import scenarios
+import importlib
+import sys
+import os
+
+SMC_SIMPLE_STRATEGY = True  # Default
+
+# Try multiple import paths to handle different execution contexts
+_config_loaded = False
+
+# Method 1: Direct importlib (most reliable)
+if not _config_loaded:
     try:
-        import sys
-        import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from config import SMC_SIMPLE_STRATEGY
-    except ImportError:
-        SMC_SIMPLE_STRATEGY = True
-        print("⚠️ Could not import SMC_SIMPLE_STRATEGY from main config, defaulting to True")
+        _config_module = importlib.import_module('forex_scanner.config')
+        SMC_SIMPLE_STRATEGY = getattr(_config_module, 'SMC_SIMPLE_STRATEGY', True)
+        _config_loaded = True
+    except (ImportError, ModuleNotFoundError):
+        pass
+
+# Method 2: Relative path import
+if not _config_loaded:
+    try:
+        # Add parent directory to path if not present
+        _parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _parent_dir not in sys.path:
+            sys.path.insert(0, _parent_dir)
+        _config_module = importlib.import_module('config')
+        SMC_SIMPLE_STRATEGY = getattr(_config_module, 'SMC_SIMPLE_STRATEGY', True)
+        _config_loaded = True
+    except (ImportError, ModuleNotFoundError):
+        pass
+
+# Clean up temporary variables
+del _config_loaded, importlib
 
 # Define what gets exported when using "from strategies import *"
 __all__ = [
