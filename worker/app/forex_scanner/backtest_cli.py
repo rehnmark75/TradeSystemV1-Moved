@@ -15,16 +15,22 @@ import logging
 import sys
 from datetime import datetime
 
-# Set up path
+# Set up path - add both /app and /app/forex_scanner for proper imports
+sys.path.insert(0, '/app')
 sys.path.insert(0, '/app/forex_scanner')
 
 try:
-    import config
-    from commands.enhanced_backtest_commands import EnhancedBacktestCommands
-except ImportError as e:
-    print(f"❌ Import error: {e}")
-    print("Please ensure you're running this from the correct directory")
-    sys.exit(1)
+    from forex_scanner import config
+    from forex_scanner.commands.enhanced_backtest_commands import EnhancedBacktestCommands
+except ImportError:
+    # Fallback for running from within forex_scanner directory
+    try:
+        import config
+        from commands.enhanced_backtest_commands import EnhancedBacktestCommands
+    except ImportError as e:
+        print(f"❌ Import error: {e}")
+        print("Please ensure you're running this from the correct directory")
+        sys.exit(1)
 
 
 class BacktestCLI:
