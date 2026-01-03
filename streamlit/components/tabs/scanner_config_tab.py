@@ -66,6 +66,9 @@ def render_scanner_config_tab():
     # Sub-tabs for different categories
     sub_tabs = st.tabs([
         "Core Settings",
+        "Indicators",
+        "Data Quality",
+        "Trading Control",
         "Duplicate Detection",
         "Risk Management",
         "Trading Hours",
@@ -80,27 +83,36 @@ def render_scanner_config_tab():
         render_core_settings(config)
 
     with sub_tabs[1]:
-        render_dedup_settings(config)
+        render_indicator_settings(config)
 
     with sub_tabs[2]:
-        render_risk_settings(config)
+        render_data_quality_settings(config)
 
     with sub_tabs[3]:
-        render_trading_hours_settings(config)
+        render_trading_control_settings(config)
 
     with sub_tabs[4]:
-        render_safety_settings(config)
+        render_dedup_settings(config)
 
     with sub_tabs[5]:
-        render_adx_settings(config)
+        render_risk_settings(config)
 
     with sub_tabs[6]:
-        render_smc_conflict_settings(config)
+        render_trading_hours_settings(config)
 
     with sub_tabs[7]:
-        render_claude_validation_settings(config)
+        render_safety_settings(config)
 
     with sub_tabs[8]:
+        render_adx_settings(config)
+
+    with sub_tabs[9]:
+        render_smc_conflict_settings(config)
+
+    with sub_tabs[10]:
+        render_claude_validation_settings(config)
+
+    with sub_tabs[11]:
         render_audit_trail()
 
 
@@ -227,6 +239,455 @@ def render_core_settings(config: Dict[str, Any]):
 
     # Save section
     render_save_section(config, 'core', updated_by)
+
+
+def render_indicator_settings(config: Dict[str, Any]):
+    """Render technical indicator settings (MACD, KAMA, BB, Zero Lag, Two-Pole)"""
+    st.subheader("Technical Indicator Settings")
+    st.markdown("Configure parameters for technical indicators used in signal analysis and performance collection")
+
+    updated_by = st.session_state.get('scanner_config_user', 'streamlit_user')
+
+    if 'scanner_pending_changes' not in st.session_state:
+        st.session_state.scanner_pending_changes = {}
+
+    # MACD Settings
+    st.markdown("### MACD Indicator")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        new_macd_fast = st.number_input(
+            "MACD Fast Period",
+            value=_get_int(config, 'macd_fast_period', 12),
+            min_value=2, max_value=50, step=1,
+            help="Fast EMA period for MACD calculation (default: 12)",
+            key="macd_fast_period"
+        )
+        if not values_equal(new_macd_fast, config.get('macd_fast_period')):
+            st.session_state.scanner_pending_changes['macd_fast_period'] = new_macd_fast
+
+    with col2:
+        new_macd_slow = st.number_input(
+            "MACD Slow Period",
+            value=_get_int(config, 'macd_slow_period', 26),
+            min_value=5, max_value=100, step=1,
+            help="Slow EMA period for MACD calculation (default: 26)",
+            key="macd_slow_period"
+        )
+        if not values_equal(new_macd_slow, config.get('macd_slow_period')):
+            st.session_state.scanner_pending_changes['macd_slow_period'] = new_macd_slow
+
+    with col3:
+        new_macd_signal = st.number_input(
+            "MACD Signal Period",
+            value=_get_int(config, 'macd_signal_period', 9),
+            min_value=2, max_value=50, step=1,
+            help="Signal line EMA period (default: 9)",
+            key="macd_signal_period"
+        )
+        if not values_equal(new_macd_signal, config.get('macd_signal_period')):
+            st.session_state.scanner_pending_changes['macd_signal_period'] = new_macd_signal
+
+    st.divider()
+
+    # KAMA Settings
+    st.markdown("### KAMA (Kaufman Adaptive Moving Average)")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        new_kama_period = st.number_input(
+            "KAMA Period",
+            value=_get_int(config, 'kama_period', 10),
+            min_value=2, max_value=50, step=1,
+            help="Efficiency ratio period (default: 10)",
+            key="kama_period"
+        )
+        if not values_equal(new_kama_period, config.get('kama_period')):
+            st.session_state.scanner_pending_changes['kama_period'] = new_kama_period
+
+    with col2:
+        new_kama_fast = st.number_input(
+            "KAMA Fast SC",
+            value=_get_int(config, 'kama_fast', 2),
+            min_value=1, max_value=20, step=1,
+            help="Fast smoothing constant (default: 2)",
+            key="kama_fast"
+        )
+        if not values_equal(new_kama_fast, config.get('kama_fast')):
+            st.session_state.scanner_pending_changes['kama_fast'] = new_kama_fast
+
+    with col3:
+        new_kama_slow = st.number_input(
+            "KAMA Slow SC",
+            value=_get_int(config, 'kama_slow', 30),
+            min_value=10, max_value=100, step=1,
+            help="Slow smoothing constant (default: 30)",
+            key="kama_slow"
+        )
+        if not values_equal(new_kama_slow, config.get('kama_slow')):
+            st.session_state.scanner_pending_changes['kama_slow'] = new_kama_slow
+
+    st.divider()
+
+    # Bollinger Bands & Supertrend Settings
+    st.markdown("### Bollinger Bands & Supertrend")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Bollinger Bands**")
+        new_bb_period = st.number_input(
+            "BB Period",
+            value=_get_int(config, 'bb_period', 20),
+            min_value=5, max_value=100, step=1,
+            help="Bollinger Bands period (default: 20)",
+            key="bb_period"
+        )
+        if not values_equal(new_bb_period, config.get('bb_period')):
+            st.session_state.scanner_pending_changes['bb_period'] = new_bb_period
+
+        new_bb_std = st.number_input(
+            "BB Std Dev",
+            value=_get_float(config, 'bb_std_dev', 2.0),
+            min_value=0.5, max_value=5.0, step=0.1,
+            format="%.1f",
+            help="Standard deviation multiplier (default: 2.0)",
+            key="bb_std_dev"
+        )
+        if not values_equal(new_bb_std, config.get('bb_std_dev')):
+            st.session_state.scanner_pending_changes['bb_std_dev'] = new_bb_std
+
+    with col2:
+        st.markdown("**Supertrend**")
+        new_st_period = st.number_input(
+            "Supertrend Period",
+            value=_get_int(config, 'supertrend_period', 10),
+            min_value=5, max_value=50, step=1,
+            help="ATR period for Supertrend (default: 10)",
+            key="supertrend_period"
+        )
+        if not values_equal(new_st_period, config.get('supertrend_period')):
+            st.session_state.scanner_pending_changes['supertrend_period'] = new_st_period
+
+        new_st_mult = st.number_input(
+            "Supertrend Multiplier",
+            value=_get_float(config, 'supertrend_multiplier', 3.0),
+            min_value=1.0, max_value=10.0, step=0.1,
+            format="%.1f",
+            help="ATR multiplier (default: 3.0)",
+            key="supertrend_multiplier"
+        )
+        if not values_equal(new_st_mult, config.get('supertrend_multiplier')):
+            st.session_state.scanner_pending_changes['supertrend_multiplier'] = new_st_mult
+
+    st.divider()
+
+    # Zero Lag Settings
+    st.markdown("### Zero Lag EMA")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        new_zl_length = st.number_input(
+            "Zero Lag Length",
+            value=_get_int(config, 'zero_lag_length', 21),
+            min_value=5, max_value=100, step=1,
+            help="Zero lag EMA period (default: 21)",
+            key="zero_lag_length"
+        )
+        if not values_equal(new_zl_length, config.get('zero_lag_length')):
+            st.session_state.scanner_pending_changes['zero_lag_length'] = new_zl_length
+
+    with col2:
+        new_zl_band = st.number_input(
+            "Zero Lag Band Multiplier",
+            value=_get_float(config, 'zero_lag_band_mult', 1.5),
+            min_value=0.5, max_value=5.0, step=0.1,
+            format="%.1f",
+            help="Band multiplier for volatility bands (default: 1.5)",
+            key="zero_lag_band_mult"
+        )
+        if not values_equal(new_zl_band, config.get('zero_lag_band_mult')):
+            st.session_state.scanner_pending_changes['zero_lag_band_mult'] = new_zl_band
+
+    st.divider()
+
+    # Two-Pole Filter Settings
+    st.markdown("### Two-Pole Butterworth Filter")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        new_tp_filter = st.number_input(
+            "Filter Length",
+            value=_get_int(config, 'two_pole_filter_length', 20),
+            min_value=5, max_value=100, step=1,
+            help="Two-pole filter length (default: 20)",
+            key="two_pole_filter_length"
+        )
+        if not values_equal(new_tp_filter, config.get('two_pole_filter_length')):
+            st.session_state.scanner_pending_changes['two_pole_filter_length'] = new_tp_filter
+
+    with col2:
+        new_tp_sma = st.number_input(
+            "SMA Length",
+            value=_get_int(config, 'two_pole_sma_length', 25),
+            min_value=5, max_value=100, step=1,
+            help="SMA length for smoothing (default: 25)",
+            key="two_pole_sma_length"
+        )
+        if not values_equal(new_tp_sma, config.get('two_pole_sma_length')):
+            st.session_state.scanner_pending_changes['two_pole_sma_length'] = new_tp_sma
+
+    with col3:
+        new_tp_delay = st.number_input(
+            "Signal Delay",
+            value=_get_int(config, 'two_pole_signal_delay', 4),
+            min_value=1, max_value=20, step=1,
+            help="Signal delay periods (default: 4)",
+            key="two_pole_signal_delay"
+        )
+        if not values_equal(new_tp_delay, config.get('two_pole_signal_delay')):
+            st.session_state.scanner_pending_changes['two_pole_signal_delay'] = new_tp_delay
+
+    # Info box
+    with st.expander("About Indicator Settings", expanded=False):
+        st.markdown("""
+        These settings control technical indicator calculations used for:
+
+        - **Signal Analysis**: Indicators are calculated for all signals regardless of strategy
+        - **Performance Collection**: Historical indicator values are stored for analysis
+        - **MACD Filter**: Used by SMC Simple strategy for momentum confirmation
+
+        **Note**: Changes take effect on the next scan cycle. The scanner must be restarted
+        for changes to fully propagate through the caching system.
+
+        **Default Values**:
+        - MACD: 12/26/9 (standard)
+        - KAMA: 10/2/30 (standard Kaufman settings)
+        - Bollinger Bands: 20 period, 2.0 std dev
+        - Supertrend: 10 period, 3.0 multiplier
+        - Zero Lag: 21 period, 1.5 band multiplier
+        - Two-Pole: 20 filter, 25 SMA, 4 delay
+        """)
+
+    # Save section
+    render_save_section(config, 'indicators', updated_by)
+
+
+def render_data_quality_settings(config: Dict[str, Any]):
+    """Render data quality settings for trading safety"""
+    st.subheader("Data Quality Settings")
+    st.markdown("Configure data quality filtering and trading safety controls")
+
+    updated_by = st.session_state.get('scanner_config_user', 'streamlit_user')
+
+    if 'scanner_pending_changes' not in st.session_state:
+        st.session_state.scanner_pending_changes = {}
+
+    # Lookback Reduction
+    st.markdown("### Lookback Configuration")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        new_lookback_factor = st.slider(
+            "Lookback Reduction Factor",
+            min_value=0.1,
+            max_value=1.0,
+            value=_get_float(config, 'lookback_reduction_factor', 0.7),
+            step=0.05,
+            format="%.2f",
+            help="Reduces lookback period for data fetching. Lower = less data, faster scans. (default: 0.7)",
+            key="lookback_reduction_factor"
+        )
+        if not values_equal(new_lookback_factor, config.get('lookback_reduction_factor')):
+            st.session_state.scanner_pending_changes['lookback_reduction_factor'] = new_lookback_factor
+
+    with col2:
+        st.info(
+            f"Current setting: {_get_float(config, 'lookback_reduction_factor', 0.7):.0%} of calculated lookback period"
+        )
+
+    st.divider()
+
+    # Data Quality Filtering
+    st.markdown("### Data Quality Filtering")
+
+    new_enable_filtering = st.checkbox(
+        "Enable Data Quality Filtering",
+        value=config.get('enable_data_quality_filtering', False),
+        help="Filter out data points flagged as unsafe or low quality before analysis",
+        key="enable_data_quality_filtering"
+    )
+    if not values_equal(new_enable_filtering, config.get('enable_data_quality_filtering')):
+        st.session_state.scanner_pending_changes['enable_data_quality_filtering'] = new_enable_filtering
+
+    if new_enable_filtering:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            new_block_trading = st.checkbox(
+                "Block Trading on Data Issues",
+                value=config.get('block_trading_on_data_issues', True),
+                help="Prevent trading when data quality issues are detected",
+                key="block_trading_on_data_issues"
+            )
+            if not values_equal(new_block_trading, config.get('block_trading_on_data_issues')):
+                st.session_state.scanner_pending_changes['block_trading_on_data_issues'] = new_block_trading
+
+        with col2:
+            new_min_quality = st.slider(
+                "Minimum Quality Score",
+                min_value=0.0,
+                max_value=1.0,
+                value=_get_float(config, 'min_quality_score_for_trading', 0.5),
+                step=0.05,
+                format="%.2f",
+                help="Minimum data quality score required for trading (0.0-1.0). Default: 0.5",
+                key="min_quality_score_for_trading"
+            )
+            if not values_equal(new_min_quality, config.get('min_quality_score_for_trading')):
+                st.session_state.scanner_pending_changes['min_quality_score_for_trading'] = new_min_quality
+    else:
+        st.caption("Data quality filtering is disabled. All data points will be used regardless of quality.")
+
+    # Info box
+    with st.expander("About Data Quality Settings", expanded=False):
+        st.markdown("""
+        These settings control how the scanner handles data quality:
+
+        **Lookback Reduction Factor**
+        - Controls how much historical data is fetched
+        - 0.7 = fetch 70% of the calculated optimal lookback
+        - Lower values = faster scans but less historical context
+        - Higher values = more data but slower performance
+
+        **Data Quality Filtering**
+        - When enabled, filters out data points marked as unsafe
+        - Checks for price anomalies, gaps, and data quality scores
+        - Prevents trading on poor quality data
+
+        **Block Trading on Data Issues**
+        - When enabled, completely blocks trading if data quality issues are detected
+        - When disabled, logs warnings but continues trading
+
+        **Minimum Quality Score**
+        - Data points below this threshold are filtered out
+        - 0.5 = moderate quality requirement (default)
+        - 0.7+ = stricter quality requirement
+        - 0.3 = permissive, allows lower quality data
+        """)
+
+    # Save section
+    render_save_section(config, 'data_quality', updated_by)
+
+
+def render_trading_control_settings(config: Dict[str, Any]):
+    """Render trading control settings for enabling/disabling live trading"""
+    st.subheader("Trading Control Settings")
+    st.markdown("⚠️ **CRITICAL**: Control live trading execution. Changes take effect immediately.")
+
+    updated_by = st.session_state.get('scanner_config_user', 'streamlit_user')
+
+    if 'scanner_pending_changes' not in st.session_state:
+        st.session_state.scanner_pending_changes = {}
+
+    # Warning banner
+    if config.get('auto_trading_enabled', False) or config.get('enable_order_execution', False):
+        st.error("🔴 **LIVE TRADING IS ENABLED** - Real orders will be executed!")
+    else:
+        st.success("🟢 **LIVE TRADING IS DISABLED** - Signals will be generated but no orders executed")
+
+    st.divider()
+
+    # Main trading controls
+    st.markdown("### Master Trading Controls")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        new_auto_trading = st.checkbox(
+            "Auto Trading Enabled",
+            value=config.get('auto_trading_enabled', False),
+            help="Master switch for automated trading. When enabled, the system will automatically execute trades based on signals.",
+            key="auto_trading_enabled"
+        )
+        if not values_equal(new_auto_trading, config.get('auto_trading_enabled')):
+            st.session_state.scanner_pending_changes['auto_trading_enabled'] = new_auto_trading
+
+        if new_auto_trading:
+            st.warning("⚠️ Auto trading will execute trades automatically without manual confirmation!")
+
+    with col2:
+        new_order_execution = st.checkbox(
+            "Enable Order Execution",
+            value=config.get('enable_order_execution', False),
+            help="Secondary control for order execution. Both this AND auto_trading_enabled must be True for orders to execute.",
+            key="enable_order_execution"
+        )
+        if not values_equal(new_order_execution, config.get('enable_order_execution')):
+            st.session_state.scanner_pending_changes['enable_order_execution'] = new_order_execution
+
+        if new_order_execution:
+            st.warning("⚠️ Order execution is enabled!")
+
+    # Current trading status
+    st.divider()
+    st.markdown("### Current Trading Status")
+
+    auto_enabled = config.get('auto_trading_enabled', False)
+    order_enabled = config.get('enable_order_execution', False)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "Auto Trading",
+            "ENABLED" if auto_enabled else "DISABLED",
+            delta=None
+        )
+
+    with col2:
+        st.metric(
+            "Order Execution",
+            "ENABLED" if order_enabled else "DISABLED",
+            delta=None
+        )
+
+    with col3:
+        trading_active = auto_enabled or order_enabled
+        st.metric(
+            "Live Trading",
+            "ACTIVE" if trading_active else "INACTIVE",
+            delta=None
+        )
+
+    # Info box
+    with st.expander("About Trading Control Settings", expanded=False):
+        st.markdown("""
+        These settings control whether the trading system executes real orders:
+
+        **Auto Trading Enabled**
+        - Master switch for automated trading
+        - When enabled, signals can trigger automatic order execution
+        - When disabled, signals are generated but no orders are placed
+
+        **Enable Order Execution**
+        - Secondary safety control for order execution
+        - Provides additional layer of protection
+        - Either flag being True enables trading (OR logic)
+
+        **Safety Notes**
+        - Both flags default to `False` for safety
+        - Changes take effect on the next scan cycle
+        - Always verify your settings before enabling live trading
+        - The scanner will fail to start if database configuration is unavailable
+
+        **NO FALLBACK**
+        - These settings are stored ONLY in the database
+        - If the database is unavailable, the scanner will NOT start
+        - This prevents accidental trading with stale or default settings
+        """)
+
+    # Save section
+    render_save_section(config, 'trading_control', updated_by)
 
 
 def render_dedup_settings(config: Dict[str, Any]):
@@ -1219,7 +1680,7 @@ def render_audit_trail():
     with col2:
         category_filter = st.selectbox(
             "Filter by Category",
-            options=['All', 'core', 'dedup', 'risk', 'trading_hours', 'safety', 'adx', 'smc_conflict', 'claude_validation'],
+            options=['All', 'core', 'indicators', 'data_quality', 'trading_control', 'dedup', 'risk', 'trading_hours', 'safety', 'adx', 'smc_conflict', 'claude_validation'],
             index=0
         )
 

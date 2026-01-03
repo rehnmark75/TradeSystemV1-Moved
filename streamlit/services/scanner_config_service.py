@@ -103,6 +103,20 @@ def get_config_by_category(category: str) -> Dict[str, Any]:
             'use_1m_base_synthesis', 'scan_align_to_boundaries', 'scan_boundary_offset_seconds',
             'enable_multi_timeframe_analysis', 'min_confluence_score'
         ],
+        'indicators': [
+            'macd_fast_period', 'macd_slow_period', 'macd_signal_period',
+            'kama_period', 'kama_fast', 'kama_slow',
+            'bb_period', 'bb_std_dev', 'supertrend_period', 'supertrend_multiplier',
+            'zero_lag_length', 'zero_lag_band_mult',
+            'two_pole_filter_length', 'two_pole_sma_length', 'two_pole_signal_delay'
+        ],
+        'data_quality': [
+            'lookback_reduction_factor', 'enable_data_quality_filtering',
+            'block_trading_on_data_issues', 'min_quality_score_for_trading'
+        ],
+        'trading_control': [
+            'auto_trading_enabled', 'enable_order_execution'
+        ],
         'dedup': [
             'enable_duplicate_check', 'duplicate_sensitivity', 'signal_cooldown_minutes',
             'alert_cooldown_minutes', 'strategy_cooldown_minutes', 'global_cooldown_seconds',
@@ -499,6 +513,94 @@ def get_field_metadata(field: str) -> Dict[str, Any]:
         'adx_filter_mode': {
             'options': ['strict', 'moderate', 'permissive', 'disabled'],
             'help': 'ADX filter strictness level'
+        },
+
+        # Indicator settings - MACD
+        'macd_fast_period': {
+            'min': 2, 'max': 50, 'step': 1,
+            'help': 'Fast EMA period for MACD calculation (default: 12)'
+        },
+        'macd_slow_period': {
+            'min': 5, 'max': 100, 'step': 1,
+            'help': 'Slow EMA period for MACD calculation (default: 26)'
+        },
+        'macd_signal_period': {
+            'min': 2, 'max': 50, 'step': 1,
+            'help': 'Signal line EMA period (default: 9)'
+        },
+
+        # Indicator settings - KAMA
+        'kama_period': {
+            'min': 2, 'max': 50, 'step': 1,
+            'help': 'Efficiency ratio period (default: 10)'
+        },
+        'kama_fast': {
+            'min': 1, 'max': 20, 'step': 1,
+            'help': 'Fast smoothing constant (default: 2)'
+        },
+        'kama_slow': {
+            'min': 10, 'max': 100, 'step': 1,
+            'help': 'Slow smoothing constant (default: 30)'
+        },
+
+        # Indicator settings - Bollinger Bands & Supertrend
+        'bb_period': {
+            'min': 5, 'max': 100, 'step': 1,
+            'help': 'Bollinger Bands period (default: 20)'
+        },
+        'bb_std_dev': {
+            'min': 0.5, 'max': 5.0, 'step': 0.1,
+            'help': 'Standard deviation multiplier (default: 2.0)',
+            'format': '%.1f'
+        },
+        'supertrend_period': {
+            'min': 5, 'max': 50, 'step': 1,
+            'help': 'ATR period for Supertrend (default: 10)'
+        },
+        'supertrend_multiplier': {
+            'min': 1.0, 'max': 10.0, 'step': 0.1,
+            'help': 'ATR multiplier (default: 3.0)',
+            'format': '%.1f'
+        },
+
+        # Indicator settings - Zero Lag
+        'zero_lag_length': {
+            'min': 5, 'max': 100, 'step': 1,
+            'help': 'Zero lag EMA period (default: 21)'
+        },
+        'zero_lag_band_mult': {
+            'min': 0.5, 'max': 5.0, 'step': 0.1,
+            'help': 'Band multiplier for volatility bands (default: 1.5)',
+            'format': '%.1f'
+        },
+
+        # Indicator settings - Two-Pole
+        'two_pole_filter_length': {
+            'min': 5, 'max': 100, 'step': 1,
+            'help': 'Two-pole filter length (default: 20)'
+        },
+        'two_pole_sma_length': {
+            'min': 5, 'max': 100, 'step': 1,
+            'help': 'SMA length for smoothing (default: 25)'
+        },
+        'two_pole_signal_delay': {
+            'min': 1, 'max': 20, 'step': 1,
+            'help': 'Signal delay periods (default: 4)'
+        },
+        # Data Quality Settings
+        'lookback_reduction_factor': {
+            'min': 0.1, 'max': 1.0, 'step': 0.05,
+            'help': 'Reduces lookback period for data fetching. Lower = less data, faster scans (default: 0.7)'
+        },
+        'enable_data_quality_filtering': {
+            'help': 'Filter out data points flagged as unsafe or low quality before analysis'
+        },
+        'block_trading_on_data_issues': {
+            'help': 'Prevent trading when data quality issues are detected'
+        },
+        'min_quality_score_for_trading': {
+            'min': 0.0, 'max': 1.0, 'step': 0.05,
+            'help': 'Minimum data quality score required for trading (0.0-1.0). Default: 0.5'
         },
     }
 

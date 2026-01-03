@@ -55,16 +55,17 @@ class DataFetcher:
         self.logger = logging.getLogger(__name__)
 
         # Performance optimizations - try database first, fallback to config.py
+        self._scanner_config = None  # Store reference for strategy checks
         if SCANNER_CONFIG_AVAILABLE:
             try:
-                scanner_cfg = get_scanner_config()
-                self.cache_enabled = scanner_cfg.enable_data_cache
-                self.reduced_lookback = scanner_cfg.reduced_lookback_hours
-                self.lazy_indicators = scanner_cfg.lazy_indicator_loading
-                self.batch_size = scanner_cfg.data_batch_size
-                self.enable_support_resistance = scanner_cfg.enable_support_resistance
-                self.enable_volume_analysis = scanner_cfg.enable_volume_analysis
-                self.enable_behavior_analysis = scanner_cfg.enable_behavior_analysis
+                self._scanner_config = get_scanner_config()
+                self.cache_enabled = self._scanner_config.enable_data_cache
+                self.reduced_lookback = self._scanner_config.reduced_lookback_hours
+                self.lazy_indicators = self._scanner_config.lazy_indicator_loading
+                self.batch_size = self._scanner_config.data_batch_size
+                self.enable_support_resistance = self._scanner_config.enable_support_resistance
+                self.enable_volume_analysis = self._scanner_config.enable_volume_analysis
+                self.enable_behavior_analysis = self._scanner_config.enable_behavior_analysis
                 logging.getLogger(__name__).debug("[CONFIG:DB] DataFetcher settings loaded from database")
             except Exception as e:
                 logging.getLogger(__name__).warning(f"[CONFIG:DB] Failed to load DataFetcher settings: {e}")
@@ -86,21 +87,7 @@ class DataFetcher:
         self.enable_support_resistance = True
         self.enable_volume_analysis = True
         self.enable_behavior_analysis = False
-    
-    def _log_strategy_status(self):
-        """Log the current strategy enablement status for debugging"""
-        strategies = {
-            'MOMENTUM_BIAS': getattr(config, 'MOMENTUM_BIAS_STRATEGY', False),
-            'ZERO_LAG': getattr(config, 'ZERO_LAG_STRATEGY', False),
-            'KAMA': getattr(config, 'KAMA_STRATEGY', False),
-            'BOLLINGER_SUPERTREND': getattr(config, 'BOLLINGER_SUPERTREND_STRATEGY', False),
-            'MACD_EMA': getattr(config, 'MACD_EMA_STRATEGY', False)
-        }
-        
-        self.logger.info("📊 Strategy Status Summary:")
-        for strategy, enabled in strategies.items():
-            status = "✅ ENABLED" if enabled else "❌ DISABLED"
-            self.logger.info(f"   {strategy}: {status}")
+
     
     def get_enhanced_data(
         self, 
@@ -237,8 +224,9 @@ class DataFetcher:
 
     def _get_ema_config_source(self, epic: str, ema_strategy=None) -> str:
         """
-        FIXED: Determine which EMA configuration source is being used
-        Uses the EMA strategy's own configuration methods
+        Determine which EMA configuration source is being used.
+        Note: EMA strategy is archived - only SMC_SIMPLE is active.
+        EMA periods (21/50/200) are now used for indicator calculations only.
         """
         try:
             # Check if we have an EMA strategy instance with dynamic config
@@ -246,112 +234,75 @@ class DataFetcher:
                 if ema_strategy.enable_dynamic_config:
                     return "dynamic (strategy-managed)"
                 else:
-                    # Get the static config name from strategy
                     config_name = getattr(ema_strategy, 'ema_config_name', 'default')
                     return f"static (strategy config: {config_name})"
-            
-            # Check config.py
-            ema_configs = getattr(config, 'EMA_STRATEGY_CONFIG', {})
-            active_config_name = getattr(config, 'ACTIVE_EMA_CONFIG', 'default')
-            
-            if active_config_name in ema_configs:
-                return f"config.py (preset: {active_config_name})"
 
+            # Default EMA periods used for indicator calculations
             return "standard (21/50/200)"
-            
-        except:
+
+        except Exception:
             return "unknown"
     
     def _enhance_with_analysis_optimized(self, df: pd.DataFrame, pair: str, ema_strategy=None, ema_periods=None) -> pd.DataFrame:
         """
-        ENHANCED: Enhanced analysis with proper market_timestamp handling and ALL strategy indicators
-        Uses only methods that actually exist in the current TechnicalAnalyzer
-        NOW INCLUDES: Momentum Bias and Zero Lag strategies
-        FIXED: Only adds indicators for strategies enabled in config.py
+        Enhanced analysis with proper market_timestamp handling and ALL indicators.
+        Always adds all indicators for SMC_SIMPLE strategy and performance collection.
         """
         try:
             df_enhanced = df.copy()
-            
-            # Ensure EMA 200 is always present (this method exists in your code)
+
+            # Ensure EMA 200 is always present
             df_enhanced = self._ensure_ema200_always_present(df_enhanced)
-            
-            # FIXED: Use provided EMA periods instead of recalculating
+
+            # Get EMA periods
             if ema_periods is None:
                 epic_guess = f"CS.D.{pair}.MINI.IP" if pair and '.' not in pair else pair
                 ema_periods = self._get_required_ema_periods(epic_guess, ema_strategy)
-            
-            # ENHANCED: Log EMA indicator addition with actual periods
-            self.logger.debug(f"🔄 Adding EMA indicators: {ema_periods} (EMA strategy enabled)")
-            
-            # Add EMA indicators with the correct periods
+
+            self.logger.debug(f"🔄 Adding EMA indicators: {ema_periods}")
+
+            # Add EMA indicators
             df_enhanced = self.technical_analyzer.add_ema_indicators(df_enhanced, ema_periods)
-            
-            # Debug: Check what columns were actually created
-            ema_cols_created = [col for col in df_enhanced.columns if col.startswith('ema_')]
-            self.logger.debug(f"EMA columns after add_ema_indicators: {ema_cols_created}")
-            
-            # ENHANCED: Add semantic column mapping for dynamic periods
+
+            # Add semantic column mapping for dynamic periods
             df_enhanced = self._add_semantic_ema_columns(df_enhanced, ema_periods)
-            
-            # Add MACD indicators if strategy is enabled
-            if getattr(config, 'MACD_EMA_STRATEGY', False):
-                self.logger.info(f"🔄 Adding MACD indicators (MACD strategy enabled)")
-                df_enhanced = self.technical_analyzer.add_macd_indicators(
-                    df_enhanced,
-                    config.MACD_PERIODS['fast_ema'],
-                    config.MACD_PERIODS['slow_ema'],
-                    config.MACD_PERIODS['signal_ema']
-                )
-                
-                # ALWAYS calculate EMA 50, 100, 200 for trend filtering
-                if 'ema_50' not in df_enhanced.columns:
-                    self.logger.debug(f"🔄 Adding EMA 50 for trend analysis")
-                    df_enhanced['ema_50'] = df_enhanced['close'].ewm(span=50).mean()
-                else:
-                    self.logger.debug(f"✅ EMA 50 already present")
 
-                if 'ema_100' not in df_enhanced.columns:
-                    self.logger.debug(f"🔄 Adding EMA 100 for trend analysis")
-                    df_enhanced['ema_100'] = df_enhanced['close'].ewm(span=100).mean()
-                else:
-                    self.logger.debug(f"✅ EMA 100 already present")
+            # Always add MACD indicators (needed for SMC_SIMPLE MACD filter)
+            self.logger.debug("🔄 Adding MACD indicators")
+            # Get MACD periods from database config
+            macd_fast = self._scanner_config.macd_fast_period if self._scanner_config else 12
+            macd_slow = self._scanner_config.macd_slow_period if self._scanner_config else 26
+            macd_signal = self._scanner_config.macd_signal_period if self._scanner_config else 9
+            df_enhanced = self.technical_analyzer.add_macd_indicators(
+                df_enhanced,
+                macd_fast,
+                macd_slow,
+                macd_signal
+            )
 
-                if 'ema_200' not in df_enhanced.columns:
-                    self.logger.debug(f"🔄 Adding EMA 200 for trend analysis")
-                    df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
-                else:
-                    self.logger.debug(f"✅ EMA 200 already present")
-            
-            # Add KAMA indicators if strategy is enabled
-            if getattr(config, 'KAMA_STRATEGY', False):
-                self.logger.info("🔄 Adding KAMA indicators (KAMA strategy enabled)")
-                df_enhanced = self._add_kama_indicators(df_enhanced)
-            
-            # Add BB+Supertrend indicators if enabled
-            if getattr(config, 'BOLLINGER_SUPERTREND_STRATEGY', False):
-                self.logger.info("🔄 Adding BB+Supertrend indicators (BB+Supertrend strategy enabled)")
-                df_enhanced = self._add_bb_supertrend_indicators(df_enhanced)
-            
-            
-            # ========== FIXED: ZERO LAG EMA INDICATORS ==========  
-            # ONLY check config.py - ignore configdata files when explicitly disabled
-            zero_lag_enabled = getattr(config, 'ZERO_LAG_STRATEGY', False)
-            
-            if zero_lag_enabled:
-                self.logger.info("🔄 Adding Zero Lag EMA indicators (Zero Lag strategy enabled)")
-                df_enhanced = self._add_zero_lag_indicators(df_enhanced)
-            else:
-                self.logger.debug("⏩ Zero Lag EMA indicators skipped (strategy disabled in config.py)")
-            
-            # ========== TWO-POLE OSCILLATOR INDICATORS ==========
-            # Add Two-Pole Oscillator for EMA signal validation if enabled
-            two_pole_enabled = getattr(config, 'TWO_POLE_OSCILLATOR_ENABLED', False)
-            
-            if two_pole_enabled:
-                self.logger.info("🔄 Adding Two-Pole Oscillator indicators (Two-Pole Oscillator enabled)")
-                df_enhanced = self._add_two_pole_oscillator_indicators(df_enhanced)
-            else:
-                self.logger.debug("⏩ Two-Pole Oscillator indicators skipped (disabled in config.py)")
+            # Ensure EMA 50, 100, 200 for trend filtering
+            if 'ema_50' not in df_enhanced.columns:
+                df_enhanced['ema_50'] = df_enhanced['close'].ewm(span=50).mean()
+            if 'ema_100' not in df_enhanced.columns:
+                df_enhanced['ema_100'] = df_enhanced['close'].ewm(span=100).mean()
+            if 'ema_200' not in df_enhanced.columns:
+                df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
+
+            # Always add KAMA indicators (for performance collection)
+            self.logger.debug("🔄 Adding KAMA indicators")
+            df_enhanced = self._add_kama_indicators(df_enhanced)
+
+            # Always add BB+Supertrend indicators (for performance collection)
+            self.logger.debug("🔄 Adding BB+Supertrend indicators")
+            df_enhanced = self._add_bb_supertrend_indicators(df_enhanced)
+
+            # Always add Zero Lag EMA indicators (for performance collection)
+            self.logger.debug("🔄 Adding Zero Lag EMA indicators")
+            df_enhanced = self._add_zero_lag_indicators(df_enhanced)
+
+            # Always add Two-Pole Oscillator indicators (for performance collection)
+            self.logger.debug("🔄 Adding Two-Pole Oscillator indicators")
+            df_enhanced = self._add_two_pole_oscillator_indicators(df_enhanced)
             
             
             # Add other indicators conditionally using instance settings (from database)
@@ -430,76 +381,19 @@ class DataFetcher:
                     self.logger.warning(f"⚠️ Applied fallback current timestamp due to: {inner_e}")
             return df
 
-    def _is_strategy_enabled(self, strategy_name: str) -> bool:
-        """
-        FIXED: Only check config.py - ignore configdata files when explicitly disabled
-        
-        This ensures that when you set a strategy to False in config.py, it stays disabled
-        regardless of what's in the configdata files.
-        """
-        strategy_name = strategy_name.upper()
-        
-        # Primary config variables (what you set in config.py)
-        primary_vars = {
-            'ZERO_LAG': 'ZERO_LAG_STRATEGY',
-            'MOMENTUM_BIAS': 'MOMENTUM_BIAS_STRATEGY', 
-            'BOLLINGER_SUPERTREND': 'BOLLINGER_SUPERTREND_STRATEGY',
-            'KAMA': 'KAMA_STRATEGY'
-        }
-        
-        # FIXED: Only check primary variable in config.py
-        if strategy_name in primary_vars:
-            primary_var = primary_vars[strategy_name]
-            primary_enabled = getattr(config, primary_var, False)
-            
-            self.logger.debug(f"📊 {strategy_name} strategy status: {primary_var}={primary_enabled} (config.py)")
-            return primary_enabled
-        
-        return False
-
-    def _is_momentum_bias_strategy_enabled(self) -> bool:
-        """
-        REMOVED: No longer checks configdata - only config.py matters
-        This method is kept for backward compatibility but now just returns config.py value
-        """
-        return getattr(config, 'MOMENTUM_BIAS_STRATEGY', False)
-    
-    def _is_zero_lag_strategy_enabled(self) -> bool:
-        """
-        REMOVED: No longer checks configdata - only config.py matters
-        This method is kept for backward compatibility but now just returns config.py value
-        """
-        return getattr(config, 'ZERO_LAG_STRATEGY', False)
-
-    
     def _add_kama_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add KAMA indicators to dataframe"""
+        """Add KAMA indicators to dataframe using database config"""
         try:
-            # Get KAMA configuration
-            kama_configs = getattr(config, 'KAMA_STRATEGY_CONFIG', {
-                'default': {'period': 10, 'fast': 2, 'slow': 30}
-            })
-            
-            # Get the current KAMA config
-            default_config_name = getattr(config, 'DEFAULT_KAMA_CONFIG', 'default')
-            kama_config = kama_configs.get(default_config_name, kama_configs['default'])
-            
-            # Calculate KAMA for the configured period
-            kama_period = kama_config['period']
-            fast_sc = kama_config['fast']
-            slow_sc = kama_config['slow']
-            
+            # Get KAMA configuration from database
+            kama_period = self._scanner_config.kama_period if self._scanner_config else 10
+            fast_sc = self._scanner_config.kama_fast if self._scanner_config else 2
+            slow_sc = self._scanner_config.kama_slow if self._scanner_config else 30
+
             df_with_kama = self._calculate_kama_indicators(df, kama_period, fast_sc, slow_sc)
-            
-            # Add additional KAMA periods if configured
-            additional_periods = getattr(config, 'ADDITIONAL_KAMA_PERIODS', [])
-            for period in additional_periods:
-                if period != kama_period:  # Avoid duplicate calculation
-                    df_with_kama = self._calculate_kama_indicators(df_with_kama, period, fast_sc, slow_sc)
-            
+
             self.logger.debug(f"✅ KAMA indicators added: KAMA_{kama_period}, ER, trend, signal")
             return df_with_kama
-            
+
         except Exception as e:
             self.logger.error(f"❌ Error adding KAMA indicators: {e}")
             return df
@@ -616,19 +510,15 @@ class DataFetcher:
             return df
     
     def _add_bb_supertrend_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add Bollinger Bands and Supertrend indicators if BB+Supertrend strategy is enabled"""
-        
-        if not getattr(config, 'BOLLINGER_SUPERTREND_STRATEGY', False):
-            return df
-            
+        """Add Bollinger Bands and Supertrend indicators for performance collection"""
         try:
             self.logger.debug("🔄 Calculating BB+Supertrend indicators...")
 
-            # Get configuration
-            bb_period = getattr(config, 'BB_PERIOD', 20)
-            bb_std_dev = getattr(config, 'BB_STD_DEV', 2.0)
-            supertrend_period = getattr(config, 'SUPERTREND_PERIOD', 10)
-            supertrend_multiplier = getattr(config, 'SUPERTREND_MULTIPLIER', 3.0)
+            # Get configuration from database
+            bb_period = self._scanner_config.bb_period if self._scanner_config else 20
+            bb_std_dev = self._scanner_config.bb_std_dev if self._scanner_config else 2.0
+            supertrend_period = self._scanner_config.supertrend_period if self._scanner_config else 10
+            supertrend_multiplier = self._scanner_config.supertrend_multiplier if self._scanner_config else 3.0
             
             # Calculate Bollinger Bands
             if 'bb_upper' not in df.columns:
@@ -724,7 +614,7 @@ class DataFetcher:
                 df['supertrend'] = supertrend
                 df['supertrend_direction'] = direction
             
-            self.logger.info("✅ BB+Supertrend indicators calculated successfully")
+            self.logger.debug("✅ BB+Supertrend indicators calculated successfully")
             return df
             
         except Exception as e:
@@ -736,15 +626,11 @@ class DataFetcher:
         """
         Add Zero Lag EMA indicators to DataFrame
         This mirrors the calculation in ZeroLagStrategy
-        FIXED: Only executes when called (config.py check already done)
         """
         try:
-            # Import configdata only when we know the strategy is enabled
-            from configdata import config_zerolag_strategy
-            
-            # Get parameters
-            length = config_zerolag_strategy.ZERO_LAG_LENGTH
-            band_multiplier = config_zerolag_strategy.ZERO_LAG_BAND_MULT
+            # Get parameters from database config
+            length = self._scanner_config.zero_lag_length if self._scanner_config else 21
+            band_multiplier = self._scanner_config.zero_lag_band_mult if self._scanner_config else 1.5
             
             # Calculate Zero Lag EMA
             src = df['close']
@@ -824,15 +710,15 @@ class DataFetcher:
         Based on BigBeluga's Two-Pole Oscillator for Pine Script
         """
         try:
-            # Get configuration parameters
-            filter_length = getattr(config, 'TWO_POLE_FILTER_LENGTH', 20)
-            sma_length = getattr(config, 'TWO_POLE_SMA_LENGTH', 25) 
-            signal_delay = getattr(config, 'TWO_POLE_SIGNAL_DELAY', 4)
+            # Get configuration parameters from database
+            filter_length = self._scanner_config.two_pole_filter_length if self._scanner_config else 20
+            sma_length = self._scanner_config.two_pole_sma_length if self._scanner_config else 25
+            signal_delay = self._scanner_config.two_pole_signal_delay if self._scanner_config else 4
             
             self.logger.debug(f"🔄 Calculating Two-Pole Oscillator indicators (length={filter_length})")
             
             if len(df) < max(sma_length * 2, filter_length * 2):
-                self.logger.warning(f"⚠️ Insufficient data for Two-Pole Oscillator: {len(df)} bars")
+                self.logger.debug(f"⚠️ Insufficient data for Two-Pole Oscillator: {len(df)} bars")
                 return df
             
             df_enhanced = df.copy()
@@ -934,66 +820,48 @@ class DataFetcher:
                 df_enhanced = self.technical_analyzer.add_ema_indicators(df_enhanced, ema_periods)
             
             if 'macd' in required_indicators:
-                if getattr(config, 'MACD_EMA_STRATEGY', False):
-                    self.logger.info(f"🔄 Adding MACD indicators (MACD strategy enabled)")
-                else:
-                    self.logger.info(f"🔄 Adding MACD indicators (explicitly requested)")
+                self.logger.debug("🔄 Adding MACD indicators")
+                macd_fast = self._scanner_config.macd_fast_period if self._scanner_config else 12
+                macd_slow = self._scanner_config.macd_slow_period if self._scanner_config else 26
+                macd_signal = self._scanner_config.macd_signal_period if self._scanner_config else 9
                 df_enhanced = self.technical_analyzer.add_macd_indicators(
                     df_enhanced,
-                    config.MACD_PERIODS['fast_ema'],
-                    config.MACD_PERIODS['slow_ema'],
-                    config.MACD_PERIODS['signal_ema']
+                    macd_fast,
+                    macd_slow,
+                    macd_signal
                 )
-                
-                # ALWAYS calculate EMA 50, 100, 200 for trend filtering (lazy loading)
+
+                # Ensure EMA 50, 100, 200 for trend filtering
                 if 'ema_50' not in df_enhanced.columns:
-                    self.logger.debug(f"🔄 Adding EMA 50 for trend analysis (lazy loading)")
                     df_enhanced['ema_50'] = df_enhanced['close'].ewm(span=50).mean()
-
                 if 'ema_100' not in df_enhanced.columns:
-                    self.logger.debug(f"🔄 Adding EMA 100 for trend analysis (lazy loading)")
                     df_enhanced['ema_100'] = df_enhanced['close'].ewm(span=100).mean()
-
                 if 'ema_200' not in df_enhanced.columns:
-                    self.logger.debug(f"🔄 Adding EMA 200 for trend analysis (lazy loading)")
                     df_enhanced['ema_200'] = df_enhanced['close'].ewm(span=200).mean()
-            
-            # Add KAMA indicators if required
-            if 'kama' in required_indicators and getattr(config, 'KAMA_STRATEGY', False):
-                self.logger.info(f"🔄 Adding KAMA indicators (KAMA strategy enabled)")
+
+            if 'kama' in required_indicators:
+                self.logger.debug("🔄 Adding KAMA indicators")
                 df_enhanced = self._add_kama_indicators(df_enhanced)
-            elif 'kama' in required_indicators:
-                self.logger.info(f"⚪ KAMA indicators NOT added (strategy disabled)")
 
-            
             if 'support_resistance' in required_indicators:
-                self.logger.debug(f"🔄 Adding S/R levels (lazy)")
+                self.logger.debug("🔄 Adding S/R levels")
                 df_enhanced = self.technical_analyzer.add_support_resistance_to_df(df_enhanced, pair)
-            
-            if 'volume' in required_indicators:
-                self.logger.debug(f"🔄 Adding volume analysis (lazy)")
-                df_enhanced = self.volume_analyzer.add_volume_analysis(df_enhanced)
-            
-            if 'behavior' in required_indicators:
-                self.logger.debug(f"🔄 Adding behavior analysis (lazy)")
-                df_enhanced = self.behavior_analyzer.add_behavior_analysis(df_enhanced, pair)
-            
-            
-            # FIXED: Only add if strategy is enabled in config.py
-            if ('zero_lag_ema' in required_indicators and getattr(config, 'ZERO_LAG_STRATEGY', False)):
-                self.logger.info(f"🔄 Adding Zero Lag EMA indicators (Zero Lag strategy enabled)")
-                df_enhanced = self._add_zero_lag_indicators(df_enhanced)
-            elif 'zero_lag_ema' in required_indicators:
-                self.logger.info(f"⚪ Zero Lag EMA indicators NOT added (strategy disabled)")
-            
-            if 'bb_supertrend' in required_indicators and getattr(config, 'BOLLINGER_SUPERTREND_STRATEGY', False):
-                self.logger.info(f"🔄 Adding BB+Supertrend indicators (BB+Supertrend strategy enabled)")
-                df_enhanced = self._add_bb_supertrend_indicators(df_enhanced)
-            elif 'bb_supertrend' in required_indicators:
-                self.logger.info(f"⚪ BB+Supertrend indicators NOT added (strategy disabled)")
 
-            # Note: RSI and ADX indicators will be added by the MACD strategy itself
-            # when needed for quality scoring - no need to pre-calculate here
+            if 'volume' in required_indicators:
+                self.logger.debug("🔄 Adding volume analysis")
+                df_enhanced = self.volume_analyzer.add_volume_analysis(df_enhanced)
+
+            if 'behavior' in required_indicators:
+                self.logger.debug("🔄 Adding behavior analysis")
+                df_enhanced = self.behavior_analyzer.add_behavior_analysis(df_enhanced, pair)
+
+            if 'zero_lag_ema' in required_indicators:
+                self.logger.debug("🔄 Adding Zero Lag EMA indicators")
+                df_enhanced = self._add_zero_lag_indicators(df_enhanced)
+
+            if 'bb_supertrend' in required_indicators:
+                self.logger.debug("🔄 Adding BB+Supertrend indicators")
+                df_enhanced = self._add_bb_supertrend_indicators(df_enhanced)
 
             return df_enhanced
             
@@ -1025,25 +893,21 @@ class DataFetcher:
                 
                 base_lookback = max(base_lookback, int(min_hours_needed))
             
-            # Adjust for KAMA requirements if enabled
-            if getattr(config, 'KAMA_STRATEGY', False):
-                kama_configs = getattr(config, 'KAMA_STRATEGY_CONFIG', {})
-                default_config = getattr(config, 'DEFAULT_KAMA_CONFIG', 'default')
-                
-                if default_config in kama_configs:
-                    kama_period = kama_configs[default_config].get('period', 10)
-                    
-                    # KAMA needs more data for stable calculation (5x the period minimum)
-                    min_kama_bars = kama_period * 5
-                    timeframe_minutes = self._timeframe_to_minutes(timeframe)
-                    min_kama_hours = (min_kama_bars * timeframe_minutes) / 60
-                    
-                    base_lookback = max(base_lookback, int(min_kama_hours))
-                    self.logger.debug(f"📊 KAMA lookback adjustment: {int(min_kama_hours)} hours for period {kama_period}")
+            # Always adjust for KAMA requirements (for performance collection)
+            # KAMA period is now in database (no config.py fallback)
+            kama_period = self._scanner_config.kama_period
+
+            # KAMA needs more data for stable calculation (5x the period minimum)
+            min_kama_bars = kama_period * 5
+            timeframe_minutes = self._timeframe_to_minutes(timeframe)
+            min_kama_hours = (min_kama_bars * timeframe_minutes) / 60
+
+            base_lookback = max(base_lookback, int(min_kama_hours))
+            self.logger.debug(f"📊 KAMA lookback adjustment: {int(min_kama_hours)} hours for period {kama_period}")
             
-            # Apply reduction factor if enabled
+            # Apply reduction factor if enabled (database-only - no fallback)
             if self.reduced_lookback:
-                reduction_factor = getattr(config, 'LOOKBACK_REDUCTION_FACTOR', 0.7)
+                reduction_factor = self._scanner_config.lookback_reduction_factor
                 base_lookback = int(base_lookback * reduction_factor)
             
             self.logger.debug(f"📈 Optimal lookback for {epic} ({timeframe}): {base_lookback} hours")
@@ -1126,35 +990,6 @@ class DataFetcher:
                         return ema_periods
                 except Exception as e:
                     self.logger.warning(f"⚠️ Strategy ema_config attribute failed: {e}")
-
-            # PRIORITY 4: Try configdata EMA_STRATEGY_CONFIG (moved from config.py)
-            ema_configs = getattr(config, 'EMA_STRATEGY_CONFIG', {})
-            active_config_name = getattr(config, 'ACTIVE_EMA_CONFIG', 'default')
-
-            if active_config_name in ema_configs:
-                config_data = ema_configs[active_config_name]
-                ema_periods = [
-                    config_data['short'],
-                    config_data['long'],
-                    config_data['trend']
-                ]
-                self.logger.debug(f"📋 Using configdata EMA config '{active_config_name}' for {epic}: {ema_periods}")
-                return ema_periods
-
-            # PRIORITY 5: Alternative configdata convenience method
-            if hasattr(config, 'get_ema_config_for_epic'):
-                try:
-                    ema_config = config.get_ema_config_for_epic(epic, 'default')
-                    if ema_config:
-                        ema_periods = [
-                            ema_config['short'],
-                            ema_config['long'],
-                            ema_config['trend']
-                        ]
-                        self.logger.debug(f"📊 Using configdata convenience method for {epic}: {ema_periods}")
-                        return ema_periods
-                except Exception as e:
-                    self.logger.warning(f"⚠️ Configdata convenience method failed: {e}")
 
             # FINAL: Standard EMA periods for trend filtering
             # These are used by all strategies for trend direction (EMA disabled, SMC uses these)
@@ -2326,32 +2161,32 @@ class DataFetcher:
             if df.empty:
                 return None
 
-            # Data quality filtering for trading safety
-            if getattr(config, 'ENABLE_DATA_QUALITY_FILTERING', False):
+            # Data quality filtering for trading safety (database-only - no fallback)
+            if self._scanner_config.enable_data_quality_filtering:
                 if 'is_safe_for_trading' in df.columns:
                     unsafe_count = len(df[df['is_safe_for_trading'] == False])
                     if unsafe_count > 0:
                         self.logger.warning(f"⚠️ {unsafe_count} unsafe price points detected for {epic} - filtering out")
-                        
-                        if getattr(config, 'BLOCK_TRADING_ON_DATA_ISSUES', True):
+
+                        if self._scanner_config.block_trading_on_data_issues:
                             df = df[df['is_safe_for_trading'] == True]
-                            
+
                             if df.empty:
                                 self.logger.error(f"❌ All data filtered out as unsafe for {epic} - cannot proceed with trading")
                                 return None
-                    
+
                     # Log data quality summary
                     if 'quality_score' in df.columns:
                         avg_quality = df['quality_score'].mean()
                         min_quality = df['quality_score'].min()
-                        min_quality_threshold = getattr(config, 'MIN_QUALITY_SCORE_FOR_TRADING', 0.5)
-                        
+                        min_quality_threshold = self._scanner_config.min_quality_score_for_trading
+
                         self.logger.debug(f"📊 Data quality for {epic}: avg={avg_quality:.3f}, min={min_quality:.3f}")
-                        
+
                         if min_quality < min_quality_threshold:
                             self.logger.warning(f"⚠️ Low quality data detected for {epic} (min: {min_quality:.3f} < threshold: {min_quality_threshold})")
-                            
-                            if getattr(config, 'BLOCK_TRADING_ON_DATA_ISSUES', True):
+
+                            if self._scanner_config.block_trading_on_data_issues:
                                 # Filter out low quality data
                                 df = df[df['quality_score'] >= min_quality_threshold]
                                 if df.empty:
@@ -2428,10 +2263,12 @@ class DataFetcher:
             if df is None or len(df) == 0:
                 return None
             
-            # Get KAMA configuration
-            kama_configs = getattr(config, 'KAMA_STRATEGY_CONFIG', {})
-            default_config = getattr(config, 'DEFAULT_KAMA_CONFIG', 'default')
-            kama_config = kama_configs.get(default_config, {'period': 10, 'fast': 2, 'slow': 30})
+            # Get KAMA configuration from database (no config.py fallback)
+            kama_config = {
+                'period': self._scanner_config.kama_period,
+                'fast': self._scanner_config.kama_fast,
+                'slow': self._scanner_config.kama_slow
+            }
             kama_period = kama_config['period']
             
             # Extract KAMA data

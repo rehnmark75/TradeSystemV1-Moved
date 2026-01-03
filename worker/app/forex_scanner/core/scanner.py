@@ -95,6 +95,18 @@ except ImportError:
     except ImportError:
         INTELLIGENCE_CONFIG_SERVICE_AVAILABLE = False
 
+# Import market hours utility to skip scanning when forex market is closed
+try:
+    from forex_scanner.utils.timezone_utils import is_market_hours
+    MARKET_HOURS_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.timezone_utils import is_market_hours
+        MARKET_HOURS_AVAILABLE = True
+    except ImportError:
+        MARKET_HOURS_AVAILABLE = False
+        is_market_hours = None
+
 
 class IntelligentForexScanner:
     """
@@ -383,10 +395,21 @@ class IntelligentForexScanner:
         """
         Perform one complete scan of all epics
         UPDATED: Now processes signals through SignalProcessor for Smart Money analysis
+        UPDATED: Skips scanning when forex market is closed (weekends)
         """
+        # Check if forex market is open before scanning
+        if MARKET_HOURS_AVAILABLE and is_market_hours is not None:
+            if not is_market_hours():
+                # Market is closed - skip all scanning, intelligence, and performance data
+                if not hasattr(self, '_last_market_closed_log') or \
+                   (datetime.now() - self._last_market_closed_log).total_seconds() > 3600:
+                    self.logger.info("🌙 Forex market is closed - skipping scan (no signals, intelligence, or performance data will be generated)")
+                    self._last_market_closed_log = datetime.now()
+                return []
+
         scan_start = datetime.now()
         self.stats['scans_completed'] += 1
-        
+
         try:
             self.logger.info(f"🔍 Starting scan #{self.stats['scans_completed']}")
             
@@ -875,7 +898,12 @@ class IntelligentForexScanner:
             while self.running:
                 scan_start = time.time()
 
-                # Perform scan
+                # Check if market is open - if closed, use longer sleep interval
+                market_open = True
+                if MARKET_HOURS_AVAILABLE and is_market_hours is not None:
+                    market_open = is_market_hours()
+
+                # Perform scan (will return empty if market closed)
                 signals = self.scan_once('live')
 
                 if signals:
@@ -889,7 +917,11 @@ class IntelligentForexScanner:
                 # Calculate sleep time based on mode
                 scan_duration = time.time() - scan_start
 
-                if boundary_aligned:
+                if not market_open:
+                    # Market is closed - use longer sleep interval (5 minutes)
+                    # to reduce resource usage during weekends
+                    sleep_time = 300  # 5 minutes
+                elif boundary_aligned:
                     # Boundary-aligned scanning: sync with 15m candle closes
                     sleep_time = self._calculate_boundary_aligned_sleep(scan_duration)
                 else:

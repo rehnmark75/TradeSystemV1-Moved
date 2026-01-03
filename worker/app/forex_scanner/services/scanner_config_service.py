@@ -169,6 +169,33 @@ class ScannerConfig:
     enable_volume_analysis: bool = True
     enable_behavior_analysis: bool = False
 
+    # INDICATOR SETTINGS (MACD, KAMA, BB, etc.)
+    macd_fast_period: int = 12
+    macd_slow_period: int = 26
+    macd_signal_period: int = 9
+    kama_period: int = 10
+    kama_fast: int = 2
+    kama_slow: int = 30
+    bb_period: int = 20
+    bb_std_dev: float = 2.0
+    supertrend_period: int = 10
+    supertrend_multiplier: float = 3.0
+    zero_lag_length: int = 21
+    zero_lag_band_mult: float = 1.5
+    two_pole_filter_length: int = 20
+    two_pole_sma_length: int = 25
+    two_pole_signal_delay: int = 4
+
+    # DATA QUALITY SETTINGS (NO FALLBACK - database only)
+    lookback_reduction_factor: float = 0.7
+    enable_data_quality_filtering: bool = False
+    block_trading_on_data_issues: bool = True
+    min_quality_score_for_trading: float = 0.5
+
+    # TRADING CONTROL FLAGS (NO FALLBACK - database only)
+    auto_trading_enabled: bool = False
+    enable_order_execution: bool = False
+
     # ADVANCED DEDUPLICATION SETTINGS
     enable_alert_deduplication: bool = True
     signal_hash_cache_expiry_minutes: int = 15
@@ -183,6 +210,39 @@ class ScannerConfig:
     loaded_at: Optional[datetime] = None
     cache_age_minutes: float = 0.0
     config_id: int = 0
+
+    def is_strategy_enabled(self, strategy_name: str) -> bool:
+        """
+        Check if a strategy is enabled in the database configuration.
+
+        Supports multiple naming conventions:
+        - 'SMC_SIMPLE' or 'smc_simple'
+        - 'MACD_EMA_STRATEGY' or 'MACD_EMA' or 'macd_ema'
+        - 'EMA_STRATEGY' or 'EMA' or 'ema'
+
+        Args:
+            strategy_name: The strategy name to check
+
+        Returns:
+            True if the strategy is in the enabled_strategies list
+        """
+        if not self.enabled_strategies:
+            return False
+
+        # Normalize the strategy name for comparison
+        normalized_name = strategy_name.upper().replace('_STRATEGY', '').replace('_ENABLED', '')
+
+        # Check against each enabled strategy (also normalized)
+        for enabled in self.enabled_strategies:
+            enabled_normalized = enabled.upper().replace('_STRATEGY', '').replace('_ENABLED', '')
+            if normalized_name == enabled_normalized:
+                return True
+
+        return False
+
+    def get_enabled_strategies(self) -> List[str]:
+        """Get the list of enabled strategies."""
+        return self.enabled_strategies or []
 
 
 class ScannerConfigService:
@@ -410,6 +470,11 @@ class ScannerConfigService:
             'max_signal_hash_cache_size', 'enable_signal_hash_check',
             'enable_time_based_hash_components', 'use_database_dedup_check',
             'database_dedup_window_minutes',
+            # Data Quality Settings
+            'lookback_reduction_factor', 'enable_data_quality_filtering',
+            'block_trading_on_data_issues', 'min_quality_score_for_trading',
+            # Trading Control Flags
+            'auto_trading_enabled', 'enable_order_execution',
         ]
 
         # Fields that should be integers

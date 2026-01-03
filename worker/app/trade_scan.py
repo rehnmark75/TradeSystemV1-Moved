@@ -200,37 +200,35 @@ class TradingSystem:
             self.enable_trading = enable_trading
             self.logger.info(f"🔧 Trading explicitly set to: {enable_trading}")
         else:
-            # Check multiple possible config variable names
-            self.enable_trading = (
-                getattr(config, 'AUTO_TRADING_ENABLED', False) or
-                getattr(config, 'ENABLE_ORDER_EXECUTION', False) or
-                getattr(config, 'TRADING_ENABLED', False) or
-                getattr(config, 'LIVE_TRADING', False)
-            )
-            self.logger.info(f"🔧 Trading from config: {self.enable_trading}")
+            # Get from database (NO FALLBACK to config.py)
+            if SCANNER_CONFIG_AVAILABLE:
+                try:
+                    scanner_cfg = get_scanner_config()
+                    self.enable_trading = scanner_cfg.auto_trading_enabled or scanner_cfg.enable_order_execution
+                    self.logger.info(f"🔧 Trading from database: {self.enable_trading}")
+                except Exception as e:
+                    self.logger.error(f"❌ Failed to get trading setting from database: {e}")
+                    raise RuntimeError(f"Trading configuration required from database: {e}")
+            else:
+                self.logger.error("[CONFIG:FAIL] Scanner config service not available for trading settings")
+                raise RuntimeError("Scanner config service is required for trading control flags")
         
         if enable_claude_analysis is not None:
             self.enable_claude_analysis = enable_claude_analysis
             self.logger.info(f"🔧 Claude explicitly set to: {enable_claude_analysis}")
         else:
-            # Try to get from database first (require_claude_approval)
+            # Get from database (NO FALLBACK to config.py)
             if SCANNER_CONFIG_AVAILABLE:
                 try:
                     scanner_cfg = get_scanner_config()
                     self.enable_claude_analysis = scanner_cfg.require_claude_approval
                     self.logger.info(f"🔧 Claude from database: {self.enable_claude_analysis}")
                 except Exception as e:
-                    self.logger.warning(f"⚠️ Failed to get Claude setting from database: {e}")
-                    self.enable_claude_analysis = False
+                    self.logger.error(f"❌ Failed to get Claude setting from database: {e}")
+                    raise RuntimeError(f"Claude configuration required from database: {e}")
             else:
-                # Legacy fallback to config.py
-                self.enable_claude_analysis = (
-                    getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False) or
-                    getattr(config, 'CLAUDE_ANALYSIS_ENABLED', False) or
-                    getattr(config, 'USE_CLAUDE_ANALYSIS', False) or
-                    getattr(config, 'CLAUDE_ANALYSIS_MODE', 'disabled') != 'disabled'
-                )
-                self.logger.info(f"🔧 Claude from config (legacy): {self.enable_claude_analysis}")
+                self.logger.error("[CONFIG:FAIL] Scanner config service not available for Claude settings")
+                raise RuntimeError("Scanner config service is required for Claude configuration")
         
         # Get scan_interval from database config service (fail-fast if not available)
         if SCANNER_CONFIG_AVAILABLE:
