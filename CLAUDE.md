@@ -35,10 +35,10 @@ docker exec -it task-worker python /app/trade_scan.py status       # System stat
 ### Backtesting
 ```bash
 docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7              # 7 days
-docker exec -it task-worker python /app/forex_scanner/bt.py GBPUSD 14 MACD --show-signals
+docker exec -it task-worker python /app/forex_scanner/bt.py GBPUSD 14 SMC --show-signals
 ```
 **Pair shortcuts**: EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY, GBPJPY
-**Strategy shortcuts**: EMA, MACD, BB, SMC, SMC_STRUCTURE, MOMENTUM, ICHIMOKU, KAMA, ZEROLAG
+**Strategy shortcuts**: SMC, SMC_SIMPLE (only active strategy after January 2026 cleanup)
 
 ---
 
@@ -50,12 +50,14 @@ trade_scan.py (entry point)
   └── TradingOrchestrator (core/trading/trading_orchestrator.py)
         ├── IntelligentForexScanner (core/scanner.py) - signal detection + dedup
         │     └── SignalDetector (core/signal_detector.py) - delegates to strategies
-        │           └── Strategies (core/strategies/*.py)
+        │           └── StrategyRegistry → SMCSimpleStrategy (only active)
         ├── DataFetcher (core/data_fetcher.py) - candles + indicators
         ├── TradeValidator, RiskManager, OrderManager
         ├── IntegrationManager - Claude AI analysis
         └── AlertHistoryManager (alerts/alert_history.py) - database
 ```
+
+**Note:** After January 2026 cleanup, only SMC Simple strategy is active. Legacy strategies (EMA, MACD, etc.) are archived in `forex_scanner/archive/disabled_strategies/`.
 
 ### Key Files Quick Reference
 
@@ -63,29 +65,38 @@ trade_scan.py (entry point)
 |---------|------|-----------|
 | **Live scanner entry** | `worker/app/trade_scan.py` | task-worker |
 | **Backtest entry** | `worker/app/forex_scanner/bt.py` | task-worker |
-| **Strategy config (LEGACY)** | `worker/app/forex_scanner/config.py` | task-worker |
+| **Infrastructure config** | `worker/app/forex_scanner/config.py` | task-worker |
 | **SMC Config Service** | `worker/app/forex_scanner/services/smc_simple_config_service.py` | task-worker |
+| **Strategy Registry** | `worker/app/forex_scanner/core/strategies/strategy_registry.py` | task-worker |
 | **Orchestrator** | `worker/app/forex_scanner/core/trading/trading_orchestrator.py` | task-worker |
 | **Scanner** | `worker/app/forex_scanner/core/scanner.py` | task-worker |
 | **Signal detector** | `worker/app/forex_scanner/core/signal_detector.py` | task-worker |
-| **Strategies** | `worker/app/forex_scanner/core/strategies/*.py` | task-worker |
+| **SMC Simple Strategy** | `worker/app/forex_scanner/core/strategies/smc_simple_strategy.py` | task-worker |
+| **Strategy templates** | `worker/app/forex_scanner/core/strategies/templates/` | task-worker |
+| **Adding new strategies** | `worker/app/forex_scanner/docs/adding_new_strategy.md` | task-worker |
 | **Order executor** | `worker/app/forex_scanner/alerts/order_executor.py` | task-worker |
 | **TRAILING STOPS (LIVE)** | `dev-app/config.py` → `PAIR_TRAILING_CONFIGS` | **fastapi-dev** |
 | **Trailing stops (backtest)** | `worker/app/forex_scanner/config_trailing_stops.py` | task-worker |
 | **Trade monitoring** | `dev-app/trailing_class.py` | fastapi-dev |
 
-### Strategies Available
-| Strategy | File | Enable in config.py |
-|----------|------|---------------------|
-| EMA | `ema_strategy.py` | `EMA_STRATEGY_ENABLED` |
-| MACD | `macd_strategy.py` | `MACD_STRATEGY_ENABLED` |
-| SMC Structure | `smc_structure_strategy.py` | `SMC_STRUCTURE_STRATEGY_ENABLED` |
-| Bollinger+Supertrend | `bb_supertrend_strategy.py` | `BB_SUPERTREND_STRATEGY_ENABLED` |
-| Scalping | `scalping_strategy.py` | `SCALPING_STRATEGY_ENABLED` |
-| Momentum | `momentum_strategy.py` | `MOMENTUM_STRATEGY_ENABLED` |
-| KAMA | `kama_strategy.py` | `KAMA_STRATEGY` |
-| Zero Lag | `zero_lag_strategy.py` | `ZERO_LAG_STRATEGY_ENABLED` |
-| Ichimoku | `ichimoku_strategy.py` | `ICHIMOKU_STRATEGY_ENABLED` |
+### Strategy System (January 2026 Cleanup)
+
+**Active Strategy:**
+| Strategy | File | Enable |
+|----------|------|--------|
+| SMC Simple | `smc_simple_strategy.py` | `SMC_SIMPLE_STRATEGY = True` (default) |
+
+**Adding New Strategies:**
+1. Copy template from `core/strategies/templates/strategy_template.py`
+2. Implement strategy logic following `StrategyInterface`
+3. Create database migration using `migrations/templates/strategy_config_template.sql`
+4. Enable in database or config.py
+5. See `docs/adding_new_strategy.md` for detailed guide
+
+**Archived Strategies** (in `forex_scanner/archive/disabled_strategies/`):
+- EMA, MACD, SMC Structure, Bollinger+Supertrend, Scalping
+- Momentum, KAMA, Zero Lag, Ichimoku, Mean Reversion
+- Volume Profile, Silver Bullet, etc. (16 total)
 
 ---
 
@@ -260,13 +271,20 @@ This file controls:
 
 ## 📈 System Status
 
-**Recent Enhancements:**
+**January 2026 Cleanup Complete:**
+- ✅ Archived 16 disabled strategies (preserved in `archive/disabled_strategies/`)
+- ✅ Archived 67 unused helper modules (preserved in `archive/disabled_helpers/`)
+- ✅ Cleaned signal_detector.py (3,605 → 630 lines, 83% reduction)
+- ✅ Cleaned config.py (1,413 → 733 lines, 48% reduction)
+- ✅ Implemented Strategy Registry pattern for easy extensibility
+- ✅ Created strategy and migration templates
+- ✅ Only SMC Simple strategy is active (database-driven configuration)
+
+**System Features:**
 - ✅ Dynamic parameter optimization system (database-driven)
 - ✅ Market intelligence with regime detection
-- ✅ Modular strategy configuration architecture
-- ✅ Comprehensive documentation split
 - ✅ Progressive trailing stop system with 4 stages
-- ✅ Partial close at 13 pips (configurable per pair)
-- ✅ Absolute stop level updates (not offset-based)
+- ✅ Claude AI trade analysis integration
+- ✅ Smart Money Concepts (SMC) analysis
 
 For detailed setup and usage instructions, start with the [Overview & Navigation](claude-overview.md).
