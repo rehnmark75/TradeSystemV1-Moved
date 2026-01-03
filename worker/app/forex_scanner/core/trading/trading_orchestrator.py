@@ -1627,14 +1627,16 @@ class TradingOrchestrator:
         if self.session_manager:
             self.session_manager.start_session(self.session_id)
 
-        # Check synthesis and boundary scanning modes
-        use_1m_base = getattr(config, 'USE_1M_BASE_SYNTHESIS', False)
-        boundary_aligned = getattr(config, 'SCAN_ALIGN_TO_BOUNDARIES', False)
+        # Check synthesis and boundary scanning modes from DATABASE (not config file)
+        scanner_config = get_scanner_config()
+        use_1m_base = scanner_config.use_1m_base_synthesis
+        boundary_aligned = scanner_config.scan_align_to_boundaries
+        boundary_offset = scanner_config.scan_boundary_offset_seconds
 
         # Note: session_manager.start_session() already logs session start details
         # Log additional orchestrator-specific info only
         self.logger.info(f"   1m Base Synthesis: {'✅ Enabled' if use_1m_base else '❌ Disabled (5m base)'}")
-        self.logger.info(f"   Boundary Scanning: {'✅ Enabled' if boundary_aligned else '❌ Disabled'}")
+        self.logger.info(f"   Boundary Scanning: {'✅ Enabled (offset: ' + str(boundary_offset) + 's)' if boundary_aligned else '❌ Disabled'}")
         self.logger.info(f"   Intelligence preset: {self.intelligence_preset}")
         self.logger.info(f"   Intelligence threshold: {self.intelligence_threshold:.1%}")
         self.logger.info(f"   Alert saving: {'Enabled' if self.alert_history else 'Disabled'}")

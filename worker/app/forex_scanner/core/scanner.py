@@ -764,16 +764,18 @@ class IntelligentForexScanner:
         """Start continuous scanning"""
         self.running = True
 
-        # Check if boundary-aligned scanning is enabled
-        boundary_aligned = getattr(config, 'SCAN_ALIGN_TO_BOUNDARIES', False)
-        use_1m_base = getattr(config, 'USE_1M_BASE_SYNTHESIS', False)
+        # Check if boundary-aligned scanning is enabled from DATABASE (not config file)
+        scanner_config = get_scanner_config()
+        boundary_aligned = scanner_config.scan_align_to_boundaries
+        boundary_offset = scanner_config.scan_boundary_offset_seconds
+        use_1m_base = scanner_config.use_1m_base_synthesis
 
         self.logger.info(f"🚀 Starting continuous scanning")
         self.logger.info(f"   Interval: {self.scan_interval}s")
         self.logger.info(f"   Epics: {len(self.epic_list)}")
         self.logger.info(f"   SignalProcessor: {'✅ Active' if self.use_signal_processor else '❌ Inactive'}")
         self.logger.info(f"   1m Base Synthesis: {'✅ Enabled' if use_1m_base else '❌ Disabled (5m base)'}")
-        self.logger.info(f"   Boundary Scanning: {'✅ Enabled' if boundary_aligned else '❌ Disabled'}")
+        self.logger.info(f"   Boundary Scanning: {'✅ Enabled (offset: ' + str(boundary_offset) + 's)' if boundary_aligned else '❌ Disabled'}")
 
         try:
             while self.running:
