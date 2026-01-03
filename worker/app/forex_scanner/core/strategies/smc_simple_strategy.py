@@ -1155,12 +1155,18 @@ class SMCSimpleStrategy:
             # Check if MACD momentum direction aligns with trade direction
             # Analysis: BULL + bullish MACD = 71% WR, misaligned = 38% WR
             try:
-                from configdata.strategies import config_smc_simple as smc_config
-                if hasattr(smc_config, 'is_macd_filter_enabled') and smc_config.is_macd_filter_enabled(epic):
-                    macd_aligned, macd_reason = smc_config.check_macd_alignment(
-                        direction, macd_line, macd_signal, macd_histogram
-                    )
+                # Use database config service if available
+                if self._config_service and hasattr(self._config_service, 'is_macd_filter_enabled'):
+                    macd_filter_enabled = self._config_service.is_macd_filter_enabled(epic)
+                else:
+                    macd_filter_enabled = getattr(self, 'macd_alignment_filter_enabled', True)
+
+                if macd_filter_enabled:
+                    # Check MACD alignment
                     macd_momentum = 'bullish' if macd_line > macd_signal else 'bearish'
+                    macd_aligned = (direction == 'BULL' and macd_momentum == 'bullish') or \
+                                   (direction == 'BEAR' and macd_momentum == 'bearish')
+                    macd_reason = f"{macd_momentum} MACD vs {direction} direction"
 
                     if not macd_aligned:
                         reason = f"MACD momentum misaligned: {direction} trade vs {macd_reason}"
@@ -1206,23 +1212,8 @@ class SMCSimpleStrategy:
             # ================================================================
             # Check if this signal should be blocked based on pair-specific conditions
             # This catches weak setups that historically underperform for specific pairs
-            try:
-                from configdata.strategies import config_smc_simple as smc_config
-                if hasattr(smc_config, 'should_block_signal'):
-                    signal_data = {
-                        'ema_distance_pips': ema_distance,
-                        'volume_confirmed': volume_confirmed,
-                        'in_optimal_zone': in_optimal_zone,
-                        'pullback_depth': pullback_depth,
-                        'confidence_score': confidence,
-                    }
-                    should_block, block_reason = smc_config.should_block_signal(epic, signal_data)
-                    if should_block:
-                        self.logger.warning(f"⛔ PAIR-SPECIFIC BLOCK: {epic}")
-                        self.logger.warning(f"   {block_reason}")
-                        return None
-            except ImportError:
-                pass  # Config not available, skip blocking check
+            # Note: Blocking conditions are now handled via database config (blocking_conditions JSONB)
+            # The blocking is checked earlier in signal validation if enabled in pair overrides
 
             # ================================================================
             # BUILD SIGNAL
@@ -2283,13 +2274,11 @@ class SMCSimpleStrategy:
 
         # Asian session: 21:00-07:00 UTC
         if hour >= 21 or hour < 7:
-            # v2.8.0: Check pair-specific override for Asian session
-            if epic:
-                from forex_scanner.configdata.strategies import config_smc_simple as smc_config
-                if hasattr(smc_config, 'is_asian_session_allowed'):
-                    if smc_config.is_asian_session_allowed(epic):
-                        pair_name = epic.split('.')[2] if '.' in epic else epic
-                        return True, f"Asian session ALLOWED for {pair_name} (hour={hour})"
+            # v2.8.0: Check pair-specific override for Asian session using database config
+            if epic and self._config_service:
+                if self._config_service.is_asian_session_allowed(epic):
+                    pair_name = epic.split('.')[2] if '.' in epic else epic
+                    return True, f"Asian session ALLOWED for {pair_name} (hour={hour})"
 
             # Default to global block
             if self.block_asian:

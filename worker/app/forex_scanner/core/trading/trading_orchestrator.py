@@ -103,12 +103,18 @@ except ImportError:
         print(f"⚠️ RejectionOutcomeAnalyzer not available: {e}")
         RejectionOutcomeAnalyzer = None
 
-# Import scanner config service for database-driven settings
+# Import config services for database-driven settings
 try:
     from forex_scanner.services.scanner_config_service import get_scanner_config
-    SCANNER_CONFIG_AVAILABLE = True
+    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+    CONFIG_SERVICES_AVAILABLE = True
 except ImportError:
-    SCANNER_CONFIG_AVAILABLE = False
+    try:
+        from services.scanner_config_service import get_scanner_config
+        from services.smc_simple_config_service import get_smc_simple_config
+        CONFIG_SERVICES_AVAILABLE = True
+    except ImportError:
+        CONFIG_SERVICES_AVAILABLE = False
 
 # Import MinIO client for chart storage
 try:
@@ -178,31 +184,44 @@ class TradingOrchestrator:
         self.intelligence_threshold = intelligence_threshold or self._get_intelligence_threshold()
         self.enable_market_intelligence = enable_market_intelligence
         
+        # Load configuration from DATABASE (not legacy config files)
+        if CONFIG_SERVICES_AVAILABLE:
+            scanner_cfg = get_scanner_config()
+            smc_cfg = get_smc_simple_config()
+        else:
+            scanner_cfg = None
+            smc_cfg = None
+
         # ENHANCED CLAUDE CONFIGURATION - read from database
         if enable_claude_analysis is not None:
             self.enable_claude = enable_claude_analysis
-        elif SCANNER_CONFIG_AVAILABLE:
-            try:
-                scanner_cfg = get_scanner_config()
-                self.enable_claude = scanner_cfg.require_claude_approval
-            except Exception:
-                self.enable_claude = getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)
+        elif scanner_cfg:
+            self.enable_claude = scanner_cfg.require_claude_approval
         else:
             self.enable_claude = getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)
 
-        self.claude_analysis_mode = claude_analysis_mode or getattr(config, 'CLAUDE_ANALYSIS_MODE', 'minimal')
-        self.claude_analysis_level = claude_analysis_level or getattr(config, 'CLAUDE_ANALYSIS_LEVEL', 'institutional')
-        self.use_advanced_claude_prompts = use_advanced_claude_prompts if use_advanced_claude_prompts is not None else getattr(config, 'USE_ADVANCED_CLAUDE_PROMPTS', True)
-        
+        self.claude_analysis_mode = claude_analysis_mode or 'minimal'
+        self.claude_analysis_level = claude_analysis_level or 'institutional'
+        self.use_advanced_claude_prompts = use_advanced_claude_prompts if use_advanced_claude_prompts is not None else True
+
         # TRADING CONFIGURATION
-        self.enable_trading = enable_trading if enable_trading is not None else getattr(config, 'ENABLE_TRADING', False)
-        
-        # SCANNER CONFIGURATION (passed to scanner)
-        self.scan_interval = scan_interval or getattr(config, 'SCAN_INTERVAL', 60)
-        self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
-        self.min_confidence = min_confidence or getattr(config, 'MIN_CONFIDENCE', 0.7)
-        self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else getattr(config, 'USE_BID_ADJUSTMENT', False)
-        self.spread_pips = spread_pips or getattr(config, 'SPREAD_PIPS', 1.5)
+        self.enable_trading = enable_trading if enable_trading is not None else False
+
+        # SCANNER CONFIGURATION (from database)
+        if scanner_cfg and smc_cfg:
+            self.scan_interval = scan_interval or scanner_cfg.scan_interval or 60
+            self.epic_list = epic_list or smc_cfg.enabled_pairs
+            self.min_confidence = min_confidence or scanner_cfg.min_confidence or 0.7
+            self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False
+            self.spread_pips = spread_pips or 1.5
+        else:
+            # Fallback to legacy config
+            self.logger.warning("⚠️ Database config unavailable, using legacy config fallback")
+            self.scan_interval = scan_interval or getattr(config, 'SCAN_INTERVAL', 60)
+            self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
+            self.min_confidence = min_confidence or getattr(config, 'MIN_CONFIDENCE', 0.7)
+            self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else getattr(config, 'USE_BID_ADJUSTMENT', False)
+            self.spread_pips = spread_pips or getattr(config, 'SPREAD_PIPS', 1.5)
         self.user_timezone = user_timezone
         
         # Session tracking
@@ -1591,7 +1610,12 @@ class TradingOrchestrator:
         """
         from datetime import timedelta
 
-        offset_seconds = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
+        # Get offset from database config
+        if CONFIG_SERVICES_AVAILABLE:
+            scanner_cfg = get_scanner_config()
+            offset_seconds = scanner_cfg.scan_boundary_offset_seconds or 60
+        else:
+            offset_seconds = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
 
         now = datetime.utcnow()
         current_minute = now.minute

@@ -130,9 +130,13 @@ class DataFetcher:
         Returns:
             Enhanced DataFrame or None if error
         """
-        # Use default timeframe if not specified
+        # Use default timeframe from database if not specified
         if timeframe is None:
-            timeframe = getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+            if SCANNER_CONFIG_AVAILABLE:
+                scanner_cfg = get_scanner_config()
+                timeframe = scanner_cfg.default_timeframe or '15m'
+            else:
+                timeframe = getattr(config, 'DEFAULT_TIMEFRAME', '15m')
             
         try:
             # Optimize lookback hours based on usage
@@ -2042,9 +2046,12 @@ class DataFetcher:
         minutes_since_close = (now - last_boundary).total_seconds() / 60
         seconds_until_next = (next_boundary - now).total_seconds()
 
-        # Consider "at boundary" if within configured offset
-        from forex_scanner import config
-        offset = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
+        # Consider "at boundary" if within configured offset (from database)
+        if SCANNER_CONFIG_AVAILABLE:
+            scanner_cfg = get_scanner_config()
+            offset = scanner_cfg.scan_boundary_offset_seconds or 60
+        else:
+            offset = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
         is_at_boundary = minutes_since_close * 60 <= offset
 
         return {
@@ -2197,10 +2204,14 @@ class DataFetcher:
         # Calculate lookback time in UTC (database time)
         since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
         
-        # Determine source timeframe based on synthesis mode
+        # Determine source timeframe based on synthesis mode (from database)
         # USE_1M_BASE_SYNTHESIS: Use 1m candles as base (better gap resilience)
         # Default (False): Use 5m candles as base (current behavior)
-        use_1m_base = getattr(config, 'USE_1M_BASE_SYNTHESIS', False)
+        if SCANNER_CONFIG_AVAILABLE:
+            scanner_cfg = get_scanner_config()
+            use_1m_base = scanner_cfg.use_1m_base_synthesis
+        else:
+            use_1m_base = getattr(config, 'USE_1M_BASE_SYNTHESIS', False)
 
         if use_1m_base:
             # 1M BASE SYNTHESIS MODE

@@ -30,12 +30,13 @@ except ImportError:
     from forex_scanner.core.smart_money_integration import add_smart_money_to_signal, add_smart_money_to_signals
     from forex_scanner.core.detection.large_candle_filter import LargeCandleFilter
 
+# Database-driven configuration services (NOT legacy config files)
 try:
-    from configdata import config
-    import config as system_config
+    from services.scanner_config_service import get_scanner_config
+    from services.smc_simple_config_service import get_smc_simple_config
 except ImportError:
-    from forex_scanner.configdata import config
-    from forex_scanner import config as system_config
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
 
 
 class SignalDetector:
@@ -56,21 +57,17 @@ class SignalDetector:
         self.logger.info("✅ Large candle filter initialized")
 
         # Initialize SMC Simple Strategy (the only active strategy)
-        # NOTE: Use system_config (main config.py) not configdata.config for strategy flags
-        if getattr(system_config, 'SMC_SIMPLE_STRATEGY', False):
-            try:
-                # SMC Simple strategy uses lazy loading for consistency
-                self.smc_simple_enabled = True
-                self.smc_simple_strategy = None  # Will be lazy-loaded on first use
-                self.logger.info("✅ SMC Simple strategy v1.0.0 enabled (3-tier EMA, lazy-load)")
-            except Exception as e:
-                self.logger.error(f"❌ Failed to enable SMC Simple strategy: {e}")
-                self.smc_simple_enabled = False
-                self.smc_simple_strategy = None
-        else:
+        # NOTE: SMC Simple is always enabled after January 2026 cleanup
+        # Configuration is loaded from database via get_smc_simple_config()
+        try:
+            # SMC Simple strategy uses lazy loading for consistency
+            self.smc_simple_enabled = True
+            self.smc_simple_strategy = None  # Will be lazy-loaded on first use
+            self.logger.info("✅ SMC Simple strategy enabled (3-tier EMA, lazy-load, database config)")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to enable SMC Simple strategy: {e}")
             self.smc_simple_enabled = False
             self.smc_simple_strategy = None
-            self.logger.info("⚪ SMC Simple strategy disabled")
 
         # Initialize analysis components
         self.performance_analyzer = PerformanceAnalyzer()
@@ -121,9 +118,10 @@ class SignalDetector:
             return False, f"Failed to force-init SMC Simple: {e}"
 
     def _get_default_timeframe(self, timeframe: str = None) -> str:
-        """Get default timeframe from config if not specified"""
+        """Get default timeframe from database config if not specified"""
         if timeframe is None:
-            return getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+            scanner_config = get_scanner_config()
+            return scanner_config.default_timeframe or '15m'
         return timeframe
 
     # =========================================================================
@@ -142,25 +140,17 @@ class SignalDetector:
 
         Uses multi-timeframe analysis:
         - Bias: 4H 50 EMA for directional bias
-        - Trigger: 1H swing break with body-close confirmation
-        - Entry: 15m pullback to Fibonacci zone
+        - Trigger: 15m swing break with body-close confirmation
+        - Entry: 5m pullback to Fibonacci zone
         """
-        # Load timeframes from SMC simple config
-        try:
-            from configdata.strategies import config_smc_simple as smc_simple_config
-            htf_tf = getattr(smc_simple_config, 'HTF_TIMEFRAME', '4h')
-            trigger_tf = getattr(smc_simple_config, 'TRIGGER_TIMEFRAME', '1h')
-            entry_tf = getattr(smc_simple_config, 'ENTRY_TIMEFRAME', '15m')
+        # Load timeframes from DATABASE config (not legacy config files)
+        smc_config = get_smc_simple_config()
+        htf_tf = smc_config.htf_timeframe or '4h'
+        trigger_tf = smc_config.trigger_timeframe or '15m'
+        entry_tf = smc_config.entry_timeframe or '5m'
 
-            # v2.9.0: Check if epic is in ENABLED_PAIRS
-            enabled_pairs = getattr(smc_simple_config, 'ENABLED_PAIRS', [])
-            if enabled_pairs and epic not in enabled_pairs:
-                self.logger.debug(f"🚫 [SMC_SIMPLE] {epic} not in ENABLED_PAIRS, skipping")
-                return None
-        except ImportError:
-            htf_tf = '4h'
-            trigger_tf = '1h'
-            entry_tf = '15m'
+        # Check if epic is enabled in pair overrides (database)
+        # get_smc_simple_config() already handles enabled pairs via pair_overrides table
 
         self.logger.debug(f"🔍 [SMC_SIMPLE] Using htf_tf={htf_tf}, trigger_tf={trigger_tf}, entry_tf={entry_tf}")
 
@@ -169,7 +159,8 @@ class SignalDetector:
             if not hasattr(self, 'smc_simple_strategy') or self.smc_simple_strategy is None:
                 from .strategies.smc_simple_strategy import create_smc_simple_strategy
 
-                self.smc_simple_strategy = create_smc_simple_strategy(config, logger=self.logger, db_manager=self.db_manager)
+                # Strategy loads all config from database via smc_simple_config_service
+                self.smc_simple_strategy = create_smc_simple_strategy(None, logger=self.logger, db_manager=self.db_manager)
                 self.logger.info(f"✅ SMC Simple strategy initialized (htf={htf_tf}, trigger={trigger_tf}, entry={entry_tf})")
 
             # Check if data_fetcher is in backtest mode (needed for lookback calculations)
@@ -274,8 +265,9 @@ class SignalDetector:
 
             individual_results = {}
 
-            # SMC Simple Strategy (the only active strategy)
-            if getattr(system_config, 'SMC_SIMPLE_STRATEGY', False) and self.smc_simple_enabled:
+            # SMC Simple Strategy (the only active strategy after January 2026 cleanup)
+            # SMC Simple is always enabled - no config flag needed
+            if self.smc_simple_enabled:
                 try:
                     self.logger.debug(f"🔍 [SMC SIMPLE] Starting detection for {epic}")
                     smc_simple_signal = self.detect_smc_simple_signals(epic, pair, spread_pips, timeframe)

@@ -71,12 +71,18 @@ except ImportError:
         MarketIntelligenceEngine = None
         MarketIntelligenceHistoryManager = None
 
-# Import scanner config service for database-driven settings
+# Import config services for database-driven settings
 try:
     from forex_scanner.services.scanner_config_service import get_scanner_config
-    SCANNER_CONFIG_AVAILABLE = True
+    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+    CONFIG_SERVICES_AVAILABLE = True
 except ImportError:
-    SCANNER_CONFIG_AVAILABLE = False
+    try:
+        from services.scanner_config_service import get_scanner_config
+        from services.smc_simple_config_service import get_smc_simple_config
+        CONFIG_SERVICES_AVAILABLE = True
+    except ImportError:
+        CONFIG_SERVICES_AVAILABLE = False
 
 
 class IntelligentForexScanner:
@@ -99,23 +105,43 @@ class IntelligentForexScanner:
         
         # Setup logging
         self.logger = logging.getLogger(__name__)
-        
-        # Core configuration
-        self.db_manager = db_manager
-        self.epic_list = epic_list or getattr(config, 'EPIC_LIST', [])
-        self.min_confidence = min_confidence or getattr(config, 'MIN_CONFIDENCE', 0.7)
-        self.scan_interval = scan_interval
-        self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else getattr(config, 'USE_BID_ADJUSTMENT', False)
-        self.spread_pips = spread_pips or getattr(config, 'SPREAD_PIPS', 1.5)
-        self.user_timezone = user_timezone
-        self.intelligence_mode = intelligence_mode
+
+        # Load configuration from DATABASE (not legacy config files)
+        if CONFIG_SERVICES_AVAILABLE:
+            scanner_cfg = get_scanner_config()
+            smc_cfg = get_smc_simple_config()
+
+            # Core configuration from database
+            self.db_manager = db_manager
+            self.epic_list = epic_list or smc_cfg.enabled_pairs
+            self.min_confidence = min_confidence or scanner_cfg.min_confidence or 0.7
+            self.scan_interval = scan_interval
+            self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False
+            self.spread_pips = spread_pips or 1.5  # Default spread
+            self.user_timezone = user_timezone
+            self.intelligence_mode = intelligence_mode
+        else:
+            # Fallback to legacy config (should not happen in normal operation)
+            self.logger.warning("⚠️ Database config unavailable, using legacy config fallback")
+            self.db_manager = db_manager
+            self.epic_list = epic_list or getattr(config, 'EPIC_LIST', [])
+            self.min_confidence = min_confidence or getattr(config, 'MIN_CONFIDENCE', 0.7)
+            self.scan_interval = scan_interval
+            self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else getattr(config, 'USE_BID_ADJUSTMENT', False)
+            self.spread_pips = spread_pips or getattr(config, 'SPREAD_PIPS', 1.5)
+            self.user_timezone = user_timezone
+            self.intelligence_mode = intelligence_mode
         
         # Initialize signal detector
         self.signal_detector = self._initialize_signal_detector(db_manager, user_timezone)
 
         # Initialize deduplication manager FIRST (shared with SignalProcessor)
+        # Get dedup setting from database if available
         self.deduplication_manager = None
-        self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True) and DEDUP_AVAILABLE
+        if CONFIG_SERVICES_AVAILABLE:
+            self.enable_deduplication = scanner_cfg.enable_alert_deduplication and DEDUP_AVAILABLE
+        else:
+            self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True) and DEDUP_AVAILABLE
 
         if self.enable_deduplication and db_manager and DEDUP_AVAILABLE:
             try:
@@ -127,7 +153,7 @@ class IntelligentForexScanner:
 
         # Initialize SignalProcessor for Smart Money analysis (pass shared dedup manager)
         self.signal_processor = None
-        self.use_signal_processor = getattr(config, 'USE_SIGNAL_PROCESSOR', True) and SIGNAL_PROCESSOR_AVAILABLE
+        self.use_signal_processor = True and SIGNAL_PROCESSOR_AVAILABLE  # Always use signal processor
 
         if self.use_signal_processor and SIGNAL_PROCESSOR_AVAILABLE:
             try:
@@ -165,14 +191,18 @@ class IntelligentForexScanner:
                 self.use_signal_processor = False
         
         # Initialize optional smart money (keep for backward compatibility)
-        self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', False) and SMART_MONEY_AVAILABLE
+        if CONFIG_SERVICES_AVAILABLE:
+            self.enable_smart_money = scanner_cfg.smart_money_readonly_enabled and SMART_MONEY_AVAILABLE
+        else:
+            self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', False) and SMART_MONEY_AVAILABLE
         if self.enable_smart_money:
             self.logger.info("✅ Smart money analysis enabled")
 
         # ADD: Initialize Market Intelligence components for comprehensive market analysis
         self.market_intelligence_engine = None
         self.market_intelligence_history = None
-        self.enable_market_intelligence = getattr(config, 'ENABLE_MARKET_INTELLIGENCE_STORAGE', True) and MARKET_INTELLIGENCE_AVAILABLE
+        # Market intelligence is always enabled if available (no config toggle needed)
+        self.enable_market_intelligence = MARKET_INTELLIGENCE_AVAILABLE
 
         if self.enable_market_intelligence and db_manager and MARKET_INTELLIGENCE_AVAILABLE:
             try:
@@ -300,23 +330,24 @@ class IntelligentForexScanner:
     def _scan_single_epic(self, epic: str, enable_multi_timeframe: bool = False) -> Optional[Dict]:
         """Scan single epic for signals"""
         try:
-            # Get pair info
-            pair_info = getattr(config, 'PAIR_INFO', {}).get(epic, {
-                'pair': epic.replace('CS.D.', '').replace('.MINI.IP', ''),
-                'pip_multiplier': 10000
-            })
-            pair_name = pair_info['pair']
-            
+            # Get pair info - extract pair name from epic
+            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+
+            # Get default timeframe from database
+            if CONFIG_SERVICES_AVAILABLE:
+                scanner_cfg = get_scanner_config()
+                default_tf = scanner_cfg.default_timeframe or '15m'
+            else:
+                default_tf = getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+
             # Detect signals
             if self.use_bid_adjustment:
                 signal = self.signal_detector.detect_signals_bid_adjusted(
-                    epic, pair_name, self.spread_pips, 
-                    getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+                    epic, pair_name, self.spread_pips, default_tf
                 )
             else:
                 signal = self.signal_detector.detect_signals_mid_prices(
-                    epic, pair_name, 
-                    getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+                    epic, pair_name, default_tf
                 )
             
             if signal:
@@ -493,25 +524,29 @@ class IntelligentForexScanner:
     def _detect_signals_for_epic(self, epic: str) -> Optional[Dict]:
         """Detect signals using all strategies for an epic"""
         try:
-            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '')
-            
+            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+
+            # Get default timeframe from database
+            if CONFIG_SERVICES_AVAILABLE:
+                scanner_cfg = get_scanner_config()
+                default_tf = scanner_cfg.default_timeframe or '15m'
+            else:
+                default_tf = getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+
             # Use detect_signals_all_strategies if available
             if hasattr(self.signal_detector, 'detect_signals_all_strategies'):
                 signals = self.signal_detector.detect_signals_all_strategies(
-                    epic, pair_name, self.spread_pips,
-                    getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+                    epic, pair_name, self.spread_pips, default_tf
                 )
             else:
                 # Fallback to single strategy
                 if self.use_bid_adjustment:
                     signals = self.signal_detector.detect_signals_bid_adjusted(
-                        epic, pair_name, self.spread_pips,
-                        getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+                        epic, pair_name, self.spread_pips, default_tf
                     )
                 else:
                     signals = self.signal_detector.detect_signals_mid_prices(
-                        epic, pair_name,
-                        getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+                        epic, pair_name, default_tf
                     )
             
             return signals
@@ -727,7 +762,12 @@ class IntelligentForexScanner:
         """
         from datetime import datetime, timedelta
 
-        offset_seconds = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
+        # Get offset from database config
+        if CONFIG_SERVICES_AVAILABLE:
+            scanner_cfg = get_scanner_config()
+            offset_seconds = scanner_cfg.scan_boundary_offset_seconds or 60
+        else:
+            offset_seconds = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
 
         now = datetime.utcnow()
         current_minute = now.minute
