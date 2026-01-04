@@ -8,6 +8,7 @@ FIXED: API request format matches working dev-app implementation
 ENHANCED: Added robust retry logic with exponential backoff and circuit breaker
 ENHANCED: Comprehensive timeout handling for HTTPConnectionPool errors
 v2.0.0: Added limit order (working order) support for SMC_SIMPLE strategy
+v3.0.0: Migrated to database-only configuration - NO FALLBACK to config.py
 """
 
 import requests
@@ -18,6 +19,15 @@ from typing import Dict, Optional, List
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from enum import Enum
+
+# CRITICAL: Database is the ONLY source of truth for behavioral settings
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
+except ImportError:
+    SCANNER_CONFIG_AVAILABLE = False
+
+# config.py is ONLY used for environment variables (API keys, URLs, epic maps)
 try:
     import config
 except ImportError:
@@ -99,58 +109,88 @@ class CircuitBreaker:
 
 
 class OrderExecutor:
-    """Enhanced order executor with retry logic and comprehensive timeout handling"""
-    
+    """Enhanced order executor with retry logic and comprehensive timeout handling.
+
+    v3.0.0: Database-only configuration - NO FALLBACK to config.py for behavioral settings.
+    Database is REQUIRED - if unavailable, the executor will fail to initialize.
+    """
+
     def __init__(self, ema_strategy=None):
         self.logger = logging.getLogger(__name__)
-        
+
         # Store reference to EMA strategy for performance tracking
         self.ema_strategy = ema_strategy
-        
-        # Load your API configuration from config
+
+        # ========== CRITICAL: Fail-fast database configuration ==========
+        # Database is the ONLY source of truth - NO FALLBACK allowed
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError(
+                "CRITICAL: Scanner config service not available - "
+                "database is REQUIRED, no fallback allowed"
+            )
+
+        try:
+            self._scanner_cfg = get_scanner_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"CRITICAL: Failed to load scanner config from database: {e} - "
+                "no fallback allowed"
+            ) from e
+
+        if not self._scanner_cfg:
+            raise RuntimeError(
+                "CRITICAL: Scanner config returned None - "
+                "database is REQUIRED, no fallback allowed"
+            )
+
+        self.logger.info(f"[CONFIG:DB] OrderExecutor using database config v{self._scanner_cfg.version}")
+
+        # ========== Environment variables from config.py (allowed) ==========
+        # These are NOT behavioral settings - they are deployment-specific
         self.order_api_url = getattr(config, 'ORDER_API_URL', None)
         self.api_subscription_key = getattr(config, 'API_SUBSCRIPTION_KEY', None)
         self.epic_map = getattr(config, 'EPIC_MAP', {})
-        
-        # FIXED: Load or create reverse epic mapping
+
+        # FIXED: Load or create reverse epic mapping (from config.py - deployment-specific)
         self.reverse_epic_map = getattr(config, 'REVERSE_EPIC_MAP', {})
-        
+
         # If REVERSE_EPIC_MAP doesn't exist in config, create it from EPIC_MAP
         if not self.reverse_epic_map and self.epic_map:
             self.reverse_epic_map = {}
             for internal_epic, external_epic in self.epic_map.items():
                 self.reverse_epic_map[external_epic] = internal_epic
-            self.logger.info("🔄 Auto-created reverse epic mapping from EPIC_MAP")
+            self.logger.info("Auto-created reverse epic mapping from EPIC_MAP")
         elif self.reverse_epic_map:
-            self.logger.info("✅ Loaded REVERSE_EPIC_MAP from config")
-        
-        # Trading settings
-        self.enabled = getattr(config, 'AUTO_TRADING_ENABLED', False)
-        self.default_risk_reward = getattr(config, 'DEFAULT_RISK_REWARD', 2.0)
-        self.default_stop_distance = getattr(config, 'DEFAULT_STOP_DISTANCE', 20)  # pips
-        self.position_size = getattr(config, 'DEFAULT_POSITION_SIZE', None)
-        
-        # ENHANCED: Retry configuration
+            self.logger.info("Loaded REVERSE_EPIC_MAP from config")
+
+        # ========== Behavioral settings from DATABASE ONLY ==========
+        # Trading settings (from database)
+        self.enabled = self._scanner_cfg.auto_trading_enabled
+        self.default_risk_reward = self._scanner_cfg.default_risk_reward
+        self.default_stop_distance = self._scanner_cfg.default_stop_distance
+        self.position_size = self._scanner_cfg.default_position_size
+
+        # Retry configuration (from database)
         self.retry_config = RetryConfig(
-            max_retries=getattr(config, 'ORDER_MAX_RETRIES', 3),
-            base_delay=getattr(config, 'ORDER_RETRY_BASE_DELAY', 2.0),
-            max_delay=getattr(config, 'ORDER_RETRY_MAX_DELAY', 60.0),
-            connect_timeout=getattr(config, 'ORDER_CONNECT_TIMEOUT', 10.0),
-            read_timeout=getattr(config, 'ORDER_READ_TIMEOUT', 45.0),
-            total_timeout=getattr(config, 'ORDER_TOTAL_TIMEOUT', 60.0),
+            max_retries=self._scanner_cfg.order_max_retries,
+            base_delay=self._scanner_cfg.order_retry_base_delay,
+            max_delay=self._scanner_cfg.order_retry_max_delay,
+            connect_timeout=self._scanner_cfg.order_connect_timeout,
+            read_timeout=self._scanner_cfg.order_read_timeout,
+            total_timeout=self._scanner_cfg.order_total_timeout,
         )
-        
-        # ENHANCED: Circuit breaker for service protection
+
+        # Circuit breaker for service protection (from database)
         self.circuit_breaker = CircuitBreaker(
-            failure_threshold=getattr(config, 'ORDER_CIRCUIT_BREAKER_THRESHOLD', 5),
-            recovery_timeout=getattr(config, 'ORDER_CIRCUIT_BREAKER_RECOVERY', 300.0)
+            failure_threshold=self._scanner_cfg.order_circuit_breaker_threshold,
+            recovery_timeout=self._scanner_cfg.order_circuit_breaker_recovery
         )
-        
+
         # Performance tracking - store pending trades
         self.pending_trades = {}  # trade_id -> signal info
         self.completed_trades = []  # completed trade records
-        
-        # ENHANCED: Request statistics tracking
+
+        # Request statistics tracking
         self.request_stats = {
             'total_requests': 0,
             'successful_requests': 0,
@@ -159,27 +199,28 @@ class OrderExecutor:
             'retry_requests': 0,
             'circuit_breaker_blocks': 0
         }
-        
+
         if self.enabled:
-            self.logger.info("🤖 Enhanced Order Executor initialized - AUTO TRADING ENABLED")
-            self.logger.info(f"   API URL: {self.order_api_url[:50]}..." if self.order_api_url else "   ❌ No API URL configured")
+            self.logger.info("Enhanced Order Executor initialized - AUTO TRADING ENABLED")
+            self.logger.info(f"   Config source: database (v{self._scanner_cfg.version})")
+            self.logger.info(f"   API URL: {self.order_api_url[:50]}..." if self.order_api_url else "   No API URL configured")
             self.logger.info(f"   Epic mappings: {len(self.epic_map)} forward, {len(self.reverse_epic_map)} reverse")
             self.logger.info(f"   Retry config: max_retries={self.retry_config.max_retries}, timeouts={self.retry_config.connect_timeout}/{self.retry_config.read_timeout}s")
             self.logger.info(f"   Circuit breaker: {self.circuit_breaker.failure_threshold} failures threshold")
-            
+
             # Debug log some key mappings
             test_epics = ['USDCHF.1.MINI', 'EURUSD.1.MINI']
             for test_epic in test_epics:
                 if test_epic in self.reverse_epic_map:
-                    self.logger.info(f"✅ {test_epic} -> {self.reverse_epic_map[test_epic]}")
+                    self.logger.info(f"   {test_epic} -> {self.reverse_epic_map[test_epic]}")
                 else:
-                    self.logger.warning(f"⚠️ {test_epic} not found in reverse mapping")
-                    
+                    self.logger.warning(f"   {test_epic} not found in reverse mapping")
+
         else:
-            self.logger.info("📋 Enhanced Order Executor initialized - AUTO TRADING DISABLED")
-        
+            self.logger.info("Enhanced Order Executor initialized - AUTO TRADING DISABLED")
+
         if self.ema_strategy:
-            self.logger.info("📊 Performance tracking enabled for dynamic EMA configuration")
+            self.logger.info("Performance tracking enabled for dynamic EMA configuration")
     
     def execute_signal_order(self, signal: Dict) -> Dict:
         """
@@ -233,15 +274,26 @@ class OrderExecutor:
                     "alert_id": alert_id
                 }
             
-            self.logger.info(f"🔄 Epic mapping: {internal_epic} -> {external_epic}")
-            
-            # Check if epic is blacklisted from trading
+            self.logger.info(f"Epic mapping: {internal_epic} -> {external_epic}")
+
+            # Check if epic is blacklisted from trading (database first, then config.py fallback for complex reasons)
+            blocked_epics = self._scanner_cfg.blocked_trading_epics or []
+            if internal_epic in blocked_epics:
+                self.logger.warning(f"Trading blocked for {internal_epic}: blocked in database config")
+                return {
+                    "status": "blocked",
+                    "message": "Trading blocked: epic in blocked_trading_epics list",
+                    "epic": internal_epic,
+                    "alert_id": alert_id
+                }
+
+            # Also check config.py TRADING_BLACKLIST for detailed reasons (deployment-specific)
             trading_blacklist = getattr(config, 'TRADING_BLACKLIST', {})
             if internal_epic in trading_blacklist:
                 reason = trading_blacklist[internal_epic]
-                self.logger.warning(f"🚫 Trading blocked for {internal_epic}: {reason}")
+                self.logger.warning(f"Trading blocked for {internal_epic}: {reason}")
                 return {
-                    "status": "blocked", 
+                    "status": "blocked",
                     "message": f"Trading blocked: {reason}",
                     "epic": internal_epic,
                     "alert_id": alert_id
@@ -1249,11 +1301,11 @@ class OrderExecutor:
                 epic = signal.get('epic', '')
                 return self._convert_to_integer_pips(price_distance, epic)
             
-            # Method 2: Use configured dynamic stops
-            if hasattr(config, 'DYNAMIC_STOPS') and config.DYNAMIC_STOPS:
+            # Method 2: Use configured dynamic stops (from database)
+            if self._scanner_cfg.dynamic_stops_enabled:
                 confidence = signal.get('confidence_score', 0.5)
                 base_stop = self.default_stop_distance
-                
+
                 # Higher confidence = tighter stop
                 if confidence > 0.8:
                     return int(base_stop * 0.8)  # 16 pips for high confidence
@@ -1277,18 +1329,18 @@ class OrderExecutor:
         if not self.enabled:
             return False
 
-        # Check minimum confidence
+        # Check minimum confidence (from database)
         confidence = signal.get('confidence_score', 0)
-        min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
+        min_confidence = self._scanner_cfg.min_confidence
 
         if confidence < min_confidence:
-            self.logger.info(f"📊 Signal confidence {confidence:.1%} below threshold {min_confidence:.1%}")
+            self.logger.info(f"Signal confidence {confidence:.1%} below threshold {min_confidence:.1%}")
             return False
 
-        # ========== USDCHF PAIR-SPECIFIC FILTERS (v2.6.0) ==========
+        # ========== PAIR-SPECIFIC FILTERS ==========
         epic = signal.get('epic', '')
 
-        # Check pair-specific blocked hours
+        # Check pair-specific blocked hours (config.py has the function for now)
         if hasattr(config, 'is_pair_hour_blocked'):
             from datetime import datetime, timezone
             current_hour_utc = datetime.now(timezone.utc).hour

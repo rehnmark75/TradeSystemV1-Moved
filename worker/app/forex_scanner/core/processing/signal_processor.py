@@ -111,57 +111,48 @@ class SignalProcessor:
         self.data_fetcher = data_fetcher  # ADD: Store data_fetcher
         self.logger = logger or logging.getLogger(__name__)
         
-        # Configuration - read from database when available
-        if SCANNER_CONFIG_AVAILABLE:
-            try:
-                scanner_cfg = get_scanner_config()
-                self.min_confidence = scanner_cfg.min_confidence
-                self.enable_deduplication = scanner_cfg.enable_duplicate_check
-                self.enable_smart_money = scanner_cfg.smart_money_readonly_enabled
-                self.smart_money_timeout = scanner_cfg.smart_money_analysis_timeout
-                self.enable_smc_conflict_filter = scanner_cfg.smc_conflict_filter_enabled
-                self.smc_min_directional_consensus = scanner_cfg.smc_min_directional_consensus
-                self.smc_reject_on_order_flow_conflict = scanner_cfg.smc_reject_order_flow_conflict
-                self.smc_reject_on_ranging_structure = scanner_cfg.smc_reject_ranging_structure
-                self.smc_min_structure_score = scanner_cfg.smc_min_structure_score
-                self.logger.info(f"[CONFIG:DB] SignalProcessor config loaded from database")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Failed to load SignalProcessor config from database: {e}")
-                # Fall back to config.py
-                self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.7)
-                self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True)
-                self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', True)
-                self.smart_money_timeout = getattr(config, 'SMART_MONEY_ANALYSIS_TIMEOUT', 5.0)
-                self.enable_smc_conflict_filter = getattr(config, 'SMC_CONFLICT_FILTER_ENABLED', True)
-                self.smc_min_directional_consensus = getattr(config, 'SMC_MIN_DIRECTIONAL_CONSENSUS', 0.3)
-                self.smc_reject_on_order_flow_conflict = getattr(config, 'SMC_REJECT_ORDER_FLOW_CONFLICT', True)
-                self.smc_reject_on_ranging_structure = getattr(config, 'SMC_REJECT_RANGING_STRUCTURE', True)
-                self.smc_min_structure_score = getattr(config, 'SMC_MIN_STRUCTURE_SCORE', 0.5)
-        else:
-            # Legacy fallback to config.py
-            self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.7)
-            self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True)
-            self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', True)
-            self.smart_money_timeout = getattr(config, 'SMART_MONEY_ANALYSIS_TIMEOUT', 5.0)
-            self.enable_smc_conflict_filter = getattr(config, 'SMC_CONFLICT_FILTER_ENABLED', True)
-            self.smc_min_directional_consensus = getattr(config, 'SMC_MIN_DIRECTIONAL_CONSENSUS', 0.3)
-            self.smc_reject_on_order_flow_conflict = getattr(config, 'SMC_REJECT_ORDER_FLOW_CONFLICT', True)
-            self.smc_reject_on_ranging_structure = getattr(config, 'SMC_REJECT_RANGING_STRUCTURE', True)
-            self.smc_min_structure_score = getattr(config, 'SMC_MIN_STRUCTURE_SCORE', 0.5)
+        # ✅ CRITICAL: Database-driven configuration - NO FALLBACK to config.py
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError(
+                "❌ CRITICAL: Scanner config service not available - database is REQUIRED, no fallback allowed"
+            )
 
-        # Settings that remain in config.py (not migrated to database)
-        self.claude_analysis_mode = getattr(config, 'CLAUDE_ANALYSIS_MODE', 'minimal')
-        self.claude_strategic_focus = getattr(config, 'CLAUDE_STRATEGIC_FOCUS', None)
-        self.claude_timeout = getattr(config, 'CLAUDE_TIMEOUT_SECONDS', 30)
-        self.enable_notifications = getattr(config, 'ENABLE_NOTIFICATIONS', True)
-        # Use dynamic strategy detection instead of hardcoded list
-        if hasattr(config, 'get_enabled_strategies'):
-            self.selected_strategies = config.get_enabled_strategies()
-        else:
-            # Fallback to old approach if new function not available
-            self.selected_strategies = getattr(config, 'SELECTED_STRATEGIES', ['EMA', 'MACD', 'Combined'])
-        self.duplicate_window_hours = getattr(config, 'DUPLICATE_WINDOW_HOURS', 24)
-        self.save_to_database = getattr(config, 'SAVE_TO_DATABASE', True)
+        try:
+            self._scanner_cfg = get_scanner_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"❌ CRITICAL: Failed to load scanner config from database: {e} - no fallback allowed"
+            )
+
+        if not self._scanner_cfg:
+            raise RuntimeError(
+                "❌ CRITICAL: Scanner config returned None - database is REQUIRED, no fallback allowed"
+            )
+
+        # Configuration from database - NO FALLBACK
+        self.min_confidence = self._scanner_cfg.min_confidence
+        self.enable_deduplication = self._scanner_cfg.enable_duplicate_check
+        self.enable_smart_money = self._scanner_cfg.smart_money_readonly_enabled
+        self.smart_money_timeout = self._scanner_cfg.smart_money_analysis_timeout
+        self.enable_smc_conflict_filter = self._scanner_cfg.smc_conflict_filter_enabled
+        self.smc_min_directional_consensus = self._scanner_cfg.smc_min_directional_consensus
+        self.smc_reject_on_order_flow_conflict = self._scanner_cfg.smc_reject_order_flow_conflict
+        self.smc_reject_on_ranging_structure = self._scanner_cfg.smc_reject_ranging_structure
+        self.smc_min_structure_score = self._scanner_cfg.smc_min_structure_score
+        self.enable_claude = self._scanner_cfg.require_claude_approval  # For accurate status display
+        self.claude_analysis_mode = self._scanner_cfg.claude_analysis_mode
+        self.claude_timeout = self._scanner_cfg.claude_timeout
+        self.enable_notifications = self._scanner_cfg.notifications_enabled
+        self.save_to_database = self._scanner_cfg.save_to_database
+
+        # Additional database-driven settings from scanner config
+        self.claude_strategic_focus = self._scanner_cfg.claude_strategic_focus
+        self.duplicate_window_hours = self._scanner_cfg.duplicate_window_hours
+
+        # Enabled strategies from database
+        self.selected_strategies = self._scanner_cfg.enabled_strategies if self._scanner_cfg.enabled_strategies else ['SMC_SIMPLE']
+
+        self.logger.info("[CONFIG:DB] ✅ SignalProcessor config loaded from database (NO FALLBACK)")
 
         # INTEGRATION: Use passed deduplication manager or create new one
         self.deduplication_manager = deduplication_manager
@@ -223,9 +214,9 @@ class SignalProcessor:
         
         self.logger.info("📊 Enhanced SignalProcessor initialized with integrated deduplication and Smart Money")
         self.logger.info(f"   Selected strategies: {self.selected_strategies}")
-        self.logger.info(f"   Claude analysis: {'✅' if claude_analyzer else '❌'} ({self.claude_analysis_mode})")
+        self.logger.info(f"   Claude analysis: {'✅' if self.enable_claude else '❌'} ({self.claude_analysis_mode})")
         self.logger.info(f"   Smart Money: {'✅' if self.smart_money_analyzer else '❌'}")
-        self.logger.info(f"   Notifications: {'✅' if notification_manager else '❌'}")
+        self.logger.info(f"   Notifications: {'✅' if self.enable_notifications else '❌'}")
         self.logger.info(f"   Alert history: {'✅' if alert_history else '❌'}")
         self.logger.info(f"   Database storage: {'✅' if self.save_to_database else '❌'}")
         self.logger.info(f"   Deduplication: {'✅' if self.deduplication_manager else '❌'}")
@@ -353,8 +344,8 @@ class SignalProcessor:
             
             # Determine confidence threshold based on MTF enhancement
             if is_mtf_enhanced:
-                # Use lower threshold for MTF-enhanced signals
-                mtf_threshold = getattr(config, 'MTF_ENHANCED_MIN_CONFIDENCE', 0.60)
+                # Use lower threshold for MTF-enhanced signals (from database)
+                mtf_threshold = self._scanner_cfg.mtf_enhanced_min_confidence
                 effective_threshold = mtf_threshold
                 processing_result['mtf_override_applied'] = True
                 
@@ -380,7 +371,8 @@ class SignalProcessor:
                                            'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern'])
 
             if is_scalping:
-                scalping_threshold = getattr(config, 'SCALPING_MIN_CONFIDENCE', 0.45)
+                # Use scalping threshold from database
+                scalping_threshold = self._scanner_cfg.scalping_min_confidence
                 effective_threshold = scalping_threshold
                 self.logger.info(f"🔥 SCALPING: Using scalping threshold {scalping_threshold:.1%} instead of {self.min_confidence:.1%}")
 

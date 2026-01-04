@@ -54,6 +54,10 @@ class ScannerConfig:
     use_1m_base_synthesis: bool = False
     scan_align_to_boundaries: bool = False
     scan_boundary_offset_seconds: int = 0
+    spread_pips: float = 1.5
+    use_bid_adjustment: bool = False
+    epic_list: List[str] = field(default_factory=list)
+    pair_info: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     # DUPLICATE DETECTION SETTINGS
     enable_duplicate_check: bool = False
@@ -84,9 +88,22 @@ class ScannerConfig:
     risk_per_trade_percent: float = 0.0
     min_position_size: float = 0.0
     max_position_size: float = 0.0
+    default_position_size: float = 1.0
     max_risk_per_trade: int = 0
     default_risk_reward: float = 0.0
     default_stop_distance: int = 0
+    # Extended risk management settings (for RiskManager - NO FALLBACK)
+    max_daily_loss_percent: float = 5.0
+    max_trades_per_pair: int = 3
+    min_account_balance: float = 1000.0
+    daily_profit_target_percent: float = 3.0
+    stop_on_daily_target: bool = False
+    testing_max_stop_percent: float = 20.0
+    testing_min_confidence: float = 0.0
+    emergency_stop_enabled: bool = True
+    disable_account_risk_validation: bool = False
+    disable_position_sizing: bool = False
+    account_balance: float = 10000.0
 
     # TRADING HOURS SETTINGS
     trading_start_hour: int = 0
@@ -134,6 +151,15 @@ class ScannerConfig:
     # SMC CONFLICT FILTER SETTINGS
     smart_money_readonly_enabled: bool = False
     smart_money_analysis_timeout: float = 0.0
+    smart_money_min_data_points: int = 50
+    smart_money_structure_weight: float = 0.4
+    smart_money_order_flow_weight: float = 0.3
+    smart_money_min_confidence_boost: float = 0.1
+    smart_money_max_confidence_boost: float = 0.3
+    smart_money_liquidity_sweep_enabled: bool = True
+    smart_money_liquidity_sweep_weight: float = 0.2
+    smart_money_liquidity_sweep_lookback_bars: int = 10
+    smart_money_min_sweep_quality: float = 0.4
     smc_conflict_filter_enabled: bool = False
     smc_min_directional_consensus: float = 0.0
     smc_reject_order_flow_conflict: bool = False
@@ -149,13 +175,26 @@ class ScannerConfig:
     claude_chart_timeframes: List[str] = field(default_factory=list)
     claude_vision_enabled: bool = False
     claude_vision_strategies: List[str] = field(default_factory=list)
+    claude_vision_save_directory: str = "claude_analysis_enhanced/vision_analysis"
     claude_validate_in_backtest: bool = False
     save_claude_rejections: bool = False
     claude_save_vision_artifacts: bool = False
+    claude_analysis_mode: str = "minimal"
+    claude_timeout: int = 30
+    claude_strategic_focus: Optional[str] = None
+
+    # CLAUDE INTEGRATION SETTINGS (for IntegrationManager)
+    claude_analysis_enabled: bool = False
+    use_advanced_claude_prompts: bool = True
+    claude_analysis_level: str = "institutional"
+    claude_auto_save: bool = True
+    claude_save_directory: str = "claude_analysis"
+    minio_enabled: bool = True  # MinIO storage for charts/artifacts
 
     # MULTI-TIMEFRAME ANALYSIS SETTINGS
     enable_multi_timeframe_analysis: bool = False
     min_confluence_score: float = 0.30
+    mtf_enhanced_min_confidence: float = 0.60  # Lower threshold for MTF-validated signals
 
     # ENABLED STRATEGIES (replaces config.py flags)
     enabled_strategies: List[str] = field(default_factory=list)
@@ -204,6 +243,95 @@ class ScannerConfig:
     enable_time_based_hash_components: bool = False
     use_database_dedup_check: bool = True
     database_dedup_window_minutes: int = 15
+    duplicate_window_hours: int = 24
+
+    # DATABASE STORAGE SETTINGS (NO FALLBACK - database only)
+    save_to_database: bool = True
+
+    # S/R VALIDATION SETTINGS (NO FALLBACK - database only)
+    enable_sr_validation: bool = True
+    enable_enhanced_sr_validation: bool = True
+    sr_analysis_timeframe: str = "15m"
+    sr_lookback_hours: int = 72
+    sr_left_bars: int = 15
+    sr_right_bars: int = 15
+    sr_volume_threshold: float = 20.0
+    sr_level_tolerance_pips: float = 2.0
+    sr_min_level_distance_pips: float = 20.0
+    sr_recent_flip_bars: int = 50
+    sr_min_flip_strength: float = 0.6
+    sr_cache_duration_minutes: int = 10
+    min_bars_for_sr_analysis: int = 100
+
+    # SIGNAL FRESHNESS SETTINGS (NO FALLBACK - database only)
+    enable_signal_freshness_check: bool = True
+    max_signal_age_minutes: int = 30
+
+    # NEWS FILTERING SETTINGS (NO FALLBACK - database only)
+    enable_news_filtering: bool = True
+    reduce_confidence_near_news: bool = True
+    news_filter_fail_secure: bool = False
+    economic_calendar_url: str = "http://economic-calendar:8091"
+    news_high_impact_buffer_minutes: int = 30
+    news_medium_impact_buffer_minutes: int = 15
+    news_lookahead_hours: int = 4
+    block_trades_before_high_impact_news: bool = True
+    block_trades_before_medium_impact_news: bool = False
+    critical_economic_events: List[str] = field(default_factory=lambda: [
+        "Non-Farm Employment Change", "NFP", "FOMC", "Federal Funds Rate",
+        "ECB Press Conference", "Interest Rate Decision", "CPI", "Core CPI",
+        "GDP", "Employment", "Unemployment"
+    ])
+    news_cache_duration_minutes: int = 5
+    news_service_timeout_seconds: int = 5
+
+    # MARKET INTELLIGENCE SETTINGS (NO FALLBACK - database only)
+    enable_market_intelligence_capture: bool = True
+    enable_market_intelligence_filtering: bool = False
+    market_intelligence_min_confidence: float = 0.7
+    market_intelligence_block_unsuitable_regimes: bool = True
+    market_bias_filter_enabled: bool = True
+    market_bias_min_consensus: float = 0.70
+
+    # INTELLIGENCE MANAGER SETTINGS (NO FALLBACK - database only)
+    intelligence_preset: str = "minimal"
+    intelligence_debug_mode: bool = False
+
+    # EPIC VALIDATION SETTINGS (NO FALLBACK - database only)
+    allowed_trading_epics: List[str] = field(default_factory=list)
+    blocked_trading_epics: List[str] = field(default_factory=list)
+
+    # TESTING & VALIDATION SETTINGS (NO FALLBACK - database only)
+    strategy_testing_mode: bool = False
+    validate_spread: bool = True
+    max_spread_pips: float = 3.0
+    min_signal_confirmations: int = 0
+    scalping_min_confidence: float = 0.45
+
+    # NOTIFICATION SETTINGS (NO FALLBACK - database only)
+    notifications_enabled: bool = True
+
+    # MARKET MONITOR SETTINGS (NO FALLBACK - database only)
+    low_volatility_threshold: float = 0.5
+    normal_volatility_threshold: float = 1.0
+    high_volatility_threshold: float = 2.0
+    extreme_volatility_threshold: float = 3.0
+    tight_spread_threshold: float = 2.0
+    normal_spread_threshold: float = 3.0
+    wide_spread_threshold: float = 5.0
+    market_sessions: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    market_condition_cache_minutes: int = 5
+
+    # ORDER EXECUTOR SETTINGS (NO FALLBACK - database only)
+    order_max_retries: int = 3
+    order_retry_base_delay: float = 2.0
+    order_retry_max_delay: float = 60.0
+    order_connect_timeout: float = 10.0
+    order_read_timeout: float = 45.0
+    order_total_timeout: float = 60.0
+    order_circuit_breaker_threshold: int = 5
+    order_circuit_breaker_recovery: float = 300.0
+    dynamic_stops_enabled: bool = False
 
     # METADATA (set by service, not from DB)
     source: str = ""  # 'database' or 'cache'
@@ -437,6 +565,7 @@ class ScannerConfigService:
         direct_fields = [
             'version', 'scan_interval', 'min_confidence', 'default_timeframe',
             'use_1m_base_synthesis', 'scan_align_to_boundaries', 'scan_boundary_offset_seconds',
+            'spread_pips', 'use_bid_adjustment',
             'enable_duplicate_check', 'duplicate_sensitivity', 'signal_cooldown_minutes',
             'alert_cooldown_minutes', 'strategy_cooldown_minutes', 'global_cooldown_seconds',
             'max_alerts_per_hour', 'max_alerts_per_epic_hour', 'price_similarity_threshold',
@@ -445,7 +574,12 @@ class ScannerConfigService:
             'enable_price_similarity_check', 'enable_strategy_cooldowns', 'deduplication_lookback_hours',
             'position_size_percent', 'stop_loss_pips', 'take_profit_pips', 'max_open_positions',
             'max_daily_trades', 'risk_per_trade_percent', 'min_position_size', 'max_position_size',
-            'max_risk_per_trade', 'default_risk_reward', 'default_stop_distance',
+            'default_position_size', 'max_risk_per_trade', 'default_risk_reward', 'default_stop_distance',
+            # Extended Risk Management Settings (for RiskManager)
+            'max_daily_loss_percent', 'max_trades_per_pair', 'min_account_balance',
+            'daily_profit_target_percent', 'stop_on_daily_target', 'testing_max_stop_percent',
+            'testing_min_confidence', 'emergency_stop_enabled', 'disable_account_risk_validation',
+            'disable_position_sizing', 'account_balance',
             'trading_start_hour', 'trading_end_hour', 'respect_market_hours', 'weekend_scanning',
             'enable_trading_time_controls', 'trading_cutoff_time_utc', 'trade_cooldown_enabled',
             'trade_cooldown_minutes', 'user_timezone', 'respect_trading_hours',
@@ -458,23 +592,68 @@ class ScannerConfigService:
             'safety_filter_log_level', 'excessive_movement_threshold_pips',
             'adx_filter_enabled', 'adx_filter_mode', 'adx_period', 'adx_grace_period_bars',
             'smart_money_readonly_enabled', 'smart_money_analysis_timeout',
+            'smart_money_min_data_points', 'smart_money_structure_weight',
+            'smart_money_order_flow_weight', 'smart_money_min_confidence_boost',
+            'smart_money_max_confidence_boost', 'smart_money_liquidity_sweep_enabled',
+            'smart_money_liquidity_sweep_weight', 'smart_money_liquidity_sweep_lookback_bars',
+            'smart_money_min_sweep_quality',
             'smc_conflict_filter_enabled', 'smc_min_directional_consensus',
             'smc_reject_order_flow_conflict', 'smc_reject_ranging_structure',
             'smc_min_structure_score',
             'require_claude_approval', 'claude_fail_secure', 'claude_model',
             'min_claude_quality_score', 'claude_include_chart', 'claude_vision_enabled',
-            'claude_validate_in_backtest', 'save_claude_rejections',
-            'claude_save_vision_artifacts',
-            'enable_multi_timeframe_analysis', 'min_confluence_score',
+            'claude_vision_save_directory', 'claude_validate_in_backtest', 'save_claude_rejections',
+            'claude_save_vision_artifacts', 'claude_analysis_mode', 'claude_timeout',
+            'claude_strategic_focus',
+            # Claude Integration Settings (for IntegrationManager)
+            'claude_analysis_enabled', 'use_advanced_claude_prompts', 'claude_analysis_level',
+            'claude_auto_save', 'claude_save_directory', 'minio_enabled',
+            'enable_multi_timeframe_analysis', 'min_confluence_score', 'mtf_enhanced_min_confidence',
             'enable_alert_deduplication', 'signal_hash_cache_expiry_minutes',
             'max_signal_hash_cache_size', 'enable_signal_hash_check',
             'enable_time_based_hash_components', 'use_database_dedup_check',
-            'database_dedup_window_minutes',
+            'database_dedup_window_minutes', 'duplicate_window_hours', 'save_to_database',
             # Data Quality Settings
             'lookback_reduction_factor', 'enable_data_quality_filtering',
             'block_trading_on_data_issues', 'min_quality_score_for_trading',
             # Trading Control Flags
             'auto_trading_enabled', 'enable_order_execution',
+            # S/R Validation Settings
+            'enable_sr_validation', 'enable_enhanced_sr_validation', 'sr_analysis_timeframe',
+            'sr_lookback_hours', 'sr_left_bars', 'sr_right_bars', 'sr_volume_threshold',
+            'sr_level_tolerance_pips', 'sr_min_level_distance_pips', 'sr_recent_flip_bars',
+            'sr_min_flip_strength', 'sr_cache_duration_minutes', 'min_bars_for_sr_analysis',
+            # Signal Freshness Settings
+            'enable_signal_freshness_check', 'max_signal_age_minutes',
+            # News Filtering Settings
+            'enable_news_filtering', 'reduce_confidence_near_news', 'news_filter_fail_secure',
+            'economic_calendar_url', 'news_high_impact_buffer_minutes',
+            'news_medium_impact_buffer_minutes', 'news_lookahead_hours',
+            'block_trades_before_high_impact_news', 'block_trades_before_medium_impact_news',
+            'news_cache_duration_minutes', 'news_service_timeout_seconds',
+            # Market Intelligence Settings
+            'enable_market_intelligence_capture', 'enable_market_intelligence_filtering',
+            'market_intelligence_min_confidence', 'market_intelligence_block_unsuitable_regimes',
+            'market_bias_filter_enabled', 'market_bias_min_consensus',
+            # Intelligence Manager Settings
+            'intelligence_preset', 'intelligence_debug_mode',
+            # Epic Validation Settings
+            'allowed_trading_epics', 'blocked_trading_epics',
+            # Testing & Validation Settings
+            'strategy_testing_mode', 'validate_spread', 'max_spread_pips',
+            'min_signal_confirmations', 'scalping_min_confidence',
+            # Notification Settings
+            'notifications_enabled',
+            # Market Monitor Settings
+            'low_volatility_threshold', 'normal_volatility_threshold',
+            'high_volatility_threshold', 'extreme_volatility_threshold',
+            'tight_spread_threshold', 'normal_spread_threshold', 'wide_spread_threshold',
+            'market_condition_cache_minutes',
+            # Order Executor Settings
+            'order_max_retries', 'order_retry_base_delay', 'order_retry_max_delay',
+            'order_connect_timeout', 'order_read_timeout', 'order_total_timeout',
+            'order_circuit_breaker_threshold', 'order_circuit_breaker_recovery',
+            'dynamic_stops_enabled',
         ]
 
         # Fields that should be integers
@@ -490,6 +669,19 @@ class ScannerConfigService:
             'large_candle_filter_cooldown', 'excessive_movement_threshold_pips',
             'adx_period', 'adx_grace_period_bars', 'min_claude_quality_score',
             'signal_hash_cache_expiry_minutes', 'max_signal_hash_cache_size',
+            # New integer fields
+            'sr_lookback_hours', 'sr_left_bars', 'sr_right_bars', 'sr_recent_flip_bars',
+            'sr_cache_duration_minutes', 'min_bars_for_sr_analysis', 'max_signal_age_minutes',
+            'min_signal_confirmations', 'claude_timeout', 'duplicate_window_hours',
+            # News Filtering integer fields
+            'news_high_impact_buffer_minutes', 'news_medium_impact_buffer_minutes',
+            'news_lookahead_hours', 'news_cache_duration_minutes', 'news_service_timeout_seconds',
+            # Market Monitor integer fields
+            'market_condition_cache_minutes',
+            # Smart Money integer fields
+            'smart_money_min_data_points', 'smart_money_liquidity_sweep_lookback_bars',
+            # Order Executor integer fields
+            'order_max_retries', 'order_circuit_breaker_threshold',
         }
 
         for field_name in direct_fields:
@@ -507,7 +699,10 @@ class ScannerConfigService:
         # Handle JSONB fields (dicts)
         jsonb_dict_fields = [
             'adx_thresholds', 'adx_pair_multipliers',
-            'deduplication_presets', 'safety_filter_presets', 'large_candle_filter_presets'
+            'deduplication_presets', 'safety_filter_presets', 'large_candle_filter_presets',
+            'pair_info',
+            # Market Monitor JSONB fields
+            'market_sessions',
         ]
 
         for field_name in jsonb_dict_fields:
@@ -519,7 +714,8 @@ class ScannerConfigService:
 
         # Handle JSONB fields (lists)
         jsonb_list_fields = [
-            'claude_chart_timeframes', 'claude_vision_strategies', 'enabled_strategies'
+            'claude_chart_timeframes', 'claude_vision_strategies', 'enabled_strategies',
+            'epic_list', 'critical_economic_events'
         ]
 
         for field_name in jsonb_list_fields:

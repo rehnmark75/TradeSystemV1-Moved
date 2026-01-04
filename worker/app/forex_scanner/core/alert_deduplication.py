@@ -3,6 +3,9 @@
 Enhanced Alert Deduplication System
 Prevents repeated alerts from hammering by using alert_history table
 with multiple deduplication strategies and configurable cooldown periods
+
+CRITICAL: Database-driven configuration - NO FALLBACK to config.py
+All settings must come from scanner_global_config table.
 """
 
 import hashlib
@@ -13,14 +16,9 @@ from typing import Dict, List, Optional, Tuple, Any
 import logging
 from dataclasses import dataclass
 
+# Import scanner config service for database-driven settings - REQUIRED, NO FALLBACK
 try:
-    import config
-except ImportError:
-    from forex_scanner import config
-
-# Import scanner config service for database-driven settings
-try:
-    from forex_scanner.services.scanner_config_service import get_scanner_config
+    from forex_scanner.services.scanner_config_service import get_scanner_config, ScannerConfig
     SCANNER_CONFIG_AVAILABLE = True
 except ImportError:
     SCANNER_CONFIG_AVAILABLE = False
@@ -49,60 +47,68 @@ class AlertDeduplicationManager:
         self.db_manager = db_manager
         self.logger = logging.getLogger(__name__)
 
-        # ✅ ENHANCED CONFIG HANDLING - Use database values by default
+        # ✅ CRITICAL: Database-driven configuration - NO FALLBACK to config.py
         if config_override:
             self.config = config_override
-        elif SCANNER_CONFIG_AVAILABLE:
-            # Read from database
-            try:
-                scanner_cfg = get_scanner_config()
-                self.config = AlertCooldownConfig(
-                    epic_signal_cooldown_minutes=scanner_cfg.alert_cooldown_minutes,
-                    strategy_cooldown_minutes=scanner_cfg.strategy_cooldown_minutes,
-                    global_cooldown_seconds=scanner_cfg.global_cooldown_seconds,
-                    max_alerts_per_hour=scanner_cfg.max_alerts_per_hour,
-                    max_alerts_per_epic_hour=scanner_cfg.max_alerts_per_epic_hour
-                )
-                self.logger.info("[CONFIG:DB] Deduplication config loaded from database")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Failed to load deduplication config from database: {e}")
-                # Fall back to config.py
-                self.config = AlertCooldownConfig(
-                    epic_signal_cooldown_minutes=getattr(config, 'ALERT_COOLDOWN_MINUTES', 5),
-                    strategy_cooldown_minutes=getattr(config, 'STRATEGY_COOLDOWN_MINUTES', 3),
-                    global_cooldown_seconds=getattr(config, 'GLOBAL_COOLDOWN_SECONDS', 30),
-                    max_alerts_per_hour=getattr(config, 'MAX_ALERTS_PER_HOUR', 50),
-                    max_alerts_per_epic_hour=getattr(config, 'MAX_ALERTS_PER_EPIC_HOUR', 6)
-                )
+            self._scanner_cfg = None
         else:
-            # Legacy fallback to config.py
+            # REQUIRE database configuration - no fallback allowed
+            if not SCANNER_CONFIG_AVAILABLE:
+                raise RuntimeError(
+                    "❌ CRITICAL: Scanner config service not available - database is REQUIRED, no fallback allowed"
+                )
+
+            try:
+                self._scanner_cfg = get_scanner_config()
+            except Exception as e:
+                raise RuntimeError(
+                    f"❌ CRITICAL: Failed to load scanner config from database: {e} - no fallback allowed"
+                )
+
+            if not self._scanner_cfg:
+                raise RuntimeError(
+                    "❌ CRITICAL: Scanner config returned None - database is REQUIRED, no fallback allowed"
+                )
+
+            # Build config from database - NO FALLBACK
             self.config = AlertCooldownConfig(
-                epic_signal_cooldown_minutes=getattr(config, 'ALERT_COOLDOWN_MINUTES', 5),
-                strategy_cooldown_minutes=getattr(config, 'STRATEGY_COOLDOWN_MINUTES', 3),
-                global_cooldown_seconds=getattr(config, 'GLOBAL_COOLDOWN_SECONDS', 30),
-                max_alerts_per_hour=getattr(config, 'MAX_ALERTS_PER_HOUR', 50),
-                max_alerts_per_epic_hour=getattr(config, 'MAX_ALERTS_PER_EPIC_HOUR', 6)
+                epic_signal_cooldown_minutes=self._scanner_cfg.alert_cooldown_minutes,
+                strategy_cooldown_minutes=self._scanner_cfg.strategy_cooldown_minutes,
+                global_cooldown_seconds=self._scanner_cfg.global_cooldown_seconds,
+                max_alerts_per_hour=self._scanner_cfg.max_alerts_per_hour,
+                max_alerts_per_epic_hour=self._scanner_cfg.max_alerts_per_epic_hour
             )
-        
+            self.logger.info("[CONFIG:DB] ✅ Deduplication config loaded from database (NO FALLBACK)")
+
         # ✅ LOG THE ACTUAL CONFIGURATION BEING USED
         self.logger.info("🛡️ Alert deduplication manager initialized")
         self.logger.info(f"   Epic cooldown: {self.config.epic_signal_cooldown_minutes} minutes")
-        self.logger.info(f"   Strategy cooldown: {self.config.strategy_cooldown_minutes} minutes") 
+        self.logger.info(f"   Strategy cooldown: {self.config.strategy_cooldown_minutes} minutes")
         self.logger.info(f"   Global cooldown: {self.config.global_cooldown_seconds} seconds")
         self.logger.info(f"   Max alerts/hour: {self.config.max_alerts_per_hour}")
         self.logger.info(f"   Max alerts/epic/hour: {self.config.max_alerts_per_epic_hour}")
-        
+
         # Initialize enhanced alert_history table if needed
         self._ensure_enhanced_table_structure()
-        
-        # In-memory caches for performance
+
+        # In-memory caches for performance - values from database (NO FALLBACK)
         self._recent_signals_cache = {}  # {epic: {signal_type: last_timestamp}}
         self._signal_hash_cache = {}  # Dict of {hash: timestamp} for time-aware expiry
         self._cooldown_key_cache = {}  # {cooldown_key: timestamp} for race condition prevention
-        self._cache_expiry_minutes = getattr(config, 'SIGNAL_HASH_CACHE_EXPIRY_MINUTES', 15)
-        self._max_cache_size = getattr(config, 'MAX_SIGNAL_HASH_CACHE_SIZE', 1000)
-        self._enable_hash_check = getattr(config, 'ENABLE_SIGNAL_HASH_CHECK', True)
-        self._enable_time_hash = getattr(config, 'ENABLE_TIME_BASED_HASH_COMPONENTS', True)
+
+        # Cache settings from database - if config_override was used, use defaults
+        if self._scanner_cfg:
+            self._cache_expiry_minutes = self._scanner_cfg.signal_hash_cache_expiry_minutes
+            self._max_cache_size = self._scanner_cfg.max_signal_hash_cache_size
+            self._enable_hash_check = self._scanner_cfg.enable_signal_hash_check
+            self._enable_time_hash = self._scanner_cfg.enable_time_based_hash_components
+        else:
+            # Using config_override - use sensible defaults
+            self._cache_expiry_minutes = 15
+            self._max_cache_size = 1000
+            self._enable_hash_check = True
+            self._enable_time_hash = True
+
         self._hourly_alert_count = 0
         self._last_count_reset = datetime.now()
     
@@ -364,11 +370,17 @@ class AlertDeduplicationManager:
         3. Recent trade CLOSURES (allows market to settle after close)
         """
         try:
-            # Get cooldown setting - match dev-app default of 30 minutes
-            trade_cooldown_minutes = getattr(config, 'TRADE_COOLDOWN_MINUTES', 30)
+            # Get cooldown settings from database (NO FALLBACK)
+            if self._scanner_cfg:
+                trade_cooldown_minutes = self._scanner_cfg.trade_cooldown_minutes
+                trade_cooldown_enabled = self._scanner_cfg.trade_cooldown_enabled
+            else:
+                # Using config_override - use sensible defaults
+                trade_cooldown_minutes = 30
+                trade_cooldown_enabled = True
 
             # Skip check if cooldown is disabled
-            if not getattr(config, 'TRADE_COOLDOWN_ENABLED', True):
+            if not trade_cooldown_enabled:
                 return True, ""
 
             conn = self.db_manager.get_connection()
@@ -660,23 +672,38 @@ class AlertDeduplicationManager:
 
 # Utility functions for easy integration
 
-def create_deduplication_manager(db_manager, 
+def create_deduplication_manager(db_manager,
                                 epic_cooldown_minutes: int = None,
                                 max_alerts_per_hour: int = None) -> AlertDeduplicationManager:
-    """Factory function to create deduplication manager with custom config"""
-    # ✅ ENHANCED: Use config.py values as defaults instead of hardcoded values
-    epic_cooldown = epic_cooldown_minutes or getattr(config, 'ALERT_COOLDOWN_MINUTES', 5)
-    max_alerts = max_alerts_per_hour or getattr(config, 'MAX_ALERTS_PER_HOUR', 50)
-    
-    custom_config = AlertCooldownConfig(
-        epic_signal_cooldown_minutes=epic_cooldown,
-        max_alerts_per_hour=max_alerts,
-        strategy_cooldown_minutes=getattr(config, 'STRATEGY_COOLDOWN_MINUTES', 3),
-        global_cooldown_seconds=getattr(config, 'GLOBAL_COOLDOWN_SECONDS', 30),
-        max_alerts_per_epic_hour=getattr(config, 'MAX_ALERTS_PER_EPIC_HOUR', 6)
-    )
-    
-    return AlertDeduplicationManager(db_manager, custom_config)
+    """
+    Factory function to create deduplication manager.
+
+    If custom config values are provided, they override database defaults.
+    If no custom values provided, database configuration is used (NO FALLBACK to config.py).
+    """
+    if epic_cooldown_minutes is not None or max_alerts_per_hour is not None:
+        # Custom config provided - load base from database then override
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError(
+                "❌ CRITICAL: Scanner config service not available - database is REQUIRED, no fallback allowed"
+            )
+        scanner_cfg = get_scanner_config()
+        if not scanner_cfg:
+            raise RuntimeError(
+                "❌ CRITICAL: Scanner config returned None - database is REQUIRED, no fallback allowed"
+            )
+
+        custom_config = AlertCooldownConfig(
+            epic_signal_cooldown_minutes=epic_cooldown_minutes if epic_cooldown_minutes is not None else scanner_cfg.alert_cooldown_minutes,
+            max_alerts_per_hour=max_alerts_per_hour if max_alerts_per_hour is not None else scanner_cfg.max_alerts_per_hour,
+            strategy_cooldown_minutes=scanner_cfg.strategy_cooldown_minutes,
+            global_cooldown_seconds=scanner_cfg.global_cooldown_seconds,
+            max_alerts_per_epic_hour=scanner_cfg.max_alerts_per_epic_hour
+        )
+        return AlertDeduplicationManager(db_manager, custom_config)
+    else:
+        # No custom config - use database defaults (NO FALLBACK)
+        return AlertDeduplicationManager(db_manager)
 
 
 def save_alert_if_allowed(db_manager, alert_history_manager, signal: Dict, 

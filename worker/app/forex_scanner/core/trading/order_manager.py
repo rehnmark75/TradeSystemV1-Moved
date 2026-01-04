@@ -3,6 +3,10 @@
 Order Manager - FIXED COMPLETE INTEGRATION with TradingOrchestrator
 Handles order execution, position management, and trade lifecycle
 
+CONFIGURATION: Database-only (NO fallback to config.py)
+- All settings loaded from scanner_global_config via scanner_config_service
+- Fails fast if database is unavailable - no silent fallbacks
+
 FIXED INTEGRATION ISSUES:
 - FIXED: Correct OrderExecutor constructor (no api_url/api_key parameters)
 - FIXED: Use execute_signal_order() method instead of place_order()
@@ -15,85 +19,119 @@ FIXED INTEGRATION ISSUES:
 - Risk management integration
 """
 
+import os
 import logging
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
+
+# Database-driven configuration - REQUIRED, no fallback
 try:
-    import config
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
 except ImportError:
-    from forex_scanner import config
+    SCANNER_CONFIG_AVAILABLE = False
+
+# Environment variables for infrastructure settings (not behavioral)
+ORDER_API_URL = os.getenv('ORDER_API_URL', "http://fastapi-dev:8000/orders/place-order")
+API_SUBSCRIPTION_KEY = os.getenv('API_SUBSCRIPTION_KEY', "")
 
 
 class OrderManager:
     """
     Manages order execution, position sizing, and trade lifecycle
     FIXED: Complete integration with TradingOrchestrator and correct OrderExecutor usage
+
+    CONFIGURATION: Database-only via scanner_config_service
+    - No fallback to config.py - fails fast if database unavailable
     """
-    
-    def __init__(self, 
+
+    def __init__(self,
                  logger: Optional[logging.Logger] = None,
                  enable_trading: bool = None):
-        
+
         self.logger = logger or logging.getLogger(__name__)
-        self.enable_trading = enable_trading if enable_trading is not None else getattr(config, 'AUTO_TRADING_ENABLED', False)
-        
+
+        # CRITICAL: Fail-fast if scanner config service not available
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError(
+                "CRITICAL: Scanner config service not available - "
+                "database is REQUIRED, no fallback allowed"
+            )
+
+        # Load configuration from database
+        try:
+            self._scanner_cfg = get_scanner_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"CRITICAL: Failed to load scanner config from database: {e} - "
+                "no fallback allowed"
+            )
+
+        if not self._scanner_cfg:
+            raise RuntimeError(
+                "CRITICAL: Scanner config returned None - "
+                "database is REQUIRED, no fallback allowed"
+            )
+
+        # Use database config for trading enabled flag
+        if enable_trading is not None:
+            self.enable_trading = enable_trading
+        else:
+            self.enable_trading = self._scanner_cfg.auto_trading_enabled
+
         # Order executor instance
         self.order_executor = None
-        
+
         # Order tracking with enhanced metrics
         self.orders_executed = 0
         self.orders_failed = 0
         self.total_volume = 0.0
         self.last_execution_time = None
         self.execution_history = []
-        
+
         # Error tracking
         self.error_counts = {}
         self.retry_counts = {}
-        
+
         # Initialize order executor
         self._initialize_order_executor()
-        
-        self.logger.info("💰 OrderManager initialized with FIXED TradingOrchestrator integration")
+
+        self.logger.info("[CONFIG:DB] OrderManager initialized with database-only configuration")
         self.logger.info(f"   Trading enabled: {self.enable_trading}")
         self.logger.info(f"   Order executor: {'Available' if self.order_executor else 'Not initialized'}")
     
     def _initialize_order_executor(self):
-        """FIXED: Initialize order executor with correct constructor"""
+        """Initialize order executor - uses env vars for API infrastructure"""
         try:
-            # Only initialize if trading is enabled and we have proper config
+            # Only initialize if trading is enabled
             if not self.enable_trading:
-                self.logger.info("💡 Order executor not initialized - trading disabled")
+                self.logger.info("Order executor not initialized - trading disabled")
                 return
-            
-            # Check if we have the required configuration
-            order_api_url = getattr(config, 'ORDER_API_URL', None)
-            api_key = getattr(config, 'API_SUBSCRIPTION_KEY', None)
-            
-            if not order_api_url or not api_key:
-                self.logger.warning("⚠️ Order executor not initialized - missing API configuration")
-                self.logger.info("   Required config: ORDER_API_URL, API_SUBSCRIPTION_KEY")
+
+            # Check if we have the required infrastructure configuration (env vars)
+            if not ORDER_API_URL or not API_SUBSCRIPTION_KEY:
+                self.logger.warning("Order executor not initialized - missing API configuration")
+                self.logger.info("   Required env vars: ORDER_API_URL, API_SUBSCRIPTION_KEY")
                 return
-            
-            # FIXED: Import and initialize the order executor with correct constructor
+
+            # Import and initialize the order executor
             try:
                 from alerts.order_executor import OrderExecutor
-                # FIXED: OrderExecutor constructor only accepts ema_strategy parameter (optional)
-                self.order_executor = OrderExecutor()  # No parameters needed
-                self.logger.info("✅ Order executor initialized successfully with FIXED constructor")
-                
+                self.order_executor = OrderExecutor()
+                self.logger.info("[CONFIG:DB] Order executor initialized successfully")
+
             except ImportError as e:
-                self.logger.warning(f"⚠️ OrderExecutor import failed: {e}")
-                self.logger.info("💡 Order execution will be simulated (paper trading mode)")
-                
+                self.logger.warning(f"OrderExecutor import failed: {e}")
+                self.logger.info("Order execution will be simulated (paper trading mode)")
+
         except Exception as e:
-            self.logger.error(f"❌ Error initializing order executor: {e}")
-            self.logger.info("💡 Continuing without live order execution")
+            self.logger.error(f"Error initializing order executor: {e}")
+            self.logger.info("Continuing without live order execution")
     
     def validate_configuration(self) -> Dict:
         """
-        ENHANCED: Comprehensive configuration validation
-        
+        Comprehensive configuration validation using database config.
+
         Returns:
             Dictionary with validation results
         """
@@ -101,41 +139,41 @@ class OrderManager:
             'ready_for_trading': False,
             'missing_config': [],
             'warnings': [],
-            'order_executor_available': self.order_executor is not None
+            'order_executor_available': self.order_executor is not None,
+            'config_source': 'database'
         }
-        
-        # Check required configuration
-        required_configs = [
-            ('AUTO_TRADING_ENABLED', 'Trading must be enabled'),
-            ('ORDER_API_URL', 'Order API URL required'),
-            ('API_SUBSCRIPTION_KEY', 'API subscription key required'),
-            ('DEFAULT_POSITION_SIZE', 'Default position size required')
-        ]
-        
-        for config_name, description in required_configs:
-            if not hasattr(config, config_name) or not getattr(config, config_name):
-                config_status['missing_config'].append(f"{config_name}: {description}")
-        
-        # Check optional but recommended configs
-        recommended_configs = [
-            ('RISK_PER_TRADE', 'Risk per trade percentage'),
-            ('MAX_DAILY_LOSS', 'Maximum daily loss limit'),
-            ('STOP_LOSS_PIPS', 'Default stop loss in pips'),
-            ('TAKE_PROFIT_PIPS', 'Default take profit in pips'),
-            ('MAX_SPREAD_PIPS', 'Maximum spread limit')
-        ]
-        
-        for config_name, description in recommended_configs:
-            if not hasattr(config, config_name) or not getattr(config, config_name):
-                config_status['warnings'].append(f"{config_name}: {description} (optional)")
-        
+
+        # Check required configuration from database
+        if not self._scanner_cfg.auto_trading_enabled:
+            config_status['missing_config'].append("auto_trading_enabled: Trading must be enabled")
+
+        # Check environment variables for infrastructure
+        if not ORDER_API_URL:
+            config_status['missing_config'].append("ORDER_API_URL: Order API URL required (env var)")
+        if not API_SUBSCRIPTION_KEY:
+            config_status['missing_config'].append("API_SUBSCRIPTION_KEY: API key required (env var)")
+
+        # Check database settings
+        if not self._scanner_cfg.default_position_size or self._scanner_cfg.default_position_size <= 0:
+            config_status['missing_config'].append("default_position_size: Default position size required")
+
+        # Check optional but recommended configs from database
+        if not self._scanner_cfg.risk_per_trade_percent or self._scanner_cfg.risk_per_trade_percent <= 0:
+            config_status['warnings'].append("risk_per_trade_percent: Risk per trade percentage (optional)")
+        if not self._scanner_cfg.stop_loss_pips or self._scanner_cfg.stop_loss_pips <= 0:
+            config_status['warnings'].append("stop_loss_pips: Default stop loss in pips (optional)")
+        if not self._scanner_cfg.take_profit_pips or self._scanner_cfg.take_profit_pips <= 0:
+            config_status['warnings'].append("take_profit_pips: Default take profit in pips (optional)")
+        if not self._scanner_cfg.max_spread_pips or self._scanner_cfg.max_spread_pips <= 0:
+            config_status['warnings'].append("max_spread_pips: Maximum spread limit (optional)")
+
         # Determine if ready for trading
         config_status['ready_for_trading'] = (
-            len(config_status['missing_config']) == 0 and 
-            self.enable_trading and 
+            len(config_status['missing_config']) == 0 and
+            self.enable_trading and
             self.order_executor is not None
         )
-        
+
         return config_status
     
     def test_order_executor(self) -> bool:
@@ -387,11 +425,12 @@ class OrderManager:
     
     def _validate_signal_for_execution(self, signal: Dict) -> Tuple[bool, str]:
         """
-        ENHANCED: Validate signal before execution with comprehensive checks
-        
+        Validate signal before execution with comprehensive checks.
+        Uses database configuration - no fallback to config.py.
+
         Args:
             signal: Signal to validate
-            
+
         Returns:
             Tuple of (is_valid, reason)
         """
@@ -400,10 +439,10 @@ class OrderManager:
         for field in required_fields:
             if field not in signal or signal[field] is None:
                 return False, f"Missing required field: {field}"
-        
-        # Check confidence threshold
-        # 🔥 SCALPING BYPASS: Use lower threshold for scalping strategies (45%)
-        # 🔥 SMC_SIMPLE/EMA_DOUBLE BYPASS: These strategies have internal confidence thresholds (50%)
+
+        # Check confidence threshold using database config
+        # SCALPING BYPASS: Use lower threshold for scalping strategies
+        # SMC_SIMPLE/EMA_DOUBLE BYPASS: These strategies have internal confidence thresholds
         strategy = signal.get('strategy', '')
         scalping_mode = signal.get('scalping_mode', '')
         is_scalping = ('scalping' in strategy.lower() or
@@ -417,30 +456,30 @@ class OrderManager:
         )
 
         if is_scalping:
-            min_confidence = getattr(config, 'SCALPING_MIN_CONFIDENCE', 0.45)
+            min_confidence = self._scanner_cfg.scalping_min_confidence
         elif is_self_validated_strategy:
             min_confidence = 0.50  # SMC_SIMPLE/EMA_DOUBLE use 50% internal threshold
         else:
-            min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
+            min_confidence = self._scanner_cfg.min_confidence
 
         if signal.get('confidence_score', 0) < min_confidence:
             return False, f"Confidence {signal['confidence_score']:.1%} below threshold {min_confidence:.1%}"
-        
-        # Check signal type validity - FIXED: Include BULL/BEAR signal types
+
+        # Check signal type validity - Include BULL/BEAR signal types
         valid_signal_types = ['BUY', 'SELL', 'LONG', 'SHORT', 'BULL', 'BEAR']
         if signal.get('signal_type') not in valid_signal_types:
             return False, f"Invalid signal type: {signal.get('signal_type')}"
-        
-        # Check spread if available
-        max_spread = getattr(config, 'MAX_SPREAD_PIPS', 5.0)
+
+        # Check spread if available using database config
+        max_spread = self._scanner_cfg.max_spread_pips
         if signal.get('spread_pips', 0) > max_spread:
             return False, f"Spread {signal.get('spread_pips')} pips exceeds maximum {max_spread} pips"
-        
+
         # Check if market is open (basic check)
         epic = signal.get('epic', '')
         if not self._is_market_open(epic):
             return False, f"Market closed for {epic}"
-        
+
         return True, "Signal validation passed"
     
     def _map_signal_to_direction(self, signal_type: str) -> Optional[str]:
@@ -457,43 +496,43 @@ class OrderManager:
     
     def _calculate_position_parameters(self, signal: Dict) -> Optional[Dict]:
         """
-        ENHANCED: Calculate position sizing and risk parameters
-        
+        Calculate position sizing and risk parameters using database config.
+
         Args:
             signal: Signal with entry, stop loss, and take profit
-            
+
         Returns:
             Dictionary with position parameters or None if calculation fails
         """
         try:
-            # Get position size from config or signal
-            position_size = signal.get('position_size') or getattr(config, 'DEFAULT_POSITION_SIZE', 0.1)
-            
+            # Get position size from signal or database config
+            position_size = signal.get('position_size') or self._scanner_cfg.default_position_size
+
             # Calculate stop loss and take profit distances
             entry_price = signal.get('entry_price', signal.get('price', 0))
             stop_loss = signal.get('stop_loss')
             take_profit = signal.get('take_profit')
-            
-            # Default distances in pips if not specified
-            default_stop_pips = getattr(config, 'STOP_LOSS_PIPS', 20)
-            default_limit_pips = getattr(config, 'TAKE_PROFIT_PIPS', 40)
-            
+
+            # Default distances in pips from database config
+            default_stop_pips = self._scanner_cfg.stop_loss_pips
+            default_limit_pips = self._scanner_cfg.take_profit_pips
+
             # Calculate distances
             stop_distance = None
             limit_distance = None
-            
+
             if stop_loss and entry_price:
                 stop_distance = abs(entry_price - stop_loss)
             else:
                 # Use default pip distance
                 stop_distance = default_stop_pips * 0.0001  # Assuming 4-decimal pairs
-            
+
             if take_profit and entry_price:
                 limit_distance = abs(take_profit - entry_price)
             else:
                 # Use default pip distance
                 limit_distance = default_limit_pips * 0.0001  # Assuming 4-decimal pairs
-            
+
             return {
                 'size': position_size,
                 'stop_distance': stop_distance,
@@ -501,9 +540,9 @@ class OrderManager:
                 'stop_loss': stop_loss,
                 'take_profit': take_profit
             }
-            
+
         except Exception as e:
-            self.logger.error(f"❌ Error calculating position parameters: {e}")
+            self.logger.error(f"Error calculating position parameters: {e}")
             return None
     
     def _execute_order_with_params(self, epic: str, direction: str, entry_price: float, **params) -> Optional[Dict]:

@@ -2,15 +2,22 @@
 """
 Scanner Controller - Extracted from IntelligentForexScanner
 Handles scanning orchestration, signal coordination, and filtering pipeline
+
+IMPORTANT: This module uses DATABASE-ONLY configuration.
+All settings are loaded from the strategy_config database via scanner_config_service.
+If the database is unavailable, the system will FAIL rather than use fallback values.
 """
 
 import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+
+# Database-only configuration - NO FALLBACK ALLOWED
 try:
-    import config
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
 except ImportError:
-    from forex_scanner import config
+    SCANNER_CONFIG_AVAILABLE = False
 
 
 class ScannerController:
@@ -29,36 +36,66 @@ class ScannerController:
                  spread_pips: float = None,
                  use_bid_adjustment: bool = None,
                  logger: Optional[logging.Logger] = None):
-        
+
         # Core dependencies
         self.signal_detector = signal_detector
         self.intelligence_manager = intelligence_manager
         self.deduplication_manager = deduplication_manager
         self.timezone_manager = timezone_manager
         self.logger = logger or logging.getLogger(__name__)
-        
-        # Configuration
-        self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
-        self.min_confidence = min_confidence or getattr(config, 'MIN_CONFIDENCE', 0.7)
-        self.spread_pips = spread_pips or getattr(config, 'SPREAD_PIPS', 1.5)
-        self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else getattr(config, 'USE_BID_ADJUSTMENT', False)
-        
+
+        # =============================================================================
+        # DATABASE-ONLY CONFIGURATION - FAIL FAST IF UNAVAILABLE
+        # =============================================================================
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError(
+                "CRITICAL: Scanner config service not available - "
+                "database is REQUIRED, no fallback allowed"
+            )
+
+        try:
+            self._scanner_cfg = get_scanner_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"CRITICAL: Failed to load scanner config from database: {e} - "
+                "no fallback allowed"
+            ) from e
+
+        if not self._scanner_cfg:
+            raise RuntimeError(
+                "CRITICAL: Scanner config returned None - "
+                "database is REQUIRED, no fallback allowed"
+            )
+
+        # =============================================================================
+        # LOAD CONFIGURATION FROM DATABASE (override with explicit params if provided)
+        # =============================================================================
+        self.epic_list = epic_list if epic_list is not None else self._scanner_cfg.epic_list
+        self.min_confidence = min_confidence if min_confidence is not None else self._scanner_cfg.min_confidence
+        self.spread_pips = spread_pips if spread_pips is not None else self._scanner_cfg.spread_pips
+        self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else self._scanner_cfg.use_bid_adjustment
+
+        # Multi-timeframe configuration from database
+        self.enable_multi_timeframe = self._scanner_cfg.enable_multi_timeframe_analysis
+        self.default_timeframe = self._scanner_cfg.default_timeframe
+
+        # Pair info from database (used for pip multiplier lookups)
+        self._pair_info = self._scanner_cfg.pair_info
+
         # Scanning state
         self.last_signals = {}  # Track last signal time for each epic
         self.scan_count = 0
         self.total_signals_detected = 0
         self.total_signals_filtered = 0
-        
-        # Multi-timeframe configuration
-        self.enable_multi_timeframe = getattr(config, 'ENABLE_MULTI_TIMEFRAME_ANALYSIS', False)
-        self.default_timeframe = getattr(config, 'DEFAULT_TIMEFRAME', '15m')
-        
-        self.logger.info("🔍 ScannerController initialized")
+
+        self.logger.info("[DB] ScannerController initialized with database configuration")
         self.logger.info(f"   Epic pairs: {len(self.epic_list)}")
         self.logger.info(f"   Min confidence: {self.min_confidence:.1%}")
+        self.logger.info(f"   Spread pips: {self.spread_pips}")
         self.logger.info(f"   Multi-timeframe: {self.enable_multi_timeframe}")
-        self.logger.info(f"   Intelligence: {'✅' if intelligence_manager else '❌'}")
-        self.logger.info(f"   Deduplication: {'✅' if deduplication_manager else '❌'}")
+        self.logger.info(f"   Default timeframe: {self.default_timeframe}")
+        self.logger.info(f"   Intelligence: {'enabled' if intelligence_manager else 'disabled'}")
+        self.logger.info(f"   Deduplication: {'enabled' if deduplication_manager else 'disabled'}")
     
     def scan_once(self, intelligence_mode: str = 'backtest_consistent') -> List[Dict]:
         """
@@ -135,15 +172,15 @@ class ScannerController:
     def _scan_single_epic(self, epic: str) -> Optional[Dict]:
         """
         Scan a single epic for signals using ALL STRATEGIES
-        ✅ FIXED: Now uses detect_signals_all_strategies instead of individual methods
+        Uses database-loaded pair_info for pip multiplier lookups
         """
         try:
-            # Get pair information
-            pair_info = getattr(config, 'PAIR_INFO', {}).get(epic, {'pair': 'EURUSD', 'pip_multiplier': 10000})
-            pair_name = pair_info['pair']
-            
+            # Get pair information from database config
+            pair_info = self._pair_info.get(epic, {'pair': 'EURUSD', 'pip_multiplier': 10000})
+            pair_name = pair_info.get('pair', '')
+
             if not pair_name or pair_name == 'EURUSD':
-                pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '')
+                pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
             
             signal = None
             
@@ -491,17 +528,17 @@ class ScannerController:
             return error_result
     
     def get_epic_performance(self) -> Dict:
-        """Get performance statistics by epic"""
+        """Get performance statistics by epic (uses database-loaded pair_info)"""
         try:
             epic_stats = {}
-            
+
             for epic in self.epic_list:
                 last_signal_time = self.last_signals.get(epic)
-                
+
                 epic_stats[epic] = {
                     'has_recent_signal': last_signal_time is not None,
                     'last_signal_time': last_signal_time,
-                    'pair_info': getattr(config, 'PAIR_INFO', {}).get(epic, {})
+                    'pair_info': self._pair_info.get(epic, {})
                 }
             
             return {

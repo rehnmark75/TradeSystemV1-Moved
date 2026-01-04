@@ -3,6 +3,9 @@
 IntelligentForexScanner with Enhanced Features
 Maintains backward compatibility while adding new capabilities
 UPDATED: Integrated SignalProcessor for Smart Money analysis
+
+CRITICAL: Database-driven configuration - NO FALLBACK to config.py
+All settings must come from scanner_global_config table.
 """
 
 import time
@@ -129,42 +132,44 @@ class IntelligentForexScanner:
         # Setup logging
         self.logger = logging.getLogger(__name__)
 
-        # Load configuration from DATABASE (not legacy config files)
-        if CONFIG_SERVICES_AVAILABLE:
-            scanner_cfg = get_scanner_config()
-            smc_cfg = get_smc_simple_config()
+        # ✅ CRITICAL: Database-driven configuration - NO FALLBACK to config.py
+        if not CONFIG_SERVICES_AVAILABLE:
+            raise RuntimeError(
+                "❌ CRITICAL: Scanner config service not available - database is REQUIRED, no fallback allowed"
+            )
 
-            # Core configuration from database
-            self.db_manager = db_manager
-            self.epic_list = epic_list or smc_cfg.enabled_pairs
-            self.min_confidence = min_confidence or scanner_cfg.min_confidence or 0.7
-            self.scan_interval = scan_interval
-            self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False
-            self.spread_pips = spread_pips or 1.5  # Default spread
-            self.user_timezone = user_timezone
-            self.intelligence_mode = intelligence_mode
-        else:
-            # Fallback to legacy config (should not happen in normal operation)
-            self.logger.warning("⚠️ Database config unavailable, using legacy config fallback")
-            self.db_manager = db_manager
-            self.epic_list = epic_list or getattr(config, 'EPIC_LIST', [])
-            self.min_confidence = min_confidence or getattr(config, 'MIN_CONFIDENCE', 0.7)
-            self.scan_interval = scan_interval
-            self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else getattr(config, 'USE_BID_ADJUSTMENT', False)
-            self.spread_pips = spread_pips or getattr(config, 'SPREAD_PIPS', 1.5)
-            self.user_timezone = user_timezone
-            self.intelligence_mode = intelligence_mode
+        try:
+            self._scanner_cfg = get_scanner_config()
+            self._smc_cfg = get_smc_simple_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"❌ CRITICAL: Failed to load config from database: {e} - no fallback allowed"
+            )
+
+        if not self._scanner_cfg or not self._smc_cfg:
+            raise RuntimeError(
+                "❌ CRITICAL: Config returned None - database is REQUIRED, no fallback allowed"
+            )
+
+        # Core configuration from database - NO FALLBACK
+        self.db_manager = db_manager
+        self.epic_list = epic_list or self._smc_cfg.enabled_pairs
+        self.min_confidence = min_confidence if min_confidence is not None else self._scanner_cfg.min_confidence
+        self.scan_interval = scan_interval
+        self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False
+        self.spread_pips = spread_pips if spread_pips is not None else 1.5
+        self.user_timezone = user_timezone
+        self.intelligence_mode = intelligence_mode
+
+        self.logger.info("[CONFIG:DB] ✅ Scanner config loaded from database (NO FALLBACK)")
         
         # Initialize signal detector
         self.signal_detector = self._initialize_signal_detector(db_manager, user_timezone)
 
         # Initialize deduplication manager FIRST (shared with SignalProcessor)
-        # Get dedup setting from database if available
+        # Get dedup setting from database - NO FALLBACK
         self.deduplication_manager = None
-        if CONFIG_SERVICES_AVAILABLE:
-            self.enable_deduplication = scanner_cfg.enable_alert_deduplication and DEDUP_AVAILABLE
-        else:
-            self.enable_deduplication = getattr(config, 'ENABLE_ALERT_DEDUPLICATION', True) and DEDUP_AVAILABLE
+        self.enable_deduplication = self._scanner_cfg.enable_alert_deduplication and DEDUP_AVAILABLE
 
         if self.enable_deduplication and db_manager and DEDUP_AVAILABLE:
             try:
@@ -214,10 +219,8 @@ class IntelligentForexScanner:
                 self.use_signal_processor = False
         
         # Initialize optional smart money (keep for backward compatibility)
-        if CONFIG_SERVICES_AVAILABLE:
-            self.enable_smart_money = scanner_cfg.smart_money_readonly_enabled and SMART_MONEY_AVAILABLE
-        else:
-            self.enable_smart_money = getattr(config, 'SMART_MONEY_READONLY_ENABLED', False) and SMART_MONEY_AVAILABLE
+        # Get setting from database - NO FALLBACK
+        self.enable_smart_money = self._scanner_cfg.smart_money_readonly_enabled and SMART_MONEY_AVAILABLE
         if self.enable_smart_money:
             self.logger.info("✅ Smart money analysis enabled")
 
@@ -298,11 +301,12 @@ class IntelligentForexScanner:
                 return SignalDetector(db_manager, user_timezone)
             else:
                 # Try to create with temporary db manager
+                # NOTE: DATABASE_URL is an environment variable that stays in config.py
                 try:
                     from core.database import DatabaseManager
                 except ImportError:
                     from forex_scanner.core.database import DatabaseManager
-                temp_db = DatabaseManager(getattr(config, 'DATABASE_URL', ''))
+                temp_db = DatabaseManager(getattr(config, 'DATABASE_URL', ''))  # ENV VAR - stays in config
                 return SignalDetector(temp_db, user_timezone)
         except Exception as e:
             self.logger.warning(f"⚠️ Signal detector init warning: {e}")
@@ -356,12 +360,8 @@ class IntelligentForexScanner:
             # Get pair info - extract pair name from epic
             pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
 
-            # Get default timeframe from database
-            if CONFIG_SERVICES_AVAILABLE:
-                scanner_cfg = get_scanner_config()
-                default_tf = scanner_cfg.default_timeframe or '15m'
-            else:
-                default_tf = getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+            # Get default timeframe from database - NO FALLBACK
+            default_tf = self._scanner_cfg.default_timeframe
 
             # Detect signals
             if self.use_bid_adjustment:
@@ -564,12 +564,8 @@ class IntelligentForexScanner:
         try:
             pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
 
-            # Get default timeframe from database
-            if CONFIG_SERVICES_AVAILABLE:
-                scanner_cfg = get_scanner_config()
-                default_tf = scanner_cfg.default_timeframe or '15m'
-            else:
-                default_tf = getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+            # Get default timeframe from database - NO FALLBACK
+            default_tf = self._scanner_cfg.default_timeframe
 
             # Use detect_signals_all_strategies if available
             if hasattr(self.signal_detector, 'detect_signals_all_strategies'):
@@ -839,12 +835,8 @@ class IntelligentForexScanner:
         """
         from datetime import datetime, timedelta
 
-        # Get offset from database config
-        if CONFIG_SERVICES_AVAILABLE:
-            scanner_cfg = get_scanner_config()
-            offset_seconds = scanner_cfg.scan_boundary_offset_seconds or 60
-        else:
-            offset_seconds = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
+        # Get offset from database config - NO FALLBACK
+        offset_seconds = self._scanner_cfg.scan_boundary_offset_seconds
 
         now = datetime.utcnow()
         current_minute = now.minute
@@ -1045,20 +1037,23 @@ class ForexScanner(IntelligentForexScanner):
         
         logger = logging.getLogger(__name__)
         
-        # Then in the init body, add:
+        # Claude analysis setting from database - NO FALLBACK to config.py
         if enable_claude_analysis is not None:
             # Use the explicitly passed value
             self.enable_claude_analysis = enable_claude_analysis
-        elif SCANNER_CONFIG_AVAILABLE:
-            # Read from database
+        else:
+            # Read from database - REQUIRED, NO FALLBACK
+            if not CONFIG_SERVICES_AVAILABLE:
+                raise RuntimeError(
+                    "❌ CRITICAL: Scanner config service not available - database is REQUIRED, no fallback allowed"
+                )
             try:
                 scanner_cfg = get_scanner_config()
                 self.enable_claude_analysis = scanner_cfg.require_claude_approval
-            except Exception:
-                self.enable_claude_analysis = getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)
-        else:
-            # Read from config with fallback to False
-            self.enable_claude_analysis = getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)
+            except Exception as e:
+                raise RuntimeError(
+                    f"❌ CRITICAL: Failed to load scanner config from database: {e} - no fallback allowed"
+                )
 
         # Warn about deprecated parameters
         if claude_api_key or enable_claude_analysis:

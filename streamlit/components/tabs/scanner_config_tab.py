@@ -237,6 +237,18 @@ def render_core_settings(config: Dict[str, Any]):
         if not values_equal(new_min_confluence, config.get('min_confluence_score')):
             st.session_state.scanner_pending_changes['min_confluence_score'] = new_min_confluence
 
+    # MTF Enhanced Confidence (only shown if MTF is enabled)
+    if new_enable_mtf:
+        new_mtf_confidence = st.slider(
+            "MTF Enhanced Min Confidence",
+            min_value=0.0, max_value=1.0, step=0.05,
+            value=_get_float(config, 'mtf_enhanced_min_confidence', 0.60),
+            help="Lower confidence threshold for MTF-validated signals (allows lower base confidence when MTF confirms)",
+            key="mtf_enhanced_min_confidence"
+        )
+        if not values_equal(new_mtf_confidence, config.get('mtf_enhanced_min_confidence')):
+            st.session_state.scanner_pending_changes['mtf_enhanced_min_confidence'] = new_mtf_confidence
+
     # Save section
     render_save_section(config, 'core', updated_by)
 
@@ -1634,6 +1646,15 @@ def render_claude_validation_settings(config: Dict[str, Any]):
         )
         if not values_equal(new_save_artifacts, config.get('claude_save_vision_artifacts')):
             st.session_state.scanner_pending_changes['claude_save_vision_artifacts'] = new_save_artifacts
+
+        new_minio_enabled = st.checkbox(
+            "Enable MinIO Storage",
+            value=config.get('minio_enabled', True),
+            help="Store charts and analysis artifacts in MinIO object storage",
+            key="minio_enabled"
+        )
+        if not values_equal(new_minio_enabled, config.get('minio_enabled')):
+            st.session_state.scanner_pending_changes['minio_enabled'] = new_minio_enabled
 
     with col2:
         # Display current timeframes

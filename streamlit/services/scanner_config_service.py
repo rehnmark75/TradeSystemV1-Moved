@@ -162,6 +162,28 @@ def get_config_by_category(category: str) -> Dict[str, Any]:
             'min_claude_quality_score', 'claude_include_chart', 'claude_chart_timeframes',
             'claude_vision_enabled', 'claude_vision_strategies', 'claude_validate_in_backtest',
             'save_claude_rejections', 'claude_save_vision_artifacts'
+        ],
+        'sr_validation': [
+            'enable_sr_validation', 'enable_enhanced_sr_validation', 'sr_analysis_timeframe',
+            'sr_lookback_hours', 'sr_left_bars', 'sr_right_bars', 'sr_volume_threshold',
+            'sr_level_tolerance_pips', 'sr_min_level_distance_pips', 'sr_recent_flip_bars',
+            'sr_min_flip_strength', 'sr_cache_duration_minutes', 'min_bars_for_sr_analysis'
+        ],
+        'signal_freshness': [
+            'enable_signal_freshness_check', 'max_signal_age_minutes'
+        ],
+        'news_filtering': [
+            'enable_news_filtering', 'reduce_confidence_near_news', 'news_filter_fail_secure'
+        ],
+        'market_intelligence': [
+            'enable_market_intelligence_capture', 'enable_market_intelligence_filtering',
+            'market_intelligence_min_confidence', 'market_intelligence_block_unsuitable_regimes',
+            'market_bias_filter_enabled', 'market_bias_min_consensus'
+        ],
+        'validation': [
+            'strategy_testing_mode', 'validate_spread', 'max_spread_pips',
+            'min_signal_confirmations', 'scalping_min_confidence',
+            'allowed_trading_epics', 'blocked_trading_epics'
         ]
     }
 
@@ -601,6 +623,120 @@ def get_field_metadata(field: str) -> Dict[str, Any]:
         'min_quality_score_for_trading': {
             'min': 0.0, 'max': 1.0, 'step': 0.05,
             'help': 'Minimum data quality score required for trading (0.0-1.0). Default: 0.5'
+        },
+
+        # S/R Validation Settings
+        'enable_sr_validation': {
+            'help': 'Enable Support/Resistance validation for signals'
+        },
+        'enable_enhanced_sr_validation': {
+            'help': 'Use enhanced S/R validator with level flip detection'
+        },
+        'sr_analysis_timeframe': {
+            'options': ['5m', '15m', '30m', '1h', '4h'],
+            'help': 'Timeframe for S/R analysis (default: 15m)'
+        },
+        'sr_lookback_hours': {
+            'min': 24, 'max': 168, 'step': 12,
+            'help': 'Hours of data for S/R analysis (default: 72 = 3 days)'
+        },
+        'sr_left_bars': {
+            'min': 5, 'max': 50, 'step': 1,
+            'help': 'Left bars for pivot detection (default: 15)'
+        },
+        'sr_right_bars': {
+            'min': 5, 'max': 50, 'step': 1,
+            'help': 'Right bars for pivot detection (default: 15)'
+        },
+        'sr_volume_threshold': {
+            'min': 5.0, 'max': 50.0, 'step': 5.0,
+            'help': 'Volume threshold percentile (default: 20.0)'
+        },
+        'sr_level_tolerance_pips': {
+            'min': 0.5, 'max': 10.0, 'step': 0.5,
+            'help': 'Tolerance for S/R level matching in pips (default: 2.0)'
+        },
+        'sr_min_level_distance_pips': {
+            'min': 5.0, 'max': 50.0, 'step': 5.0,
+            'help': 'Minimum distance between S/R levels in pips (default: 20.0)'
+        },
+        'sr_recent_flip_bars': {
+            'min': 20, 'max': 100, 'step': 10,
+            'help': 'Bars to check for recent level flips (default: 50)'
+        },
+        'sr_min_flip_strength': {
+            'min': 0.3, 'max': 1.0, 'step': 0.1,
+            'help': 'Minimum strength for level flip detection (default: 0.6)'
+        },
+        'sr_cache_duration_minutes': {
+            'min': 5, 'max': 60, 'step': 5,
+            'help': 'Duration to cache S/R data in minutes (default: 10)'
+        },
+        'min_bars_for_sr_analysis': {
+            'min': 50, 'max': 500, 'step': 50,
+            'help': 'Minimum bars required for S/R analysis (default: 100)'
+        },
+
+        # Signal Freshness Settings
+        'enable_signal_freshness_check': {
+            'help': 'Check if signals are recent enough for trading'
+        },
+        'max_signal_age_minutes': {
+            'min': 5, 'max': 120, 'step': 5,
+            'help': 'Maximum age of signal in minutes (default: 30)'
+        },
+
+        # News Filtering Settings
+        'enable_news_filtering': {
+            'help': 'Filter signals based on economic news events'
+        },
+        'reduce_confidence_near_news': {
+            'help': 'Reduce signal confidence when near high-impact news'
+        },
+        'news_filter_fail_secure': {
+            'help': 'Block signals if news filter fails (fail-secure mode)'
+        },
+
+        # Market Intelligence Settings
+        'enable_market_intelligence_capture': {
+            'help': 'Capture market intelligence data with each signal'
+        },
+        'enable_market_intelligence_filtering': {
+            'help': 'Use market intelligence for signal filtering'
+        },
+        'market_intelligence_min_confidence': {
+            'min': 0.3, 'max': 1.0, 'step': 0.05,
+            'help': 'Minimum market intelligence confidence (default: 0.7)'
+        },
+        'market_intelligence_block_unsuitable_regimes': {
+            'help': 'Block signals in unsuitable market regimes'
+        },
+        'market_bias_filter_enabled': {
+            'help': 'Block counter-trend trades when market consensus is high'
+        },
+        'market_bias_min_consensus': {
+            'min': 0.5, 'max': 1.0, 'step': 0.05,
+            'help': 'Minimum market consensus to trigger bias filter (default: 0.70)'
+        },
+
+        # Validation Settings
+        'strategy_testing_mode': {
+            'help': 'Skip certain validations for strategy testing'
+        },
+        'validate_spread': {
+            'help': 'Validate spread before trading'
+        },
+        'max_spread_pips': {
+            'min': 1.0, 'max': 10.0, 'step': 0.5,
+            'help': 'Maximum allowed spread in pips (default: 3.0)'
+        },
+        'min_signal_confirmations': {
+            'min': 0, 'max': 5, 'step': 1,
+            'help': 'Minimum number of signal confirmations required (default: 0)'
+        },
+        'scalping_min_confidence': {
+            'min': 0.3, 'max': 0.8, 'step': 0.05,
+            'help': 'Minimum confidence for scalping strategies (default: 0.45)'
         },
     }
 

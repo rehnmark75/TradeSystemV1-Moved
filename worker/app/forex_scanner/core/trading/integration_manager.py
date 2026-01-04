@@ -10,22 +10,25 @@ ENHANCED INTEGRATION FEATURES:
 - Enhanced error handling and fallbacks
 - Comprehensive monitoring and statistics
 - Support for new Claude configuration settings
+
+DATABASE-ONLY CONFIGURATION:
+- All behavioral settings come from scanner_global_config database
+- CLAUDE_API_KEY remains in config.py (it's a secret/environment variable)
+- No fallback to config.py for behavioral settings
 """
 
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-try:
-    import config
-except ImportError:
-    from forex_scanner import config
 
-# Import scanner config service for database-driven settings
+# Import scanner config service for database-driven settings (REQUIRED)
+from forex_scanner.services.scanner_config_service import get_scanner_config, ScannerConfig
+
+# Import config ONLY for environment variables/secrets (CLAUDE_API_KEY)
 try:
-    from forex_scanner.services.scanner_config_service import get_scanner_config
-    SCANNER_CONFIG_AVAILABLE = True
+    import config as env_config
 except ImportError:
-    SCANNER_CONFIG_AVAILABLE = False
+    from forex_scanner import config as env_config
 
 # Market hours validation
 try:
@@ -43,8 +46,13 @@ class IntegrationManager:
     """
     Manages external integrations (Claude, notifications, APIs)
     ENHANCED: Complete integration with modular Claude API and advanced features
+
+    DATABASE-ONLY CONFIGURATION:
+    - All settings come from scanner_global_config database
+    - No fallback to config.py - system fails if database unavailable
+    - CLAUDE_API_KEY is the ONLY setting from config.py (it's a secret)
     """
-    
+
     def __init__(self,
                  db_manager=None,
                  logger: Optional[logging.Logger] = None,
@@ -55,26 +63,36 @@ class IntegrationManager:
         self.logger = logger or logging.getLogger(__name__)
         self.db_manager = db_manager
         self.data_fetcher = data_fetcher  # For vision analysis chart generation
-        
-        # Configuration with proper defaults
-        self.enable_claude = enable_claude if enable_claude is not None else getattr(config, 'CLAUDE_ANALYSIS_ENABLED', False)
-        self.enable_notifications = enable_notifications if enable_notifications is not None else getattr(config, 'NOTIFICATIONS_ENABLED', True)
-        
-        # ENHANCED: New modular Claude configuration
-        self.claude_analysis_mode = self._map_analysis_mode(getattr(config, 'CLAUDE_ANALYSIS_MODE', 'minimal'))
-        self.use_advanced_prompts = getattr(config, 'USE_ADVANCED_CLAUDE_PROMPTS', True)
-        self.claude_analysis_level = getattr(config, 'CLAUDE_ANALYSIS_LEVEL', 'institutional')
-        
+
+        # FAIL-FAST: Load database configuration (no fallback)
+        try:
+            self._scanner_cfg: ScannerConfig = get_scanner_config()
+            self.logger.info(f"[CONFIG:DB] IntegrationManager loaded config from {self._scanner_cfg.source}")
+        except Exception as e:
+            self.logger.critical(f"[CONFIG:FAIL] IntegrationManager cannot load database config: {e}")
+            raise RuntimeError(
+                f"IntegrationManager failed to initialize: database config required. Error: {e}"
+            ) from e
+
+        # Configuration from database (with parameter override support)
+        self.enable_claude = enable_claude if enable_claude is not None else self._scanner_cfg.claude_analysis_enabled
+        self.enable_notifications = enable_notifications if enable_notifications is not None else self._scanner_cfg.notifications_enabled
+
+        # ENHANCED: New modular Claude configuration from database
+        self.claude_analysis_mode = self._map_analysis_mode(self._scanner_cfg.claude_analysis_mode)
+        self.use_advanced_prompts = self._scanner_cfg.use_advanced_claude_prompts
+        self.claude_analysis_level = self._scanner_cfg.claude_analysis_level
+
         # Integration instances
         self.claude_analyzer = None
         self.notification_manager = None
         self.alert_history_manager = None
-        
+
         # Enhanced integration status tracking
         self.integration_status = {
             'claude': {
-                'available': False, 
-                'last_test': None, 
+                'available': False,
+                'last_test': None,
                 'error_count': 0,
                 'success_count': 0,
                 'last_analysis': None,
@@ -84,28 +102,28 @@ class IntegrationManager:
                 'modular_features': []
             },
             'notifications': {
-                'available': False, 
-                'last_send': None, 
+                'available': False,
+                'last_send': None,
                 'error_count': 0,
                 'success_count': 0
             },
             'alerts': {
-                'available': False, 
-                'last_alert': None, 
+                'available': False,
+                'last_alert': None,
                 'error_count': 0,
                 'success_count': 0
             },
             'broker_api': {
-                'available': False, 
-                'last_connect': None, 
+                'available': False,
+                'last_connect': None,
                 'error_count': 0
             }
         }
-        
+
         # Initialize integrations
         self._initialize_integrations()
-        
-        self.logger.info("🔗 IntegrationManager initialized with ENHANCED Modular Claude integration")
+
+        self.logger.info("[DB] IntegrationManager initialized with database-driven config")
         self.logger.info(f"   Claude enabled: {self.enable_claude}")
         self.logger.info(f"   Claude analysis mode: {self.claude_analysis_mode}")
         self.logger.info(f"   Advanced prompts enabled: {self.use_advanced_prompts}")
@@ -161,23 +179,26 @@ class IntegrationManager:
     def _initialize_claude(self):
         """
         ENHANCED: Initialize Claude API integration with automatic modular/legacy detection
+
+        Uses database config for all behavioral settings.
+        CLAUDE_API_KEY is the ONLY setting from config.py (it's a secret/env variable).
         """
         try:
             # ENHANCED: Import from unified alerts interface (handles modular/legacy automatically)
             from alerts import ClaudeAnalyzer
-            
-            # Check if API key is available
-            api_key = getattr(config, 'CLAUDE_API_KEY', None)
+
+            # Check if API key is available (from env_config - secrets only)
+            api_key = getattr(env_config, 'CLAUDE_API_KEY', None)
             if not api_key:
-                self.logger.warning("⚠️ CLAUDE_API_KEY not found in config")
+                self.logger.warning("[CONFIG] CLAUDE_API_KEY not found in config (env variable)")
                 self.integration_status['claude']['available'] = False
                 return
-            
-            # ENHANCED: Initialize with automatic modular/legacy detection
+
+            # ENHANCED: Initialize with database-driven configuration
             self.claude_analyzer = ClaudeAnalyzer(
                 api_key=api_key,
-                auto_save=getattr(config, 'CLAUDE_AUTO_SAVE', True),
-                save_directory=getattr(config, 'CLAUDE_SAVE_DIRECTORY', "claude_analysis"),
+                auto_save=self._scanner_cfg.claude_auto_save,
+                save_directory=self._scanner_cfg.claude_save_directory,
                 data_fetcher=self.data_fetcher  # For vision analysis chart generation
             )
             
@@ -310,15 +331,8 @@ class IntegrationManager:
         """
         # CRITICAL GUARD: Prevent duplicate Claude calls
         # If TradeValidator handles Claude (require_claude_approval=True), skip this entirely
-        require_claude_approval = False
-        if SCANNER_CONFIG_AVAILABLE:
-            try:
-                scanner_cfg = get_scanner_config()
-                require_claude_approval = scanner_cfg.require_claude_approval
-            except Exception:
-                pass
-        else:
-            require_claude_approval = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
+        # Use database config (no fallback)
+        require_claude_approval = self._scanner_cfg.require_claude_approval
 
         if require_claude_approval:
             self.logger.debug("🚫 IntegrationManager Claude BLOCKED: TradeValidator handles Claude analysis")
@@ -492,19 +506,9 @@ class IntegrationManager:
         NOTE: This method should NOT be called if REQUIRE_CLAUDE_APPROVAL=True
         because TradeValidator already handles Claude analysis in that case.
         """
-        # CRITICAL GUARD: Prevent duplicate Claude calls
-        require_claude_approval = False
-        if SCANNER_CONFIG_AVAILABLE:
-            try:
-                scanner_cfg = get_scanner_config()
-                require_claude_approval = scanner_cfg.require_claude_approval
-            except Exception:
-                pass
-        else:
-            require_claude_approval = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
-
-        if require_claude_approval:
-            self.logger.debug("🚫 IntegrationManager analysis BLOCKED: TradeValidator handles Claude")
+        # CRITICAL GUARD: Prevent duplicate Claude calls (use database config)
+        if self._scanner_cfg.require_claude_approval:
+            self.logger.debug("[DB] IntegrationManager analysis BLOCKED: TradeValidator handles Claude")
             return None
 
         try:
@@ -512,16 +516,9 @@ class IntegrationManager:
             strategy = signal.get('strategy', '').upper()
             use_vision = hasattr(self.claude_analyzer, 'analyze_signal_with_vision')
 
-            # Check if this strategy supports vision - get from database
+            # Check if this strategy supports vision - get from database (no fallback)
             if use_vision:
-                if SCANNER_CONFIG_AVAILABLE:
-                    try:
-                        scanner_cfg = get_scanner_config()
-                        vision_strategies = scanner_cfg.claude_vision_strategies or ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']
-                    except Exception:
-                        vision_strategies = getattr(self.claude_analyzer, 'vision_strategies', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
-                else:
-                    vision_strategies = getattr(self.claude_analyzer, 'vision_strategies', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
+                vision_strategies = self._scanner_cfg.claude_vision_strategies or ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']
                 strategy_supports_vision = any(vs.upper() in strategy for vs in vision_strategies)
 
                 if strategy_supports_vision:
@@ -721,10 +718,11 @@ class IntegrationManager:
     def validate_claude_configuration(self) -> Dict[str, Any]:
         """
         ENHANCED: Validate modular Claude configuration for integration debugging
+        Uses database config for all behavioral settings.
         """
         validation_result = {
-            'api_key_present': bool(getattr(config, 'CLAUDE_API_KEY', None)),
-            'analysis_mode_config': getattr(config, 'CLAUDE_ANALYSIS_MODE', 'minimal'),
+            'api_key_present': bool(getattr(env_config, 'CLAUDE_API_KEY', None)),
+            'analysis_mode_config': self._scanner_cfg.claude_analysis_mode,
             'analysis_mode_mapped': self.claude_analysis_mode,
             'claude_enabled': self.enable_claude,
             'analyzer_available': self.claude_analyzer is not None,
@@ -734,6 +732,7 @@ class IntegrationManager:
                 'use_advanced_prompts': self.use_advanced_prompts,
                 'analysis_level': self.claude_analysis_level
             },
+            'config_source': self._scanner_cfg.source,
             'recommended_method': None,
             'integration_status': 'UNKNOWN',
             'recommended_fixes': []
@@ -843,10 +842,10 @@ def create_integration_manager(db_manager=None, logger=None, **kwargs):
 def test_claude_integration(api_key: str = None) -> bool:
     """Standalone function to test modular Claude integration"""
     try:
-        api_key = api_key or getattr(config, 'CLAUDE_API_KEY', None)
+        api_key = api_key or getattr(env_config, 'CLAUDE_API_KEY', None)
         if not api_key:
             return False
-        
+
         integration_manager = IntegrationManager(enable_claude=True)
         return integration_manager.test_claude_integration()
     except Exception:

@@ -3,6 +3,11 @@ Claude Analyzer - Main Orchestrator for Signal Analysis
 Modular refactor of the original claude_api.py for better maintainability
 CLEAN ARCHITECTURE: Uses enhanced PromptBuilder without duplicate classes
 ENHANCED: Vision API integration with chart generation for EMA_DOUBLE and other strategies
+
+DATABASE-DRIVEN CONFIGURATION:
+All behavioral settings are loaded from the database via scanner_config_service.
+The database is the ONLY source of truth - no fallback to config.py allowed.
+EXCEPTION: CLAUDE_API_KEY remains as getattr(config, ...) since it's a secret/env var.
 """
 
 import logging
@@ -24,7 +29,7 @@ except ImportError:
     from forex_scanner import config
 from .validation.timestamp_validator import TimestampValidator
 
-# Try to import scanner config service for database-driven settings
+# Import scanner config service for database-driven settings (REQUIRED)
 try:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     SCANNER_CONFIG_AVAILABLE = True
@@ -53,13 +58,46 @@ class ClaudeAnalyzer:
     Main interface for Claude analysis - orchestrates all components
     Significantly reduced complexity by delegating to specialized modules
     ENHANCED: Now uses the enhanced PromptBuilder for institutional-grade analysis
+
+    DATABASE-DRIVEN CONFIGURATION:
+    All behavioral settings are loaded from the database via scanner_config_service.
+    The database is the ONLY source of truth - no fallback to config.py allowed.
+    If database is unavailable, initialization will FAIL with RuntimeError.
+    EXCEPTION: CLAUDE_API_KEY remains as getattr(config, ...) since it's a secret/env var.
     """
-    
+
     def __init__(self, api_key: str = None, auto_save: bool = True, save_directory: str = "claude_analysis", data_fetcher=None):
         # Initialize logger FIRST (required by other initialization steps)
         self.logger = logging.getLogger(__name__)
 
-        # Initialize API key
+        # ========================================================================
+        # FAIL-FAST: Database configuration is REQUIRED - no fallback allowed
+        # ========================================================================
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError(
+                "CRITICAL: Scanner config service not available - "
+                "database is REQUIRED for ClaudeAnalyzer, no fallback allowed"
+            )
+
+        try:
+            self._scanner_cfg = get_scanner_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"CRITICAL: Failed to load scanner config from database: {e} - "
+                "no fallback allowed"
+            ) from e
+
+        if not self._scanner_cfg:
+            raise RuntimeError(
+                "CRITICAL: Scanner config returned None - "
+                "database is REQUIRED for ClaudeAnalyzer, no fallback allowed"
+            )
+
+        self.logger.info(f"[CONFIG:DB] ClaudeAnalyzer config loaded from database (source={self._scanner_cfg.source})")
+
+        # ========================================================================
+        # Initialize API key - EXCEPTION: This is a secret/env var, use getattr
+        # ========================================================================
         if not api_key:
             api_key = getattr(config, 'CLAUDE_API_KEY', None)
 
@@ -72,62 +110,64 @@ class ClaudeAnalyzer:
         self.timestamp_validator = TimestampValidator()
         self.data_fetcher = data_fetcher
 
-        # Configuration for analysis mode
-        self.use_advanced_prompts = getattr(config, 'USE_ADVANCED_CLAUDE_PROMPTS', True)
-        self.analysis_level = getattr(config, 'CLAUDE_ANALYSIS_LEVEL', 'institutional')  # institutional, hedge_fund, prop_trader, risk_manager
+        # ========================================================================
+        # Configuration for analysis mode - FROM DATABASE
+        # ========================================================================
+        # claude_analysis_mode: 'minimal', 'advanced', 'institutional', etc.
+        analysis_mode = self._scanner_cfg.claude_analysis_mode or 'minimal'
+        self.use_advanced_prompts = analysis_mode != 'minimal'
+        # Default to 'institutional' if advanced mode is enabled but no specific level
+        self.analysis_level = analysis_mode if analysis_mode in ['institutional', 'hedge_fund', 'prop_trader', 'risk_manager'] else 'institutional'
 
-        # ENHANCED: Vision API configuration - NOW READS FROM DATABASE
-        # Try to get settings from database first, fall back to config.py defaults
-        if SCANNER_CONFIG_AVAILABLE and get_scanner_config:
-            try:
-                scanner_cfg = get_scanner_config()
-                self.use_vision_api = scanner_cfg.claude_vision_enabled
-                self.vision_strategies = scanner_cfg.claude_vision_strategies or ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']
-                self.save_vision_artifacts = scanner_cfg.claude_save_vision_artifacts
-                self.logger.info(f"[CONFIG:DB] Vision settings loaded from database - enabled={self.use_vision_api}, strategies={self.vision_strategies}")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Failed to load vision settings from database: {e}, using defaults")
-                self.use_vision_api = getattr(config, 'CLAUDE_VISION_ENABLED', True)
-                self.vision_strategies = getattr(config, 'CLAUDE_VISION_STRATEGIES', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
-                self.save_vision_artifacts = getattr(config, 'CLAUDE_SAVE_VISION_ARTIFACTS', True)
-        else:
-            # Fall back to config.py (legacy)
-            self.use_vision_api = getattr(config, 'CLAUDE_VISION_ENABLED', True)
-            self.vision_strategies = getattr(config, 'CLAUDE_VISION_STRATEGIES', ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE'])
-            self.save_vision_artifacts = getattr(config, 'CLAUDE_SAVE_VISION_ARTIFACTS', True)
-            self.logger.info("[CONFIG:LEGACY] Vision settings loaded from config.py (database service not available)")
+        # ========================================================================
+        # Vision API configuration - FROM DATABASE (NO FALLBACK)
+        # ========================================================================
+        self.use_vision_api = self._scanner_cfg.claude_vision_enabled
+        self.vision_strategies = self._scanner_cfg.claude_vision_strategies or ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']
+        self.save_vision_artifacts = self._scanner_cfg.claude_save_vision_artifacts
+        self.logger.info(
+            f"[CONFIG:DB] Vision settings - enabled={self.use_vision_api}, "
+            f"strategies={self.vision_strategies}, save_artifacts={self.save_vision_artifacts}"
+        )
 
-        # ENHANCED: Chart generator initialization
+        # ========================================================================
+        # Chart generator initialization
+        # ========================================================================
         self.chart_generator = None
         if CHART_GENERATOR_AVAILABLE and self.use_vision_api:
             try:
                 self.chart_generator = ForexChartGenerator(data_fetcher=data_fetcher)
-                self.logger.info("✅ Chart generator initialized for vision analysis")
+                self.logger.info("Chart generator initialized for vision analysis")
             except Exception as e:
-                self.logger.warning(f"⚠️ Failed to initialize chart generator: {e}")
+                self.logger.warning(f"Failed to initialize chart generator: {e}")
 
-        # MinIO client for chart storage
+        # ========================================================================
+        # MinIO client for chart storage (from database)
+        # ========================================================================
         self.minio_client = None
-        self.minio_enabled = getattr(config, 'MINIO_ENABLED', True)
+        self.minio_enabled = self._scanner_cfg.minio_enabled
         if MINIO_CLIENT_AVAILABLE and self.minio_enabled:
             try:
                 self.minio_client = get_minio_client()
                 if self.minio_client.is_available:
-                    self.logger.info("✅ MinIO client initialized for chart storage")
+                    self.logger.info("MinIO client initialized for chart storage")
                 else:
-                    self.logger.warning("⚠️ MinIO client not available - using disk storage")
+                    self.logger.warning("MinIO client not available - using disk storage")
                     self.minio_client = None
             except Exception as e:
-                self.logger.warning(f"⚠️ Failed to initialize MinIO client: {e}")
+                self.logger.warning(f"Failed to initialize MinIO client: {e}")
                 self.minio_client = None
 
-        # Save directory for analysis artifacts
-        self.save_directory = save_directory
+        # Save directory for analysis artifacts - from database or fallback
+        self.save_directory = self._scanner_cfg.claude_vision_save_directory or save_directory
 
         if not api_key:
-            self.logger.warning("⚠️ No Claude API key provided")
+            self.logger.warning("No Claude API key provided")
 
-        self.logger.info(f"✅ Claude Analyzer initialized - Advanced prompts: {self.use_advanced_prompts}, Level: {self.analysis_level}")
+        self.logger.info(
+            f"ClaudeAnalyzer initialized - Advanced prompts: {self.use_advanced_prompts}, "
+            f"Level: {self.analysis_level}"
+        )
         self.logger.info(f"   Vision API: {'Enabled' if self.use_vision_api and self.chart_generator else 'Disabled'}")
         self.logger.info(f"   Chart Storage: {'MinIO' if self.minio_client else 'Disk'}")
     

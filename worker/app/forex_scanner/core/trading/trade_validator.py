@@ -73,13 +73,14 @@ except ImportError:
     MARKET_INTELLIGENCE_AVAILABLE = False
     logging.warning("⚠️ Market intelligence not available - signals will be saved without market context")
 
-# Import scanner config service for database-driven settings
+# Import scanner config service for database-driven settings - REQUIRED, NO FALLBACK
 try:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     SCANNER_CONFIG_AVAILABLE = True
 except ImportError:
     SCANNER_CONFIG_AVAILABLE = False
-    logging.warning("⚠️ Scanner config service not available - using config.py fallbacks")
+    # This is a critical error - database config is REQUIRED
+    logging.error("❌ CRITICAL: Scanner config service not available - database is REQUIRED")
 
 
 class TradeValidator:
@@ -105,8 +106,21 @@ class TradeValidator:
         self.backtest_mode = backtest_mode
         self.alert_history_manager = alert_history_manager  # Store for Claude rejection saving
 
+        # Load scanner config from database - REQUIRED, NO FALLBACK
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError("❌ CRITICAL: Scanner config service not available - database is REQUIRED, no fallback allowed")
+
+        try:
+            self._scanner_cfg = get_scanner_config()
+        except Exception as e:
+            raise RuntimeError(f"❌ CRITICAL: Failed to load scanner config from database: {e} - no fallback allowed")
+
+        if not self._scanner_cfg:
+            raise RuntimeError("❌ CRITICAL: Scanner config returned None - database is REQUIRED, no fallback allowed")
+
         # Validation rules - UNIVERSAL FIX: Confidence format handling for all strategies
-        raw_confidence = float(getattr(config, 'MIN_CONFIDENCE', 0.6))
+        # Read min_confidence from DATABASE ONLY
+        raw_confidence = float(self._scanner_cfg.min_confidence)
         self.min_confidence = self._normalize_confidence_threshold(raw_confidence)
         # FIXED: More flexible required fields - price can be in multiple field names
         self.required_fields = ['epic', 'signal_type', 'confidence_score']
@@ -120,60 +134,59 @@ class TradeValidator:
         # Market hours validation - DISABLED for backtests (historical data analysis)
         if self.backtest_mode:
             self.validate_market_hours = False  # UNIVERSAL FIX: Allow historical analysis
-            if hasattr(self, 'logger') and self.logger:
-                self.logger.info("🔧 BACKTEST: Market hours validation disabled for historical analysis")
+            self.logger.info("🔧 BACKTEST: Market hours validation disabled for historical analysis")
         else:
-            self.validate_market_hours = getattr(config, 'VALIDATE_MARKET_HOURS', False)
-        self.trading_start_hour = getattr(config, 'TRADING_START_HOUR', 0)
-        self.trading_end_hour = getattr(config, 'TRADING_END_HOUR', 23)
-        
-        # Epic validation
-        self.allowed_epics = getattr(config, 'ALLOWED_TRADING_EPICS', [])
-        self.blocked_epics = getattr(config, 'BLOCKED_TRADING_EPICS', [])
-        
-        # Risk management
-        self.max_risk_percent = float(getattr(config, 'MAX_RISK_PERCENT_PER_TRADE', 2.0))
-        self.min_risk_reward_ratio = float(getattr(config, 'MIN_RISK_REWARD_RATIO', 1.0))
-        
-        # NEW: EMA 200 trend filter
-        self.enable_ema200_filter = getattr(config, 'ENABLE_EMA200_TREND_FILTER', True)
-        
-        # NEW: Signal freshness configuration
-        self.enable_freshness_check = getattr(config, 'ENABLE_SIGNAL_FRESHNESS_CHECK', True)
-        self.max_signal_age_minutes = getattr(config, 'MAX_SIGNAL_AGE_MINUTES', 30)
-        
-        # ENHANCED: Support/Resistance validation configuration with safe initialization
+            # Read from database ONLY - no fallback
+            self.validate_market_hours = self._scanner_cfg.respect_market_hours
+
+        # Trading hours from database ONLY - no fallback
+        self.trading_start_hour = self._scanner_cfg.trading_start_hour
+        self.trading_end_hour = self._scanner_cfg.trading_end_hour
+        self.trading_cutoff_hour = self._scanner_cfg.trading_cutoff_time_utc
+        self.user_timezone = self._scanner_cfg.user_timezone
+
+        # Epic validation from database ONLY - no fallback
+        self.allowed_epics = self._scanner_cfg.allowed_trading_epics or []
+        self.blocked_epics = self._scanner_cfg.blocked_trading_epics or []
+
+        # Risk management from database ONLY - no fallback
+        self.max_risk_percent = float(self._scanner_cfg.max_risk_per_trade or 2.0)
+        self.min_risk_reward_ratio = float(self._scanner_cfg.default_risk_reward or 1.0)
+
+        # EMA 200 trend filter from database ONLY - no fallback
+        self.enable_ema200_filter = self._scanner_cfg.enable_ema200_contradiction_filter
+
+        # Signal freshness configuration from database ONLY - no fallback
+        self.enable_freshness_check = self._scanner_cfg.enable_signal_freshness_check
+        self.max_signal_age_minutes = self._scanner_cfg.max_signal_age_minutes
+
+        # Support/Resistance validation configuration from database ONLY - no fallback
         self.enable_sr_validation = (
-            getattr(config, 'ENABLE_SR_VALIDATION', True) and
+            self._scanner_cfg.enable_sr_validation and
             (ENHANCED_SR_VALIDATOR_AVAILABLE or SR_VALIDATOR_AVAILABLE) and
             DATA_FETCHER_AVAILABLE
         )
 
-        # Prefer enhanced validator with level flip detection
+        # Prefer enhanced validator with level flip detection from database ONLY
         self.use_enhanced_sr_validation = (
-            getattr(config, 'ENABLE_ENHANCED_SR_VALIDATION', True) and
+            self._scanner_cfg.enable_enhanced_sr_validation and
             ENHANCED_SR_VALIDATOR_AVAILABLE
         )
         
-        # NEW: Claude filtering configuration - read from database
-        if SCANNER_CONFIG_AVAILABLE:
-            try:
-                scanner_cfg = get_scanner_config()
-                self.enable_claude_filtering = bool(scanner_cfg.require_claude_approval)
-                self.min_claude_score = int(scanner_cfg.min_claude_quality_score)
-                self.logger.info(f"[CONFIG:DB] Claude filtering: {self.enable_claude_filtering}, min_score: {self.min_claude_score}")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Failed to load Claude config from database: {e}, using defaults")
-                self.enable_claude_filtering = False
-                self.min_claude_score = 6
-        else:
-            # Legacy fallback
-            self.enable_claude_filtering = bool(getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False))
-            self.min_claude_score = int(getattr(config, 'MIN_CLAUDE_QUALITY_SCORE', 6))
+        # Claude filtering configuration from database ONLY - no fallback
+        self.enable_claude_filtering = bool(self._scanner_cfg.require_claude_approval)
+        self.min_claude_score = int(self._scanner_cfg.min_claude_quality_score)
+        self.claude_fail_secure = bool(self._scanner_cfg.claude_fail_secure)
+        self.claude_validate_in_backtest = bool(self._scanner_cfg.claude_validate_in_backtest)
+        self.save_claude_rejections = bool(self._scanner_cfg.save_claude_rejections)
+        self.claude_save_vision_artifacts = bool(self._scanner_cfg.claude_save_vision_artifacts)
+        self.claude_vision_save_directory = self._scanner_cfg.claude_vision_save_directory
+        self.claude_include_chart = bool(self._scanner_cfg.claude_include_chart)
+        self.logger.info(f"[CONFIG:DB] Claude filtering: {self.enable_claude_filtering}, min_score: {self.min_claude_score}")
 
-        # NEW: Economic news filtering configuration
+        # Economic news filtering configuration from database ONLY - no fallback
         self.enable_news_filtering = (
-            getattr(config, 'ENABLE_NEWS_FILTERING', True) and
+            self._scanner_cfg.enable_news_filtering and
             NEWS_FILTER_AVAILABLE
         )
         
@@ -193,21 +206,21 @@ class TradeValidator:
         
         if self.enable_sr_validation:
             try:
-                # Initialize S/R validator (enhanced if available, fallback to basic)
+                # Initialize S/R validator from database ONLY - no fallback
                 sr_config = {
-                    'left_bars': getattr(config, 'SR_LEFT_BARS', 15),
-                    'right_bars': getattr(config, 'SR_RIGHT_BARS', 15),
-                    'volume_threshold': getattr(config, 'SR_VOLUME_THRESHOLD', 20.0),
-                    'level_tolerance_pips': getattr(config, 'SR_LEVEL_TOLERANCE_PIPS', 2.0),  # OPTIMIZED: Less restrictive (was 3.0)
-                    'min_level_distance_pips': getattr(config, 'SR_MIN_LEVEL_DISTANCE_PIPS', 20.0),
+                    'left_bars': self._scanner_cfg.sr_left_bars,
+                    'right_bars': self._scanner_cfg.sr_right_bars,
+                    'volume_threshold': self._scanner_cfg.sr_volume_threshold,
+                    'level_tolerance_pips': self._scanner_cfg.sr_level_tolerance_pips,
+                    'min_level_distance_pips': self._scanner_cfg.sr_min_level_distance_pips,
                     'logger': self.logger
                 }
 
                 if self.use_enhanced_sr_validation:
                     # Enhanced validator with level flip detection
                     self.sr_validator = EnhancedSupportResistanceValidator(
-                        recent_flip_bars=getattr(config, 'SR_RECENT_FLIP_BARS', 50),
-                        min_flip_strength=getattr(config, 'SR_MIN_FLIP_STRENGTH', 0.6),
+                        recent_flip_bars=self._scanner_cfg.sr_recent_flip_bars,
+                        min_flip_strength=self._scanner_cfg.sr_min_flip_strength,
                         **sr_config
                     )
                     self.logger.info("✅ Enhanced S/R Validator with level flip detection initialized")
@@ -215,22 +228,22 @@ class TradeValidator:
                     # Basic S/R validator
                     self.sr_validator = SupportResistanceValidator(**sr_config)
                     self.logger.info("✅ Basic S/R Validator initialized")
-                
-                # Initialize data fetcher for market data (with fallback)
+
+                # Initialize data fetcher for market data - use self.user_timezone from database
                 if self.db_manager:
                     self.data_fetcher = DataFetcher(
                         db_manager=self.db_manager,
-                        user_timezone=getattr(config, 'USER_TIMEZONE', 'Europe/Stockholm')
+                        user_timezone=self.user_timezone
                     )
                 elif DATA_FETCHER_AVAILABLE:
-                    # Try to create database manager from config
+                    # Try to create database manager using DATABASE_URL from config.py (environment variable)
                     try:
-                        db_url = getattr(config, 'DATABASE_URL', '')
+                        db_url = getattr(config, 'DATABASE_URL', None)
                         if db_url:
                             temp_db_manager = DatabaseManager(db_url)
                             self.data_fetcher = DataFetcher(
                                 db_manager=temp_db_manager,
-                                user_timezone=getattr(config, 'USER_TIMEZONE', 'Europe/Stockholm')
+                                user_timezone=self.user_timezone
                             )
                         else:
                             self.logger.warning("⚠️ No DATABASE_URL configured - S/R validation will use provided data only")
@@ -256,10 +269,10 @@ class TradeValidator:
             else:
                 self.logger.info("✅ TradeValidator initialized (S/R validation disabled)")
         
-        # NEW: S/R validation performance cache
+        # S/R validation performance cache from database ONLY - no fallback
         self.sr_data_cache = {}
         self.sr_cache_expiry = {}
-        self.sr_cache_duration_minutes = getattr(config, 'SR_CACHE_DURATION_MINUTES', 10)
+        self.sr_cache_duration_minutes = self._scanner_cfg.sr_cache_duration_minutes
 
         # FIXED: Initialize Claude analyzer AFTER data_fetcher is available
         # This ensures chart generator can access data_fetcher for vision analysis
@@ -270,25 +283,25 @@ class TradeValidator:
             else:
                 self.logger.warning("⚠️ Vision analysis limited: data_fetcher not available")
 
-        # NEW: Market Intelligence for universal signal context capture
+        # Market Intelligence for universal signal context capture from database ONLY - no fallback
         self.market_intelligence_engine = None
         self.enable_market_intelligence_capture = (
-            getattr(config, 'ENABLE_MARKET_INTELLIGENCE_CAPTURE', True) and
+            self._scanner_cfg.enable_market_intelligence_capture and
             MARKET_INTELLIGENCE_AVAILABLE
         )
 
-        # NEW: Market Intelligence for trade filtering/blocking
+        # Market Intelligence for trade filtering/blocking from database ONLY - no fallback
         self.enable_market_intelligence_filtering = (
-            getattr(config, 'ENABLE_MARKET_INTELLIGENCE_FILTERING', False) and
+            self._scanner_cfg.enable_market_intelligence_filtering and
             MARKET_INTELLIGENCE_AVAILABLE
         )
-        self.market_intelligence_min_confidence = getattr(config, 'MARKET_INTELLIGENCE_MIN_CONFIDENCE', 0.7)
-        self.market_intelligence_block_unsuitable_regimes = getattr(config, 'MARKET_INTELLIGENCE_BLOCK_UNSUITABLE_REGIMES', True)
+        self.market_intelligence_min_confidence = self._scanner_cfg.market_intelligence_min_confidence
+        self.market_intelligence_block_unsuitable_regimes = self._scanner_cfg.market_intelligence_block_unsuitable_regimes
 
-        # v2.3.2: Market Bias Filter - Block counter-trend trades when consensus is high
+        # v2.3.2: Market Bias Filter - Block counter-trend trades when consensus is high from database ONLY
         # Trade 1586 analysis: BUY in bearish market with 1.0 consensus = immediate loss
-        self.market_bias_filter_enabled = getattr(config, 'MARKET_BIAS_FILTER_ENABLED', True)
-        self.market_bias_min_consensus = getattr(config, 'MARKET_BIAS_MIN_CONSENSUS', 0.70)
+        self.market_bias_filter_enabled = self._scanner_cfg.market_bias_filter_enabled
+        self.market_bias_min_consensus = self._scanner_cfg.market_bias_min_consensus
 
         if self.enable_market_intelligence_capture:
             try:
@@ -368,10 +381,11 @@ class TradeValidator:
             from alerts.analysis.response_parser import ResponseParser
             from alerts.forex_chart_generator import ForexChartGenerator, MPLFINANCE_AVAILABLE
 
+            # Get Claude API key from config.py (environment variable - NOT stored in database)
             api_key = getattr(config, 'CLAUDE_API_KEY', None)
 
             if not api_key:
-                self.logger.warning("⚠️ CLAUDE_API_KEY not found - Claude filtering disabled")
+                self.logger.warning("⚠️ CLAUDE_API_KEY not found in environment - Claude filtering disabled")
                 return
 
             if not ANTHROPIC_SDK_AVAILABLE:
@@ -392,7 +406,7 @@ class TradeValidator:
 
             # Initialize chart generator for vision analysis
             self.chart_generator = None
-            if getattr(config, 'CLAUDE_INCLUDE_CHART', True) and MPLFINANCE_AVAILABLE:
+            if self.claude_include_chart and MPLFINANCE_AVAILABLE:
                 self.chart_generator = ForexChartGenerator(
                     db_manager=self.db_manager,
                     data_fetcher=self.data_fetcher
@@ -455,8 +469,8 @@ class TradeValidator:
             # Perform news validation
             is_valid, reason, news_context = self.news_filter.validate_signal_against_news(signal)
 
-            # Adjust confidence if enabled and signal is valid
-            if is_valid and getattr(config, 'REDUCE_CONFIDENCE_NEAR_NEWS', True):
+            # Adjust confidence if enabled and signal is valid (from database ONLY - no fallback)
+            if is_valid and self._scanner_cfg.reduce_confidence_near_news:
                 original_confidence = signal.get('confidence_score', 0.0)
                 adjusted_confidence, adjustment_reason = self.news_filter.adjust_confidence_for_news(
                     signal, original_confidence
@@ -476,9 +490,8 @@ class TradeValidator:
         except Exception as e:
             self.logger.error(f"❌ News validation error: {e}")
 
-            # Configurable fail mode
-            fail_secure = getattr(config, 'NEWS_FILTER_FAIL_SECURE', False)
-            if fail_secure:
+            # Configurable fail mode from database ONLY - no fallback
+            if self._scanner_cfg.news_filter_fail_secure:
                 return False, f"News validation error (fail-secure mode): {str(e)}", None
             else:
                 return True, f"News validation error (allowing signal): {str(e)}", None
@@ -503,12 +516,12 @@ class TradeValidator:
                 return True, "Claude filtering disabled", None
 
         # Skip Claude validation in backtest if configured
-        if self.backtest_mode and not getattr(config, 'CLAUDE_VALIDATE_IN_BACKTEST', False):
+        if self.backtest_mode and not self.claude_validate_in_backtest:
             self.logger.debug("⏭️ Skipping Claude validation in backtest mode")
             return True, "Claude validation skipped (backtest mode)", None
 
-        # Get fail-secure setting (default to True for trade safety)
-        fail_secure = getattr(config, 'CLAUDE_FAIL_SECURE', True)
+        # Get fail-secure setting from instance variable (loaded from database)
+        fail_secure = self.claude_fail_secure
 
         try:
             self.validation_stats['claude_analyzed'] += 1
@@ -610,7 +623,7 @@ class TradeValidator:
 
             # Store vision artifacts in result for later saving with alert_id
             # Don't save here - orchestrator will save after alert_id is obtained
-            if getattr(config, 'CLAUDE_SAVE_VISION_ARTIFACTS', True) and not self.backtest_mode:
+            if self.claude_save_vision_artifacts and not self.backtest_mode:
                 claude_result['_vision_artifacts'] = {
                     'chart_base64': chart_base64,
                     'prompt': prompt
@@ -841,8 +854,8 @@ class TradeValidator:
             import base64
             import json
 
-            # Create vision analysis directory
-            vision_dir = getattr(config, 'CLAUDE_VISION_SAVE_DIRECTORY', 'claude_analysis/vision_analysis')
+            # Create vision analysis directory (from database config)
+            vision_dir = self.claude_vision_save_directory
             os.makedirs(vision_dir, exist_ok=True)
 
             # Generate filename prefix
@@ -1058,7 +1071,7 @@ class TradeValidator:
                     self.logger.debug(f"⚠️ Signal freshness warning: {msg} (continuing anyway)")
             
             # 6. Risk management validation
-            if getattr(config, 'STRATEGY_TESTING_MODE', False):
+            if self._scanner_cfg.strategy_testing_mode:
                 valid, msg = True, "Testing mode - risk validation skipped"
             else:
                 valid, msg = self.validate_risk_parameters(signal)
@@ -1167,8 +1180,8 @@ class TradeValidator:
                     # Save rejected signals for analysis (database + optional file)
                     if claude_result:
                         # Always save to DB if alert_history_manager available
-                        # Also save to file if SAVE_CLAUDE_REJECTIONS is True
-                        if self.alert_history_manager or getattr(config, 'SAVE_CLAUDE_REJECTIONS', False):
+                        # Also save to file if save_claude_rejections is True (from database config)
+                        if self.alert_history_manager or self.save_claude_rejections:
                             self._save_claude_rejection(signal, claude_result, rejection_reason=msg)
 
                     return False, f"Claude filtering: {msg}"
@@ -1362,13 +1375,13 @@ class TradeValidator:
             # Extract pair from epic (e.g., 'CS.D.EURUSD.CEEM.IP' -> 'EURUSD')
             pair = epic.split('.')[2] if len(epic.split('.')) > 2 else epic
             
-            # Fetch enhanced data with required indicators
+            # Fetch enhanced data with required indicators (settings from database)
             market_data = self.data_fetcher.get_enhanced_data(
                 epic=epic,
                 pair=pair,
-                timeframe=getattr(config, 'SR_ANALYSIS_TIMEFRAME', '15m'),
-                lookback_hours=getattr(config, 'SR_LOOKBACK_HOURS', 72),  # 3 days for S/R analysis
-                user_timezone=getattr(config, 'USER_TIMEZONE', 'Europe/Stockholm'),
+                timeframe=self._scanner_cfg.sr_analysis_timeframe,
+                lookback_hours=self._scanner_cfg.sr_lookback_hours,
+                user_timezone=self.user_timezone,
                 required_indicators=['ema', 'volume']  # Minimal indicators for S/R
             )
             
@@ -1424,8 +1437,8 @@ class TradeValidator:
                 self.logger.warning(f"⚠️ Market data missing required columns: {missing_columns}")
                 return False
                 
-            # Check minimum data length for S/R analysis
-            min_bars_for_sr = getattr(config, 'MIN_BARS_FOR_SR_ANALYSIS', 100)
+            # Check minimum data length for S/R analysis (from database)
+            min_bars_for_sr = self._scanner_cfg.min_bars_for_sr_analysis
             if len(market_data) < min_bars_for_sr:
                 self.logger.warning(f"⚠️ Insufficient data for S/R analysis: {len(market_data)} < {min_bars_for_sr}")
                 return False
@@ -1989,11 +2002,11 @@ class TradeValidator:
             current_minute = now_utc.minute
             weekday = now_utc.weekday()  # 0 = Monday, 6 = Sunday
 
-            # Get trading cutoff time from config (default 20:00 UTC)
-            trading_cutoff_hour = getattr(config, 'TRADING_CUTOFF_TIME_UTC', 20)
+            # Get trading cutoff time from database (already loaded in __init__)
+            trading_cutoff_hour = self.trading_cutoff_hour
 
             # Check daily trading cutoff (no new trades after cutoff time)
-            if getattr(config, 'ENABLE_TRADING_TIME_CONTROLS', True):
+            if self._scanner_cfg.enable_trading_time_controls:
                 if current_hour >= trading_cutoff_hour:
                     return False, f"Trading cutoff reached: {current_hour:02d}:{current_minute:02d} UTC >= {trading_cutoff_hour:02d}:00 UTC (no new trades after cutoff)"
 
@@ -2075,7 +2088,7 @@ class TradeValidator:
 
             if is_scalping:
                 # Scalping uses lower threshold (45%) - high frequency, tight risk management
-                scalping_min_confidence = getattr(config, 'SCALPING_MIN_CONFIDENCE', 0.45)
+                scalping_min_confidence = self._scanner_cfg.scalping_min_confidence
                 if confidence < scalping_min_confidence:
                     return False, f"Scalping confidence {confidence:.1%} below scalping minimum {scalping_min_confidence:.1%}"
                 return True, f"Scalping confidence {confidence:.1%} meets requirements (min: {scalping_min_confidence:.1%})"
@@ -2211,7 +2224,7 @@ class TradeValidator:
         try:
 
             # 🚀 STRATEGY TESTING MODE: Skip ONLY risk management validation
-            if getattr(config, 'STRATEGY_TESTING_MODE', False):
+            if self._scanner_cfg.strategy_testing_mode:
                 return True, "Testing mode - risk management validation skipped"
 
             # SMC_SIMPLE: Skip - strategy already validates R:R with ATR-based caps and structural stops
@@ -2314,17 +2327,18 @@ class TradeValidator:
                     return False, "Low market liquidity detected"
                 
                 spread = market_conditions.get('spread')
-                if spread and spread > getattr(config, 'MAX_SPREAD_PIPS', 3.0):
-                    return False, f"Spread too wide: {spread} pips (max: {getattr(config, 'MAX_SPREAD_PIPS', 3.0)})"
-            
+                max_spread = self._scanner_cfg.max_spread_pips
+                if spread and spread > max_spread:
+                    return False, f"Spread too wide: {spread} pips (max: {max_spread})"
+
             # Check signal strength
             signal_strength = signal.get('signal_strength', 'medium')
             if signal_strength == 'weak':
                 return False, "Signal strength too weak for trading"
-            
+
             # Check if multiple confirmations exist
             confirmations = signal.get('confirmations', [])
-            min_confirmations = getattr(config, 'MIN_SIGNAL_CONFIRMATIONS', 0)
+            min_confirmations = self._scanner_cfg.min_signal_confirmations
             if len(confirmations) < min_confirmations:
                 return False, f"Insufficient confirmations: {len(confirmations)} (min: {min_confirmations})"
             
@@ -2487,11 +2501,17 @@ class TradeValidator:
                         timeout_ms=50
                     )
 
-                    # Start background worker for all configured epics (from EPIC_LIST)
+                    # Start background worker for all configured epics (from SMC config enabled_pairs)
                     # This runs in background and updates cache every 30s to avoid recalculating during signal validation
-                    epic_list = getattr(config, 'EPIC_LIST', [
-                        'CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP'
-                    ])
+                    # Use SMC config service for enabled pairs, fallback to basic list if not available
+                    try:
+                        from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+                        smc_cfg = get_smc_simple_config()
+                        epic_list = smc_cfg.enabled_pairs if smc_cfg and smc_cfg.enabled_pairs else [
+                            'CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP'
+                        ]
+                    except Exception:
+                        epic_list = ['CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP']
                     self._cached_intelligence_engine.start_background_worker(epic_list, 30)
 
                     self.logger.info(f"🚀 {epic}: Initialized enhanced intelligence system with 5-level fallback")

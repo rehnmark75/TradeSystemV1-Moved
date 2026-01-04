@@ -5,6 +5,7 @@ Smart Money Concepts (SMC) and Strategy configurations
 
 NOTE: After January 2026 cleanup, only SMC Simple strategy is active.
 Legacy strategy configs have been archived to forex_scanner/archive/
+trading_config.py DELETED - settings now in database (scanner_global_config)
 """
 
 # Import all config modules using the new modular structure
@@ -12,20 +13,17 @@ try:
     from forex_scanner.configdata.smc.smc_configdata import *
     from forex_scanner.configdata.strategies import *
     from forex_scanner.configdata.market_intelligence_config import *
-    from forex_scanner.configdata.trading_config import *
 except ImportError:
     # Fallback for different execution contexts (e.g., Docker container)
     try:
         from .smc.smc_configdata import *
         from .strategies import *
         from .market_intelligence_config import *
-        from .trading_config import *
     except ImportError:
         # Last resort - try relative imports
         from smc.smc_configdata import *
         from strategies import *
         from market_intelligence_config import *
-        from trading_config import *
 
 
 class Config:
@@ -42,31 +40,28 @@ class Config:
 
     def __init__(self):
         # Import all config modules
+        # NOTE: trading_config.py DELETED - settings now in database
         try:
             from forex_scanner.configdata.smc import smc_configdata
             from forex_scanner.configdata import strategies
             from forex_scanner.configdata import market_intelligence_config
-            from forex_scanner.configdata import trading_config
         except ImportError:
             try:
                 from .smc import smc_configdata
                 from . import strategies
                 from . import market_intelligence_config
-                from . import trading_config
             except ImportError:
                 import smc.smc_configdata as smc_configdata
                 import strategies
                 import market_intelligence_config
-                import trading_config
 
         # Store module references for dot notation access
         self.smc = smc_configdata
         self.strategies = strategies
         self.intelligence = market_intelligence_config
-        self.trading = trading_config
 
         # For backward compatibility, add all module attributes to self
-        for module in [smc_configdata, strategies, market_intelligence_config, trading_config]:
+        for module in [smc_configdata, strategies, market_intelligence_config]:
             for attr in dir(module):
                 if not attr.startswith('_') and attr.isupper():
                     setattr(self, attr, getattr(module, attr))
@@ -74,7 +69,7 @@ class Config:
     def get_config_summary(self) -> dict:
         """Get a summary of all loaded configurations"""
         summary = {
-            'loaded_modules': ['smc', 'strategies', 'intelligence', 'trading'],
+            'loaded_modules': ['smc', 'strategies', 'intelligence'],
             'smc_config': self.smc.get_smart_money_config_summary() if hasattr(self.smc, 'get_smart_money_config_summary') else {},
             'strategies_config': self.strategies.get_strategies_summary() if hasattr(self.strategies, 'get_strategies_summary') else {},
             'intelligence_config': self.intelligence.get_market_intelligence_config_summary() if hasattr(self.intelligence, 'get_market_intelligence_config_summary') else {},
@@ -166,7 +161,15 @@ try:
 except Exception as e:
     print(f"⚠️ Configuration validation error: {e}")
 
-print(f"📊 ConfigData system loaded - SMC enabled: {getattr(config, 'SMART_MONEY_ENABLED', False)}")
-print(f"📈 Strategy configs loaded - ZeroLag: False, MACD: False, EMA: False")
-print(f"🧠 Intelligence config loaded - Enabled: {getattr(config, 'ENABLE_MARKET_INTELLIGENCE', False)}, Preset: {getattr(config, 'INTELLIGENCE_PRESET', 'unknown')}")
-print(f"💰 Trading config loaded - DB params: {'ENABLED' if getattr(config, 'USE_OPTIMIZED_DATABASE_PARAMS', False) else 'DISABLED (testing mode)'}, Min SL: {getattr(config, 'PAIR_MINIMUM_STOPS', {}).get('DEFAULT', 20)} pips")
+# Startup info - reads from database when available
+try:
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    _scanner_cfg = get_scanner_config()
+    print(f"📊 ConfigData system loaded - SMC enabled: {_scanner_cfg.smart_money_readonly_enabled}")
+    print(f"📈 Strategy: SMC Simple only (all legacy strategies removed)")
+    print(f"🧠 Intelligence config loaded - Enabled: {_scanner_cfg.enable_market_intelligence_capture}, Preset: {_scanner_cfg.intelligence_preset}")
+except Exception as _e:
+    # Fallback for when database is not available (e.g., during migrations)
+    print(f"📊 ConfigData system loaded - SMC enabled: {getattr(config, 'SMART_MONEY_ENABLED', False)}")
+    print(f"📈 Strategy: SMC Simple only (all legacy strategies removed)")
+    print(f"🧠 Intelligence config loaded (database unavailable: {_e})")

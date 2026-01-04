@@ -9,6 +9,11 @@ FEATURES:
 - Configurable impact levels and time windows
 - Graceful degradation when news service unavailable
 - Caching for performance optimization
+
+CONFIGURATION:
+- ALL configuration is loaded from database via ScannerConfigService
+- NO fallback to config.py - database is the ONLY source of truth
+- If database is unavailable, the system FAILS rather than using defaults
 """
 
 import logging
@@ -17,49 +22,72 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 import time
 
+# Database-only configuration - no fallback allowed
 try:
-    import config
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
 except ImportError:
-    from forex_scanner import config
+    SCANNER_CONFIG_AVAILABLE = False
 
 
 class EconomicNewsFilter:
     """
     Economic news filter for trade validation
     Integrates with economic-calendar service to assess news risk before trading
+
+    CRITICAL: Uses database-only configuration. If database is unavailable,
+    initialization will fail rather than using fallback defaults.
     """
 
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.logger = logger or logging.getLogger(__name__)
 
-        # Configuration
-        self.news_service_url = getattr(config, 'ECONOMIC_CALENDAR_URL', 'http://economic-calendar:8091')
-        self.enable_news_filtering = getattr(config, 'ENABLE_NEWS_FILTERING', True)
+        # Fail-fast: Database is REQUIRED, no fallback allowed
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError(
+                "CRITICAL: Scanner config service not available - "
+                "database is REQUIRED, no fallback allowed"
+            )
+
+        try:
+            self._scanner_cfg = get_scanner_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"CRITICAL: Failed to load scanner config from database: {e} - "
+                "no fallback allowed"
+            ) from e
+
+        if not self._scanner_cfg:
+            raise RuntimeError(
+                "CRITICAL: Scanner config returned None - "
+                "database is REQUIRED, no fallback allowed"
+            )
+
+        # Configuration from database
+        self.news_service_url = self._scanner_cfg.economic_calendar_url
+        self.enable_news_filtering = self._scanner_cfg.enable_news_filtering
 
         # Risk assessment parameters
-        self.high_impact_buffer_minutes = getattr(config, 'NEWS_HIGH_IMPACT_BUFFER_MINUTES', 30)
-        self.medium_impact_buffer_minutes = getattr(config, 'NEWS_MEDIUM_IMPACT_BUFFER_MINUTES', 15)
-        self.max_lookahead_hours = getattr(config, 'NEWS_LOOKAHEAD_HOURS', 4)
+        self.high_impact_buffer_minutes = self._scanner_cfg.news_high_impact_buffer_minutes
+        self.medium_impact_buffer_minutes = self._scanner_cfg.news_medium_impact_buffer_minutes
+        self.max_lookahead_hours = self._scanner_cfg.news_lookahead_hours
 
         # Risk tolerance levels
-        self.block_before_high_impact = getattr(config, 'BLOCK_TRADES_BEFORE_HIGH_IMPACT_NEWS', True)
-        self.block_before_medium_impact = getattr(config, 'BLOCK_TRADES_BEFORE_MEDIUM_IMPACT_NEWS', False)
-        self.reduce_confidence_near_news = getattr(config, 'REDUCE_CONFIDENCE_NEAR_NEWS', True)
+        self.block_before_high_impact = self._scanner_cfg.block_trades_before_high_impact_news
+        self.block_before_medium_impact = self._scanner_cfg.block_trades_before_medium_impact_news
+        self.reduce_confidence_near_news = self._scanner_cfg.reduce_confidence_near_news
 
         # Major economic events that always trigger high risk
-        self.critical_events = getattr(config, 'CRITICAL_ECONOMIC_EVENTS', [
-            'Non-Farm Employment Change', 'NFP', 'FOMC', 'Federal Funds Rate', 'ECB Press Conference',
-            'Interest Rate Decision', 'CPI', 'Core CPI', 'GDP', 'Employment', 'Unemployment'
-        ])
+        self.critical_events = self._scanner_cfg.critical_economic_events
 
         # Cache for performance
         self.news_cache = {}
         self.cache_expiry = {}
-        self.cache_duration_minutes = getattr(config, 'NEWS_CACHE_DURATION_MINUTES', 5)
+        self.cache_duration_minutes = self._scanner_cfg.news_cache_duration_minutes
 
         # Connection settings
-        self.request_timeout = getattr(config, 'NEWS_SERVICE_TIMEOUT_SECONDS', 5)
-        self.fail_safe_on_error = getattr(config, 'NEWS_FILTER_FAIL_SAFE', True)
+        self.request_timeout = self._scanner_cfg.news_service_timeout_seconds
+        self.fail_safe_on_error = not self._scanner_cfg.news_filter_fail_secure
 
         # Statistics
         self.stats = {
@@ -72,7 +100,7 @@ class EconomicNewsFilter:
             'cache_hits': 0
         }
 
-        self.logger.info("📰 Economic News Filter initialized")
+        self.logger.info("[DB] Economic News Filter initialized from database config")
         self.logger.info(f"   Service URL: {self.news_service_url}")
         self.logger.info(f"   High impact buffer: {self.high_impact_buffer_minutes} minutes")
         self.logger.info(f"   Medium impact buffer: {self.medium_impact_buffer_minutes} minutes")
@@ -80,6 +108,26 @@ class EconomicNewsFilter:
         self.logger.info(f"   Block high impact: {self.block_before_high_impact}")
         self.logger.info(f"   Block medium impact: {self.block_before_medium_impact}")
         self.logger.info(f"   Reduce confidence: {self.reduce_confidence_near_news}")
+
+    def _refresh_config(self):
+        """Refresh configuration from database if needed."""
+        try:
+            self._scanner_cfg = get_scanner_config()
+            # Update runtime settings
+            self.news_service_url = self._scanner_cfg.economic_calendar_url
+            self.enable_news_filtering = self._scanner_cfg.enable_news_filtering
+            self.high_impact_buffer_minutes = self._scanner_cfg.news_high_impact_buffer_minutes
+            self.medium_impact_buffer_minutes = self._scanner_cfg.news_medium_impact_buffer_minutes
+            self.max_lookahead_hours = self._scanner_cfg.news_lookahead_hours
+            self.block_before_high_impact = self._scanner_cfg.block_trades_before_high_impact_news
+            self.block_before_medium_impact = self._scanner_cfg.block_trades_before_medium_impact_news
+            self.reduce_confidence_near_news = self._scanner_cfg.reduce_confidence_near_news
+            self.critical_events = self._scanner_cfg.critical_economic_events
+            self.cache_duration_minutes = self._scanner_cfg.news_cache_duration_minutes
+            self.request_timeout = self._scanner_cfg.news_service_timeout_seconds
+            self.fail_safe_on_error = not self._scanner_cfg.news_filter_fail_secure
+        except Exception as e:
+            self.logger.warning(f"Failed to refresh config from database: {e}")
 
     def validate_signal_against_news(self, signal: Dict) -> Tuple[bool, str, Dict]:
         """
@@ -124,15 +172,15 @@ class EconomicNewsFilter:
                 elif risk_assessment['highest_impact'] == 'medium':
                     self.stats['medium_impact_blocks'] += 1
 
-                self.logger.info(f"📰 NEWS BLOCK: {epic} {signal_type} - {reason}")
+                self.logger.info(f"NEWS BLOCK: {epic} {signal_type} - {reason}")
             else:
-                self.logger.debug(f"📰 News check passed: {epic} {signal_type} - {reason}")
+                self.logger.debug(f"News check passed: {epic} {signal_type} - {reason}")
 
             return is_valid, reason, risk_assessment
 
         except Exception as e:
             self.stats['service_errors'] += 1
-            self.logger.error(f"❌ Economic news filter error: {e}")
+            self.logger.error(f"Economic news filter error: {e}")
 
             if self.fail_safe_on_error:
                 return True, f"News filter error (allowing): {str(e)}", {}
@@ -205,14 +253,14 @@ class EconomicNewsFilter:
             # Clean old cache entries
             self._cleanup_cache(current_time)
 
-            self.logger.debug(f"📰 Retrieved {len(events)} upcoming news events for {currency_pair}")
+            self.logger.debug(f"Retrieved {len(events)} upcoming news events for {currency_pair}")
             return events
 
         except requests.RequestException as e:
-            self.logger.warning(f"⚠️ Failed to fetch news events: {e}")
+            self.logger.warning(f"Failed to fetch news events: {e}")
             return []
         except Exception as e:
-            self.logger.error(f"❌ Error getting news events: {e}")
+            self.logger.error(f"Error getting news events: {e}")
             return []
 
     def _assess_news_risk(self, news_events: List[Dict], signal: Dict) -> Dict:
@@ -308,14 +356,14 @@ class EconomicNewsFilter:
 
             risk_assessment['risk_score'] = min(1.0, risk_score)
 
-            self.logger.debug(f"📰 News risk assessment: {risk_assessment['highest_impact']} impact, "
+            self.logger.debug(f"News risk assessment: {risk_assessment['highest_impact']} impact, "
                             f"score: {risk_assessment['risk_score']:.2f}, "
                             f"events: {risk_assessment['events_count']}")
 
             return risk_assessment
 
         except Exception as e:
-            self.logger.error(f"❌ Error assessing news risk: {e}")
+            self.logger.error(f"Error assessing news risk: {e}")
             return risk_assessment
 
     def _make_filtering_decision(self, risk_assessment: Dict, signal: Dict) -> Tuple[bool, str]:
@@ -361,7 +409,7 @@ class EconomicNewsFilter:
                 return True, "No significant news risk detected"
 
         except Exception as e:
-            self.logger.error(f"❌ Error making filtering decision: {e}")
+            self.logger.error(f"Error making filtering decision: {e}")
             if self.fail_safe_on_error:
                 return True, f"Decision error (allowing): {str(e)}"
             else:
@@ -380,10 +428,10 @@ class EconomicNewsFilter:
                 self.cache_expiry.pop(key, None)
 
             if expired_keys:
-                self.logger.debug(f"🧹 Cleaned {len(expired_keys)} expired news cache entries")
+                self.logger.debug(f"Cleaned {len(expired_keys)} expired news cache entries")
 
         except Exception as e:
-            self.logger.error(f"❌ Error cleaning news cache: {e}")
+            self.logger.error(f"Error cleaning news cache: {e}")
 
     def adjust_confidence_for_news(self, signal: Dict, confidence: float) -> Tuple[float, str]:
         """
@@ -432,7 +480,7 @@ class EconomicNewsFilter:
                 return confidence, "No confidence adjustment needed"
 
         except Exception as e:
-            self.logger.error(f"❌ Error adjusting confidence for news: {e}")
+            self.logger.error(f"Error adjusting confidence for news: {e}")
             return confidence, f"Confidence adjustment error: {str(e)}"
 
     def get_news_context_for_signal(self, signal: Dict) -> Dict:
@@ -464,7 +512,7 @@ class EconomicNewsFilter:
             return context
 
         except Exception as e:
-            self.logger.error(f"❌ Error getting news context: {e}")
+            self.logger.error(f"Error getting news context: {e}")
             return {}
 
     def test_service_connection(self) -> Tuple[bool, str]:
@@ -490,6 +538,7 @@ class EconomicNewsFilter:
         return {
             'enabled': self.enable_news_filtering,
             'service_url': self.news_service_url,
+            'config_source': 'database',
             'configuration': {
                 'high_impact_buffer_minutes': self.high_impact_buffer_minutes,
                 'medium_impact_buffer_minutes': self.medium_impact_buffer_minutes,

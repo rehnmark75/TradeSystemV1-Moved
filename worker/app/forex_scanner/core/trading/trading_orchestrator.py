@@ -184,44 +184,49 @@ class TradingOrchestrator:
         self.intelligence_threshold = intelligence_threshold or self._get_intelligence_threshold()
         self.enable_market_intelligence = enable_market_intelligence
         
-        # Load configuration from DATABASE (not legacy config files)
-        if CONFIG_SERVICES_AVAILABLE:
-            scanner_cfg = get_scanner_config()
-            smc_cfg = get_smc_simple_config()
-        else:
-            scanner_cfg = None
-            smc_cfg = None
+        # ✅ CRITICAL: Database-driven configuration - NO FALLBACK to config.py
+        if not CONFIG_SERVICES_AVAILABLE:
+            raise RuntimeError(
+                "❌ CRITICAL: Scanner config service not available - database is REQUIRED, no fallback allowed"
+            )
 
-        # ENHANCED CLAUDE CONFIGURATION - read from database
+        try:
+            self._scanner_cfg = get_scanner_config()
+            self._smc_cfg = get_smc_simple_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"❌ CRITICAL: Failed to load config from database: {e} - no fallback allowed"
+            )
+
+        if not self._scanner_cfg or not self._smc_cfg:
+            raise RuntimeError(
+                "❌ CRITICAL: Config returned None - database is REQUIRED, no fallback allowed"
+            )
+
+        self.logger.info("[CONFIG:DB] ✅ TradingOrchestrator config loaded from database (NO FALLBACK)")
+
+        # ENHANCED CLAUDE CONFIGURATION - read from database (NO FALLBACK)
         if enable_claude_analysis is not None:
             self.enable_claude = enable_claude_analysis
-        elif scanner_cfg:
-            self.enable_claude = scanner_cfg.require_claude_approval
         else:
-            self.enable_claude = getattr(config, 'ENABLE_CLAUDE_ANALYSIS', False)
+            self.enable_claude = self._scanner_cfg.require_claude_approval
 
         self.claude_analysis_mode = claude_analysis_mode or 'minimal'
         self.claude_analysis_level = claude_analysis_level or 'institutional'
         self.use_advanced_claude_prompts = use_advanced_claude_prompts if use_advanced_claude_prompts is not None else True
 
-        # TRADING CONFIGURATION
-        self.enable_trading = enable_trading if enable_trading is not None else False
-
-        # SCANNER CONFIGURATION (from database)
-        if scanner_cfg and smc_cfg:
-            self.scan_interval = scan_interval or scanner_cfg.scan_interval or 60
-            self.epic_list = epic_list or smc_cfg.enabled_pairs
-            self.min_confidence = min_confidence or scanner_cfg.min_confidence or 0.7
-            self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False
-            self.spread_pips = spread_pips or 1.5
+        # TRADING CONFIGURATION - from database (NO FALLBACK)
+        if enable_trading is not None:
+            self.enable_trading = enable_trading
         else:
-            # Fallback to legacy config
-            self.logger.warning("⚠️ Database config unavailable, using legacy config fallback")
-            self.scan_interval = scan_interval or getattr(config, 'SCAN_INTERVAL', 60)
-            self.epic_list = epic_list or getattr(config, 'EPIC_LIST', ['CS.D.EURUSD.CEEM.IP'])
-            self.min_confidence = min_confidence or getattr(config, 'MIN_CONFIDENCE', 0.7)
-            self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else getattr(config, 'USE_BID_ADJUSTMENT', False)
-            self.spread_pips = spread_pips or getattr(config, 'SPREAD_PIPS', 1.5)
+            self.enable_trading = self._scanner_cfg.enable_order_execution
+
+        # SCANNER CONFIGURATION (from database - NO FALLBACK)
+        self.scan_interval = scan_interval if scan_interval is not None else self._scanner_cfg.scan_interval
+        self.epic_list = epic_list or self._smc_cfg.enabled_pairs
+        self.min_confidence = min_confidence if min_confidence is not None else self._scanner_cfg.min_confidence
+        self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False
+        self.spread_pips = spread_pips if spread_pips is not None else 1.5
         self.user_timezone = user_timezone
         
         # Session tracking
@@ -328,7 +333,7 @@ class TradingOrchestrator:
                 db_manager=self.db_manager,
                 logger=self.logger,
                 enable_claude=self.enable_claude,
-                enable_notifications=getattr(config, 'NOTIFICATIONS_ENABLED', True),
+                enable_notifications=self._scanner_cfg.notifications_enabled,  # From database - NO FALLBACK
                 data_fetcher=data_fetcher
             )
         except (NameError, ImportError) as e:
@@ -821,8 +826,11 @@ class TradingOrchestrator:
             chart_base64 = artifacts.get('chart_base64')
             prompt = artifacts.get('prompt', '')
 
-            # Get save directory from config
-            vision_dir = getattr(config, 'CLAUDE_VISION_SAVE_DIRECTORY', 'claude_analysis_enhanced/vision_analysis')
+            # Get save directory from database config (NO FALLBACK to config.py)
+            if self._scanner_cfg:
+                vision_dir = self._scanner_cfg.claude_vision_save_directory
+            else:
+                vision_dir = 'claude_analysis_enhanced/vision_analysis'
             os.makedirs(vision_dir, exist_ok=True)
 
             # Generate filename prefix with alert_id
@@ -1192,7 +1200,7 @@ class TradingOrchestrator:
                 self.logger.warning("⚠️ No trade validator available - skipping validation")
             
             # 4. 🚀 ENHANCED: Apply risk management with testing mode bypass
-            if getattr(config, 'STRATEGY_TESTING_MODE', False):
+            if self._scanner_cfg.strategy_testing_mode:  # From database - NO FALLBACK
                 # 🚀 TESTING MODE: Skip all risk management and use minimal position sizes
                 self.logger.info(f"🚀 Testing mode - risk management bypassed: {len(valid_signals)} signals approved")
                 
@@ -1259,15 +1267,8 @@ class TradingOrchestrator:
             # FIXED: Skip IntegrationManager Claude if TradeValidator already did Claude analysis
             # This prevents duplicate API calls and wasted tokens
             claude_results = {}
-            # Check from database first
-            if SCANNER_CONFIG_AVAILABLE:
-                try:
-                    scanner_cfg = get_scanner_config()
-                    trade_validator_did_claude = scanner_cfg.require_claude_approval
-                except Exception:
-                    trade_validator_did_claude = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
-            else:
-                trade_validator_did_claude = getattr(config, 'REQUIRE_CLAUDE_APPROVAL', False)
+            # Check from database - NO FALLBACK
+            trade_validator_did_claude = self._scanner_cfg.require_claude_approval
 
             if trade_validator_did_claude:
                 # TradeValidator already did Claude analysis - use its results, skip IntegrationManager
@@ -1610,12 +1611,8 @@ class TradingOrchestrator:
         """
         from datetime import timedelta
 
-        # Get offset from database config
-        if CONFIG_SERVICES_AVAILABLE:
-            scanner_cfg = get_scanner_config()
-            offset_seconds = scanner_cfg.scan_boundary_offset_seconds or 60
-        else:
-            offset_seconds = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
+        # Get offset from database config - NO FALLBACK
+        offset_seconds = self._scanner_cfg.scan_boundary_offset_seconds
 
         now = datetime.utcnow()
         current_minute = now.minute
@@ -2114,7 +2111,8 @@ def create_trading_orchestrator(
         if not db_manager:
             logger.info("🔧 No database manager provided, attempting to create one...")
             try:
-                database_url = getattr(config, 'DATABASE_URL', None)
+                # NOTE: DATABASE_URL is an environment variable that stays in config.py
+                database_url = getattr(config, 'DATABASE_URL', None)  # ENV VAR - stays in config
                 if database_url:
                     db_manager = DatabaseManager(database_url)
                     logger.info("✅ DatabaseManager created in factory")

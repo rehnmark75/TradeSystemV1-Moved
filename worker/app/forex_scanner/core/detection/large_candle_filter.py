@@ -5,6 +5,9 @@ Prevents entries after excessive price movements that could indicate exhaustion
 
 This filter analyzes recent candle size and movement to prevent entries
 when price has moved too aggressively, which often leads to reversals.
+
+CRITICAL: Database-driven configuration - NO FALLBACK to config.py
+All settings must come from scanner_global_config table.
 """
 
 import pandas as pd
@@ -13,32 +16,56 @@ from typing import Dict, Optional, List, Tuple
 import logging
 from datetime import datetime
 
+# Import scanner config service for database-driven settings - REQUIRED, NO FALLBACK
 try:
-    import config
+    from forex_scanner.services.scanner_config_service import get_scanner_config, ScannerConfig
+    SCANNER_CONFIG_AVAILABLE = True
 except ImportError:
-    from forex_scanner import config
+    SCANNER_CONFIG_AVAILABLE = False
 
 
 class LargeCandleFilter:
     """
     Filters out signals that occur after unusually large price movements
-    
+
     Key Features:
     - Detects abnormally large candles based on ATR (Average True Range)
     - Prevents entries after parabolic moves
     - Configurable sensitivity for different market conditions
     - Works with multiple timeframes
+
+    CRITICAL: Database-driven configuration - NO FALLBACK to config.py
     """
-    
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        
-        # Configuration from config.py
-        self.large_candle_multiplier = getattr(config, 'LARGE_CANDLE_ATR_MULTIPLIER', 2.5)
-        self.consecutive_large_threshold = getattr(config, 'CONSECUTIVE_LARGE_CANDLES_THRESHOLD', 2)
-        self.movement_lookback_periods = getattr(config, 'MOVEMENT_LOOKBACK_PERIODS', 5)
-        self.excessive_movement_threshold = getattr(config, 'EXCESSIVE_MOVEMENT_THRESHOLD_PIPS', 15)
-        self.filter_cooldown_periods = getattr(config, 'LARGE_CANDLE_FILTER_COOLDOWN', 3)
+
+        # ✅ CRITICAL: Database-driven configuration - NO FALLBACK to config.py
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError(
+                "❌ CRITICAL: Scanner config service not available - database is REQUIRED, no fallback allowed"
+            )
+
+        try:
+            self._scanner_cfg = get_scanner_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"❌ CRITICAL: Failed to load scanner config from database: {e} - no fallback allowed"
+            )
+
+        if not self._scanner_cfg:
+            raise RuntimeError(
+                "❌ CRITICAL: Scanner config returned None - database is REQUIRED, no fallback allowed"
+            )
+
+        # Configuration from database - NO FALLBACK
+        self.large_candle_multiplier = self._scanner_cfg.large_candle_atr_multiplier
+        self.consecutive_large_threshold = self._scanner_cfg.consecutive_large_candles_threshold
+        self.movement_lookback_periods = self._scanner_cfg.movement_lookback_periods
+        self.excessive_movement_threshold = self._scanner_cfg.excessive_movement_threshold_pips
+        self.filter_cooldown_periods = self._scanner_cfg.large_candle_filter_cooldown
+
+        self.logger.info("[CONFIG:DB] ✅ Large candle filter config loaded from database (NO FALLBACK)")
         
         # Track filtered signals for debugging
         self.filter_stats = {
@@ -303,26 +330,14 @@ class LargeCandleFilter:
         }
 
 
-# Configuration additions for config.py
-LARGE_CANDLE_FILTER_CONFIG = {
-    # Enable large candle filtering
-    'ENABLE_LARGE_CANDLE_FILTER': True,
-    
-    # Large candle detection - candles larger than this multiple of ATR are considered "large"
-    'LARGE_CANDLE_ATR_MULTIPLIER': 2.5,  # 2.5x ATR = large candle
-    
-    # Consecutive large candles threshold
-    'CONSECUTIVE_LARGE_CANDLES_THRESHOLD': 2,  # Block if 2+ large candles recently
-    
-    # Movement analysis periods
-    'MOVEMENT_LOOKBACK_PERIODS': 5,  # Check last 5 candles
-    
-    # Excessive movement threshold in pips
-    'EXCESSIVE_MOVEMENT_THRESHOLD_PIPS': 15,  # 15+ pips in lookback period
-    
-    # Cooldown after large candle (periods to wait)
-    'LARGE_CANDLE_FILTER_COOLDOWN': 3,  # Wait 3 periods after large candle
-    
-    # Parabolic movement sensitivity
-    'PARABOLIC_ACCELERATION_THRESHOLD': 1.5,  # 50% acceleration in movement
-}
+# LEGACY: Configuration moved to database (scanner_global_config table)
+# All settings are now managed via the Streamlit UI or direct database updates.
+# This dict is kept only for documentation purposes.
+#
+# Settings now in database:
+# - large_candle_atr_multiplier (default 2.5)
+# - consecutive_large_candles_threshold (default 2)
+# - movement_lookback_periods (default 5)
+# - excessive_movement_threshold_pips (default 15)
+# - large_candle_filter_cooldown (default 3)
+# - enable_large_candle_filter (default True)

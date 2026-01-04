@@ -57,10 +57,12 @@ except ImportError:
         LIQUIDITY_ANALYZER_AVAILABLE = False
         logging.getLogger(__name__).warning("Liquidity sweep analyzer not available")
 
+# Import scanner config service - DATABASE IS THE ONLY SOURCE OF TRUTH
 try:
-    from configdata import config
+    from forex_scanner.services.scanner_config_service import get_scanner_config
+    SCANNER_CONFIG_AVAILABLE = True
 except ImportError:
-    from forex_scanner.configdata import config
+    SCANNER_CONFIG_AVAILABLE = False
 
 
 class SmartMoneyReadOnlyAnalyzer:
@@ -72,13 +74,32 @@ class SmartMoneyReadOnlyAnalyzer:
     def __init__(self, data_fetcher=None):
         self.logger = logging.getLogger(__name__)
         self.data_fetcher = data_fetcher
-        
+
+        # CRITICAL: Fail-fast database configuration - NO FALLBACK ALLOWED
+        if not SCANNER_CONFIG_AVAILABLE:
+            raise RuntimeError(
+                "CRITICAL: Scanner config service not available - "
+                "database is REQUIRED, no fallback allowed"
+            )
+        try:
+            self._scanner_cfg = get_scanner_config()
+        except Exception as e:
+            raise RuntimeError(
+                f"CRITICAL: Failed to load scanner config from database: {e} - "
+                "no fallback allowed"
+            ) from e
+        if not self._scanner_cfg:
+            raise RuntimeError(
+                "CRITICAL: Scanner config returned None - "
+                "database is REQUIRED, no fallback allowed"
+            )
+
         # Initialize smart money analyzers with comprehensive fallback
         if ANALYZERS_AVAILABLE:
             try:
                 self.market_structure_analyzer = MarketStructureAnalyzer()
                 self.order_flow_analyzer = OrderFlowAnalyzer()
-                self.logger.info("✅ Smart money analyzers initialized successfully")
+                self.logger.info("Smart money analyzers initialized successfully")
             except Exception as e:
                 self.logger.warning(f"Failed to initialize analyzers: {e}")
                 self.market_structure_analyzer = None
@@ -86,36 +107,36 @@ class SmartMoneyReadOnlyAnalyzer:
         else:
             self.market_structure_analyzer = None
             self.order_flow_analyzer = None
-            self.logger.warning("⚠️ Using mock smart money implementation")
-        
-        # Read-only configuration
-        self.enabled = getattr(config, 'SMART_MONEY_READONLY_ENABLED', True)
-        self.min_data_points = getattr(config, 'SMART_MONEY_MIN_DATA_POINTS', 50)
-        self.analysis_timeout = getattr(config, 'SMART_MONEY_ANALYSIS_TIMEOUT', 10.0)
-        self.structure_weight = getattr(config, 'SMART_MONEY_STRUCTURE_WEIGHT', 0.4)
-        self.order_flow_weight = getattr(config, 'SMART_MONEY_ORDER_FLOW_WEIGHT', 0.3)
-        self.min_confidence_boost = getattr(config, 'SMART_MONEY_MIN_CONFIDENCE_BOOST', 0.1)
-        self.max_confidence_boost = getattr(config, 'SMART_MONEY_MAX_CONFIDENCE_BOOST', 0.3)
+            self.logger.warning("Using mock smart money implementation")
 
-        # Liquidity sweep configuration (NEW)
-        self.liquidity_sweep_enabled = getattr(config, 'SMART_MONEY_LIQUIDITY_SWEEP_ENABLED', True)
-        self.liquidity_sweep_weight = getattr(config, 'SMART_MONEY_LIQUIDITY_SWEEP_WEIGHT', 0.20)
-        self.liquidity_sweep_lookback = getattr(config, 'SMART_MONEY_LIQUIDITY_SWEEP_LOOKBACK_BARS', 10)
-        self.min_sweep_quality = getattr(config, 'SMART_MONEY_MIN_SWEEP_QUALITY', 0.4)
+        # Read-only configuration FROM DATABASE (no fallback)
+        self.enabled = self._scanner_cfg.smart_money_readonly_enabled
+        self.min_data_points = self._scanner_cfg.smart_money_min_data_points
+        self.analysis_timeout = self._scanner_cfg.smart_money_analysis_timeout
+        self.structure_weight = self._scanner_cfg.smart_money_structure_weight
+        self.order_flow_weight = self._scanner_cfg.smart_money_order_flow_weight
+        self.min_confidence_boost = self._scanner_cfg.smart_money_min_confidence_boost
+        self.max_confidence_boost = self._scanner_cfg.smart_money_max_confidence_boost
+
+        # Liquidity sweep configuration FROM DATABASE (no fallback)
+        self.liquidity_sweep_enabled = self._scanner_cfg.smart_money_liquidity_sweep_enabled
+        self.liquidity_sweep_weight = self._scanner_cfg.smart_money_liquidity_sweep_weight
+        self.liquidity_sweep_lookback = self._scanner_cfg.smart_money_liquidity_sweep_lookback_bars
+        self.min_sweep_quality = self._scanner_cfg.smart_money_min_sweep_quality
 
         # Initialize liquidity analyzer
         self.liquidity_analyzer = None
         if LIQUIDITY_ANALYZER_AVAILABLE and self.liquidity_sweep_enabled:
             try:
                 self.liquidity_analyzer = SilverBulletLiquidity(logger=self.logger)
-                self.logger.info("✅ Liquidity sweep analyzer initialized")
+                self.logger.info("Liquidity sweep analyzer initialized")
             except Exception as e:
                 self.logger.warning(f"Failed to initialize liquidity analyzer: {e}")
 
-        self.logger.info("🧠 SmartMoneyReadOnlyAnalyzer initialized")
-        self.logger.info(f"   Enabled: {'✅' if self.enabled else '❌'}")
-        self.logger.info(f"   Analyzers available: {'✅' if ANALYZERS_AVAILABLE else '❌'}")
-        self.logger.info(f"   Liquidity sweep: {'✅' if self.liquidity_analyzer else '❌'}")
+        self.logger.info("[DB] SmartMoneyReadOnlyAnalyzer initialized from database config")
+        self.logger.info(f"   Enabled: {self.enabled}")
+        self.logger.info(f"   Analyzers available: {ANALYZERS_AVAILABLE}")
+        self.logger.info(f"   Liquidity sweep: {self.liquidity_analyzer is not None}")
         self.logger.info(f"   Weights - Structure: {self.structure_weight}, OrderFlow: {self.order_flow_weight}")
     
     def analyze_signal(self, signal, df, epic, timeframe='5m') -> Dict:

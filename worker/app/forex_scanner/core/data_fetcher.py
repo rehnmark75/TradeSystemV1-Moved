@@ -117,13 +117,13 @@ class DataFetcher:
         Returns:
             Enhanced DataFrame or None if error
         """
-        # Use default timeframe from database if not specified
+        # Use default timeframe from database if not specified - NO FALLBACK
         if timeframe is None:
-            if SCANNER_CONFIG_AVAILABLE:
-                scanner_cfg = get_scanner_config()
-                timeframe = scanner_cfg.default_timeframe or '15m'
+            if self._scanner_config:
+                timeframe = self._scanner_config.default_timeframe
             else:
-                timeframe = getattr(config, 'DEFAULT_TIMEFRAME', '15m')
+                # Use hardcoded default if no config available (should not happen in normal operation)
+                timeframe = '15m'
             
         try:
             # Optimize lookback hours based on usage
@@ -1881,12 +1881,12 @@ class DataFetcher:
         minutes_since_close = (now - last_boundary).total_seconds() / 60
         seconds_until_next = (next_boundary - now).total_seconds()
 
-        # Consider "at boundary" if within configured offset (from database)
-        if SCANNER_CONFIG_AVAILABLE:
-            scanner_cfg = get_scanner_config()
-            offset = scanner_cfg.scan_boundary_offset_seconds or 60
+        # Consider "at boundary" if within configured offset (from database - NO FALLBACK)
+        if self._scanner_config:
+            offset = self._scanner_config.scan_boundary_offset_seconds
         else:
-            offset = getattr(config, 'SCAN_BOUNDARY_OFFSET_SECONDS', 60)
+            # Hardcoded default if no config available (should not happen in normal operation)
+            offset = 60
         is_at_boundary = minutes_since_close * 60 <= offset
 
         return {
@@ -2039,14 +2039,14 @@ class DataFetcher:
         # Calculate lookback time in UTC (database time)
         since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
         
-        # Determine source timeframe based on synthesis mode (from database)
+        # Determine source timeframe based on synthesis mode (from database - NO FALLBACK)
         # USE_1M_BASE_SYNTHESIS: Use 1m candles as base (better gap resilience)
         # Default (False): Use 5m candles as base (current behavior)
-        if SCANNER_CONFIG_AVAILABLE:
-            scanner_cfg = get_scanner_config()
-            use_1m_base = scanner_cfg.use_1m_base_synthesis
+        if self._scanner_config:
+            use_1m_base = self._scanner_config.use_1m_base_synthesis
         else:
-            use_1m_base = getattr(config, 'USE_1M_BASE_SYNTHESIS', False)
+            # Hardcoded default if no config available (should not happen in normal operation)
+            use_1m_base = False
 
         if use_1m_base:
             # 1M BASE SYNTHESIS MODE

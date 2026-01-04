@@ -91,31 +91,12 @@ TRADING_BLACKLIST = {}
 # =============================================================================
 # STRATEGY ENABLED FLAGS
 # =============================================================================
-# Only SMC_SIMPLE is active. Others are disabled/archived.
+# Only SMC_SIMPLE is active. All legacy strategies have been removed.
+# Legacy strategy files are archived in forex_scanner/archive/disabled_strategies/
+# Legacy strategy configs deleted 2026-01-03 (Phase 9A cleanup)
 
-# Active strategy
+# Active strategy - DO NOT REMOVE
 SMC_SIMPLE_STRATEGY = True
-
-# Disabled strategies (archived in forex_scanner/archive/disabled_strategies/)
-EMA_STRATEGY_ENABLED = False
-MACD_STRATEGY_ENABLED = False
-SCALPING_STRATEGY_ENABLED = False
-KAMA_STRATEGY = False
-SMC_STRATEGY = False
-SMC_STRUCTURE_STRATEGY = False
-ICHIMOKU_CLOUD_STRATEGY = False
-MEAN_REVERSION_STRATEGY = False
-RANGING_MARKET_STRATEGY = False
-VOLUME_PROFILE_STRATEGY = False
-EMA_DOUBLE_CONFIRMATION_STRATEGY = False
-SILVER_BULLET_STRATEGY = False
-BOLLINGER_SUPERTREND_STRATEGY = False
-ZERO_LAG_STRATEGY = False
-ZERO_LAG_STRATEGY_ENABLED = False
-USE_ZERO_LAG_STRATEGY = False
-MOMENTUM_STRATEGY = False
-MOMENTUM_STRATEGY_ENABLED = False
-USE_MOMENTUM_STRATEGY = False
 
 
 def get_enabled_strategy_flags():
