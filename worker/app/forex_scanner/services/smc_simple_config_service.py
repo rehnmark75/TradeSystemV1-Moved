@@ -821,6 +821,49 @@ class SMCSimpleConfigService:
             self._cache_timestamp = None
             logger.info("SMC Simple config cache invalidated")
 
+    # =========================================================================
+    # CONFIG ACCESSOR METHODS
+    # These delegate to the cached SMCSimpleConfig object for per-pair lookups.
+    # The strategy uses the service as its config accessor, so these methods
+    # provide a clean interface without exposing the internal config object.
+    # =========================================================================
+
+    def is_asian_session_allowed(self, epic: str) -> bool:
+        """Check if Asian session trading is allowed for a specific pair"""
+        return self.get_config().is_asian_session_allowed(epic)
+
+    def is_macd_filter_enabled(self, epic: str) -> bool:
+        """Check if MACD filter is enabled for a specific pair"""
+        return self.get_config().is_macd_filter_enabled(epic)
+
+    def get_pair_sl_buffer(self, epic: str) -> int:
+        """Get SL buffer for a specific pair"""
+        return self.get_config().get_pair_sl_buffer(epic)
+
+    def get_pair_min_confidence(self, epic: str) -> float:
+        """Get minimum confidence threshold for a specific pair"""
+        return self.get_config().get_pair_min_confidence(epic)
+
+    def get_pair_max_confidence(self, epic: str) -> float:
+        """Get maximum confidence cap for a specific pair"""
+        return self.get_config().get_pair_max_confidence(epic)
+
+    def get_pair_fixed_stop_loss(self, epic: str) -> float:
+        """Get fixed stop loss for a specific pair"""
+        return self.get_config().get_pair_fixed_stop_loss(epic)
+
+    def get_pair_fixed_take_profit(self, epic: str) -> float:
+        """Get fixed take profit for a specific pair"""
+        return self.get_config().get_pair_fixed_take_profit(epic)
+
+    def get_pair_min_volume_ratio(self, epic: str) -> float:
+        """Get minimum volume ratio for a specific pair"""
+        return self.get_config().get_pair_min_volume_ratio(epic)
+
+    def is_session_allowed(self, hour_utc: int) -> bool:
+        """Check if current hour is in allowed trading session"""
+        return self.get_config().is_session_allowed(hour_utc)
+
 
 # Global singleton instance
 _service_instance: Optional[SMCSimpleConfigService] = None
