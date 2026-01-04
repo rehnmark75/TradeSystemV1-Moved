@@ -1042,9 +1042,13 @@ def render_effective_config(config: Dict[str, Any]):
             with col2:
                 st.markdown("**Quick Reference**")
                 st.metric("Version", effective.get('version', 'N/A'))
-                st.metric("Min Confidence", effective.get('min_confidence', 'N/A'))
+                # Check pair override first, then fall back to global setting
+                min_conf = effective.get('min_confidence') if effective.get('min_confidence') is not None else effective.get('min_confidence_threshold', 'N/A')
+                st.metric("Min Confidence", min_conf)
                 st.metric("SL Buffer (pips)", effective.get('sl_buffer_pips', 'N/A'))
-                st.metric("MACD Filter", "On" if effective.get('macd_filter_enabled') else "Off")
+                # Check pair override first, then fall back to global setting
+                macd_enabled = effective.get('macd_filter_enabled') if effective.get('macd_filter_enabled') is not None else effective.get('macd_alignment_filter_enabled', False)
+                st.metric("MACD Filter", "On" if macd_enabled else "Off")
 
                 # Check if has overrides
                 override = get_pair_override(config['id'], selected_pair)
@@ -1080,12 +1084,15 @@ def render_effective_config(config: Dict[str, Any]):
         for pair in compare_pairs:
             eff = get_effective_config_for_pair(pair)
             if eff:
+                # Check pair override first, then fall back to global setting
+                macd_val = eff.get('macd_filter_enabled') if eff.get('macd_filter_enabled') is not None else eff.get('macd_alignment_filter_enabled')
+                min_conf_val = eff.get('min_confidence') if eff.get('min_confidence') is not None else eff.get('min_confidence_threshold')
                 compare_data.append({
                     'Pair': pair.split('.')[2] if '.' in pair else pair,
-                    'Min Confidence': eff.get('min_confidence'),
+                    'Min Confidence': min_conf_val,
                     'SL Buffer': eff.get('sl_buffer_pips'),
                     'Asian Session': eff.get('allow_asian_session', 'Default'),
-                    'MACD Filter': eff.get('macd_filter_enabled'),
+                    'MACD Filter': macd_val,
                     'Has Override': get_pair_override(config['id'], pair) is not None
                 })
 
