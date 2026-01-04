@@ -130,6 +130,7 @@ For detailed information, see these docs (read with Read tool when needed):
 | Market Intelligence | `claude-intelligence.md` |
 | Trailing Stop System | `claude-trailing-system.md` |
 | Development Best Practices | `claude-development.md` |
+| Configuration System | `claude-configuration.md` |
 
 ---
 

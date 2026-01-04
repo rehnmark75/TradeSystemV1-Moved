@@ -7,6 +7,7 @@ This documentation provides comprehensive guidance for Claude Code when working 
 ### 🚀 Quick Start
 - **[Commands & CLI](claude-commands.md)** - Docker services, CLI usage, optimization commands
 - **[Architecture Overview](claude-architecture.md)** - System design, services, and database models
+- **[Configuration System](claude-configuration.md)** - Database-driven config, trailing stops, infrastructure
 
 ### 🛠️ Development
 - **[Strategy Development](claude-strategies.md)** - Trading strategy patterns and configuration guidelines
