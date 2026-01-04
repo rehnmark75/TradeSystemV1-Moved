@@ -34,6 +34,13 @@ ORDER_API_URL = os.getenv('ORDER_API_URL', "http://fastapi-dev:8000/orders/place
 API_SUBSCRIPTION_KEY = os.getenv('API_SUBSCRIPTION_KEY', "436abe054a074894a0517e5172f0e5b6")
 
 # =============================================================================
+# TIMEZONE SETTINGS (Infrastructure - used across all modules)
+# =============================================================================
+
+USER_TIMEZONE = os.getenv('USER_TIMEZONE', 'Europe/Stockholm')
+DATABASE_TIMEZONE = 'UTC'
+
+# =============================================================================
 # STATIC PAIR MAPPINGS (Used by pip calculations and order mapping)
 # =============================================================================
 
