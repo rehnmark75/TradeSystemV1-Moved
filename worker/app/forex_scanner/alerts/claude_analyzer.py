@@ -123,7 +123,8 @@ class ClaudeAnalyzer:
         # Vision API configuration - FROM DATABASE (NO FALLBACK)
         # ========================================================================
         self.use_vision_api = self._scanner_cfg.claude_vision_enabled
-        self.vision_strategies = self._scanner_cfg.claude_vision_strategies or ['EMA_DOUBLE', 'SMC', 'SMC_STRUCTURE']
+        # Note: After January 2026 cleanup, only SMC Simple strategy is active
+        self.vision_strategies = self._scanner_cfg.claude_vision_strategies or ['SMC', 'SMC_SIMPLE']
         self.save_vision_artifacts = self._scanner_cfg.claude_save_vision_artifacts
         self.logger.info(
             f"[CONFIG:DB] Vision settings - enabled={self.use_vision_api}, "
@@ -1477,27 +1478,19 @@ Claude Analysis: Based on the signal characteristics using {analysis_mode} analy
             return 0
     
     def _identify_strategy(self, signal: Dict) -> str:
-        """Identify the strategy type from signal data"""
-        strategy = signal.get('strategy', '').lower()
-        
-        if 'combined' in strategy:
-            return 'COMBINED'
-        elif 'macd' in strategy:
-            return 'MACD'
-        elif 'kama' in strategy:
-            return 'KAMA'
-        elif 'ema' in strategy:
-            return 'EMA'
+        """
+        Identify the strategy type from signal data.
+
+        Note: After January 2026 cleanup, only SMC Simple strategy is active.
+        Returns 'SMC_SIMPLE' as the default strategy.
+        """
+        strategy = signal.get('strategy', '').upper()
+
+        if 'SMC' in strategy:
+            return 'SMC_SIMPLE'
         else:
-            # Try to identify from available indicators
-            if signal.get('macd_line') is not None or signal.get('macd_histogram') is not None:
-                return 'MACD'
-            elif signal.get('kama_value') is not None or any(k.startswith('kama_') for k in signal.keys()):
-                return 'KAMA'
-            elif signal.get('ema_short') is not None or signal.get('ema_9') is not None:
-                return 'EMA'
-            else:
-                return 'UNKNOWN'
+            # Default to SMC_SIMPLE as it's the only active strategy
+            return 'SMC_SIMPLE'
     
     def _prepare_signal_data_from_candle(self, target_candle, target_time, epic: str, pair: str) -> Dict:
         """
