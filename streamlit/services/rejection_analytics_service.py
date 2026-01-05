@@ -265,8 +265,8 @@ class RejectionAnalyticsService:
                 details_parsed = df['rejection_details'].apply(parse_details)
                 df['order_flow_bias'] = details_parsed.apply(lambda x: x.get('order_flow_bias', 'N/A'))
                 df['structure_bias'] = details_parsed.apply(lambda x: x.get('structure_bias', 'N/A'))
-                df['structure_score'] = details_parsed.apply(lambda x: x.get('structure_score'))
-                df['directional_consensus'] = details_parsed.apply(lambda x: x.get('directional_consensus'))
+                df['structure_score'] = pd.to_numeric(details_parsed.apply(lambda x: x.get('structure_score')), errors='coerce')
+                df['directional_consensus'] = pd.to_numeric(details_parsed.apply(lambda x: x.get('directional_consensus')), errors='coerce')
                 df['conflicts'] = details_parsed.apply(lambda x: x.get('conflicts', []))
 
             return df

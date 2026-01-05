@@ -204,6 +204,18 @@ class SMCRejectionHistoryManager:
         # Add to batch buffer
         self._batch_buffer.append(rejection_data)
 
+        # Immediately flush for important rejection types (S/R path blocking, SMC conflict, Claude filter)
+        # These are rare but important for real-time visibility in dashboards
+        immediate_flush_stages = [
+            self.STAGE_SR_PATH_BLOCKED,
+            self.STAGE_SMC_CONFLICT,
+            self.STAGE_CLAUDE_FILTER,
+            self.STAGE_SR_LEVEL,
+            self.STAGE_SR_CLUSTER
+        ]
+        if rejection_data['rejection_stage'] in immediate_flush_stages:
+            return self._flush_batch()
+
         # Flush if batch is full
         if len(self._batch_buffer) >= self.batch_size:
             return self._flush_batch()
@@ -245,12 +257,14 @@ class SMCRejectionHistoryManager:
                     strategy_version, strategy_config_hash, strategy_config,
                     macd_line, macd_signal, macd_histogram, macd_aligned, macd_momentum,
                     efficiency_ratio, market_regime_detected, bb_width_percentile,
-                    volatility_state, adx_value, adx_trend_strength, performance_metrics
+                    volatility_state, adx_value, adx_trend_strength, performance_metrics,
+                    sr_blocking_level, sr_blocking_type, sr_blocking_distance_pips,
+                    sr_path_blocked_pct, target_distance_pips
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT DO NOTHING
             """
@@ -331,7 +345,13 @@ class SMCRejectionHistoryManager:
                     data.get('volatility_state'),
                     self._safe_float(data.get('adx_value')),
                     data.get('adx_trend_strength'),
-                    self._safe_json(data.get('performance_metrics'))
+                    self._safe_json(data.get('performance_metrics')),
+                    # v2.12.0: S/R Path Blocking fields
+                    self._safe_float(data.get('sr_blocking_level')),
+                    data.get('sr_blocking_type'),
+                    self._safe_float(data.get('sr_blocking_distance_pips')),
+                    self._safe_float(data.get('sr_path_blocked_pct')),
+                    self._safe_float(data.get('target_distance_pips'))
                 )
 
                 cursor.execute(insert_sql, values)

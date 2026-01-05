@@ -1391,8 +1391,10 @@ SMC_MIN_STRUCTURE_SCORE = 0.5          # Minimum structure score
             st.markdown(f"- **{ranging_pct:.0f}%** of conflicts occur during RANGING market structure")
 
     if 'directional_consensus' in conflict_df.columns and conflict_df['directional_consensus'].notna().any():
-        avg_consensus = conflict_df['directional_consensus'].mean()
-        st.markdown(f"- Average directional consensus at rejection: **{avg_consensus:.2f}** (threshold: 0.3)")
+        # Convert to numeric (may be stored as string in JSON)
+        avg_consensus = pd.to_numeric(conflict_df['directional_consensus'], errors='coerce').mean()
+        if pd.notna(avg_consensus):
+            st.markdown(f"- Average directional consensus at rejection: **{avg_consensus:.2f}** (threshold: 0.3)")
 
     # Recommendations based on data
     if conflict_stats.get('total', 0) > 20:
