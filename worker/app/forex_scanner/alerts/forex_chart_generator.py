@@ -206,6 +206,15 @@ class ForexChartGenerator:
                 if tf == '5m' and signal:
                     self._add_entry_type_annotation(ax, df, signal, strategy_indicators)
 
+                # [CHART_IMPROVE_V1] Add entry price and current price markers on 5m
+                if tf == '5m' and signal:
+                    self._add_entry_price_marker(ax, df, signal)
+                    self._add_current_price_marker(ax, df)
+
+                # [CHART_IMPROVE_V1] Add swing break level on 15m and 5m (always, not just when smc_data present)
+                if tf in ['15m', '5m'] and signal:
+                    self._add_swing_break_level(ax, df, signal, tf)
+
                 # Add SMC annotations (swing levels, BOS)
                 if smc_data and tf in ['15m', '5m']:
                     self._add_smc_annotations(ax, df, signal, smc_data, tf)
@@ -297,6 +306,17 @@ class ForexChartGenerator:
             if len(df) > max_bars:
                 df = df.tail(max_bars)
 
+            # [CHART_IMPROVE_V1] Preserve timestamp before resetting index
+            # Check for timestamp in index or columns
+            if df.index.dtype == 'datetime64[ns]' or 'datetime64' in str(df.index.dtype):
+                df['_timestamp'] = df.index
+            elif 'timestamp' in df.columns:
+                df['_timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+            elif 'time' in df.columns:
+                df['_timestamp'] = pd.to_datetime(df['time'], errors='coerce')
+            elif 'date' in df.columns:
+                df['_timestamp'] = pd.to_datetime(df['date'], errors='coerce')
+
             # Reset index for plotting
             df = df.reset_index(drop=True)
 
@@ -344,8 +364,70 @@ class ForexChartGenerator:
             # Set x-axis limits
             ax.set_xlim(-1, len(df))
 
+            # [CHART_IMPROVE_V1] Add time labels on x-axis if timestamps available
+            self._add_time_axis_labels(ax, df, timeframe)
+
         except Exception as e:
             logger.error(f"Error plotting candlesticks: {e}")
+
+    def _add_time_axis_labels(self, ax, df: pd.DataFrame, timeframe: str) -> None:
+        """
+        [CHART_IMPROVE_V1] Add time labels on x-axis for context.
+
+        Shows timestamps at regular intervals so Claude can understand
+        the time context of the price action.
+        """
+        try:
+            if '_timestamp' not in df.columns:
+                return
+
+            n_bars = len(df)
+            if n_bars < 5:
+                return
+
+            # Determine how many labels to show based on timeframe
+            if timeframe == '4h':
+                n_labels = 5  # Show ~5 labels for 4H
+                date_format = '%m/%d %H:%M'
+            elif timeframe == '15m':
+                n_labels = 6  # Show ~6 labels for 15M
+                date_format = '%H:%M'
+            else:  # 5m
+                n_labels = 8  # Show ~8 labels for 5M
+                date_format = '%H:%M'
+
+            # Calculate interval between labels
+            interval = max(1, n_bars // n_labels)
+
+            # Get positions and labels
+            positions = []
+            labels = []
+
+            for i in range(0, n_bars, interval):
+                ts = df.iloc[i].get('_timestamp')
+                if pd.notna(ts):
+                    positions.append(i)
+                    if isinstance(ts, pd.Timestamp):
+                        labels.append(ts.strftime(date_format))
+                    else:
+                        labels.append(str(ts)[-8:-3])  # Fallback: last part of string
+
+            # Always include last bar
+            if positions and positions[-1] != n_bars - 1:
+                ts = df.iloc[-1].get('_timestamp')
+                if pd.notna(ts):
+                    positions.append(n_bars - 1)
+                    if isinstance(ts, pd.Timestamp):
+                        labels.append(ts.strftime(date_format))
+                    else:
+                        labels.append(str(ts)[-8:-3])
+
+            if positions:
+                ax.set_xticks(positions)
+                ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=7)
+
+        except Exception as e:
+            logger.debug(f"Could not add time axis labels: {e}")
 
     def _add_signal_levels(self, ax, df: pd.DataFrame, signal: Dict[str, Any]) -> None:
         """Add entry, stop loss, and take profit levels"""
@@ -498,6 +580,191 @@ class ForexChartGenerator:
         except Exception as e:
             logger.warning(f"Error adding entry type annotation: {e}")
 
+    # ========================================================================
+    # [CHART_IMPROVE_V1] New methods for improved Claude vision analysis
+    # ========================================================================
+
+    def _add_entry_price_marker(
+        self,
+        ax,
+        df: pd.DataFrame,
+        signal: Dict[str, Any]
+    ) -> None:
+        """
+        [CHART_IMPROVE_V1] Add entry price horizontal line on chart.
+
+        Shows where the trade entry is planned, helping Claude evaluate
+        if the entry level makes sense relative to price action.
+        """
+        try:
+            # Get entry price from signal (try multiple field names)
+            entry_price = (
+                signal.get('entry_price') or
+                signal.get('price') or
+                signal.get('limit_price') or
+                signal.get('execution_price')
+            )
+
+            if not entry_price:
+                return
+
+            x_max = len(df) - 1
+
+            # Draw entry price line
+            ax.axhline(
+                y=entry_price,
+                color=self.COLORS['entry'],
+                linestyle='--',
+                linewidth=2,
+                alpha=0.9,
+                zorder=10  # Draw on top
+            )
+
+            # Add label on right side
+            ax.annotate(
+                f'ENTRY: {entry_price:.5f}',
+                xy=(x_max, entry_price),
+                xytext=(x_max + 1, entry_price),
+                fontsize=9,
+                fontweight='bold',
+                color=self.COLORS['entry'],
+                va='center',
+                ha='left',
+                bbox=dict(
+                    boxstyle='round,pad=0.3',
+                    facecolor='white',
+                    edgecolor=self.COLORS['entry'],
+                    alpha=0.9
+                )
+            )
+
+            logger.debug(f"Added entry price marker at {entry_price}")
+
+        except Exception as e:
+            logger.warning(f"Error adding entry price marker: {e}")
+
+    def _add_current_price_marker(
+        self,
+        ax,
+        df: pd.DataFrame
+    ) -> None:
+        """
+        [CHART_IMPROVE_V1] Add current price marker (arrow/line at last close).
+
+        Helps Claude see exactly where price is "now" vs the entry level.
+        """
+        try:
+            if df is None or len(df) == 0:
+                return
+
+            current_price = df['Close'].iloc[-1]
+            x_max = len(df) - 1
+
+            # Draw small arrow pointing to current price
+            ax.annotate(
+                '',
+                xy=(x_max, current_price),
+                xytext=(x_max + 2, current_price),
+                arrowprops=dict(
+                    arrowstyle='->',
+                    color='#ffffff',
+                    lw=2
+                )
+            )
+
+            # Add "NOW" label
+            ax.annotate(
+                f'NOW: {current_price:.5f}',
+                xy=(x_max + 2, current_price),
+                fontsize=8,
+                fontweight='bold',
+                color='white',
+                va='center',
+                ha='left',
+                bbox=dict(
+                    boxstyle='round,pad=0.3',
+                    facecolor='#424242',
+                    edgecolor='white',
+                    alpha=0.9
+                )
+            )
+
+        except Exception as e:
+            logger.warning(f"Error adding current price marker: {e}")
+
+    def _add_swing_break_level(
+        self,
+        ax,
+        df: pd.DataFrame,
+        signal: Dict[str, Any],
+        timeframe: str
+    ) -> None:
+        """
+        [CHART_IMPROVE_V1] Add swing break level horizontal line.
+
+        The swing break is the core SMC concept - shows where structure
+        was broken to confirm the trade direction.
+        """
+        try:
+            # Get swing level from signal or strategy_indicators
+            swing_level = signal.get('swing_level')
+
+            # Also try strategy_indicators
+            if not swing_level:
+                strategy_indicators = signal.get('strategy_indicators', {})
+                tier2_swing = strategy_indicators.get('tier2_swing', {})
+                swing_level = tier2_swing.get('swing_level') or tier2_swing.get('swing_break_level')
+
+            if not swing_level:
+                return
+
+            x_max = len(df) - 1
+            direction = signal.get('signal_type', signal.get('signal', '')).upper()
+
+            # Determine color based on direction
+            if direction in ['BULL', 'BUY']:
+                color = self.COLORS['swing_low']  # Blue for bullish swing break
+                label = 'SWING BREAK ▲'
+            else:
+                color = self.COLORS['swing_high']  # Orange for bearish swing break
+                label = 'SWING BREAK ▼'
+
+            # Draw swing break line
+            ax.axhline(
+                y=swing_level,
+                color=color,
+                linestyle=':',
+                linewidth=2,
+                alpha=0.9,
+                zorder=9
+            )
+
+            # Add label
+            ax.annotate(
+                f'{label}: {swing_level:.5f}',
+                xy=(x_max * 0.5, swing_level),
+                fontsize=8,
+                fontweight='bold',
+                color=color,
+                va='bottom' if direction in ['BULL', 'BUY'] else 'top',
+                ha='center',
+                bbox=dict(
+                    boxstyle='round,pad=0.2',
+                    facecolor='white',
+                    edgecolor=color,
+                    alpha=0.8
+                )
+            )
+
+            logger.debug(f"Added swing break level at {swing_level} on {timeframe}")
+
+        except Exception as e:
+            logger.warning(f"Error adding swing break level: {e}")
+
+    # ========================================================================
+    # End of [CHART_IMPROVE_V1] new methods
+    # ========================================================================
+
     def _add_support_resistance_levels(
         self,
         ax,
@@ -633,43 +900,66 @@ class ForexChartGenerator:
                 if fvg_low > price_max or fvg_high < price_min:
                     continue  # FVG outside visible range
 
+                # [CHART_IMPROVE_V1] Improved FVG visualization
                 # Get start index for the rectangle (or use recent portion of chart)
                 start_idx = fvg.get('start_index', max(0, x_max - 30))
 
-                # Determine colors based on FVG type
+                # [CHART_IMPROVE_V1] Limit FVG width to max 20 bars
+                fvg_width = min(20, x_max - start_idx)
+
+                # [CHART_IMPROVE_V1] Enhanced colors - higher opacity for better visibility
                 if 'bull' in str(fvg_type).lower():
-                    fill_color = self.COLORS['fvg_bull']
-                    border_color = self.COLORS['fvg_border_bull']
+                    fill_color = '#2196f350'  # 50% opacity (was 30%)
+                    border_color = '#2196f3'
                     label = f'Bull FVG'
                 else:
-                    fill_color = self.COLORS['fvg_bear']
-                    border_color = self.COLORS['fvg_border_bear']
+                    fill_color = '#ff980050'  # 50% opacity (was 30%)
+                    border_color = '#ff9800'
                     label = f'Bear FVG'
 
-                # Draw FVG as a rectangle spanning from start_index to end of chart
+                # [CHART_IMPROVE_V1] Draw FVG as limited-width rectangle
                 rect = plt.Rectangle(
                     (start_idx, fvg_low),
-                    x_max - start_idx,
+                    fvg_width,  # Limited width
                     fvg_high - fvg_low,
                     facecolor=fill_color,
                     edgecolor=border_color,
-                    linewidth=1.5,
-                    alpha=0.6,
-                    label=label if fvg_count == 0 else None  # Only label first
+                    linewidth=2,  # Thicker border
+                    alpha=0.7,  # Higher overall opacity
+                    label=label if fvg_count == 0 else None
                 )
                 ax.add_patch(rect)
 
-                # Add small label
+                # [CHART_IMPROVE_V1] Add horizontal line to show FVG zone extends
                 mid_price = (fvg_high + fvg_low) / 2
+                if start_idx + fvg_width < x_max:
+                    ax.axhline(
+                        y=mid_price,
+                        xmin=(start_idx + fvg_width) / x_max,
+                        xmax=1.0,
+                        color=border_color,
+                        linestyle=':',
+                        linewidth=1,
+                        alpha=0.4
+                    )
+
+                # [CHART_IMPROVE_V1] Improved label with background
                 ax.annotate(
                     'FVG',
                     xy=(x_max - 2, mid_price),
-                    fontsize=7,
+                    fontsize=8,
                     color=border_color,
                     fontweight='bold',
                     ha='right',
                     va='center',
-                    alpha=0.8
+                    alpha=0.95,
+                    bbox=dict(
+                        boxstyle='round,pad=0.15',
+                        facecolor='white',
+                        edgecolor=border_color,
+                        linewidth=1,
+                        alpha=0.85
+                    )
                 )
 
                 fvg_count += 1
@@ -760,9 +1050,13 @@ class ForexChartGenerator:
                 if ob_low > price_max or ob_high < price_min:
                     continue  # OB outside visible range
 
-                # Get start and end index for the rectangle
+                # [CHART_IMPROVE_V1] Improved OB visualization
+                # Get start index for the rectangle
                 start_idx = ob.get('start_index', max(0, x_max - 40))
-                end_idx = ob.get('end_index', start_idx + 5)
+
+                # [CHART_IMPROVE_V1] Limit OB width to max 15 bars to reduce clutter
+                # OBs are zones, not infinite extensions
+                ob_width = min(15, x_max - start_idx)
 
                 # Determine colors based on OB type
                 if 'bull' in str(ob_type).lower():
@@ -774,37 +1068,49 @@ class ForexChartGenerator:
                     border_color = self.COLORS['order_block_border_bear']
                     label = 'Bear OB'
 
-                # Draw Order Block as a rectangle
-                # OBs extend from their formation point to current price
+                # [CHART_IMPROVE_V1] Draw Order Block as a limited-width rectangle
+                # Also draw a horizontal line extending to show the zone level
                 rect = plt.Rectangle(
                     (start_idx, ob_low),
-                    x_max - start_idx,
+                    ob_width,  # Limited width instead of x_max - start_idx
                     ob_high - ob_low,
                     facecolor=fill_color,
                     edgecolor=border_color,
                     linewidth=2,
-                    linestyle='--',
-                    alpha=0.5,
+                    linestyle='-',  # Solid border for better visibility
+                    alpha=0.4,  # Slightly reduced opacity
                     label=label if ob_count == 0 else None
                 )
                 ax.add_patch(rect)
 
-                # Add label on the left side of the OB
+                # [CHART_IMPROVE_V1] Add horizontal dashed line showing OB zone extends
                 mid_price = (ob_high + ob_low) / 2
+                ax.axhline(
+                    y=mid_price,
+                    xmin=(start_idx + ob_width) / x_max,
+                    xmax=1.0,
+                    color=border_color,
+                    linestyle=':',
+                    linewidth=1,
+                    alpha=0.5
+                )
+
+                # Add label on the left side of the OB
                 ax.annotate(
                     'OB',
                     xy=(start_idx + 1, mid_price),
-                    fontsize=8,
+                    fontsize=9,
                     color=border_color,
                     fontweight='bold',
                     ha='left',
                     va='center',
-                    alpha=0.9,
+                    alpha=0.95,
                     bbox=dict(
                         boxstyle='round,pad=0.2',
                         facecolor='white',
                         edgecolor=border_color,
-                        alpha=0.7
+                        linewidth=1.5,
+                        alpha=0.9
                     )
                 )
 
