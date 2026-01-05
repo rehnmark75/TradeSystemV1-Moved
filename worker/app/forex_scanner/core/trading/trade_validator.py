@@ -82,6 +82,16 @@ except ImportError:
     # This is a critical error - database config is REQUIRED
     logging.error("❌ CRITICAL: Scanner config service not available - database is REQUIRED")
 
+# Import MinIO client for chart storage (optional - graceful degradation)
+try:
+    from forex_scanner.services.minio_client import upload_vision_chart, get_minio_client
+    MINIO_AVAILABLE = True
+except ImportError:
+    MINIO_AVAILABLE = False
+    upload_vision_chart = None
+    get_minio_client = None
+    logging.info("ℹ️ MinIO client not available - charts will be saved to disk only")
+
 
 class TradeValidator:
     """
@@ -838,17 +848,18 @@ class TradeValidator:
         alert_id: int = None
     ) -> Optional[str]:
         """
-        Save vision analysis artifacts (chart, prompt, result) to disk.
+        Save vision analysis artifacts (chart, prompt, result) to disk and MinIO.
+        Also updates alert_history with vision_chart_url if alert_id is provided.
 
         Args:
             signal: Signal dictionary
             result: Claude analysis result
             chart_base64: Base64-encoded chart image (or None)
             prompt: Prompt text sent to Claude
-            alert_id: Optional alert ID for file naming
+            alert_id: Optional alert ID for file naming and DB update
 
         Returns:
-            Chart file path if saved, None otherwise
+            Chart URL (MinIO or file path) if saved, None otherwise
         """
         try:
             import base64
@@ -868,16 +879,32 @@ class TradeValidator:
                 prefix = f"{epic}_{timestamp}"
 
             files_saved = []
+            minio_chart_url = None
 
-            # 1. Save chart image as PNG
+            # 1. Save chart image - try MinIO first, then fall back to disk
             if chart_base64:
-                chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
                 try:
                     chart_bytes = base64.b64decode(chart_base64)
-                    with open(chart_path, 'wb') as f:
-                        f.write(chart_bytes)
-                    files_saved.append(f"{prefix}_chart.png")
-                    self.logger.info(f"📊 Chart saved: {chart_path}")
+
+                    # Try MinIO upload first
+                    if MINIO_AVAILABLE and upload_vision_chart and alert_id:
+                        minio_chart_url = upload_vision_chart(
+                            chart_bytes,
+                            alert_id,
+                            signal.get('epic', 'unknown'),
+                            timestamp
+                        )
+                        if minio_chart_url:
+                            self.logger.info(f"📊 Chart uploaded to MinIO: {minio_chart_url}")
+                            files_saved.append(f"{prefix}_chart.png (MinIO)")
+
+                    # Fall back to disk if MinIO fails or unavailable
+                    if not minio_chart_url:
+                        chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
+                        with open(chart_path, 'wb') as f:
+                            f.write(chart_bytes)
+                        files_saved.append(f"{prefix}_chart.png")
+                        self.logger.info(f"📊 Chart saved to disk: {chart_path}")
                 except Exception as e:
                     self.logger.warning(f"⚠️ Failed to save chart: {e}")
 
@@ -948,10 +975,27 @@ class TradeValidator:
             if files_saved:
                 self.logger.info(f"✅ Vision artifacts saved: {', '.join(files_saved)}")
 
-            # Return the chart path if it was saved
+            # Update alert_history with vision_chart_url if chart was saved and alert_id exists
+            if chart_base64 and alert_id and self.alert_history_manager:
+                try:
+                    # Use MinIO URL if available, otherwise use disk path
+                    if minio_chart_url:
+                        chart_url = minio_chart_url
+                    else:
+                        chart_url = f"file://{vision_dir}/{prefix}_chart.png"
+
+                    self.alert_history_manager.update_alert_vision_chart_url(alert_id, chart_url)
+                    self.logger.info(f"✅ Updated alert #{alert_id} with vision_chart_url: {chart_url}")
+                    return chart_url
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Failed to update vision_chart_url in database: {e}")
+                    return minio_chart_url or f"{prefix}_chart.png"
+
+            # Return the chart URL/path if it was saved
             if chart_base64:
-                chart_path = os.path.join(vision_dir, f"{prefix}_chart.png")
-                return chart_path
+                if minio_chart_url:
+                    return minio_chart_url
+                return os.path.join(vision_dir, f"{prefix}_chart.png")
 
         except Exception as e:
             self.logger.error(f"❌ Failed to save vision artifacts: {e}")

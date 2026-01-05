@@ -1623,6 +1623,8 @@ class AlertHistoryManager:
                 'distance_to_support_pips', 'distance_to_resistance_pips', 'risk_reward_ratio',
                 'signal_strength', 'technical_score',
                 'swing_proximity_distance', 'directional_consensus',  # Validation/market bias fields
+                # OB Proximity and Smart Money fields
+                'ob_proximity_score', 'nearest_ob_distance_pips',
                 # Performance metrics (v2.11.0)
                 'efficiency_ratio', 'regime_confidence', 'bb_width_percentile', 'atr_percentile',
                 'entry_quality_score', 'distance_from_optimal_fib', 'entry_candle_momentum',
@@ -1655,7 +1657,11 @@ class AlertHistoryManager:
                         alert_data[field] = None
             
             # Convert boolean fields safely with numpy handling
-            boolean_fields = ['volume_confirmation', 'is_market_hours']
+            boolean_fields = [
+                'volume_confirmation', 'is_market_hours',
+                'swing_proximity_valid', 'market_bias_conflict',
+                'liquidity_sweep_detected', 'all_timeframes_aligned'
+            ]
             for field in boolean_fields:
                 if alert_data[field] is not None:
                     try:
@@ -1674,9 +1680,22 @@ class AlertHistoryManager:
             for key, value in alert_data.items():
                 if isinstance(value, str) and value.strip() in ['', 'None', 'null', 'undefined']:
                     alert_data[key] = None
-            
+
+            # CATCH-ALL: Convert any remaining numpy types that weren't in the specific lists
+            for key, value in alert_data.items():
+                if value is not None and hasattr(value, 'dtype'):
+                    try:
+                        if hasattr(value, 'item'):
+                            alert_data[key] = value.item()  # Convert numpy scalar to Python type
+                        else:
+                            alert_data[key] = value.tolist()  # Convert numpy array to list
+                        self.logger.debug(f"🔄 Converted numpy type for field '{key}': {type(value)} -> {type(alert_data[key])}")
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ Failed to convert numpy type for '{key}': {e}")
+                        alert_data[key] = None
+
             self.logger.debug(f"📊 Extracted {len([v for v in alert_data.values() if v is not None])} non-null fields from signal")
-            
+
             return alert_data
             
         except Exception as e:
