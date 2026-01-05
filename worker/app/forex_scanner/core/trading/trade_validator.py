@@ -1214,12 +1214,11 @@ class TradeValidator:
             if self.enable_claude_filtering:
                 valid, msg, claude_result = self._validate_with_claude(signal)
                 if not valid:
-                    # Log the Claude rejection for analysis
+                    # Note: _validate_with_claude already logs the rejection details
                     epic = signal.get('epic', 'Unknown')
                     signal_type = signal.get('signal_type', 'Unknown')
                     if self.backtest_mode:
                         self.logger.warning(f"🚫 BACKTEST STEP 12 FAILED - Claude filtering: {msg}")
-                    self.logger.info(f"🚫 Claude REJECTED: {epic} {signal_type} - {msg}")
 
                     # Save rejected signals for analysis (database + optional file)
                     if claude_result:
@@ -1230,13 +1229,9 @@ class TradeValidator:
 
                     return False, f"Claude filtering: {msg}"
                 else:
-                    # Log Claude approval
-                    epic = signal.get('epic', 'Unknown')
-                    signal_type = signal.get('signal_type', 'Unknown')
-                    score = claude_result.get('score', 'N/A') if claude_result else 'N/A'
+                    # Note: _validate_with_claude already logs approval
                     if self.backtest_mode:
                         self.logger.info(f"✅ BACKTEST STEP 12 PASSED - Claude filtering approved")
-                    self.logger.info(f"✅ Claude APPROVED: {epic} {signal_type} - Score: {score}/10")
 
                     # Add Claude result to signal for later use
                     if claude_result:
