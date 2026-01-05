@@ -527,6 +527,18 @@ class IntelligentForexScanner:
                                 processed['rejection_reason'] = 'dedup'
                                 processed['rejection_details'] = 'Duplicate signal filtered by SignalProcessor'
                                 rejected_signals.append(processed)
+                            elif processing_result.get('smc_conflict_rejected'):
+                                # Track SMC conflict rejection
+                                processed['rejection_reason'] = 'smc_conflict'
+                                processed['rejection_details'] = processing_result.get('smc_conflict_reason', 'SMC data conflicts with signal')
+                                rejected_signals.append(processed)
+                                self.stats['smc_conflict_rejected'] = self.stats.get('smc_conflict_rejected', 0) + 1
+                                self.logger.info(f"⛔ SMC Conflict filtered: {processed.get('epic')} - {processed['rejection_details']}")
+                            elif processed.get('rejected'):
+                                # Generic rejection flag (catch-all for other rejection types)
+                                processed['rejection_reason'] = processed.get('rejection_reason', 'rejected')
+                                processed['rejection_details'] = processed.get('rejection_details', 'Signal rejected by processor')
+                                rejected_signals.append(processed)
                             else:
                                 processed_signals.append(processed)
 

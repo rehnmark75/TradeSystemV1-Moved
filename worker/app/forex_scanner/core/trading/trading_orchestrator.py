@@ -103,6 +103,16 @@ except ImportError:
         print(f"⚠️ RejectionOutcomeAnalyzer not available: {e}")
         RejectionOutcomeAnalyzer = None
 
+    # Import SMCRejectionHistoryManager for tracking validation rejections
+    try:
+        from forex_scanner.alerts.smc_rejection_history import SMCRejectionHistoryManager
+        SMC_REJECTION_AVAILABLE = True
+        print("✅ Successfully imported SMCRejectionHistoryManager")
+    except ImportError as e:
+        print(f"⚠️ SMCRejectionHistoryManager not available: {e}")
+        SMCRejectionHistoryManager = None
+        SMC_REJECTION_AVAILABLE = False
+
 # Import config services for database-driven settings
 try:
     from forex_scanner.services.scanner_config_service import get_scanner_config
@@ -356,6 +366,17 @@ class TradingOrchestrator:
         except Exception as e:
             self.logger.warning(f"⚠️ RejectionOutcomeAnalyzer initialization failed: {e}")
 
+        # Initialize SMCRejectionHistoryManager for tracking validation rejections (S/R, etc.)
+        self.smc_rejection_manager = None
+        try:
+            if SMC_REJECTION_AVAILABLE and SMCRejectionHistoryManager and self.db_manager:
+                self.smc_rejection_manager = SMCRejectionHistoryManager(self.db_manager)
+                self.logger.info("✅ SMCRejectionHistoryManager initialized for validation rejection tracking")
+            else:
+                self.logger.warning("⚠️ SMCRejectionHistoryManager not available - validation rejections won't be saved")
+        except Exception as e:
+            self.logger.warning(f"⚠️ SMCRejectionHistoryManager initialization failed: {e}")
+
         self.logger.info("🎯 TradingOrchestrator initialized with ENHANCED modular Claude integration")
         self.logger.info(f"   Intelligence mode: {self.intelligence_mode}")
         self.logger.info(f"   Intelligence preset: {self.intelligence_preset}")
@@ -606,6 +627,131 @@ class TradingOrchestrator:
         
         health_percentage = (working_components / total_components) * 100
         self.logger.info(f"📊 System Health: {health_percentage:.1f}% ({working_components}/{total_components} components)")
+
+    def _save_validation_rejection(self, signal: Dict, reason: str) -> None:
+        """
+        Save validation rejection to smc_simple_rejections table for analytics.
+
+        This captures rejections from TradeValidator including:
+        - S/R Level proximity rejections
+        - S/R Path Blocking rejections
+        - EMA200 filter rejections
+        - Claude filtering rejections (if not already saved by validator)
+        - Other validation failures
+
+        Args:
+            signal: The rejected signal dictionary
+            reason: The rejection reason string
+        """
+        if not self.smc_rejection_manager:
+            return
+
+        try:
+            from datetime import timezone
+
+            epic = signal.get('epic', '')
+            pair = signal.get('pair', epic.split('.')[2] if len(epic.split('.')) > 2 else epic)
+
+            # Determine rejection stage based on reason
+            rejection_stage = self._determine_rejection_stage(reason)
+
+            # Get timestamp
+            timestamp = signal.get('timestamp')
+            if timestamp is None:
+                timestamp = datetime.now(timezone.utc)
+            elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+            # Extract S/R path blocking details if available
+            sr_path_blocking = signal.get('sr_path_blocking', {})
+
+            # Build rejection data
+            rejection_data = {
+                'scan_timestamp': timestamp,
+                'epic': epic,
+                'pair': pair,
+                'rejection_stage': rejection_stage,
+                'rejection_reason': reason,
+                'attempted_direction': signal.get('signal_type', ''),
+                'strategy_version': signal.get('strategy_version', 'unknown'),
+
+                # Price context
+                'current_price': signal.get('entry_price'),
+                'potential_entry': signal.get('entry_price'),
+                'potential_stop_loss': signal.get('stop_loss'),
+                'potential_take_profit': signal.get('take_profit'),
+                'potential_risk_pips': signal.get('risk_pips'),
+                'potential_reward_pips': signal.get('reward_pips'),
+                'potential_rr_ratio': signal.get('rr_ratio'),
+
+                # Confidence
+                'confidence_score': signal.get('confidence_score'),
+
+                # Market context from signal
+                'market_hour': signal.get('market_hour'),
+                'market_session': signal.get('market_session'),
+
+                # S/R Path Blocking specific fields
+                'sr_blocking_level': sr_path_blocking.get('blocking_sr_level'),
+                'sr_blocking_type': sr_path_blocking.get('blocking_sr_type'),
+                'sr_blocking_distance_pips': sr_path_blocking.get('distance_pips'),
+                'sr_path_blocked_pct': sr_path_blocking.get('path_blocked_pct'),
+                'target_distance_pips': sr_path_blocking.get('target_distance_pips'),
+            }
+
+            # Save to database
+            self.smc_rejection_manager.save_rejection(rejection_data)
+            self.logger.debug(f"💾 Validation rejection saved: {epic} - {rejection_stage}")
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to save validation rejection: {e}")
+
+    def _determine_rejection_stage(self, reason: str) -> str:
+        """
+        Determine the rejection stage based on the rejection reason string.
+
+        Args:
+            reason: The rejection reason from TradeValidator
+
+        Returns:
+            Rejection stage constant (e.g., 'SR_PATH_BLOCKED', 'S/R_LEVEL', etc.)
+        """
+        reason_lower = reason.lower()
+
+        # S/R Path Blocking (most specific - check first)
+        if 'blocks' in reason_lower and ('path' in reason_lower or '% of' in reason_lower):
+            return 'SR_PATH_BLOCKED'
+
+        # S/R Level proximity
+        if 's/r level' in reason_lower or 'too close to' in reason_lower:
+            return 'SR_LEVEL'
+
+        # Support/Resistance cluster
+        if 'cluster' in reason_lower and ('support' in reason_lower or 'resistance' in reason_lower):
+            return 'SR_CLUSTER'
+
+        # EMA200 filter
+        if 'ema200' in reason_lower or 'ema 200' in reason_lower:
+            return 'EMA200_FILTER'
+
+        # Claude filtering (shouldn't normally get here - validator handles it)
+        if 'claude' in reason_lower:
+            return 'CLAUDE_FILTER'
+
+        # News filtering
+        if 'news' in reason_lower:
+            return 'NEWS_FILTER'
+
+        # Market hours
+        if 'market hours' in reason_lower or 'outside trading' in reason_lower:
+            return 'MARKET_HOURS'
+
+        # Confidence
+        if 'confidence' in reason_lower:
+            return 'CONFIDENCE'
+
+        # Default: Generic validation failure
+        return 'VALIDATION_FAILED'
 
     def _apply_intelligence_filtering(self, signals: List[Dict]) -> List[Dict]:
         """
@@ -1184,6 +1330,9 @@ class TradingOrchestrator:
                         signal_type = invalid_signal.get('signal_type', 'Unknown')
                         reason = invalid_signal.get('validation_error', 'Unknown reason')
                         rejected_epics.append(f"{epic} {signal_type} ({reason})")
+
+                        # Save validation rejection to database for analytics
+                        self._save_validation_rejection(invalid_signal, reason)
 
                     epics_summary = ', '.join(rejected_epics)
                     self.logger.warning(f"❌ Filtered out {len(invalid_signals)} invalid signals: {epics_summary}")
