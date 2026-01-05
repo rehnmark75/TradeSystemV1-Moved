@@ -724,10 +724,10 @@ class ForexChartGenerator:
             # Determine color based on direction
             if direction in ['BULL', 'BUY']:
                 color = self.COLORS['swing_low']  # Blue for bullish swing break
-                label = 'SWING BREAK ▲'
+                label = 'SB▲'  # Short label
             else:
                 color = self.COLORS['swing_high']  # Orange for bearish swing break
-                label = 'SWING BREAK ▼'
+                label = 'SB▼'  # Short label
 
             # Draw swing break line
             ax.axhline(
@@ -739,20 +739,20 @@ class ForexChartGenerator:
                 zorder=9
             )
 
-            # Add label
+            # [CHART_IMPROVE_V1] Simplified label - just "SB" on left side
             ax.annotate(
-                f'{label}: {swing_level:.5f}',
-                xy=(x_max * 0.5, swing_level),
-                fontsize=8,
+                label,
+                xy=(2, swing_level),
+                fontsize=9,
                 fontweight='bold',
-                color=color,
-                va='bottom' if direction in ['BULL', 'BUY'] else 'top',
-                ha='center',
+                color='white',
+                va='center',
+                ha='left',
                 bbox=dict(
-                    boxstyle='round,pad=0.2',
-                    facecolor='white',
-                    edgecolor=color,
-                    alpha=0.8
+                    boxstyle='round,pad=0.3',
+                    facecolor=color,
+                    edgecolor='white',
+                    alpha=0.9
                 )
             )
 
