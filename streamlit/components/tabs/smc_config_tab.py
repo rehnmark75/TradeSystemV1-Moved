@@ -1374,11 +1374,18 @@ def render_parameter_optimizer(config: Dict[str, Any]):
             return
 
         recommendations = data.get('recommendations', [])
+        direction_recommendations = data.get('direction_recommendations', [])
+        pairs_needing_direction = data.get('pairs_needing_direction_config', [])
 
         # Filter by confidence
         filtered_recs = [r for r in recommendations if r.get('confidence', 0) >= min_confidence]
+        filtered_dir_recs = [r for r in direction_recommendations if r.get('confidence', 0) >= min_confidence]
 
-        if not filtered_recs:
+        # Check if we have any recommendations
+        has_global_recs = len(filtered_recs) > 0
+        has_dir_recs = len(filtered_dir_recs) > 0
+
+        if not has_global_recs and not has_dir_recs:
             st.success("No recommendations at this time. Your filters appear to be well-balanced!")
 
             # Show stage metrics anyway
@@ -1393,27 +1400,76 @@ def render_parameter_optimizer(config: Dict[str, Any]):
                     st.dataframe(stage_df[available], use_container_width=True)
             return
 
-        # Separate relax vs tighten
+        # Separate relax vs tighten for global/pair recommendations
         relax_recs = [r for r in filtered_recs if r.get('action') == 'relax']
         tighten_recs = [r for r in filtered_recs if r.get('action') == 'tighten']
 
+        # Separate direction recommendations
+        dir_relax_recs = [r for r in filtered_dir_recs if r.get('action') == 'relax']
+        dir_strict_recs = [r for r in filtered_dir_recs if r.get('action') == 'keep_strict']
+
         # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            st.metric("Total Recommendations", len(filtered_recs))
+            st.metric("Global/Pair Recs", len(filtered_recs))
         with col2:
-            st.metric("Relax Filters", len(relax_recs))
+            st.metric("Direction Recs", len(filtered_dir_recs))
         with col3:
-            st.metric("Tighten Filters", len(tighten_recs))
+            st.metric("Relax Filters", len(relax_recs) + len(dir_relax_recs))
         with col4:
-            total_impact = sum(r.get('impact_pips', 0) for r in filtered_recs)
+            st.metric("Keep Strict", len(tighten_recs) + len(dir_strict_recs))
+        with col5:
+            total_impact = sum(r.get('impact_pips', 0) for r in filtered_recs + filtered_dir_recs)
             st.metric("Potential Impact", f"{total_impact:.0f} pips")
 
         st.divider()
 
-        # Relax recommendations
+        # Direction-aware summary if pairs need direction config
+        if pairs_needing_direction:
+            st.markdown("### 🎯 Pairs Needing Direction-Aware Config")
+            st.caption("These pairs show >20% win rate difference between BULL and BEAR trades")
+
+            for pair_info in pairs_needing_direction:
+                pair = pair_info.get('pair', '')
+                bull_wr = pair_info.get('bull_win_rate', 0)
+                bear_wr = pair_info.get('bear_win_rate', 0)
+                diff = pair_info.get('difference', 0)
+                action = pair_info.get('recommended_action', '')
+
+                if bull_wr > bear_wr:
+                    st.warning(f"**{pair}**: BULL {bull_wr:.0f}% vs BEAR {bear_wr:.0f}% ({diff:.0f}% diff) - {action}")
+                else:
+                    st.warning(f"**{pair}**: BEAR {bear_wr:.0f}% vs BULL {bull_wr:.0f}% ({diff:.0f}% diff) - {action}")
+
+            st.divider()
+
+        # Direction-aware recommendations section
+        if dir_relax_recs:
+            st.markdown("### 🔵 Direction-Aware: Relax Filters")
+            st.caption("Per-pair, per-direction filter relaxations based on win rate analysis")
+
+            total_dir_missed = sum(r.get('impact_pips', 0) for r in dir_relax_recs)
+            st.caption(f"Potential recovery: {total_dir_missed:.0f} pips")
+
+            for i, rec in enumerate(dir_relax_recs):
+                title = _format_direction_recommendation_title(rec)
+                with st.expander(f"**{title}**", expanded=i == 0):
+                    _render_direction_recommendation_detail(rec)
+
+        if dir_strict_recs:
+            st.markdown("### 🔒 Direction-Aware: Keep Strict")
+            st.caption("These direction+pair combinations are correctly filtering losers")
+
+            for i, rec in enumerate(dir_strict_recs[:5]):  # Show max 5
+                title = _format_direction_recommendation_title(rec)
+                with st.expander(f"**{title}**", expanded=False):
+                    _render_direction_recommendation_detail(rec)
+
+        st.divider()
+
+        # Global/Pair recommendations
         if relax_recs:
-            st.markdown("### 🟢 Relax Filters (Capture More Winners)")
+            st.markdown("### 🟢 Global/Pair: Relax Filters (Capture More Winners)")
             total_missed = sum(r.get('impact_pips', 0) for r in relax_recs)
             st.caption(f"Potential recovery: {total_missed:.0f} pips")
 
@@ -1421,9 +1477,8 @@ def render_parameter_optimizer(config: Dict[str, Any]):
                 with st.expander(f"**{_format_recommendation_title(rec)}**", expanded=i == 0):
                     _render_recommendation_detail(rec)
 
-        # Tighten recommendations
         if tighten_recs:
-            st.markdown("### 🔴 Tighten Filters (Avoid More Losers)")
+            st.markdown("### 🔴 Global/Pair: Tighten Filters (Avoid More Losers)")
             total_avoided = sum(r.get('impact_pips', 0) for r in tighten_recs)
             st.caption(f"Potential savings: {total_avoided:.0f} pips")
 
@@ -1443,8 +1498,11 @@ def render_parameter_optimizer(config: Dict[str, Any]):
             key="optimizer_user"
         )
 
+        # Combine all recommendations for selection
+        all_recs = filtered_recs + [r for r in filtered_dir_recs if r.get('action') == 'relax']
+
         # Selection for which to apply
-        apply_options = ["All Recommendations", "Relax Only", "Tighten Only", "Select Individual"]
+        apply_options = ["All Recommendations", "Global/Pair Only", "Direction-Aware Only", "Relax Only", "Select Individual"]
         apply_mode = st.radio(
             "What to apply",
             options=apply_options,
@@ -1454,15 +1512,20 @@ def render_parameter_optimizer(config: Dict[str, Any]):
 
         recs_to_apply = []
         if apply_mode == "All Recommendations":
+            recs_to_apply = all_recs
+        elif apply_mode == "Global/Pair Only":
             recs_to_apply = filtered_recs
+        elif apply_mode == "Direction-Aware Only":
+            recs_to_apply = [r for r in filtered_dir_recs if r.get('action') == 'relax']
         elif apply_mode == "Relax Only":
-            recs_to_apply = relax_recs
-        elif apply_mode == "Tighten Only":
-            recs_to_apply = tighten_recs
+            recs_to_apply = relax_recs + dir_relax_recs
         elif apply_mode == "Select Individual":
             st.markdown("**Select recommendations to apply:**")
-            for i, rec in enumerate(filtered_recs):
-                title = _format_recommendation_title(rec)
+            for i, rec in enumerate(all_recs):
+                if rec.get('scope') == 'direction':
+                    title = _format_direction_recommendation_title(rec)
+                else:
+                    title = _format_recommendation_title(rec)
                 if st.checkbox(title, key=f"select_rec_{i}"):
                     recs_to_apply.append(rec)
 
@@ -1484,6 +1547,8 @@ def render_parameter_optimizer(config: Dict[str, Any]):
                             if detail.get('success'):
                                 if detail['type'] == 'global':
                                     st.write(f"✅ `{detail['param']}`: {detail['old']} → {detail['new']}")
+                                elif detail['type'] == 'direction':
+                                    st.write(f"✅ `{detail['epic']}` {detail['direction']}: {', '.join(detail.get('params', []))}")
                                 else:
                                     st.write(f"✅ `{detail['epic']}.{detail['param']}`: {detail['old']} → {detail['new']}")
 
@@ -1518,6 +1583,16 @@ def render_parameter_optimizer(config: Dict[str, Any]):
             if pair_metrics:
                 st.dataframe(pd.DataFrame(pair_metrics), use_container_width=True)
 
+            st.markdown("**Pair+Direction Metrics**")
+            pair_dir_metrics = data.get('pair_direction_metrics', [])
+            if pair_dir_metrics:
+                st.dataframe(pd.DataFrame(pair_dir_metrics), use_container_width=True)
+
+            st.markdown("**Direction Summary**")
+            dir_summary = data.get('direction_summary', {})
+            if dir_summary:
+                st.json(dir_summary)
+
             st.markdown("**Parameter Suggestions from API**")
             suggestions = data.get('suggestions', {})
             if suggestions:
@@ -1549,3 +1624,46 @@ def _render_recommendation_detail(rec: Dict[str, Any]):
         st.markdown(f"**Impact:** {rec.get('impact_pips', 0):.0f} pips")
 
     st.markdown(f"**Reason:** {rec.get('reason', 'N/A')}")
+
+
+def _format_direction_recommendation_title(rec: Dict[str, Any]) -> str:
+    """Format a direction-aware recommendation as a title string."""
+    pair_name = rec.get('pair_name', 'UNKNOWN')
+    direction = rec.get('direction', '')
+    action = rec.get('action', '')
+    win_rate = rec.get('win_rate', 0)
+    impact = rec.get('impact_pips', 0)
+
+    icon = "+" if direction == 'BULL' else "-" if direction == 'BEAR' else "o"
+
+    if action == 'relax':
+        return f"{icon} {pair_name} {direction}: WR {win_rate:.0f}% - Relax filters ({impact:.0f} pips)"
+    else:
+        return f"{icon} {pair_name} {direction}: WR {win_rate:.0f}% - Keep strict ({impact:.0f} pips avoided)"
+
+
+def _render_direction_recommendation_detail(rec: Dict[str, Any]):
+    """Render detailed view of a direction-aware recommendation."""
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(f"**Pair:** {rec.get('pair_name', 'N/A')}")
+        st.markdown(f"**Direction:** {rec.get('direction', 'N/A')}")
+        st.markdown(f"**Action:** {'Relax Filters' if rec.get('action') == 'relax' else 'Keep Strict'}")
+        st.markdown(f"**Win Rate:** {rec.get('win_rate', 0):.0f}%")
+
+    with col2:
+        st.markdown(f"**Total Analyzed:** {rec.get('total_analyzed', 0)}")
+        st.markdown(f"**Confidence:** {rec.get('confidence', 0):.0%}")
+        st.markdown(f"**Impact:** {rec.get('impact_pips', 0):.0f} pips")
+
+    st.markdown(f"**Reason:** {rec.get('reason', 'N/A')}")
+
+    # Show suggested parameter changes if available
+    suggested_params = rec.get('suggested_params')
+    if suggested_params:
+        st.markdown("**Suggested Parameter Changes:**")
+        for param, values in suggested_params.items():
+            current = values.get('current', 'default')
+            suggested = values.get('suggested', 'N/A')
+            st.write(f"  - `{param}`: {current} → {suggested}")

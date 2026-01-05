@@ -376,8 +376,11 @@ def fetch_optimizer_recommendations(days: int = 30) -> Dict[str, Any]:
 
     result = {
         'recommendations': [],
+        'direction_recommendations': [],
         'stage_metrics': [],
         'pair_metrics': [],
+        'pair_direction_metrics': [],
+        'pairs_needing_direction_config': [],
         'error': None
     }
 
@@ -402,6 +405,28 @@ def fetch_optimizer_recommendations(days: int = 30) -> Dict[str, Any]:
         if pair_resp.ok:
             result['pair_metrics'] = pair_resp.json()
 
+        # Fetch pair+direction metrics (NEW)
+        pair_dir_resp = requests.get(
+            f"{fastapi_url}/api/rejection-outcomes/by-pair-direction",
+            params={'days': days},
+            headers=headers,
+            timeout=30
+        )
+        if pair_dir_resp.ok:
+            result['pair_direction_metrics'] = pair_dir_resp.json()
+
+        # Fetch direction-aware suggestions (NEW)
+        dir_suggest_resp = requests.get(
+            f"{fastapi_url}/api/rejection-outcomes/direction-aware-suggestions",
+            params={'days': days},
+            headers=headers,
+            timeout=30
+        )
+        if dir_suggest_resp.ok:
+            dir_suggestions = dir_suggest_resp.json()
+            result['pairs_needing_direction_config'] = dir_suggestions.get('pairs_needing_direction_config', [])
+            result['direction_summary'] = dir_suggestions.get('overall_direction_summary', {})
+
         # Fetch parameter suggestions
         suggest_resp = requests.get(
             f"{fastapi_url}/api/rejection-outcomes/parameter-suggestions",
@@ -412,10 +437,16 @@ def fetch_optimizer_recommendations(days: int = 30) -> Dict[str, Any]:
         if suggest_resp.ok:
             result['suggestions'] = suggest_resp.json()
 
-        # Generate recommendations from the data
+        # Generate recommendations from the data (global + pair-level)
         result['recommendations'] = _generate_recommendations(
             result['stage_metrics'],
             result['pair_metrics'],
+            days
+        )
+
+        # Generate direction-aware recommendations (NEW)
+        result['direction_recommendations'] = _generate_direction_recommendations(
+            result['pair_direction_metrics'],
             days
         )
 
@@ -661,6 +692,125 @@ def _generate_recommendations(
     return recommendations
 
 
+def _generate_direction_recommendations(
+    pair_direction_metrics: List[Dict],
+    days: int
+) -> List[Dict[str, Any]]:
+    """Generate direction-aware recommendations from pair+direction metrics."""
+    from decimal import Decimal
+
+    recommendations = []
+    config = get_global_config()
+    if not config:
+        return recommendations
+
+    config_id = config.get('id')
+    pair_overrides = get_pair_overrides(config_id) if config_id else []
+    pair_override_map = {o['epic']: o for o in pair_overrides}
+
+    # Direction-specific parameter suggestions
+    DIRECTION_PARAM_SUGGESTIONS = {
+        'relax': {
+            'fib_pullback_min': 0.10,  # Lower from 0.236
+            'fib_pullback_max': 0.85,  # Higher from 0.70
+            'momentum_min_depth': -0.80,  # More negative from -0.45
+            'min_volume_ratio': 0.20,  # Lower from 0.50
+        },
+        'tighten': {
+            'fib_pullback_min': 0.30,  # Higher from 0.236
+            'fib_pullback_max': 0.60,  # Lower from 0.70
+            'momentum_min_depth': -0.30,  # Less negative from -0.45
+            'min_volume_ratio': 0.60,  # Higher from 0.50
+        }
+    }
+
+    # Group metrics by pair to compare directions
+    pair_data = {}
+    for item in pair_direction_metrics:
+        epic = item.get('epic', '')
+        if not epic:
+            continue
+        if epic not in pair_data:
+            pair_data[epic] = {'pair': item.get('pair', ''), 'BULL': None, 'BEAR': None}
+        direction = item.get('direction')
+        if direction in ['BULL', 'BEAR']:
+            pair_data[epic][direction] = item
+
+    for epic, data in pair_data.items():
+        pair_name = data['pair']
+        override = pair_override_map.get(epic, {})
+
+        for direction in ['BULL', 'BEAR']:
+            dir_data = data.get(direction)
+            if not dir_data:
+                continue
+
+            win_rate = dir_data.get('would_be_win_rate', 50)
+            total = dir_data.get('total_analyzed', 0)
+            missed_pips = dir_data.get('missed_profit_pips', 0)
+            avoided_pips = dir_data.get('avoided_loss_pips', 0)
+
+            if total < 5:
+                continue
+
+            dir_suffix = direction.lower()
+
+            if win_rate > 60:
+                # Too aggressive - relax this direction
+                suggested_params = {}
+                for param, suggested_val in DIRECTION_PARAM_SUGGESTIONS['relax'].items():
+                    param_key = f'{param}_{dir_suffix}'
+                    current = override.get(param_key)
+                    if current is None:
+                        # Use global value as current
+                        global_val = config.get(param)
+                        if global_val is not None:
+                            if isinstance(global_val, Decimal):
+                                global_val = float(global_val)
+                            current = global_val
+                        else:
+                            current = 'default'
+                    elif isinstance(current, Decimal):
+                        current = float(current)
+
+                    suggested_params[param_key] = {
+                        'current': current,
+                        'suggested': suggested_val
+                    }
+
+                recommendations.append({
+                    'scope': 'direction',
+                    'target': (epic, direction),
+                    'pair_name': pair_name,
+                    'direction': direction,
+                    'action': 'relax',
+                    'win_rate': win_rate,
+                    'total_analyzed': total,
+                    'impact_pips': missed_pips,
+                    'reason': f"{pair_name} {direction} filters reject {win_rate:.0f}% would-be winners ({total} samples, {missed_pips:.0f} missed pips)",
+                    'confidence': min(total / 30, 1.0),
+                    'suggested_params': suggested_params,
+                })
+
+            elif win_rate < 40:
+                # Working well - could tighten (but usually we just note this)
+                recommendations.append({
+                    'scope': 'direction',
+                    'target': (epic, direction),
+                    'pair_name': pair_name,
+                    'direction': direction,
+                    'action': 'keep_strict',
+                    'win_rate': win_rate,
+                    'total_analyzed': total,
+                    'impact_pips': avoided_pips,
+                    'reason': f"{pair_name} {direction} filters correctly reject {100-win_rate:.0f}% losers ({total} samples, {avoided_pips:.0f} avoided pips)",
+                    'confidence': min(total / 30, 1.0),
+                    'suggested_params': None,
+                })
+
+    return recommendations
+
+
 def apply_optimizer_recommendations(
     recommendations: List[Dict[str, Any]],
     updated_by: str = 'parameter_optimizer'
@@ -750,6 +900,50 @@ def apply_optimizer_recommendations(
                         'type': 'pair',
                         'epic': epic,
                         'param': param,
+                        'success': False,
+                        'error': 'Save failed'
+                    })
+
+            elif rec['scope'] == 'direction':
+                # Direction-aware recommendations
+                epic, direction = rec['target']
+                suggested_params = rec.get('suggested_params', {})
+                reason = f"Direction-optimized: {rec['reason'][:100]}"
+
+                if not suggested_params or rec.get('action') != 'relax':
+                    # Skip non-relax or no suggested params
+                    continue
+
+                # Build override dict with direction-specific params
+                override_updates = {
+                    'direction_overrides_enabled': True,
+                }
+                for param_key, values in suggested_params.items():
+                    override_updates[param_key] = values['suggested']
+
+                success = save_pair_override(
+                    config_id,
+                    epic,
+                    override_updates,
+                    updated_by,
+                    reason
+                )
+
+                if success:
+                    result['applied_count'] += 1
+                    result['details'].append({
+                        'type': 'direction',
+                        'epic': epic,
+                        'direction': direction,
+                        'params': list(suggested_params.keys()),
+                        'success': True
+                    })
+                else:
+                    result['failed_count'] += 1
+                    result['details'].append({
+                        'type': 'direction',
+                        'epic': epic,
+                        'direction': direction,
                         'success': False,
                         'error': 'Save failed'
                     })

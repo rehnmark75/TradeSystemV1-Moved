@@ -249,12 +249,77 @@ async def get_recent_outcomes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/by-pair-direction")
+async def get_outcome_by_pair_and_direction(
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get outcome breakdown by currency pair AND direction (BULL/BEAR).
+
+    Critical for direction-aware parameter tuning - shows performance
+    difference between BULL and BEAR trades for each pair.
+    """
+    try:
+        service = RejectionOutcomeService(db)
+        return service.get_outcome_by_pair_and_direction(days)
+    except Exception as e:
+        logger.error(f"Error getting outcome by pair and direction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/pair-direction-stage")
+async def get_pair_direction_stage_breakdown(
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+    pair: Optional[str] = Query(None, description="Filter by currency pair (e.g., EURUSD)"),
+    direction: Optional[str] = Query(None, description="Filter by direction (BULL or BEAR)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed breakdown by pair, direction, and rejection stage.
+
+    Allows analyzing which specific stages cause issues for
+    BULL vs BEAR trades on each pair.
+    """
+    try:
+        service = RejectionOutcomeService(db)
+        return service.get_pair_direction_stage_breakdown(days, pair, direction)
+    except Exception as e:
+        logger.error(f"Error getting pair direction stage breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/direction-aware-suggestions")
+async def get_direction_aware_suggestions(
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get direction-aware parameter optimization suggestions.
+
+    Analyzes BULL vs BEAR performance separately for each pair
+    and recommends which pairs need direction-specific filter settings.
+
+    Returns:
+    - pairs_needing_direction_config: Pairs where BULL/BEAR have 20%+ win rate difference
+    - direction_recommendations: Specific direction+pair recommendations
+    - overall_direction_summary: Aggregate BULL vs BEAR statistics
+    """
+    try:
+        service = RejectionOutcomeService(db)
+        return service.get_direction_aware_suggestions(days)
+    except Exception as e:
+        logger.error(f"Error getting direction-aware suggestions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint for rejection outcome analysis service"""
     return {
         "status": "healthy",
         "service": "rejection-outcome-analysis",
-        "version": "1.0",
-        "description": "Analyzes SMC Simple rejected signals to determine if they would have been profitable"
+        "version": "1.1",
+        "description": "Analyzes SMC Simple rejected signals to determine if they would have been profitable",
+        "features": ["direction-aware-analysis", "pair-specific-recommendations"]
     }

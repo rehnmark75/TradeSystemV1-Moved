@@ -663,6 +663,317 @@ class RejectionOutcomeService:
 
         return suggestions
 
+    def get_outcome_by_pair_and_direction(self, days: int = 30) -> List[Dict]:
+        """
+        Get outcome breakdown by currency pair AND direction (BULL/BEAR).
+
+        This is critical for direction-aware parameter tuning - allows different
+        filter thresholds for BULL vs BEAR trades per pair.
+
+        Args:
+            days: Number of days to include
+
+        Returns:
+            List of dictionaries with pair+direction level metrics
+        """
+        query = text("""
+        SELECT
+            epic,
+            pair,
+            attempted_direction,
+            COUNT(*) as total_analyzed,
+            COUNT(CASE WHEN outcome = 'HIT_TP' THEN 1 END) as would_be_winners,
+            COUNT(CASE WHEN outcome = 'HIT_SL' THEN 1 END) as would_be_losers,
+            COUNT(CASE WHEN outcome = 'STILL_OPEN' THEN 1 END) as still_open,
+            ROUND(
+                COUNT(CASE WHEN outcome = 'HIT_TP' THEN 1 END)::numeric /
+                NULLIF(COUNT(CASE WHEN outcome IN ('HIT_TP', 'HIT_SL') THEN 1 END), 0) * 100,
+                1
+            ) as would_be_win_rate,
+            ROUND(SUM(CASE WHEN outcome = 'HIT_TP' THEN potential_profit_pips ELSE 0 END)::numeric, 1) as missed_profit_pips,
+            ROUND(SUM(CASE WHEN outcome = 'HIT_SL' THEN ABS(potential_profit_pips) ELSE 0 END)::numeric, 1) as avoided_loss_pips,
+            ROUND(SUM(potential_profit_pips)::numeric, 1) as net_pips,
+            ROUND(AVG(max_favorable_excursion_pips)::numeric, 2) as avg_mfe_pips,
+            ROUND(AVG(max_adverse_excursion_pips)::numeric, 2) as avg_mae_pips
+        FROM smc_rejection_outcomes
+        WHERE analysis_timestamp >= NOW() - INTERVAL :days_interval
+          AND attempted_direction IS NOT NULL
+        GROUP BY epic, pair, attempted_direction
+        ORDER BY pair, attempted_direction
+        """)
+
+        try:
+            result = self.db.execute(query, {'days_interval': f'{days} days'})
+            rows = result.fetchall()
+
+            pair_direction_data = []
+            for row in rows:
+                win_rate = float(row.would_be_win_rate) if row.would_be_win_rate else 0.0
+                missed_profit = float(row.missed_profit_pips) if row.missed_profit_pips else 0.0
+                avoided_loss = float(row.avoided_loss_pips) if row.avoided_loss_pips else 0.0
+                net_pips = float(row.net_pips) if row.net_pips else 0.0
+
+                # Generate direction-aware recommendation
+                if row.total_analyzed < 5:
+                    recommendation = "Insufficient data for recommendation"
+                    status = "NEUTRAL"
+                elif win_rate > 60:
+                    recommendation = f"Filters too aggressive for {row.pair} {row.attempted_direction} - missing {missed_profit:.0f} pips. Relax {row.attempted_direction.lower()} direction filters."
+                    status = "TOO_AGGRESSIVE"
+                elif win_rate < 40:
+                    recommendation = f"Filters working well for {row.pair} {row.attempted_direction} - avoided {avoided_loss:.0f} pips loss. Keep strict filters."
+                    status = "WORKING_WELL"
+                else:
+                    recommendation = f"Neutral performance for {row.pair} {row.attempted_direction}. Net impact: {net_pips:.0f} pips."
+                    status = "NEUTRAL"
+
+                pair_direction_data.append({
+                    'epic': row.epic,
+                    'pair': row.pair,
+                    'direction': row.attempted_direction,
+                    'total_analyzed': row.total_analyzed,
+                    'would_be_winners': row.would_be_winners,
+                    'would_be_losers': row.would_be_losers,
+                    'still_open': row.still_open,
+                    'would_be_win_rate': win_rate,
+                    'missed_profit_pips': missed_profit,
+                    'avoided_loss_pips': avoided_loss,
+                    'net_pips': net_pips,
+                    'avg_mfe_pips': float(row.avg_mfe_pips) if row.avg_mfe_pips else 0.0,
+                    'avg_mae_pips': float(row.avg_mae_pips) if row.avg_mae_pips else 0.0,
+                    'status': status,
+                    'recommendation': recommendation
+                })
+
+            return pair_direction_data
+
+        except Exception as e:
+            logger.error(f"Error getting outcome by pair and direction: {e}")
+            return []
+
+    def get_pair_direction_stage_breakdown(self, days: int = 30, pair: str = None, direction: str = None) -> List[Dict]:
+        """
+        Get detailed breakdown by pair, direction, and rejection stage.
+
+        This allows analyzing which specific stages cause issues for
+        BULL vs BEAR trades on each pair.
+
+        Args:
+            days: Number of days to include
+            pair: Optional pair filter (e.g., 'EURUSD')
+            direction: Optional direction filter ('BULL' or 'BEAR')
+
+        Returns:
+            List of dictionaries with pair+direction+stage level metrics
+        """
+        filters = []
+        params = {'days_interval': f'{days} days'}
+
+        if pair:
+            filters.append("pair = :pair")
+            params['pair'] = pair
+        if direction:
+            filters.append("attempted_direction = :direction")
+            params['direction'] = direction
+
+        where_clause = f"AND {' AND '.join(filters)}" if filters else ""
+
+        query = text(f"""
+        SELECT
+            epic,
+            pair,
+            attempted_direction,
+            rejection_stage,
+            rejection_reason,
+            COUNT(*) as total_analyzed,
+            COUNT(CASE WHEN outcome = 'HIT_TP' THEN 1 END) as would_be_winners,
+            COUNT(CASE WHEN outcome = 'HIT_SL' THEN 1 END) as would_be_losers,
+            ROUND(
+                COUNT(CASE WHEN outcome = 'HIT_TP' THEN 1 END)::numeric /
+                NULLIF(COUNT(CASE WHEN outcome IN ('HIT_TP', 'HIT_SL') THEN 1 END), 0) * 100,
+                1
+            ) as would_be_win_rate,
+            ROUND(SUM(CASE WHEN outcome = 'HIT_TP' THEN potential_profit_pips ELSE 0 END)::numeric, 1) as missed_profit_pips,
+            ROUND(SUM(CASE WHEN outcome = 'HIT_SL' THEN ABS(potential_profit_pips) ELSE 0 END)::numeric, 1) as avoided_loss_pips,
+            ROUND(SUM(potential_profit_pips)::numeric, 1) as net_pips
+        FROM smc_rejection_outcomes
+        WHERE analysis_timestamp >= NOW() - INTERVAL :days_interval
+          AND attempted_direction IS NOT NULL
+        {where_clause}
+        GROUP BY epic, pair, attempted_direction, rejection_stage, rejection_reason
+        ORDER BY pair, attempted_direction, total_analyzed DESC
+        """)
+
+        try:
+            result = self.db.execute(query, params)
+            rows = result.fetchall()
+
+            return [
+                {
+                    'epic': row.epic,
+                    'pair': row.pair,
+                    'direction': row.attempted_direction,
+                    'rejection_stage': row.rejection_stage,
+                    'rejection_reason': row.rejection_reason,
+                    'total_analyzed': row.total_analyzed,
+                    'would_be_winners': row.would_be_winners,
+                    'would_be_losers': row.would_be_losers,
+                    'would_be_win_rate': float(row.would_be_win_rate) if row.would_be_win_rate else 0.0,
+                    'missed_profit_pips': float(row.missed_profit_pips) if row.missed_profit_pips else 0.0,
+                    'avoided_loss_pips': float(row.avoided_loss_pips) if row.avoided_loss_pips else 0.0,
+                    'net_pips': float(row.net_pips) if row.net_pips else 0.0
+                }
+                for row in rows
+            ]
+
+        except Exception as e:
+            logger.error(f"Error getting pair direction stage breakdown: {e}")
+            return []
+
+    def get_direction_aware_suggestions(self, days: int = 30) -> Dict[str, Any]:
+        """
+        Generate direction-aware parameter suggestions.
+
+        Analyzes BULL vs BEAR performance separately for each pair
+        to recommend direction-specific filter adjustments.
+
+        Args:
+            days: Number of days to include
+
+        Returns:
+            Dictionary with direction-aware suggestions
+        """
+        suggestions = {
+            'direction_recommendations': [],
+            'pairs_needing_direction_config': [],
+            'overall_direction_summary': {}
+        }
+
+        # Get pair+direction data
+        pair_direction_data = self.get_outcome_by_pair_and_direction(days)
+
+        if not pair_direction_data:
+            return suggestions
+
+        # Group by pair to compare BULL vs BEAR
+        pair_data = {}
+        for item in pair_direction_data:
+            epic = item['epic']
+            if epic not in pair_data:
+                pair_data[epic] = {'pair': item['pair'], 'BULL': None, 'BEAR': None}
+            pair_data[epic][item['direction']] = item
+
+        # Analyze each pair's directional performance
+        for epic, data in pair_data.items():
+            pair_name = data['pair']
+            bull = data.get('BULL')
+            bear = data.get('BEAR')
+
+            # Check if there's significant difference between directions
+            if bull and bear:
+                bull_wr = bull.get('would_be_win_rate', 50)
+                bear_wr = bear.get('would_be_win_rate', 50)
+                bull_total = bull.get('total_analyzed', 0)
+                bear_total = bear.get('total_analyzed', 0)
+
+                # Only analyze if we have enough data for both
+                if bull_total >= 5 and bear_total >= 5:
+                    wr_diff = abs(bull_wr - bear_wr)
+
+                    if wr_diff >= 20:  # Significant difference (20+ percentage points)
+                        # This pair needs direction-aware config
+                        suggestions['pairs_needing_direction_config'].append({
+                            'epic': epic,
+                            'pair': pair_name,
+                            'bull_win_rate': bull_wr,
+                            'bear_win_rate': bear_wr,
+                            'bull_total': bull_total,
+                            'bear_total': bear_total,
+                            'bull_missed_pips': bull.get('missed_profit_pips', 0),
+                            'bear_missed_pips': bear.get('missed_profit_pips', 0),
+                            'difference': wr_diff,
+                            'recommended_action': self._get_direction_recommendation(bull_wr, bear_wr, pair_name)
+                        })
+
+            # Generate individual direction recommendations
+            for direction_data in [bull, bear]:
+                if direction_data and direction_data.get('total_analyzed', 0) >= 5:
+                    win_rate = direction_data.get('would_be_win_rate', 50)
+                    direction = direction_data.get('direction')
+
+                    if win_rate > 60:
+                        suggestions['direction_recommendations'].append({
+                            'epic': epic,
+                            'pair': pair_name,
+                            'direction': direction,
+                            'action': 'relax',
+                            'win_rate': win_rate,
+                            'missed_pips': direction_data.get('missed_profit_pips', 0),
+                            'total_analyzed': direction_data.get('total_analyzed', 0),
+                            'recommendation': f"Relax filters for {pair_name} {direction} trades (WR: {win_rate:.0f}%)",
+                            'suggested_params': self._suggest_direction_params(direction, 'relax')
+                        })
+                    elif win_rate < 40:
+                        suggestions['direction_recommendations'].append({
+                            'epic': epic,
+                            'pair': pair_name,
+                            'direction': direction,
+                            'action': 'keep_strict',
+                            'win_rate': win_rate,
+                            'avoided_pips': direction_data.get('avoided_loss_pips', 0),
+                            'total_analyzed': direction_data.get('total_analyzed', 0),
+                            'recommendation': f"Keep strict filters for {pair_name} {direction} trades (WR: {win_rate:.0f}%)",
+                            'suggested_params': None
+                        })
+
+        # Overall direction summary
+        all_bull = [d for d in pair_direction_data if d['direction'] == 'BULL']
+        all_bear = [d for d in pair_direction_data if d['direction'] == 'BEAR']
+
+        if all_bull:
+            total_bull = sum(d['total_analyzed'] for d in all_bull)
+            avg_bull_wr = sum(d['would_be_win_rate'] * d['total_analyzed'] for d in all_bull) / total_bull if total_bull > 0 else 0
+            suggestions['overall_direction_summary']['BULL'] = {
+                'total_analyzed': total_bull,
+                'avg_win_rate': round(avg_bull_wr, 1),
+                'total_missed_pips': sum(d['missed_profit_pips'] for d in all_bull),
+                'total_avoided_pips': sum(d['avoided_loss_pips'] for d in all_bull)
+            }
+
+        if all_bear:
+            total_bear = sum(d['total_analyzed'] for d in all_bear)
+            avg_bear_wr = sum(d['would_be_win_rate'] * d['total_analyzed'] for d in all_bear) / total_bear if total_bear > 0 else 0
+            suggestions['overall_direction_summary']['BEAR'] = {
+                'total_analyzed': total_bear,
+                'avg_win_rate': round(avg_bear_wr, 1),
+                'total_missed_pips': sum(d['missed_profit_pips'] for d in all_bear),
+                'total_avoided_pips': sum(d['avoided_loss_pips'] for d in all_bear)
+            }
+
+        return suggestions
+
+    def _get_direction_recommendation(self, bull_wr: float, bear_wr: float, pair: str) -> str:
+        """Generate recommendation based on directional win rate difference."""
+        if bull_wr > bear_wr + 20:
+            return f"Enable direction overrides for {pair}: Relax BULL filters, keep BEAR strict"
+        elif bear_wr > bull_wr + 20:
+            return f"Enable direction overrides for {pair}: Relax BEAR filters, keep BULL strict"
+        else:
+            return f"Direction performance similar for {pair}"
+
+    def _suggest_direction_params(self, direction: str, action: str) -> Dict[str, Any]:
+        """Suggest specific parameter values for direction-aware config."""
+        dir_suffix = direction.lower()
+
+        if action == 'relax':
+            return {
+                f'fib_pullback_min_{dir_suffix}': 0.10,  # Lower from 0.236
+                f'fib_pullback_max_{dir_suffix}': 0.85,  # Higher from 0.70
+                f'momentum_min_depth_{dir_suffix}': -0.80,  # More negative from -0.45
+                f'min_volume_ratio_{dir_suffix}': 0.20,  # Lower from 0.50
+            }
+        return None
+
     def get_recent_outcomes(self, limit: int = 100, filters: Dict = None) -> List[Dict]:
         """
         Get recent individual outcome records with optional filters.
