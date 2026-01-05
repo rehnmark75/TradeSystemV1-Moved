@@ -186,8 +186,8 @@ class ForexChartGenerator:
                     ax.plot(range(len(df)), df['EMA50'].values, color=self.COLORS['ema_50'],
                            linewidth=1.5, label='EMA 50', alpha=0.9)
 
-                # Add EMA 9/21 on 15m for swing break context and micro-structure
-                if tf == '15m' and len(df) >= 21:
+                # Add EMA 9/21 on 15m and 5m for swing break context and micro-structure
+                if tf in ['15m', '5m'] and len(df) >= 21:
                     self._add_ema_stack(ax, df, strategy_indicators)
 
                 # Add Support/Resistance levels on 15m (swing break timeframe)
@@ -541,36 +541,36 @@ class ForexChartGenerator:
             if not entry_type or entry_type == 'UNKNOWN':
                 return
 
-            # Position annotation in top-right corner
-            x_pos = len(df) - 1
+            # Position annotation in top-right area (inset from edge to avoid clipping)
+            x_pos = len(df) - 5  # Move inward from edge
             y_range = df['High'].max() - df['Low'].min()
-            y_pos = df['High'].max() - (y_range * 0.05)
+            y_pos = df['High'].max() - (y_range * 0.02)
 
-            # Build annotation text
+            # Build annotation text - compact format
             depth_pct = abs(pullback_depth * 100)
             if entry_type == 'PULLBACK':
-                zone_status = "✓ Optimal" if in_optimal_zone else "Outside Zone"
-                annotation_text = f"⬇ {entry_type}\nDepth: {depth_pct:.1f}%\n{zone_status}"
+                zone_icon = "✓" if in_optimal_zone else "✗"
+                annotation_text = f"⬇ PULLBACK {depth_pct:.0f}%\nZone: {zone_icon}"
                 bg_color = '#1565c0'  # Blue for pullback
             else:  # MOMENTUM
-                annotation_text = f"⚡ {entry_type}\nExtension: {depth_pct:.1f}%"
+                annotation_text = f"⚡ MOMENTUM {depth_pct:.0f}%"
                 bg_color = '#ff6f00'  # Orange for momentum
 
-            # Add volume status
-            vol_icon = "📊 Vol ✓" if volume_confirmed else "📊 Vol ✗"
+            # Add volume status (compact)
+            vol_icon = "Vol✓" if volume_confirmed else "Vol✗"
             annotation_text += f"\n{vol_icon}"
 
             # Draw annotation box
             ax.annotate(
                 annotation_text,
                 xy=(x_pos, y_pos),
-                fontsize=9,
+                fontsize=8,
                 fontweight='bold',
                 color='white',
                 ha='right',
                 va='top',
                 bbox=dict(
-                    boxstyle='round,pad=0.4',
+                    boxstyle='round,pad=0.3',
                     facecolor=bg_color,
                     edgecolor='white',
                     alpha=0.9
