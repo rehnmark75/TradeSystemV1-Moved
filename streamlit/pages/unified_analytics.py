@@ -34,6 +34,7 @@ from components.tabs import (
     render_smc_config_tab,
     render_scanner_config_tab,
     render_intelligence_config_tab,
+    render_performance_snapshot_tab,
 )
 
 # Configure page
@@ -138,6 +139,7 @@ def main():
             "Strategy",
             "Trade Analysis",
             "Market Intelligence",
+            "Performance Snapshots",
             "Breakeven Optimizer"
         ])
         with analysis_tabs[0]:
@@ -147,6 +149,8 @@ def main():
         with analysis_tabs[2]:
             render_market_intelligence_tab()
         with analysis_tabs[3]:
+            render_performance_snapshot_tab()
+        with analysis_tabs[4]:
             render_breakeven_optimizer_tab()
 
     with tab_performance:

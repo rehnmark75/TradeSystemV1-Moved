@@ -20,6 +20,7 @@ from .trade_analysis_tab import render_trade_analysis_tab
 from .smc_config_tab import render_smc_config_tab
 from .scanner_config_tab import render_scanner_config_tab
 from .intelligence_config_tab import render_intelligence_config_tab
+from .performance_snapshot_tab import render_performance_snapshot_tab
 
 __all__ = [
     'render_smc_rejections_tab',
@@ -36,4 +37,5 @@ __all__ = [
     'render_smc_config_tab',
     'render_scanner_config_tab',
     'render_intelligence_config_tab',
+    'render_performance_snapshot_tab',
 ]
