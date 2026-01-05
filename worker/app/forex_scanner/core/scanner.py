@@ -74,6 +74,18 @@ except ImportError:
         MarketIntelligenceEngine = None
         MarketIntelligenceHistoryManager = None
 
+# ADD: Import Scan Performance Manager for per-epic indicator snapshots
+try:
+    from core.intelligence.scan_performance_manager import ScanPerformanceManager
+    SCAN_PERFORMANCE_AVAILABLE = True
+except ImportError:
+    try:
+        from forex_scanner.core.intelligence.scan_performance_manager import ScanPerformanceManager
+        SCAN_PERFORMANCE_AVAILABLE = True
+    except ImportError:
+        SCAN_PERFORMANCE_AVAILABLE = False
+        ScanPerformanceManager = None
+
 # Import config services for database-driven settings
 try:
     from forex_scanner.services.scanner_config_service import get_scanner_config
@@ -265,6 +277,18 @@ class IntelligentForexScanner:
                 self.logger.warning(f"⚠️ Could not initialize Market Intelligence: {e}")
                 self.enable_market_intelligence = False
 
+        # ADD: Initialize Scan Performance Manager for per-epic indicator snapshots
+        self.scan_performance_manager = None
+        self.enable_scan_performance = SCAN_PERFORMANCE_AVAILABLE
+
+        if self.enable_scan_performance and db_manager and SCAN_PERFORMANCE_AVAILABLE:
+            try:
+                self.scan_performance_manager = ScanPerformanceManager(db_manager)
+                self.logger.info("📊 Scan Performance Manager initialized")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Could not initialize Scan Performance Manager: {e}")
+                self.enable_scan_performance = False
+
         # Scanner state
         self.running = False
         self.last_signals = {}
@@ -283,7 +307,9 @@ class IntelligentForexScanner:
             'smart_money_validated': 0,  # ADD: Track validated signals
             'market_intelligence_generated': 0,  # ADD: Track market intelligence generation
             'market_intelligence_stored': 0,     # ADD: Track successful storage
-            'market_intelligence_errors': 0     # ADD: Track storage errors
+            'market_intelligence_errors': 0,     # ADD: Track storage errors
+            'scan_snapshots_saved': 0,           # ADD: Track per-epic scan snapshots
+            'scan_snapshots_errors': 0           # ADD: Track snapshot errors
         }
 
         self.logger.info(f"🔍 IntelligentForexScanner initialized")
@@ -293,6 +319,7 @@ class IntelligentForexScanner:
         self.logger.info(f"   Smart money: {'✅' if self.enable_smart_money else '❌'}")
         self.logger.info(f"   SignalProcessor: {'✅' if self.use_signal_processor else '❌'}")
         self.logger.info(f"   Market Intelligence: {'✅' if self.enable_market_intelligence else '❌'}")
+        self.logger.info(f"   Scan Performance: {'✅' if self.enable_scan_performance else '❌'}")
 
     def _initialize_signal_detector(self, db_manager, user_timezone):
         """Initialize signal detector with fallback"""
@@ -396,6 +423,7 @@ class IntelligentForexScanner:
         Perform one complete scan of all epics
         UPDATED: Now processes signals through SignalProcessor for Smart Money analysis
         UPDATED: Skips scanning when forex market is closed (weekends)
+        UPDATED: Captures per-epic performance snapshots for rejection analysis
         """
         # Check if forex market is open before scanning
         if MARKET_HOURS_AVAILABLE and is_market_hours is not None:
@@ -410,9 +438,24 @@ class IntelligentForexScanner:
         scan_start = datetime.now()
         self.stats['scans_completed'] += 1
 
+        # Generate scan cycle ID for linking data across tables
+        scan_cycle_id = f"scan_{scan_start.strftime('%Y%m%d_%H%M%S')}_{self.stats['scans_completed']:05d}"
+
+        # Track rejected signals for performance analysis
+        rejected_signals = []
+
+        # Track indicator data per epic for snapshots
+        epic_scan_data = {}
+
         try:
             self.logger.info(f"🔍 Starting scan #{self.stats['scans_completed']}")
-            
+
+            # Step 0: Fetch indicator data for ALL epics (independent of signal detection)
+            # This ensures we capture market state for every epic on every scan
+            if self.enable_scan_performance:
+                for epic in self.epic_list:
+                    epic_scan_data[epic] = self._fetch_epic_indicators(epic)
+
             # Step 1: Detect raw signals
             raw_signals = []
             for epic in self.epic_list:
@@ -420,32 +463,48 @@ class IntelligentForexScanner:
                 if signals:
                     if isinstance(signals, list):
                         raw_signals.extend(signals)
+                        # Merge signal data into epic_scan_data (signal has more detailed data)
+                        if signals:
+                            signal_data = self._extract_indicator_data(signals[0])
+                            epic_scan_data[epic] = {**epic_scan_data.get(epic, {}), **signal_data}
                     else:
                         raw_signals.append(signals)
-            
+                        signal_data = self._extract_indicator_data(signals)
+                        epic_scan_data[epic] = {**epic_scan_data.get(epic, {}), **signal_data}
+
             if not raw_signals:
                 self.logger.info("✓ No signals detected")
                 # Still capture market intelligence even with no signals
-                self._capture_scan_market_intelligence(scan_start, [])
+                intelligence_report = self._capture_scan_market_intelligence(scan_start, [])
+
+                # Capture performance snapshots for all epics (no signals case)
+                self._capture_scan_performance_snapshots(
+                    scan_cycle_id=scan_cycle_id,
+                    scan_timestamp=scan_start,
+                    epic_scan_data=epic_scan_data,
+                    signals=[],
+                    rejected_signals=[],
+                    intelligence_report=intelligence_report
+                )
                 return []
-            
+
             self.logger.info(f"📊 {len(raw_signals)} raw signals detected")
             self.stats['signals_detected'] += len(raw_signals)
-            
+
             # Step 2: Process through SignalProcessor if available (NEW!)
             processed_signals = []
-            
+
             if self.use_signal_processor and self.signal_processor:
                 self.logger.debug("📊 Processing signals through SignalProcessor...")
-                
+
                 for signal in raw_signals:
                     try:
                         # Process signal through SignalProcessor (includes Smart Money analysis)
                         processed = self.signal_processor.process_signal(signal)
-                        
+
                         if processed:
                             self.stats['signal_processor_used'] += 1
-                            
+
                             # Check if smart money was applied
                             processing_result = processed.get('processing_result', {})
                             if processing_result.get('smart_money_analyzed'):
@@ -453,25 +512,35 @@ class IntelligentForexScanner:
                                 self.logger.info(f"🧠 Smart Money applied to {processed.get('epic')}")
                                 self.logger.debug(f"   Score: {processed.get('smart_money_score', 0):.3f}")
                                 self.logger.debug(f"   Type: {processed.get('smart_money_type', 'Unknown')}")
-                                
+
                                 if processed.get('smart_money_validated'):
                                     self.stats['smart_money_validated'] += 1
-                            
+
                             # Add to processed signals if not filtered out
-                            if not processing_result.get('strategy_filtered') and not processing_result.get('duplicate_filtered'):
+                            if processing_result.get('strategy_filtered'):
+                                # Track rejection
+                                processed['rejection_reason'] = 'strategy_filter'
+                                processed['rejection_details'] = processing_result.get('filter_reason', 'Strategy filter')
+                                rejected_signals.append(processed)
+                            elif processing_result.get('duplicate_filtered'):
+                                # Track rejection
+                                processed['rejection_reason'] = 'dedup'
+                                processed['rejection_details'] = 'Duplicate signal filtered by SignalProcessor'
+                                rejected_signals.append(processed)
+                            else:
                                 processed_signals.append(processed)
-                        
+
                     except Exception as e:
                         self.logger.error(f"Error processing signal through SignalProcessor: {e}")
                         # Add original signal if processing fails
                         processed_signals.append(signal)
-                
+
                 self.logger.info(f"📊 {len(processed_signals)} signals after SignalProcessor")
             else:
                 # Fallback to original processing if SignalProcessor not available
                 processed_signals = raw_signals
                 self.logger.debug("⚠️ SignalProcessor not available, using original processing")
-            
+
             # Step 3: Filter by confidence (for signals not processed by SignalProcessor)
             filtered_signals = []
             for signal in processed_signals:
@@ -482,7 +551,11 @@ class IntelligentForexScanner:
                     filtered_signals.append(signal)
                 else:
                     self.stats['signals_filtered_confidence'] += 1
-            
+                    # Track rejection
+                    signal['rejection_reason'] = 'confidence'
+                    signal['rejection_details'] = f"Confidence {signal.get('confidence_score', 0):.2%} < {self.min_confidence:.2%}"
+                    rejected_signals.append(signal)
+
             # Step 4: Apply deduplication if available and not already done by SignalProcessor
             if self.enable_deduplication and self.deduplication_manager:
                 deduplicated = []
@@ -497,39 +570,43 @@ class IntelligentForexScanner:
                             deduplicated.append(signal)
                         else:
                             self.stats['signals_filtered_dedup'] += 1
+                            # Track rejection
+                            signal['rejection_reason'] = 'dedup'
+                            signal['rejection_details'] = reason
+                            rejected_signals.append(signal)
                 filtered_signals = deduplicated
-            
+
             # Step 5: Apply smart money if available and not already done by SignalProcessor
             # (This is for backward compatibility - SignalProcessor handles this better)
             if self.enable_smart_money and add_smart_money_to_signals and not self.use_signal_processor:
                 try:
                     filtered_signals = add_smart_money_to_signals(
-                        filtered_signals, 
+                        filtered_signals,
                         self.signal_detector.data_fetcher,
                         self.db_manager
                     )
                     self.stats['smart_money_enhanced'] += len(filtered_signals)
                 except Exception as e:
                     self.logger.warning(f"⚠️ Smart money enhancement failed: {e}")
-            
+
             # Step 6: Prepare signals for output
             clean_signals = []
             for signal in filtered_signals:
                 clean_signal = self._prepare_signal(signal)
                 clean_signals.append(clean_signal)
                 self.stats['signals_processed'] += 1
-            
+
             scan_duration = (datetime.now() - scan_start).total_seconds()
-            
+
             if clean_signals:
                 self.logger.info(f"✅ Scan completed in {scan_duration:.2f}s: {len(clean_signals)} signals ready")
-                
+
                 # Log signal details with Smart Money info
                 for signal in clean_signals:
                     epic = signal.get('epic', 'Unknown')
                     signal_type = signal.get('signal_type', 'Unknown')
                     confidence = signal.get('confidence_score', 0)
-                    
+
                     # Check for smart money validation
                     if signal.get('smart_money_validated'):
                         sm_score = signal.get('smart_money_score', 0)
@@ -537,7 +614,7 @@ class IntelligentForexScanner:
                         self.logger.info(f"   📊 {epic} {signal_type} ({confidence:.1%}) 🧠 SM: {sm_type} ({sm_score:.2f})")
                     else:
                         self.logger.info(f"   📊 {epic} {signal_type} ({confidence:.1%})")
-                
+
                 # Log Smart Money statistics if any
                 if self.stats['smart_money_validated'] > 0:
                     self.logger.info(f"🧠 Smart Money validated: {self.stats['smart_money_validated']}/{len(clean_signals)} signals")
@@ -545,8 +622,22 @@ class IntelligentForexScanner:
                 # NEW: Log Market Intelligence summary for analysis
                 self._log_market_intelligence_summary(clean_signals)
 
+            # Log rejection summary if any
+            if rejected_signals:
+                self.logger.debug(f"📊 {len(rejected_signals)} signals rejected this scan")
+
             # ADD: Generate and store market intelligence for this scan cycle
-            self._capture_scan_market_intelligence(scan_start, clean_signals)
+            intelligence_report = self._capture_scan_market_intelligence(scan_start, clean_signals)
+
+            # ADD: Capture per-epic performance snapshots for rejection analysis
+            self._capture_scan_performance_snapshots(
+                scan_cycle_id=scan_cycle_id,
+                scan_timestamp=scan_start,
+                epic_scan_data=epic_scan_data,
+                signals=clean_signals,
+                rejected_signals=rejected_signals,
+                intelligence_report=intelligence_report
+            )
 
             # Periodic cleanup of old intelligence records (once per ~24 hours)
             # At ~600 scans/day (every 2.5 minutes), check every 500 scans
@@ -558,6 +649,171 @@ class IntelligentForexScanner:
             self.logger.error(f"❌ Scan error: {e}")
             self.stats['errors'] += 1
             return []
+
+    def _extract_indicator_data(self, signal: Dict) -> Dict:
+        """
+        Extract indicator data from a signal for performance snapshots.
+
+        Returns a dict of indicator values that can be stored in scan_performance_snapshot.
+        """
+        if not signal:
+            return {}
+
+        # Core indicators to extract
+        indicator_keys = [
+            # Price data
+            'current_price', 'entry_price', 'bid_price', 'ask_price', 'spread_pips',
+            # EMAs
+            'ema_9', 'ema_21', 'ema_50', 'ema_200', 'ema_bias_4h', 'price_vs_ema50',
+            # MACD
+            'macd_line', 'macd_signal', 'macd_histogram',
+            # RSI
+            'rsi_14', 'rsi',
+            # Efficiency Ratio
+            'efficiency_ratio',
+            # ATR / Volatility
+            'atr_14', 'atr', 'atr_pips', 'atr_percentile',
+            # Bollinger Bands
+            'bb_upper', 'bb_middle', 'bb_lower', 'bb_width', 'bb_width_percentile',
+            # ADX
+            'adx', 'plus_di', 'minus_di',
+            # Smart Money
+            'smart_money_score', 'smart_money_validated', 'smart_money_analysis',
+            # MTF
+            'mtf_alignment', 'mtf_confluence_score',
+            # Entry quality
+            'entry_quality_score', 'fib_zone_distance',
+            # Confidence
+            'confidence_score', 'raw_confidence'
+        ]
+
+        data = {}
+        for key in indicator_keys:
+            if key in signal:
+                data[key] = signal[key]
+
+        # Use entry_price as current_price if not set
+        if 'current_price' not in data and 'entry_price' in signal:
+            data['current_price'] = signal['entry_price']
+
+        return data
+
+    def _fetch_epic_indicators(self, epic: str) -> Dict:
+        """
+        Fetch current indicator values for an epic independently of signal detection.
+
+        This is called for EVERY epic on EVERY scan to capture market state,
+        regardless of whether a signal was generated.
+
+        Returns:
+            Dict of indicator values for this epic
+        """
+        try:
+            # Get data fetcher from signal detector
+            data_fetcher = getattr(self.signal_detector, 'data_fetcher', None)
+            if not data_fetcher:
+                return {}
+
+            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+
+            # Get default timeframe from database
+            default_tf = self._scanner_cfg.default_timeframe
+
+            # Fetch enhanced data with indicators
+            df = data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair_name,
+                timeframe=default_tf,
+                lookback_hours=4  # Minimal lookback for current indicators
+            )
+
+            if df is None or df.empty:
+                return {}
+
+            # Get the latest row
+            latest = df.iloc[-1]
+
+            indicators = {}
+
+            # Price data
+            for col in ['close', 'open', 'high', 'low']:
+                if col in df.columns:
+                    indicators['current_price'] = float(latest['close'])
+                    break
+
+            # EMA indicators
+            for col in df.columns:
+                if col.startswith('ema_'):
+                    try:
+                        period = col.replace('ema_', '')
+                        if period.isdigit():
+                            indicators[col] = float(latest[col]) if pd.notna(latest[col]) else None
+                    except:
+                        pass
+
+            # MACD
+            macd_cols = {
+                'macd_line': ['macd_line', 'macd', 'macd_12_26_9'],
+                'macd_signal': ['macd_signal', 'macd_signal_line'],
+                'macd_histogram': ['macd_histogram', 'macd_hist']
+            }
+            for std_name, possible_names in macd_cols.items():
+                for col in possible_names:
+                    if col in df.columns and pd.notna(latest[col]):
+                        indicators[std_name] = float(latest[col])
+                        break
+
+            # RSI
+            for col in ['rsi', 'rsi_14']:
+                if col in df.columns and pd.notna(latest[col]):
+                    indicators['rsi_14'] = float(latest[col])
+                    break
+
+            # Efficiency Ratio
+            for col in ['efficiency_ratio', 'kama_er', 'kama_10_er']:
+                if col in df.columns and pd.notna(latest[col]):
+                    indicators['efficiency_ratio'] = float(latest[col])
+                    break
+
+            # ATR
+            for col in ['atr', 'atr_14']:
+                if col in df.columns and pd.notna(latest[col]):
+                    indicators['atr_14'] = float(latest[col])
+                    break
+
+            # Bollinger Bands
+            bb_cols = {
+                'bb_upper': ['bb_upper', 'bollinger_upper'],
+                'bb_middle': ['bb_middle', 'bollinger_middle'],
+                'bb_lower': ['bb_lower', 'bollinger_lower']
+            }
+            for std_name, possible_names in bb_cols.items():
+                for col in possible_names:
+                    if col in df.columns and pd.notna(latest[col]):
+                        indicators[std_name] = float(latest[col])
+                        break
+
+            # ADX
+            for col in ['adx', 'adx_14']:
+                if col in df.columns and pd.notna(latest[col]):
+                    indicators['adx'] = float(latest[col])
+                    break
+
+            for col in ['plus_di', 'adx_plus_di', 'di_plus']:
+                if col in df.columns and pd.notna(latest[col]):
+                    indicators['plus_di'] = float(latest[col])
+                    break
+
+            for col in ['minus_di', 'adx_minus_di', 'di_minus']:
+                if col in df.columns and pd.notna(latest[col]):
+                    indicators['minus_di'] = float(latest[col])
+                    break
+
+            return indicators
+
+        except Exception as e:
+            self.logger.debug(f"Error fetching indicators for {epic}: {e}")
+            return {}
     
     def _detect_signals_for_epic(self, epic: str) -> Optional[Dict]:
         """Detect signals using all strategies for an epic"""
@@ -722,13 +978,16 @@ class IntelligentForexScanner:
         except Exception as e:
             self.logger.warning(f"⚠️ Error logging market intelligence summary: {e}")
 
-    def _capture_scan_market_intelligence(self, scan_start: datetime, signals: List[Dict]) -> None:
+    def _capture_scan_market_intelligence(self, scan_start: datetime, signals: List[Dict]) -> Optional[Dict]:
         """
         🧠 Generate and store comprehensive market intelligence for this scan cycle
         This captures market conditions regardless of whether signals were detected
+
+        Returns:
+            The intelligence report dict, or None if not generated
         """
         if not self.enable_market_intelligence or not self.market_intelligence_engine or not self.market_intelligence_history:
-            return
+            return None
 
         try:
             scan_duration = (datetime.now() - scan_start).total_seconds()
@@ -770,19 +1029,24 @@ class IntelligentForexScanner:
                         market_bias = market_strength.get('market_bias', 'neutral')
                         self.logger.debug(f"High confidence analysis: Market bias = {market_bias}")
 
+                    return intelligence_report
+
                 else:
                     self.stats['market_intelligence_errors'] += 1
                     self.logger.warning("⚠️ Failed to store market intelligence data")
+                    return intelligence_report  # Still return even if storage failed
 
             else:
                 self.stats['market_intelligence_errors'] += 1
                 self.logger.warning("⚠️ Failed to generate market intelligence report")
+                return None
 
         except Exception as e:
             self.stats['market_intelligence_errors'] += 1
             self.logger.error(f"❌ Error capturing market intelligence: {e}")
             import traceback
             self.logger.debug(f"   Traceback: {traceback.format_exc()}")
+            return None
 
     def _maybe_cleanup_old_intelligence_records(self):
         """
@@ -822,6 +1086,138 @@ class IntelligentForexScanner:
 
         except Exception as e:
             self.logger.warning(f"Intelligence cleanup failed: {e}")
+
+        # Also cleanup scan performance snapshots
+        if self.scan_performance_manager:
+            try:
+                snapshot_deleted = self.scan_performance_manager.cleanup_old_records(
+                    days_to_keep=retention_days
+                )
+                if snapshot_deleted and snapshot_deleted > 0:
+                    self.logger.info(
+                        f"Cleaned {snapshot_deleted} old scan snapshots "
+                        f"(keeping {retention_days} days)"
+                    )
+            except Exception as e:
+                self.logger.warning(f"Scan snapshot cleanup failed: {e}")
+
+    def _capture_scan_performance_snapshots(
+        self,
+        scan_cycle_id: str,
+        scan_timestamp: datetime,
+        epic_scan_data: Dict[str, Dict],
+        signals: List[Dict],
+        rejected_signals: List[Dict],
+        intelligence_report: Optional[Dict] = None
+    ) -> None:
+        """
+        Capture per-epic indicator snapshots for analysis.
+
+        This stores indicator data for EVERY epic on EVERY scan, enabling:
+        - Rejection pattern analysis
+        - Signal quality correlation
+        - Market condition profiling
+
+        Args:
+            scan_cycle_id: Unique ID linking to market_intelligence_history
+            scan_timestamp: When the scan occurred
+            epic_scan_data: Dict mapping epic -> indicator data from scan
+            signals: List of signals that passed all filters
+            rejected_signals: List of signals that were rejected
+            intelligence_report: Market intelligence data (optional)
+        """
+        if not self.enable_scan_performance or not self.scan_performance_manager:
+            return
+
+        try:
+            # Build lookup for signals and rejections by epic
+            signal_by_epic = {s.get('epic'): s for s in signals}
+            rejection_by_epic = {r.get('epic'): r for r in rejected_signals}
+
+            # Extract market context from intelligence report
+            market_context = {}
+            if intelligence_report:
+                market_regime = intelligence_report.get('market_regime', {})
+                session_analysis = intelligence_report.get('session_analysis', {})
+                market_context = {
+                    'market_regime': market_regime.get('dominant_regime'),
+                    'regime_confidence': market_regime.get('confidence'),
+                    'session': session_analysis.get('current_session'),
+                    'session_volatility': session_analysis.get('volatility_level')
+                }
+
+            snapshots = []
+            for epic in self.epic_list:
+                indicator_data = epic_scan_data.get(epic, {})
+
+                # Determine signal outcome for this epic
+                signal_outcome = None
+                if epic in signal_by_epic:
+                    sig = signal_by_epic[epic]
+                    signal_outcome = {
+                        'generated': True,
+                        'signal_type': sig.get('signal_type'),
+                        'signal_id': sig.get('id'),  # Will be populated after alert_history save
+                        'raw_confidence': sig.get('raw_confidence') or sig.get('confidence_score'),
+                        'final_confidence': sig.get('confidence_score'),
+                        'confidence_threshold': self.min_confidence
+                    }
+                elif epic in rejection_by_epic:
+                    rej = rejection_by_epic[epic]
+                    signal_outcome = {
+                        'generated': False,
+                        'signal_type': rej.get('signal_type'),
+                        'rejection_reason': rej.get('rejection_reason', 'unknown'),
+                        'rejection_details': rej.get('rejection_details'),
+                        'raw_confidence': rej.get('confidence_score'),
+                        'confidence_threshold': self.min_confidence
+                    }
+                else:
+                    # No signal detected for this epic
+                    signal_outcome = {
+                        'generated': False,
+                        'signal_type': None,
+                        'rejection_reason': None  # No signal to reject
+                    }
+
+                # Extract SMC context if available
+                smc_context = None
+                if indicator_data.get('smart_money_analysis'):
+                    sma = indicator_data['smart_money_analysis']
+                    smc_context = {
+                        'near_order_block': sma.get('near_order_block', False),
+                        'ob_type': sma.get('ob_type'),
+                        'ob_distance_pips': sma.get('ob_distance_pips'),
+                        'near_fvg': sma.get('near_fvg', False),
+                        'fvg_type': sma.get('fvg_type'),
+                        'fvg_distance_pips': sma.get('fvg_distance_pips'),
+                        'liquidity_sweep_detected': sma.get('liquidity_sweep', False),
+                        'liquidity_sweep_type': sma.get('liquidity_sweep_type')
+                    }
+
+                snapshots.append({
+                    'epic': epic,
+                    'indicator_data': indicator_data,
+                    'signal_outcome': signal_outcome,
+                    'market_context': market_context,
+                    'smc_context': smc_context
+                })
+
+            # Save all snapshots
+            saved_count = self.scan_performance_manager.save_batch_snapshots(
+                scan_cycle_id=scan_cycle_id,
+                scan_timestamp=scan_timestamp,
+                snapshots=snapshots
+            )
+
+            self.stats['scan_snapshots_saved'] += saved_count
+            self.logger.debug(f"📊 Saved {saved_count}/{len(snapshots)} scan performance snapshots")
+
+        except Exception as e:
+            self.stats['scan_snapshots_errors'] += 1
+            self.logger.error(f"❌ Error capturing scan performance snapshots: {e}")
+            import traceback
+            self.logger.debug(f"   Traceback: {traceback.format_exc()}")
 
     def _calculate_boundary_aligned_sleep(self, scan_duration: float) -> float:
         """
