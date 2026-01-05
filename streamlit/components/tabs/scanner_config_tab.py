@@ -487,12 +487,68 @@ def render_indicator_settings(config: Dict[str, Any]):
 def render_data_quality_settings(config: Dict[str, Any]):
     """Render data quality settings for trading safety"""
     st.subheader("Data Quality Settings")
-    st.markdown("Configure data quality filtering and trading safety controls")
+    st.markdown("Configure data quality filtering, performance, and data fetching controls")
 
     updated_by = st.session_state.get('scanner_config_user', 'streamlit_user')
 
     if 'scanner_pending_changes' not in st.session_state:
         st.session_state.scanner_pending_changes = {}
+
+    # Performance / Data Fetching Settings (CRITICAL)
+    st.markdown("### ⚠️ Data Fetching Settings (Critical)")
+    st.caption("These settings control how much data is fetched. Incorrect values can cause 'Insufficient data' errors.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        new_batch_size = st.number_input(
+            "Data Batch Size",
+            value=_get_int(config, 'data_batch_size', 25000),
+            min_value=5000, max_value=100000, step=5000,
+            help="Max rows fetched for 1m synthesis. For 4H data with 1m synthesis, need ~14,400+ rows (60 bars × 240). Set to 25000+ to account for weekend gaps.",
+            key="data_batch_size"
+        )
+        if not values_equal(new_batch_size, config.get('data_batch_size')):
+            st.session_state.scanner_pending_changes['data_batch_size'] = new_batch_size
+
+        new_reduced_lookback = st.checkbox(
+            "Enable Reduced Lookback",
+            value=config.get('reduced_lookback_hours', True),
+            help="Reduce lookback period by the reduction factor below for faster scans",
+            key="reduced_lookback_hours"
+        )
+        if not values_equal(new_reduced_lookback, config.get('reduced_lookback_hours')):
+            st.session_state.scanner_pending_changes['reduced_lookback_hours'] = new_reduced_lookback
+
+    with col2:
+        new_enable_cache = st.checkbox(
+            "Enable Data Cache",
+            value=config.get('enable_data_cache', False),
+            help="Cache fetched data to reduce database load (may use stale data)",
+            key="enable_data_cache"
+        )
+        if not values_equal(new_enable_cache, config.get('enable_data_cache')):
+            st.session_state.scanner_pending_changes['enable_data_cache'] = new_enable_cache
+
+        new_lazy_loading = st.checkbox(
+            "Lazy Indicator Loading",
+            value=config.get('lazy_indicator_loading', True),
+            help="Only calculate required indicators (faster)",
+            key="lazy_indicator_loading"
+        )
+        if not values_equal(new_lazy_loading, config.get('lazy_indicator_loading')):
+            st.session_state.scanner_pending_changes['lazy_indicator_loading'] = new_lazy_loading
+
+    # Show calculated requirements
+    batch_size = _get_int(config, 'data_batch_size', 25000)
+    if batch_size < 14400:
+        st.error(f"⚠️ Batch size ({batch_size}) is below minimum required for 4H strategy (14,400). This WILL cause 'Insufficient data' errors!")
+    elif batch_size < 20000:
+        st.warning(f"⚠️ Batch size ({batch_size}) may be too low during weekends/gaps. Recommend 25,000+")
+    else:
+        st.success(f"✅ Batch size ({batch_size}) is sufficient for 4H strategy with weekend gaps")
+
+    st.divider()
 
     # Lookback Reduction
     st.markdown("### Lookback Configuration")
@@ -563,7 +619,25 @@ def render_data_quality_settings(config: Dict[str, Any]):
     # Info box
     with st.expander("About Data Quality Settings", expanded=False):
         st.markdown("""
-        These settings control how the scanner handles data quality:
+        These settings control how the scanner handles data fetching and quality:
+
+        **⚠️ Data Batch Size (CRITICAL)**
+        - Maximum rows fetched from database for 1m candle synthesis
+        - For 4H strategy: need 60 bars × 240 candles = 14,400 minimum
+        - Set to 25,000+ to account for weekend gaps and holidays
+        - **Too low = "Insufficient 4h data" errors!**
+
+        **Enable Reduced Lookback**
+        - When enabled, applies the reduction factor to lookback calculations
+        - Reduces data fetching for faster scans
+
+        **Enable Data Cache**
+        - Caches fetched data in memory to reduce database load
+        - May use slightly stale data between refreshes
+
+        **Lazy Indicator Loading**
+        - Only calculates indicators that are actually needed
+        - Significantly improves performance
 
         **Lookback Reduction Factor**
         - Controls how much historical data is fetched
