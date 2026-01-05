@@ -568,7 +568,44 @@ class AlertHistoryManager:
                         %(candle_body_pips)s, %(candle_upper_wick_pips)s, %(candle_lower_wick_pips)s, %(candle_type)s
                     ) RETURNING id
                 '''
-                
+
+                # ================================================================
+                # FIX: Final numpy type conversion before SQL insert
+                # This handles any numpy types that slipped through earlier conversion
+                # (Fixes psycopg2.ProgrammingError: can't adapt type 'numpy.int64')
+                # ================================================================
+                def convert_numpy_to_python(obj):
+                    """Recursively convert numpy types to native Python types for psycopg2"""
+                    if obj is None:
+                        return None
+                    # Handle numpy scalar types
+                    if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+                        return int(obj)
+                    elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+                        result = float(obj)
+                        # Convert NaN to None for database compatibility
+                        if np.isnan(result):
+                            return None
+                        return result
+                    elif isinstance(obj, np.bool_):
+                        return bool(obj)
+                    elif isinstance(obj, np.ndarray):
+                        return obj.tolist()
+                    # Handle hasattr check for numpy types that may not be in the isinstance list
+                    elif hasattr(obj, 'item'):
+                        return obj.item()
+                    elif hasattr(obj, 'tolist'):
+                        return obj.tolist()
+                    # Recursively handle dicts and lists
+                    elif isinstance(obj, dict):
+                        return {k: convert_numpy_to_python(v) for k, v in obj.items()}
+                    elif isinstance(obj, (list, tuple)):
+                        return [convert_numpy_to_python(item) for item in obj]
+                    return obj
+
+                # Apply conversion to all alert_data values
+                alert_data = {k: convert_numpy_to_python(v) for k, v in alert_data.items()}
+
                 cursor.execute(insert_query, alert_data)
                 alert_id = cursor.fetchone()[0]
                 

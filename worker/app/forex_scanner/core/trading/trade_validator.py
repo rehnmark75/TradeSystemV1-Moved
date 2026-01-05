@@ -1208,7 +1208,18 @@ class TradeValidator:
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 11 PASSED - Trading suitability")
 
-            # 12. ⭐ Claude AI filtering - FINAL VALIDATOR (if enabled) ⭐
+            # 12. ⭐ Universal Market Intelligence Capture ⭐
+            # MOVED BEFORE CLAUDE: Capture market intelligence for ALL signals that reach this point
+            # This ensures strategy_metadata is populated even for Claude-rejected signals
+            # (Previously was step 13, after Claude filtering, which caused NULL metadata for rejections)
+            if self.enable_market_intelligence_capture:
+                self._capture_market_intelligence_context(signal)
+                if self.backtest_mode:
+                    self.logger.info(f"✅ BACKTEST STEP 12 COMPLETED - Market Intelligence capture")
+            elif self.backtest_mode:
+                self.logger.info(f"✅ BACKTEST STEP 12 SKIPPED - Market Intelligence capture (disabled)")
+
+            # 13. ⭐ Claude AI filtering - FINAL VALIDATOR (if enabled) ⭐
             # Claude is the most comprehensive and expensive check, so it runs last
             # Only signals that pass all other filters get validated by Claude
             if self.enable_claude_filtering:
@@ -1218,7 +1229,7 @@ class TradeValidator:
                     epic = signal.get('epic', 'Unknown')
                     signal_type = signal.get('signal_type', 'Unknown')
                     if self.backtest_mode:
-                        self.logger.warning(f"🚫 BACKTEST STEP 12 FAILED - Claude filtering: {msg}")
+                        self.logger.warning(f"🚫 BACKTEST STEP 13 FAILED - Claude filtering: {msg}")
 
                     # Save rejected signals for analysis (database + optional file)
                     if claude_result:
@@ -1231,22 +1242,13 @@ class TradeValidator:
                 else:
                     # Note: _validate_with_claude already logs approval
                     if self.backtest_mode:
-                        self.logger.info(f"✅ BACKTEST STEP 12 PASSED - Claude filtering approved")
+                        self.logger.info(f"✅ BACKTEST STEP 13 PASSED - Claude filtering approved")
 
                     # Add Claude result to signal for later use
                     if claude_result:
                         signal['claude_validation_result'] = claude_result
             elif self.backtest_mode:
-                self.logger.info(f"✅ BACKTEST STEP 12 PASSED - Claude filtering (disabled)")
-
-            # 13. ⭐ Universal Market Intelligence Capture ⭐
-            # Capture market intelligence for ALL validated signals, regardless of strategy
-            if self.enable_market_intelligence_capture:
-                self._capture_market_intelligence_context(signal)
-                if self.backtest_mode:
-                    self.logger.info(f"✅ BACKTEST STEP 13 COMPLETED - Market Intelligence capture")
-            elif self.backtest_mode:
-                self.logger.info(f"✅ BACKTEST STEP 13 SKIPPED - Market Intelligence capture (disabled)")
+                self.logger.info(f"✅ BACKTEST STEP 13 PASSED - Claude filtering (disabled)")
 
             # All validations passed
             self.validation_stats['passed_validations'] += 1

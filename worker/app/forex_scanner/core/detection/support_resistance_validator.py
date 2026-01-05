@@ -741,8 +741,33 @@ class SupportResistanceValidator:
 
         # Extract prices for path blocking check
         entry_price = self._get_current_price(signal)
-        take_profit = signal.get('take_profit') or signal.get('tp_price')
         signal_type = signal.get('signal_type', '').upper()
+
+        # ================================================================
+        # FIX: Use per-pair fixed TP from config if available for path blocking
+        # This prevents overly aggressive path blocking when dynamic TPs are large
+        # (Dynamic TPs from swing targets can be 45+ pips, causing 80%+ blocking)
+        # ================================================================
+        take_profit = None
+        try:
+            from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+            config = get_smc_simple_config()
+            fixed_tp_pips = config.get_pair_fixed_take_profit(epic)
+
+            if fixed_tp_pips and entry_price:
+                pip_size = self._get_pip_size(epic)
+                # Calculate TP price from fixed pips
+                if signal_type in ['BUY', 'BULL']:
+                    take_profit = entry_price + (fixed_tp_pips * pip_size)
+                else:
+                    take_profit = entry_price - (fixed_tp_pips * pip_size)
+                self.logger.debug(f"🎯 Using fixed TP for path blocking: {fixed_tp_pips} pips = {take_profit:.5f}")
+        except Exception as e:
+            self.logger.debug(f"Could not get fixed TP from config: {e}")
+
+        # Fallback to signal's dynamic TP if no fixed TP available
+        if take_profit is None:
+            take_profit = signal.get('take_profit') or signal.get('tp_price')
 
         if not entry_price or not take_profit:
             details['path_blocking_skipped'] = True
