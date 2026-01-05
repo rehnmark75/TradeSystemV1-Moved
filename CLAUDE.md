@@ -204,6 +204,39 @@ Located in `worker/app/forex_scanner/migrations/`:
 
 ---
 
+## ⚠️ Scanner Config Service (CRITICAL)
+
+**File**: `worker/app/forex_scanner/services/scanner_config_service.py`
+
+The `ScannerConfigService` loads scanner settings from the `scanner_global_config` table.
+
+### IMPORTANT: Adding New Database Fields
+
+When adding new fields to `scanner_global_config` table, you MUST also add them to the `direct_fields` list in `_build_config_from_row()` method (~line 565), otherwise:
+- The field will NOT be loaded from the database
+- The dataclass default value will be used instead
+- **This caused a major bug in Jan 2026** where `data_batch_size=10000` (default) was used instead of the database value `25000`, causing "Insufficient 4h data" errors
+
+### Checklist for New Scanner Config Fields:
+1. ✅ Add column to `scanner_global_config` table
+2. ✅ Add field to `ScannerConfig` dataclass (with default)
+3. ✅ **Add field name to `direct_fields` list** (easy to forget!)
+4. ✅ If integer, add to `int_fields` set
+5. ✅ If float, add to `float_fields` set
+6. ✅ Restart `task-worker` container to pick up changes
+
+### Key Performance Fields (in `scanner_global_config`):
+| Field | Purpose | Default |
+|-------|---------|---------|
+| `data_batch_size` | Max rows fetched for 1m synthesis | 25000 |
+| `reduced_lookback_hours` | Enable lookback reduction | true |
+| `lookback_reduction_factor` | Reduction multiplier | 0.7 |
+| `use_1m_base_synthesis` | Use 1m candles for resampling | true |
+
+**Note**: For 4H data with 1m synthesis, need ~14,400+ 1m candles (60 bars × 240). Set `data_batch_size >= 25000` to account for weekend gaps.
+
+---
+
 ## 🚨 CRITICAL: Container & Config Ownership
 
 **NEVER confuse these containers - they have DIFFERENT config files!**

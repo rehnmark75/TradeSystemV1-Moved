@@ -616,6 +616,9 @@ class ScannerConfigService:
             # Data Quality Settings
             'lookback_reduction_factor', 'enable_data_quality_filtering',
             'block_trading_on_data_issues', 'min_quality_score_for_trading',
+            # Performance/Data Fetching Settings
+            'data_batch_size', 'reduced_lookback_hours', 'enable_data_cache',
+            'lazy_indicator_loading', 'kama_period',
             # Trading Control Flags
             'auto_trading_enabled', 'enable_order_execution',
             # S/R Validation Settings
@@ -682,6 +685,8 @@ class ScannerConfigService:
             'smart_money_min_data_points', 'smart_money_liquidity_sweep_lookback_bars',
             # Order Executor integer fields
             'order_max_retries', 'order_circuit_breaker_threshold',
+            # Performance/Data Fetching integer fields
+            'data_batch_size', 'kama_period',
         }
 
         for field_name in direct_fields:
