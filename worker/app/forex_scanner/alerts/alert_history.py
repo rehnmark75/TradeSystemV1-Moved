@@ -633,7 +633,7 @@ class AlertHistoryManager:
             epic = signal.get('epic', 'Unknown')
             signal_type = signal.get('signal_type', signal.get('signal', 'Unknown'))
 
-            self.logger.info(f"🚫 Saving Claude rejection: {epic} {signal_type}")
+            self.logger.info(f"💾 Saving Claude rejection: {epic} {signal_type}")
 
             # Mark signal as Claude rejected
             signal['status'] = 'CLAUDE_REJECTED'
