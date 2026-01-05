@@ -926,7 +926,11 @@ class SMCSimpleStrategy:
             # v2.11.0: Dynamic confidence threshold based on EMA distance, ATR, and Volume
             # Priority: EMA distance > ATR > Volume > Pair-specific > Default
             # EMA distance is the strongest predictor of CONFIDENCE rejection outcomes
-            pair_min_confidence = self.pair_min_confidence.get(pair, self.pair_min_confidence.get(epic, self.min_confidence))
+            # v2.12.0: Added direction-aware confidence threshold support
+            if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+                pair_min_confidence = self._db_config.get_min_confidence_directional(epic, direction)
+            else:
+                pair_min_confidence = self.pair_min_confidence.get(pair, self.pair_min_confidence.get(epic, self.min_confidence))
             adjustment_type = "pair-specific"
 
             # v2.11.0: EMA distance-adjusted confidence threshold (HIGHEST PRIORITY)
@@ -1074,9 +1078,14 @@ class SMCSimpleStrategy:
 
             # ================================================================
             # v2.9.0: VOLUME RATIO FILTER (Volume >= 0.50 has 70%+ WR)
+            # v2.12.0: Direction-aware volume ratio threshold
             # ================================================================
             if self.volume_filter_enabled:
-                pair_min_volume = self._get_pair_param(epic, 'MIN_VOLUME_RATIO', self.min_volume_ratio)
+                # v2.12.0: Get direction-aware volume ratio threshold
+                if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+                    pair_min_volume = self._db_config.get_min_volume_ratio_directional(epic, direction)
+                else:
+                    pair_min_volume = self._get_pair_param(epic, 'MIN_VOLUME_RATIO', self.min_volume_ratio)
                 if volume_ratio is not None and volume_ratio > 0:
                     if volume_ratio < pair_min_volume:
                         reason = f"Volume ratio too low ({volume_ratio:.2f} < {pair_min_volume:.2f} min)"
@@ -1877,16 +1886,21 @@ class SMCSimpleStrategy:
 
         # v1.8.0: Determine entry type and validate zone
         # v2.6.0: Uses pair-specific overrides for EURUSD
+        # v2.12.0: Direction-aware overrides (BULL/BEAR specific thresholds)
         entry_type = 'PULLBACK'  # Default
 
-        # v2.6.0: Get pair-specific momentum min depth if configured
-        pair_momentum_min = self._get_pair_param(epic, 'MOMENTUM_MIN_DEPTH', self.momentum_min_depth)
+        # v2.12.0: Get direction-aware momentum min depth
+        # Priority: direction-specific -> pair parameter_overrides -> global
+        if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+            pair_momentum_min = self._db_config.get_momentum_min_depth(epic, direction)
+        else:
+            pair_momentum_min = self._get_pair_param(epic, 'MOMENTUM_MIN_DEPTH', self.momentum_min_depth)
 
         # Check for momentum continuation entry (price beyond break point)
         if pullback_depth < 0:
             if self.momentum_mode_enabled:
                 # v1.8.0: Allow momentum entries within configured range
-                # v2.6.0: Use pair-specific momentum_min_depth
+                # v2.12.0: Use direction-aware momentum_min_depth
                 if pair_momentum_min <= pullback_depth <= self.momentum_max_depth:
                     entry_type = 'MOMENTUM'
                     # Momentum entries are not in "optimal" Fib zone
@@ -1918,16 +1932,25 @@ class SMCSimpleStrategy:
                 'reason': f"Pullback exceeded swing ({pullback_depth*100:.1f}% - trend reversal)"
             }
 
+        # v2.12.0: Get direction-aware Fib thresholds
+        # Priority: direction-specific -> pair parameter_overrides -> global
+        if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+            pair_fib_min = self._db_config.get_fib_pullback_min(epic, direction)
+            pair_fib_max = self._db_config.get_fib_pullback_max(epic, direction)
+        else:
+            pair_fib_min = self._get_pair_param(epic, 'FIB_PULLBACK_MIN', self.fib_min)
+            pair_fib_max = self._get_pair_param(epic, 'FIB_PULLBACK_MAX', self.fib_max)
+
         # Check if in Fib pullback zone
-        if pullback_depth < self.fib_min:
+        if pullback_depth < pair_fib_min:
             return {
                 'valid': False,
-                'reason': f"Insufficient pullback ({pullback_depth*100:.1f}% < {self.fib_min*100:.1f}%)"
+                'reason': f"Insufficient pullback ({pullback_depth*100:.1f}% < {pair_fib_min*100:.1f}%)"
             }
-        if pullback_depth > self.fib_max:
+        if pullback_depth > pair_fib_max:
             return {
                 'valid': False,
-                'reason': f"Pullback too deep ({pullback_depth*100:.1f}% > {self.fib_max*100:.1f}%)"
+                'reason': f"Pullback too deep ({pullback_depth*100:.1f}% > {pair_fib_max*100:.1f}%)"
             }
 
         # Check if in optimal zone (golden zone)

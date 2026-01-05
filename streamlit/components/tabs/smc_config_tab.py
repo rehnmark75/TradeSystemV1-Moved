@@ -862,6 +862,173 @@ def render_pair_overrides(config: Dict[str, Any]):
             if not _values_equal(new_near_ema, near_ema_effective):
                 override_changes['near_ema_confidence'] = new_near_ema
 
+        # Direction-aware overrides (v2.12.0)
+        st.markdown("**Direction-Aware Overrides**")
+        st.caption("Enable to set different thresholds for BULL vs BEAR trades. Useful when one direction performs significantly better.")
+
+        direction_enabled = existing.get('direction_overrides_enabled', False)
+        new_direction_enabled = st.checkbox(
+            "Enable Direction-Specific Overrides",
+            value=direction_enabled,
+            help="When enabled, BULL and BEAR trades will use their own thresholds instead of a single value",
+            key=f"direction_enabled_{selected_pair}"
+        )
+        if not _values_equal(new_direction_enabled, direction_enabled):
+            override_changes['direction_overrides_enabled'] = new_direction_enabled
+
+        if new_direction_enabled:
+            st.markdown("##### Pullback Thresholds (Fib %)")
+            col_bull, col_bear = st.columns(2)
+
+            with col_bull:
+                st.markdown("**BULL Settings**")
+                # Fib Min Bull
+                fib_min_bull_value = existing.get('fib_pullback_min_bull')
+                global_fib_min = config.get('fib_pullback_min', 0.236)
+                fib_min_bull_effective = float(fib_min_bull_value) if fib_min_bull_value is not None else float(global_fib_min)
+                new_fib_min_bull = st.number_input(
+                    "Min Pullback (BULL)",
+                    value=fib_min_bull_effective,
+                    min_value=0.0, max_value=0.5, step=0.01,
+                    format="%.3f",
+                    help=f"Min Fib pullback for BULL trades. Global: {global_fib_min:.1%}",
+                    key=f"fib_min_bull_{selected_pair}"
+                )
+                if not _values_equal(new_fib_min_bull, fib_min_bull_effective):
+                    override_changes['fib_pullback_min_bull'] = new_fib_min_bull
+
+                # Fib Max Bull
+                fib_max_bull_value = existing.get('fib_pullback_max_bull')
+                global_fib_max = config.get('fib_pullback_max', 0.70)
+                fib_max_bull_effective = float(fib_max_bull_value) if fib_max_bull_value is not None else float(global_fib_max)
+                new_fib_max_bull = st.number_input(
+                    "Max Pullback (BULL)",
+                    value=fib_max_bull_effective,
+                    min_value=0.3, max_value=1.5, step=0.01,
+                    format="%.3f",
+                    help=f"Max Fib pullback for BULL trades. Global: {global_fib_max:.1%}",
+                    key=f"fib_max_bull_{selected_pair}"
+                )
+                if not _values_equal(new_fib_max_bull, fib_max_bull_effective):
+                    override_changes['fib_pullback_max_bull'] = new_fib_max_bull
+
+                # Momentum Min Bull
+                mom_min_bull_value = existing.get('momentum_min_depth_bull')
+                global_mom_min = config.get('momentum_min_depth', -0.50)
+                mom_min_bull_effective = float(mom_min_bull_value) if mom_min_bull_value is not None else float(global_mom_min)
+                new_mom_min_bull = st.number_input(
+                    "Momentum Min Depth (BULL)",
+                    value=mom_min_bull_effective,
+                    min_value=-2.0, max_value=0.0, step=0.05,
+                    format="%.2f",
+                    help=f"How far beyond break for momentum. Global: {global_mom_min:.0%}",
+                    key=f"mom_min_bull_{selected_pair}"
+                )
+                if not _values_equal(new_mom_min_bull, mom_min_bull_effective):
+                    override_changes['momentum_min_depth_bull'] = new_mom_min_bull
+
+                # Volume Ratio Bull
+                vol_bull_value = existing.get('min_volume_ratio_bull')
+                global_vol = existing.get('min_volume_ratio') or config.get('min_volume_ratio', 0.50)
+                vol_bull_effective = float(vol_bull_value) if vol_bull_value is not None else float(global_vol)
+                new_vol_bull = st.number_input(
+                    "Min Volume Ratio (BULL)",
+                    value=vol_bull_effective,
+                    min_value=0.0, max_value=2.0, step=0.05,
+                    format="%.2f",
+                    help=f"Min volume ratio for BULL. Pair default: {global_vol:.2f}",
+                    key=f"vol_bull_{selected_pair}"
+                )
+                if not _values_equal(new_vol_bull, vol_bull_effective):
+                    override_changes['min_volume_ratio_bull'] = new_vol_bull
+
+                # Confidence Bull
+                conf_bull_value = existing.get('min_confidence_bull')
+                global_conf = existing.get('min_confidence') or config.get('min_confidence_threshold', 0.44)
+                conf_bull_effective = float(conf_bull_value) if conf_bull_value is not None else float(global_conf)
+                new_conf_bull = st.number_input(
+                    "Min Confidence (BULL)",
+                    value=conf_bull_effective,
+                    min_value=0.0, max_value=1.0, step=0.01,
+                    format="%.2f",
+                    help=f"Min confidence for BULL. Pair default: {global_conf:.0%}",
+                    key=f"conf_bull_{selected_pair}"
+                )
+                if not _values_equal(new_conf_bull, conf_bull_effective):
+                    override_changes['min_confidence_bull'] = new_conf_bull
+
+            with col_bear:
+                st.markdown("**BEAR Settings**")
+                # Fib Min Bear
+                fib_min_bear_value = existing.get('fib_pullback_min_bear')
+                fib_min_bear_effective = float(fib_min_bear_value) if fib_min_bear_value is not None else float(global_fib_min)
+                new_fib_min_bear = st.number_input(
+                    "Min Pullback (BEAR)",
+                    value=fib_min_bear_effective,
+                    min_value=0.0, max_value=0.5, step=0.01,
+                    format="%.3f",
+                    help=f"Min Fib pullback for BEAR trades. Global: {global_fib_min:.1%}",
+                    key=f"fib_min_bear_{selected_pair}"
+                )
+                if not _values_equal(new_fib_min_bear, fib_min_bear_effective):
+                    override_changes['fib_pullback_min_bear'] = new_fib_min_bear
+
+                # Fib Max Bear
+                fib_max_bear_value = existing.get('fib_pullback_max_bear')
+                fib_max_bear_effective = float(fib_max_bear_value) if fib_max_bear_value is not None else float(global_fib_max)
+                new_fib_max_bear = st.number_input(
+                    "Max Pullback (BEAR)",
+                    value=fib_max_bear_effective,
+                    min_value=0.3, max_value=1.5, step=0.01,
+                    format="%.3f",
+                    help=f"Max Fib pullback for BEAR trades. Global: {global_fib_max:.1%}",
+                    key=f"fib_max_bear_{selected_pair}"
+                )
+                if not _values_equal(new_fib_max_bear, fib_max_bear_effective):
+                    override_changes['fib_pullback_max_bear'] = new_fib_max_bear
+
+                # Momentum Min Bear
+                mom_min_bear_value = existing.get('momentum_min_depth_bear')
+                mom_min_bear_effective = float(mom_min_bear_value) if mom_min_bear_value is not None else float(global_mom_min)
+                new_mom_min_bear = st.number_input(
+                    "Momentum Min Depth (BEAR)",
+                    value=mom_min_bear_effective,
+                    min_value=-2.0, max_value=0.0, step=0.05,
+                    format="%.2f",
+                    help=f"How far beyond break for momentum. Global: {global_mom_min:.0%}",
+                    key=f"mom_min_bear_{selected_pair}"
+                )
+                if not _values_equal(new_mom_min_bear, mom_min_bear_effective):
+                    override_changes['momentum_min_depth_bear'] = new_mom_min_bear
+
+                # Volume Ratio Bear
+                vol_bear_value = existing.get('min_volume_ratio_bear')
+                vol_bear_effective = float(vol_bear_value) if vol_bear_value is not None else float(global_vol)
+                new_vol_bear = st.number_input(
+                    "Min Volume Ratio (BEAR)",
+                    value=vol_bear_effective,
+                    min_value=0.0, max_value=2.0, step=0.05,
+                    format="%.2f",
+                    help=f"Min volume ratio for BEAR. Pair default: {global_vol:.2f}",
+                    key=f"vol_bear_{selected_pair}"
+                )
+                if not _values_equal(new_vol_bear, vol_bear_effective):
+                    override_changes['min_volume_ratio_bear'] = new_vol_bear
+
+                # Confidence Bear
+                conf_bear_value = existing.get('min_confidence_bear')
+                conf_bear_effective = float(conf_bear_value) if conf_bear_value is not None else float(global_conf)
+                new_conf_bear = st.number_input(
+                    "Min Confidence (BEAR)",
+                    value=conf_bear_effective,
+                    min_value=0.0, max_value=1.0, step=0.01,
+                    format="%.2f",
+                    help=f"Min confidence for BEAR. Pair default: {global_conf:.0%}",
+                    key=f"conf_bear_{selected_pair}"
+                )
+                if not _values_equal(new_conf_bear, conf_bear_effective):
+                    override_changes['min_confidence_bear'] = new_conf_bear
+
         # Advanced parameter overrides (JSON)
         st.markdown("**Advanced Parameter Overrides (JSON)**")
         param_overrides = existing.get('parameter_overrides', {})

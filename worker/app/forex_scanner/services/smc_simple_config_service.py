@@ -349,6 +349,136 @@ class SMCSimpleConfig:
                 return float(override['fixed_take_profit_pips'])
         return self.fixed_take_profit_pips
 
+    # =========================================================================
+    # DIRECTION-AWARE GETTERS (v2.12.0)
+    # These methods return direction-specific values when enabled, otherwise
+    # fall back to non-directional pair overrides, then global defaults.
+    # =========================================================================
+
+    def is_direction_overrides_enabled(self, epic: str) -> bool:
+        """Check if direction-specific overrides are enabled for a pair"""
+        if epic in self._pair_overrides:
+            return self._pair_overrides[epic].get('direction_overrides_enabled', False)
+        return False
+
+    def get_fib_pullback_min(self, epic: str, direction: str) -> float:
+        """
+        Get minimum Fib pullback threshold for a pair and direction.
+
+        Priority: direction-specific -> pair parameter_overrides -> global
+        Direction should be 'BULL' or 'BEAR'.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+
+            # Check direction-specific if enabled
+            if override.get('direction_overrides_enabled', False):
+                dir_key = f'fib_pullback_min_{direction.lower()}'
+                if override.get(dir_key) is not None:
+                    return float(override[dir_key])
+
+            # Check parameter_overrides JSONB
+            param_overrides = override.get('parameter_overrides', {})
+            if 'FIB_PULLBACK_MIN' in param_overrides:
+                return float(param_overrides['FIB_PULLBACK_MIN'])
+
+        # Fall back to global
+        return self.fib_pullback_min
+
+    def get_fib_pullback_max(self, epic: str, direction: str) -> float:
+        """
+        Get maximum Fib pullback threshold for a pair and direction.
+
+        Priority: direction-specific -> pair parameter_overrides -> global
+        Direction should be 'BULL' or 'BEAR'.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+
+            # Check direction-specific if enabled
+            if override.get('direction_overrides_enabled', False):
+                dir_key = f'fib_pullback_max_{direction.lower()}'
+                if override.get(dir_key) is not None:
+                    return float(override[dir_key])
+
+            # Check parameter_overrides JSONB
+            param_overrides = override.get('parameter_overrides', {})
+            if 'FIB_PULLBACK_MAX' in param_overrides:
+                return float(param_overrides['FIB_PULLBACK_MAX'])
+
+        # Fall back to global
+        return self.fib_pullback_max
+
+    def get_momentum_min_depth(self, epic: str, direction: str) -> float:
+        """
+        Get momentum minimum depth threshold for a pair and direction.
+
+        Priority: direction-specific -> pair parameter_overrides -> global
+        Direction should be 'BULL' or 'BEAR'.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+
+            # Check direction-specific if enabled
+            if override.get('direction_overrides_enabled', False):
+                dir_key = f'momentum_min_depth_{direction.lower()}'
+                if override.get(dir_key) is not None:
+                    return float(override[dir_key])
+
+            # Check parameter_overrides JSONB
+            param_overrides = override.get('parameter_overrides', {})
+            if 'MOMENTUM_MIN_DEPTH' in param_overrides:
+                return float(param_overrides['MOMENTUM_MIN_DEPTH'])
+
+        # Fall back to global
+        return self.momentum_min_depth
+
+    def get_min_volume_ratio_directional(self, epic: str, direction: str) -> float:
+        """
+        Get minimum volume ratio for a pair and direction.
+
+        Priority: direction-specific -> pair min_volume_ratio -> global
+        Direction should be 'BULL' or 'BEAR'.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+
+            # Check direction-specific if enabled
+            if override.get('direction_overrides_enabled', False):
+                dir_key = f'min_volume_ratio_{direction.lower()}'
+                if override.get(dir_key) is not None:
+                    return float(override[dir_key])
+
+            # Fall back to non-directional pair override
+            if override.get('min_volume_ratio') is not None:
+                return float(override['min_volume_ratio'])
+
+        # Fall back to global
+        return self.min_volume_ratio
+
+    def get_min_confidence_directional(self, epic: str, direction: str) -> float:
+        """
+        Get minimum confidence threshold for a pair and direction.
+
+        Priority: direction-specific -> pair min_confidence -> global
+        Direction should be 'BULL' or 'BEAR'.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+
+            # Check direction-specific if enabled
+            if override.get('direction_overrides_enabled', False):
+                dir_key = f'min_confidence_{direction.lower()}'
+                if override.get(dir_key) is not None:
+                    return float(override[dir_key])
+
+            # Fall back to non-directional pair override
+            if override.get('min_confidence') is not None:
+                return float(override['min_confidence'])
+
+        # Fall back to global
+        return self.min_confidence_threshold
+
     def get_dynamic_confidence(
         self,
         epic: str,
@@ -779,6 +909,18 @@ class SMCSimpleConfigService:
                 'blocking_conditions': row.get('blocking_conditions'),
                 'fixed_stop_loss_pips': row.get('fixed_stop_loss_pips'),
                 'fixed_take_profit_pips': row.get('fixed_take_profit_pips'),
+                # Direction-aware overrides (v2.12.0)
+                'direction_overrides_enabled': row.get('direction_overrides_enabled', False),
+                'fib_pullback_min_bull': row.get('fib_pullback_min_bull'),
+                'fib_pullback_min_bear': row.get('fib_pullback_min_bear'),
+                'fib_pullback_max_bull': row.get('fib_pullback_max_bull'),
+                'fib_pullback_max_bear': row.get('fib_pullback_max_bear'),
+                'momentum_min_depth_bull': row.get('momentum_min_depth_bull'),
+                'momentum_min_depth_bear': row.get('momentum_min_depth_bear'),
+                'min_volume_ratio_bull': row.get('min_volume_ratio_bull'),
+                'min_volume_ratio_bear': row.get('min_volume_ratio_bear'),
+                'min_confidence_bull': row.get('min_confidence_bull'),
+                'min_confidence_bear': row.get('min_confidence_bear'),
             }
 
         return config
