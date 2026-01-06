@@ -447,24 +447,18 @@ class OrderManager:
 
         # Check confidence threshold using database config
         # SCALPING BYPASS: Use lower threshold for scalping strategies
-        # SMC_SIMPLE/EMA_DOUBLE BYPASS: These strategies have internal confidence thresholds
+        # All other strategies use the global min_confidence from database
         strategy = signal.get('strategy', '')
         scalping_mode = signal.get('scalping_mode', '')
         is_scalping = ('scalping' in strategy.lower() or
                       scalping_mode in ['linda_raschke', 'ranging_momentum', 'linda_macd_zero_cross',
                                        'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern'])
 
-        # SMC_SIMPLE and EMA_DOUBLE have their own internal confidence checks (50% threshold)
-        is_self_validated_strategy = (
-            'SMC_SIMPLE' in strategy or 'smc_simple' in strategy.lower() or
-            'EMA_DOUBLE' in strategy or 'ema_double' in strategy.lower()
-        )
-
         if is_scalping:
             min_confidence = self._scanner_cfg.scalping_min_confidence
-        elif is_self_validated_strategy:
-            min_confidence = 0.50  # SMC_SIMPLE/EMA_DOUBLE use 50% internal threshold
         else:
+            # Use global min_confidence from database (default 40%)
+            # NOTE: Removed hardcoded 50% for SMC_SIMPLE (Jan 2026) - use database config instead
             min_confidence = self._scanner_cfg.min_confidence
 
         if signal.get('confidence_score', 0) < min_confidence:
