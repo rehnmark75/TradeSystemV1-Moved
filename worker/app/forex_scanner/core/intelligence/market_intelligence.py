@@ -258,39 +258,83 @@ class MarketIntelligenceEngine:
             recent_secondary = secondary_df.tail(min(lookback_hours * 2, len(secondary_df)))
             
             regime_scores = {}
-            
-            # 1. Trend Analysis - FIXED with error handling
+            structure_regime = None
+            volatility_level = None
+
+            # Check if enhanced regime detection is enabled
             try:
-                regime_scores['trending'] = self._calculate_trend_score(recent_primary, recent_secondary)
-                regime_scores['ranging'] = max(0, 1.0 - regime_scores['trending'])
-            except Exception as e:
-                self.logger.debug(f"Trend analysis failed for {epic}: {e}")
-                regime_scores['trending'] = 0.5
-                regime_scores['ranging'] = 0.5
-            
+                from forex_scanner.configdata.market_intelligence_config import ENHANCED_REGIME_DETECTION_ENABLED
+            except ImportError:
+                ENHANCED_REGIME_DETECTION_ENABLED = False
+
+            if ENHANCED_REGIME_DETECTION_ENABLED:
+                # =========================================================
+                # ENHANCED REGIME DETECTION (v2.0) - ADX-based trending
+                # Separates structure (trending/ranging) from volatility
+                # =========================================================
+                try:
+                    enhanced = self.calculate_enhanced_regime(recent_primary, recent_secondary)
+
+                    # Structure scores from enhanced detection
+                    regime_scores['trending'] = enhanced.get('trend_score', 0.5)
+                    regime_scores['ranging'] = max(0, 1.0 - regime_scores['trending'])
+
+                    # Store structure regime separately (not mixed with volatility)
+                    structure_regime = enhanced.get('structure_regime', 'ranging')
+
+                    # Volatility as separate dimension (not competing with structure)
+                    vol_data = enhanced.get('volatility', {})
+                    volatility_level = vol_data.get('regime', 'medium')
+                    vol_score = vol_data.get('score', 0.5)
+
+                    # Still populate volatility scores for compatibility, but they won't dominate
+                    regime_scores['high_volatility'] = vol_score if vol_score > 0.6 else 0.0
+                    regime_scores['low_volatility'] = (1 - vol_score) if vol_score < 0.4 else 0.0
+
+                    self.logger.debug(
+                        f"📊 [ENHANCED] {epic}: structure={structure_regime}, "
+                        f"volatility={volatility_level}, trend_score={regime_scores['trending']:.2f}"
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Enhanced regime failed for {epic}, falling back to legacy: {e}")
+                    ENHANCED_REGIME_DETECTION_ENABLED = False  # Fall through to legacy
+
+            if not ENHANCED_REGIME_DETECTION_ENABLED:
+                # =========================================================
+                # LEGACY REGIME DETECTION (fallback)
+                # =========================================================
+                # 1. Trend Analysis - FIXED with error handling
+                try:
+                    regime_scores['trending'] = self._calculate_trend_score(recent_primary, recent_secondary)
+                    regime_scores['ranging'] = max(0, 1.0 - regime_scores['trending'])
+                except Exception as e:
+                    self.logger.debug(f"Trend analysis failed for {epic}: {e}")
+                    regime_scores['trending'] = 0.5
+                    regime_scores['ranging'] = 0.5
+
+                # 4. Volatility Analysis - FIXED with error handling
+                try:
+                    vol_score = self._calculate_volatility_score(recent_primary)
+                    regime_scores['high_volatility'] = max(0, vol_score - 0.5) * 2
+                    regime_scores['low_volatility'] = max(0, 0.5 - vol_score) * 2
+                except Exception as e:
+                    self.logger.debug(f"Volatility analysis failed for {epic}: {e}")
+                    regime_scores['high_volatility'] = 0.4
+                    regime_scores['low_volatility'] = 0.6
+
             # 2. Breakout Analysis - FIXED with error handling
             try:
                 regime_scores['breakout'] = self._calculate_breakout_score(recent_primary, recent_secondary)
             except Exception as e:
                 self.logger.debug(f"Breakout analysis failed for {epic}: {e}")
                 regime_scores['breakout'] = 0.3
-            
+
             # 3. Reversal Analysis - FIXED with error handling
             try:
                 regime_scores['reversal'] = self._calculate_reversal_score(recent_primary, recent_secondary)
             except Exception as e:
                 self.logger.debug(f"Reversal analysis failed for {epic}: {e}")
                 regime_scores['reversal'] = 0.3
-            
-            # 4. Volatility Analysis - FIXED with error handling
-            try:
-                vol_score = self._calculate_volatility_score(recent_primary)
-                regime_scores['high_volatility'] = max(0, vol_score - 0.5) * 2
-                regime_scores['low_volatility'] = max(0, 0.5 - vol_score) * 2
-            except Exception as e:
-                self.logger.debug(f"Volatility analysis failed for {epic}: {e}")
-                regime_scores['high_volatility'] = 0.4
-                regime_scores['low_volatility'] = 0.6
             
             # Get additional analysis with error handling
             try:
@@ -352,7 +396,10 @@ class MarketIntelligenceEngine:
                 'volatility_percentile': volatility_percentile,
                 'volume_analysis': volume_analysis,
                 'support_resistance': support_resistance,
-                'enhanced_regime': enhanced_regime_data  # v2.0 data collection
+                'enhanced_regime': enhanced_regime_data,  # v2.0 data collection
+                # New fields for separated structure/volatility (Jan 2026)
+                'structure_regime': structure_regime,  # trending/ranging/breakout/reversal
+                'volatility_level': volatility_level   # low/medium/high/extreme
             }
 
         except Exception as e:
@@ -557,53 +604,83 @@ class MarketIntelligenceEngine:
             return 0.1
     
     def _calculate_market_strength(self, pair_analyses: Dict) -> Dict:
-        """Calculate overall market strength indicators - FIXED"""
+        """
+        Calculate overall market strength indicators.
+
+        FIXED (Jan 2026): Previous algorithm counted pairs without magnitude weighting.
+        A 0.2% move counted the same as a 5% move. New algorithm:
+        1. Weights market bias by actual price change magnitude
+        2. Uses 10% threshold to avoid noise-driven bias switches
+        3. Calculates directional consensus based on magnitude, not count
+        """
         try:
             if not pair_analyses:
                 return self._get_fallback_market_strength()
-            
+
             total_trend_strength = 0
             total_volatility = 0
+            bullish_weight = 0.0  # Sum of positive changes
+            bearish_weight = 0.0  # Sum of negative changes (abs)
             bullish_pairs = 0
             bearish_pairs = 0
             valid_pairs = 0
-            
+
             for epic, analysis in pair_analyses.items():
                 try:
                     # Safe access to regime scores
                     regime_scores = analysis.get('regime_scores', {})
                     total_trend_strength += regime_scores.get('trending', 0.5)
                     total_volatility += regime_scores.get('high_volatility', 0.5)
-                    
+
                     price_change = analysis.get('price_change_24h', 0)
-                    if price_change > 0.001:  # >0.1% gain
+
+                    # Weight by magnitude (not just count)
+                    if price_change > 0.0005:  # >0.05% gain (reduce noise threshold)
+                        bullish_weight += price_change
                         bullish_pairs += 1
-                    elif price_change < -0.001:  # >0.1% loss
+                    elif price_change < -0.0005:  # >0.05% loss
+                        bearish_weight += abs(price_change)
                         bearish_pairs += 1
-                    
+
                     valid_pairs += 1
                 except:
                     continue
-            
+
             if valid_pairs == 0:
                 return self._get_fallback_market_strength()
-            
-            # Determine market bias
-            if bullish_pairs > bearish_pairs:
-                market_bias = 'bullish'
-            elif bearish_pairs > bullish_pairs:
-                market_bias = 'bearish'
+
+            # Determine market bias using magnitude weighting
+            # Require 10% stronger weight to change bias (avoid noise)
+            total_weight = bullish_weight + bearish_weight
+            if total_weight > 0:
+                bullish_ratio = bullish_weight / total_weight
+                bearish_ratio = bearish_weight / total_weight
+
+                if bullish_ratio > 0.55:  # >55% bullish weight
+                    market_bias = 'bullish'
+                elif bearish_ratio > 0.55:  # >55% bearish weight
+                    market_bias = 'bearish'
+                else:
+                    market_bias = 'neutral'
             else:
                 market_bias = 'neutral'
-            
+
+            # Directional consensus based on magnitude dominance
+            directional_consensus = max(bullish_weight, bearish_weight) / total_weight if total_weight > 0 else 0.5
+
             return {
                 'average_trend_strength': total_trend_strength / valid_pairs,
                 'average_volatility': total_volatility / valid_pairs,
                 'market_bias': market_bias,
-                'directional_consensus': max(bullish_pairs, bearish_pairs) / valid_pairs if valid_pairs > 0 else 0.5,
-                'market_efficiency': 1 - abs(bullish_pairs - bearish_pairs) / valid_pairs if valid_pairs > 0 else 0.5
+                'directional_consensus': directional_consensus,
+                'market_efficiency': 1 - abs(bullish_weight - bearish_weight) / total_weight if total_weight > 0 else 0.5,
+                # Additional debug info
+                'bullish_pairs': bullish_pairs,
+                'bearish_pairs': bearish_pairs,
+                'bullish_weight': round(bullish_weight * 100, 2),  # As percentage
+                'bearish_weight': round(bearish_weight * 100, 2)
             }
-            
+
         except Exception as e:
             self.logger.warning(f"Market strength calculation error: {e}")
             return self._get_fallback_market_strength()
@@ -676,31 +753,74 @@ class MarketIntelligenceEngine:
             return {}
     
     def _determine_risk_sentiment(self, price_changes: Dict) -> str:
-        """Determine market risk sentiment - FIXED"""
+        """
+        Determine market risk sentiment based on currency strength.
+
+        FIXED (Jan 2026): Previous algorithm used abs(change) which always
+        favored safe havens due to pair count bias. New algorithm:
+        1. Calculates per-currency strength (positive = strengthening)
+        2. Normalizes by number of pairs per currency
+        3. Compares average safe-haven strength vs risk-currency strength
+
+        Risk Off = Safe havens (JPY, CHF, USD) strengthening
+        Risk On = Risk currencies (AUD, NZD, CAD) strengthening
+        """
         try:
-            safe_havens = ['JPY', 'CHF', 'USD']
-            risk_currencies = ['AUD', 'NZD', 'CAD']
-            
-            safe_haven_performance = 0
-            risk_currency_performance = 0
-            
+            # Track strength per currency (positive = currency strengthening)
+            safe_havens = {'JPY': [], 'CHF': [], 'USD': []}
+            risk_currencies = {'AUD': [], 'NZD': [], 'CAD': []}
+
             for epic, change in price_changes.items():
-                for safe_currency in safe_havens:
-                    if safe_currency in epic:
-                        safe_haven_performance += abs(change)
-                
-                for risk_currency in risk_currencies:
-                    if risk_currency in epic:
-                        risk_currency_performance += abs(change)
-            
-            if safe_haven_performance > risk_currency_performance:
+                # Parse pair from epic (e.g., "CS.D.EURUSD.MINI.IP" -> "EURUSD")
+                pair = epic.replace('CS.D.', '').split('.')[0]
+                if len(pair) < 6:
+                    continue
+
+                base = pair[:3]   # First currency (e.g., EUR in EURUSD)
+                quote = pair[3:6]  # Second currency (e.g., USD in EURUSD)
+
+                # For base currency: if pair goes UP, base strengthened
+                # For quote currency: if pair goes UP, quote weakened (inverse)
+
+                # Safe havens
+                for sh in safe_havens:
+                    if sh == base:
+                        safe_havens[sh].append(change)  # Direct
+                    elif sh == quote:
+                        safe_havens[sh].append(-change)  # Inverse
+
+                # Risk currencies
+                for rc in risk_currencies:
+                    if rc == base:
+                        risk_currencies[rc].append(change)  # Direct
+                    elif rc == quote:
+                        risk_currencies[rc].append(-change)  # Inverse
+
+            # Calculate average strength per currency group
+            def avg_strength(currency_dict):
+                all_values = []
+                for values in currency_dict.values():
+                    if values:
+                        all_values.extend(values)
+                return sum(all_values) / len(all_values) if all_values else 0
+
+            sh_avg = avg_strength(safe_havens)
+            rc_avg = avg_strength(risk_currencies)
+
+            # Threshold of 0.0005 (0.05%) to avoid noise
+            threshold = 0.0005
+
+            if sh_avg > rc_avg + threshold:
+                # Safe havens outperforming = risk off
                 return 'risk_off'
-            elif risk_currency_performance > safe_haven_performance:
+            elif rc_avg > sh_avg + threshold:
+                # Risk currencies outperforming = risk on
                 return 'risk_on'
             else:
                 return 'neutral'
-                
-        except:
+
+        except Exception as e:
+            self.logger.warning(f"Risk sentiment calculation error: {e}")
             return 'neutral'
     
     def _recommend_strategy_for_regime(self, regime: str, confidence: float) -> Dict:

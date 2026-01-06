@@ -398,10 +398,10 @@ MARKET_BIAS_MIN_CONSENSUS = 0.70              # Block when directional_consensus
 #
 # Solution: Separate volatility from directionality, add ADX-based trending
 #
-# DISABLED BY DEFAULT - Only collecting data for analysis
+# ENABLED (Jan 2026) - Enhanced regime detection with ADX-based trending
 
 # Enable enhanced regime detection (replaces legacy logic)
-ENHANCED_REGIME_DETECTION_ENABLED = False   # DISABLED - data collection only
+ENHANCED_REGIME_DETECTION_ENABLED = True   # ENABLED - uses ADX-based trending
 
 # ADX-based trending detection thresholds
 ADX_TRENDING_THRESHOLD = 25          # ADX > 25 = trending market

@@ -373,6 +373,7 @@ class MarketIntelligenceHistoryManager:
             })
 
             # Extract individual epic regimes for easier querying
+            # UPDATED (Jan 2026): Now includes structure_regime and volatility_level
             individual_epic_regimes = {}
             for epic, analysis in pair_analyses.items():
                 if isinstance(analysis, dict) and 'regime_scores' in analysis:
@@ -382,10 +383,18 @@ class MarketIntelligenceHistoryManager:
 
                     # Clean epic name for consistent key
                     clean_epic = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+
+                    # Get new structure/volatility fields (Jan 2026)
+                    structure_regime = analysis.get('structure_regime')
+                    volatility_level = analysis.get('volatility_level')
+
                     individual_epic_regimes[clean_epic] = {
                         'regime': epic_regime,
                         'confidence': float(epic_confidence),
-                        'regime_scores': regime_scores
+                        'regime_scores': regime_scores,
+                        # New fields for separated structure/volatility
+                        'structure_regime': structure_regime,
+                        'volatility_level': volatility_level
                     }
 
             data['individual_epic_regimes'] = self._safe_json_serialize(individual_epic_regimes)
