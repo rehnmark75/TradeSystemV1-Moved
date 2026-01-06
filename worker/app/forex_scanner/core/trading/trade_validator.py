@@ -163,8 +163,8 @@ class TradeValidator:
         self.max_risk_percent = float(self._scanner_cfg.max_risk_per_trade or 2.0)
         self.min_risk_reward_ratio = float(self._scanner_cfg.default_risk_reward or 1.0)
 
-        # EMA 200 trend filter from database ONLY - no fallback
-        self.enable_ema200_filter = self._scanner_cfg.enable_ema200_contradiction_filter
+        # NOTE: EMA200 filter removed (Jan 2026) - redundant with SMC Simple strategy's
+        # built-in 4H 50 EMA bias check. The strategy handles trend alignment internally.
 
         # Signal freshness configuration from database ONLY - no fallback
         self.enable_freshness_check = self._scanner_cfg.enable_signal_freshness_check
@@ -346,8 +346,6 @@ class TradeValidator:
             'failed_format': 0,
             'failed_market_hours': 0,
             'failed_epic_blocked': 0,
-            'failed_ema200_filter': 0,
-            'failed_ema200_error': 0,  # NEW: EMA200 validation exceptions
             'failed_sr_validation': 0,  # NEW
             'failed_risk_management': 0,
             'failed_other': 0,
@@ -368,7 +366,6 @@ class TradeValidator:
         self.logger.info(f"   Min confidence: {self.min_confidence:.1%}")
         self.logger.info(f"   Market hours validation: {self.validate_market_hours}")
         self.logger.info(f"   Epic restrictions: {len(self.allowed_epics)} allowed, {len(self.blocked_epics)} blocked")
-        self.logger.info(f"   EMA 200 trend filter: {'✅ Enabled' if self.enable_ema200_filter else '❌ Disabled'}")
         self.logger.info(f"   Freshness check: {'✅ Enabled' if self.enable_freshness_check else '❌ Disabled'}")
         self.logger.info(f"   S/R validation: {'✅ Enabled' if self.enable_sr_validation else '❌ Disabled'}")
         if self.enable_claude_filtering:
@@ -1128,19 +1125,10 @@ class TradeValidator:
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 6 PASSED - Risk validation")
 
-            
-            # 7. NEW: EMA 200 trend filter validation
-            if self.enable_ema200_filter:
-                valid, msg = self.validate_ema200_trend_filter(signal)
-                if not valid:
-                    self.validation_stats['failed_ema200_filter'] += 1
-                    if self.backtest_mode:
-                        self.logger.warning(f"🚫 BACKTEST STEP 7 FAILED - EMA200 filter: {msg}")
-                    return False, f"EMA200 Trend: {msg}"
-            elif self.backtest_mode:
-                self.logger.info(f"✅ BACKTEST STEP 7 PASSED - EMA200 filter validation")
-            
-            # 8. ENHANCED: Support/Resistance validation with safe market data handling
+            # NOTE: EMA200 filter step removed (Jan 2026) - redundant with SMC Simple strategy's
+            # built-in 4H 50 EMA bias check. The strategy handles trend alignment internally.
+
+            # 7. ENHANCED: Support/Resistance validation with safe market data handling
             # Skip S/R validation for strategies with built-in confluence analysis
             strategy = signal.get('strategy', '').lower()
             strategy_name = signal.get('strategy_name', '').lower()
@@ -1151,14 +1139,14 @@ class TradeValidator:
                 if not valid:
                     self.validation_stats['failed_sr_validation'] += 1
                     if self.backtest_mode:
-                        self.logger.warning(f"🚫 BACKTEST STEP 8 FAILED - S/R Level: {msg}")
+                        self.logger.warning(f"🚫 BACKTEST STEP 7 FAILED - S/R Level: {msg}")
                     return False, f"S/R Level: {msg}"
             elif skip_sr_for_strategy and self.backtest_mode:
-                self.logger.info(f"✅ BACKTEST STEP 8 PASSED - S/R validation (skipped for {strategy} - has built-in confluence)")
+                self.logger.info(f"✅ BACKTEST STEP 7 PASSED - S/R validation (skipped for {strategy} - has built-in confluence)")
             elif self.backtest_mode:
-                self.logger.info(f"✅ BACKTEST STEP 8 PASSED - S/R validation (disabled)")
+                self.logger.info(f"✅ BACKTEST STEP 7 PASSED - S/R validation (disabled)")
             
-            # 9. ⭐ NEW: Economic News filtering (if enabled) ⭐
+            # 8. Economic News filtering (if enabled)
             if self.enable_news_filtering:
                 valid, msg, news_context = self._validate_with_news_filter(signal)
                 if not valid:
@@ -1166,19 +1154,19 @@ class TradeValidator:
                     epic = signal.get('epic', 'Unknown')
                     signal_type = signal.get('signal_type', 'Unknown')
                     if self.backtest_mode:
-                        self.logger.warning(f"🚫 BACKTEST STEP 9 FAILED - News filtering: {msg}")
+                        self.logger.warning(f"🚫 BACKTEST STEP 8 FAILED - News filtering: {msg}")
                     self.logger.info(f"📰 NEWS BLOCKED: {epic} {signal_type} - {msg}")
                     return False, f"News filtering: {msg}"
                 else:
                     if self.backtest_mode:
-                        self.logger.info(f"✅ BACKTEST STEP 9 PASSED - News filtering")
+                        self.logger.info(f"✅ BACKTEST STEP 8 PASSED - News filtering")
                     # Add news context to signal for later use
                     if news_context:
                         signal['news_validation_context'] = news_context
             elif self.backtest_mode:
-                self.logger.info(f"✅ BACKTEST STEP 9 PASSED - News filtering (disabled)")
+                self.logger.info(f"✅ BACKTEST STEP 8 PASSED - News filtering (disabled)")
 
-            # 10. Market Intelligence validation (if enabled) - fast rule-based filtering
+            # 9. Market Intelligence validation (if enabled) - fast rule-based filtering
             self.logger.info(f"🧠 {epic}: Market Intelligence filtering enabled: {self.enable_market_intelligence_filtering}")
             if self.enable_market_intelligence_filtering:
                 self.logger.info(f"🧠🎯 {epic}: CALLING MARKET INTELLIGENCE VALIDATION for {strategy} strategy")
@@ -1186,29 +1174,29 @@ class TradeValidator:
                 if not valid:
                     self.validation_stats['failed_other'] += 1
                     if self.backtest_mode:
-                        self.logger.warning(f"🚫 BACKTEST STEP 10 FAILED - Market Intelligence: {msg}")
+                        self.logger.warning(f"🚫 BACKTEST STEP 9 FAILED - Market Intelligence: {msg}")
                     self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY MARKET INTELLIGENCE: {msg}")
                     return False, f"Market Intelligence: {msg}"
                 else:
                     if self.backtest_mode:
-                        self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Market Intelligence")
+                        self.logger.info(f"✅ BACKTEST STEP 9 PASSED - Market Intelligence")
                     self.logger.info(f"🧠✅ {epic}: Market Intelligence validation PASSED: {msg}")
             else:
                 if self.backtest_mode:
-                    self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Market Intelligence (disabled)")
+                    self.logger.info(f"✅ BACKTEST STEP 9 PASSED - Market Intelligence (disabled)")
                 self.logger.info(f"🧠⏭️ {epic}: Market Intelligence filtering DISABLED - skipping regime checks")
 
-            # 11. Trading suitability check
+            # 10. Trading suitability check
             valid, msg = self.check_trading_suitability(signal)
             if not valid:
                 self.validation_stats['failed_other'] += 1
                 if self.backtest_mode:
-                    self.logger.warning(f"🚫 BACKTEST STEP 11 FAILED - Trading suitability: {msg}")
+                    self.logger.warning(f"🚫 BACKTEST STEP 10 FAILED - Trading suitability: {msg}")
                 return False, f"Trading: {msg}"
             elif self.backtest_mode:
-                self.logger.info(f"✅ BACKTEST STEP 11 PASSED - Trading suitability")
+                self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Trading suitability")
 
-            # 12. ⭐ Universal Market Intelligence Capture ⭐
+            # 11. Universal Market Intelligence Capture
             # MOVED BEFORE CLAUDE: Capture market intelligence for ALL signals that reach this point
             # This ensures strategy_metadata is populated even for Claude-rejected signals
             # (Previously was step 13, after Claude filtering, which caused NULL metadata for rejections)
@@ -1503,189 +1491,11 @@ class TradeValidator:
         """
         # Delegate to the safe validation method
         return self._safe_validate_support_resistance(signal, market_data)
-    
-    def validate_ema200_trend_filter(self, signal: Dict) -> Tuple[bool, str]:
-        """
-        EMA 200 trend filter - Strategy-aware validation
 
-        EMA Strategy: STRICT trend alignment required (must trade with EMA 200)
-        MACD Strategy: OPTIONAL trend alignment (can trade counter-trend momentum reversals)
-        Ranging Market Strategy: NO trend filter (designed for non-trending/ranging conditions)
-        Other Strategies: STRICT trend alignment by default
+    # NOTE: validate_ema200_trend_filter method removed (Jan 2026)
+    # The EMA200 filter was redundant with SMC Simple strategy's built-in 4H 50 EMA bias check.
+    # The strategy handles trend alignment internally via _check_ema_bias() method.
 
-        UPDATED: Strategy-aware filtering to support:
-        - Momentum reversals (MACD)
-        - Ranging market conditions (ranging_market)
-        """
-        try:
-            signal_type = signal.get('signal_type', '').upper()
-            epic = signal.get('epic', 'Unknown')
-            strategy = signal.get('strategy', '').upper()
-
-            # GET CURRENT PRICE - flexible approach
-            current_price = None
-            price_candidates = ['price', 'current_price', 'close_price', 'entry_price', 'close']
-
-            # Try standard fields first
-            for field in price_candidates:
-                if field in signal and signal[field] is not None:
-                    try:
-                        current_price = float(signal[field])
-                        self.logger.debug(f"Using {field} as current price: {current_price:.5f}")
-                        break
-                    except (ValueError, TypeError):
-                        continue
-
-            # CRITICAL FIX: Check ema_data for current price if not found
-            if current_price is None and 'ema_data' in signal:
-                ema_data = signal['ema_data']
-                if isinstance(ema_data, dict):
-                    # Use shortest EMA as current price proxy
-                    for field in ['ema_1', 'ema_2', 'ema_5', 'current_price', 'close']:
-                        if field in ema_data and ema_data[field] is not None:
-                            try:
-                                current_price = float(ema_data[field])
-                                self.logger.debug(f"Using ema_data.{field} as current price: {current_price:.5f}")
-                                break
-                            except (ValueError, TypeError):
-                                continue
-
-            # GET EMA 200 - flexible approach for your signal format
-            ema_200 = None
-
-            # Your strategies likely put EMA values directly in signal
-            ema_200_candidates = ['ema_200', 'ema_trend', 'ema_200_current', 'ema_long']
-
-            for field in ema_200_candidates:
-                if field in signal and signal[field] is not None:
-                    try:
-                        ema_200 = float(signal[field])
-                        self.logger.debug(f"Using {field} as EMA 200: {ema_200:.5f}")
-                        break
-                    except (ValueError, TypeError):
-                        continue
-
-            # Check nested structures if needed
-            if ema_200 is None and 'ema_data' in signal:
-                ema_data = signal['ema_data']
-                if isinstance(ema_data, dict):
-                    for field in ema_200_candidates:
-                        if field in ema_data and ema_data[field] is not None:
-                            try:
-                                ema_200 = float(ema_data[field])
-                                self.logger.debug(f"Using ema_data.{field} as EMA 200: {ema_200:.5f}")
-                                break
-                            except (ValueError, TypeError):
-                                continue
-
-            # STRICT: REJECT signals with missing data (no bypass allowed)
-            if current_price is None:
-                self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: No current price data found")
-                self.logger.error(f"   Signal structure debug: {list(signal.keys())}")
-                self.logger.error(f"   Price fields checked: {price_candidates}")
-                if 'ema_data' in signal:
-                    self.logger.error(f"   EMA data fields: {list(signal['ema_data'].keys()) if isinstance(signal['ema_data'], dict) else 'Not a dict'}")
-                return False, "EMA200 filter: No current price data - REJECTED"
-
-            if ema_200 is None:
-                self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: No EMA 200 data found")
-                self.logger.error(f"   Signal structure debug: {list(signal.keys())}")
-                self.logger.error(f"   EMA200 fields checked: {ema_200_candidates}")
-                if 'ema_data' in signal:
-                    self.logger.error(f"   EMA data fields: {list(signal['ema_data'].keys()) if isinstance(signal['ema_data'], dict) else 'Not a dict'}")
-                return False, "EMA200 filter: No EMA 200 data - REJECTED"
-
-            # Validate extracted values are reasonable
-            if current_price <= 0 or ema_200 <= 0:
-                self.logger.error(f"🚫 EMA200 filter REJECTING {epic}: Invalid price values - price: {current_price}, ema200: {ema_200}")
-                return False, "EMA200 filter: Invalid price values - REJECTED"
-
-            # 🔥 SCALPING BYPASS: Scalping uses faster EMAs (34/50) instead of EMA 200
-            # EMA 200 (~16.5 hours on 5m) is too slow for 2-hour scalping trades
-            scalping_mode = signal.get('scalping_mode', '')
-            is_scalping = ('scalping' in strategy.lower() or
-                          scalping_mode in ['linda_raschke', 'ranging_momentum', 'linda_macd_zero_cross',
-                                           'linda_macd_cross', 'linda_macd_momentum', 'linda_anti_pattern',
-                                           'trending_adaptive', 'ultra_fast', 'dual_ma'])
-
-            if is_scalping:
-                self.logger.info(f"✅ SCALPING BYPASS: {epic} {signal_type} uses EMA 34/50, skipping EMA 200 filter")
-                return True, f"Scalping strategy uses EMA 34/50 instead of EMA 200"
-
-            # STRATEGY-AWARE FILTERING: Some strategies exempt from EMA200 trend filter
-            # - MACD: Can trade counter-trend (momentum reversals)
-            # - ranging_market: Specifically designed for ranging/non-trending conditions
-            # - SMC_STRUCTURE: Has its own HTF trend validation and structure-based entries
-            # - SMC_SIMPLE: Has its own HTF trend validation
-            # - EMA_DOUBLE_CONFIRMATION: Has its own 4H EMA 21 HTF trend filter
-            is_macd_strategy = 'MACD' in strategy
-            is_ranging_strategy = 'ranging_market' in strategy.lower()
-            is_smc_structure = 'SMC_STRUCTURE' in strategy or 'smc_structure' in strategy.lower()
-            is_smc_simple = 'SMC_SIMPLE' in strategy or 'smc_simple' in strategy.lower()
-            is_ema_double = 'EMA_DOUBLE' in strategy or 'ema_double' in strategy.lower()
-
-            # Apply trend filter logic with comprehensive logging
-            self.logger.info(f"📊 EMA200 validation for {epic} {signal_type} ({strategy}): price={current_price:.5f}, ema200={ema_200:.5f}")
-
-            if signal_type in ['BUY', 'BULL']:
-                if current_price > ema_200:
-                    self.logger.info(f"✅ BUY signal APPROVED {epic}: {current_price:.5f} > {ema_200:.5f} (price above EMA200)")
-                    return True, f"BUY valid: price {current_price:.5f} above EMA200 {ema_200:.5f}"
-                else:
-                    # Strategy-specific exemptions
-                    if is_macd_strategy:
-                        self.logger.info(f"✅ MACD BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (counter-trend momentum reversal allowed)")
-                        return True, f"MACD BUY valid: counter-trend reversal (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
-                    elif is_ranging_strategy:
-                        self.logger.info(f"✅ RANGING BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (ranging market strategy - no trend filter)")
-                        return True, f"RANGING BUY valid: ranging market condition (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
-                    elif is_smc_structure:
-                        self.logger.info(f"✅ SMC_STRUCTURE BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (has own HTF trend validation)")
-                        return True, f"SMC_STRUCTURE BUY valid: structure-based entry with HTF validation (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
-                    elif is_smc_simple:
-                        self.logger.info(f"✅ SMC_SIMPLE BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (has own HTF trend validation)")
-                        return True, f"SMC_SIMPLE BUY valid: SMC-based entry with HTF validation (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
-                    elif is_ema_double:
-                        self.logger.info(f"✅ EMA_DOUBLE BUY signal APPROVED {epic}: {current_price:.5f} <= {ema_200:.5f} (has own 4H EMA 21 HTF filter)")
-                        return True, f"EMA_DOUBLE BUY valid: 4H EMA 21 trend filter applied (price {current_price:.5f} at/below EMA200 {ema_200:.5f})"
-                    else:
-                        self.logger.warning(f"🚫 BUY signal REJECTED {epic}: {current_price:.5f} <= {ema_200:.5f} (price at/below EMA200)")
-                        return False, f"BUY rejected: price {current_price:.5f} at/below EMA200 {ema_200:.5f}"
-
-            elif signal_type in ['SELL', 'BEAR']:
-                if current_price < ema_200:
-                    self.logger.info(f"✅ SELL signal APPROVED {epic}: {current_price:.5f} < {ema_200:.5f} (price below EMA200)")
-                    return True, f"SELL valid: price {current_price:.5f} below EMA200 {ema_200:.5f}"
-                else:
-                    # Strategy-specific exemptions
-                    if is_macd_strategy:
-                        self.logger.info(f"✅ MACD SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (counter-trend momentum reversal allowed)")
-                        return True, f"MACD SELL valid: counter-trend reversal (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
-                    elif is_ranging_strategy:
-                        self.logger.info(f"✅ RANGING SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (ranging market strategy - no trend filter)")
-                        return True, f"RANGING SELL valid: ranging market condition (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
-                    elif is_smc_structure:
-                        self.logger.info(f"✅ SMC_STRUCTURE SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (has own HTF trend validation)")
-                        return True, f"SMC_STRUCTURE SELL valid: structure-based entry with HTF validation (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
-                    elif is_smc_simple:
-                        self.logger.info(f"✅ SMC_SIMPLE SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (has own HTF trend validation)")
-                        return True, f"SMC_SIMPLE SELL valid: SMC-based entry with HTF validation (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
-                    elif is_ema_double:
-                        self.logger.info(f"✅ EMA_DOUBLE SELL signal APPROVED {epic}: {current_price:.5f} >= {ema_200:.5f} (has own 4H EMA 21 HTF filter)")
-                        return True, f"EMA_DOUBLE SELL valid: 4H EMA 21 trend filter applied (price {current_price:.5f} at/above EMA200 {ema_200:.5f})"
-                    else:
-                        self.logger.warning(f"🚫 SELL signal REJECTED {epic}: {current_price:.5f} >= {ema_200:.5f} (price at/above EMA200)")
-                        return False, f"SELL rejected: price {current_price:.5f} at/above EMA200 {ema_200:.5f}"
-
-            else:
-                return True, f"Unknown signal type {signal_type} (allowing)"
-
-        except Exception as e:
-            self.logger.error(f"❌ EMA200 trend filter error: {e}")
-            self.logger.error(f"🚫 CRITICAL: Rejecting trade due to EMA200 validation failure - fail-safe mode")
-            self.validation_stats['failed_ema200_error'] += 1
-            return False, f"EMA200 filter error (REJECTED for safety): {str(e)}"
-    
     def get_validation_statistics(self) -> Dict:
         """
         FIXED: Enhanced validation statistics with EXACT status messages expected by TradingOrchestrator
@@ -1709,7 +1519,6 @@ class TradeValidator:
                 'validate_market_hours': self.validate_market_hours,
                 # FIXED: Add the missing 'trading_hours' field that TradingOrchestrator expects
                 'trading_hours': f"{self.trading_start_hour:02d}:00-{self.trading_end_hour:02d}:00" if self.validate_market_hours else "Disabled",
-                'ema200_trend_filter': self.enable_ema200_filter,
                 'sr_validation': self.enable_sr_validation,
                 'freshness_check': self.enable_freshness_check,
                 'allowed_epics': len(self.allowed_epics) if self.allowed_epics else 'All',
@@ -1732,8 +1541,6 @@ class TradeValidator:
                 'success_rate': f"{(self.validation_stats['passed_validations'] / total) * 100:.1f}%",
                 'confidence_failure_rate': f"{(self.validation_stats['failed_confidence'] / total) * 100:.1f}%",
                 'format_failure_rate': f"{(self.validation_stats['failed_format'] / total) * 100:.1f}%",
-                'ema200_failure_rate': f"{(self.validation_stats['failed_ema200_filter'] / total) * 100:.1f}%",
-                'ema200_error_rate': f"{(self.validation_stats['failed_ema200_error'] / total) * 100:.1f}%",
                 'sr_failure_rate': f"{(self.validation_stats['failed_sr_validation'] / total) * 100:.1f}%",
                 'news_failure_rate': f"{(self.validation_stats['failed_news_filtering'] / total) * 100:.1f}%",
                 'claude_failure_rate': f"{(self.validation_stats['failed_claude_rejection'] + self.validation_stats['failed_claude_score']) / total * 100:.1f}%",
@@ -1770,7 +1577,6 @@ class TradeValidator:
                 'Market hours check',
                 'Epic restrictions',
                 'Freshness validation',
-                'EMA 200 trend filter (STRICT - no bypasses)',
                 'Support/Resistance validation',
                 'Economic news filtering',
                 'Claude AI filtering',
@@ -1788,13 +1594,11 @@ class TradeValidator:
         config_summary.append(f"Market hours: {'Enabled' if self.validate_market_hours else 'Disabled'}")
         if self.validate_market_hours:
             config_summary.append(f"Trading hours: {self.trading_start_hour:02d}:00-{self.trading_end_hour:02d}:00")
-        config_summary.append(f"EMA200 filter: {'Enabled' if self.enable_ema200_filter else 'Disabled'} (ALL strategies must follow trend)")  # 🆕 UPDATED
         config_summary.append(f"Freshness: {'Enabled' if self.enable_freshness_check else 'Disabled'}")
         config_summary.append(f"Epic restrictions: {len(self.allowed_epics) if self.allowed_epics else 0} allowed, {len(self.blocked_epics)} blocked")
         config_summary.append(f"S/R validation: {'Enabled' if self.enable_sr_validation else 'Disabled'}")
-        config_summary.append(f"News filtering: {'Enabled' if self.enable_news_filtering else 'Disabled'}")  # 🆕 NEW
-        config_summary.append(f"Claude filtering: {'Enabled' if self.enable_claude_filtering else 'Disabled'}")  # 🆕 NEW
-        config_summary.append(f"Trend filter: STRICT (no bypasses)")  # 🆕 UPDATED
+        config_summary.append(f"News filtering: {'Enabled' if self.enable_news_filtering else 'Disabled'}")
+        config_summary.append(f"Claude filtering: {'Enabled' if self.enable_claude_filtering else 'Disabled'}")
         
         if self.enable_sr_validation and self.sr_validator:
             config_summary.append(f"S/R config: {self.sr_validator.get_validation_summary()}")

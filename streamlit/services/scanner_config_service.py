@@ -137,20 +137,9 @@ def get_config_by_category(category: str) -> Dict[str, Any]:
             'enable_trading_time_controls', 'trading_cutoff_time_utc', 'trade_cooldown_enabled',
             'trade_cooldown_minutes', 'user_timezone', 'respect_trading_hours'
         ],
-        'safety': [
-            'enable_critical_safety_filters', 'enable_ema200_contradiction_filter',
-            'enable_ema_stack_contradiction_filter', 'require_indicator_consensus',
-            'min_confirming_indicators', 'enable_emergency_circuit_breaker',
-            'max_contradictions_allowed', 'active_safety_preset', 'enable_large_candle_filter',
-            'large_candle_atr_multiplier', 'consecutive_large_candles_threshold',
-            'movement_lookback_periods', 'large_candle_filter_cooldown', 'ema200_minimum_margin',
-            'safety_filter_log_level', 'excessive_movement_threshold_pips',
-            'safety_filter_presets', 'large_candle_filter_presets'
-        ],
-        'adx': [
-            'adx_filter_enabled', 'adx_filter_mode', 'adx_period', 'adx_grace_period_bars',
-            'adx_thresholds', 'adx_pair_multipliers'
-        ],
+        # NOTE: 'safety' section removed (Jan 2026) - EMA200/consensus filters were redundant
+        # with SMC Simple strategy's built-in 4H 50 EMA bias check
+        # NOTE: 'adx' section removed (Jan 2026) - was never used by active strategies
         'smc_conflict': [
             'smart_money_readonly_enabled', 'smart_money_analysis_timeout',
             'smc_conflict_filter_enabled', 'smc_min_directional_consensus',
@@ -228,9 +217,9 @@ def save_global_config(
             values = []
 
             # JSONB fields that need special handling
+            # NOTE: adx_thresholds, adx_pair_multipliers removed (Jan 2026)
             jsonb_fields = [
-                'adx_thresholds', 'adx_pair_multipliers',
-                'deduplication_presets', 'safety_filter_presets', 'large_candle_filter_presets'
+                'deduplication_presets'
             ]
 
             for key, value in updates.items():
@@ -430,7 +419,7 @@ def validate_config_value(field: str, value: Any) -> tuple[bool, str]:
         'trading_start_hour': lambda v: (0 <= v <= 23, "Must be between 0 and 23"),
         'trading_end_hour': lambda v: (0 <= v <= 23, "Must be between 0 and 23"),
         'trading_cutoff_time_utc': lambda v: (0 <= v <= 23, "Must be between 0 and 23"),
-        'adx_period': lambda v: (5 <= v <= 50, "Must be between 5 and 50"),
+        # NOTE: adx_period validation removed (Jan 2026)
     }
 
     if field in validations:
@@ -512,30 +501,8 @@ def get_field_metadata(field: str) -> Dict[str, Any]:
             'format': '%.1f'
         },
 
-        # Safety settings
-        'max_contradictions_allowed': {
-            'min': 0, 'max': 10, 'step': 1,
-            'help': 'Maximum indicator contradictions before rejecting signal'
-        },
-        'active_safety_preset': {
-            'options': ['strict', 'balanced', 'permissive', 'emergency'],
-            'help': 'Active safety filter preset'
-        },
-        'large_candle_atr_multiplier': {
-            'min': 1.0, 'max': 5.0, 'step': 0.1,
-            'help': 'ATR multiplier for large candle detection',
-            'format': '%.1f'
-        },
-
-        # ADX settings
-        'adx_period': {
-            'min': 5, 'max': 50, 'step': 1,
-            'help': 'ADX calculation period'
-        },
-        'adx_filter_mode': {
-            'options': ['strict', 'moderate', 'permissive', 'disabled'],
-            'help': 'ADX filter strictness level'
-        },
+        # NOTE: Safety settings removed (Jan 2026) - redundant with SMC Simple strategy
+        # NOTE: ADX filter settings removed (Jan 2026) - was never used by active strategies
 
         # Indicator settings - MACD
         'macd_fast_period': {

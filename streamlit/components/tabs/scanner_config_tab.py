@@ -64,6 +64,9 @@ def render_scanner_config_tab():
     st.divider()
 
     # Sub-tabs for different categories
+    # NOTE: Safety Filters tab removed (Jan 2026) - EMA200/consensus filters were redundant
+    # with SMC Simple strategy's built-in 4H 50 EMA bias check
+    # NOTE: ADX Filter tab removed (Jan 2026) - was never used by active strategies
     sub_tabs = st.tabs([
         "Core Settings",
         "Indicators",
@@ -72,8 +75,6 @@ def render_scanner_config_tab():
         "Duplicate Detection",
         "Risk Management",
         "Trading Hours",
-        "Safety Filters",
-        "ADX Filter",
         "SMC Conflict",
         "Claude AI",
         "Audit Trail"
@@ -101,18 +102,12 @@ def render_scanner_config_tab():
         render_trading_hours_settings(config)
 
     with sub_tabs[7]:
-        render_safety_settings(config)
-
-    with sub_tabs[8]:
-        render_adx_settings(config)
-
-    with sub_tabs[9]:
         render_smc_conflict_settings(config)
 
-    with sub_tabs[10]:
+    with sub_tabs[8]:
         render_claude_validation_settings(config)
 
-    with sub_tabs[11]:
+    with sub_tabs[9]:
         render_audit_trail()
 
 
@@ -1240,263 +1235,6 @@ def render_trading_hours_settings(config: Dict[str, Any]):
             st.session_state.scanner_pending_changes['trade_cooldown_minutes'] = new_cooldown_mins
 
     render_save_section(config, 'trading_hours', updated_by)
-
-
-def render_safety_settings(config: Dict[str, Any]):
-    """Render safety filter settings"""
-    st.subheader("Safety Filter Settings")
-    st.markdown("Critical safety filters to prevent invalid signals")
-
-    updated_by = st.session_state.get('scanner_config_user', 'streamlit_user')
-
-    if 'scanner_pending_changes' not in st.session_state:
-        st.session_state.scanner_pending_changes = {}
-
-    # Preset selector
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        current_preset = config.get('active_safety_preset', 'balanced')
-        new_preset = st.selectbox(
-            "Safety Filter Preset",
-            options=['strict', 'balanced', 'permissive', 'emergency'],
-            index=['strict', 'balanced', 'permissive', 'emergency'].index(current_preset),
-            help="Pre-configured safety settings",
-            key="safety_preset"
-        )
-        if new_preset != current_preset:
-            st.session_state.scanner_pending_changes['active_safety_preset'] = new_preset
-
-    with col2:
-        if st.button("Apply Preset", key="apply_safety_preset"):
-            if apply_preset(config['id'], 'safety_filter', new_preset, updated_by):
-                st.success(f"Applied {new_preset} preset")
-                st.rerun()
-
-    st.divider()
-
-    # Master switch
-    new_enable_safety = st.checkbox(
-        "Enable Critical Safety Filters",
-        value=config.get('enable_critical_safety_filters', True),
-        help="Master switch for all safety filters",
-        key="enable_critical_safety_filters"
-    )
-    if not values_equal(new_enable_safety, config.get('enable_critical_safety_filters')):
-        st.session_state.scanner_pending_changes['enable_critical_safety_filters'] = new_enable_safety
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("**EMA Filters**")
-
-        new_ema200_filter = st.checkbox(
-            "EMA200 Contradiction Filter",
-            value=config.get('enable_ema200_contradiction_filter', True),
-            help="Reject signals contradicting EMA200 trend",
-            key="enable_ema200_contradiction_filter"
-        )
-        if not values_equal(new_ema200_filter, config.get('enable_ema200_contradiction_filter')):
-            st.session_state.scanner_pending_changes['enable_ema200_contradiction_filter'] = new_ema200_filter
-
-        new_ema_stack_filter = st.checkbox(
-            "EMA Stack Contradiction Filter",
-            value=config.get('enable_ema_stack_contradiction_filter', True),
-            help="Reject signals with perfect stack contradiction",
-            key="enable_ema_stack_contradiction_filter"
-        )
-        if not values_equal(new_ema_stack_filter, config.get('enable_ema_stack_contradiction_filter')):
-            st.session_state.scanner_pending_changes['enable_ema_stack_contradiction_filter'] = new_ema_stack_filter
-
-        new_ema_margin = st.number_input(
-            "EMA200 Minimum Margin",
-            value=_get_float(config, 'ema200_minimum_margin', 0.002),
-            min_value=0.0005, max_value=0.01, step=0.0005,
-            format="%.4f",
-            help="Minimum margin for contra-trend signals",
-            key="ema200_minimum_margin"
-        )
-        if not values_equal(new_ema_margin, config.get('ema200_minimum_margin')):
-            st.session_state.scanner_pending_changes['ema200_minimum_margin'] = new_ema_margin
-
-    with col2:
-        st.markdown("**Consensus & Circuit Breaker**")
-
-        new_require_consensus = st.checkbox(
-            "Require Indicator Consensus",
-            value=config.get('require_indicator_consensus', True),
-            help="Require multiple indicators to confirm",
-            key="require_indicator_consensus"
-        )
-        if not values_equal(new_require_consensus, config.get('require_indicator_consensus')):
-            st.session_state.scanner_pending_changes['require_indicator_consensus'] = new_require_consensus
-
-        new_min_indicators = st.number_input(
-            "Min Confirming Indicators",
-            value=_get_int(config, 'min_confirming_indicators', 1),
-            min_value=0, max_value=5, step=1,
-            help="Minimum indicators that must confirm",
-            key="min_confirming_indicators"
-        )
-        if not values_equal(new_min_indicators, config.get('min_confirming_indicators')):
-            st.session_state.scanner_pending_changes['min_confirming_indicators'] = new_min_indicators
-
-        new_circuit_breaker = st.checkbox(
-            "Emergency Circuit Breaker",
-            value=config.get('enable_emergency_circuit_breaker', True),
-            help="Enable emergency rejection for too many contradictions",
-            key="enable_emergency_circuit_breaker"
-        )
-        if not values_equal(new_circuit_breaker, config.get('enable_emergency_circuit_breaker')):
-            st.session_state.scanner_pending_changes['enable_emergency_circuit_breaker'] = new_circuit_breaker
-
-        new_max_contradictions = st.number_input(
-            "Max Contradictions Allowed",
-            value=_get_int(config, 'max_contradictions_allowed', 5),
-            min_value=0, max_value=10, step=1,
-            help="Maximum contradictions before rejection",
-            key="max_contradictions_allowed"
-        )
-        if not values_equal(new_max_contradictions, config.get('max_contradictions_allowed')):
-            st.session_state.scanner_pending_changes['max_contradictions_allowed'] = new_max_contradictions
-
-    # Large candle filter in expander
-    with st.expander("Large Candle Filter Settings", expanded=False):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            new_large_candle = st.checkbox(
-                "Enable Large Candle Filter",
-                value=config.get('enable_large_candle_filter', True),
-                help="Filter out signals after large price movements",
-                key="enable_large_candle_filter"
-            )
-            if not values_equal(new_large_candle, config.get('enable_large_candle_filter')):
-                st.session_state.scanner_pending_changes['enable_large_candle_filter'] = new_large_candle
-
-            new_atr_mult = st.number_input(
-                "Large Candle ATR Multiplier",
-                value=_get_float(config, 'large_candle_atr_multiplier', 2.5),
-                min_value=1.0, max_value=5.0, step=0.1,
-                format="%.1f",
-                help="Candles larger than X * ATR are 'large'",
-                key="large_candle_atr_multiplier"
-            )
-            if not values_equal(new_atr_mult, config.get('large_candle_atr_multiplier')):
-                st.session_state.scanner_pending_changes['large_candle_atr_multiplier'] = new_atr_mult
-
-        with col2:
-            new_consecutive = st.number_input(
-                "Consecutive Large Candles Threshold",
-                value=_get_int(config, 'consecutive_large_candles_threshold', 2),
-                min_value=1, max_value=5, step=1,
-                help="Block if X+ large candles recently",
-                key="consecutive_large_candles_threshold"
-            )
-            if not values_equal(new_consecutive, config.get('consecutive_large_candles_threshold')):
-                st.session_state.scanner_pending_changes['consecutive_large_candles_threshold'] = new_consecutive
-
-            new_cooldown = st.number_input(
-                "Large Candle Filter Cooldown",
-                value=_get_int(config, 'large_candle_filter_cooldown', 3),
-                min_value=1, max_value=10, step=1,
-                help="Periods to wait after large candle",
-                key="large_candle_filter_cooldown"
-            )
-            if not values_equal(new_cooldown, config.get('large_candle_filter_cooldown')):
-                st.session_state.scanner_pending_changes['large_candle_filter_cooldown'] = new_cooldown
-
-    render_save_section(config, 'safety', updated_by)
-
-
-def render_adx_settings(config: Dict[str, Any]):
-    """Render ADX filter settings"""
-    st.subheader("ADX Trend Strength Filter")
-    st.markdown("Filter signals based on trend strength using ADX indicator")
-
-    updated_by = st.session_state.get('scanner_config_user', 'streamlit_user')
-
-    if 'scanner_pending_changes' not in st.session_state:
-        st.session_state.scanner_pending_changes = {}
-
-    # Main toggle
-    new_adx_enabled = st.checkbox(
-        "Enable ADX Filter",
-        value=config.get('adx_filter_enabled', False),
-        help="Filter signals based on ADX trend strength",
-        key="adx_filter_enabled"
-    )
-    if not values_equal(new_adx_enabled, config.get('adx_filter_enabled')):
-        st.session_state.scanner_pending_changes['adx_filter_enabled'] = new_adx_enabled
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        new_adx_mode = st.selectbox(
-            "ADX Filter Mode",
-            options=['strict', 'moderate', 'permissive', 'disabled'],
-            index=['strict', 'moderate', 'permissive', 'disabled'].index(
-                config.get('adx_filter_mode', 'moderate')
-            ),
-            help="How strictly to filter by ADX",
-            key="adx_filter_mode"
-        )
-        if new_adx_mode != config.get('adx_filter_mode'):
-            st.session_state.scanner_pending_changes['adx_filter_mode'] = new_adx_mode
-
-        new_adx_period = st.number_input(
-            "ADX Period",
-            value=_get_int(config, 'adx_period', 14),
-            min_value=5, max_value=50, step=1,
-            help="ADX calculation period (standard is 14)",
-            key="adx_period"
-        )
-        if not values_equal(new_adx_period, config.get('adx_period')):
-            st.session_state.scanner_pending_changes['adx_period'] = new_adx_period
-
-    with col2:
-        new_grace_period = st.number_input(
-            "ADX Grace Period (bars)",
-            value=_get_int(config, 'adx_grace_period_bars', 2),
-            min_value=0, max_value=10, step=1,
-            help="Allow X bars of weak ADX if previous trend was strong",
-            key="adx_grace_period_bars"
-        )
-        if not values_equal(new_grace_period, config.get('adx_grace_period_bars')):
-            st.session_state.scanner_pending_changes['adx_grace_period_bars'] = new_grace_period
-
-    # ADX Thresholds in expander
-    with st.expander("ADX Thresholds", expanded=False):
-        thresholds = config.get('adx_thresholds', {})
-        if isinstance(thresholds, str):
-            thresholds = json.loads(thresholds)
-
-        st.markdown("**Trend Strength Thresholds**")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.metric("Strong Trend", f"> {thresholds.get('STRONG_TREND', 25.0)}")
-            st.metric("Moderate Trend", f"> {thresholds.get('MODERATE_TREND', 22.0)}")
-
-        with col2:
-            st.metric("Weak Trend", f"> {thresholds.get('WEAK_TREND', 15.0)}")
-            st.metric("Very Weak", f"< {thresholds.get('VERY_WEAK', 10.0)}")
-
-    # Pair multipliers in expander
-    with st.expander("ADX Pair Multipliers", expanded=False):
-        multipliers = config.get('adx_pair_multipliers', {})
-        if isinstance(multipliers, str):
-            multipliers = json.loads(multipliers)
-
-        if multipliers:
-            df = pd.DataFrame([
-                {'Pair': k, 'Multiplier': v}
-                for k, v in multipliers.items()
-            ])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No pair-specific multipliers configured")
-
-    render_save_section(config, 'adx', updated_by)
 
 
 def render_smc_conflict_settings(config: Dict[str, Any]):

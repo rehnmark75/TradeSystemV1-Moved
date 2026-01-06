@@ -117,36 +117,13 @@ class ScannerConfig:
     user_timezone: str = ""
     respect_trading_hours: bool = False
 
-    # SAFETY FILTER SETTINGS
-    enable_critical_safety_filters: bool = False
-    enable_ema200_contradiction_filter: bool = False
-    enable_ema_stack_contradiction_filter: bool = False
-    require_indicator_consensus: bool = False
-    min_confirming_indicators: int = 0
-    enable_emergency_circuit_breaker: bool = False
-    max_contradictions_allowed: int = 0
-    active_safety_preset: str = ""
-    enable_large_candle_filter: bool = False
-    large_candle_atr_multiplier: float = 0.0
-    consecutive_large_candles_threshold: int = 0
-    movement_lookback_periods: int = 0
-    large_candle_filter_cooldown: int = 0
-    ema200_minimum_margin: float = 0.0
-    safety_filter_log_level: str = ""
-    excessive_movement_threshold_pips: int = 0
-
-    # ADX FILTER SETTINGS
-    adx_filter_enabled: bool = False
-    adx_filter_mode: str = ""
-    adx_period: int = 0
-    adx_grace_period_bars: int = 0
-    adx_thresholds: Dict[str, float] = field(default_factory=dict)
-    adx_pair_multipliers: Dict[str, float] = field(default_factory=dict)
+    # NOTE: Safety filter settings removed (Jan 2026) - EMA200/consensus filters were redundant
+    # with SMC Simple strategy's built-in 4H 50 EMA bias check. Database columns retained for
+    # backward compatibility but no longer loaded or used.
+    # NOTE: ADX filter settings removed (Jan 2026) - was never used by active strategies
 
     # PRESETS (JSONB from database)
     deduplication_presets: Dict[str, Dict] = field(default_factory=dict)
-    safety_filter_presets: Dict[str, Dict] = field(default_factory=dict)
-    large_candle_filter_presets: Dict[str, Dict] = field(default_factory=dict)
 
     # SMC CONFLICT FILTER SETTINGS
     smart_money_readonly_enabled: bool = False
@@ -583,14 +560,8 @@ class ScannerConfigService:
             'trading_start_hour', 'trading_end_hour', 'respect_market_hours', 'weekend_scanning',
             'enable_trading_time_controls', 'trading_cutoff_time_utc', 'trade_cooldown_enabled',
             'trade_cooldown_minutes', 'user_timezone', 'respect_trading_hours',
-            'enable_critical_safety_filters', 'enable_ema200_contradiction_filter',
-            'enable_ema_stack_contradiction_filter', 'require_indicator_consensus',
-            'min_confirming_indicators', 'enable_emergency_circuit_breaker',
-            'max_contradictions_allowed', 'active_safety_preset', 'enable_large_candle_filter',
-            'large_candle_atr_multiplier', 'consecutive_large_candles_threshold',
-            'movement_lookback_periods', 'large_candle_filter_cooldown', 'ema200_minimum_margin',
-            'safety_filter_log_level', 'excessive_movement_threshold_pips',
-            'adx_filter_enabled', 'adx_filter_mode', 'adx_period', 'adx_grace_period_bars',
+            # NOTE: Safety filter fields removed (Jan 2026) - no longer loaded from database
+            # NOTE: ADX filter fields removed (Jan 2026) - was never used by active strategies
             'smart_money_readonly_enabled', 'smart_money_analysis_timeout',
             'smart_money_min_data_points', 'smart_money_structure_weight',
             'smart_money_order_flow_weight', 'smart_money_min_confidence_boost',
@@ -667,10 +638,10 @@ class ScannerConfigService:
             'deduplication_lookback_hours', 'stop_loss_pips', 'take_profit_pips',
             'max_open_positions', 'max_daily_trades', 'max_risk_per_trade', 'default_stop_distance',
             'trading_start_hour', 'trading_end_hour', 'trading_cutoff_time_utc',
-            'trade_cooldown_minutes', 'min_confirming_indicators', 'max_contradictions_allowed',
-            'consecutive_large_candles_threshold', 'movement_lookback_periods',
-            'large_candle_filter_cooldown', 'excessive_movement_threshold_pips',
-            'adx_period', 'adx_grace_period_bars', 'min_claude_quality_score',
+            'trade_cooldown_minutes',
+            # NOTE: Safety filter int fields removed (Jan 2026)
+            # NOTE: ADX filter int fields (adx_period, adx_grace_period_bars) removed (Jan 2026)
+            'min_claude_quality_score',
             'signal_hash_cache_expiry_minutes', 'max_signal_hash_cache_size',
             # New integer fields
             'sr_lookback_hours', 'sr_left_bars', 'sr_right_bars', 'sr_recent_flip_bars',
@@ -703,8 +674,9 @@ class ScannerConfigService:
 
         # Handle JSONB fields (dicts)
         jsonb_dict_fields = [
-            'adx_thresholds', 'adx_pair_multipliers',
-            'deduplication_presets', 'safety_filter_presets', 'large_candle_filter_presets',
+            'deduplication_presets',
+            # NOTE: safety_filter_presets, large_candle_filter_presets removed (Jan 2026)
+            # NOTE: adx_thresholds, adx_pair_multipliers removed (Jan 2026)
             'pair_info',
             # Market Monitor JSONB fields
             'market_sessions',
