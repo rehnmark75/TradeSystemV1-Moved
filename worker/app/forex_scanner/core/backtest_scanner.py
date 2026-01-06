@@ -40,11 +40,17 @@ class BacktestScanner(IntelligentForexScanner):
                  backtest_config: Dict,
                  db_manager: DatabaseManager = None,
                  config_override: dict = None,
+                 use_historical_intelligence: bool = True,
                  **kwargs):
 
         # Set up backtest-specific configuration
         self.backtest_config = backtest_config
         self.backtest_mode = True
+
+        # Historical intelligence replay support (Phase 3)
+        self._use_historical_intelligence = use_historical_intelligence
+        self._historical_intelligence_cache = {}  # Cache for loaded intelligence
+        self._intelligence_history_manager = None  # Lazy-loaded
 
         # Store config override for backtest parameter isolation
         # This is stored BEFORE super().__init__() so it's available in _initialize_signal_detector
@@ -167,6 +173,12 @@ class BacktestScanner(IntelligentForexScanner):
                 self.logger.info(f"      - {key}: {value}")
         else:
             self.logger.info(f"   Config Override: None (using database config)")
+
+        # Log historical intelligence mode
+        if self._use_historical_intelligence:
+            self.logger.info(f"   📚 Historical Intelligence: ENABLED (will replay stored market intelligence)")
+        else:
+            self.logger.info(f"   📚 Historical Intelligence: DISABLED (will recalculate from data)")
 
         self.logger.info(f"🧪 BacktestScanner initialized:")
         self.logger.info(f"   Execution ID: {self.execution_id}")
@@ -399,6 +411,12 @@ class BacktestScanner(IntelligentForexScanner):
             with self.order_logger:
                 # Initialize execution in database
                 self._initialize_backtest_execution()
+
+                # Preload historical intelligence for the backtest period (Phase 3)
+                if self._use_historical_intelligence:
+                    intel_count = self._preload_historical_intelligence()
+                    if intel_count == 0:
+                        self.logger.warning("⚠️ No historical intelligence found - will recalculate as needed")
 
                 # Main backtest loop
                 results = self._execute_backtest_loop()
@@ -809,12 +827,151 @@ class BacktestScanner(IntelligentForexScanner):
             signal['pipeline_error'] = str(e)
             return signal
 
+    def _get_intelligence_history_manager(self):
+        """Lazy-load the MarketIntelligenceHistoryManager"""
+        if self._intelligence_history_manager is None:
+            try:
+                from .intelligence.market_intelligence_history_manager import MarketIntelligenceHistoryManager
+            except ImportError:
+                from forex_scanner.core.intelligence.market_intelligence_history_manager import MarketIntelligenceHistoryManager
+
+            self._intelligence_history_manager = MarketIntelligenceHistoryManager(self.db_manager)
+
+        return self._intelligence_history_manager
+
+    def _get_historical_intelligence(self, timestamp: datetime, tolerance_minutes: int = 5) -> Optional[Dict]:
+        """
+        Get historical market intelligence for a given timestamp.
+
+        This method replays stored market intelligence during backtesting to ensure
+        backtest results match what live trading would have done.
+
+        Args:
+            timestamp: The backtest timestamp to lookup
+            tolerance_minutes: Max time difference to accept (default 5 min)
+
+        Returns:
+            Dict with intelligence data or None if not found/disabled
+        """
+        if not self._use_historical_intelligence:
+            return None
+
+        # Check cache first (for efficiency during batch processing)
+        cache_key = timestamp.strftime('%Y%m%d%H%M')
+        if cache_key in self._historical_intelligence_cache:
+            cached = self._historical_intelligence_cache[cache_key]
+            self.logger.debug(f"📚 Using cached intelligence for {timestamp}")
+            return cached
+
+        try:
+            manager = self._get_intelligence_history_manager()
+            intelligence = manager.get_intelligence_for_timestamp(
+                timestamp,
+                tolerance_minutes=tolerance_minutes
+            )
+
+            # Cache the result (even if None, to avoid repeated queries)
+            self._historical_intelligence_cache[cache_key] = intelligence
+
+            if intelligence:
+                self.logger.debug(
+                    f"📚 HISTORICAL intelligence for {timestamp}: "
+                    f"{intelligence.get('dominant_regime')} ({intelligence.get('regime_confidence', 0):.1%})"
+                )
+            else:
+                self.logger.debug(f"⚠️ No stored intelligence for {timestamp}, will recalculate")
+
+            return intelligence
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Error fetching historical intelligence: {e}")
+            return None
+
+    def _preload_historical_intelligence(self) -> int:
+        """
+        Preload all historical intelligence for the backtest period.
+
+        This is more efficient than querying one at a time during the backtest loop.
+
+        Returns:
+            Number of intelligence records loaded
+        """
+        if not self._use_historical_intelligence:
+            return 0
+
+        try:
+            manager = self._get_intelligence_history_manager()
+            records = manager.get_intelligence_for_period(
+                self.start_date,
+                self.end_date
+            )
+
+            # Populate cache with all records
+            for record in records:
+                ts = record.get('scan_timestamp')
+                if ts:
+                    cache_key = ts.strftime('%Y%m%d%H%M')
+                    self._historical_intelligence_cache[cache_key] = record
+
+            self.logger.info(f"📚 Preloaded {len(records)} historical intelligence records for backtest")
+            return len(records)
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Error preloading historical intelligence: {e}")
+            return 0
+
+    def _format_historical_intelligence_for_signal(self, intelligence: Dict) -> Dict:
+        """
+        Format historical intelligence data for use in signal enrichment.
+
+        Converts the database format to the format expected by signal processing.
+
+        Args:
+            intelligence: Raw intelligence from database
+
+        Returns:
+            Formatted intelligence dict for signal processing
+        """
+        if not intelligence:
+            return {}
+
+        return {
+            'market_regime': {
+                'dominant_regime': intelligence.get('dominant_regime', 'unknown'),
+                'confidence': intelligence.get('regime_confidence', 0.5),
+                'regime_scores': intelligence.get('regime_scores', {}),
+                'market_strength': {
+                    'market_bias': intelligence.get('market_bias', 'neutral'),
+                    'average_trend_strength': intelligence.get('average_trend_strength'),
+                    'average_volatility': intelligence.get('average_volatility'),
+                },
+                'pair_analyses': intelligence.get('pair_analyses', {}),
+            },
+            'session_analysis': {
+                'current_session': intelligence.get('current_session', 'unknown'),
+                'session_config': {
+                    'volatility': intelligence.get('session_volatility', 'medium'),
+                },
+            },
+            'trading_recommendations': {
+                'recommended_strategy': intelligence.get('recommended_strategy', 'conservative'),
+                'confidence_threshold': intelligence.get('confidence_threshold', 0.7),
+                'position_sizing': intelligence.get('position_sizing_recommendation', 'NORMAL'),
+            },
+            'intelligence_source': 'historical_replay',
+            'scan_timestamp': intelligence.get('scan_timestamp'),
+        }
+
     def _process_backtest_signals(self, signals: List[Dict], timestamp: datetime) -> List[Dict]:
         """
         Process signals through the same pipeline as live scanner
         But add backtest-specific metadata and simulate trade outcomes
         """
         processed_signals = []
+
+        # Get historical intelligence for this timestamp (if enabled)
+        historical_intelligence = self._get_historical_intelligence(timestamp)
+        formatted_intelligence = self._format_historical_intelligence_for_signal(historical_intelligence)
 
         for signal in signals:
             try:
@@ -823,6 +980,16 @@ class BacktestScanner(IntelligentForexScanner):
                 signal['backtest_timestamp'] = timestamp
                 signal['backtest_mode'] = True
                 signal['signal_timestamp'] = timestamp
+
+                # Add historical market intelligence if available
+                if formatted_intelligence:
+                    signal['market_intelligence'] = formatted_intelligence
+                    signal['intelligence_source'] = 'historical_replay'
+                    signal['market_regime'] = formatted_intelligence.get('market_regime', {}).get('dominant_regime', 'unknown')
+                    signal['regime_confidence'] = formatted_intelligence.get('market_regime', {}).get('confidence', 0.5)
+                    signal['session'] = formatted_intelligence.get('session_analysis', {}).get('current_session', 'unknown')
+                else:
+                    signal['intelligence_source'] = 'not_available'
 
                 # Process through parent's signal preparation
                 processed_signal = self._prepare_signal(signal)
@@ -1247,6 +1414,26 @@ class BacktestScanner(IntelligentForexScanner):
 # Factory function for creating backtest scanner
 def create_backtest_scanner(backtest_config: Dict,
                           db_manager: DatabaseManager = None,
+                          config_override: dict = None,
+                          use_historical_intelligence: bool = True,
                           **kwargs) -> BacktestScanner:
-    """Create BacktestScanner instance"""
-    return BacktestScanner(backtest_config, db_manager, **kwargs)
+    """
+    Create BacktestScanner instance
+
+    Args:
+        backtest_config: Backtest configuration dict
+        db_manager: Database manager instance
+        config_override: Parameter overrides for backtest isolation (Phase 1)
+        use_historical_intelligence: Whether to replay stored intelligence (Phase 3)
+        **kwargs: Additional arguments passed to BacktestScanner
+
+    Returns:
+        Configured BacktestScanner instance
+    """
+    return BacktestScanner(
+        backtest_config,
+        db_manager,
+        config_override=config_override,
+        use_historical_intelligence=use_historical_intelligence,
+        **kwargs
+    )

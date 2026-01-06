@@ -593,6 +593,247 @@ class MarketIntelligenceHistoryManager:
             self.logger.error(f"Error cleaning up old records: {e}")
             return 0
 
+    def get_intelligence_for_timestamp(
+        self,
+        timestamp: datetime,
+        tolerance_minutes: int = 5
+    ) -> Optional[Dict]:
+        """
+        Retrieve stored market intelligence closest to the given timestamp.
+
+        This method is primarily used during backtesting to replay historical
+        market intelligence instead of recalculating it from raw data.
+
+        Args:
+            timestamp: The backtest timestamp to lookup
+            tolerance_minutes: Max time difference to accept (default 5 min)
+
+        Returns:
+            Dict with intelligence data or None if not found within tolerance
+
+        Example:
+            >>> manager.get_intelligence_for_timestamp(
+            ...     datetime(2026, 1, 5, 10, 0, tzinfo=timezone.utc),
+            ...     tolerance_minutes=5
+            ... )
+            {
+                'scan_timestamp': datetime(2026, 1, 5, 10, 2),
+                'dominant_regime': 'trending',
+                'regime_confidence': 0.85,
+                'regime_scores': {'trending': 0.85, 'ranging': 0.15, ...},
+                'current_session': 'london',
+                'session_volatility': 'high',
+                'market_bias': 'bullish',
+                ...
+            }
+        """
+        def query_operation(conn, cursor):
+            # Ensure timestamp is timezone-aware
+            if timestamp.tzinfo is None:
+                query_ts = timestamp.replace(tzinfo=timezone.utc)
+            else:
+                query_ts = timestamp
+
+            # Calculate tolerance window
+            start_time = query_ts - timedelta(minutes=tolerance_minutes)
+            end_time = query_ts + timedelta(minutes=tolerance_minutes)
+
+            # Query for closest match within tolerance window
+            cursor.execute('''
+                SELECT
+                    scan_timestamp,
+                    scan_cycle_id,
+                    epic_list,
+                    epic_count,
+                    dominant_regime,
+                    regime_confidence,
+                    regime_scores,
+                    current_session,
+                    session_volatility,
+                    session_characteristics,
+                    optimal_timeframes,
+                    market_bias,
+                    average_trend_strength,
+                    average_volatility,
+                    directional_consensus,
+                    market_efficiency,
+                    volatility_percentile,
+                    correlation_analysis,
+                    currency_strength,
+                    risk_sentiment,
+                    recommended_strategy,
+                    confidence_threshold,
+                    position_sizing_recommendation,
+                    strategy_adjustments,
+                    market_strength_summary,
+                    pair_analyses,
+                    individual_epic_regimes,
+                    regime_trending_score,
+                    regime_ranging_score,
+                    regime_breakout_score,
+                    regime_reversal_score,
+                    regime_high_vol_score,
+                    regime_low_vol_score
+                FROM market_intelligence_history
+                WHERE scan_timestamp BETWEEN %s AND %s
+                ORDER BY ABS(EXTRACT(EPOCH FROM (scan_timestamp - %s)))
+                LIMIT 1
+            ''', (start_time, end_time, query_ts))
+
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            # Map result to dictionary
+            columns = [
+                'scan_timestamp', 'scan_cycle_id', 'epic_list', 'epic_count',
+                'dominant_regime', 'regime_confidence', 'regime_scores',
+                'current_session', 'session_volatility', 'session_characteristics',
+                'optimal_timeframes', 'market_bias', 'average_trend_strength',
+                'average_volatility', 'directional_consensus', 'market_efficiency',
+                'volatility_percentile', 'correlation_analysis', 'currency_strength',
+                'risk_sentiment', 'recommended_strategy', 'confidence_threshold',
+                'position_sizing_recommendation', 'strategy_adjustments',
+                'market_strength_summary', 'pair_analyses', 'individual_epic_regimes',
+                'regime_trending_score', 'regime_ranging_score', 'regime_breakout_score',
+                'regime_reversal_score', 'regime_high_vol_score', 'regime_low_vol_score'
+            ]
+
+            result = dict(zip(columns, row))
+
+            # Parse JSON fields
+            json_fields = [
+                'regime_scores', 'session_characteristics', 'optimal_timeframes',
+                'correlation_analysis', 'currency_strength', 'market_strength_summary',
+                'pair_analyses', 'individual_epic_regimes'
+            ]
+
+            for field in json_fields:
+                if result.get(field) and isinstance(result[field], str):
+                    try:
+                        result[field] = json.loads(result[field])
+                    except (json.JSONDecodeError, TypeError):
+                        pass  # Keep as-is if parsing fails
+
+            return result
+
+        try:
+            result = self._execute_with_connection(
+                query_operation,
+                f"get intelligence for timestamp {timestamp}"
+            )
+
+            if result:
+                time_diff = abs((result['scan_timestamp'] - timestamp).total_seconds())
+                self.logger.debug(
+                    f"📚 Found historical intelligence {time_diff:.0f}s from target: "
+                    f"{result['dominant_regime']} ({result['regime_confidence']:.1%})"
+                )
+            else:
+                self.logger.debug(f"⚠️ No historical intelligence within {tolerance_minutes}min of {timestamp}")
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Error getting intelligence for timestamp {timestamp}: {e}")
+            return None
+
+    def get_intelligence_for_period(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        interval_minutes: int = 5
+    ) -> List[Dict]:
+        """
+        Retrieve all market intelligence records for a time period.
+
+        Useful for backtesting over a date range to pre-fetch all intelligence.
+
+        Args:
+            start_time: Period start
+            end_time: Period end
+            interval_minutes: Expected interval between scans (for gap detection)
+
+        Returns:
+            List of intelligence records ordered by timestamp
+        """
+        def query_operation(conn, cursor):
+            # Ensure timestamps are timezone-aware
+            if start_time.tzinfo is None:
+                query_start = start_time.replace(tzinfo=timezone.utc)
+            else:
+                query_start = start_time
+
+            if end_time.tzinfo is None:
+                query_end = end_time.replace(tzinfo=timezone.utc)
+            else:
+                query_end = end_time
+
+            cursor.execute('''
+                SELECT
+                    scan_timestamp,
+                    dominant_regime,
+                    regime_confidence,
+                    regime_scores,
+                    current_session,
+                    session_volatility,
+                    market_bias,
+                    average_trend_strength,
+                    average_volatility,
+                    pair_analyses,
+                    individual_epic_regimes
+                FROM market_intelligence_history
+                WHERE scan_timestamp BETWEEN %s AND %s
+                ORDER BY scan_timestamp ASC
+            ''', (query_start, query_end))
+
+            columns = [
+                'scan_timestamp', 'dominant_regime', 'regime_confidence',
+                'regime_scores', 'current_session', 'session_volatility',
+                'market_bias', 'average_trend_strength', 'average_volatility',
+                'pair_analyses', 'individual_epic_regimes'
+            ]
+
+            results = []
+            for row in cursor.fetchall():
+                record = dict(zip(columns, row))
+
+                # Parse JSON fields
+                for field in ['regime_scores', 'pair_analyses', 'individual_epic_regimes']:
+                    if record.get(field) and isinstance(record[field], str):
+                        try:
+                            record[field] = json.loads(record[field])
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                results.append(record)
+
+            return results
+
+        try:
+            results = self._execute_with_connection(
+                query_operation,
+                f"get intelligence for period {start_time} to {end_time}"
+            )
+
+            if results:
+                self.logger.info(
+                    f"📚 Loaded {len(results)} historical intelligence records "
+                    f"for period {start_time.strftime('%Y-%m-%d %H:%M')} to "
+                    f"{end_time.strftime('%Y-%m-%d %H:%M')}"
+                )
+            else:
+                self.logger.warning(
+                    f"⚠️ No historical intelligence found for period "
+                    f"{start_time.strftime('%Y-%m-%d')} to {end_time.strftime('%Y-%m-%d')}"
+                )
+
+            return results or []
+
+        except Exception as e:
+            self.logger.error(f"Error getting intelligence for period: {e}")
+            return []
+
 
 # Backward compatibility exports
 __all__ = ['MarketIntelligenceHistoryManager']

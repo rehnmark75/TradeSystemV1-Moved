@@ -118,8 +118,8 @@ Signal Display Format:
         parser.add_argument(
             '--strategy',
             type=str,
-            default='EMA_CROSSOVER',
-            help='Strategy name to use for backtest (default: EMA_CROSSOVER)'
+            default='SMC_SIMPLE',
+            help='Strategy name to use for backtest (default: SMC_SIMPLE)'
         )
 
         parser.add_argument(
@@ -188,6 +188,42 @@ Signal Display Format:
                  'Does NOT affect live trading configuration.'
         )
 
+        # Snapshot support for persistent parameter configurations
+        parser.add_argument(
+            '--snapshot',
+            type=str,
+            metavar='NAME',
+            help='Load parameter overrides from a saved snapshot. '
+                 'Create snapshots with: python snapshot_cli.py create NAME --set PARAM=VALUE. '
+                 'List available: python snapshot_cli.py list'
+        )
+
+        parser.add_argument(
+            '--save-snapshot',
+            type=str,
+            metavar='NAME',
+            help='Save current test results to a snapshot after backtest completes. '
+                 'Can be combined with --override to create a new snapshot.'
+        )
+
+        # Historical market intelligence replay (Phase 3)
+        parser.add_argument(
+            '--use-historical-intelligence',
+            action='store_true',
+            default=True,
+            dest='use_historical_intelligence',
+            help='Use stored market intelligence from database instead of recalculating (default: True). '
+                 'This ensures backtest results match what live trading would have done.'
+        )
+
+        parser.add_argument(
+            '--no-historical-intelligence',
+            action='store_false',
+            dest='use_historical_intelligence',
+            help='Force recalculation of market intelligence (ignore stored data). '
+                 'Useful for testing intelligence calculation changes.'
+        )
+
         return parser
 
     def _parse_overrides(self, override_args) -> dict:
@@ -231,6 +267,106 @@ Signal Display Format:
 
         return overrides if overrides else None
 
+    def _load_snapshot_overrides(self, snapshot_name: str) -> dict:
+        """
+        Load parameter overrides from a saved snapshot.
+
+        Args:
+            snapshot_name: Name of the snapshot to load
+
+        Returns:
+            Dict of parameter overrides from the snapshot, or None if not found
+        """
+        try:
+            from forex_scanner.services.backtest_config_service import get_backtest_config_service
+        except ImportError:
+            from services.backtest_config_service import get_backtest_config_service
+
+        service = get_backtest_config_service()
+        snapshot = service.get_snapshot(snapshot_name)
+
+        if not snapshot:
+            print(f"❌ Snapshot '{snapshot_name}' not found")
+            print("   Use 'python snapshot_cli.py list' to see available snapshots")
+            return None
+
+        overrides = snapshot.parameter_overrides
+        print(f"📦 Loaded snapshot '{snapshot_name}' ({len(overrides)} parameters)")
+        for k, v in overrides.items():
+            print(f"   - {k}: {v}")
+
+        return overrides
+
+    def _save_test_results_to_snapshot(
+        self,
+        snapshot_name: str,
+        overrides: dict,
+        results: dict,
+        epic: str = None,
+        days: int = None
+    ) -> bool:
+        """
+        Save test results to a snapshot (create new or update existing).
+
+        Args:
+            snapshot_name: Name for the snapshot
+            overrides: Parameter overrides used in the test
+            results: Test results dict
+            epic: Epic tested (optional)
+            days: Days tested (optional)
+
+        Returns:
+            True if saved successfully
+        """
+        try:
+            from forex_scanner.services.backtest_config_service import get_backtest_config_service
+        except ImportError:
+            from services.backtest_config_service import get_backtest_config_service
+
+        service = get_backtest_config_service()
+
+        # Check if snapshot exists
+        existing = service.get_snapshot(snapshot_name)
+
+        if existing:
+            # Update existing snapshot with new test results
+            success = service.update_test_results(
+                name=snapshot_name,
+                execution_id=results.get('execution_id', 0),
+                results=results,
+                epic_tested=epic,
+                days_tested=days
+            )
+            if success:
+                print(f"📊 Updated snapshot '{snapshot_name}' with test results")
+            return success
+        else:
+            # Create new snapshot
+            if not overrides:
+                print(f"⚠️ Cannot create snapshot without parameter overrides")
+                print("   Use --override to specify parameters for the new snapshot")
+                return False
+
+            snapshot_id = service.create_snapshot(
+                name=snapshot_name,
+                parameter_overrides=overrides,
+                description=f"Created from backtest: {epic or 'all pairs'}, {days} days",
+                created_by='backtest_cli'
+            )
+
+            if snapshot_id:
+                # Update with test results
+                service.update_test_results(
+                    name=snapshot_name,
+                    execution_id=results.get('execution_id', 0),
+                    results=results,
+                    epic_tested=epic,
+                    days_tested=days
+                )
+                print(f"📦 Created snapshot '{snapshot_name}' with test results")
+                return True
+            return False
+
     def execute_command(self, args) -> bool:
         """Execute the backtest command based on arguments"""
 
@@ -238,8 +374,24 @@ Signal Display Format:
             # Setup logging level
             self.setup_logging(args.verbose)
 
-            # Parse config overrides
-            config_override = self._parse_overrides(getattr(args, 'override', None))
+            # Parse config overrides - snapshot takes precedence, then inline overrides
+            config_override = None
+
+            # Load from snapshot if specified
+            if getattr(args, 'snapshot', None):
+                config_override = self._load_snapshot_overrides(args.snapshot)
+                if config_override is None:
+                    return False  # Snapshot not found
+
+            # Parse inline overrides (these merge with/override snapshot values)
+            inline_overrides = self._parse_overrides(getattr(args, 'override', None))
+            if inline_overrides:
+                if config_override:
+                    # Merge: inline overrides take precedence
+                    config_override.update(inline_overrides)
+                    print(f"   (merged with {len(inline_overrides)} inline overrides)")
+                else:
+                    config_override = inline_overrides
 
             # Validate date range parameters
             if (args.start_date and not args.end_date) or (args.end_date and not args.start_date):
@@ -271,6 +423,13 @@ Signal Display Format:
             if args.cleanup:
                 self.enhanced_backtest.cleanup_test_executions()
 
+            # Get historical intelligence flag
+            use_historical_intelligence = getattr(args, 'use_historical_intelligence', True)
+            if not use_historical_intelligence:
+                print("📚 Historical intelligence: DISABLED (will recalculate from data)")
+            else:
+                print("📚 Historical intelligence: ENABLED (will replay stored data)")
+
             # Quick test mode
             if args.quick_test:
                 if not args.epic:
@@ -282,7 +441,8 @@ Signal Display Format:
                     hours=args.hours,
                     show_signals=True,  # Always show signals for quick test
                     pipeline=args.pipeline,
-                    config_override=config_override
+                    config_override=config_override,
+                    use_historical_intelligence=use_historical_intelligence
                 )
 
             # Standard backtest mode
@@ -297,7 +457,8 @@ Signal Display Format:
                 max_signals_display=args.max_signals,
                 pipeline=args.pipeline,
                 csv_export=args.csv_export if hasattr(args, 'csv_export') else None,
-                config_override=config_override
+                config_override=config_override,
+                use_historical_intelligence=use_historical_intelligence
             )
 
         except KeyboardInterrupt:

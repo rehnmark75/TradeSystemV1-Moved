@@ -78,6 +78,29 @@ def main():
                 processed_args.append(args[i])
                 print(f"🧪 Override: {args[i]}")
 
+            # Handle --snapshot flag for loading saved parameter configs
+            elif arg == "--snapshot" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"📦 Using snapshot: {args[i]}")
+
+            # Handle --save-snapshot flag for saving test results
+            elif arg == "--save-snapshot" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"💾 Will save to snapshot: {args[i]}")
+
+            # Handle historical intelligence flags
+            elif arg == "--no-historical-intelligence":
+                processed_args.append(arg)
+                print(f"📚 Historical intelligence: DISABLED")
+
+            elif arg == "--use-historical-intelligence":
+                processed_args.append(arg)
+                print(f"📚 Historical intelligence: ENABLED")
+
             # Pass through other flags
             elif arg.startswith("--"):
                 processed_args.append(arg)
@@ -182,6 +205,19 @@ Parameter Override Examples:
   python bt.py EURUSD 14 --override fixed_stop_loss_pips=10 --override min_confidence=0.55
   python bt.py GBPUSD 30 --override fib_min=0.5 --override fib_max=0.7
   python bt.py EURUSD 7 --override macd_filter_enabled=false --show-signals
+
+Config Snapshots (persistent parameter sets):
+  # Create a snapshot with specific parameters
+  python snapshot_cli.py create tight_sl --set fixed_stop_loss_pips=8 --set min_confidence=0.6
+
+  # Run backtest using a saved snapshot
+  python bt.py EURUSD 14 --snapshot tight_sl
+
+  # Run with snapshot + additional overrides (overrides take precedence)
+  python bt.py EURUSD 14 --snapshot tight_sl --override min_confidence=0.65
+
+  # List available snapshots
+  python snapshot_cli.py list
 """
     print(help_text)
 

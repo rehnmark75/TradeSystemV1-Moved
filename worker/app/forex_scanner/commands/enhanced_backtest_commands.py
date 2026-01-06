@@ -47,7 +47,8 @@ class EnhancedBacktestCommands:
         max_signals_display: int = 20,
         pipeline: bool = False,
         csv_export: str = None,
-        config_override: dict = None
+        config_override: dict = None,
+        use_historical_intelligence: bool = True
     ) -> bool:
         """
         Run enhanced backtest using the new integrated pipeline
@@ -64,6 +65,7 @@ class EnhancedBacktestCommands:
             pipeline: Use full pipeline with validation
             csv_export: Path to CSV file for exporting all signals
             config_override: Dict of parameter overrides for this backtest only (backtest isolation)
+            use_historical_intelligence: Use stored market intelligence instead of recalculating (Phase 3)
         """
 
         self.logger.info("🚀 Starting Enhanced Backtest Pipeline")
@@ -139,7 +141,8 @@ class EnhancedBacktestCommands:
                 self.db_manager,
                 logger=self.logger,
                 pipeline_mode=pipeline,  # Pass pipeline mode to control validation
-                config_override=config_override  # Pass config override for backtest isolation
+                config_override=config_override,  # Pass config override for backtest isolation
+                use_historical_intelligence=use_historical_intelligence  # Pass historical intelligence mode (Phase 3)
             ) as orchestrator:
 
                 # Run the complete orchestration
@@ -476,7 +479,7 @@ class EnhancedBacktestCommands:
         except Exception as e:
             self.logger.error(f"❌ Error calculating performance summary: {e}")
 
-    def quick_enhanced_backtest(self, epic: str, hours: int = 24, show_signals: bool = True, pipeline: bool = False, config_override: dict = None) -> bool:
+    def quick_enhanced_backtest(self, epic: str, hours: int = 24, show_signals: bool = True, pipeline: bool = False, config_override: dict = None, use_historical_intelligence: bool = True) -> bool:
         """Quick enhanced backtest for recent signals"""
 
         days = max(1, hours // 24)
@@ -490,7 +493,8 @@ class EnhancedBacktestCommands:
             strategy='QUICK_TEST',
             max_signals_display=10,
             pipeline=pipeline,
-            config_override=config_override
+            config_override=config_override,
+            use_historical_intelligence=use_historical_intelligence
         )
 
     def cleanup_test_executions(self, keep_recent: int = 5) -> bool:

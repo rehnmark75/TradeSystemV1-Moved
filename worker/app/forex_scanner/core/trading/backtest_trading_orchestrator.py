@@ -74,12 +74,14 @@ class BacktestTradingOrchestrator:
                  db_manager: DatabaseManager = None,
                  logger: Optional[logging.Logger] = None,
                  pipeline_mode: bool = False,
-                 config_override: dict = None):
+                 config_override: dict = None,
+                 use_historical_intelligence: bool = True):
 
         self.execution_id = execution_id
         self.backtest_config = backtest_config
         self.pipeline_mode = pipeline_mode
         self._config_override = config_override
+        self._use_historical_intelligence = use_historical_intelligence
         self.db_manager = db_manager or DatabaseManager(config.DATABASE_URL)
         self.logger = logger or logging.getLogger(__name__)
 
@@ -122,7 +124,12 @@ class BacktestTradingOrchestrator:
         # The orchestrator will handle all signal logging to prevent duplicates
         scanner_config = backtest_config.copy()
         scanner_config['skip_signal_logging'] = True
-        self.scanner = BacktestScanner(scanner_config, db_manager=self.db_manager, config_override=self._config_override)
+        self.scanner = BacktestScanner(
+            scanner_config,
+            db_manager=self.db_manager,
+            config_override=self._config_override,
+            use_historical_intelligence=self._use_historical_intelligence
+        )
 
         # Alert history DISABLED for backtests - only for production signals
         self.alert_history_manager = None  # Never use alert_history for backtest data
