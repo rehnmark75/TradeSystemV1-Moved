@@ -18,19 +18,21 @@ def get_point_value(epic: str) -> float:
     Examples:
         >>> get_point_value("USDJPY")
         0.01
+        >>> get_point_value("CS.D.USDJPY.MINI.IP")
+        0.01
         >>> get_point_value("EURUSD")
         0.0001
         >>> get_point_value("CS.D.EURUSD.CEEM.IP")
-        1.0  # CEEM uses scaled pricing (11646 instead of 1.1646)
+        0.0001
         >>> get_point_value("US500")
         1.0
     """
-    # CRITICAL: CEEM epics use scaled pricing format (e.g., 11646 instead of 1.1646)
-    # In this format, 1 pip = 1 point, so point_value = 1.0
-    if "CEEM" in epic:
-        return 1.0
-    elif "JPY" in epic:
+    # NOTE: CEEM epics use regular forex pricing (e.g., 1.1646), NOT scaled format.
+    # The previous comment was incorrect - prices in ig_candles are standard forex format.
+    # JPY pairs use 2 decimal places (0.01 per pip)
+    if "JPY" in epic:
         return 0.01
+    # Standard forex pairs use 4 decimal places (0.0001 per pip)
     elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
         return 0.0001
     else:
