@@ -732,11 +732,12 @@ class IntelligentForexScanner:
             default_tf = self._scanner_cfg.default_timeframe
 
             # Fetch enhanced data with indicators
+            # Note: Need 24h lookback for Two-Pole Oscillator (requires 50+ bars on 15m)
             df = data_fetcher.get_enhanced_data(
                 epic=epic,
                 pair=pair_name,
                 timeframe=default_tf,
-                lookback_hours=4  # Minimal lookback for current indicators
+                lookback_hours=24  # Sufficient for Two-Pole (50 bars) and ZLEMA indicators
             )
 
             if df is None or df.empty:
@@ -820,6 +821,97 @@ class IntelligentForexScanner:
                 if col in df.columns and pd.notna(latest[col]):
                     indicators['minus_di'] = float(latest[col])
                     break
+
+            # ================================================================
+            # ADDITIONAL INDICATORS (added Jan 2026 for complete snapshot)
+            # ================================================================
+
+            # Supertrend
+            if 'supertrend' in df.columns and pd.notna(latest['supertrend']):
+                indicators['supertrend'] = float(latest['supertrend'])
+            if 'supertrend_direction' in df.columns and pd.notna(latest['supertrend_direction']):
+                indicators['supertrend_direction'] = int(latest['supertrend_direction'])
+
+            # Bollinger Band width percentile
+            if 'bb_width_percentile' in df.columns and pd.notna(latest['bb_width_percentile']):
+                indicators['bb_width_percentile'] = float(latest['bb_width_percentile'])
+
+            # BB width (raw value)
+            if 'bb_upper' in indicators and 'bb_lower' in indicators:
+                indicators['bb_width'] = indicators['bb_upper'] - indicators['bb_lower']
+
+            # ATR percentile
+            if 'atr_percentile' in df.columns and pd.notna(latest['atr_percentile']):
+                indicators['atr_percentile'] = float(latest['atr_percentile'])
+
+            # ATR pips (calculate from ATR value)
+            if 'atr_14' in indicators and indicators['atr_14']:
+                atr_val = indicators['atr_14']
+                # Determine pip multiplier based on pair (JPY pairs use 100, others use 10000)
+                if 'JPY' in pair_name.upper():
+                    indicators['atr_pips'] = round(atr_val * 100, 2)
+                else:
+                    indicators['atr_pips'] = round(atr_val * 10000, 2)
+
+            # Two-Pole Oscillator indicators
+            if 'two_pole_osc' in df.columns and pd.notna(latest['two_pole_osc']):
+                indicators['two_pole_osc'] = float(latest['two_pole_osc'])
+            if 'two_pole_zone' in df.columns and pd.notna(latest['two_pole_zone']):
+                indicators['two_pole_zone'] = str(latest['two_pole_zone'])
+            if 'two_pole_strength' in df.columns and pd.notna(latest['two_pole_strength']):
+                indicators['two_pole_strength'] = float(latest['two_pole_strength'])
+            if 'two_pole_is_green' in df.columns:
+                indicators['two_pole_is_green'] = bool(latest['two_pole_is_green'])
+            if 'two_pole_is_purple' in df.columns:
+                indicators['two_pole_is_purple'] = bool(latest['two_pole_is_purple'])
+
+            # KAMA indicators
+            for col in df.columns:
+                if col.startswith('kama_') and pd.notna(latest[col]):
+                    try:
+                        indicators[col] = float(latest[col])
+                    except (ValueError, TypeError):
+                        pass
+
+            # Zero Lag EMA indicators
+            for col in df.columns:
+                if col.startswith('zlema_') and pd.notna(latest[col]):
+                    try:
+                        indicators[col] = float(latest[col])
+                    except (ValueError, TypeError):
+                        pass
+
+            # Volatility state classification (derived from ATR percentile)
+            if 'atr_percentile' in indicators:
+                atr_pct = indicators['atr_percentile']
+                if atr_pct >= 90:
+                    indicators['volatility_state'] = 'extreme'
+                elif atr_pct >= 70:
+                    indicators['volatility_state'] = 'high'
+                elif atr_pct >= 30:
+                    indicators['volatility_state'] = 'normal'
+                else:
+                    indicators['volatility_state'] = 'low'
+
+            # Price vs EMA50 (percentage distance)
+            if 'current_price' in indicators and 'ema_50' in indicators:
+                price = indicators['current_price']
+                ema50 = indicators['ema_50']
+                if ema50 and ema50 > 0:
+                    indicators['price_vs_ema50'] = round(((price - ema50) / ema50) * 100, 4)
+
+            # EMA bias 4H (determine trend direction from EMAs)
+            if 'ema_9' in indicators and 'ema_21' in indicators and 'ema_50' in indicators:
+                ema9 = indicators.get('ema_9')
+                ema21 = indicators.get('ema_21')
+                ema50 = indicators.get('ema_50')
+                if ema9 and ema21 and ema50:
+                    if ema9 > ema21 > ema50:
+                        indicators['ema_bias_4h'] = 'bullish'
+                    elif ema9 < ema21 < ema50:
+                        indicators['ema_bias_4h'] = 'bearish'
+                    else:
+                        indicators['ema_bias_4h'] = 'neutral'
 
             return indicators
 

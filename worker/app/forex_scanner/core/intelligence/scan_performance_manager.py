@@ -516,5 +516,6 @@ class ScanPerformanceManager:
             'adx', 'plus_di', 'minus_di',
             'smart_money_score', 'smart_money_validated',
             'mtf_alignment', 'mtf_confluence_score',
-            'entry_quality_score', 'fib_zone_distance'
+            'entry_quality_score', 'fib_zone_distance',
+            'volatility_state'  # Added Jan 2026 - derived from atr_percentile
         }
