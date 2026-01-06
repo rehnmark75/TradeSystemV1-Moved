@@ -40,6 +40,26 @@ docker exec -it task-worker python /app/forex_scanner/bt.py GBPUSD 14 SMC --show
 **Pair shortcuts**: EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY, GBPJPY
 **Strategy shortcuts**: SMC, SMC_SIMPLE (only active strategy after January 2026 cleanup)
 
+### Backtest Parameter Isolation (January 2026)
+Test strategy parameters during backtesting WITHOUT affecting live trading:
+
+```bash
+# Phase 1: In-memory parameter overrides
+docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 14 \
+    --override fixed_stop_loss_pips=10 --override min_confidence=0.55
+
+# Phase 2: Persistent config snapshots
+docker exec -it task-worker python /app/forex_scanner/snapshot_cli.py create tight_sl \
+    --set fixed_stop_loss_pips=8 --set min_confidence=0.6 --desc "Tighter SL test"
+docker exec -it task-worker python /app/forex_scanner/snapshot_cli.py list
+docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 14 --snapshot tight_sl
+
+# Phase 3: Historical intelligence replay (enabled by default)
+docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 14 --no-historical-intelligence
+```
+
+See **Backtest Parameter Isolation System** section below for full documentation.
+
 ---
 
 ## 🏗️ Core Architecture
