@@ -1087,7 +1087,7 @@ class TradingOrchestrator:
                 del claude_result['_vision_artifacts']
 
             # Update alert_history with vision_chart_url if chart was saved
-            if chart_base64 and self.alert_history_manager:
+            if chart_base64 and self.alert_history:
                 try:
                     # Use MinIO URL if available, otherwise use disk path
                     if minio_chart_url:
@@ -1095,7 +1095,7 @@ class TradingOrchestrator:
                     else:
                         chart_url = f"file://{vision_dir}/{prefix}_chart.png"
 
-                    self.alert_history_manager.update_alert_vision_chart_url(alert_id, chart_url)
+                    self.alert_history.update_alert_vision_chart_url(alert_id, chart_url)
                     self.logger.info(f"✅ Updated alert #{alert_id} with vision_chart_url: {chart_url}")
                     return chart_url
                 except Exception as e:

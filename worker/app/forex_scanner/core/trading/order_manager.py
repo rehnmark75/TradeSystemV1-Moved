@@ -31,9 +31,14 @@ try:
 except ImportError:
     SCANNER_CONFIG_AVAILABLE = False
 
-# Environment variables for infrastructure settings (not behavioral)
-ORDER_API_URL = os.getenv('ORDER_API_URL', "http://fastapi-dev:8000/orders/place-order")
-API_SUBSCRIPTION_KEY = os.getenv('API_SUBSCRIPTION_KEY', "")
+# Import config for infrastructure settings (not behavioral)
+try:
+    from forex_scanner import config as forex_config
+    ORDER_API_URL = getattr(forex_config, 'ORDER_API_URL', "http://fastapi-dev:8000/orders/place-order")
+    API_SUBSCRIPTION_KEY = getattr(forex_config, 'API_SUBSCRIPTION_KEY', "")
+except ImportError:
+    ORDER_API_URL = os.getenv('ORDER_API_URL', "http://fastapi-dev:8000/orders/place-order")
+    API_SUBSCRIPTION_KEY = os.getenv('API_SUBSCRIPTION_KEY', "")
 
 
 class OrderManager:
