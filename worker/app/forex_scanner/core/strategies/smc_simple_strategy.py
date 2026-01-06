@@ -94,17 +94,25 @@ class SMCSimpleStrategy:
     3. TIER 3: 15m price pulls back to Fibonacci zone (entry timing)
     """
 
-    def __init__(self, config, logger=None, db_manager=None):
+    def __init__(self, config, logger=None, db_manager=None, config_override: dict = None):
         """Initialize SMC Simple Strategy
 
         Args:
             config: Main config module
             logger: Logger instance (optional)
             db_manager: DatabaseManager for rejection tracking (optional)
+            config_override: Dict of parameter overrides for backtesting (optional)
+                            e.g., {'fixed_stop_loss_pips': 12, 'min_confidence': 0.55}
+                            When None = LIVE TRADING (unchanged behavior)
+                            When dict = BACKTEST MODE (overrides applied after base config)
         """
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
         self._db_manager = db_manager  # Store for later initialization
+
+        # CRITICAL: Backtest mode detection for parameter isolation
+        self._backtest_mode = config_override is not None
+        self._config_override = config_override
 
         # Load configuration (sets self.rejection_tracking_enabled)
         self._load_config()
@@ -305,6 +313,11 @@ class SMCSimpleStrategy:
             self._db_config = config
 
             self.logger.info(f"✅ SMC Simple config v{config.version} loaded from DATABASE (source: {config.source})")
+
+            # Apply backtest overrides if in backtest mode
+            if self._backtest_mode:
+                self._apply_config_overrides()
+
             return
 
         except Exception as e:
@@ -482,6 +495,131 @@ class SMCSimpleStrategy:
 
         # v2.6.0: Pair-specific parameter overrides
         self.pair_parameter_overrides = getattr(smc_config, 'PAIR_PARAMETER_OVERRIDES', {})
+
+        self.logger.info("✅ SMC Simple config loaded from FILE (fallback mode)")
+
+        # Apply backtest overrides if in backtest mode
+        if self._backtest_mode:
+            self._apply_config_overrides()
+
+    def _apply_config_overrides(self):
+        """Apply in-memory overrides for backtesting.
+
+        This method is called after base config is loaded (from DB or file).
+        It applies parameter overrides provided via config_override dict,
+        allowing backtests to test different parameters without affecting live trading.
+        """
+        if not self._config_override:
+            return
+
+        self.logger.info("=" * 60)
+        self.logger.info("🧪 BACKTEST MODE: Applying parameter overrides")
+        self.logger.info("=" * 60)
+
+        # Comprehensive parameter mapping: override key -> instance attribute
+        override_mapping = {
+            # SL/TP Parameters
+            'fixed_stop_loss_pips': 'sl_buffer_pips',  # Maps to SL buffer
+            'fixed_take_profit_pips': 'min_tp_pips',  # Maps to min TP
+            'min_rr_ratio': 'min_rr_ratio',
+            'optimal_rr_ratio': 'optimal_rr',
+            'max_rr_ratio': 'max_rr_ratio',
+            'sl_buffer_pips': 'sl_buffer_pips',
+            'sl_atr_multiplier': 'sl_atr_multiplier',
+            'max_sl_atr_multiplier': 'max_sl_atr_multiplier',
+            'max_sl_absolute_pips': 'max_sl_absolute_pips',
+
+            # Confidence Thresholds
+            'min_confidence': 'min_confidence',
+            'max_confidence': 'max_confidence',
+            'min_volume_ratio': 'min_volume_ratio',
+
+            # Fibonacci Zones (Entry Timing)
+            'fib_min': 'fib_min',
+            'fib_max': 'fib_max',
+            'fib_pullback_min': 'fib_min',  # Alias
+            'fib_pullback_max': 'fib_max',  # Alias
+
+            # TIER 1: HTF Settings
+            'ema_period': 'ema_period',
+            'ema_buffer_pips': 'ema_buffer_pips',
+            'min_distance_from_ema_pips': 'min_distance_from_ema',
+            'require_close_beyond_ema': 'require_close_beyond_ema',
+            'htf_timeframe': 'htf_timeframe',
+
+            # TIER 2: Trigger Settings
+            'swing_lookback': 'swing_lookback',
+            'swing_lookback_bars': 'swing_lookback',  # Alias
+            'swing_strength': 'swing_strength',
+            'swing_strength_bars': 'swing_strength',  # Alias
+            'trigger_tf': 'trigger_tf',
+            'trigger_timeframe': 'trigger_tf',  # Alias
+
+            # TIER 3: Entry Settings
+            'entry_tf': 'entry_tf',
+            'entry_timeframe': 'entry_tf',  # Alias
+            'momentum_min_depth': 'momentum_min_depth',
+            'momentum_max_depth': 'momentum_max_depth',
+            'max_pullback_wait_bars': 'max_pullback_wait',
+            'pullback_confirmation_bars': 'pullback_confirm_bars',
+
+            # Volume Settings
+            'volume_confirmation_enabled': 'volume_enabled',
+            'volume_sma_period': 'volume_sma_period',
+            'volume_spike_multiplier': 'volume_multiplier',
+            'volume_filter_enabled': 'volume_filter_enabled',
+
+            # Session/Filter Settings
+            'session_filter_enabled': 'session_filter_enabled',
+            'block_asian_session': 'block_asian',
+            'allow_asian_session': 'block_asian',  # Inverted logic handled below
+
+            # Cooldown Settings
+            'signal_cooldown_hours': 'cooldown_hours',
+            'cooldown_minutes': 'cooldown_hours',  # Will be converted
+            'adaptive_cooldown_enabled': 'adaptive_cooldown_enabled',
+            'base_cooldown_hours': 'base_cooldown_hours',
+
+            # Momentum Quality
+            'momentum_mode_enabled': 'momentum_mode_enabled',
+            'momentum_quality_enabled': 'momentum_quality_enabled',
+            'min_breakout_atr_ratio': 'min_breakout_atr_ratio',
+            'min_body_percentage': 'min_body_percentage',
+
+            # ATR Settings
+            'atr_period': 'atr_period',
+            'use_atr_stop': 'use_atr_stop',
+            'use_atr_swing_validation': 'use_atr_swing_validation',
+            'min_swing_atr_multiplier': 'min_swing_atr_multiplier',
+
+            # Limit Order Settings
+            'limit_order_enabled': 'limit_order_enabled',
+            'limit_expiry_minutes': 'limit_expiry_minutes',
+
+            # Debug
+            'enable_debug_logging': 'debug_logging',
+        }
+
+        overrides_applied = 0
+        for param, attr_name in override_mapping.items():
+            if param in self._config_override:
+                value = self._config_override[param]
+
+                # Special handling for inverted logic
+                if param == 'allow_asian_session':
+                    value = not value  # Invert for block_asian
+
+                # Special handling for cooldown_minutes -> cooldown_hours conversion
+                if param == 'cooldown_minutes':
+                    value = value / 60.0  # Convert minutes to hours
+
+                old_value = getattr(self, attr_name, None)
+                setattr(self, attr_name, value)
+                self.logger.info(f"   [OVERRIDE] {param}: {old_value} → {value}")
+                overrides_applied += 1
+
+        self.logger.info(f"   Total overrides applied: {overrides_applied}")
+        self.logger.info("=" * 60)
 
     def _get_pair_param(self, epic: str, param_name: str, default_value):
         """
@@ -3379,6 +3517,18 @@ class SMCSimpleStrategy:
         return True
 
 
-def create_smc_simple_strategy(config, logger=None, db_manager=None):
-    """Factory function to create SMC Simple Strategy instance"""
-    return SMCSimpleStrategy(config, logger, db_manager)
+def create_smc_simple_strategy(config, logger=None, db_manager=None, config_override: dict = None):
+    """Factory function to create SMC Simple Strategy instance.
+
+    Args:
+        config: Main config module
+        logger: Logger instance (optional)
+        db_manager: DatabaseManager for rejection tracking (optional)
+        config_override: Dict of parameter overrides for backtesting (optional)
+                        When None = LIVE TRADING (unchanged behavior)
+                        When dict = BACKTEST MODE (overrides applied)
+
+    Returns:
+        SMCSimpleStrategy instance
+    """
+    return SMCSimpleStrategy(config, logger, db_manager, config_override=config_override)

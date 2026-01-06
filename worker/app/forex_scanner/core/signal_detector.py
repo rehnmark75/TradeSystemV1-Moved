@@ -47,11 +47,14 @@ class SignalDetector:
     Legacy strategies are archived in forex_scanner/archive/disabled_strategies/
     """
 
-    def __init__(self, db_manager: DatabaseManager, user_timezone: str = 'Europe/Stockholm'):
+    def __init__(self, db_manager: DatabaseManager, user_timezone: str = 'Europe/Stockholm', config_override: dict = None):
         self.db_manager = db_manager
         self.data_fetcher = DataFetcher(db_manager, user_timezone)
         self.price_adjuster = PriceAdjuster()
         self.logger = logging.getLogger(__name__)
+
+        # Store config override for backtest parameter isolation
+        self._config_override = config_override
 
         # NOTE: Large candle filter removed (Jan 2026 cleanup)
         # The filter was initialized but never called in the signal flow.
@@ -163,8 +166,15 @@ class SignalDetector:
                 from .strategies.smc_simple_strategy import create_smc_simple_strategy
 
                 # Strategy loads all config from database via smc_simple_config_service
-                self.smc_simple_strategy = create_smc_simple_strategy(None, logger=self.logger, db_manager=self.db_manager)
-                self.logger.info(f"✅ SMC Simple strategy initialized (htf={htf_tf}, trigger={trigger_tf}, entry={entry_tf})")
+                # Pass config_override for backtest parameter isolation
+                self.smc_simple_strategy = create_smc_simple_strategy(
+                    None,
+                    logger=self.logger,
+                    db_manager=self.db_manager,
+                    config_override=self._config_override
+                )
+                mode_str = "BACKTEST MODE with overrides" if self._config_override else "LIVE MODE"
+                self.logger.info(f"✅ SMC Simple strategy initialized ({mode_str}, htf={htf_tf}, trigger={trigger_tf}, entry={entry_tf})")
 
             # Check if data_fetcher is in backtest mode (needed for lookback calculations)
             is_backtest = hasattr(self.data_fetcher, 'current_backtest_time') and self.data_fetcher.current_backtest_time is not None

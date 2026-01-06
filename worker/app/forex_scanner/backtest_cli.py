@@ -178,7 +178,58 @@ Signal Display Format:
             help='Clean up old test executions before running'
         )
 
+        # Parameter override options for backtest isolation
+        parser.add_argument(
+            '--override',
+            action='append',
+            metavar='PARAM=VALUE',
+            help='Override strategy parameter for this backtest only (can be used multiple times). '
+                 'Example: --override fixed_stop_loss_pips=12 --override min_confidence=0.55. '
+                 'Does NOT affect live trading configuration.'
+        )
+
         return parser
+
+    def _parse_overrides(self, override_args) -> dict:
+        """
+        Parse --override PARAM=VALUE arguments into a dictionary.
+
+        Args:
+            override_args: List of strings like ['fixed_stop_loss_pips=12', 'min_confidence=0.55']
+
+        Returns:
+            Dict of parameter overrides with auto-converted types
+        """
+        if not override_args:
+            return None
+
+        overrides = {}
+        for item in override_args:
+            if '=' not in item:
+                print(f"⚠️ Invalid override format '{item}' - expected PARAM=VALUE, skipping")
+                continue
+
+            key, value = item.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+
+            # Auto-convert types
+            try:
+                if value.lower() in ('true', 'false'):
+                    overrides[key] = value.lower() == 'true'
+                elif '.' in value:
+                    overrides[key] = float(value)
+                else:
+                    overrides[key] = int(value)
+            except ValueError:
+                overrides[key] = value  # Keep as string
+
+        if overrides:
+            print(f"🧪 Parameter overrides parsed: {len(overrides)} parameters")
+            for k, v in overrides.items():
+                print(f"   - {k}: {v} ({type(v).__name__})")
+
+        return overrides if overrides else None
 
     def execute_command(self, args) -> bool:
         """Execute the backtest command based on arguments"""
@@ -186,6 +237,9 @@ Signal Display Format:
         try:
             # Setup logging level
             self.setup_logging(args.verbose)
+
+            # Parse config overrides
+            config_override = self._parse_overrides(getattr(args, 'override', None))
 
             # Validate date range parameters
             if (args.start_date and not args.end_date) or (args.end_date and not args.start_date):
@@ -227,7 +281,8 @@ Signal Display Format:
                     epic=args.epic,
                     hours=args.hours,
                     show_signals=True,  # Always show signals for quick test
-                    pipeline=args.pipeline
+                    pipeline=args.pipeline,
+                    config_override=config_override
                 )
 
             # Standard backtest mode
@@ -241,7 +296,8 @@ Signal Display Format:
                 strategy=args.strategy,
                 max_signals_display=args.max_signals,
                 pipeline=args.pipeline,
-                csv_export=args.csv_export if hasattr(args, 'csv_export') else None
+                csv_export=args.csv_export if hasattr(args, 'csv_export') else None,
+                config_override=config_override
             )
 
         except KeyboardInterrupt:

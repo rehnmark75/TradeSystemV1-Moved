@@ -73,17 +73,19 @@ class BacktestTradingOrchestrator:
                  backtest_config: Dict,
                  db_manager: DatabaseManager = None,
                  logger: Optional[logging.Logger] = None,
-                 pipeline_mode: bool = False):
+                 pipeline_mode: bool = False,
+                 config_override: dict = None):
 
         self.execution_id = execution_id
         self.backtest_config = backtest_config
         self.pipeline_mode = pipeline_mode
+        self._config_override = config_override
         self.db_manager = db_manager or DatabaseManager(config.DATABASE_URL)
         self.logger = logger or logging.getLogger(__name__)
 
         # Core components - SAME as live trading
         self.data_fetcher = BacktestDataFetcher(self.db_manager, config.USER_TIMEZONE)
-        self.signal_detector = SignalDetector(self.db_manager, config.USER_TIMEZONE)
+        self.signal_detector = SignalDetector(self.db_manager, config.USER_TIMEZONE, config_override=self._config_override)
 
         # Force-initialize the requested strategy for backtest (regardless of config flags)
         # This allows testing any strategy without modifying config.py
@@ -120,7 +122,7 @@ class BacktestTradingOrchestrator:
         # The orchestrator will handle all signal logging to prevent duplicates
         scanner_config = backtest_config.copy()
         scanner_config['skip_signal_logging'] = True
-        self.scanner = BacktestScanner(scanner_config, db_manager=self.db_manager)
+        self.scanner = BacktestScanner(scanner_config, db_manager=self.db_manager, config_override=self._config_override)
 
         # Alert history DISABLED for backtests - only for production signals
         self.alert_history_manager = None  # Never use alert_history for backtest data
@@ -140,6 +142,10 @@ class BacktestTradingOrchestrator:
         self.logger.info(f"   Strategy: {backtest_config.get('strategy_name', 'unknown')}")
         self.logger.info(f"   Using SAME TradeValidator as live trading ✅")
         self.logger.info(f"   Alert history: ❌ DISABLED (backtest mode - production only)")
+        if self._config_override:
+            self.logger.info(f"   🧪 CONFIG OVERRIDES: {len(self._config_override)} parameters")
+            for key, value in self._config_override.items():
+                self.logger.info(f"      - {key}: {value}")
 
     def run_backtest_orchestration(self) -> Dict:
         """
@@ -554,6 +560,7 @@ class BacktestTradingOrchestrator:
 def create_backtest_trading_orchestrator(execution_id: int,
                                        backtest_config: Dict,
                                        db_manager: DatabaseManager = None,
+                                       config_override: dict = None,
                                        **kwargs) -> BacktestTradingOrchestrator:
     """Create BacktestTradingOrchestrator instance"""
     # Extract pipeline_mode from backtest_config if not provided in kwargs
@@ -561,7 +568,7 @@ def create_backtest_trading_orchestrator(execution_id: int,
         kwargs['pipeline_mode'] = backtest_config.get('pipeline_mode', False)
 
     return BacktestTradingOrchestrator(
-        execution_id, backtest_config, db_manager, **kwargs
+        execution_id, backtest_config, db_manager, config_override=config_override, **kwargs
     )
 
 

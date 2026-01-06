@@ -71,6 +71,13 @@ def main():
                 processed_args.extend(["--days", arg])
                 print(f"📅 Testing {arg} days")
 
+            # Handle --override flags (can be used multiple times)
+            elif arg == "--override" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🧪 Override: {args[i]}")
+
             # Pass through other flags
             elif arg.startswith("--"):
                 processed_args.append(arg)
@@ -151,6 +158,18 @@ Additional Options:
   --timeframe 5m    Use different timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d)
   --verbose         Verbose output
 
+Parameter Overrides (for backtest testing only - does NOT affect live trading):
+  --override PARAM=VALUE   Override strategy parameter (can be used multiple times)
+                          Types auto-detected: bool (true/false), float (1.5), int (10), string
+
+  Supported Override Parameters:
+    SL/TP: fixed_stop_loss_pips, fixed_take_profit_pips, min_rr_ratio, sl_buffer_pips
+    Confidence: min_confidence, max_confidence, high_volume_confidence
+    Fibonacci: fib_min, fib_max, fib_pullback_min, fib_pullback_max
+    HTF Settings: ema_period, ema_buffer_pips, min_distance_from_ema_pips
+    Filters: macd_filter_enabled, allow_asian_session, cooldown_minutes
+    See plan file for full list of 40+ overridable parameters
+
 Examples:
   python bt.py GBPUSD 14 EMA --show-signals       # GBP/USD, 14 days, EMA strategy with signals (raw)
   python bt.py EURUSD 7 MACD --pipeline           # EUR/USD, 7 days, MACD with full pipeline
@@ -158,6 +177,11 @@ Examples:
   python bt.py EURUSD 3 SMC --timeframe 5m        # EUR/USD, 3 days, Smart Money on 5m timeframe
   python bt.py AUDUSD 7 MOMENTUM --pipeline        # AUD/USD, 7 days, Momentum with pipeline validation
   python bt.py USDJPY 14 ZEROLAG --show-signals   # USD/JPY, 14 days, Zero Lag strategy
+
+Parameter Override Examples:
+  python bt.py EURUSD 14 --override fixed_stop_loss_pips=10 --override min_confidence=0.55
+  python bt.py GBPUSD 30 --override fib_min=0.5 --override fib_max=0.7
+  python bt.py EURUSD 7 --override macd_filter_enabled=false --show-signals
 """
     print(help_text)
 

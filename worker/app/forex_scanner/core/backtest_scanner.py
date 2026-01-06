@@ -39,11 +39,16 @@ class BacktestScanner(IntelligentForexScanner):
     def __init__(self,
                  backtest_config: Dict,
                  db_manager: DatabaseManager = None,
+                 config_override: dict = None,
                  **kwargs):
 
         # Set up backtest-specific configuration
         self.backtest_config = backtest_config
         self.backtest_mode = True
+
+        # Store config override for backtest parameter isolation
+        # This is stored BEFORE super().__init__() so it's available in _initialize_signal_detector
+        self._config_override = config_override
 
         # Extract backtest parameters
         self.start_date = backtest_config['start_date']
@@ -155,12 +160,46 @@ class BacktestScanner(IntelligentForexScanner):
         # CRITICAL VALIDATION: Log lookback configuration alignment
         self._validate_lookback_alignment()
 
+        # Log config override status
+        if self._config_override:
+            self.logger.info(f"   🧪 Config Override: {len(self._config_override)} parameters")
+            for key, value in self._config_override.items():
+                self.logger.info(f"      - {key}: {value}")
+        else:
+            self.logger.info(f"   Config Override: None (using database config)")
+
         self.logger.info(f"🧪 BacktestScanner initialized:")
         self.logger.info(f"   Execution ID: {self.execution_id}")
         self.logger.info(f"   Strategy: {self.strategy_name}")
         self.logger.info(f"   Period: {self.start_date} to {self.end_date}")
         self.logger.info(f"   Epics: {len(self.epic_list)} pairs")
         self.logger.info(f"   Timeframe: {self.timeframe}")
+
+    def _initialize_signal_detector(self, db_manager, user_timezone):
+        """
+        Override parent's signal detector initialization to pass config_override
+        for backtest parameter isolation.
+        """
+        try:
+            from .signal_detector import SignalDetector
+        except ImportError:
+            from forex_scanner.core.signal_detector import SignalDetector
+
+        try:
+            if db_manager:
+                return SignalDetector(db_manager, user_timezone, config_override=self._config_override)
+            else:
+                # Try to create with temporary db manager
+                try:
+                    from .database import DatabaseManager
+                except ImportError:
+                    from forex_scanner.core.database import DatabaseManager
+                temp_db = DatabaseManager(getattr(config, 'DATABASE_URL', ''))
+                return SignalDetector(temp_db, user_timezone, config_override=self._config_override)
+        except Exception as e:
+            self.logger.warning(f"⚠️ Signal detector init warning: {e}")
+            # Return basic signal detector without db but with config override
+            return SignalDetector(None, user_timezone, config_override=self._config_override)
 
     def _override_signal_detector_for_backtest(self):
         """
