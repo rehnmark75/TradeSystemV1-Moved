@@ -135,7 +135,19 @@ def get_config_by_category(category: str) -> Dict[str, Any]:
         'trading_hours': [
             'trading_start_hour', 'trading_end_hour', 'respect_market_hours', 'weekend_scanning',
             'enable_trading_time_controls', 'trading_cutoff_time_utc', 'trade_cooldown_enabled',
-            'trade_cooldown_minutes', 'user_timezone', 'respect_trading_hours'
+            'trade_cooldown_minutes', 'user_timezone', 'respect_trading_hours',
+            # Session Hours Configuration (Jan 2026)
+            'session_asian_start_hour', 'session_asian_end_hour',
+            'session_london_start_hour', 'session_london_end_hour',
+            'session_newyork_start_hour', 'session_newyork_end_hour',
+            'session_overlap_start_hour', 'session_overlap_end_hour',
+            'block_asian_session'
+        ],
+        'order_executor': [
+            # Order Executor Thresholds (Jan 2026)
+            'executor_high_confidence_threshold', 'executor_medium_confidence_threshold',
+            'executor_max_stop_loss_pips', 'executor_max_take_profit_pips',
+            'executor_high_conf_stop_multiplier', 'executor_low_conf_stop_multiplier'
         ],
         # NOTE: 'safety' section removed (Jan 2026) - EMA200/consensus filters were redundant
         # with SMC Simple strategy's built-in 4H 50 EMA bias check

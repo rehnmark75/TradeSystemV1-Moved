@@ -2286,6 +2286,12 @@ class SMCSimpleStrategy:
     def _check_session(self, timestamp, epic: str = None) -> Tuple[bool, str]:
         """Check if current time is in allowed trading session
 
+        Session hours are loaded from scanner_global_config database (NO FALLBACK):
+        - Asian: session_asian_start_hour to session_asian_end_hour (default 21:00-07:00 UTC)
+        - London: session_london_start_hour to session_london_end_hour (default 07:00-16:00 UTC)
+        - New York: session_newyork_start_hour to session_newyork_end_hour (default 12:00-21:00 UTC)
+        - Overlap: session_overlap_start_hour to session_overlap_end_hour (default 12:00-16:00 UTC)
+
         Args:
             timestamp: Candle timestamp
             epic: Trading pair epic for pair-specific session overrides (v2.8.0)
@@ -2295,23 +2301,41 @@ class SMCSimpleStrategy:
         else:
             hour = datetime.now().hour
 
-        # Asian session: 21:00-07:00 UTC
-        if hour >= 21 or hour < 7:
+        # Load session hours from scanner_global_config database (NO FALLBACK)
+        try:
+            from forex_scanner.services.scanner_config_service import get_scanner_config
+            scanner_cfg = get_scanner_config()
+            asian_start = scanner_cfg.session_asian_start_hour
+            asian_end = scanner_cfg.session_asian_end_hour
+            london_start = scanner_cfg.session_london_start_hour
+            overlap_start = scanner_cfg.session_overlap_start_hour
+            overlap_end = scanner_cfg.session_overlap_end_hour
+            newyork_end = scanner_cfg.session_newyork_end_hour
+            block_asian = scanner_cfg.block_asian_session
+        except Exception as e:
+            # Database required - fail explicitly
+            self.logger.error(f"❌ Cannot load session hours from database: {e}")
+            raise RuntimeError(f"Session hours database config required: {e}")
+
+        # Asian session check (crosses midnight, e.g., 21:00-07:00)
+        in_asian_session = hour >= asian_start or hour < asian_end
+
+        if in_asian_session:
             # v2.8.0: Check pair-specific override for Asian session using database config
             if epic and self._config_service:
                 if self._config_service.is_asian_session_allowed(epic):
                     pair_name = epic.split('.')[2] if '.' in epic else epic
                     return True, f"Asian session ALLOWED for {pair_name} (hour={hour})"
 
-            # Default to global block
-            if self.block_asian:
+            # Use database config for block_asian
+            if block_asian:
                 return False, f"Asian session blocked (hour={hour})"
 
-        # London: 07:00-16:00, NY: 12:00-21:00
-        if 7 <= hour <= 21:
-            if 12 <= hour <= 16:
+        # Active trading sessions (use database config values)
+        if london_start <= hour < newyork_end:
+            if overlap_start <= hour < overlap_end:
                 return True, f"London/NY overlap (hour={hour})"
-            elif 7 <= hour < 12:
+            elif london_start <= hour < overlap_start:
                 return True, f"London session (hour={hour})"
             else:
                 return True, f"New York session (hour={hour})"
@@ -2581,6 +2605,8 @@ class SMCSimpleStrategy:
     def _get_current_session(self, current_time: datetime) -> str:
         """Determine current trading session
 
+        Session boundaries are loaded from scanner_global_config database (NO FALLBACK).
+
         Args:
             current_time: Current timestamp
 
@@ -2589,12 +2615,26 @@ class SMCSimpleStrategy:
         """
         hour = current_time.hour
 
-        # Session definitions (UTC)
-        if 21 <= hour or hour < 7:
+        # Load session hours from scanner_global_config database (NO FALLBACK)
+        try:
+            from forex_scanner.services.scanner_config_service import get_scanner_config
+            scanner_cfg = get_scanner_config()
+            asian_start = scanner_cfg.session_asian_start_hour
+            asian_end = scanner_cfg.session_asian_end_hour
+            london_start = scanner_cfg.session_london_start_hour
+            overlap_start = scanner_cfg.session_overlap_start_hour
+            overlap_end = scanner_cfg.session_overlap_end_hour
+        except Exception as e:
+            # Database required - fail explicitly
+            self.logger.error(f"❌ Cannot load session hours from database: {e}")
+            raise RuntimeError(f"Session hours database config required: {e}")
+
+        # Session definitions (from database)
+        if asian_start <= hour or hour < asian_end:
             return 'asian'
-        elif 7 <= hour < 12:
+        elif london_start <= hour < overlap_start:
             return 'london'
-        elif 12 <= hour < 16:
+        elif overlap_start <= hour < overlap_end:
             return 'overlap'  # London-NY overlap
         else:
             return 'new_york'

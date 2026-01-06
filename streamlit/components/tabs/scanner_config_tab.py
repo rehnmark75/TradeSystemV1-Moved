@@ -75,6 +75,7 @@ def render_scanner_config_tab():
         "Duplicate Detection",
         "Risk Management",
         "Trading Hours",
+        "Order Executor",
         "SMC Conflict",
         "Claude AI",
         "Audit Trail"
@@ -102,12 +103,15 @@ def render_scanner_config_tab():
         render_trading_hours_settings(config)
 
     with sub_tabs[7]:
-        render_smc_conflict_settings(config)
+        render_order_executor_settings(config)
 
     with sub_tabs[8]:
-        render_claude_validation_settings(config)
+        render_smc_conflict_settings(config)
 
     with sub_tabs[9]:
+        render_claude_validation_settings(config)
+
+    with sub_tabs[10]:
         render_audit_trail()
 
 
@@ -1234,7 +1238,206 @@ def render_trading_hours_settings(config: Dict[str, Any]):
         if not values_equal(new_cooldown_mins, config.get('trade_cooldown_minutes')):
             st.session_state.scanner_pending_changes['trade_cooldown_minutes'] = new_cooldown_mins
 
+    # Session Hours Configuration (UTC)
+    st.markdown("---")
+    st.markdown("### Forex Session Hours (UTC)")
+    st.markdown("Configure trading session boundaries. All times are in UTC.")
+
+    col3, col4, col5 = st.columns(3)
+
+    with col3:
+        st.markdown("**Asian Session**")
+
+        new_asian_start = st.number_input(
+            "Asian Start Hour",
+            value=_get_int(config, 'session_asian_start_hour', 21),
+            min_value=0, max_value=23, step=1,
+            help="Asian session start (UTC). Default: 21:00",
+            key="session_asian_start_hour"
+        )
+        if not values_equal(new_asian_start, config.get('session_asian_start_hour')):
+            st.session_state.scanner_pending_changes['session_asian_start_hour'] = new_asian_start
+
+        new_asian_end = st.number_input(
+            "Asian End Hour",
+            value=_get_int(config, 'session_asian_end_hour', 7),
+            min_value=0, max_value=23, step=1,
+            help="Asian session end (UTC). Default: 07:00",
+            key="session_asian_end_hour"
+        )
+        if not values_equal(new_asian_end, config.get('session_asian_end_hour')):
+            st.session_state.scanner_pending_changes['session_asian_end_hour'] = new_asian_end
+
+        new_block_asian = st.checkbox(
+            "Block Asian Session",
+            value=config.get('block_asian_session', True),
+            help="Block trading during Asian session (lower liquidity)",
+            key="scanner_block_asian_session"
+        )
+        if not values_equal(new_block_asian, config.get('block_asian_session')):
+            st.session_state.scanner_pending_changes['block_asian_session'] = new_block_asian
+
+    with col4:
+        st.markdown("**London Session**")
+
+        new_london_start = st.number_input(
+            "London Start Hour",
+            value=_get_int(config, 'session_london_start_hour', 7),
+            min_value=0, max_value=23, step=1,
+            help="London session start (UTC). Default: 07:00",
+            key="session_london_start_hour"
+        )
+        if not values_equal(new_london_start, config.get('session_london_start_hour')):
+            st.session_state.scanner_pending_changes['session_london_start_hour'] = new_london_start
+
+        new_london_end = st.number_input(
+            "London End Hour",
+            value=_get_int(config, 'session_london_end_hour', 16),
+            min_value=0, max_value=23, step=1,
+            help="London session end (UTC). Default: 16:00",
+            key="session_london_end_hour"
+        )
+        if not values_equal(new_london_end, config.get('session_london_end_hour')):
+            st.session_state.scanner_pending_changes['session_london_end_hour'] = new_london_end
+
+    with col5:
+        st.markdown("**New York Session**")
+
+        new_newyork_start = st.number_input(
+            "New York Start Hour",
+            value=_get_int(config, 'session_newyork_start_hour', 12),
+            min_value=0, max_value=23, step=1,
+            help="New York session start (UTC). Default: 12:00",
+            key="session_newyork_start_hour"
+        )
+        if not values_equal(new_newyork_start, config.get('session_newyork_start_hour')):
+            st.session_state.scanner_pending_changes['session_newyork_start_hour'] = new_newyork_start
+
+        new_newyork_end = st.number_input(
+            "New York End Hour",
+            value=_get_int(config, 'session_newyork_end_hour', 21),
+            min_value=0, max_value=23, step=1,
+            help="New York session end (UTC). Default: 21:00",
+            key="session_newyork_end_hour"
+        )
+        if not values_equal(new_newyork_end, config.get('session_newyork_end_hour')):
+            st.session_state.scanner_pending_changes['session_newyork_end_hour'] = new_newyork_end
+
+    # London/NY Overlap
+    st.markdown("**London/NY Overlap (Best Trading Window)**")
+    col6, col7 = st.columns(2)
+
+    with col6:
+        new_overlap_start = st.number_input(
+            "Overlap Start Hour",
+            value=_get_int(config, 'session_overlap_start_hour', 12),
+            min_value=0, max_value=23, step=1,
+            help="London/NY overlap start (UTC). Default: 12:00",
+            key="session_overlap_start_hour"
+        )
+        if not values_equal(new_overlap_start, config.get('session_overlap_start_hour')):
+            st.session_state.scanner_pending_changes['session_overlap_start_hour'] = new_overlap_start
+
+    with col7:
+        new_overlap_end = st.number_input(
+            "Overlap End Hour",
+            value=_get_int(config, 'session_overlap_end_hour', 16),
+            min_value=0, max_value=23, step=1,
+            help="London/NY overlap end (UTC). Default: 16:00",
+            key="session_overlap_end_hour"
+        )
+        if not values_equal(new_overlap_end, config.get('session_overlap_end_hour')):
+            st.session_state.scanner_pending_changes['session_overlap_end_hour'] = new_overlap_end
+
     render_save_section(config, 'trading_hours', updated_by)
+
+
+def render_order_executor_settings(config: Dict[str, Any]):
+    """Render order executor threshold settings"""
+    st.subheader("Order Executor Settings")
+    st.markdown("Confidence-based position sizing and SL/TP sanity checks")
+
+    updated_by = st.session_state.get('scanner_config_user', 'streamlit_user')
+
+    if 'scanner_pending_changes' not in st.session_state:
+        st.session_state.scanner_pending_changes = {}
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Confidence Thresholds**")
+
+        new_high_conf = st.number_input(
+            "High Confidence Threshold",
+            value=_get_float(config, 'executor_high_confidence_threshold', 0.80),
+            min_value=0.50, max_value=1.00, step=0.05,
+            format="%.2f",
+            help="Signals above this get tighter stops (default: 0.80)",
+            key="executor_high_confidence_threshold"
+        )
+        if not values_equal(new_high_conf, config.get('executor_high_confidence_threshold')):
+            st.session_state.scanner_pending_changes['executor_high_confidence_threshold'] = new_high_conf
+
+        new_med_conf = st.number_input(
+            "Medium Confidence Threshold",
+            value=_get_float(config, 'executor_medium_confidence_threshold', 0.70),
+            min_value=0.40, max_value=0.90, step=0.05,
+            format="%.2f",
+            help="Signals above this get normal stops (default: 0.70)",
+            key="executor_medium_confidence_threshold"
+        )
+        if not values_equal(new_med_conf, config.get('executor_medium_confidence_threshold')):
+            st.session_state.scanner_pending_changes['executor_medium_confidence_threshold'] = new_med_conf
+
+        st.markdown("**Stop Distance Multipliers**")
+
+        new_high_mult = st.number_input(
+            "High Confidence Stop Multiplier",
+            value=_get_float(config, 'executor_high_conf_stop_multiplier', 0.80),
+            min_value=0.50, max_value=1.00, step=0.05,
+            format="%.2f",
+            help="Multiplier for high confidence (tighter stops, default: 0.80)",
+            key="executor_high_conf_stop_multiplier"
+        )
+        if not values_equal(new_high_mult, config.get('executor_high_conf_stop_multiplier')):
+            st.session_state.scanner_pending_changes['executor_high_conf_stop_multiplier'] = new_high_mult
+
+        new_low_mult = st.number_input(
+            "Low Confidence Stop Multiplier",
+            value=_get_float(config, 'executor_low_conf_stop_multiplier', 1.20),
+            min_value=1.00, max_value=2.00, step=0.05,
+            format="%.2f",
+            help="Multiplier for low confidence (wider stops, default: 1.20)",
+            key="executor_low_conf_stop_multiplier"
+        )
+        if not values_equal(new_low_mult, config.get('executor_low_conf_stop_multiplier')):
+            st.session_state.scanner_pending_changes['executor_low_conf_stop_multiplier'] = new_low_mult
+
+    with col2:
+        st.markdown("**SL/TP Sanity Limits**")
+        st.markdown("Orders exceeding these limits are rejected (SL) or capped (TP)")
+
+        new_max_sl = st.number_input(
+            "Max Stop Loss (pips)",
+            value=_get_int(config, 'executor_max_stop_loss_pips', 100),
+            min_value=20, max_value=500, step=10,
+            help="Maximum allowed stop loss in pips (default: 100)",
+            key="executor_max_stop_loss_pips"
+        )
+        if not values_equal(new_max_sl, config.get('executor_max_stop_loss_pips')):
+            st.session_state.scanner_pending_changes['executor_max_stop_loss_pips'] = new_max_sl
+
+        new_max_tp = st.number_input(
+            "Max Take Profit (pips)",
+            value=_get_int(config, 'executor_max_take_profit_pips', 200),
+            min_value=50, max_value=1000, step=10,
+            help="Maximum allowed take profit in pips (default: 200)",
+            key="executor_max_take_profit_pips"
+        )
+        if not values_equal(new_max_tp, config.get('executor_max_take_profit_pips')):
+            st.session_state.scanner_pending_changes['executor_max_take_profit_pips'] = new_max_tp
+
+    render_save_section(config, 'order_executor', updated_by)
 
 
 def render_smc_conflict_settings(config: Dict[str, Any]):

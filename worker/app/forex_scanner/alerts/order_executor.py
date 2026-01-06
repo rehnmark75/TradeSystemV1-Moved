@@ -377,9 +377,9 @@ class OrderExecutor:
                 self.logger.debug(f"Database config not available, using strategy values: {e}")
 
             # ✅ SAFETY VALIDATION: Ensure reasonable SL/TP values
-            # For all pairs, stop_distance and limit_distance should be in reasonable pip/point range
-            max_reasonable_sl = 100  # Maximum reasonable stop loss in pips/points
-            max_reasonable_tp = 200  # Maximum reasonable take profit in pips/points
+            # Thresholds loaded from scanner_global_config database (NO FALLBACK)
+            max_reasonable_sl = self._scanner_cfg.executor_max_stop_loss_pips
+            max_reasonable_tp = self._scanner_cfg.executor_max_take_profit_pips
 
             if stop_distance > max_reasonable_sl:
                 self.logger.error(
@@ -1306,13 +1306,19 @@ class OrderExecutor:
                 confidence = signal.get('confidence_score', 0.5)
                 base_stop = self.default_stop_distance
 
+                # Confidence thresholds and multipliers from scanner_global_config database (NO FALLBACK)
+                high_conf_threshold = self._scanner_cfg.executor_high_confidence_threshold
+                medium_conf_threshold = self._scanner_cfg.executor_medium_confidence_threshold
+                high_conf_multiplier = self._scanner_cfg.executor_high_conf_stop_multiplier
+                low_conf_multiplier = self._scanner_cfg.executor_low_conf_stop_multiplier
+
                 # Higher confidence = tighter stop
-                if confidence > 0.8:
-                    return int(base_stop * 0.8)  # 16 pips for high confidence
-                elif confidence > 0.7:
-                    return base_stop  # 20 pips for medium confidence
+                if confidence > high_conf_threshold:
+                    return int(base_stop * high_conf_multiplier)
+                elif confidence > medium_conf_threshold:
+                    return base_stop
                 else:
-                    return int(base_stop * 1.2)  # 24 pips for lower confidence
+                    return int(base_stop * low_conf_multiplier)
             
             # Method 3: Use default stop distance
             return self.default_stop_distance

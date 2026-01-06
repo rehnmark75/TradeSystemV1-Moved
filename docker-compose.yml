@@ -219,7 +219,7 @@ services:
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
       - STRATEGY_CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/strategy_config
-      - ORDER_API_URL=http://fastapi-dev:8000/orders
+      - ORDER_API_URL=http://fastapi-dev:8000/orders/place-order
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
       - GEMINI_API_KEY=${GEMINI_API_KEY}

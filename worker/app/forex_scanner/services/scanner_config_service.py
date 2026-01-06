@@ -117,6 +117,29 @@ class ScannerConfig:
     user_timezone: str = ""
     respect_trading_hours: bool = False
 
+    # SESSION HOURS CONFIGURATION (NO FALLBACK - database only)
+    # These control trading session boundaries in UTC
+    session_asian_start_hour: int = 21      # Asian session starts 21:00 UTC
+    session_asian_end_hour: int = 7         # Asian session ends 07:00 UTC
+    session_london_start_hour: int = 7      # London session starts 07:00 UTC
+    session_london_end_hour: int = 16       # London session ends 16:00 UTC
+    session_newyork_start_hour: int = 12    # New York session starts 12:00 UTC
+    session_newyork_end_hour: int = 21      # New York session ends 21:00 UTC
+    session_overlap_start_hour: int = 12    # London/NY overlap starts 12:00 UTC
+    session_overlap_end_hour: int = 16      # London/NY overlap ends 16:00 UTC
+    block_asian_session: bool = True        # Block trading during Asian session
+
+    # ORDER EXECUTOR THRESHOLDS (NO FALLBACK - database only)
+    # Confidence thresholds for position sizing
+    executor_high_confidence_threshold: float = 0.80   # High confidence threshold
+    executor_medium_confidence_threshold: float = 0.70  # Medium confidence threshold
+    # SL/TP sanity check limits (in pips)
+    executor_max_stop_loss_pips: int = 100             # Maximum reasonable SL
+    executor_max_take_profit_pips: int = 200           # Maximum reasonable TP
+    # Stop distance multipliers based on confidence
+    executor_high_conf_stop_multiplier: float = 0.80   # Tighter stops for high confidence
+    executor_low_conf_stop_multiplier: float = 1.20    # Wider stops for low confidence
+
     # NOTE: Safety filter settings removed (Jan 2026) - EMA200/consensus filters were redundant
     # with SMC Simple strategy's built-in 4H 50 EMA bias check. Database columns retained for
     # backward compatibility but no longer loaded or used.
@@ -560,6 +583,16 @@ class ScannerConfigService:
             'trading_start_hour', 'trading_end_hour', 'respect_market_hours', 'weekend_scanning',
             'enable_trading_time_controls', 'trading_cutoff_time_utc', 'trade_cooldown_enabled',
             'trade_cooldown_minutes', 'user_timezone', 'respect_trading_hours',
+            # Session Hours Configuration (Jan 2026 - database only, NO FALLBACK)
+            'session_asian_start_hour', 'session_asian_end_hour',
+            'session_london_start_hour', 'session_london_end_hour',
+            'session_newyork_start_hour', 'session_newyork_end_hour',
+            'session_overlap_start_hour', 'session_overlap_end_hour',
+            'block_asian_session',
+            # Order Executor Thresholds (Jan 2026 - database only, NO FALLBACK)
+            'executor_high_confidence_threshold', 'executor_medium_confidence_threshold',
+            'executor_max_stop_loss_pips', 'executor_max_take_profit_pips',
+            'executor_high_conf_stop_multiplier', 'executor_low_conf_stop_multiplier',
             # NOTE: Safety filter fields removed (Jan 2026) - no longer loaded from database
             # NOTE: ADX filter fields removed (Jan 2026) - was never used by active strategies
             'smart_money_readonly_enabled', 'smart_money_analysis_timeout',
@@ -639,6 +672,13 @@ class ScannerConfigService:
             'max_open_positions', 'max_daily_trades', 'max_risk_per_trade', 'default_stop_distance',
             'trading_start_hour', 'trading_end_hour', 'trading_cutoff_time_utc',
             'trade_cooldown_minutes',
+            # Session Hours integer fields (Jan 2026)
+            'session_asian_start_hour', 'session_asian_end_hour',
+            'session_london_start_hour', 'session_london_end_hour',
+            'session_newyork_start_hour', 'session_newyork_end_hour',
+            'session_overlap_start_hour', 'session_overlap_end_hour',
+            # Order Executor integer fields (Jan 2026)
+            'executor_max_stop_loss_pips', 'executor_max_take_profit_pips',
             # NOTE: Safety filter int fields removed (Jan 2026)
             # NOTE: ADX filter int fields (adx_period, adx_grace_period_bars) removed (Jan 2026)
             'min_claude_quality_score',
