@@ -66,20 +66,24 @@ class RSPopulator:
             spy = yf.Ticker("SPY")
             hist = spy.history(period="1mo")
 
-            if hist.empty or len(hist) < 20:
-                logger.error(f"Insufficient SPY data: {len(hist)} days")
+            if hist.empty or len(hist) < 5:
+                logger.error(f"Insufficient SPY data: {len(hist)} days (need at least 5)")
                 return False
 
-            # Calculate 20-day return (most recent vs 20 days ago)
+            # Calculate returns using available data
+            # Use all available days up to 20
             closes = hist['Close'].values
             current_price = closes[-1]
-            price_20d_ago = closes[-20] if len(closes) >= 20 else closes[0]
+
+            # Use oldest available price for "20-day" return (or whatever we have)
+            available_days = len(closes)
+            price_20d_ago = closes[0]  # Use oldest available
             price_5d_ago = closes[-5] if len(closes) >= 5 else closes[0]
 
             self.spy_return_20d = ((current_price / price_20d_ago) - 1) * 100
             self.spy_return_5d = ((current_price / price_5d_ago) - 1) * 100
 
-            logger.info(f"SPY 20-day return: {self.spy_return_20d:+.2f}%")
+            logger.info(f"SPY {available_days}-day return: {self.spy_return_20d:+.2f}%")
             logger.info(f"SPY 5-day return: {self.spy_return_5d:+.2f}%")
             logger.info(f"SPY current price: ${current_price:.2f}")
 

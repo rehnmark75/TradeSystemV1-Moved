@@ -3779,6 +3779,127 @@ Respond in this exact JSON format:
         results = _self._execute_query(query % ('%s', weeks), (ticker,))
         return pd.DataFrame(results) if results else pd.DataFrame()
 
+    # =========================================================================
+    # CHART MARKERS - Signals and Watchlist Events
+    # =========================================================================
+
+    @st.cache_data(ttl=300)
+    def get_chart_markers_for_ticker(_self, ticker: str, days: int = 90) -> Dict[str, List[Dict]]:
+        """
+        Get signal and watchlist events for chart markers.
+
+        Returns a dict with:
+        - 'signals': List of signal events with date, type, and metadata
+        - 'watchlist_events': List of watchlist events with date, watchlist name, and type
+
+        Args:
+            ticker: Stock ticker symbol
+            days: Lookback period in days
+
+        Returns:
+            Dict with 'signals' and 'watchlist_events' lists
+        """
+        result = {
+            'signals': [],
+            'watchlist_events': []
+        }
+
+        # Get signal history for this ticker
+        signal_query = """
+            SELECT
+                signal_timestamp::date as event_date,
+                signal_timestamp,
+                signal_type,
+                scanner_name,
+                quality_tier,
+                composite_score,
+                entry_price,
+                stop_loss,
+                take_profit_1,
+                status
+            FROM stock_scanner_signals
+            WHERE ticker = %s
+              AND signal_timestamp >= NOW() - INTERVAL '%s days'
+            ORDER BY signal_timestamp DESC
+        """
+        signals = _self._execute_query(signal_query % ('%s', days), (ticker,))
+        result['signals'] = signals if signals else []
+
+        # Get watchlist history for this ticker
+        # For crossover watchlists: use crossover_date as the event date
+        # For event watchlists: use scan_date
+        # Query both active entries AND historical entries within the lookback period
+        watchlist_query = """
+            SELECT
+                COALESCE(crossover_date, scan_date) as event_date,
+                scan_date,
+                crossover_date,
+                watchlist_name,
+                status,
+                price,
+                rsi_14,
+                gap_pct,
+                macd,
+                macd_signal
+            FROM stock_watchlist_results
+            WHERE ticker = %s
+              AND (
+                  -- Include active entries regardless of date (shows current watchlist membership)
+                  status = 'active'
+                  OR
+                  -- Include historical entries where event happened in lookback period
+                  COALESCE(crossover_date, scan_date) >= CURRENT_DATE - INTERVAL '%s days'
+              )
+            ORDER BY COALESCE(crossover_date, scan_date) DESC
+        """
+        watchlist_events = _self._execute_query(watchlist_query % ('%s', days), (ticker,))
+        result['watchlist_events'] = watchlist_events if watchlist_events else []
+
+        return result
+
+    @st.cache_data(ttl=300)
+    def get_watchlist_history_for_ticker(_self, ticker: str, days: int = 90) -> pd.DataFrame:
+        """
+        Get complete watchlist history for a specific ticker.
+
+        Shows all watchlist appearances with dates and relevant metrics.
+
+        Args:
+            ticker: Stock ticker symbol
+            days: Lookback period in days
+
+        Returns:
+            DataFrame with watchlist history
+        """
+        query = """
+            SELECT
+                w.scan_date,
+                w.crossover_date,
+                w.watchlist_name,
+                w.status,
+                w.price,
+                w.volume,
+                w.rsi_14,
+                w.ema_20,
+                w.ema_50,
+                w.ema_200,
+                w.macd,
+                w.macd_signal,
+                w.gap_pct,
+                w.price_change_1d,
+                CASE
+                    WHEN w.watchlist_name IN ('ema_50_crossover', 'ema_20_crossover', 'macd_bullish_cross')
+                    THEN (CURRENT_DATE - w.crossover_date) + 1
+                    ELSE 1
+                END as days_on_list
+            FROM stock_watchlist_results w
+            WHERE w.ticker = %s
+              AND w.scan_date >= CURRENT_DATE - INTERVAL '%s days'
+            ORDER BY w.scan_date DESC, w.watchlist_name
+        """
+        results = _self._execute_query(query % ('%s', days), (ticker,))
+        return pd.DataFrame(results) if results else pd.DataFrame()
+
 
 # Service instance - no caching to allow code changes to take effect
 # Individual methods use @st.cache_data for query caching

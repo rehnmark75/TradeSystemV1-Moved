@@ -150,15 +150,44 @@ class RSCalculator:
         days: int
     ) -> Optional[float]:
         """Get the N-day return for a benchmark (SPY, sector ETF)."""
-        query = """
-            SELECT close
-            FROM stock_candles_synthesized
-            WHERE ticker = $1 AND timeframe = '1d'
-              AND DATE(timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') <= $2
-            ORDER BY timestamp DESC
-            LIMIT $3
-        """
-        rows = await self.db.fetch(query, ticker, calc_date, days + 1)
+        # Try synthesized candles first, then raw candles
+        rows = []
+        for table in ['stock_candles_synthesized', 'stock_candles']:
+            if table == 'stock_candles_synthesized':
+                query = """
+                    SELECT close
+                    FROM stock_candles_synthesized
+                    WHERE ticker = $1 AND timeframe = '1d'
+                      AND DATE(timestamp) <= $2
+                    ORDER BY timestamp DESC
+                    LIMIT $3
+                """
+            else:
+                query = """
+                    SELECT close
+                    FROM stock_candles
+                    WHERE ticker = $1
+                      AND timeframe = '1d'
+                      AND DATE(timestamp) <= $2
+                    ORDER BY timestamp DESC
+                    LIMIT $3
+                """
+            rows = await self.db.fetch(query, ticker, calc_date, days + 1)
+            if len(rows) >= days + 1:
+                break
+
+        # If no database data for ETFs, try yfinance
+        if len(rows) < days + 1:
+            try:
+                import yfinance as yf
+                etf = yf.Ticker(ticker)
+                # Use 3mo period to ensure we have enough data
+                hist = etf.history(period="3mo")
+                if len(hist) >= days + 1:
+                    closes = hist['Close'].values.tolist()
+                    rows = [{'close': c} for c in reversed(closes)]
+            except Exception as e:
+                logger.debug(f"Failed to fetch {ticker} from yfinance: {e}")
 
         if len(rows) < days + 1:
             return None
@@ -536,15 +565,45 @@ class MarketRegimeCalculator:
 
     async def _get_spy_metrics(self, calc_date: date) -> Optional[Dict]:
         """Get SPY price and moving averages."""
-        query = """
-            SELECT close
-            FROM stock_candles_synthesized
-            WHERE ticker = 'SPY' AND timeframe = '1d'
-              AND DATE(timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') <= $1
-            ORDER BY timestamp DESC
-            LIMIT 220
-        """
-        rows = await self.db.fetch(query, calc_date)
+        # Try synthesized candles first, then raw candles
+        for table in ['stock_candles_synthesized', 'stock_candles']:
+            if table == 'stock_candles_synthesized':
+                query = """
+                    SELECT close
+                    FROM stock_candles_synthesized
+                    WHERE ticker = 'SPY' AND timeframe = '1d'
+                      AND DATE(timestamp) <= $1
+                    ORDER BY timestamp DESC
+                    LIMIT 220
+                """
+            else:
+                query = """
+                    SELECT close
+                    FROM stock_candles
+                    WHERE ticker = 'SPY'
+                      AND timeframe = '1d'
+                      AND DATE(timestamp) <= $1
+                    ORDER BY timestamp DESC
+                    LIMIT 220
+                """
+            rows = await self.db.fetch(query, calc_date)
+            if len(rows) >= 200:
+                break
+
+        # If no database data, try yfinance
+        if len(rows) < 200:
+            logger.info("SPY data not in database, fetching from yfinance...")
+            try:
+                import yfinance as yf
+                spy = yf.Ticker("SPY")
+                hist = spy.history(period="1y")
+                if len(hist) >= 200:
+                    closes = hist['Close'].values.tolist()
+                    # Convert to list of dicts format
+                    rows = [{'close': c} for c in reversed(closes)]
+            except Exception as e:
+                logger.warning(f"Failed to fetch SPY from yfinance: {e}")
+                return None
 
         if len(rows) < 200:
             return None

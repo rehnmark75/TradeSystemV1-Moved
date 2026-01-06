@@ -170,6 +170,7 @@ def render_chart_tab(service):
         show_macd = st.checkbox("Show MACD", value=True, key="chart_show_macd")
         show_smc = st.checkbox("Show SMC (Smart Money)", value=False, key="chart_show_smc")
         show_mtf = st.checkbox("Show Multi-Timeframe", value=False, key="chart_show_mtf")
+        show_markers = st.checkbox("Show Signal/Watchlist Markers", value=False, key="chart_show_markers")
 
     # Fetch candle data (extra for EMA 200 warmup)
     with st.spinner(f"Loading {selected_ticker} chart data..."):
@@ -205,20 +206,29 @@ def render_chart_tab(service):
                 # Show SMC summary above chart
                 _render_smc_summary(smc_data)
 
+    # Fetch markers data if enabled
+    markers_data = None
+    if show_markers:
+        with st.spinner("Loading signal/watchlist markers..."):
+            markers_data = service.get_chart_markers_for_ticker(selected_ticker, days=lookback_days)
+            if markers_data:
+                # Show markers summary above chart
+                _render_markers_summary(markers_data)
+
     # Build and render charts
     if show_mtf:
         # Multi-timeframe layout
-        _render_mtf_charts(service, selected_ticker, df, lookback_days, show_macd, show_volume, smc_data)
+        _render_mtf_charts(service, selected_ticker, df, lookback_days, show_macd, show_volume, smc_data, markers_data)
     else:
         # Standard single chart layout
         try:
-            charts = _build_charts(df, show_macd, show_volume, smc_data)
+            charts = _build_charts(df, show_macd, show_volume, smc_data, markers_data)
             renderLightweightCharts(charts, f"stock-chart-{selected_ticker}")
         except Exception as chart_error:
-            # If chart fails with SMC, try without SMC overlays
-            if smc_data:
-                st.warning("SMC overlays caused a rendering issue. Showing chart without SMC zones.")
-                charts = _build_charts(df, show_macd, show_volume, None)
+            # If chart fails with SMC or markers, try without overlays
+            if smc_data or markers_data:
+                st.warning("Overlays caused a rendering issue. Showing chart without extra overlays.")
+                charts = _build_charts(df, show_macd, show_volume, None, None)
                 renderLightweightCharts(charts, f"stock-chart-{selected_ticker}-fallback")
             else:
                 st.error(f"Chart rendering failed: {chart_error}")
@@ -386,12 +396,12 @@ def _calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _build_charts(df: pd.DataFrame, show_macd: bool, show_volume: bool, smc_data: dict = None) -> list:
+def _build_charts(df: pd.DataFrame, show_macd: bool, show_volume: bool, smc_data: dict = None, markers_data: dict = None) -> list:
     """Build chart configurations for Lightweight Charts."""
     charts = []
 
     # Price chart with candlesticks and EMAs
-    price_chart = _build_price_chart(df, smc_data)
+    price_chart = _build_price_chart(df, smc_data, markers_data)
     charts.append(price_chart)
 
     # MACD chart
@@ -407,13 +417,15 @@ def _build_charts(df: pd.DataFrame, show_macd: bool, show_volume: bool, smc_data
     return charts
 
 
-def _build_price_chart(df: pd.DataFrame, smc_data: dict = None) -> dict:
-    """Build the main price chart with candlesticks, EMAs, and optional SMC overlays."""
-    # Prepare candle data
+def _build_price_chart(df: pd.DataFrame, smc_data: dict = None, markers_data: dict = None) -> dict:
+    """Build the main price chart with candlesticks, EMAs, optional SMC overlays, and event markers."""
+    # Prepare candle data and build a timestamp->price lookup for markers
     candles = []
+    date_to_price = {}  # Map date strings to OHLC data for marker placement
     for row in df.itertuples():
         if pd.notna(row.timestamp):
             ts = int(pd.Timestamp(row.timestamp).timestamp())
+            date_str = pd.Timestamp(row.timestamp).strftime('%Y-%m-%d')
             candles.append({
                 "time": ts,
                 "open": float(row.open),
@@ -421,6 +433,12 @@ def _build_price_chart(df: pd.DataFrame, smc_data: dict = None) -> dict:
                 "low": float(row.low),
                 "close": float(row.close)
             })
+            date_to_price[date_str] = {
+                "time": ts,
+                "high": float(row.high),
+                "low": float(row.low),
+                "close": float(row.close)
+            }
 
     # Build series list
     series = [
@@ -446,6 +464,19 @@ def _build_price_chart(df: pd.DataFrame, smc_data: dict = None) -> dict:
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"Failed to add SMC overlays: {e}")
+
+    # Add signal and watchlist markers to candlestick series if data available
+    event_markers = []
+    if markers_data:
+        try:
+            event_markers = _build_event_markers(markers_data, date_to_price)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to build event markers: {e}")
+
+    # Add markers to the candlestick series if we have any
+    if event_markers and series:
+        series[0]["markers"] = event_markers
 
     # Add EMA lines
     ema_configs = [
@@ -801,10 +832,181 @@ def _build_smc_overlays(df: pd.DataFrame, smc_data: dict) -> list:
 
 
 # =============================================================================
+# Signal & Watchlist Event Markers
+# =============================================================================
+
+def _render_markers_summary(markers_data: dict) -> None:
+    """Render summary of signal and watchlist events above the chart."""
+    if not markers_data:
+        return
+
+    signals = markers_data.get('signals', [])
+    watchlist_events = markers_data.get('watchlist_events', [])
+
+    # Count unique events
+    signal_count = len(signals)
+    watchlist_count = len(watchlist_events)
+
+    # Get unique watchlist names with their event dates
+    watchlist_info = {}
+    for event in watchlist_events:
+        wl_name = event.get('watchlist_name', '')
+        event_date = event.get('event_date') or event.get('crossover_date') or event.get('scan_date')
+        if wl_name:
+            display_name = wl_name.replace('_', ' ').title()
+            date_str = str(event_date)[:10] if event_date else ''
+            if display_name not in watchlist_info:
+                watchlist_info[display_name] = date_str
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Signals", signal_count)
+
+    with col2:
+        st.metric("Watchlist Events", watchlist_count)
+
+    with col3:
+        if watchlist_info:
+            # Show watchlist names with dates
+            wl_texts = [f"{name} ({date})" for name, date in watchlist_info.items()]
+            st.caption(f"Watchlists: {', '.join(sorted(wl_texts))}")
+        else:
+            st.caption("No watchlist events")
+
+    # Show recent signal details
+    if signals:
+        recent_signals = signals[:3]
+        signal_texts = []
+        for sig in recent_signals:
+            sig_type = sig.get('signal_type', '?')
+            tier = sig.get('quality_tier', '')
+            date = sig.get('event_date')
+            date_str = str(date)[:10] if date else ''
+            signal_texts.append(f"{sig_type} ({tier}) {date_str}")
+        st.caption(f"Recent Signals: {' | '.join(signal_texts)}")
+
+
+def _build_event_markers(markers_data: dict, date_to_price: dict) -> list:
+    """
+    Build markers list for signals and watchlist events.
+
+    Returns a list of marker dicts that can be attached to the candlestick series.
+    This follows the pattern used in tvchart.py for trade markers.
+
+    Signals appear as triangles (up for BUY, down for SELL).
+    Watchlist events appear as circles with different colors per watchlist type.
+    """
+    markers = []
+
+    if not markers_data or not date_to_price:
+        return markers
+
+    # Build signal markers - shown as arrows above/below candles
+    signals = markers_data.get('signals', [])
+    for sig in signals:
+        event_date = sig.get('event_date')
+        if not event_date:
+            continue
+
+        date_str = str(event_date)[:10]
+        price_data = date_to_price.get(date_str)
+        if not price_data:
+            continue
+
+        sig_type = sig.get('signal_type', 'BUY')
+        tier = sig.get('quality_tier', '')
+        scanner = sig.get('scanner_name', '')
+
+        # Build label: "BUY A+" or "SELL B"
+        label = f"{sig_type}"
+        if tier:
+            label += f" {tier}"
+
+        if sig_type == 'BUY':
+            markers.append({
+                "time": price_data['time'],
+                "position": "belowBar",
+                "color": "#00C853",  # Green
+                "shape": "arrowUp",
+                "text": label
+            })
+        else:
+            markers.append({
+                "time": price_data['time'],
+                "position": "aboveBar",
+                "color": "#FF1744",  # Red
+                "shape": "arrowDown",
+                "text": label
+            })
+
+    # Build watchlist event markers - shown as circles
+    watchlist_events = markers_data.get('watchlist_events', [])
+    if watchlist_events:
+        watchlist_colors = {
+            'ema_50_crossover': '#2196F3',      # Blue
+            'ema_20_crossover': '#9C27B0',      # Purple
+            'macd_bullish_cross': '#FF9800',    # Orange
+            'gap_up_continuation': '#4CAF50',   # Green
+            'rsi_oversold_bounce': '#E91E63',   # Pink
+        }
+
+        watchlist_labels = {
+            'ema_50_crossover': 'E50',
+            'ema_20_crossover': 'E20',
+            'macd_bullish_cross': 'MCD',
+            'gap_up_continuation': 'GAP',
+            'rsi_oversold_bounce': 'RSI',
+        }
+
+        # Track which (watchlist, date) combos we've processed to avoid duplicates
+        processed = set()
+
+        for event in watchlist_events:
+            wl_name = event.get('watchlist_name', '')
+            crossover_date = event.get('crossover_date')
+            scan_date = event.get('scan_date')
+
+            # Use crossover_date for crossover watchlists, scan_date for event watchlists
+            if wl_name in ['ema_50_crossover', 'ema_20_crossover', 'macd_bullish_cross']:
+                event_date = crossover_date or scan_date
+            else:
+                event_date = scan_date
+
+            if not event_date:
+                continue
+
+            date_str = str(event_date)[:10]
+            key = (wl_name, date_str)
+
+            # Skip duplicates
+            if key in processed:
+                continue
+            processed.add(key)
+
+            price_data = date_to_price.get(date_str)
+            if not price_data:
+                continue
+
+            color = watchlist_colors.get(wl_name, '#9E9E9E')
+            label = watchlist_labels.get(wl_name, wl_name[:3].upper())
+
+            markers.append({
+                "time": price_data['time'],
+                "position": "inBar",
+                "color": color,
+                "shape": "circle",
+                "text": label
+            })
+
+    return markers
+
+
+# =============================================================================
 # Multi-Timeframe Charts
 # =============================================================================
 
-def _render_mtf_charts(service, ticker: str, daily_df: pd.DataFrame, lookback_days: int, show_macd: bool, show_volume: bool, smc_data: dict = None) -> None:
+def _render_mtf_charts(service, ticker: str, daily_df: pd.DataFrame, lookback_days: int, show_macd: bool, show_volume: bool, smc_data: dict = None, markers_data: dict = None) -> None:
     """
     Render multi-timeframe chart layout with Daily and Weekly views plus trend alignment.
     """
@@ -815,12 +1017,12 @@ def _render_mtf_charts(service, ticker: str, daily_df: pd.DataFrame, lookback_da
     if weekly_df is None or weekly_df.empty:
         st.warning("Weekly data not available - showing daily chart only")
         try:
-            charts = _build_charts(daily_df, show_macd, show_volume, smc_data)
+            charts = _build_charts(daily_df, show_macd, show_volume, smc_data, markers_data)
             renderLightweightCharts(charts, f"stock-chart-{ticker}")
         except Exception as e:
-            if smc_data:
-                st.warning("SMC overlays caused a rendering issue. Showing chart without SMC zones.")
-                charts = _build_charts(daily_df, show_macd, show_volume, None)
+            if smc_data or markers_data:
+                st.warning("Overlays caused a rendering issue. Showing chart without extra overlays.")
+                charts = _build_charts(daily_df, show_macd, show_volume, None, None)
                 renderLightweightCharts(charts, f"stock-chart-{ticker}-fallback")
         return
 
@@ -834,17 +1036,17 @@ def _render_mtf_charts(service, ticker: str, daily_df: pd.DataFrame, lookback_da
     with col1:
         st.markdown("#### Daily Chart")
         try:
-            daily_charts = _build_charts(daily_df, show_macd, show_volume, smc_data)
+            daily_charts = _build_charts(daily_df, show_macd, show_volume, smc_data, markers_data)
             renderLightweightCharts(daily_charts, f"stock-chart-daily-{ticker}")
         except Exception as e:
-            if smc_data:
-                st.warning("SMC overlays caused a rendering issue. Showing chart without SMC zones.")
-                daily_charts = _build_charts(daily_df, show_macd, show_volume, None)
+            if smc_data or markers_data:
+                st.warning("Overlays caused a rendering issue. Showing chart without extra overlays.")
+                daily_charts = _build_charts(daily_df, show_macd, show_volume, None, None)
                 renderLightweightCharts(daily_charts, f"stock-chart-daily-{ticker}-fallback")
 
     with col2:
         st.markdown("#### Weekly Chart")
-        weekly_charts = _build_charts(weekly_df, False, False, None)  # Simplified weekly chart
+        weekly_charts = _build_charts(weekly_df, False, False, None, None)  # Simplified weekly chart
         renderLightweightCharts(weekly_charts, f"stock-chart-weekly-{ticker}")
 
     # Trend Alignment Summary

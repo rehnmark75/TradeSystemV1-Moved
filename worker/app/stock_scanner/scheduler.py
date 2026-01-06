@@ -54,6 +54,7 @@ from stock_scanner.core.data_fetcher import StockDataFetcher
 from stock_scanner.core.synthesis.daily_synthesizer import DailyCandleSynthesizer
 from stock_scanner.core.metrics.calculator import MetricsCalculator
 from stock_scanner.scripts.populate_rs import RSPopulator
+from stock_scanner.core.metrics.rs_calculator import RSCalculator, MarketRegimeCalculator
 from stock_scanner.core.screener.watchlist_builder import WatchlistBuilder
 from stock_scanner.core.smc.smc_stock_analyzer import SMCStockAnalyzer
 from stock_scanner.core.fundamentals.fundamentals_fetcher import FundamentalsFetcher
@@ -186,6 +187,8 @@ class StockScheduler:
         self.synthesizer: DailyCandleSynthesizer = None
         self.calculator: MetricsCalculator = None
         self.rs_populator: RSPopulator = None
+        self.rs_calculator: RSCalculator = None
+        self.market_regime_calculator: MarketRegimeCalculator = None
         self.smc_analyzer: SMCStockAnalyzer = None
         self.fundamentals: FundamentalsFetcher = None
         self.watchlist_builder: WatchlistBuilder = None
@@ -211,6 +214,8 @@ class StockScheduler:
         self.synthesizer = DailyCandleSynthesizer(db_manager=self.db)
         self.calculator = MetricsCalculator(db_manager=self.db)
         self.rs_populator = RSPopulator(db=self.db)
+        self.rs_calculator = RSCalculator(db_manager=self.db)
+        self.market_regime_calculator = MarketRegimeCalculator(db_manager=self.db)
         self.smc_analyzer = SMCStockAnalyzer(db_manager=self.db)
         self.fundamentals = FundamentalsFetcher(db_manager=self.db)
         self.watchlist_builder = WatchlistBuilder(db_manager=self.db)
@@ -332,7 +337,7 @@ class StockScheduler:
             results['metrics'] = {'error': str(e)}
 
         # === STAGE 4: Relative Strength (RS) Calculation ===
-        logger.info("\n[STAGE 4/11] Calculating Relative Strength vs SPY...")
+        logger.info("\n[STAGE 4/13] Calculating Relative Strength vs SPY...")
         try:
             rs_stats = await self.rs_populator.populate_rs()
             results['rs'] = rs_stats
@@ -347,8 +352,38 @@ class StockScheduler:
             logger.error(f"[FAIL] RS: {e}")
             results['rs'] = {'error': str(e)}
 
+        # === STAGE 4b: Market Regime Calculation ===
+        logger.info("\n[STAGE 4b/13] Calculating Market Regime...")
+        try:
+            regime_stats = await self.market_regime_calculator.calculate_market_regime()
+            results['market_regime'] = regime_stats
+            if 'error' in regime_stats:
+                logger.warning(f"[WARN] Market Regime: {regime_stats['error']}")
+            else:
+                logger.info(f"[OK] Market Regime: {regime_stats.get('regime', 'unknown')}")
+                if 'spy_data' in regime_stats:
+                    logger.info(f"     SPY vs SMA200: {regime_stats['spy_data'].get('vs_sma200_pct', 0):.1f}%")
+                if 'breadth' in regime_stats:
+                    logger.info(f"     % Above SMA200: {regime_stats['breadth'].get('pct_above_sma200', 0):.1f}%")
+        except Exception as e:
+            logger.error(f"[FAIL] Market Regime: {e}")
+            results['market_regime'] = {'error': str(e)}
+
+        # === STAGE 4c: Sector RS Calculation ===
+        logger.info("\n[STAGE 4c/13] Calculating Sector RS...")
+        try:
+            sector_stats = await self.rs_calculator.calculate_sector_rs()
+            results['sector_rs'] = sector_stats
+            if 'error' in sector_stats:
+                logger.warning(f"[WARN] Sector RS: {sector_stats['error']}")
+            else:
+                logger.info(f"[OK] Sector RS: {sector_stats.get('sectors_processed', 0)} sectors processed")
+        except Exception as e:
+            logger.error(f"[FAIL] Sector RS: {e}")
+            results['sector_rs'] = {'error': str(e)}
+
         # === STAGE 5: SMC Analysis ===
-        logger.info("\n[STAGE 5/11] Running SMC analysis...")
+        logger.info("\n[STAGE 5/13] Running SMC analysis...")
         try:
             smc_stats = await self.smc_analyzer.run_analysis_pipeline()
             results['smc'] = smc_stats
@@ -1215,6 +1250,10 @@ async def run_once(task: str):
             await scheduler.calculator.calculate_all_metrics()
         elif task == "rs":
             await scheduler.rs_populator.populate_rs()
+        elif task == "market_regime":
+            await scheduler.market_regime_calculator.calculate_market_regime()
+        elif task == "sector_rs":
+            await scheduler.rs_calculator.calculate_sector_rs()
         elif task == "smc":
             await scheduler.smc_analyzer.run_analysis_pipeline()
         elif task == "watchlist":
