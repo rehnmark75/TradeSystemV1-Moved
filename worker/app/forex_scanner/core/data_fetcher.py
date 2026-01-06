@@ -303,8 +303,19 @@ class DataFetcher:
             # Always add Two-Pole Oscillator indicators (for performance collection)
             self.logger.debug("🔄 Adding Two-Pole Oscillator indicators")
             df_enhanced = self._add_two_pole_oscillator_indicators(df_enhanced)
-            
-            
+
+            # Always add RSI indicator (for performance collection)
+            self.logger.debug("🔄 Adding RSI indicator")
+            df_enhanced = self.technical_analyzer.calculate_rsi(df_enhanced, period=14)
+
+            # Always add ATR indicator (for performance collection)
+            self.logger.debug("🔄 Adding ATR indicator")
+            df_enhanced = self.technical_analyzer.calculate_atr(df_enhanced, period=14)
+
+            # Always add ADX indicator (for performance collection)
+            self.logger.debug("🔄 Adding ADX indicator")
+            df_enhanced = self._add_adx_indicator(df_enhanced, period=14)
+
             # Add other indicators conditionally using instance settings (from database)
             if self.enable_support_resistance:
                 try:
@@ -804,6 +815,66 @@ class DataFetcher:
             
         except Exception as e:
             self.logger.error(f"❌ Error adding Two-Pole Oscillator indicators: {e}")
+            return df
+
+    def _add_adx_indicator(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+        """
+        Calculate Average Directional Index (ADX) for trend strength measurement.
+
+        ADX measures trend strength regardless of direction:
+        - ADX < 20: Weak trend or ranging
+        - ADX 20-25: Trend developing
+        - ADX 25-50: Strong trend
+        - ADX > 50: Very strong trend
+
+        Args:
+            df: DataFrame with OHLC data
+            period: ADX period (default 14)
+
+        Returns:
+            DataFrame with ADX, +DI, and -DI columns
+        """
+        try:
+            df_adx = df.copy()
+
+            # Calculate True Range
+            high_low = df_adx['high'] - df_adx['low']
+            high_close_prev = abs(df_adx['high'] - df_adx['close'].shift(1))
+            low_close_prev = abs(df_adx['low'] - df_adx['close'].shift(1))
+
+            tr = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)
+
+            # Calculate Directional Movement
+            up_move = df_adx['high'] - df_adx['high'].shift(1)
+            down_move = df_adx['low'].shift(1) - df_adx['low']
+
+            # +DM: up_move > down_move and up_move > 0
+            plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+            # -DM: down_move > up_move and down_move > 0
+            minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+
+            # Smoothed TR and DM using Wilder's smoothing (similar to EMA with alpha = 1/period)
+            atr_smooth = pd.Series(tr).ewm(alpha=1/period, adjust=False).mean()
+            plus_dm_smooth = pd.Series(plus_dm).ewm(alpha=1/period, adjust=False).mean()
+            minus_dm_smooth = pd.Series(minus_dm).ewm(alpha=1/period, adjust=False).mean()
+
+            # Calculate +DI and -DI
+            df_adx['plus_di'] = 100 * (plus_dm_smooth / atr_smooth)
+            df_adx['minus_di'] = 100 * (minus_dm_smooth / atr_smooth)
+
+            # Calculate DX
+            di_diff = abs(df_adx['plus_di'] - df_adx['minus_di'])
+            di_sum = df_adx['plus_di'] + df_adx['minus_di']
+            dx = 100 * (di_diff / di_sum.replace(0, np.nan))
+
+            # ADX is smoothed DX
+            df_adx['adx'] = dx.ewm(alpha=1/period, adjust=False).mean()
+
+            self.logger.debug(f"✅ ADX indicator added successfully (period={period})")
+            return df_adx
+
+        except Exception as e:
+            self.logger.error(f"❌ Error adding ADX indicator: {e}")
             return df
 
     def _apply_lazy_indicators(self, df: pd.DataFrame, pair: str, required_indicators: List[str], ema_strategy=None) -> pd.DataFrame:

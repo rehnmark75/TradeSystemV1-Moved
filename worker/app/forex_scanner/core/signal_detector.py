@@ -20,7 +20,7 @@ try:
     from .backtest.signal_analyzer import SignalAnalyzer
     from .detection.price_adjuster import PriceAdjuster
     from .smart_money_integration import add_smart_money_to_signal, add_smart_money_to_signals
-    from .detection.large_candle_filter import LargeCandleFilter
+    # NOTE: LargeCandleFilter removed (Jan 2026) - database columns dropped
 except ImportError:
     from forex_scanner.core.database import DatabaseManager
     from forex_scanner.core.data_fetcher import DataFetcher
@@ -28,7 +28,7 @@ except ImportError:
     from forex_scanner.core.backtest.signal_analyzer import SignalAnalyzer
     from forex_scanner.core.detection.price_adjuster import PriceAdjuster
     from forex_scanner.core.smart_money_integration import add_smart_money_to_signal, add_smart_money_to_signals
-    from forex_scanner.core.detection.large_candle_filter import LargeCandleFilter
+    # NOTE: LargeCandleFilter removed (Jan 2026) - database columns dropped
 
 # Database-driven configuration services (NOT legacy config files)
 try:
@@ -53,8 +53,11 @@ class SignalDetector:
         self.price_adjuster = PriceAdjuster()
         self.logger = logging.getLogger(__name__)
 
-        self.large_candle_filter = LargeCandleFilter()
-        self.logger.info("✅ Large candle filter initialized")
+        # NOTE: Large candle filter removed (Jan 2026 cleanup)
+        # The filter was initialized but never called in the signal flow.
+        # Database columns for large candle filter were dropped.
+        # See migration: remove_safety_filter_columns.sql
+        self.large_candle_filter = None
 
         # Initialize SMC Simple Strategy (the only active strategy)
         # NOTE: SMC Simple is always enabled after January 2026 cleanup
