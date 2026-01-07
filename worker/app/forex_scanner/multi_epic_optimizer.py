@@ -10,15 +10,16 @@ Runs comprehensive parameter optimization across all enabled epics with:
 - Database + CSV result storage
 - Auto-snapshot for best configs per epic
 - Cross-epic comparison reports
+- Optional parallel execution (multiple epics simultaneously)
 
 Usage:
-    # Fast mode - core parameters only (~6-7 hours)
+    # Fast mode - core parameters only (~6-7 hours sequential)
     docker exec -it task-worker python /app/forex_scanner/multi_epic_optimizer.py --mode fast --days 30
 
-    # Medium mode - extended parameters (~22-25 hours)
+    # Medium mode - extended parameters (~22-25 hours sequential)
     docker exec -it task-worker python /app/forex_scanner/multi_epic_optimizer.py --mode medium --days 30
 
-    # Extended mode - full sweep (~45-50 hours)
+    # Extended mode - full sweep (~45-50 hours sequential)
     docker exec -it task-worker python /app/forex_scanner/multi_epic_optimizer.py --mode extended --days 30
 
     # Specific epics only
@@ -29,6 +30,15 @@ Usage:
 
     # Dry run (show combinations without executing)
     docker exec -it task-worker python /app/forex_scanner/multi_epic_optimizer.py --mode extended --dry-run
+
+    # Enable parallel execution (auto-detect worker count)
+    docker exec -it task-worker python /app/forex_scanner/multi_epic_optimizer.py --mode fast --days 30 --parallel
+
+    # Parallel with specific worker count
+    docker exec -it task-worker python /app/forex_scanner/multi_epic_optimizer.py --mode fast --days 30 --parallel 4
+
+    # Parallel with memory limit
+    docker exec -it task-worker python /app/forex_scanner/multi_epic_optimizer.py --mode fast --days 30 --parallel --max-memory-gb 4
 """
 
 import sys
@@ -51,6 +61,15 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from itertools import product
 from dataclasses import dataclass, field
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Manager
+
+# For resource checking
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 from forex_scanner.commands.enhanced_backtest_commands import EnhancedBacktestCommands
 from forex_scanner.core.database import DatabaseManager
@@ -139,12 +158,16 @@ class MultiEpicOptimizer:
         days: int = DEFAULT_DAYS,
         epics: List[str] = None,
         output_dir: str = DEFAULT_OUTPUT_DIR,
-        auto_snapshot: bool = True
+        auto_snapshot: bool = True,
+        parallel_workers: int = None,  # None=sequential, 0=auto, N=fixed workers
+        max_memory_gb: float = 8.0
     ):
         self.mode = mode
         self.days = days
         self.output_dir = output_dir
         self.auto_snapshot = auto_snapshot
+        self.parallel_workers = parallel_workers
+        self.max_memory_gb = max_memory_gb
 
         # Resolve epic shortcuts
         if epics:
@@ -169,6 +192,9 @@ class MultiEpicOptimizer:
         # Progress bar state
         self.last_result: Optional[OptimizationResult] = None
 
+        # Parallel execution state
+        self._parallel_progress = {}  # {epic: status_string}
+
         # Setup interrupt handlers
         signal.signal(signal.SIGINT, self._handle_interrupt)
         signal.signal(signal.SIGTERM, self._handle_interrupt)
@@ -186,6 +212,367 @@ class MultiEpicOptimizer:
             log = logging.getLogger(name)
             log.setLevel(logging.CRITICAL)
             log.disabled = True
+
+    # ============================================
+    # PARALLEL EXECUTION SUPPORT
+    # ============================================
+
+    def _get_safe_worker_count(self, max_workers: int = 4) -> int:
+        """
+        Determine safe worker count based on system resources.
+
+        Args:
+            max_workers: Maximum workers to consider
+
+        Returns:
+            Safe number of workers (1 = sequential fallback)
+        """
+        if not PSUTIL_AVAILABLE:
+            print("⚠️  psutil not available, using conservative 2 workers")
+            return min(2, max_workers)
+
+        try:
+            cpu_count = os.cpu_count() or 4
+            memory = psutil.virtual_memory()
+            available_memory_gb = memory.available / (1024 ** 3)
+
+            # Each worker needs ~500MB-1GB for backtest data
+            memory_per_worker_gb = 0.75
+            memory_based_workers = int(min(available_memory_gb, self.max_memory_gb) / memory_per_worker_gb)
+
+            # Don't exceed CPU count - 1 (leave 1 core for system)
+            cpu_based_workers = max(1, cpu_count - 1)
+
+            # Don't exceed number of epics
+            epic_based_workers = len(self.epics)
+
+            safe_workers = min(max_workers, memory_based_workers, cpu_based_workers, epic_based_workers)
+            safe_workers = max(1, safe_workers)  # At least 1
+
+            print(f"🔧 Resource check: CPU={cpu_count}, Available RAM={available_memory_gb:.1f}GB")
+            print(f"   Safe workers: {safe_workers} (CPU limit: {cpu_based_workers}, Memory limit: {memory_based_workers})")
+
+            return safe_workers
+
+        except Exception as e:
+            print(f"⚠️  Error checking resources: {e}, using 2 workers")
+            return min(2, max_workers)
+
+    def _optimize_single_epic_worker(
+        self,
+        epic: str,
+        combinations: List[Dict],
+        start_date: datetime,
+        end_date: datetime,
+        run_id: int,
+        progress_dict: dict = None
+    ) -> Tuple[str, List[dict]]:
+        """
+        Worker function to optimize a single epic. Runs in separate process.
+
+        Args:
+            epic: Epic to optimize
+            combinations: Parameter combinations to test
+            start_date: Backtest start date
+            end_date: Backtest end date
+            run_id: Optimization run ID
+            progress_dict: Shared dict for progress updates (multiprocessing.Manager)
+
+        Returns:
+            Tuple of (epic, list of result dicts)
+        """
+        # Worker-local imports and setup (each process needs its own)
+        from forex_scanner.commands.enhanced_backtest_commands import EnhancedBacktestCommands
+        from forex_scanner.core.database import DatabaseManager
+        from forex_scanner import config
+
+        # Suppress logging in worker
+        import logging
+        logging.disable(logging.CRITICAL)
+
+        # Worker-local instances
+        local_backtest_cmd = EnhancedBacktestCommands()
+        local_db = DatabaseManager(config.DATABASE_URL)
+
+        pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+        results = []
+
+        try:
+            for idx, params in enumerate(combinations):
+                # Update progress
+                if progress_dict is not None:
+                    progress_dict[epic] = f"{idx + 1}/{len(combinations)}"
+
+                # Run backtest (same logic as run_single_backtest)
+                try:
+                    start_time = time.time()
+
+                    override = {
+                        'fixed_stop_loss_pips': params.get('fixed_stop_loss_pips', 9),
+                        'fixed_take_profit_pips': params.get('fixed_take_profit_pips', 15),
+                        'min_confidence': params.get('min_confidence', 0.5),
+                    }
+
+                    success = local_backtest_cmd.run_enhanced_backtest(
+                        epic=epic,
+                        start_date=start_date,
+                        end_date=end_date,
+                        strategy='SMC_SIMPLE',
+                        config_override=override,
+                        use_historical_intelligence=False,
+                        pipeline=False,
+                        show_signals=False
+                    )
+
+                    duration = time.time() - start_time
+
+                    # Extract result from DB
+                    result_data = self._extract_latest_result_static(local_db, epic, params, duration)
+                    results.append(result_data)
+
+                    # Store result in DB
+                    self._store_result_static(local_db, run_id, result_data)
+
+                except Exception as e:
+                    results.append({
+                        'epic': epic,
+                        'params': params,
+                        'status': 'error',
+                        'error_message': str(e),
+                        'duration_seconds': 0
+                    })
+
+            # Mark epic as complete
+            if progress_dict is not None:
+                progress_dict[epic] = "✅ DONE"
+
+        except Exception as e:
+            if progress_dict is not None:
+                progress_dict[epic] = f"❌ ERROR: {e}"
+
+        return epic, results
+
+    @staticmethod
+    def _extract_latest_result_static(db: 'DatabaseManager', epic: str, params: dict, duration: float) -> dict:
+        """Static method to extract latest backtest result (worker-safe)"""
+        query = """
+            SELECT
+                id,
+                total_signals,
+                winning_trades,
+                losing_trades,
+                win_rate,
+                profit_factor,
+                total_profit_pips,
+                avg_profit_pips,
+                avg_loss_pips
+            FROM backtest_executions
+            WHERE epic = :epic
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
+
+        try:
+            result = db.execute_query(query, {'epic': epic})
+            if result is not None and len(result) > 0:
+                row = result.iloc[0]
+
+                # Calculate composite score
+                win_rate = float(row.get('win_rate', 0) or 0)
+                profit_factor = float(row.get('profit_factor', 0) or 0)
+                total_pips = float(row.get('total_profit_pips', 0) or 0)
+                total_signals = int(row.get('total_signals', 0) or 0)
+
+                # Composite score formula
+                score = (
+                    (win_rate * 100) * 0.3 +
+                    min(profit_factor, 3.0) * 20 +
+                    (total_pips / 10) * 0.2 +
+                    min(total_signals / 10, 5) * 0.2
+                )
+
+                return {
+                    'epic': epic,
+                    'params': params,
+                    'execution_id': int(row.get('id', 0)),
+                    'total_signals': total_signals,
+                    'winners': int(row.get('winning_trades', 0) or 0),
+                    'losers': int(row.get('losing_trades', 0) or 0),
+                    'win_rate': win_rate,
+                    'profit_factor': profit_factor,
+                    'total_pips': total_pips,
+                    'avg_profit_pips': float(row.get('avg_profit_pips', 0) or 0),
+                    'avg_loss_pips': float(row.get('avg_loss_pips', 0) or 0),
+                    'composite_score': score,
+                    'status': 'completed',
+                    'error_message': '',
+                    'duration_seconds': duration
+                }
+
+        except Exception as e:
+            pass
+
+        return {
+            'epic': epic,
+            'params': params,
+            'status': 'error',
+            'error_message': 'Failed to extract result',
+            'duration_seconds': duration
+        }
+
+    @staticmethod
+    def _store_result_static(db: 'DatabaseManager', run_id: int, result: dict) -> None:
+        """Static method to store result in DB (worker-safe)"""
+        try:
+            query = """
+                INSERT INTO optimization_results (
+                    run_id, epic, params, execution_id,
+                    total_signals, winners, losers, win_rate,
+                    profit_factor, total_pips, avg_profit_pips, avg_loss_pips,
+                    composite_score, status, error_message, duration_seconds,
+                    created_at
+                ) VALUES (
+                    :run_id, :epic, :params, :execution_id,
+                    :total_signals, :winners, :losers, :win_rate,
+                    :profit_factor, :total_pips, :avg_profit_pips, :avg_loss_pips,
+                    :composite_score, :status, :error_message, :duration_seconds,
+                    NOW()
+                )
+            """
+            db.execute_query(query, {
+                'run_id': run_id,
+                'epic': result.get('epic', ''),
+                'params': json.dumps(result.get('params', {})),
+                'execution_id': result.get('execution_id', 0),
+                'total_signals': result.get('total_signals', 0),
+                'winners': result.get('winners', 0),
+                'losers': result.get('losers', 0),
+                'win_rate': result.get('win_rate', 0),
+                'profit_factor': result.get('profit_factor', 0),
+                'total_pips': result.get('total_pips', 0),
+                'avg_profit_pips': result.get('avg_profit_pips', 0),
+                'avg_loss_pips': result.get('avg_loss_pips', 0),
+                'composite_score': result.get('composite_score', 0),
+                'status': result.get('status', 'error'),
+                'error_message': result.get('error_message', ''),
+                'duration_seconds': result.get('duration_seconds', 0)
+            })
+        except Exception:
+            pass  # Don't fail on storage errors
+
+    def _run_parallel_optimization(self, num_workers: int) -> None:
+        """
+        Run optimization with parallel epic processing.
+
+        Args:
+            num_workers: Number of parallel workers to use
+        """
+        print(f"\n🚀 Starting PARALLEL optimization with {num_workers} workers")
+        print(f"   Processing {len(self.epics)} epics with {len(self.combinations)} combinations each\n")
+
+        # Create shared progress dict
+        manager = Manager()
+        progress_dict = manager.dict()
+
+        # Initialize progress for all epics
+        for epic in self.epics:
+            pair_name = self._get_epic_shortcut(epic)
+            progress_dict[epic] = "⏳ Queued"
+
+        completed_epics = {}
+        all_results = []
+
+        try:
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                # Submit all epics
+                future_to_epic = {
+                    executor.submit(
+                        self._optimize_single_epic_worker,
+                        epic,
+                        self.combinations,
+                        self.run.start_date,
+                        self.run.end_date,
+                        self.run.run_id,
+                        progress_dict
+                    ): epic for epic in self.epics
+                }
+
+                # Process as they complete
+                for future in as_completed(future_to_epic):
+                    epic = future_to_epic[future]
+                    pair_name = self._get_epic_shortcut(epic)
+
+                    try:
+                        epic_name, results = future.result()
+                        completed_epics[epic] = results
+                        all_results.extend(results)
+
+                        # Find best for this epic
+                        successful = [r for r in results if r.get('status') == 'completed']
+                        if successful:
+                            best = max(successful, key=lambda x: x.get('composite_score', 0))
+                            self.run.best_per_epic[epic] = self._dict_to_result(best)
+
+                            print(f"\n✅ {pair_name} completed: {len(results)} tests")
+                            print(f"   Best: SL={best['params'].get('fixed_stop_loss_pips')}, "
+                                  f"TP={best['params'].get('fixed_take_profit_pips')}, "
+                                  f"Score={best.get('composite_score', 0):.1f}")
+
+                            # Create snapshot if enabled
+                            if self.auto_snapshot:
+                                best_result = self._dict_to_result(best)
+                                snapshot_name = self.create_snapshot(epic, best['params'], best_result)
+                                if snapshot_name:
+                                    print(f"   📦 Snapshot: {snapshot_name}")
+                        else:
+                            print(f"\n⚠️  {pair_name} completed: No successful tests")
+
+                        # Update completed count
+                        self.run.completed += len(results)
+
+                    except Exception as e:
+                        print(f"\n❌ {pair_name} failed: {e}")
+
+                    # Print current progress
+                    self._print_parallel_progress(progress_dict)
+
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Interrupt received - workers will complete current tests...")
+            self.interrupted = True
+
+        # Convert results to OptimizationResult objects
+        for result_dict in all_results:
+            self.run.results.append(self._dict_to_result(result_dict))
+
+    def _dict_to_result(self, d: dict) -> OptimizationResult:
+        """Convert result dict to OptimizationResult object"""
+        return OptimizationResult(
+            epic=d.get('epic', ''),
+            params=d.get('params', {}),
+            execution_id=d.get('execution_id', 0),
+            total_signals=d.get('total_signals', 0),
+            winners=d.get('winners', 0),
+            losers=d.get('losers', 0),
+            win_rate=d.get('win_rate', 0),
+            profit_factor=d.get('profit_factor', 0),
+            total_pips=d.get('total_pips', 0),
+            avg_profit_pips=d.get('avg_profit_pips', 0),
+            avg_loss_pips=d.get('avg_loss_pips', 0),
+            composite_score=d.get('composite_score', 0),
+            status=d.get('status', 'error'),
+            error_message=d.get('error_message', ''),
+            duration_seconds=d.get('duration_seconds', 0)
+        )
+
+    def _print_parallel_progress(self, progress_dict: dict) -> None:
+        """Print progress for all parallel workers"""
+        print("\n" + "-" * 50)
+        print("📊 PARALLEL PROGRESS:")
+        for epic in self.epics:
+            pair_name = self._get_epic_shortcut(epic)
+            status = progress_dict.get(epic, "Unknown")
+            print(f"   {pair_name:8s}: {status}")
+        print("-" * 50)
 
     # ============================================
     # COMBINATION GENERATION
@@ -808,6 +1195,71 @@ class MultiEpicOptimizer:
     # MAIN OPTIMIZATION LOOP
     # ============================================
 
+    def _finalize_run(self):
+        """Finalize the optimization run with report and export."""
+        if not self.interrupted:
+            self.run.status = 'completed'
+
+            # Update run status in database
+            query = """
+                UPDATE optimization_runs SET
+                    status = 'completed',
+                    completed_at = NOW(),
+                    best_overall_epic = :best_epic,
+                    best_overall_params = :best_params,
+                    best_overall_score = :best_score
+                WHERE id = :run_id
+            """
+
+            best_epic = None
+            best_params = None
+            best_score = None
+
+            if self.run.best_per_epic:
+                sorted_best = sorted(
+                    self.run.best_per_epic.items(),
+                    key=lambda x: x[1].composite_score,
+                    reverse=True
+                )
+                best_epic, best_result = sorted_best[0]
+                best_params = json.dumps(best_result.params)
+                best_score = best_result.composite_score
+
+            self.db.execute_query(query, {
+                'run_id': self.run.run_id,
+                'best_epic': best_epic,
+                'best_params': best_params,
+                'best_score': best_score,
+            })
+
+            # Print comparison report
+            self.print_comparison_report()
+
+            # Export CSV
+            csv_path = f"{self.output_dir}/optimization_{self.run.run_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+            self.export_csv(csv_path)
+
+            # Final stats
+            total_duration = (datetime.now() - self.optimization_start_time).total_seconds()
+            print(f"\n{'='*80}")
+            print(f"✅ OPTIMIZATION COMPLETE")
+            print(f"{'='*80}")
+            print(f"Run ID:      {self.run.run_id}")
+            print(f"Duration:    {total_duration / 3600:.1f} hours")
+            print(f"Tests run:   {self.run.completed}")
+            print(f"CSV export:  {csv_path}")
+            print(f"{'='*80}")
+
+        else:
+            print(f"\n{'='*80}")
+            print(f"⏸️  OPTIMIZATION PAUSED")
+            print(f"{'='*80}")
+            print(f"Progress saved. Resume with:")
+            print(f"  python multi_epic_optimizer.py --resume {self.run.run_id}")
+            print(f"{'='*80}")
+
+        self._save_progress()
+
     def run_optimization(self, resume_run_id: int = None):
         """Main optimization loop"""
 
@@ -827,16 +1279,37 @@ class MultiEpicOptimizer:
         print("\n" + "=" * 80)
         print("🚀 MULTI-EPIC PARAMETER OPTIMIZATION")
         print("=" * 80)
+        # Determine execution mode
+        if self.parallel_workers is not None:
+            if self.parallel_workers == 0:
+                actual_workers = self._get_safe_worker_count(max_workers=8)
+            else:
+                actual_workers = min(self.parallel_workers, len(self.epics))
+            execution_mode = f"PARALLEL ({actual_workers} workers)"
+            est_hours = len(self.combinations) * len(self.epics) * 3 / 60 / actual_workers
+        else:
+            actual_workers = 0
+            execution_mode = "SEQUENTIAL"
+            est_hours = len(self.combinations) * len(self.epics) * 3 / 60
+
         print(f"Mode:        {self.mode.upper()}")
+        print(f"Execution:   {execution_mode}")
         print(f"Epics:       {len(self.epics)} pairs")
         print(f"Period:      {self.days} days ({self.run.start_date.strftime('%Y-%m-%d')} to {self.run.end_date.strftime('%Y-%m-%d')})")
         print(f"Combinations: {len(self.combinations)} per epic")
         print(f"Total tests: {self.run.total_combinations}")
-        print(f"Est. time:   ~{len(self.combinations) * len(self.epics) * 3 / 60:.1f} hours")
+        print(f"Est. time:   ~{est_hours:.1f} hours")
         print(f"Historical Intelligence: DISABLED")
         print(f"Auto-snapshot: {'ENABLED' if self.auto_snapshot else 'DISABLED'}")
         print("=" * 80)
         print("\nPress Ctrl+C to pause and save progress.\n")
+
+        # Run parallel or sequential
+        if self.parallel_workers is not None and actual_workers > 1:
+            self._run_parallel_optimization(actual_workers)
+            # After parallel completion, skip to final report
+            self._finalize_run()
+            return
 
         # Main loop
         for epic_idx in range(self.run.current_epic_idx, len(self.epics)):
@@ -911,68 +1384,7 @@ class MultiEpicOptimizer:
                     self._store_best_params(epic, best)
 
         # Final report
-        if not self.interrupted:
-            self.run.status = 'completed'
-
-            # Update run status
-            query = """
-                UPDATE optimization_runs SET
-                    status = 'completed',
-                    completed_at = NOW(),
-                    best_overall_epic = :best_epic,
-                    best_overall_params = :best_params,
-                    best_overall_score = :best_score
-                WHERE id = :run_id
-            """
-
-            best_epic = None
-            best_params = None
-            best_score = None
-
-            if self.run.best_per_epic:
-                sorted_best = sorted(
-                    self.run.best_per_epic.items(),
-                    key=lambda x: x[1].composite_score,
-                    reverse=True
-                )
-                best_epic, best_result = sorted_best[0]
-                best_params = json.dumps(best_result.params)
-                best_score = best_result.composite_score
-
-            self.db.execute_query(query, {
-                'run_id': self.run.run_id,
-                'best_epic': best_epic,
-                'best_params': best_params,
-                'best_score': best_score,
-            })
-
-            # Print comparison report
-            self.print_comparison_report()
-
-            # Export CSV
-            csv_path = f"{self.output_dir}/optimization_{self.run.run_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-            self.export_csv(csv_path)
-
-            # Final stats
-            total_duration = (datetime.now() - self.optimization_start_time).total_seconds()
-            print(f"\n{'='*80}")
-            print(f"✅ OPTIMIZATION COMPLETE")
-            print(f"{'='*80}")
-            print(f"Run ID:      {self.run.run_id}")
-            print(f"Duration:    {total_duration / 3600:.1f} hours")
-            print(f"Tests run:   {self.run.completed}")
-            print(f"CSV export:  {csv_path}")
-            print(f"{'='*80}")
-
-        else:
-            print(f"\n{'='*80}")
-            print(f"⏸️  OPTIMIZATION PAUSED")
-            print(f"{'='*80}")
-            print(f"Progress saved. Resume with:")
-            print(f"  python multi_epic_optimizer.py --resume {self.run.run_id}")
-            print(f"{'='*80}")
-
-        self._save_progress()
+        self._finalize_run()
 
 
 # ============================================
@@ -1021,13 +1433,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Fast mode - core parameters only (~6-7 hours)
+  # Fast mode - core parameters only (~6-7 hours sequential)
   python multi_epic_optimizer.py --mode fast --days 30
 
-  # Medium mode - extended parameters (~22-25 hours)
+  # Medium mode - extended parameters (~22-25 hours sequential)
   python multi_epic_optimizer.py --mode medium --days 30
 
-  # Extended mode - full sweep (~45-50 hours)
+  # Extended mode - full sweep (~45-50 hours sequential)
   python multi_epic_optimizer.py --mode extended --days 30
 
   # Specific epics only
@@ -1041,6 +1453,15 @@ Examples:
 
   # Disable auto-snapshot
   python multi_epic_optimizer.py --mode fast --no-snapshots
+
+  # Enable parallel execution (auto-detect workers)
+  python multi_epic_optimizer.py --mode fast --days 30 --parallel
+
+  # Parallel with specific worker count
+  python multi_epic_optimizer.py --mode fast --days 30 --parallel 4
+
+  # Parallel with memory limit
+  python multi_epic_optimizer.py --mode fast --days 30 --parallel --max-memory-gb 4
 """
     )
 
@@ -1081,6 +1502,16 @@ Examples:
         help='Show what would be tested without running'
     )
 
+    parser.add_argument(
+        '--parallel', nargs='?', const=0, type=int, default=None,
+        help='Enable parallel execution. No value=auto-detect workers, or specify count (2-8)'
+    )
+
+    parser.add_argument(
+        '--max-memory-gb', type=float, default=8.0,
+        help='Maximum memory to use in GB (default: 8.0). Workers adjusted to fit.'
+    )
+
     args = parser.parse_args()
 
     # Dry run mode
@@ -1094,7 +1525,9 @@ Examples:
         days=args.days,
         epics=args.epics,
         output_dir=args.output_dir,
-        auto_snapshot=not args.no_snapshots
+        auto_snapshot=not args.no_snapshots,
+        parallel_workers=args.parallel,
+        max_memory_gb=args.max_memory_gb
     )
 
     # Run optimization
