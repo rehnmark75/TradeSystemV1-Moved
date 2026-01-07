@@ -92,6 +92,221 @@ from forex_scanner.optimization_config import (
 
 
 # ============================================
+# MODULE-LEVEL WORKER FUNCTION (for multiprocessing)
+# ============================================
+
+def _worker_optimize_epic(
+    epic: str,
+    combinations: List[Dict],
+    start_date: datetime,
+    end_date: datetime,
+    run_id: int,
+    database_url: str,
+    progress_dict: dict = None
+) -> Tuple[str, List[dict]]:
+    """
+    Module-level worker function to optimize a single epic.
+    Must be at module level for ProcessPoolExecutor pickling.
+
+    Args:
+        epic: Epic to optimize
+        combinations: Parameter combinations to test
+        start_date: Backtest start date
+        end_date: Backtest end date
+        run_id: Optimization run ID
+        database_url: Database connection URL
+        progress_dict: Shared dict for progress updates (multiprocessing.Manager)
+
+    Returns:
+        Tuple of (epic, list of result dicts)
+    """
+    # Worker-local imports and setup (each process needs its own)
+    from forex_scanner.commands.enhanced_backtest_commands import EnhancedBacktestCommands
+    from forex_scanner.core.database import DatabaseManager
+
+    # Suppress logging in worker
+    import logging
+    logging.disable(logging.CRITICAL)
+
+    # Worker-local instances - create fresh connections in this process
+    local_backtest_cmd = EnhancedBacktestCommands()
+    local_db = DatabaseManager(database_url)
+
+    pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+    results = []
+
+    try:
+        for idx, params in enumerate(combinations):
+            # Update progress
+            if progress_dict is not None:
+                progress_dict[epic] = f"🔄 {idx + 1}/{len(combinations)}"
+
+            # Run backtest
+            try:
+                start_time = time.time()
+
+                override = {
+                    'fixed_stop_loss_pips': params.get('fixed_stop_loss_pips', 9),
+                    'fixed_take_profit_pips': params.get('fixed_take_profit_pips', 15),
+                    'min_confidence': params.get('min_confidence', 0.5),
+                }
+
+                success = local_backtest_cmd.run_enhanced_backtest(
+                    epic=epic,
+                    start_date=start_date,
+                    end_date=end_date,
+                    strategy='SMC_SIMPLE',
+                    config_override=override,
+                    use_historical_intelligence=False,
+                    pipeline=False,
+                    show_signals=False
+                )
+
+                duration = time.time() - start_time
+
+                # Extract result from DB
+                result_data = _worker_extract_result(local_db, epic, params, duration)
+                results.append(result_data)
+
+                # Store result in DB
+                _worker_store_result(local_db, run_id, result_data)
+
+            except Exception as e:
+                results.append({
+                    'epic': epic,
+                    'params': params,
+                    'status': 'error',
+                    'error_message': str(e),
+                    'duration_seconds': 0
+                })
+
+        # Mark epic as complete
+        if progress_dict is not None:
+            progress_dict[epic] = "✅ DONE"
+
+    except Exception as e:
+        if progress_dict is not None:
+            progress_dict[epic] = f"❌ ERROR: {e}"
+
+    finally:
+        # Clean up worker DB connection
+        try:
+            local_db.close() if hasattr(local_db, 'close') else None
+        except:
+            pass
+
+    return epic, results
+
+
+def _worker_extract_result(db, epic: str, params: dict, duration: float) -> dict:
+    """Extract latest backtest result (worker-safe)"""
+    query = """
+        SELECT
+            id,
+            total_signals,
+            winning_trades,
+            losing_trades,
+            win_rate,
+            profit_factor,
+            total_profit_pips,
+            avg_profit_pips,
+            avg_loss_pips
+        FROM backtest_executions
+        WHERE epic = :epic
+        ORDER BY created_at DESC
+        LIMIT 1
+    """
+
+    try:
+        result = db.execute_query(query, {'epic': epic})
+        if result is not None and len(result) > 0:
+            row = result.iloc[0]
+
+            # Calculate composite score
+            win_rate = float(row.get('win_rate', 0) or 0)
+            profit_factor = float(row.get('profit_factor', 0) or 0)
+            total_pips = float(row.get('total_profit_pips', 0) or 0)
+            total_signals = int(row.get('total_signals', 0) or 0)
+
+            # Composite score formula
+            score = (
+                (win_rate * 100) * 0.3 +
+                min(profit_factor, 3.0) * 20 +
+                (total_pips / 10) * 0.2 +
+                min(total_signals / 10, 5) * 0.2
+            )
+
+            return {
+                'epic': epic,
+                'params': params,
+                'execution_id': int(row.get('id', 0)),
+                'total_signals': total_signals,
+                'winners': int(row.get('winning_trades', 0) or 0),
+                'losers': int(row.get('losing_trades', 0) or 0),
+                'win_rate': win_rate,
+                'profit_factor': profit_factor,
+                'total_pips': total_pips,
+                'avg_profit_pips': float(row.get('avg_profit_pips', 0) or 0),
+                'avg_loss_pips': float(row.get('avg_loss_pips', 0) or 0),
+                'composite_score': score,
+                'status': 'completed',
+                'error_message': '',
+                'duration_seconds': duration
+            }
+
+    except Exception as e:
+        pass
+
+    return {
+        'epic': epic,
+        'params': params,
+        'status': 'error',
+        'error_message': 'Failed to extract result',
+        'duration_seconds': duration
+    }
+
+
+def _worker_store_result(db, run_id: int, result: dict) -> None:
+    """Store result in DB (worker-safe)"""
+    try:
+        query = """
+            INSERT INTO optimization_results (
+                run_id, epic, params, execution_id,
+                total_signals, winners, losers, win_rate,
+                profit_factor, total_pips, avg_profit_pips, avg_loss_pips,
+                composite_score, status, error_message, duration_seconds,
+                created_at
+            ) VALUES (
+                :run_id, :epic, :params, :execution_id,
+                :total_signals, :winners, :losers, :win_rate,
+                :profit_factor, :total_pips, :avg_profit_pips, :avg_loss_pips,
+                :composite_score, :status, :error_message, :duration_seconds,
+                NOW()
+            )
+        """
+        db.execute_query(query, {
+            'run_id': run_id,
+            'epic': result.get('epic', ''),
+            'params': json.dumps(result.get('params', {})),
+            'execution_id': result.get('execution_id', 0),
+            'total_signals': result.get('total_signals', 0),
+            'winners': result.get('winners', 0),
+            'losers': result.get('losers', 0),
+            'win_rate': result.get('win_rate', 0),
+            'profit_factor': result.get('profit_factor', 0),
+            'total_pips': result.get('total_pips', 0),
+            'avg_profit_pips': result.get('avg_profit_pips', 0),
+            'avg_loss_pips': result.get('avg_loss_pips', 0),
+            'composite_score': result.get('composite_score', 0),
+            'status': result.get('status', 'error'),
+            'error_message': result.get('error_message', ''),
+            'duration_seconds': result.get('duration_seconds', 0),
+        })
+    except Exception as e:
+        pass  # Don't fail the worker for DB storage issues
+
+
+# ============================================
 # DATA CLASSES
 # ============================================
 
@@ -258,208 +473,6 @@ class MultiEpicOptimizer:
             print(f"⚠️  Error checking resources: {e}, using 2 workers")
             return min(2, max_workers)
 
-    def _optimize_single_epic_worker(
-        self,
-        epic: str,
-        combinations: List[Dict],
-        start_date: datetime,
-        end_date: datetime,
-        run_id: int,
-        progress_dict: dict = None
-    ) -> Tuple[str, List[dict]]:
-        """
-        Worker function to optimize a single epic. Runs in separate process.
-
-        Args:
-            epic: Epic to optimize
-            combinations: Parameter combinations to test
-            start_date: Backtest start date
-            end_date: Backtest end date
-            run_id: Optimization run ID
-            progress_dict: Shared dict for progress updates (multiprocessing.Manager)
-
-        Returns:
-            Tuple of (epic, list of result dicts)
-        """
-        # Worker-local imports and setup (each process needs its own)
-        from forex_scanner.commands.enhanced_backtest_commands import EnhancedBacktestCommands
-        from forex_scanner.core.database import DatabaseManager
-        from forex_scanner import config
-
-        # Suppress logging in worker
-        import logging
-        logging.disable(logging.CRITICAL)
-
-        # Worker-local instances
-        local_backtest_cmd = EnhancedBacktestCommands()
-        local_db = DatabaseManager(config.DATABASE_URL)
-
-        pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
-        results = []
-
-        try:
-            for idx, params in enumerate(combinations):
-                # Update progress
-                if progress_dict is not None:
-                    progress_dict[epic] = f"{idx + 1}/{len(combinations)}"
-
-                # Run backtest (same logic as run_single_backtest)
-                try:
-                    start_time = time.time()
-
-                    override = {
-                        'fixed_stop_loss_pips': params.get('fixed_stop_loss_pips', 9),
-                        'fixed_take_profit_pips': params.get('fixed_take_profit_pips', 15),
-                        'min_confidence': params.get('min_confidence', 0.5),
-                    }
-
-                    success = local_backtest_cmd.run_enhanced_backtest(
-                        epic=epic,
-                        start_date=start_date,
-                        end_date=end_date,
-                        strategy='SMC_SIMPLE',
-                        config_override=override,
-                        use_historical_intelligence=False,
-                        pipeline=False,
-                        show_signals=False
-                    )
-
-                    duration = time.time() - start_time
-
-                    # Extract result from DB
-                    result_data = self._extract_latest_result_static(local_db, epic, params, duration)
-                    results.append(result_data)
-
-                    # Store result in DB
-                    self._store_result_static(local_db, run_id, result_data)
-
-                except Exception as e:
-                    results.append({
-                        'epic': epic,
-                        'params': params,
-                        'status': 'error',
-                        'error_message': str(e),
-                        'duration_seconds': 0
-                    })
-
-            # Mark epic as complete
-            if progress_dict is not None:
-                progress_dict[epic] = "✅ DONE"
-
-        except Exception as e:
-            if progress_dict is not None:
-                progress_dict[epic] = f"❌ ERROR: {e}"
-
-        return epic, results
-
-    @staticmethod
-    def _extract_latest_result_static(db: 'DatabaseManager', epic: str, params: dict, duration: float) -> dict:
-        """Static method to extract latest backtest result (worker-safe)"""
-        query = """
-            SELECT
-                id,
-                total_signals,
-                winning_trades,
-                losing_trades,
-                win_rate,
-                profit_factor,
-                total_profit_pips,
-                avg_profit_pips,
-                avg_loss_pips
-            FROM backtest_executions
-            WHERE epic = :epic
-            ORDER BY created_at DESC
-            LIMIT 1
-        """
-
-        try:
-            result = db.execute_query(query, {'epic': epic})
-            if result is not None and len(result) > 0:
-                row = result.iloc[0]
-
-                # Calculate composite score
-                win_rate = float(row.get('win_rate', 0) or 0)
-                profit_factor = float(row.get('profit_factor', 0) or 0)
-                total_pips = float(row.get('total_profit_pips', 0) or 0)
-                total_signals = int(row.get('total_signals', 0) or 0)
-
-                # Composite score formula
-                score = (
-                    (win_rate * 100) * 0.3 +
-                    min(profit_factor, 3.0) * 20 +
-                    (total_pips / 10) * 0.2 +
-                    min(total_signals / 10, 5) * 0.2
-                )
-
-                return {
-                    'epic': epic,
-                    'params': params,
-                    'execution_id': int(row.get('id', 0)),
-                    'total_signals': total_signals,
-                    'winners': int(row.get('winning_trades', 0) or 0),
-                    'losers': int(row.get('losing_trades', 0) or 0),
-                    'win_rate': win_rate,
-                    'profit_factor': profit_factor,
-                    'total_pips': total_pips,
-                    'avg_profit_pips': float(row.get('avg_profit_pips', 0) or 0),
-                    'avg_loss_pips': float(row.get('avg_loss_pips', 0) or 0),
-                    'composite_score': score,
-                    'status': 'completed',
-                    'error_message': '',
-                    'duration_seconds': duration
-                }
-
-        except Exception as e:
-            pass
-
-        return {
-            'epic': epic,
-            'params': params,
-            'status': 'error',
-            'error_message': 'Failed to extract result',
-            'duration_seconds': duration
-        }
-
-    @staticmethod
-    def _store_result_static(db: 'DatabaseManager', run_id: int, result: dict) -> None:
-        """Static method to store result in DB (worker-safe)"""
-        try:
-            query = """
-                INSERT INTO optimization_results (
-                    run_id, epic, params, execution_id,
-                    total_signals, winners, losers, win_rate,
-                    profit_factor, total_pips, avg_profit_pips, avg_loss_pips,
-                    composite_score, status, error_message, duration_seconds,
-                    created_at
-                ) VALUES (
-                    :run_id, :epic, :params, :execution_id,
-                    :total_signals, :winners, :losers, :win_rate,
-                    :profit_factor, :total_pips, :avg_profit_pips, :avg_loss_pips,
-                    :composite_score, :status, :error_message, :duration_seconds,
-                    NOW()
-                )
-            """
-            db.execute_query(query, {
-                'run_id': run_id,
-                'epic': result.get('epic', ''),
-                'params': json.dumps(result.get('params', {})),
-                'execution_id': result.get('execution_id', 0),
-                'total_signals': result.get('total_signals', 0),
-                'winners': result.get('winners', 0),
-                'losers': result.get('losers', 0),
-                'win_rate': result.get('win_rate', 0),
-                'profit_factor': result.get('profit_factor', 0),
-                'total_pips': result.get('total_pips', 0),
-                'avg_profit_pips': result.get('avg_profit_pips', 0),
-                'avg_loss_pips': result.get('avg_loss_pips', 0),
-                'composite_score': result.get('composite_score', 0),
-                'status': result.get('status', 'error'),
-                'error_message': result.get('error_message', ''),
-                'duration_seconds': result.get('duration_seconds', 0)
-            })
-        except Exception:
-            pass  # Don't fail on storage errors
-
     def _run_parallel_optimization(self, num_workers: int) -> None:
         """
         Run optimization with parallel epic processing.
@@ -484,15 +497,17 @@ class MultiEpicOptimizer:
 
         try:
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                # Submit all epics
+                # Submit all epics using module-level worker function
+                # (module-level function avoids pickle issues with self)
                 future_to_epic = {
                     executor.submit(
-                        self._optimize_single_epic_worker,
+                        _worker_optimize_epic,  # Module-level function
                         epic,
                         self.combinations,
                         self.run.start_date,
                         self.run.end_date,
                         self.run.run_id,
+                        config.DATABASE_URL,  # Pass URL, not connection
                         progress_dict
                     ): epic for epic in self.epics
                 }
