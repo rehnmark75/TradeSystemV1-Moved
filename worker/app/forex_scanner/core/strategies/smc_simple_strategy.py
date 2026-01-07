@@ -2,9 +2,15 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.14.0
+VERSION: 2.14.1
 DATE: 2026-01-07
-STATUS: Volume confirmation fix for incomplete candles
+STATUS: Cooldown persistence fix
+
+v2.14.1 CHANGES (Cooldown Persistence Fix):
+    - FIX: Database-loaded cooldowns were keyed by epic but checked by pair name
+    - BUG: Cooldowns from DB were never enforced due to key mismatch
+    - SOLUTION: Extract pair name from epic when loading from database
+    - IMPACT: Cooldowns now properly persist across container restarts
 
 v2.14.0 CHANGES (Volume Confirmation Fix):
     - FIX: volume_confirmed was using incomplete candle when break happened on current candle
@@ -2899,15 +2905,18 @@ class SMCSimpleStrategy:
                 last_signal = row[1]
 
                 if last_signal:
-                    # Store by epic (the strategy uses epic as key)
-                    self.pair_cooldowns[epic] = last_signal
+                    # v2.14.1: Extract pair name from epic for consistent key usage
+                    # Epic format: CS.D.EURUSD.MINI.IP or CS.D.EURUSD.CEEM.IP -> EURUSD
+                    # The _check_cooldown and _update_cooldown methods use pair name, not epic
+                    pair = epic.split('.')[2] if '.' in epic else epic
+                    self.pair_cooldowns[pair] = last_signal
                     loaded_count += 1
 
             if loaded_count > 0:
                 self.logger.info(f"📥 Loaded {loaded_count} cooldown states from database (persist across restarts)")
-                for epic, last_signal in self.pair_cooldowns.items():
+                for pair, last_signal in self.pair_cooldowns.items():
                     hours_ago = (datetime.now() - last_signal.replace(tzinfo=None)).total_seconds() / 3600
-                    self.logger.debug(f"   {epic}: last signal {hours_ago:.1f}h ago")
+                    self.logger.debug(f"   {pair}: last signal {hours_ago:.1f}h ago")
             else:
                 self.logger.debug("📥 No recent cooldown states to load from database")
 
