@@ -2,9 +2,15 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.5.0
-DATE: 2025-12-23
-STATUS: Pair-Specific Blocking - USDCHF filtered on weak setups
+VERSION: 2.14.0
+DATE: 2026-01-07
+STATUS: Volume confirmation fix for incomplete candles
+
+v2.14.0 CHANGES (Volume Confirmation Fix):
+    - FIX: volume_confirmed was using incomplete candle when break happened on current candle
+    - Same issue as volume_ratio fixed in v2.13.0 - incomplete candles have artificially low volume
+    - SOLUTION: If break_candle_idx == current_idx, use previous complete candle for volume check
+    - IMPACT: More accurate volume confirmation, fewer false negatives
 
 v2.5.0 CHANGES (Pair-Specific Blocking):
     - NEW: Pair-specific blocking conditions for consistently losing pairs
@@ -1869,12 +1875,27 @@ class SMCSimpleStrategy:
             break_low = lows[break_candle_idx]
 
         # Volume confirmation (optional) - check volume on break candle
+        # v2.14.0: Fix for incomplete candle volume issue (same fix as volume_ratio in v2.13.0)
+        # If the break candle is the current (incomplete) candle, use the previous complete candle instead
+        # to avoid artificially low volume readings from partial candles
         volume_confirmed = False
         if self.volume_enabled and volumes is not None:
-            vol_sma = np.mean(volumes[max(0, break_candle_idx-self.volume_sma_period):break_candle_idx])
-            break_vol = volumes[break_candle_idx]
+            current_idx = len(df) - 1
+
+            # Determine which candle to use for volume confirmation
+            if break_candle_idx == current_idx:
+                # Break just happened on current incomplete candle - use previous complete candle
+                vol_check_idx = break_candle_idx - 1 if break_candle_idx > 0 else break_candle_idx
+            else:
+                # Break happened on a previous (complete) candle - use it directly
+                vol_check_idx = break_candle_idx
+
+            # Calculate SMA from candles before the volume check candle (all complete)
+            vol_sma = np.mean(volumes[max(0, vol_check_idx-self.volume_sma_period):vol_check_idx])
+            check_vol = volumes[vol_check_idx]
+
             if vol_sma > 0:
-                volume_confirmed = break_vol > vol_sma * self.volume_multiplier
+                volume_confirmed = check_vol > vol_sma * self.volume_multiplier
 
         # v1.8.0: Momentum quality filter - ensure strong breakout candle
         # v2.6.0: Uses pair-specific overrides for EURUSD
