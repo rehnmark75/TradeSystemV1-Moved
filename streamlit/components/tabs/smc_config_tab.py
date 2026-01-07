@@ -796,6 +796,26 @@ def render_pair_overrides(config: Dict[str, Any]):
             if not _values_equal(new_macd, macd_effective):
                 override_changes['macd_filter_enabled'] = new_macd
 
+        # Min Volume Ratio - pair-specific threshold for volume filter
+        st.markdown("**Volume Filter Settings**")
+        col_vol1, col_vol2 = st.columns(2)
+        with col_vol1:
+            vol_ratio_value = existing.get('min_volume_ratio')
+            global_vol_ratio = config.get('min_volume_ratio', 0.25)
+            vol_ratio_effective = float(vol_ratio_value) if vol_ratio_value is not None else float(global_vol_ratio)
+            new_vol_ratio = st.number_input(
+                "Min Volume Ratio",
+                value=vol_ratio_effective,
+                min_value=0.0, max_value=2.0, step=0.05,
+                format="%.2f",
+                help=f"{'Inherited from global (' + str(global_vol_ratio) + ')' if vol_ratio_value is None else 'Explicit override for this pair'}. Signals with volume ratio below this are rejected. Set to 0 to disable volume filter for this pair.",
+                key=f"override_vol_ratio_{selected_pair}"
+            )
+            if not _values_equal(new_vol_ratio, vol_ratio_effective):
+                override_changes['min_volume_ratio'] = new_vol_ratio
+        with col_vol2:
+            st.caption("💡 Volume ratio = current candle volume / 20-period SMA. Values 0.75-1.00 historically have best win rate.")
+
         # Dynamic confidence thresholds (absolute values, not adjustments)
         st.markdown("**Dynamic Confidence Thresholds**")
         st.caption("These are absolute confidence thresholds that override the global minimum when conditions are met. NULL = uses global min_confidence.")

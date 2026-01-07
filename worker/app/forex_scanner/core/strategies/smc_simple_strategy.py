@@ -127,6 +127,10 @@ class SMCSimpleStrategy:
         self.pair_last_session = {}  # {pair: session_name} - track session changes
         self._trade_outcome_cache = {}  # {pair: {'outcome': dict, 'cached_at': datetime}}
 
+        # v3.1.0: Load cooldowns from database on startup (persist across restarts)
+        if self._db_manager is not None and not self._backtest_mode:
+            self._load_cooldowns_from_db()
+
         # Rejection tracking (v2.2.0) - initialized after config is loaded
         self.rejection_manager = None
         if self._db_manager is not None and self.rejection_tracking_enabled:
@@ -1036,10 +1040,22 @@ class SMCSimpleStrategy:
                 vol_col = None
 
             if vol_col:
-                current_vol = df_trigger[vol_col].iloc[-1]
-                vol_sma = df_trigger[vol_col].iloc[-self.volume_sma_period:].mean()
+                # v2.13.0: Use PREVIOUS complete candle for volume ratio, not current incomplete candle
+                # The current 15m candle may only have 1-14 of 15 expected 1m candles,
+                # making its volume artificially low compared to complete candles in SMA.
+                # This was causing ~90% of signals to be rejected with "Volume ratio too low (0.09 < 0.25)"
+                if len(df_trigger) >= self.volume_sma_period + 1:
+                    # Use previous (complete) candle for current volume comparison
+                    current_vol = df_trigger[vol_col].iloc[-2]
+                    # SMA uses candles before the current one (all complete)
+                    vol_sma = df_trigger[vol_col].iloc[-(self.volume_sma_period + 1):-1].mean()
+                else:
+                    # Fallback for insufficient data
+                    current_vol = df_trigger[vol_col].iloc[-1]
+                    vol_sma = df_trigger[vol_col].iloc[-self.volume_sma_period:].mean()
                 if vol_sma > 0:
                     volume_ratio = current_vol / vol_sma
+                    self.logger.debug(f"   📊 Volume ratio: {volume_ratio:.2f} (prev_candle={current_vol:.0f} / sma20={vol_sma:.0f})")
 
             # v2.2.0: Enhanced confidence with new parameters
             confidence = self._calculate_confidence(
@@ -2826,6 +2842,57 @@ class SMCSimpleStrategy:
         self._trade_outcome_cache = {}
         if self.logger:
             self.logger.info("🔄 SMC Simple strategy cooldowns reset for new backtest (v3.0.0 adaptive state cleared)")
+
+    def _load_cooldowns_from_db(self):
+        """Load cooldown state from alert_history on startup (v3.1.0)
+
+        This ensures cooldowns persist across container restarts by loading
+        the last signal time for each pair from the database.
+        """
+        if self._db_manager is None:
+            return
+
+        try:
+            conn = self._db_manager.get_connection()
+            cursor = conn.cursor()
+
+            # Get the last alert time for each epic within the max cooldown window
+            # Only look back max_cooldown_hours to avoid loading very old data
+            max_lookback_hours = getattr(self, 'max_cooldown_hours', 12.0)
+
+            query = """
+                SELECT epic, MAX(alert_timestamp) as last_signal
+                FROM alert_history
+                WHERE alert_timestamp >= NOW() - INTERVAL '%s hours'
+                  AND strategy LIKE '%%SMC%%'
+                GROUP BY epic
+            """
+            cursor.execute(query, (max_lookback_hours,))
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            loaded_count = 0
+            for row in rows:
+                epic = row[0]
+                last_signal = row[1]
+
+                if last_signal:
+                    # Store by epic (the strategy uses epic as key)
+                    self.pair_cooldowns[epic] = last_signal
+                    loaded_count += 1
+
+            if loaded_count > 0:
+                self.logger.info(f"📥 Loaded {loaded_count} cooldown states from database (persist across restarts)")
+                for epic, last_signal in self.pair_cooldowns.items():
+                    hours_ago = (datetime.now() - last_signal.replace(tzinfo=None)).total_seconds() / 3600
+                    self.logger.debug(f"   {epic}: last signal {hours_ago:.1f}h ago")
+            else:
+                self.logger.debug("📥 No recent cooldown states to load from database")
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to load cooldowns from database: {e}")
+            # Continue without loaded cooldowns - not critical
 
     def _build_description(
         self,
