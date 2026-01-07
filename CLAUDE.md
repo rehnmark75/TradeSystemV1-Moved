@@ -20,6 +20,45 @@ docker exec -it task-worker bash
 
 **Path mapping**: `worker/app/` → `/app/` inside container
 
+### Docker Compose Commands (CRITICAL)
+
+**ALWAYS use `docker compose` (v2) NOT `docker-compose` (v1):**
+
+```bash
+# ✅ CORRECT - Use docker compose (v2, space-separated)
+docker compose up -d stock-scheduler
+docker compose restart task-worker
+docker compose logs -f fastapi-dev
+
+# ❌ WRONG - Never use docker-compose (v1, hyphenated)
+docker-compose up -d  # OLD VERSION - causes ContainerConfig errors
+```
+
+**Safe container operations (avoid disrupting other services):**
+
+```bash
+# Restart a single container (safest)
+docker restart stock-scheduler
+
+# Recreate single container with new config (use --no-deps!)
+docker compose up -d --no-deps --force-recreate stock-scheduler
+
+# View logs
+docker compose logs -f --tail 100 stock-scheduler
+
+# Check container status
+docker ps --format "table {{.Names}}\t{{.Status}}"
+```
+
+**⚠️ NEVER run these without `--no-deps` flag:**
+```bash
+# DANGEROUS - may recreate dependent containers like postgres!
+docker compose up -d stock-scheduler  # Without --no-deps
+
+# SAFE - only affects the specified container
+docker compose up -d --no-deps stock-scheduler
+```
+
 ---
 
 ## 🚀 Entry Points
@@ -243,7 +282,7 @@ When adding new fields to `scanner_global_config` table, you MUST also add them 
 3. ✅ **Add field name to `direct_fields` list** (easy to forget!)
 4. ✅ If integer, add to `int_fields` set
 5. ✅ If float, add to `float_fields` set
-6. ✅ Restart `task-worker` container to pick up changes
+6. ✅ Restart container: `docker restart task-worker` (NOT `docker compose up`)
 
 ### Key Performance Fields (in `scanner_global_config`):
 | Field | Purpose | Default |
@@ -281,7 +320,7 @@ This file controls:
 
 ### When updating trailing stops:
 1. Edit `dev-app/config.py` (the ONLY source of truth)
-2. Restart `fastapi-dev`: `docker restart fastapi-dev`
+2. Restart `fastapi-dev`: `docker restart fastapi-dev` (NOT `docker compose up`)
 3. Verify: `docker exec fastapi-dev python3 -c "from config import PAIR_TRAILING_CONFIGS; print(PAIR_TRAILING_CONFIGS['CS.D.EURUSD.CEEM.IP'])"`
 
 ### Streamlit reads trailing config via docker-compose mount:

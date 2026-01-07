@@ -14,11 +14,12 @@ All concrete scanners inherit from BaseScanner and implement:
 
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +178,22 @@ class SignalSetup:
 
     def to_db_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for database insertion"""
+        # Convert signal_timestamp to timezone-aware datetime for asyncpg
+        ts = self.signal_timestamp
+        if isinstance(ts, pd.Timestamp):
+            # If pandas Timestamp, convert to Python datetime
+            if ts.tz is None:
+                # Assume UTC if no timezone
+                ts = ts.tz_localize('UTC').to_pydatetime()
+            else:
+                ts = ts.to_pydatetime()
+        elif isinstance(ts, datetime):
+            if ts.tzinfo is None:
+                # Assume UTC if no timezone
+                ts = ts.replace(tzinfo=timezone.utc)
+
         return {
-            'signal_timestamp': self.signal_timestamp,
+            'signal_timestamp': ts,
             'scanner_name': self.scanner_name,
             'ticker': self.ticker,
             'signal_type': self.signal_type.value,
