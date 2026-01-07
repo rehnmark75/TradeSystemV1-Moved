@@ -294,16 +294,20 @@ class TradeValidator:
                 self.logger.warning("⚠️ Vision analysis limited: data_fetcher not available")
 
         # Market Intelligence for universal signal context capture from database ONLY - no fallback
+        # DISABLED in backtest mode to avoid DB writes and improve performance
         self.market_intelligence_engine = None
         self.enable_market_intelligence_capture = (
             self._scanner_cfg.enable_market_intelligence_capture and
-            MARKET_INTELLIGENCE_AVAILABLE
+            MARKET_INTELLIGENCE_AVAILABLE and
+            not self.backtest_mode  # Disable in backtest mode
         )
 
         # Market Intelligence for trade filtering/blocking from database ONLY - no fallback
+        # DISABLED in backtest mode to avoid DB writes and improve performance
         self.enable_market_intelligence_filtering = (
             self._scanner_cfg.enable_market_intelligence_filtering and
-            MARKET_INTELLIGENCE_AVAILABLE
+            MARKET_INTELLIGENCE_AVAILABLE and
+            not self.backtest_mode  # Disable in backtest mode
         )
         self.market_intelligence_min_confidence = self._scanner_cfg.market_intelligence_min_confidence
         self.market_intelligence_block_unsuitable_regimes = self._scanner_cfg.market_intelligence_block_unsuitable_regimes

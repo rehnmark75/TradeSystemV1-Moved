@@ -91,6 +91,23 @@ class SimpleDatabaseManager:
             raise
 
 
+def _safe_int(value) -> Optional[int]:
+    """Safely convert value to int, handling NaN and None."""
+    if value is None:
+        return None
+    try:
+        import numpy as np
+        import math
+        # Check for NaN (works for both numpy and Python floats)
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        if isinstance(value, np.floating) and np.isnan(value):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class OutcomeType(Enum):
     """Possible outcomes for rejected signals"""
     HIT_TP = "HIT_TP"           # Would have hit take profit first
@@ -576,7 +593,7 @@ class RejectionOutcomeAnalyzer:
             rejection_stage=rejection['rejection_stage'],
             attempted_direction=direction,
             market_session=rejection.get('market_session'),
-            market_hour=rejection.get('market_hour'),
+            market_hour=_safe_int(rejection.get('market_hour')),
             entry_price=entry_price,
             stop_loss_price=stop_loss_price,
             take_profit_price=take_profit_price,

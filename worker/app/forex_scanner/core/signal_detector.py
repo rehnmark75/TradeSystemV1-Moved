@@ -187,7 +187,9 @@ class SignalDetector:
                     self.smc_simple_strategy.reset_cooldowns()
 
             # Get 4H data for EMA bias
-            htf_lookback = 4000 if is_backtest else 400
+            # Backtest needs ~60 bars minimum for EMA calculation, 4H bars = 60*4 = 240 hours
+            # Add buffer for weekends/gaps: 400 hours is sufficient (vs 4000 before)
+            htf_lookback = 400 if is_backtest else 400
             df_4h = self.data_fetcher.get_enhanced_data(
                 epic=epic,
                 pair=pair,
@@ -200,10 +202,11 @@ class SignalDetector:
                 return None
 
             # Get trigger timeframe data for swing break detection
+            # 15m bars: 30 bars minimum, ~8 hours. Use 72 hours for swing detection lookback
             if trigger_tf == '15m':
-                trigger_lookback = 2000 if is_backtest else 30
+                trigger_lookback = 72 if is_backtest else 30
             else:
-                trigger_lookback = 2000 if is_backtest else 100
+                trigger_lookback = 100 if is_backtest else 100
 
             df_trigger = self.data_fetcher.get_enhanced_data(
                 epic=epic,
@@ -217,12 +220,13 @@ class SignalDetector:
                 return None
 
             # Get entry timeframe data for pullback entry
+            # 5m bars: need ~50 bars for pullback analysis = ~4 hours. Use 24 hours for buffer
             df_entry = None
             if entry_tf in ['15m', '5m']:
                 if entry_tf == '5m':
-                    entry_lookback = 2000 if is_backtest else 25
+                    entry_lookback = 24 if is_backtest else 25
                 else:
-                    entry_lookback = 2000 if is_backtest else 50
+                    entry_lookback = 48 if is_backtest else 50
 
                 df_entry = self.data_fetcher.get_enhanced_data(
                     epic=epic,

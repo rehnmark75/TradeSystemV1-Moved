@@ -144,14 +144,17 @@ class SMCSimpleStrategy:
             self._load_cooldowns_from_db()
 
         # Rejection tracking (v2.2.0) - initialized after config is loaded
+        # DISABLED in backtest mode to avoid polluting DB and improve performance
         self.rejection_manager = None
-        if self._db_manager is not None and self.rejection_tracking_enabled:
+        if self._db_manager is not None and self.rejection_tracking_enabled and not self._backtest_mode:
             try:
                 from forex_scanner.alerts.smc_rejection_history import SMCRejectionHistoryManager
                 self.rejection_manager = SMCRejectionHistoryManager(db_manager)
                 self.logger.info("   Rejection tracking: ENABLED")
             except Exception as e:
                 self.logger.warning(f"   Rejection tracking: DISABLED (failed to init: {e})")
+        elif self._backtest_mode:
+            self.logger.info("   Rejection tracking: DISABLED (backtest mode)")
 
         self.logger.info("=" * 60)
         self.logger.info("✅ SMC Simple Strategy v1.0.0 initialized")
@@ -307,6 +310,11 @@ class SMCSimpleStrategy:
             # v2.4.0: ATR-based SL cap
             self.max_sl_atr_multiplier = config.max_sl_atr_multiplier
             self.max_sl_absolute_pips = config.max_sl_absolute_pips
+
+            # v2.15.0: Fixed SL/TP override (per-pair configurable)
+            self.fixed_sl_tp_override_enabled = config.fixed_sl_tp_override_enabled
+            self.fixed_stop_loss_pips = config.fixed_stop_loss_pips
+            self.fixed_take_profit_pips = config.fixed_take_profit_pips
 
             # v2.1.0: Dynamic Swing Lookback Configuration
             self.use_dynamic_swing_lookback = config.use_dynamic_swing_lookback
@@ -495,6 +503,11 @@ class SMCSimpleStrategy:
         self.max_sl_atr_multiplier = getattr(smc_config, 'MAX_SL_ATR_MULTIPLIER', 3.0)
         self.max_sl_absolute_pips = getattr(smc_config, 'MAX_SL_ABSOLUTE_PIPS', 30.0)
 
+        # v2.15.0: Fixed SL/TP override (per-pair configurable)
+        self.fixed_sl_tp_override_enabled = getattr(smc_config, 'FIXED_SL_TP_OVERRIDE_ENABLED', False)
+        self.fixed_stop_loss_pips = getattr(smc_config, 'FIXED_STOP_LOSS_PIPS', 9.0)
+        self.fixed_take_profit_pips = getattr(smc_config, 'FIXED_TAKE_PROFIT_PIPS', 15.0)
+
         # v2.1.0: Dynamic Swing Lookback Configuration
         self.use_dynamic_swing_lookback = getattr(smc_config, 'USE_DYNAMIC_SWING_LOOKBACK', True)
         self.swing_lookback_atr_low = getattr(smc_config, 'SWING_LOOKBACK_ATR_LOW', 8)
@@ -535,8 +548,9 @@ class SMCSimpleStrategy:
         # Comprehensive parameter mapping: override key -> instance attribute
         override_mapping = {
             # SL/TP Parameters
-            'fixed_stop_loss_pips': 'sl_buffer_pips',  # Maps to SL buffer
-            'fixed_take_profit_pips': 'min_tp_pips',  # Maps to min TP
+            'fixed_stop_loss_pips': 'fixed_stop_loss_pips',  # Fixed SL in pips
+            'fixed_take_profit_pips': 'fixed_take_profit_pips',  # Fixed TP in pips
+            'fixed_sl_tp_override_enabled': 'fixed_sl_tp_override_enabled',  # Enable fixed SL/TP
             'min_rr_ratio': 'min_rr_ratio',
             'optimal_rr_ratio': 'optimal_rr',
             'max_rr_ratio': 'max_rr_ratio',
@@ -874,61 +888,95 @@ class SMCSimpleStrategy:
             # ================================================================
             self.logger.info(f"\n🛑 STEP 4: Calculating SL/TP")
 
-            # v1.9.0: Get pair-specific SL buffer or use default
-            pair_sl_buffer = self.pair_sl_buffers.get(pair, self.pair_sl_buffers.get(epic, self.sl_buffer_pips))
-            buffer_sl_distance = pair_sl_buffer * pip_value
+            # v2.15.0: Check for fixed SL/TP override (per-pair or global)
+            # Priority: backtest override > per-pair DB setting > global DB setting > structural calculation
+            fixed_sl_pips = None
+            fixed_tp_pips = None
+            using_fixed_sl_tp = False
 
-            # v1.9.0: Calculate ATR-based SL distance if enabled
-            atr_sl_distance = 0
-            if self.use_atr_stop:
-                atr = self._calculate_atr(df_trigger)
-                if atr > 0:
-                    atr_sl_distance = atr * self.sl_atr_multiplier
-                    self.logger.info(f"   ATR: {atr:.5f}, ATR-based SL: {atr_sl_distance/pip_value:.1f} pips")
+            if self.fixed_sl_tp_override_enabled:
+                # Check for per-pair override from database
+                if self._using_database_config and self._db_config:
+                    fixed_sl_pips = self._db_config.get_pair_fixed_stop_loss(epic)
+                    fixed_tp_pips = self._db_config.get_pair_fixed_take_profit(epic)
+                else:
+                    # Use instance attributes (set from config or backtest override)
+                    fixed_sl_pips = self.fixed_stop_loss_pips
+                    fixed_tp_pips = self.fixed_take_profit_pips
 
-            # v1.9.0: Use MAXIMUM of buffer OR ATR-based (whichever gives more room)
-            sl_distance = max(buffer_sl_distance, atr_sl_distance)
-            self.logger.info(f"   SL Distance: {sl_distance/pip_value:.1f} pips (buffer: {pair_sl_buffer}, ATR: {atr_sl_distance/pip_value:.1f})")
+                if fixed_sl_pips is not None and fixed_sl_pips > 0:
+                    using_fixed_sl_tp = True
+                    self.logger.info(f"   📌 Using FIXED SL/TP: SL={fixed_sl_pips} pips, TP={fixed_tp_pips} pips")
 
-            # v1.7.0 FIX: Stop loss beyond OPPOSITE swing (not the broken swing)
-            # For BULL: SL below the swing LOW (opposite_swing) - the level we DON'T want price to break
-            # For BEAR: SL above the swing HIGH (opposite_swing) - the level we DON'T want price to break
-            # Previous bug: Used swing_level (the breakout level) which gave unrealistic 0.6 pip stops
-            #
-            # v2.4.0 FIX: ATR-BASED DYNAMIC SL CAP
-            # Problem: Fixed 55 pip cap (v2.3.0) was still 7x ATR on low-volatility pairs
-            # Analysis: Trade 1594 (GBPUSD) had 48 pip SL with only 7.4 pip ATR = massive risk
-            # Solution: Dynamic cap = min(ATR * multiplier, absolute_max)
-            # Example: GBPUSD with 7.4 pip ATR → cap = min(7.4 * 3, 30) = 22 pips
-            #
-            # v2.3.0 (superseded): Fixed cap at max_risk_after_offset_pips (55 pips)
-            # v2.4.0: Now uses ATR-proportional cap for better risk management
+            if using_fixed_sl_tp:
+                # Use fixed SL/TP values
+                if direction == 'BULL':
+                    stop_loss = entry_price - (fixed_sl_pips * pip_value)
+                    take_profit = entry_price + (fixed_tp_pips * pip_value) if fixed_tp_pips else None
+                else:
+                    stop_loss = entry_price + (fixed_sl_pips * pip_value)
+                    take_profit = entry_price - (fixed_tp_pips * pip_value) if fixed_tp_pips else None
 
-            # Calculate dynamic max risk based on ATR
-            atr_pips = atr / pip_value if atr > 0 else 0
-            if atr_pips > 0:
-                atr_max_risk_pips = atr_pips * self.max_sl_atr_multiplier
-                dynamic_max_risk_pips = min(atr_max_risk_pips, self.max_sl_absolute_pips)
-                self.logger.info(f"   Dynamic SL cap: {dynamic_max_risk_pips:.1f} pips (ATR×{self.max_sl_atr_multiplier}={atr_max_risk_pips:.1f}, abs_max={self.max_sl_absolute_pips})")
+                risk_pips = fixed_sl_pips
+                self.logger.info(f"   Stop Loss: {stop_loss:.5f} ({risk_pips:.1f} pips) [FIXED]")
+
             else:
-                # Fallback to legacy fixed cap if ATR unavailable
-                dynamic_max_risk_pips = self.max_risk_after_offset_pips
-                self.logger.info(f"   Dynamic SL cap: {dynamic_max_risk_pips:.1f} pips (fallback, no ATR)")
+                # Original structural SL calculation
+                # v1.9.0: Get pair-specific SL buffer or use default
+                pair_sl_buffer = self.pair_sl_buffers.get(pair, self.pair_sl_buffers.get(epic, self.sl_buffer_pips))
+                buffer_sl_distance = pair_sl_buffer * pip_value
 
-            if direction == 'BULL':
-                structural_stop = opposite_swing - sl_distance
-                max_risk_stop = entry_price - (dynamic_max_risk_pips * pip_value)
-                stop_loss = max(structural_stop, max_risk_stop)  # Higher value = tighter stop
-                if stop_loss != structural_stop:
-                    self.logger.info(f"   ⚠️ Structural SL capped: {(entry_price - structural_stop)/pip_value:.1f} → {dynamic_max_risk_pips:.1f} pips")
-            else:
-                structural_stop = opposite_swing + sl_distance
-                max_risk_stop = entry_price + (dynamic_max_risk_pips * pip_value)
-                stop_loss = min(structural_stop, max_risk_stop)  # Lower value = tighter stop
-                if stop_loss != structural_stop:
-                    self.logger.info(f"   ⚠️ Structural SL capped: {(structural_stop - entry_price)/pip_value:.1f} → {dynamic_max_risk_pips:.1f} pips")
+                # v1.9.0: Calculate ATR-based SL distance if enabled
+                atr_sl_distance = 0
+                if self.use_atr_stop:
+                    atr = self._calculate_atr(df_trigger)
+                    if atr > 0:
+                        atr_sl_distance = atr * self.sl_atr_multiplier
+                        self.logger.info(f"   ATR: {atr:.5f}, ATR-based SL: {atr_sl_distance/pip_value:.1f} pips")
 
-            risk_pips = abs(entry_price - stop_loss) / pip_value
+                # v1.9.0: Use MAXIMUM of buffer OR ATR-based (whichever gives more room)
+                sl_distance = max(buffer_sl_distance, atr_sl_distance)
+                self.logger.info(f"   SL Distance: {sl_distance/pip_value:.1f} pips (buffer: {pair_sl_buffer}, ATR: {atr_sl_distance/pip_value:.1f})")
+
+                # v1.7.0 FIX: Stop loss beyond OPPOSITE swing (not the broken swing)
+                # For BULL: SL below the swing LOW (opposite_swing) - the level we DON'T want price to break
+                # For BEAR: SL above the swing HIGH (opposite_swing) - the level we DON'T want price to break
+                # Previous bug: Used swing_level (the breakout level) which gave unrealistic 0.6 pip stops
+                #
+                # v2.4.0 FIX: ATR-BASED DYNAMIC SL CAP
+                # Problem: Fixed 55 pip cap (v2.3.0) was still 7x ATR on low-volatility pairs
+                # Analysis: Trade 1594 (GBPUSD) had 48 pip SL with only 7.4 pip ATR = massive risk
+                # Solution: Dynamic cap = min(ATR * multiplier, absolute_max)
+                # Example: GBPUSD with 7.4 pip ATR → cap = min(7.4 * 3, 30) = 22 pips
+                #
+                # v2.3.0 (superseded): Fixed cap at max_risk_after_offset_pips (55 pips)
+                # v2.4.0: Now uses ATR-proportional cap for better risk management
+
+                # Calculate dynamic max risk based on ATR
+                atr_pips = atr / pip_value if atr > 0 else 0
+                if atr_pips > 0:
+                    atr_max_risk_pips = atr_pips * self.max_sl_atr_multiplier
+                    dynamic_max_risk_pips = min(atr_max_risk_pips, self.max_sl_absolute_pips)
+                    self.logger.info(f"   Dynamic SL cap: {dynamic_max_risk_pips:.1f} pips (ATR×{self.max_sl_atr_multiplier}={atr_max_risk_pips:.1f}, abs_max={self.max_sl_absolute_pips})")
+                else:
+                    # Fallback to legacy fixed cap if ATR unavailable
+                    dynamic_max_risk_pips = self.max_risk_after_offset_pips
+                    self.logger.info(f"   Dynamic SL cap: {dynamic_max_risk_pips:.1f} pips (fallback, no ATR)")
+
+                if direction == 'BULL':
+                    structural_stop = opposite_swing - sl_distance
+                    max_risk_stop = entry_price - (dynamic_max_risk_pips * pip_value)
+                    stop_loss = max(structural_stop, max_risk_stop)  # Higher value = tighter stop
+                    if stop_loss != structural_stop:
+                        self.logger.info(f"   ⚠️ Structural SL capped: {(entry_price - structural_stop)/pip_value:.1f} → {dynamic_max_risk_pips:.1f} pips")
+                else:
+                    structural_stop = opposite_swing + sl_distance
+                    max_risk_stop = entry_price + (dynamic_max_risk_pips * pip_value)
+                    stop_loss = min(structural_stop, max_risk_stop)  # Lower value = tighter stop
+                    if stop_loss != structural_stop:
+                        self.logger.info(f"   ⚠️ Structural SL capped: {(structural_stop - entry_price)/pip_value:.1f} → {dynamic_max_risk_pips:.1f} pips")
+
+                risk_pips = abs(entry_price - stop_loss) / pip_value
 
             # v2.0.0: Risk sanity check for limit orders with offset
             if order_type == 'limit':
@@ -971,18 +1019,26 @@ class SMCSimpleStrategy:
                     )
                     return None
 
-            # Find take profit (next swing structure)
-            tp_result = self._calculate_take_profit(
-                df_trigger, direction, entry_price, risk_pips, pip_value
-            )
+            # Find take profit (next swing structure) or use fixed TP
+            if using_fixed_sl_tp and fixed_tp_pips is not None and fixed_tp_pips > 0:
+                # Use fixed TP from config/override
+                reward_pips = fixed_tp_pips
+                rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
+                self.logger.info(f"   Take Profit: {take_profit:.5f} ({reward_pips:.1f} pips) [FIXED]")
+                self.logger.info(f"   R:R Ratio: {rr_ratio:.2f}")
+            else:
+                # Calculate TP from market structure
+                tp_result = self._calculate_take_profit(
+                    df_trigger, direction, entry_price, risk_pips, pip_value
+                )
 
-            take_profit = tp_result['take_profit']
-            reward_pips = tp_result['reward_pips']
-            rr_ratio = tp_result['rr_ratio']
+                take_profit = tp_result['take_profit']
+                reward_pips = tp_result['reward_pips']
+                rr_ratio = tp_result['rr_ratio']
 
-            self.logger.info(f"   Stop Loss: {stop_loss:.5f} ({risk_pips:.1f} pips)")
-            self.logger.info(f"   Take Profit: {take_profit:.5f} ({reward_pips:.1f} pips)")
-            self.logger.info(f"   R:R Ratio: {rr_ratio:.2f}")
+                self.logger.info(f"   Stop Loss: {stop_loss:.5f} ({risk_pips:.1f} pips)")
+                self.logger.info(f"   Take Profit: {take_profit:.5f} ({reward_pips:.1f} pips)")
+                self.logger.info(f"   R:R Ratio: {rr_ratio:.2f}")
 
             # Validate R:R
             if rr_ratio < self.min_rr_ratio:

@@ -79,6 +79,20 @@ class BacktestScanner(IntelligentForexScanner):
 
         super().__init__(**backtest_kwargs)
 
+        # CRITICAL: Disable market intelligence CAPTURE in backtest mode
+        # We can READ historical intelligence (replay) but should NOT WRITE new intelligence
+        # This prevents polluting the database and speeds up backtests
+        self.enable_market_intelligence = False
+        self.market_intelligence_engine = None
+        self.market_intelligence_history = None
+
+        # Also disable scan performance capture to avoid DB writes
+        self.enable_scan_performance = False
+        self.scan_performance_manager = None
+
+        self.logger.info("🧠 Market Intelligence CAPTURE: DISABLED (backtest mode)")
+        self.logger.info("📊 Scan Performance CAPTURE: DISABLED (backtest mode)")
+
         # Override scanner metadata
         self.scanner_version = 'backtest_v1.0_integrated_pipeline'
 

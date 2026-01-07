@@ -212,7 +212,8 @@ class TrailingStopSimulator:
                     signal_type=signal_type,
                     future_data=future_data,
                     atr_stops=atr_stops,
-                    epic=signal_epic  # Pass epic for correct pip calculation
+                    epic=signal_epic,  # Pass epic for correct pip calculation
+                    signal=signal  # Pass signal for SL/TP extraction
                 )
 
                 # Calculate holding time
@@ -362,7 +363,8 @@ class TrailingStopSimulator:
                             signal_type: str,
                             future_data: pd.DataFrame,
                             atr_stops: Optional[Dict[str, float]] = None,
-                            epic: Optional[str] = None) -> Dict[str, Any]:
+                            epic: Optional[str] = None,
+                            signal: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Simulate trade execution bar by bar with Progressive 3-Stage trailing
 
@@ -372,12 +374,23 @@ class TrailingStopSimulator:
             future_data: DataFrame with future price bars
             atr_stops: Optional ATR-based stop levels
             epic: Optional epic for pip calculation (JPY pairs need different multiplier)
+            signal: Optional signal dict to extract SL/TP from
 
         Returns:
             Dictionary with trade simulation results
         """
-        # Use ATR-based stops if provided, otherwise use fixed stops
-        if atr_stops:
+        # Priority for SL/TP:
+        # 1. Signal's risk_pips/reward_pips (calculated from fixed or structural)
+        # 2. ATR-based stops
+        # 3. Simulator's default values
+        use_signal_sl_tp = False
+        if signal and signal.get('risk_pips') and signal.get('reward_pips'):
+            # Use signal's SL/TP (works for both fixed and structural)
+            current_stop_pips = float(signal['risk_pips'])
+            target_pips = float(signal['reward_pips'])
+            use_signal_sl_tp = True  # Disable trailing when using signal's SL/TP
+            self.logger.debug(f"Using signal SL/TP: SL={current_stop_pips}, TP={target_pips} (trailing disabled)")
+        elif atr_stops:
             current_stop_pips = atr_stops['initial_stop_pips']
             target_pips = atr_stops['target_pips']
         else:
@@ -479,8 +492,8 @@ class TrailingStopSimulator:
                 if current_profit_pips > best_profit_pips:
                     best_profit_pips = current_profit_pips
 
-                # 🎯 FIXED SL/TP MODE: Skip trailing for scalping (keep original SL/TP)
-                if not self.use_fixed_sl_tp:
+                # 🎯 FIXED SL/TP MODE: Skip trailing when using signal's SL/TP or scalping mode
+                if not self.use_fixed_sl_tp and not use_signal_sl_tp:
                     # Apply Progressive 3-Stage trailing stop logic with MFE Protection
                     # Called on every bar to check for MFE protection (profit decline from peak)
                     current_stop_pips, stage_info = self._update_progressive_trailing_stop(
@@ -529,8 +542,8 @@ class TrailingStopSimulator:
                 if current_profit_pips > best_profit_pips:
                     best_profit_pips = current_profit_pips
 
-                # 🎯 FIXED SL/TP MODE: Skip trailing for scalping (keep original SL/TP)
-                if not self.use_fixed_sl_tp:
+                # 🎯 FIXED SL/TP MODE: Skip trailing when using signal's SL/TP or scalping mode
+                if not self.use_fixed_sl_tp and not use_signal_sl_tp:
                     # Apply Progressive 3-Stage trailing stop logic with MFE Protection
                     # Called on every bar to check for MFE protection (profit decline from peak)
                     current_stop_pips, stage_info = self._update_progressive_trailing_stop(
