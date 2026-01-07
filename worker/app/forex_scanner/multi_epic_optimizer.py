@@ -480,6 +480,8 @@ class MultiEpicOptimizer:
         Args:
             num_workers: Number of parallel workers to use
         """
+        import threading
+
         print(f"\n🚀 Starting PARALLEL optimization with {num_workers} workers")
         print(f"   Processing {len(self.epics)} epics with {len(self.combinations)} combinations each\n")
 
@@ -494,6 +496,17 @@ class MultiEpicOptimizer:
 
         completed_epics = {}
         all_results = []
+
+        # Background thread for periodic progress updates
+        stop_progress_thread = threading.Event()
+
+        def progress_reporter():
+            """Print progress every 30 seconds"""
+            while not stop_progress_thread.wait(30):
+                self._print_parallel_progress(progress_dict)
+
+        progress_thread = threading.Thread(target=progress_reporter, daemon=True)
+        progress_thread.start()
 
         try:
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
@@ -511,6 +524,9 @@ class MultiEpicOptimizer:
                         progress_dict
                     ): epic for epic in self.epics
                 }
+
+                # Print initial progress
+                self._print_parallel_progress(progress_dict)
 
                 # Process as they complete
                 for future in as_completed(future_to_epic):
@@ -554,6 +570,9 @@ class MultiEpicOptimizer:
         except KeyboardInterrupt:
             print("\n\n⚠️  Interrupt received - workers will complete current tests...")
             self.interrupted = True
+        finally:
+            # Stop the progress reporter thread
+            stop_progress_thread.set()
 
         # Convert results to OptimizationResult objects
         for result_dict in all_results:
