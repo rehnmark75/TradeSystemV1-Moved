@@ -604,6 +604,10 @@ class SMCSimpleStrategy:
             'block_asian_session': 'block_asian',
             'allow_asian_session': 'block_asian',  # Inverted logic handled below
 
+            # MACD Filter
+            'macd_filter_enabled': 'macd_alignment_filter_enabled',  # Alias for optimization
+            'macd_alignment_filter_enabled': 'macd_alignment_filter_enabled',
+
             # Cooldown Settings
             'signal_cooldown_hours': 'cooldown_hours',
             'cooldown_minutes': 'cooldown_hours',  # Will be converted

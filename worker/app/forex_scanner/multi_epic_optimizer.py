@@ -145,11 +145,22 @@ def _worker_optimize_epic(
             try:
                 start_time = time.time()
 
+                # Build override dict from params - only include keys that are present
                 override = {
                     'fixed_stop_loss_pips': params.get('fixed_stop_loss_pips', 9),
                     'fixed_take_profit_pips': params.get('fixed_take_profit_pips', 15),
                     'min_confidence': params.get('min_confidence', 0.5),
                 }
+
+                # Add optional filter parameters if present in params
+                if 'sl_buffer_pips' in params:
+                    override['sl_buffer_pips'] = params['sl_buffer_pips']
+                if 'volume_filter_enabled' in params:
+                    override['volume_filter_enabled'] = params['volume_filter_enabled']
+                if 'macd_filter_enabled' in params:
+                    override['macd_filter_enabled'] = params['macd_filter_enabled']
+                if 'session_filter_enabled' in params:
+                    override['session_filter_enabled'] = params['session_filter_enabled']
 
                 success = local_backtest_cmd.run_enhanced_backtest(
                     epic=epic,

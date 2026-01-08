@@ -4,8 +4,8 @@ Parameter Configuration for Multi-Epic Optimization
 
 Defines tiered parameter grids for different optimization depths:
 - fast: Core SL/TP/Confidence only (~15-20 combinations after R:R filter)
-- medium: + Buffer and Fib settings (~50 combinations)
-- extended: Full parameter sweep (~100 combinations)
+- medium: + Buffer and filter toggles (~50-80 combinations)
+- extended: Full parameter sweep with all filters (~150-200 combinations)
 
 R:R filtering (TP/SL >= 1.5 and <= 4.0) is applied to reduce invalid combinations.
 """
@@ -20,28 +20,35 @@ from typing import Dict, List, Any
 PARAMETER_TIERS: Dict[str, Dict[str, List[Any]]] = {
     'fast': {
         # Core risk management parameters only
-        # Optimized for ~15 combinations after R:R filter (~6-7 hours total)
+        # Optimized for ~15 combinations after R:R filter
         'fixed_stop_loss_pips': [8, 10, 12],
         'fixed_take_profit_pips': [16, 20, 25],
         'min_confidence': [0.48, 0.52],
     },
 
     'medium': {
-        # Core + Buffer (~20-25 hours)
-        # Target: ~50 combinations per epic
+        # Core + Key filter toggles
+        # Target: ~50-80 combinations per epic
         'fixed_stop_loss_pips': [8, 10, 12],
         'fixed_take_profit_pips': [16, 20, 25],
         'min_confidence': [0.45, 0.50, 0.55],
         'sl_buffer_pips': [4, 6],
+        # Key filters that block signals
+        'volume_filter_enabled': [True, False],
+        'macd_filter_enabled': [True, False],
     },
 
     'extended': {
-        # Extended parameter sweep (~45-50 hours)
-        # Target: ~100 combinations per epic
+        # Full parameter sweep with all major filters
+        # Target: ~150-200 combinations per epic
         'fixed_stop_loss_pips': [7, 8, 9, 10, 12],
         'fixed_take_profit_pips': [14, 16, 20, 25],
         'min_confidence': [0.45, 0.50, 0.55],
         'sl_buffer_pips': [4, 6],
+        # Key filters that block signals
+        'volume_filter_enabled': [True, False],
+        'macd_filter_enabled': [True, False],
+        'session_filter_enabled': [True, False],
     },
 }
 
