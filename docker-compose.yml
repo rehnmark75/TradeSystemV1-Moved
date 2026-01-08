@@ -323,19 +323,15 @@ services:
     restart: unless-stopped  # Auto-restart for continuous backup service
     environment:
       - BACKUP_SCHEDULE=0 2 * * *  # Daily at 2 AM
-      - BACKUP_RETENTION_DAYS=7
-      - WEEKLY_RETENTION=4
-      - MONTHLY_RETENTION=12
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      # Azure Blob Storage configuration
+      # Azure Blob Storage configuration (Azure-only mode, no local storage)
       - AZURE_STORAGE_ACCOUNT=klirrbackup
       - AZURE_STORAGE_KEY=${AZURE_STORAGE_KEY}
       - AZURE_STORAGE_CONTAINER=klirrbackup
       - AZURE_RETENTION_DAYS=60
     volumes:
       - ./scripts:/scripts:ro
-      - /media/hr/TradeSystemBackup/TradeSystemV1-Backups/postgresbackup:/app/postgresbackup
       - ./logs:/app/logs:ro
       - ./vector-db:/app/vector-db:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -348,18 +344,18 @@ services:
         apt-get update && apt-get install -y docker.io bc findutils curl gpg lsb-release &&
         curl -sL https://aka.ms/InstallAzureCLIDeb | bash &&
         while true; do
-          echo 'Running scheduled enhanced backup...' &&
-          /scripts/enhanced_backup.sh &&
-          echo 'Enhanced backup completed. Sleeping for 24 hours...' &&
+          echo 'Running scheduled Azure backup...' &&
+          /scripts/azure_backup.sh &&
+          echo 'Azure backup completed. Sleeping for 24 hours...' &&
           sleep 86400
         done
       "
     healthcheck:
-      test: ["CMD", "/scripts/backup_health.sh"]
+      test: ["CMD-SHELL", "az storage container exists --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --name $AZURE_STORAGE_CONTAINER --query exists -o tsv | grep -q true"]
       interval: 6h
-      timeout: 30s
+      timeout: 60s
       retries: 2
-      start_period: 1h
+      start_period: 2h
 
 volumes:
   pgadmin_data:
