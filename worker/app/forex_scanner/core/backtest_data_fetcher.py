@@ -366,6 +366,28 @@ class BacktestDataFetcher(DataFetcher):
         """Set the current backtest time for data filtering"""
         self.current_backtest_time = current_time
 
+        # CRITICAL FIX: Override timezone_manager's get_lookback_time_utc to use backtest time
+        # This ensures data is fetched relative to the backtest timestamp, not real current time
+        # Only set up the override once to avoid nested closures
+        if not hasattr(self, '_backtest_lookback_override_set'):
+            original_get_lookback = self.timezone_manager.get_lookback_time_utc
+
+            def backtest_aware_get_lookback(hours_back: int) -> datetime:
+                """Calculate lookback from backtest time instead of real current time"""
+                if self.current_backtest_time is not None:
+                    # Use backtest time as reference point
+                    from pytz import UTC
+                    backtest_utc = self.current_backtest_time
+                    if backtest_utc.tzinfo is None:
+                        backtest_utc = UTC.localize(backtest_utc)
+                    return backtest_utc - timedelta(hours=hours_back)
+                else:
+                    # Fallback to original behavior
+                    return original_get_lookback(hours_back)
+
+            self.timezone_manager.get_lookback_time_utc = backtest_aware_get_lookback
+            self._backtest_lookback_override_set = True
+
     def get_resampled_cache_stats(self) -> dict:
         """Get statistics about resampled data cache performance"""
         total_requests = self._resampled_cache_hits + self._resampled_cache_misses
@@ -694,6 +716,148 @@ class BacktestDataFetcher(DataFetcher):
         except Exception as e:
             self.logger.error(f"Error getting historical data: {e}")
             return pd.DataFrame()
+
+    def _fetch_candle_data_optimized(
+        self,
+        epic: str,
+        timeframe: str,
+        lookback_hours: int,
+        tz_manager
+    ) -> Optional[pd.DataFrame]:
+        """
+        Override parent method to use in-memory cache for backtest mode.
+
+        This is CRITICAL for date range backtesting - the parent class queries
+        the database using lookback_hours from current time, but for backtests
+        we need data from the backtest time period (which is in the memory cache).
+        """
+        try:
+            # Calculate the lookback time using the (potentially overridden) tz_manager method
+            since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
+
+            # Determine end time: use backtest time if set, otherwise current time
+            if hasattr(self, 'current_backtest_time') and self.current_backtest_time:
+                from pytz import UTC
+                end_utc = self.current_backtest_time
+                if end_utc.tzinfo is None:
+                    end_utc = UTC.localize(end_utc)
+            else:
+                end_utc = tz_manager.get_current_utc_time()
+
+            self.logger.debug(f"📊 Backtest fetch: {epic} {timeframe}, {since_utc} to {end_utc}")
+
+            # Convert timeframe to minutes
+            timeframe_map = {
+                '5m': 5,
+                '15m': 15,
+                '1h': 60,
+                '4h': 240
+            }
+            tf_minutes = timeframe_map.get(timeframe, 5)
+
+            # Determine source timeframe for resampling
+            # Use 5m as base for all higher timeframes
+            if timeframe in ('15m', '1h', '4h'):
+                source_tf = 5
+                # Increase lookback for resampling buffer
+                adjusted_lookback = int(lookback_hours * 1.2)
+                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+            else:
+                source_tf = tf_minutes
+
+            # 🚀 FAST PATH: Try in-memory cache first
+            df = None
+            if self.memory_cache and self.memory_cache.is_loaded:
+                # CRITICAL: Memory cache uses timezone-naive datetimes
+                # Convert our UTC timestamps to naive for comparison
+                since_naive = since_utc.replace(tzinfo=None) if since_utc.tzinfo else since_utc
+                end_naive = end_utc.replace(tzinfo=None) if end_utc.tzinfo else end_utc
+
+                df = self.memory_cache.get_historical_data(
+                    epic, source_tf, since_naive, end_naive
+                )
+
+                if df is not None and not df.empty:
+                    self.logger.debug(f"⚡ Memory cache hit: {epic} {timeframe}, {len(df)} source rows")
+                else:
+                    self.logger.debug(f"⚠️ Memory cache miss for {epic} {source_tf}m, {since_naive} to {end_naive}")
+
+            # 🐌 SLOW PATH: Database fallback
+            if df is None or df.empty:
+                self.logger.debug(f"💾 Database fallback for {epic} {timeframe}")
+
+                query = """
+                SELECT start_time,
+                       open, high, low, close,
+                       volume, ltv
+                FROM ig_candles
+                WHERE epic = :epic
+                  AND timeframe = :source_tf
+                  AND start_time >= :since_utc
+                  AND start_time <= :end_utc
+                ORDER BY start_time ASC
+                """
+
+                params = {
+                    'epic': epic,
+                    'source_tf': source_tf,
+                    'since_utc': since_utc,
+                    'end_utc': end_utc
+                }
+
+                result = self.db_manager.execute_query(query, params)
+
+                if result is None or (hasattr(result, 'empty') and result.empty):
+                    self.logger.warning(f"⚠️ No data from database for {epic} {timeframe}")
+                    return None
+
+                # Convert to DataFrame if needed
+                if hasattr(result, 'fetchall'):
+                    rows = result.fetchall()
+                    if not rows:
+                        return None
+                    df = pd.DataFrame(rows)
+                else:
+                    df = result.copy()
+
+            if df is None or len(df) == 0:
+                self.logger.warning(f"⚠️ No data available for {epic} {timeframe}")
+                return None
+
+            # Ensure proper column format
+            if 'start_time' not in df.columns and df.index.name == 'start_time':
+                df = df.reset_index()
+
+            # Convert timestamp
+            df['start_time'] = pd.to_datetime(df['start_time'], utc=True)
+
+            # Add timezone columns
+            df = tz_manager.add_timezone_columns_to_df(df)
+
+            # Resample if needed
+            if source_tf == 5:
+                if timeframe == '15m':
+                    self.logger.debug(f"🔄 Resampling 5m→15m for {epic}")
+                    df = self._resample_to_15m_optimized(df)
+                elif timeframe == '1h':
+                    self.logger.debug(f"🔄 Resampling 5m→1h for {epic}")
+                    df = self._resample_to_60m_optimized(df)
+                elif timeframe == '4h':
+                    self.logger.debug(f"🔄 Resampling 5m→4h for {epic}")
+                    df = self._resample_to_4h_optimized(df)
+
+                if df is None or len(df) == 0:
+                    self.logger.error(f"❌ Resampling failed for {epic} {timeframe}")
+                    return None
+
+            self.logger.debug(f"✅ Fetched {len(df)} bars for {epic} {timeframe}")
+            return df.reset_index(drop=True)
+
+        except Exception as e:
+            self.logger.error(f"❌ Error in backtest _fetch_candle_data_optimized: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return None
 
     def _add_strategy_specific_indicators(self, df: pd.DataFrame, strategy_config: Dict[str, Any]) -> pd.DataFrame:
         """Add strategy-specific technical indicators"""

@@ -56,6 +56,10 @@ class SignalDetector:
         # Store config override for backtest parameter isolation
         self._config_override = config_override
 
+        # Backtest mode flag - set by backtest_scanner when configuring strategies
+        # This ensures lazy-loaded strategies use in-memory cooldowns instead of database
+        self._is_backtest_mode = False
+
         # NOTE: Large candle filter removed (Jan 2026 cleanup)
         # The filter was initialized but never called in the signal flow.
         # Database columns for large candle filter were dropped.
@@ -175,6 +179,12 @@ class SignalDetector:
                 )
                 mode_str = "BACKTEST MODE with overrides" if self._config_override else "LIVE MODE"
                 self.logger.info(f"✅ SMC Simple strategy initialized ({mode_str}, htf={htf_tf}, trigger={trigger_tf}, entry={entry_tf})")
+
+                # CRITICAL FIX: Set backtest mode on lazy-loaded strategy
+                # This ensures cooldowns use in-memory tracking instead of database
+                if self._is_backtest_mode:
+                    self.smc_simple_strategy._backtest_mode = True
+                    self.logger.info("   🧪 Strategy configured for backtest mode (in-memory cooldowns)")
 
             # Check if data_fetcher is in backtest mode (needed for lookback calculations)
             is_backtest = hasattr(self.data_fetcher, 'current_backtest_time') and self.data_fetcher.current_backtest_time is not None

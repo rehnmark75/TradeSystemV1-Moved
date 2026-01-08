@@ -899,12 +899,22 @@ class SMCSimpleStrategy:
             using_fixed_sl_tp = False
 
             if self.fixed_sl_tp_override_enabled:
-                # Check for per-pair override from database
-                if self._using_database_config and self._db_config:
+                # Priority: backtest override > per-pair DB setting > global DB setting
+                # Check if backtest override was applied (indicated by _config_override having SL/TP)
+                has_backtest_sl_override = self._config_override and 'fixed_stop_loss_pips' in self._config_override
+                has_backtest_tp_override = self._config_override and 'fixed_take_profit_pips' in self._config_override
+
+                if has_backtest_sl_override or has_backtest_tp_override:
+                    # Use backtest overrides (highest priority)
+                    fixed_sl_pips = self.fixed_stop_loss_pips
+                    fixed_tp_pips = self.fixed_take_profit_pips
+                    self.logger.info(f"   🧪 Using BACKTEST OVERRIDE SL/TP")
+                elif self._using_database_config and self._db_config:
+                    # Use per-pair override from database
                     fixed_sl_pips = self._db_config.get_pair_fixed_stop_loss(epic)
                     fixed_tp_pips = self._db_config.get_pair_fixed_take_profit(epic)
                 else:
-                    # Use instance attributes (set from config or backtest override)
+                    # Use instance attributes (set from config)
                     fixed_sl_pips = self.fixed_stop_loss_pips
                     fixed_tp_pips = self.fixed_take_profit_pips
 

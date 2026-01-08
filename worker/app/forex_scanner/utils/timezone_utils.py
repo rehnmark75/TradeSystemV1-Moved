@@ -63,7 +63,10 @@ class TimezoneManager:
             True if within market hours
         """
         # Import here to avoid circular imports
-        import config
+        try:
+            import config
+        except ImportError:
+            from forex_scanner import config
         
         # If market hours respect is disabled, always return True (24/5)
         if not getattr(config, 'RESPECT_MARKET_HOURS', True):

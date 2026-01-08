@@ -249,6 +249,11 @@ class BacktestScanner(IntelligentForexScanner):
             # Create a new signal detector but replace its data_fetcher with BacktestDataFetcher
             backtest_data_fetcher = BacktestDataFetcher(self.db_manager, getattr(config, 'USER_TIMEZONE', 'Europe/Stockholm'))
 
+            # CRITICAL FIX: Set initial backtest time to end_date so the data fetcher knows the time window
+            # This ensures the first call to get_enhanced_data fetches historical data, not current data
+            backtest_data_fetcher.set_backtest_time(self.end_date)
+            self.logger.info(f"⏰ BacktestDataFetcher initialized with end_date: {self.end_date}")
+
             # Replace the data_fetcher in the existing signal_detector
             self.signal_detector.data_fetcher = backtest_data_fetcher
 
@@ -407,6 +412,21 @@ class BacktestScanner(IntelligentForexScanner):
                 # Reset cooldowns for fresh backtest
                 self.signal_detector.silver_bullet_strategy.reset_cooldowns()
                 self.logger.info("✅ Silver Bullet strategy configured for backtest mode")
+
+            # CRITICAL FIX: Configure SMC Simple strategy for backtest mode
+            # This is the only active strategy after January 2026 cleanup
+            # Set the backtest flag on signal_detector so lazy-loaded strategies use in-memory cooldowns
+            self.signal_detector._is_backtest_mode = True
+            self.logger.info("🧪 Signal detector configured for backtest mode")
+
+            # If strategy is already initialized, configure it directly
+            if hasattr(self.signal_detector, 'smc_simple_strategy') and self.signal_detector.smc_simple_strategy:
+                self.signal_detector.smc_simple_strategy.data_fetcher = backtest_data_fetcher
+                self.signal_detector.smc_simple_strategy._backtest_mode = True  # Note: uses _backtest_mode
+                # Reset cooldowns for fresh backtest
+                if hasattr(self.signal_detector.smc_simple_strategy, 'reset_cooldowns'):
+                    self.signal_detector.smc_simple_strategy.reset_cooldowns()
+                self.logger.info("✅ SMC Simple strategy configured for backtest mode")
 
             self.logger.info("✅ Signal detector updated to use BacktestDataFetcher for historical data")
 
