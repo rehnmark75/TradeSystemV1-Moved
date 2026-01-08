@@ -47,29 +47,99 @@ class RejectionCollector(BaseCollector):
             epic_filter = f"AND r.epic IN ('{epic_list}')"
 
         # Cast numeric columns to FLOAT to avoid Decimal type issues with pandas
+        # COMPREHENSIVE DATA COLLECTION - All available indicators for proper analysis
         query = f"""
         SELECT
             r.epic,
             r.pair,
             r.attempted_direction as direction,
             r.rejection_stage,
+            r.rejection_reason,
             r.scan_timestamp,
             r.market_session,
             r.market_hour,
-            -- Signal parameters at rejection (cast to float)
+            r.is_market_hours,
+
+            -- Core signal parameters (cast to float)
             CAST(r.confidence_score AS FLOAT) as confidence_score,
             CAST(r.volume_ratio AS FLOAT) as volume_ratio,
             CAST(r.pullback_depth AS FLOAT) as pullback_depth,
             r.fib_zone as fib_level,
+
+            -- ATR & Volatility
             CAST(r.atr_15m AS FLOAT) as atr_15m,
+            CAST(r.atr_5m AS FLOAT) as atr_5m,
             CAST(r.atr_percentile AS FLOAT) as atr_percentile,
-            -- Potential entry/exit (cast to float)
+            r.volatility_state,
+            CAST(r.bb_width_percentile AS FLOAT) as bb_width_percentile,
+
+            -- Swing structure
+            CAST(r.swing_high_level AS FLOAT) as swing_high_level,
+            CAST(r.swing_low_level AS FLOAT) as swing_low_level,
+            r.swing_lookback_bars,
+            r.swings_found_count,
+            r.last_swing_bars_ago,
+            CAST(r.swing_range_pips AS FLOAT) as swing_range_pips,
+
+            -- Entry/Exit levels
             CAST(r.potential_entry AS FLOAT) as potential_entry,
             CAST(r.potential_stop_loss AS FLOAT) as potential_stop_loss,
             CAST(r.potential_take_profit AS FLOAT) as potential_take_profit,
             CAST(r.potential_rr_ratio AS FLOAT) as potential_rr_ratio,
             CAST(r.potential_risk_pips AS FLOAT) as potential_risk_pips,
             CAST(r.potential_reward_pips AS FLOAT) as potential_reward_pips,
+
+            -- MACD (histogram STRENGTH matters, not just direction!)
+            r.macd_aligned,
+            r.macd_momentum,  -- categorical: 'bullish'/'bearish'
+            CAST(r.macd_histogram AS FLOAT) as macd_histogram,  -- numeric histogram value
+            CAST(r.macd_line AS FLOAT) as macd_line,
+            CAST(r.macd_signal AS FLOAT) as macd_signal,
+
+            -- Efficiency Ratio (trend quality measure)
+            CAST(r.efficiency_ratio AS FLOAT) as efficiency_ratio,
+
+            -- Market Regime
+            r.market_regime_detected,
+
+            -- Bollinger Bands
+            CAST(r.bb_upper AS FLOAT) as bb_upper,
+            CAST(r.bb_middle AS FLOAT) as bb_middle,
+            CAST(r.bb_lower AS FLOAT) as bb_lower,
+            CAST(r.bb_width AS FLOAT) as bb_width,
+            CAST(r.bb_percent_b AS FLOAT) as bb_percent_b,
+
+            -- ADX (trend strength)
+            CAST(r.adx_value AS FLOAT) as adx_value,
+            r.adx_trend_strength,
+
+            -- Stochastics
+            CAST(r.stoch_k AS FLOAT) as stoch_k,
+            CAST(r.stoch_d AS FLOAT) as stoch_d,
+            r.stoch_zone,
+
+            -- Supertrend
+            CAST(r.supertrend_value AS FLOAT) as supertrend_value,
+            r.supertrend_direction,
+
+            -- RSI
+            r.rsi_zone,
+
+            -- EMAs
+            CAST(r.ema_9 AS FLOAT) as ema_9,
+            CAST(r.ema_21 AS FLOAT) as ema_21,
+            CAST(r.ema_50 AS FLOAT) as ema_50,
+            CAST(r.ema_200 AS FLOAT) as ema_200,
+            r.price_vs_ema_200,
+            CAST(r.ema_4h_value AS FLOAT) as ema_4h_value,
+            CAST(r.ema_distance_pips AS FLOAT) as ema_distance_pips,
+            r.price_position_vs_ema,
+
+            -- KAMA
+            CAST(r.kama_value AS FLOAT) as kama_value,
+            CAST(r.kama_er AS FLOAT) as kama_er,
+            r.kama_trend,
+
             -- Outcome analysis (cast to float)
             o.outcome,
             CAST(o.outcome_price AS FLOAT) as outcome_price,

@@ -45,23 +45,75 @@ class OptimizationRecommendation:
 class CorrelationAnalyzer:
     """Analyzes parameter correlations with trade outcomes"""
 
-    # Parameters that can be optimized
-    OPTIMIZABLE_PARAMS = [
-        'confidence_score',
-        'volume_ratio',
-        'pullback_depth',
-        'fib_level',
-        'macd_histogram',
-        'rsi_14',
-        'atr_pips'
+    # COMPREHENSIVE parameter list for analysis
+    # Grouped by category for organized analysis
+    OPTIMIZABLE_PARAMS = {
+        # Core thresholds (directly configurable)
+        'core': [
+            'confidence_score',
+            'volume_ratio',
+            'pullback_depth',
+        ],
+        # MACD-related (histogram STRENGTH matters, not just direction)
+        'macd': [
+            'macd_histogram',  # Histogram strength - key insight! (numeric value)
+        ],
+        # Trend strength indicators
+        'trend_strength': [
+            'adx_value',
+            'efficiency_ratio',
+            'kama_er',  # Kaufman efficiency ratio
+        ],
+        # Volatility measures
+        'volatility': [
+            'atr_percentile',
+            'bb_width_percentile',
+            'bb_percent_b',
+        ],
+        # Momentum/Oscillators
+        'momentum': [
+            'stoch_k',
+            'stoch_d',
+        ],
+        # Structure
+        'structure': [
+            'swing_range_pips',
+            'last_swing_bars_ago',
+            'ema_distance_pips',
+        ],
+        # Risk/Reward
+        'risk_reward': [
+            'potential_rr_ratio',
+            'potential_risk_pips',
+        ],
+    }
+
+    # Categorical parameters (analyze win rate by category)
+    CATEGORICAL_PARAMS = [
+        'fib_level',           # fib zone category
+        'volatility_state',    # low/medium/high
+        'market_regime_detected',
+        'adx_trend_strength',  # weak/moderate/strong
+        'stoch_zone',          # oversold/neutral/overbought
+        'rsi_zone',            # oversold/neutral/overbought
+        'supertrend_direction',
+        'price_vs_ema_200',    # above/below
+        'kama_trend',          # up/down/sideways
+        'macd_aligned',        # True/False
     ]
 
-    # Mapping from analysis parameters to database columns
-    PARAM_TO_DB_COLUMN = {
+    # Mapping from analysis parameters to config parameters
+    PARAM_TO_CONFIG = {
         'confidence_score': 'min_confidence',
         'volume_ratio': 'min_volume_ratio',
         'pullback_depth': 'fib_pullback_min',
-        'fib_level': 'fib_pullback_max',
+        'macd_histogram': 'macd_min_histogram',  # New: minimum histogram strength
+        'adx_value': 'min_adx_value',
+        'efficiency_ratio': 'min_efficiency_ratio',
+        'atr_percentile': 'atr_percentile_filter',
+        'bb_percent_b': 'bb_percent_b_range',
+        'stoch_k': 'stoch_threshold',
+        'potential_rr_ratio': 'min_rr_ratio',
     }
 
     def __init__(self, min_sample_size: int = 20, min_confidence: float = 0.70):
@@ -156,6 +208,25 @@ class CorrelationAnalyzer:
         if not rejection_df.empty:
             stage_recs = self._analyze_rejection_stages(epic, rejection_df, config)
             recommendations.extend(stage_recs)
+
+        # 7. COMPREHENSIVE INDICATOR ANALYSIS - the key addition!
+        # Analyzes ALL available indicators: MACD strength, ADX, stochastics,
+        # Bollinger bands, efficiency ratio, volatility state, etc.
+        if not rejection_df.empty:
+            comprehensive_recs = self._analyze_comprehensive_indicators(epic, rejection_df, config)
+            recommendations.extend(comprehensive_recs)
+
+        # 8. Specific MACD histogram strength analysis
+        if not rejection_df.empty:
+            macd_rec = self._analyze_macd_strength(epic, rejection_df, config)
+            if macd_rec:
+                recommendations.append(macd_rec)
+
+        # 9. ADX trend strength analysis
+        if not rejection_df.empty:
+            adx_rec = self._analyze_adx_strength(epic, rejection_df, config)
+            if adx_rec:
+                recommendations.append(adx_rec)
 
         return recommendations
 
@@ -549,3 +620,377 @@ class CorrelationAnalyzer:
             ))
 
         return recommendations
+
+    def _analyze_comprehensive_indicators(
+        self,
+        epic: str,
+        rejection_df: pd.DataFrame,
+        config: Dict[str, Any]
+    ) -> List[OptimizationRecommendation]:
+        """
+        Comprehensive indicator analysis - analyzes ALL available indicators.
+
+        This is the KEY method that provides deep insights by analyzing:
+        - MACD histogram STRENGTH (not just direction)
+        - ADX trend strength values
+        - Stochastic levels
+        - Bollinger band positions
+        - Efficiency ratios
+        - And more...
+        """
+        recommendations = []
+
+        if rejection_df.empty:
+            return recommendations
+
+        # Analyze each category of parameters
+        for category, params in self.OPTIMIZABLE_PARAMS.items():
+            for param in params:
+                if param not in rejection_df.columns:
+                    continue
+
+                rec = self._analyze_numeric_param_bins(epic, rejection_df, param, config)
+                if rec:
+                    recommendations.append(rec)
+
+        # Analyze categorical parameters
+        for param in self.CATEGORICAL_PARAMS:
+            if param not in rejection_df.columns:
+                continue
+
+            rec = self._analyze_categorical_param(epic, rejection_df, param, config)
+            if rec:
+                recommendations.append(rec)
+
+        return recommendations
+
+    def _analyze_numeric_param_bins(
+        self,
+        epic: str,
+        df: pd.DataFrame,
+        param: str,
+        config: Dict[str, Any]
+    ) -> Optional[OptimizationRecommendation]:
+        """
+        Analyze a numeric parameter by binning into quartiles and comparing win rates.
+
+        This finds optimal ranges for parameters like:
+        - MACD histogram strength
+        - ADX values
+        - Volume ratios
+        - etc.
+        """
+        # Filter to valid values
+        df_valid = df[df[param].notna() & (df[param] != 0)].copy()
+
+        if len(df_valid) < self.min_sample_size:
+            return None
+
+        try:
+            # Create quartile bins
+            df_valid['bin'] = pd.qcut(df_valid[param], q=4, duplicates='drop')
+        except ValueError:
+            # Not enough unique values
+            try:
+                df_valid['bin'] = pd.cut(df_valid[param], bins=4)
+            except ValueError:
+                return None
+
+        # Calculate win rate per bin
+        bin_stats = df_valid.groupby('bin', observed=True).agg(
+            count=('epic', 'count'),
+            winners=('would_be_winner', 'sum'),
+            avg_value=(param, 'mean'),
+            missed_pips=('potential_profit_pips', lambda x: x[df_valid.loc[x.index, 'would_be_winner']].sum() if 'potential_profit_pips' in df_valid.columns else 0)
+        ).reset_index()
+
+        bin_stats['win_rate'] = bin_stats['winners'] / bin_stats['count']
+
+        # Find best and worst performing bins
+        if len(bin_stats) < 2:
+            return None
+
+        best_bin = bin_stats.loc[bin_stats['win_rate'].idxmax()]
+        worst_bin = bin_stats.loc[bin_stats['win_rate'].idxmin()]
+
+        # Only recommend if there's significant difference
+        win_rate_diff = best_bin['win_rate'] - worst_bin['win_rate']
+        if win_rate_diff < 0.15:  # At least 15% difference
+            return None
+
+        # Determine recommendation based on current rejection pattern
+        # If worst bin has high win rate (>55%), the filter is too strict
+        if worst_bin['win_rate'] > 0.55 and worst_bin['count'] >= 10:
+            # Filter is rejecting too many winners - recommend relaxing
+            config_param = self.PARAM_TO_CONFIG.get(param, param)
+            current_val = config.get(config_param, worst_bin['avg_value'])
+
+            # Recommend value from worst bin (to capture those rejected winners)
+            recommended_val = round(float(worst_bin['avg_value']), 3)
+
+            confidence = min(0.90, 0.5 + (worst_bin['count'] / 50) + (win_rate_diff / 2))
+
+            if confidence < self.min_confidence:
+                return None
+
+            return OptimizationRecommendation(
+                epic=epic,
+                parameter=config_param,
+                direction=None,
+                current_value=current_val,
+                recommended_value=recommended_val,
+                confidence=confidence,
+                expected_impact_pips=float(worst_bin['missed_pips']) if worst_bin['missed_pips'] > 0 else float(worst_bin['count']) * 8,
+                sample_size=int(worst_bin['count']),
+                reason=f"{param}: Rejected signals in range [{worst_bin['bin']}] have {worst_bin['win_rate']:.0%} win rate vs best {best_bin['win_rate']:.0%}",
+                evidence={
+                    'param': param,
+                    'worst_bin_win_rate': float(worst_bin['win_rate']),
+                    'best_bin_win_rate': float(best_bin['win_rate']),
+                    'worst_bin_avg': float(worst_bin['avg_value']),
+                    'best_bin_avg': float(best_bin['avg_value']),
+                    'worst_bin_count': int(worst_bin['count']),
+                    'all_bins': bin_stats.to_dict('records')
+                }
+            )
+
+        return None
+
+    def _analyze_categorical_param(
+        self,
+        epic: str,
+        df: pd.DataFrame,
+        param: str,
+        config: Dict[str, Any]
+    ) -> Optional[OptimizationRecommendation]:
+        """
+        Analyze categorical parameters to find which categories perform best/worst.
+
+        Examples:
+        - volatility_state: 'low', 'medium', 'high'
+        - rsi_zone: 'oversold', 'neutral', 'overbought'
+        - market_regime_detected: 'trending', 'ranging', 'breakout'
+        """
+        df_valid = df[df[param].notna()].copy()
+
+        if len(df_valid) < self.min_sample_size:
+            return None
+
+        # Calculate win rate per category
+        cat_stats = df_valid.groupby(param).agg(
+            count=('epic', 'count'),
+            winners=('would_be_winner', 'sum'),
+            missed_pips=('potential_profit_pips', lambda x: x[df_valid.loc[x.index, 'would_be_winner']].sum() if 'potential_profit_pips' in df_valid.columns else 0)
+        ).reset_index()
+
+        cat_stats['win_rate'] = cat_stats['winners'] / cat_stats['count']
+
+        # Filter to categories with enough samples
+        cat_stats = cat_stats[cat_stats['count'] >= 10]
+
+        if len(cat_stats) < 2:
+            return None
+
+        # Find best and worst categories
+        best_cat = cat_stats.loc[cat_stats['win_rate'].idxmax()]
+        worst_cat = cat_stats.loc[cat_stats['win_rate'].idxmin()]
+
+        win_rate_diff = best_cat['win_rate'] - worst_cat['win_rate']
+
+        # Only report if significant difference AND worst category has high win rate
+        if win_rate_diff < 0.20:
+            return None
+
+        # If worst category has >55% win rate, we're rejecting winners
+        if worst_cat['win_rate'] > 0.55:
+            confidence = min(0.90, 0.5 + (worst_cat['count'] / 50) + (win_rate_diff / 2))
+
+            if confidence < self.min_confidence:
+                return None
+
+            return OptimizationRecommendation(
+                epic=epic,
+                parameter=f"{param}_filter",
+                direction=None,
+                current_value=f"blocking {worst_cat[param]}",
+                recommended_value=f"allow {worst_cat[param]}",
+                confidence=confidence,
+                expected_impact_pips=float(worst_cat['missed_pips']) if worst_cat['missed_pips'] > 0 else float(worst_cat['count']) * 8,
+                sample_size=int(worst_cat['count']),
+                reason=f"{param}={worst_cat[param]} rejections have {worst_cat['win_rate']:.0%} win rate vs best {best_cat[param]}={best_cat['win_rate']:.0%}",
+                evidence={
+                    'param': param,
+                    'worst_category': str(worst_cat[param]),
+                    'worst_win_rate': float(worst_cat['win_rate']),
+                    'best_category': str(best_cat[param]),
+                    'best_win_rate': float(best_cat['win_rate']),
+                    'all_categories': cat_stats.to_dict('records')
+                }
+            )
+
+        return None
+
+    def _analyze_macd_strength(
+        self,
+        epic: str,
+        rejection_df: pd.DataFrame,
+        config: Dict[str, Any]
+    ) -> Optional[OptimizationRecommendation]:
+        """
+        Specific analysis for MACD histogram STRENGTH.
+
+        Key insight: It's not just about positive/negative MACD,
+        but HOW STRONG the momentum is. Weak histogram readings
+        may incorrectly reject good trades.
+        """
+        if 'macd_histogram' not in rejection_df.columns:
+            return None
+
+        df = rejection_df[rejection_df['macd_histogram'].notna()].copy()
+
+        if len(df) < self.min_sample_size:
+            return None
+
+        # Analyze by absolute MACD strength
+        df['macd_abs'] = df['macd_histogram'].abs()
+
+        # Split into weak vs strong momentum
+        median_strength = df['macd_abs'].median()
+        df['momentum_strength'] = df['macd_abs'].apply(
+            lambda x: 'weak' if x < median_strength else 'strong'
+        )
+
+        strength_stats = df.groupby('momentum_strength').agg(
+            count=('epic', 'count'),
+            winners=('would_be_winner', 'sum'),
+            avg_momentum=('macd_abs', 'mean'),
+            missed_pips=('potential_profit_pips', 'sum')
+        ).reset_index()
+
+        strength_stats['win_rate'] = strength_stats['winners'] / strength_stats['count']
+
+        if len(strength_stats) < 2:
+            return None
+
+        weak_stats = strength_stats[strength_stats['momentum_strength'] == 'weak']
+        strong_stats = strength_stats[strength_stats['momentum_strength'] == 'strong']
+
+        if weak_stats.empty or strong_stats.empty:
+            return None
+
+        weak_row = weak_stats.iloc[0]
+        strong_row = strong_stats.iloc[0]
+
+        # If weak momentum has HIGH win rate, MACD filter is too strict
+        if weak_row['win_rate'] > 0.55 and weak_row['count'] >= 10:
+            win_diff = strong_row['win_rate'] - weak_row['win_rate']
+
+            # If weak momentum performs BETTER than strong, something is wrong
+            if weak_row['win_rate'] >= strong_row['win_rate']:
+                reason = f"MACD filter paradox: weak momentum ({weak_row['win_rate']:.0%} WR) outperforms strong ({strong_row['win_rate']:.0%} WR)"
+            else:
+                reason = f"Weak MACD momentum rejections have {weak_row['win_rate']:.0%} win rate - consider relaxing threshold"
+
+            confidence = min(0.90, 0.5 + (weak_row['count'] / 50))
+
+            if confidence < self.min_confidence:
+                return None
+
+            return OptimizationRecommendation(
+                epic=epic,
+                parameter='macd_min_histogram_strength',
+                direction=None,
+                current_value=float(median_strength),
+                recommended_value=float(weak_row['avg_momentum']),
+                confidence=confidence,
+                expected_impact_pips=float(weak_row['missed_pips']) if weak_row['missed_pips'] > 0 else float(weak_row['count']) * 8,
+                sample_size=int(weak_row['count']),
+                reason=reason,
+                evidence={
+                    'weak_win_rate': float(weak_row['win_rate']),
+                    'strong_win_rate': float(strong_row['win_rate']),
+                    'weak_avg_momentum': float(weak_row['avg_momentum']),
+                    'strong_avg_momentum': float(strong_row['avg_momentum']),
+                    'median_strength': float(median_strength),
+                    'weak_count': int(weak_row['count']),
+                    'strong_count': int(strong_row['count'])
+                }
+            )
+
+        return None
+
+    def _analyze_adx_strength(
+        self,
+        epic: str,
+        rejection_df: pd.DataFrame,
+        config: Dict[str, Any]
+    ) -> Optional[OptimizationRecommendation]:
+        """
+        Analyze ADX values to find optimal trend strength thresholds.
+
+        ADX < 20: weak/no trend
+        ADX 20-25: developing trend
+        ADX 25-50: strong trend
+        ADX > 50: very strong trend (potentially overextended)
+        """
+        if 'adx_value' not in rejection_df.columns:
+            return None
+
+        df = rejection_df[rejection_df['adx_value'].notna()].copy()
+
+        if len(df) < self.min_sample_size:
+            return None
+
+        # Create ADX buckets
+        df['adx_bucket'] = pd.cut(
+            df['adx_value'],
+            bins=[0, 20, 25, 40, 100],
+            labels=['weak_0_20', 'developing_20_25', 'strong_25_40', 'very_strong_40+']
+        )
+
+        bucket_stats = df.groupby('adx_bucket', observed=True).agg(
+            count=('epic', 'count'),
+            winners=('would_be_winner', 'sum'),
+            avg_adx=('adx_value', 'mean'),
+            missed_pips=('potential_profit_pips', 'sum')
+        ).reset_index()
+
+        bucket_stats['win_rate'] = bucket_stats['winners'] / bucket_stats['count']
+
+        # Filter to buckets with enough samples
+        bucket_stats = bucket_stats[bucket_stats['count'] >= 10]
+
+        if len(bucket_stats) < 2:
+            return None
+
+        # Find best performing ADX range
+        best_bucket = bucket_stats.loc[bucket_stats['win_rate'].idxmax()]
+
+        # Check if we're over-filtering certain ADX ranges
+        for _, row in bucket_stats.iterrows():
+            if row['win_rate'] > 0.55 and row['adx_bucket'] != best_bucket['adx_bucket']:
+                confidence = min(0.85, 0.5 + (row['count'] / 50))
+
+                if confidence < self.min_confidence:
+                    continue
+
+                return OptimizationRecommendation(
+                    epic=epic,
+                    parameter='adx_threshold',
+                    direction=None,
+                    current_value=f"current ADX filter",
+                    recommended_value=f"include {row['adx_bucket']} range",
+                    confidence=confidence,
+                    expected_impact_pips=float(row['missed_pips']) if row['missed_pips'] > 0 else float(row['count']) * 8,
+                    sample_size=int(row['count']),
+                    reason=f"ADX {row['adx_bucket']} rejections have {row['win_rate']:.0%} win rate ({int(row['count'])} samples)",
+                    evidence={
+                        'bucket': str(row['adx_bucket']),
+                        'win_rate': float(row['win_rate']),
+                        'avg_adx': float(row['avg_adx']),
+                        'count': int(row['count']),
+                        'all_buckets': bucket_stats.to_dict('records')
+                    }
+                )
+
+        return None
