@@ -229,7 +229,7 @@ def _worker_extract_result(db, epic: str, params: dict, duration: float) -> dict
             SUM(CASE WHEN bs.trade_result = 'loss' THEN ABS(bs.pips_gained) ELSE 0 END) as gross_loss
         FROM backtest_executions be
         LEFT JOIN backtest_signals bs ON be.id = bs.execution_id
-        WHERE be.status = 'COMPLETED'
+        WHERE be.status = 'completed'
         GROUP BY be.id, be.created_at
         ORDER BY be.created_at DESC
         LIMIT 1
@@ -940,7 +940,7 @@ class MultiEpicOptimizer:
                 SUM(CASE WHEN bs.trade_result = 'loss' THEN ABS(bs.pips_gained) ELSE 0 END) as gross_loss
             FROM backtest_executions be
             LEFT JOIN backtest_signals bs ON be.id = bs.execution_id
-            WHERE be.status = 'COMPLETED'
+            WHERE be.status = 'completed'
             GROUP BY be.id, be.created_at
             ORDER BY be.created_at DESC
             LIMIT 1
