@@ -180,9 +180,13 @@ def _worker_optimize_epic(
                     'duration_seconds': 0
                 })
 
-        # Mark epic as complete
+        # Mark epic as complete - check if any successful tests
         if progress_dict is not None:
-            progress_dict[epic] = "✅ DONE"
+            successful_count = sum(1 for r in results if r.get('status') == 'completed')
+            if successful_count > 0:
+                progress_dict[epic] = f"✅ DONE ({successful_count} ok)"
+            else:
+                progress_dict[epic] = "⚠️ DONE (0 ok)"
 
     except Exception as e:
         if progress_dict is not None:
