@@ -10,32 +10,72 @@ Architecture:
 - Tab components: streamlit/components/tabs/*.py
 - Services: streamlit/services/*.py
 - This file: Tab layout orchestration only
+
+Performance optimization: Uses lazy loading to only render the active tab's content,
+avoiding the Streamlit default behavior of rendering all tabs on every page load.
 """
 
 import streamlit as st
 from datetime import datetime
+from typing import Callable
 
 # Import cache warmer for faster first loads
 from services.cache_warmer import run_cache_warmup_async
 
-# Import tab components
-from components.tabs import (
-    render_smc_rejections_tab,
-    render_ema_double_rejections_tab,
-    render_alert_history_tab,
-    render_overview_tab,
-    render_strategy_performance_tab,
-    render_trade_performance_tab,
-    render_unfilled_orders_tab,
-    render_settings_tab,
-    render_market_intelligence_tab,
-    render_breakeven_optimizer_tab,
-    render_trade_analysis_tab,
-    render_smc_config_tab,
-    render_scanner_config_tab,
-    render_intelligence_config_tab,
-    render_performance_snapshot_tab,
-)
+
+def lazy_import_tab(tab_name: str) -> Callable:
+    """
+    Lazy import tab render function to avoid loading all tabs at startup.
+    Only imports the tab module when actually needed.
+    """
+    if tab_name == "overview":
+        from components.tabs import render_overview_tab
+        return render_overview_tab
+    elif tab_name == "strategy_performance":
+        from components.tabs import render_strategy_performance_tab
+        return render_strategy_performance_tab
+    elif tab_name == "trade_analysis":
+        from components.tabs import render_trade_analysis_tab
+        return render_trade_analysis_tab
+    elif tab_name == "market_intelligence":
+        from components.tabs import render_market_intelligence_tab
+        return render_market_intelligence_tab
+    elif tab_name == "performance_snapshot":
+        from components.tabs import render_performance_snapshot_tab
+        return render_performance_snapshot_tab
+    elif tab_name == "breakeven_optimizer":
+        from components.tabs import render_breakeven_optimizer_tab
+        return render_breakeven_optimizer_tab
+    elif tab_name == "trade_performance":
+        from components.tabs import render_trade_performance_tab
+        return render_trade_performance_tab
+    elif tab_name == "alert_history":
+        from components.tabs import render_alert_history_tab
+        return render_alert_history_tab
+    elif tab_name == "smc_rejections":
+        from components.tabs import render_smc_rejections_tab
+        return render_smc_rejections_tab
+    elif tab_name == "ema_rejections":
+        from components.tabs import render_ema_double_rejections_tab
+        return render_ema_double_rejections_tab
+    elif tab_name == "unfilled_orders":
+        from components.tabs import render_unfilled_orders_tab
+        return render_unfilled_orders_tab
+    elif tab_name == "settings":
+        from components.tabs import render_settings_tab
+        return render_settings_tab
+    elif tab_name == "smc_config":
+        from components.tabs import render_smc_config_tab
+        return render_smc_config_tab
+    elif tab_name == "scanner_config":
+        from components.tabs import render_scanner_config_tab
+        return render_scanner_config_tab
+    elif tab_name == "intelligence_config":
+        from components.tabs import render_intelligence_config_tab
+        return render_intelligence_config_tab
+    else:
+        raise ValueError(f"Unknown tab: {tab_name}")
+
 
 # Configure page
 st.set_page_config(
@@ -106,8 +146,8 @@ def initialize_session_state():
         st.session_state.selected_pairs = []
     if 'last_refresh' not in st.session_state:
         st.session_state.last_refresh = datetime.now()
-    if 'active_tab' not in st.session_state:
-        st.session_state.active_tab = "Overview"
+    if 'active_main_tab' not in st.session_state:
+        st.session_state.active_main_tab = 0
 
 
 def main():
@@ -121,79 +161,123 @@ def main():
     st.title("Trading Analytics Hub")
     st.markdown("*Unified dashboard for comprehensive trading analysis*")
 
-    # Tab navigation - Grouped into 5 main categories with sub-tabs
-    tab_overview, tab_analysis, tab_performance, tab_rejections, tab_settings = st.tabs([
-        "Overview",
-        "Analysis",
-        "Performance",
-        "Rejections",
-        "Settings"
-    ])
+    # Main tab selection using radio buttons in sidebar for better performance
+    # This avoids the Streamlit behavior of rendering all tab contents
+    main_tabs = ["Overview", "Analysis", "Performance", "Rejections", "Settings"]
 
-    with tab_overview:
-        render_overview_tab()
+    with st.sidebar:
+        st.markdown("### Navigation")
+        selected_main = st.radio(
+            "Main Section",
+            main_tabs,
+            index=st.session_state.active_main_tab,
+            key="main_tab_radio",
+            label_visibility="collapsed"
+        )
+        # Update session state
+        st.session_state.active_main_tab = main_tabs.index(selected_main)
 
-    with tab_analysis:
-        # Sub-tabs for analysis features
-        analysis_tabs = st.tabs([
+    # Only render the selected main tab's content
+    # This avoids the Streamlit default behavior of rendering ALL tabs on every page load
+    if selected_main == "Overview":
+        render_func = lazy_import_tab("overview")
+        render_func()
+
+    elif selected_main == "Analysis":
+        # Use radio buttons for sub-navigation to avoid rendering all sub-tabs
+        analysis_options = [
             "Strategy",
             "Trade Analysis",
             "Market Intelligence",
             "Performance Snapshots",
             "Breakeven Optimizer"
-        ])
-        with analysis_tabs[0]:
-            render_strategy_performance_tab()
-        with analysis_tabs[1]:
-            render_trade_analysis_tab()
-        with analysis_tabs[2]:
-            render_market_intelligence_tab()
-        with analysis_tabs[3]:
-            render_performance_snapshot_tab()
-        with analysis_tabs[4]:
-            render_breakeven_optimizer_tab()
+        ]
+        analysis_sub = st.radio(
+            "Analysis Section",
+            analysis_options,
+            horizontal=True,
+            key="analysis_sub_radio",
+            label_visibility="collapsed"
+        )
 
-    with tab_performance:
-        # Sub-tabs for performance tracking
-        perf_tabs = st.tabs([
-            "Trade Performance",
-            "Alert History"
-        ])
-        with perf_tabs[0]:
-            render_trade_performance_tab()
-        with perf_tabs[1]:
-            render_alert_history_tab()
+        if analysis_sub == "Strategy":
+            render_func = lazy_import_tab("strategy_performance")
+            render_func()
+        elif analysis_sub == "Trade Analysis":
+            render_func = lazy_import_tab("trade_analysis")
+            render_func()
+        elif analysis_sub == "Market Intelligence":
+            render_func = lazy_import_tab("market_intelligence")
+            render_func()
+        elif analysis_sub == "Performance Snapshots":
+            render_func = lazy_import_tab("performance_snapshot")
+            render_func()
+        elif analysis_sub == "Breakeven Optimizer":
+            render_func = lazy_import_tab("breakeven_optimizer")
+            render_func()
 
-    with tab_rejections:
-        # Sub-tabs for rejection analysis
-        rejection_tabs = st.tabs([
-            "SMC Rejections",
-            "EMA Rejections",
-            "Unfilled Orders"
-        ])
-        with rejection_tabs[0]:
-            render_smc_rejections_tab()
-        with rejection_tabs[1]:
-            render_ema_double_rejections_tab()
-        with rejection_tabs[2]:
-            render_unfilled_orders_tab()
+    elif selected_main == "Performance":
+        # Use radio buttons for sub-navigation
+        perf_options = ["Trade Performance", "Alert History"]
+        perf_sub = st.radio(
+            "Performance Section",
+            perf_options,
+            horizontal=True,
+            key="perf_sub_radio",
+            label_visibility="collapsed"
+        )
 
-    with tab_settings:
-        # Sub-tabs for settings and configuration
-        settings_tabs = st.tabs([
-            "General",
-            "SMC Config",
-            "Scanner Config",
-            "Intelligence Config"
-        ])
-        with settings_tabs[0]:
-            render_settings_tab()
-        with settings_tabs[1]:
-            render_smc_config_tab()
-        with settings_tabs[2]:
-            render_scanner_config_tab()
-        with settings_tabs[3]:
-            render_intelligence_config_tab()
+        if perf_sub == "Trade Performance":
+            render_func = lazy_import_tab("trade_performance")
+            render_func()
+        elif perf_sub == "Alert History":
+            render_func = lazy_import_tab("alert_history")
+            render_func()
+
+    elif selected_main == "Rejections":
+        # Use radio buttons for sub-navigation
+        rejection_options = ["SMC Rejections", "EMA Rejections", "Unfilled Orders"]
+        rej_sub = st.radio(
+            "Rejections Section",
+            rejection_options,
+            horizontal=True,
+            key="rej_sub_radio",
+            label_visibility="collapsed"
+        )
+
+        if rej_sub == "SMC Rejections":
+            render_func = lazy_import_tab("smc_rejections")
+            render_func()
+        elif rej_sub == "EMA Rejections":
+            render_func = lazy_import_tab("ema_rejections")
+            render_func()
+        elif rej_sub == "Unfilled Orders":
+            render_func = lazy_import_tab("unfilled_orders")
+            render_func()
+
+    elif selected_main == "Settings":
+        # Use radio buttons for sub-navigation to avoid rendering all 4 config tabs
+        settings_options = ["General", "SMC Config", "Scanner Config", "Intelligence Config"]
+        settings_sub = st.radio(
+            "Settings Section",
+            settings_options,
+            horizontal=True,
+            key="settings_sub_radio",
+            label_visibility="collapsed"
+        )
+
+        if settings_sub == "General":
+            render_func = lazy_import_tab("settings")
+            render_func()
+        elif settings_sub == "SMC Config":
+            render_func = lazy_import_tab("smc_config")
+            render_func()
+        elif settings_sub == "Scanner Config":
+            render_func = lazy_import_tab("scanner_config")
+            render_func()
+        elif settings_sub == "Intelligence Config":
+            render_func = lazy_import_tab("intelligence_config")
+            render_func()
 
     # Footer
     st.markdown("---")

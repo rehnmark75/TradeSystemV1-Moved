@@ -17,27 +17,15 @@ from contextlib import contextmanager
 import psycopg2
 import psycopg2.extras
 
-from .db_utils import get_connection_string
+from .db_utils import get_psycopg2_pool, get_connection_string
 
 logger = logging.getLogger(__name__)
 
 
-@st.cache_resource
-def get_strategy_config_pool():
-    """Get cached connection pool for strategy_config database"""
-    from psycopg2 import pool as psycopg2_pool
-    conn_str = get_connection_string("strategy_config")
-    return psycopg2_pool.ThreadedConnectionPool(
-        minconn=2,
-        maxconn=10,
-        dsn=conn_str
-    )
-
-
 @contextmanager
 def get_connection():
-    """Get a connection from the pool"""
-    pool = get_strategy_config_pool()
+    """Get a connection from the centralized pool"""
+    pool = get_psycopg2_pool("strategy_config")
     conn = pool.getconn()
     try:
         yield conn
@@ -45,8 +33,9 @@ def get_connection():
         pool.putconn(conn)
 
 
+@st.cache_data(ttl=60)  # Cache for 1 minute - config changes rarely
 def get_global_config() -> Optional[Dict[str, Any]]:
-    """Load active global configuration from database"""
+    """Load active global configuration from database (cached 1 min)"""
     try:
         with get_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -65,8 +54,9 @@ def get_global_config() -> Optional[Dict[str, Any]]:
     return None
 
 
+@st.cache_data(ttl=60)  # Cache for 1 minute - config changes rarely
 def get_pair_overrides(config_id: int) -> List[Dict[str, Any]]:
-    """Load all pair overrides for a config"""
+    """Load all pair overrides for a config (cached 1 min)"""
     try:
         with get_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:

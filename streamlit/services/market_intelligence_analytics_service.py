@@ -30,6 +30,31 @@ class MarketIntelligenceAnalyticsService:
         """Get a database connection from the pool."""
         return get_psycopg2_connection(self.db_type)
 
+    @st.cache_data(ttl=3600)  # Cache schema for 1 hour - columns rarely change
+    def _get_market_intelligence_columns(_self) -> list:
+        """
+        Get column names for market_intelligence_history table (cached 1 hour).
+
+        This avoids querying information_schema on every request.
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return []
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'market_intelligence_history'
+                """)
+                return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error fetching column names: {e}")
+            return []
+        finally:
+            conn.close()
+
     @st.cache_data(ttl=300)
     def fetch_signal_based_intelligence(
         _self, start_date: datetime, end_date: datetime
@@ -108,14 +133,8 @@ class MarketIntelligenceAnalyticsService:
             return pd.DataFrame()
 
         try:
-            # First check which columns exist in the table
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_name = 'market_intelligence_history'
-                """)
-                existing_columns = [row[0] for row in cursor.fetchall()]
+            # Use cached column list instead of querying information_schema every time
+            existing_columns = _self._get_market_intelligence_columns()
 
             if not existing_columns:
                 return pd.DataFrame()

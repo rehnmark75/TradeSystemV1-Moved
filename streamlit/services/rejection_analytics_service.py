@@ -129,6 +129,8 @@ class RejectionAnalyticsService:
         """
         Fetch aggregated SMC rejection statistics (cached 5 min).
 
+        Optimized to use a single query with CTEs instead of multiple round-trips.
+
         Args:
             days: Number of days to look back
 
@@ -140,64 +142,82 @@ class RejectionAnalyticsService:
             return {}
 
         try:
-            # Total and by-stage counts
+            # Single optimized query using CTEs to get all stats in one round-trip
             query = """
+            WITH base_data AS (
+                SELECT
+                    epic,
+                    pair,
+                    rejection_stage,
+                    confidence_score
+                FROM smc_simple_rejections
+                WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            ),
+            stage_counts AS (
+                SELECT
+                    rejection_stage,
+                    COUNT(*) as stage_count
+                FROM base_data
+                GROUP BY rejection_stage
+            ),
+            totals AS (
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(DISTINCT epic) as unique_pairs
+                FROM base_data
+            ),
+            near_misses AS (
+                SELECT COUNT(*) as near_miss_count
+                FROM base_data
+                WHERE rejection_stage = 'CONFIDENCE'
+                AND confidence_score >= 0.45
+            ),
+            smc_conflicts AS (
+                SELECT COUNT(*) as conflict_count
+                FROM base_data
+                WHERE rejection_stage = 'SMC_CONFLICT'
+            ),
+            top_pair AS (
+                SELECT pair, COUNT(*) as pair_count
+                FROM base_data
+                WHERE pair IS NOT NULL
+                GROUP BY pair
+                ORDER BY pair_count DESC
+                LIMIT 1
+            )
             SELECT
-                COUNT(*) as total,
-                COUNT(DISTINCT epic) as unique_pairs,
-                rejection_stage,
-                COUNT(*) as stage_count
-            FROM smc_simple_rejections
-            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
-            GROUP BY rejection_stage
-            ORDER BY stage_count DESC
+                t.total,
+                t.unique_pairs,
+                nm.near_miss_count,
+                sc.conflict_count,
+                tp.pair as most_rejected_pair,
+                (SELECT json_object_agg(rejection_stage, stage_count) FROM stage_counts) as by_stage
+            FROM totals t
+            CROSS JOIN near_misses nm
+            CROSS JOIN smc_conflicts sc
+            LEFT JOIN top_pair tp ON true
             """
 
-            df = pd.read_sql_query(query, conn, params=[days])
+            with conn.cursor() as cursor:
+                cursor.execute(query, [days])
+                result = cursor.fetchone()
 
-            if df.empty:
-                return {'total': 0, 'unique_pairs': 0, 'by_stage': {}}
+            if not result or result[0] == 0:
+                return {'total': 0, 'unique_pairs': 0, 'by_stage': {}, 'near_misses': 0, 'most_rejected_pair': 'N/A', 'smc_conflicts': 0}
 
-            stats = {
-                'total': int(df['total'].iloc[0]) if not df.empty else 0,
-                'unique_pairs': int(df['unique_pairs'].iloc[0]) if not df.empty else 0,
-                'by_stage': dict(zip(df['rejection_stage'], df['stage_count']))
+            import json
+            by_stage = result[5] if result[5] else {}
+            if isinstance(by_stage, str):
+                by_stage = json.loads(by_stage)
+
+            return {
+                'total': int(result[0]) if result[0] else 0,
+                'unique_pairs': int(result[1]) if result[1] else 0,
+                'near_misses': int(result[2]) if result[2] else 0,
+                'smc_conflicts': int(result[3]) if result[3] else 0,
+                'most_rejected_pair': result[4] if result[4] else 'N/A',
+                'by_stage': by_stage
             }
-
-            # Near-miss count (high confidence rejects)
-            near_miss_query = """
-            SELECT COUNT(*) as near_misses
-            FROM smc_simple_rejections
-            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
-            AND rejection_stage = 'CONFIDENCE'
-            AND confidence_score >= 0.45
-            """
-            near_miss_df = pd.read_sql_query(near_miss_query, conn, params=[days])
-            stats['near_misses'] = int(near_miss_df['near_misses'].iloc[0]) if not near_miss_df.empty else 0
-
-            # Most rejected pair
-            pair_query = """
-            SELECT pair, COUNT(*) as count
-            FROM smc_simple_rejections
-            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
-            GROUP BY pair
-            ORDER BY count DESC
-            LIMIT 1
-            """
-            pair_df = pd.read_sql_query(pair_query, conn, params=[days])
-            stats['most_rejected_pair'] = pair_df['pair'].iloc[0] if not pair_df.empty else 'N/A'
-
-            # SMC Conflict count (new stage)
-            smc_conflict_query = """
-            SELECT COUNT(*) as smc_conflicts
-            FROM smc_simple_rejections
-            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
-            AND rejection_stage = 'SMC_CONFLICT'
-            """
-            smc_conflict_df = pd.read_sql_query(smc_conflict_query, conn, params=[days])
-            stats['smc_conflicts'] = int(smc_conflict_df['smc_conflicts'].iloc[0]) if not smc_conflict_df.empty else 0
-
-            return stats
 
         except Exception as e:
             if "does not exist" not in str(e):
@@ -371,10 +391,12 @@ class RejectionAnalyticsService:
         finally:
             conn.close()
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=300)  # Increased TTL to 5 min - filter options change rarely
     def get_smc_filter_options(_self) -> Dict[str, List[str]]:
         """
-        Get unique filter options for SMC rejections (cached 1 min).
+        Get unique filter options for SMC rejections (cached 5 min).
+
+        Optimized to use a single query instead of 3 separate DISTINCT queries.
 
         Returns:
             Dictionary with stages, pairs, and sessions lists
@@ -384,43 +406,58 @@ class RejectionAnalyticsService:
             return {'stages': ['All'], 'pairs': ['All'], 'sessions': ['All']}
 
         try:
-            stages = ['All']
-            pairs = ['All']
-            sessions = ['All']
+            # Single query to get all filter options at once
+            query = """
+            SELECT
+                COALESCE(
+                    (SELECT json_agg(DISTINCT rejection_stage ORDER BY rejection_stage)
+                     FROM smc_simple_rejections),
+                    '[]'::json
+                ) as stages,
+                COALESCE(
+                    (SELECT json_agg(DISTINCT pair ORDER BY pair)
+                     FROM smc_simple_rejections
+                     WHERE pair IS NOT NULL),
+                    '[]'::json
+                ) as pairs,
+                COALESCE(
+                    (SELECT json_agg(DISTINCT market_session ORDER BY market_session)
+                     FROM smc_simple_rejections
+                     WHERE market_session IS NOT NULL),
+                    '[]'::json
+                ) as sessions,
+                EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'smc_simple_rejections'
+                ) as table_exists
+            """
 
-            # Check table exists
             with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables
-                        WHERE table_name = 'smc_simple_rejections'
-                    )
-                """)
-                if not cursor.fetchone()[0]:
-                    return {'stages': stages, 'pairs': pairs, 'sessions': sessions, 'table_exists': False}
+                cursor.execute(query)
+                result = cursor.fetchone()
 
-            # Get unique stages
-            stage_df = pd.read_sql_query(
-                "SELECT DISTINCT rejection_stage FROM smc_simple_rejections ORDER BY rejection_stage",
-                conn
-            )
-            stages.extend(stage_df['rejection_stage'].tolist())
+            if not result or not result[3]:  # table_exists check
+                return {'stages': ['All'], 'pairs': ['All'], 'sessions': ['All'], 'table_exists': False}
 
-            # Get unique pairs
-            pair_df = pd.read_sql_query(
-                "SELECT DISTINCT pair FROM smc_simple_rejections WHERE pair IS NOT NULL ORDER BY pair",
-                conn
-            )
-            pairs.extend(pair_df['pair'].tolist())
+            import json
+            stages_list = result[0] if result[0] else []
+            pairs_list = result[1] if result[1] else []
+            sessions_list = result[2] if result[2] else []
 
-            # Get unique sessions
-            session_df = pd.read_sql_query(
-                "SELECT DISTINCT market_session FROM smc_simple_rejections WHERE market_session IS NOT NULL ORDER BY market_session",
-                conn
-            )
-            sessions.extend(session_df['market_session'].tolist())
+            # Parse JSON if needed
+            if isinstance(stages_list, str):
+                stages_list = json.loads(stages_list)
+            if isinstance(pairs_list, str):
+                pairs_list = json.loads(pairs_list)
+            if isinstance(sessions_list, str):
+                sessions_list = json.loads(sessions_list)
 
-            return {'stages': stages, 'pairs': pairs, 'sessions': sessions, 'table_exists': True}
+            return {
+                'stages': ['All'] + (stages_list or []),
+                'pairs': ['All'] + (pairs_list or []),
+                'sessions': ['All'] + (sessions_list or []),
+                'table_exists': True
+            }
 
         except Exception as e:
             logger.error(f"Error fetching SMC filter options: {e}")
@@ -527,6 +564,8 @@ class RejectionAnalyticsService:
         """
         Fetch aggregated EMA Double rejection statistics (cached 5 min).
 
+        Optimized to use a single query with CTEs instead of multiple round-trips.
+
         Args:
             days: Number of days to look back
 
@@ -538,64 +577,78 @@ class RejectionAnalyticsService:
             return {}
 
         try:
-            # Total and by-stage counts
+            # Single optimized query using CTEs to get all stats in one round-trip
             query = """
+            WITH base_data AS (
+                SELECT
+                    epic,
+                    pair,
+                    rejection_stage,
+                    confidence_score,
+                    successful_crossover_count
+                FROM ema_double_rejections
+                WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
+            ),
+            stage_counts AS (
+                SELECT
+                    rejection_stage,
+                    COUNT(*) as stage_count
+                FROM base_data
+                GROUP BY rejection_stage
+            ),
+            totals AS (
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(DISTINCT epic) as unique_pairs,
+                    ROUND(AVG(successful_crossover_count)::numeric, 1) as avg_crossovers
+                FROM base_data
+            ),
+            near_misses AS (
+                SELECT COUNT(*) as near_miss_count
+                FROM base_data
+                WHERE rejection_stage = 'CONFIDENCE'
+                AND confidence_score >= 0.45
+            ),
+            top_pair AS (
+                SELECT pair, COUNT(*) as pair_count
+                FROM base_data
+                WHERE pair IS NOT NULL
+                GROUP BY pair
+                ORDER BY pair_count DESC
+                LIMIT 1
+            )
             SELECT
-                COUNT(*) as total,
-                COUNT(DISTINCT epic) as unique_pairs,
-                rejection_stage,
-                COUNT(*) as stage_count
-            FROM ema_double_rejections
-            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
-            GROUP BY rejection_stage
-            ORDER BY stage_count DESC
+                t.total,
+                t.unique_pairs,
+                t.avg_crossovers,
+                nm.near_miss_count,
+                tp.pair as most_rejected_pair,
+                (SELECT json_object_agg(rejection_stage, stage_count) FROM stage_counts) as by_stage
+            FROM totals t
+            CROSS JOIN near_misses nm
+            LEFT JOIN top_pair tp ON true
             """
 
-            df = pd.read_sql_query(query, conn, params=[days])
+            with conn.cursor() as cursor:
+                cursor.execute(query, [days])
+                result = cursor.fetchone()
 
-            if df.empty:
-                return {'total': 0, 'unique_pairs': 0, 'by_stage': {}}
+            if not result or result[0] == 0:
+                return {'total': 0, 'unique_pairs': 0, 'by_stage': {}, 'near_misses': 0, 'most_rejected_pair': 'N/A', 'avg_crossover_count': 0}
 
-            stats = {
-                'total': int(df['total'].iloc[0]) if not df.empty else 0,
-                'unique_pairs': int(df['unique_pairs'].iloc[0]) if not df.empty else 0,
-                'by_stage': dict(zip(df['rejection_stage'], df['stage_count']))
+            import json
+            by_stage = result[5] if result[5] else {}
+            if isinstance(by_stage, str):
+                by_stage = json.loads(by_stage)
+
+            return {
+                'total': int(result[0]) if result[0] else 0,
+                'unique_pairs': int(result[1]) if result[1] else 0,
+                'avg_crossover_count': float(result[2]) if result[2] else 0,
+                'near_misses': int(result[3]) if result[3] else 0,
+                'most_rejected_pair': result[4] if result[4] else 'N/A',
+                'by_stage': by_stage
             }
-
-            # Near-miss count (high confidence rejects)
-            near_miss_query = """
-            SELECT COUNT(*) as near_misses
-            FROM ema_double_rejections
-            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
-            AND rejection_stage = 'CONFIDENCE'
-            AND confidence_score >= 0.45
-            """
-            near_miss_df = pd.read_sql_query(near_miss_query, conn, params=[days])
-            stats['near_misses'] = int(near_miss_df['near_misses'].iloc[0]) if not near_miss_df.empty else 0
-
-            # Most rejected pair
-            pair_query = """
-            SELECT pair, COUNT(*) as count
-            FROM ema_double_rejections
-            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
-            GROUP BY pair
-            ORDER BY count DESC
-            LIMIT 1
-            """
-            pair_df = pd.read_sql_query(pair_query, conn, params=[days])
-            stats['most_rejected_pair'] = pair_df['pair'].iloc[0] if not pair_df.empty else 'N/A'
-
-            # Average crossover count (EMA-specific)
-            avg_query = """
-            SELECT ROUND(AVG(successful_crossover_count)::numeric, 1) as avg_crossovers
-            FROM ema_double_rejections
-            WHERE scan_timestamp >= NOW() - INTERVAL '%s days'
-            AND successful_crossover_count IS NOT NULL
-            """
-            avg_df = pd.read_sql_query(avg_query, conn, params=[days])
-            stats['avg_crossover_count'] = float(avg_df['avg_crossovers'].iloc[0]) if not avg_df.empty and avg_df['avg_crossovers'].iloc[0] else 0
-
-            return stats
 
         except Exception as e:
             if "does not exist" not in str(e):
@@ -604,10 +657,12 @@ class RejectionAnalyticsService:
         finally:
             conn.close()
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=300)  # Increased TTL to 5 min - filter options change rarely
     def get_ema_filter_options(_self) -> Dict[str, List[str]]:
         """
-        Get unique filter options for EMA Double rejections (cached 1 min).
+        Get unique filter options for EMA Double rejections (cached 5 min).
+
+        Optimized to use a single query instead of 3 separate DISTINCT queries.
 
         Returns:
             Dictionary with stages, pairs, and sessions lists
@@ -617,43 +672,58 @@ class RejectionAnalyticsService:
             return {'stages': ['All'], 'pairs': ['All'], 'sessions': ['All']}
 
         try:
-            stages = ['All']
-            pairs = ['All']
-            sessions = ['All']
+            # Single query to get all filter options at once
+            query = """
+            SELECT
+                COALESCE(
+                    (SELECT json_agg(DISTINCT rejection_stage ORDER BY rejection_stage)
+                     FROM ema_double_rejections),
+                    '[]'::json
+                ) as stages,
+                COALESCE(
+                    (SELECT json_agg(DISTINCT pair ORDER BY pair)
+                     FROM ema_double_rejections
+                     WHERE pair IS NOT NULL),
+                    '[]'::json
+                ) as pairs,
+                COALESCE(
+                    (SELECT json_agg(DISTINCT market_session ORDER BY market_session)
+                     FROM ema_double_rejections
+                     WHERE market_session IS NOT NULL),
+                    '[]'::json
+                ) as sessions,
+                EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'ema_double_rejections'
+                ) as table_exists
+            """
 
-            # Check table exists
             with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables
-                        WHERE table_name = 'ema_double_rejections'
-                    )
-                """)
-                if not cursor.fetchone()[0]:
-                    return {'stages': stages, 'pairs': pairs, 'sessions': sessions, 'table_exists': False}
+                cursor.execute(query)
+                result = cursor.fetchone()
 
-            # Get unique stages
-            stage_df = pd.read_sql_query(
-                "SELECT DISTINCT rejection_stage FROM ema_double_rejections ORDER BY rejection_stage",
-                conn
-            )
-            stages.extend(stage_df['rejection_stage'].tolist())
+            if not result or not result[3]:  # table_exists check
+                return {'stages': ['All'], 'pairs': ['All'], 'sessions': ['All'], 'table_exists': False}
 
-            # Get unique pairs
-            pair_df = pd.read_sql_query(
-                "SELECT DISTINCT pair FROM ema_double_rejections WHERE pair IS NOT NULL ORDER BY pair",
-                conn
-            )
-            pairs.extend(pair_df['pair'].tolist())
+            import json
+            stages_list = result[0] if result[0] else []
+            pairs_list = result[1] if result[1] else []
+            sessions_list = result[2] if result[2] else []
 
-            # Get unique sessions
-            session_df = pd.read_sql_query(
-                "SELECT DISTINCT market_session FROM ema_double_rejections WHERE market_session IS NOT NULL ORDER BY market_session",
-                conn
-            )
-            sessions.extend(session_df['market_session'].tolist())
+            # Parse JSON if needed
+            if isinstance(stages_list, str):
+                stages_list = json.loads(stages_list)
+            if isinstance(pairs_list, str):
+                pairs_list = json.loads(pairs_list)
+            if isinstance(sessions_list, str):
+                sessions_list = json.loads(sessions_list)
 
-            return {'stages': stages, 'pairs': pairs, 'sessions': sessions, 'table_exists': True}
+            return {
+                'stages': ['All'] + (stages_list or []),
+                'pairs': ['All'] + (pairs_list or []),
+                'sessions': ['All'] + (sessions_list or []),
+                'table_exists': True
+            }
 
         except Exception as e:
             logger.error(f"Error fetching EMA filter options: {e}")

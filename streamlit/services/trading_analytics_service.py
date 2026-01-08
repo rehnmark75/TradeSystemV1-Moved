@@ -202,56 +202,45 @@ class TradingAnalyticsService:
 
             df = pd.read_sql_query(query, conn, params=params)
 
-            # Enhance DataFrame
+            # Enhance DataFrame using vectorized operations (much faster than .apply())
             if not df.empty:
-                # Determine trade result based on status and profit_loss
-                # Only pending_limit and pending are truly "pending" orders
-                # limit_not_filled, limit_rejected, limit_cancelled are terminal states (not pending)
-                def get_trade_result(row):
-                    status = row.get('status', '')
-                    pnl = row.get('profit_loss')
+                # Determine trade result using vectorized numpy operations
+                # Initialize with 'PENDING' as default
+                df['trade_result'] = 'PENDING'
 
-                    # Check P&L first for completed trades
-                    if pd.notna(pnl):
-                        return 'WIN' if pnl > 0 else 'LOSS' if pnl < 0 else 'BREAKEVEN'
+                # Handle P&L-based results first (highest priority)
+                has_pnl = df['profit_loss'].notna()
+                df.loc[has_pnl & (df['profit_loss'] > 0), 'trade_result'] = 'WIN'
+                df.loc[has_pnl & (df['profit_loss'] < 0), 'trade_result'] = 'LOSS'
+                df.loc[has_pnl & (df['profit_loss'] == 0), 'trade_result'] = 'BREAKEVEN'
 
-                    # For NULL P&L, check status to determine actual state
-                    if status in ('pending', 'pending_limit'):
-                        return 'PENDING'
-                    elif status == 'tracking':
-                        return 'OPEN'
-                    elif status == 'limit_not_filled':
-                        return 'EXPIRED'
-                    elif status == 'limit_rejected':
-                        return 'REJECTED'
-                    elif status == 'limit_cancelled':
-                        return 'CANCELLED'
-                    else:
-                        # Fallback for any other status with NULL P&L
-                        return 'PENDING'
+                # Handle status-based results for NULL P&L
+                no_pnl = ~has_pnl
+                df.loc[no_pnl & df['status'].isin(['pending', 'pending_limit']), 'trade_result'] = 'PENDING'
+                df.loc[no_pnl & (df['status'] == 'tracking'), 'trade_result'] = 'OPEN'
+                df.loc[no_pnl & (df['status'] == 'limit_not_filled'), 'trade_result'] = 'EXPIRED'
+                df.loc[no_pnl & (df['status'] == 'limit_rejected'), 'trade_result'] = 'REJECTED'
+                df.loc[no_pnl & (df['status'] == 'limit_cancelled'), 'trade_result'] = 'CANCELLED'
 
-                df['trade_result'] = df.apply(get_trade_result, axis=1)
+                # Format P&L display using vectorized operations
+                # Start with status-based text for NULL P&L
+                pnl_text_map = {
+                    'OPEN': 'Open',
+                    'EXPIRED': 'Not Filled',
+                    'REJECTED': 'Rejected',
+                    'CANCELLED': 'Cancelled',
+                    'PENDING': 'Pending'
+                }
+                df['profit_loss_formatted'] = df['trade_result'].map(pnl_text_map).fillna('Pending')
 
-                # Format P&L display based on trade result
-                def format_pnl(row):
-                    pnl = row.get('profit_loss')
-                    result = row.get('trade_result', '')
-                    currency = row.get('pnl_currency', '')
-
-                    if pd.notna(pnl):
-                        return f"{pnl:.2f} {currency}"
-                    elif result == 'OPEN':
-                        return "Open"
-                    elif result == 'EXPIRED':
-                        return "Not Filled"
-                    elif result == 'REJECTED':
-                        return "Rejected"
-                    elif result == 'CANCELLED':
-                        return "Cancelled"
-                    else:
-                        return "Pending"
-
-                df['profit_loss_formatted'] = df.apply(format_pnl, axis=1)
+                # Override with formatted P&L where available
+                has_pnl_mask = df['profit_loss'].notna()
+                if has_pnl_mask.any():
+                    df.loc[has_pnl_mask, 'profit_loss_formatted'] = (
+                        df.loc[has_pnl_mask, 'profit_loss'].apply(lambda x: f"{x:.2f}") +
+                        ' ' +
+                        df.loc[has_pnl_mask, 'pnl_currency'].fillna('')
+                    )
 
             return df
 

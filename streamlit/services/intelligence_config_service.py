@@ -19,27 +19,15 @@ from contextlib import contextmanager
 import psycopg2
 import psycopg2.extras
 
-from .db_utils import get_connection_string
+from .db_utils import get_psycopg2_pool
 
 logger = logging.getLogger(__name__)
 
 
-@st.cache_resource
-def get_strategy_config_pool():
-    """Get cached connection pool for strategy_config database"""
-    from psycopg2 import pool as psycopg2_pool
-    conn_str = get_connection_string("strategy_config")
-    return psycopg2_pool.ThreadedConnectionPool(
-        minconn=2,
-        maxconn=10,
-        dsn=conn_str
-    )
-
-
 @contextmanager
 def get_connection():
-    """Get a connection from the pool"""
-    pool = get_strategy_config_pool()
+    """Get a connection from the centralized pool"""
+    pool = get_psycopg2_pool("strategy_config")
     conn = pool.getconn()
     try:
         yield conn
@@ -47,9 +35,12 @@ def get_connection():
         pool.putconn(conn)
 
 
+@st.cache_data(ttl=60)  # Cache for 1 minute - config changes rarely
 def get_intelligence_config() -> Dict[str, Any]:
     """
-    Load all intelligence configuration from database.
+    Load all intelligence configuration from database (cached 1 min).
+
+    Optimized to use a single query with UNION ALL instead of 4 separate queries.
 
     Returns dict with:
     - parameters: Dict of parameter_name -> value
@@ -65,90 +56,114 @@ def get_intelligence_config() -> Dict[str, Any]:
 
     try:
         with get_connection() as conn:
+            # Single optimized query to fetch all config data at once
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                # Load global parameters
                 cur.execute("""
-                    SELECT parameter_name, parameter_value, value_type, category,
+                    -- Fetch all configuration in a single query using UNION ALL
+                    -- Type 1: Global parameters
+                    SELECT 1 as query_type,
+                           parameter_name, parameter_value, value_type, category,
                            subcategory, description, display_order, min_value, max_value,
-                           valid_options, is_editable
+                           valid_options, is_editable,
+                           NULL::INTEGER as preset_id, NULL::VARCHAR as preset_name,
+                           NULL::NUMERIC as threshold, NULL::BOOLEAN as use_intelligence_engine,
+                           NULL::VARCHAR as component_name, NULL::BOOLEAN as is_enabled,
+                           NULL::VARCHAR as regime, NULL::VARCHAR as strategy,
+                           NULL::NUMERIC as confidence_modifier
                     FROM intelligence_global_config
                     WHERE is_active = TRUE
-                    ORDER BY category, display_order
-                """)
-                for row in cur.fetchall():
-                    name = row['parameter_name']
-                    value = row['parameter_value']
-                    value_type = row['value_type']
 
-                    # Convert value based on type
-                    if value_type == 'bool':
-                        converted_value = value.lower() in ('true', '1', 'yes')
-                    elif value_type == 'int':
-                        converted_value = int(value)
-                    elif value_type == 'float':
-                        converted_value = float(value)
-                    else:
-                        converted_value = value
+                    UNION ALL
 
-                    result['parameters'][name] = {
-                        'value': converted_value,
-                        'raw_value': value,
-                        'type': value_type,
-                        'category': row['category'],
-                        'subcategory': row['subcategory'],
-                        'description': row['description'],
-                        'display_order': row['display_order'],
-                        'min_value': float(row['min_value']) if row['min_value'] is not None else None,
-                        'max_value': float(row['max_value']) if row['max_value'] is not None else None,
-                        'valid_options': row['valid_options'],
-                        'is_editable': row['is_editable'],
-                    }
-
-                # Load presets
-                cur.execute("""
-                    SELECT id, preset_name, threshold, use_intelligence_engine, description, display_order
+                    -- Type 2: Presets
+                    SELECT 2 as query_type,
+                           NULL, NULL, NULL, NULL, NULL,
+                           description, display_order, NULL, NULL, NULL, NULL,
+                           id, preset_name, threshold, use_intelligence_engine,
+                           NULL, NULL, NULL, NULL, NULL
                     FROM intelligence_presets
                     WHERE is_active = TRUE
-                    ORDER BY display_order
-                """)
-                for row in cur.fetchall():
-                    result['presets'][row['preset_name']] = {
-                        'id': row['id'],
-                        'name': row['preset_name'],
-                        'threshold': float(row['threshold']),
-                        'use_intelligence_engine': row['use_intelligence_engine'],
-                        'description': row['description'],
-                        'display_order': row['display_order'],
-                    }
 
-                # Load preset components
-                cur.execute("""
-                    SELECT p.preset_name, pc.component_name, pc.is_enabled
+                    UNION ALL
+
+                    -- Type 3: Preset components
+                    SELECT 3 as query_type,
+                           NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                           NULL, p.preset_name, NULL, NULL,
+                           pc.component_name, pc.is_enabled, NULL, NULL, NULL
                     FROM intelligence_preset_components pc
                     JOIN intelligence_presets p ON p.id = pc.preset_id
                     WHERE p.is_active = TRUE
-                """)
-                for row in cur.fetchall():
-                    preset_name = row['preset_name']
-                    if preset_name not in result['preset_components']:
-                        result['preset_components'][preset_name] = {}
-                    result['preset_components'][preset_name][row['component_name']] = row['is_enabled']
 
-                # Load regime modifiers
-                cur.execute("""
-                    SELECT regime, strategy, confidence_modifier, description
+                    UNION ALL
+
+                    -- Type 4: Regime modifiers
+                    SELECT 4 as query_type,
+                           NULL, NULL, NULL, NULL, NULL,
+                           description, NULL, NULL, NULL, NULL, NULL,
+                           NULL, NULL, NULL, NULL, NULL, NULL,
+                           regime, strategy, confidence_modifier
                     FROM intelligence_regime_modifiers
                     WHERE is_active = TRUE
-                    ORDER BY regime, strategy
                 """)
+
                 for row in cur.fetchall():
-                    regime = row['regime']
-                    if regime not in result['regime_modifiers']:
-                        result['regime_modifiers'][regime] = {}
-                    result['regime_modifiers'][regime][row['strategy']] = {
-                        'modifier': float(row['confidence_modifier']),
-                        'description': row['description'],
-                    }
+                    query_type = row['query_type']
+
+                    if query_type == 1:  # Global parameters
+                        name = row['parameter_name']
+                        value = row['parameter_value']
+                        value_type = row['value_type']
+
+                        # Convert value based on type
+                        if value_type == 'bool':
+                            converted_value = value.lower() in ('true', '1', 'yes')
+                        elif value_type == 'int':
+                            converted_value = int(value)
+                        elif value_type == 'float':
+                            converted_value = float(value)
+                        else:
+                            converted_value = value
+
+                        result['parameters'][name] = {
+                            'value': converted_value,
+                            'raw_value': value,
+                            'type': value_type,
+                            'category': row['category'],
+                            'subcategory': row['subcategory'],
+                            'description': row['description'],
+                            'display_order': row['display_order'],
+                            'min_value': float(row['min_value']) if row['min_value'] is not None else None,
+                            'max_value': float(row['max_value']) if row['max_value'] is not None else None,
+                            'valid_options': row['valid_options'],
+                            'is_editable': row['is_editable'],
+                        }
+
+                    elif query_type == 2:  # Presets
+                        preset_name = row['preset_name']
+                        result['presets'][preset_name] = {
+                            'id': row['preset_id'],
+                            'name': preset_name,
+                            'threshold': float(row['threshold']),
+                            'use_intelligence_engine': row['use_intelligence_engine'],
+                            'description': row['description'],
+                            'display_order': row['display_order'],
+                        }
+
+                    elif query_type == 3:  # Preset components
+                        preset_name = row['preset_name']
+                        if preset_name not in result['preset_components']:
+                            result['preset_components'][preset_name] = {}
+                        result['preset_components'][preset_name][row['component_name']] = row['is_enabled']
+
+                    elif query_type == 4:  # Regime modifiers
+                        regime = row['regime']
+                        if regime not in result['regime_modifiers']:
+                            result['regime_modifiers'][regime] = {}
+                        result['regime_modifiers'][regime][row['strategy']] = {
+                            'modifier': float(row['confidence_modifier']),
+                            'description': row['description'],
+                        }
 
     except Exception as e:
         logger.error(f"Failed to load intelligence config: {e}")
