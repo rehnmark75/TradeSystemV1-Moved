@@ -70,6 +70,9 @@ vector-db/vectordb/32cb61c2-d8ab-4295-b0ed-f764a453d8a2/length.bin
 # Backtest signal output files
 worker/app/forex_scanner/all_signals*.txt
 
+# Optimization result CSV files
+worker/app/forex_scanner/optimization_results/
+
 # Analysis and planning documentation (local only)
 analysis_docs/
 docs/
