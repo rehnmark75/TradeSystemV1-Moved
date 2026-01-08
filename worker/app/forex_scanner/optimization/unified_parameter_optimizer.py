@@ -248,22 +248,58 @@ class UnifiedParameterOptimizer:
         config = {}
 
         try:
+            # Load ALL configurable parameters from pair_overrides
             query = """
             SELECT
                 epic,
+                -- SL/TP parameters
                 CAST(fixed_stop_loss_pips AS FLOAT) as fixed_stop_loss_pips,
                 CAST(fixed_take_profit_pips AS FLOAT) as fixed_take_profit_pips,
+                sl_buffer_pips,
+
+                -- Confidence parameters
                 CAST(min_confidence AS FLOAT) as min_confidence,
                 CAST(max_confidence AS FLOAT) as max_confidence,
+                CAST(min_confidence_bull AS FLOAT) as min_confidence_bull,
+                CAST(min_confidence_bear AS FLOAT) as min_confidence_bear,
+
+                -- Volume parameters
                 CAST(min_volume_ratio AS FLOAT) as min_volume_ratio,
+                CAST(min_volume_ratio_bull AS FLOAT) as min_volume_ratio_bull,
+                CAST(min_volume_ratio_bear AS FLOAT) as min_volume_ratio_bear,
+
+                -- Fib pullback parameters
                 CAST(fib_pullback_min_bull AS FLOAT) as fib_pullback_min_bull,
                 CAST(fib_pullback_min_bear AS FLOAT) as fib_pullback_min_bear,
                 CAST(fib_pullback_max_bull AS FLOAT) as fib_pullback_max_bull,
                 CAST(fib_pullback_max_bear AS FLOAT) as fib_pullback_max_bear,
+
+                -- Momentum parameters
+                CAST(momentum_min_depth_bull AS FLOAT) as momentum_min_depth_bull,
+                CAST(momentum_min_depth_bear AS FLOAT) as momentum_min_depth_bear,
+
+                -- Swing structure parameters
+                CAST(min_swing_atr_multiplier AS FLOAT) as min_swing_atr_multiplier,
+                swing_lookback_bars,
+
+                -- Filter toggles
                 direction_overrides_enabled,
-                sl_buffer_pips,
                 macd_filter_enabled,
-                change_reason
+                smc_conflict_tolerance,
+
+                -- Session parameters
+                allow_asian_session,
+
+                -- Confidence adjustments
+                CAST(high_volume_confidence AS FLOAT) as high_volume_confidence,
+                CAST(low_atr_confidence AS FLOAT) as low_atr_confidence,
+                CAST(high_atr_confidence AS FLOAT) as high_atr_confidence,
+                CAST(near_ema_confidence AS FLOAT) as near_ema_confidence,
+                CAST(far_ema_confidence AS FLOAT) as far_ema_confidence,
+
+                -- Metadata
+                change_reason,
+                updated_at
             FROM smc_simple_pair_overrides
             WHERE is_enabled = TRUE
             """
