@@ -204,35 +204,43 @@ def _worker_optimize_epic(
 
 def _worker_extract_result(db, epic: str, params: dict, duration: float) -> dict:
     """Extract latest backtest result (worker-safe)"""
+    # Query matches the original _extract_result method - joins backtest_signals
     query = """
         SELECT
-            id,
-            total_signals,
-            winning_trades,
-            losing_trades,
-            win_rate,
-            profit_factor,
-            total_profit_pips,
-            avg_profit_pips,
-            avg_loss_pips
-        FROM backtest_executions
-        WHERE epic = :epic
-        ORDER BY created_at DESC
+            be.id as execution_id,
+            COUNT(bs.id) as total_signals,
+            SUM(CASE WHEN bs.trade_result = 'win' THEN 1 ELSE 0 END) as winners,
+            SUM(CASE WHEN bs.trade_result = 'loss' THEN 1 ELSE 0 END) as losers,
+            SUM(bs.pips_gained) as total_pips,
+            AVG(CASE WHEN bs.trade_result = 'win' THEN bs.pips_gained END) as avg_profit,
+            AVG(CASE WHEN bs.trade_result = 'loss' THEN ABS(bs.pips_gained) END) as avg_loss,
+            SUM(CASE WHEN bs.trade_result = 'win' THEN bs.pips_gained ELSE 0 END) as gross_profit,
+            SUM(CASE WHEN bs.trade_result = 'loss' THEN ABS(bs.pips_gained) ELSE 0 END) as gross_loss
+        FROM backtest_executions be
+        LEFT JOIN backtest_signals bs ON be.id = bs.execution_id
+        WHERE be.status = 'COMPLETED'
+        GROUP BY be.id, be.created_at
+        ORDER BY be.created_at DESC
         LIMIT 1
     """
 
     try:
-        result = db.execute_query(query, {'epic': epic})
+        result = db.execute_query(query)
         if result is not None and len(result) > 0:
             row = result.iloc[0]
 
-            # Calculate composite score
-            win_rate = float(row.get('win_rate', 0) or 0)
-            profit_factor = float(row.get('profit_factor', 0) or 0)
-            total_pips = float(row.get('total_profit_pips', 0) or 0)
+            winners = int(row.get('winners', 0) or 0)
+            losers = int(row.get('losers', 0) or 0)
+            total = winners + losers
             total_signals = int(row.get('total_signals', 0) or 0)
 
-            # Composite score formula
+            win_rate = winners / max(total, 1)
+            gross_profit = float(row.get('gross_profit', 0) or 0)
+            gross_loss = float(row.get('gross_loss', 0) or 0)
+            profit_factor = gross_profit / max(gross_loss, 0.01)
+            total_pips = float(row.get('total_pips', 0) or 0)
+
+            # Composite score formula (same as original)
             score = (
                 (win_rate * 100) * 0.3 +
                 min(profit_factor, 3.0) * 20 +
@@ -243,15 +251,15 @@ def _worker_extract_result(db, epic: str, params: dict, duration: float) -> dict
             return {
                 'epic': epic,
                 'params': params,
-                'execution_id': int(row.get('id', 0)),
+                'execution_id': int(row.get('execution_id', 0)),
                 'total_signals': total_signals,
-                'winners': int(row.get('winning_trades', 0) or 0),
-                'losers': int(row.get('losing_trades', 0) or 0),
+                'winners': winners,
+                'losers': losers,
                 'win_rate': win_rate,
                 'profit_factor': profit_factor,
                 'total_pips': total_pips,
-                'avg_profit_pips': float(row.get('avg_profit_pips', 0) or 0),
-                'avg_loss_pips': float(row.get('avg_loss_pips', 0) or 0),
+                'avg_profit_pips': float(row.get('avg_profit', 0) or 0),
+                'avg_loss_pips': float(row.get('avg_loss', 0) or 0),
                 'composite_score': score,
                 'status': 'completed',
                 'error_message': '',
