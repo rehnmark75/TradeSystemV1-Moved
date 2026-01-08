@@ -228,11 +228,12 @@ class PerformanceTracker:
             pnl_pct = ((entry - current) / entry) * 100
             r_multiple = (entry - current) / (stop - entry) if stop != entry else 0
 
-        # Update query
+        # Update query - use explicit cast to VARCHAR to avoid type inference issues
+        # The CASE expression uses $1::VARCHAR to ensure consistent type deduction
         query = """
             UPDATE stock_scanner_signals
-            SET status = $1,
-                close_timestamp = CASE WHEN $1 IN ('closed', 'expired') THEN NOW() ELSE close_timestamp END,
+            SET status = $1::VARCHAR,
+                close_timestamp = CASE WHEN $1::VARCHAR IN ('closed', 'expired') THEN NOW() ELSE close_timestamp END,
                 close_price = $2,
                 realized_pnl_pct = $3,
                 realized_r_multiple = $4,
@@ -430,7 +431,7 @@ class PerformanceTracker:
 
             await self.db.execute(
                 insert_query,
-                scanner_name, today, 'daily',
+                scanner_name, today,
                 metrics.total_signals, metrics.triggered_signals,
                 metrics.closed_signals, metrics.expired_signals,
                 metrics.win_rate, metrics.avg_win_pct, metrics.avg_loss_pct,

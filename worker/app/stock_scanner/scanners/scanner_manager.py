@@ -166,7 +166,9 @@ class ScannerManager:
         logger.info("=" * 60)
 
         if calculation_date is None:
-            calculation_date = (datetime.now() - timedelta(days=1)).date()
+            # Use today's date - represents when the pipeline ran
+            # (even though data is from previous trading day's close)
+            calculation_date = datetime.now().date()
 
         start_time = datetime.now()
         all_signals = []

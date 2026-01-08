@@ -137,8 +137,8 @@ class RSIDivergenceScanner(BaseScanner):
         logger.info(f"Starting {self.scanner_name} scan")
 
         if calculation_date is None:
-            from datetime import timedelta
-            calculation_date = (datetime.now() - timedelta(days=1)).date()
+            # Use today's date - represents when pipeline ran
+            calculation_date = datetime.now().date()
 
         # Ensure calculation_date is a date object
         if hasattr(calculation_date, 'date'):
@@ -468,7 +468,10 @@ class RSIDivergenceScanner(BaseScanner):
             avg_gain[i] = (avg_gain[i-1] * (period - 1) + gains[i-1]) / period
             avg_loss[i] = (avg_loss[i-1] * (period - 1) + losses[i-1]) / period
 
-        rs = np.where(avg_loss != 0, avg_gain / avg_loss, 100)
+        # Use np.divide with where parameter to avoid division warnings
+        # When avg_loss is 0, RS is set to 100 (max strength)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            rs = np.where(avg_loss != 0, avg_gain / avg_loss, 100)
         rsi = 100 - (100 / (1 + rs))
 
         return rsi

@@ -98,7 +98,7 @@ class WatchlistBuilder:
         start_time = datetime.now()
 
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         # Get metrics for all stocks
         metrics = await self._get_all_metrics(calculation_date)
@@ -593,7 +593,7 @@ class WatchlistBuilder:
     ) -> List[Dict[str, Any]]:
         """Get stocks for a specific tier."""
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         query = """
             SELECT *
@@ -611,7 +611,7 @@ class WatchlistBuilder:
     ) -> Dict[str, Any]:
         """Get summary statistics for the watchlist."""
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         query = """
             SELECT
@@ -669,7 +669,7 @@ class WatchlistBuilder:
             List of matching stocks
         """
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         conditions = ["calculation_date = $1"]
         params = [calculation_date]
@@ -737,7 +737,7 @@ class WatchlistBuilder:
         - MACD bullish or bullish cross
         """
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         query = """
             SELECT *
@@ -767,7 +767,7 @@ class WatchlistBuilder:
         - Bullish candlestick pattern (hammer, bullish_engulfing, etc.)
         """
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         query = """
             SELECT *
@@ -795,7 +795,7 @@ class WatchlistBuilder:
             direction: 'up' for gap ups, 'down' for gap downs
         """
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         if direction == 'up':
             gap_signals = ['gap_up_large', 'gap_up']
@@ -820,7 +820,7 @@ class WatchlistBuilder:
     ) -> List[Dict[str, Any]]:
         """Get stocks that just experienced a Golden Cross (SMA50 crossed above SMA200)."""
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         query = """
             SELECT *
@@ -840,7 +840,7 @@ class WatchlistBuilder:
     ) -> Dict[str, Any]:
         """Get summary of enhanced signals across the watchlist."""
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         # RSI summary
         rsi_query = """

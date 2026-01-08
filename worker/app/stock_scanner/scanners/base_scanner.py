@@ -178,6 +178,17 @@ class SignalSetup:
 
     def to_db_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for database insertion"""
+        import math
+
+        def sanitize_float(val) -> Optional[float]:
+            """Convert to float, replacing NaN/Inf with None"""
+            if val is None:
+                return None
+            f = float(val)
+            if math.isnan(f) or math.isinf(f):
+                return None
+            return f
+
         # Convert signal_timestamp to timezone-aware datetime for asyncpg
         ts = self.signal_timestamp
         if isinstance(ts, pd.Timestamp):
@@ -192,30 +203,50 @@ class SignalSetup:
                 # Assume UTC if no timezone
                 ts = ts.replace(tzinfo=timezone.utc)
 
+        # Sanitize all float values to prevent NaN from reaching the database
+        entry_price = sanitize_float(self.entry_price) or 0.0
+        stop_loss = sanitize_float(self.stop_loss)
+        take_profit_1 = sanitize_float(self.take_profit_1)
+
+        # If stop_loss or take_profit is None/NaN, calculate reasonable defaults
+        if stop_loss is None or stop_loss == 0:
+            # Default to 5% below entry for BUY, 5% above for SELL
+            if self.signal_type == SignalType.BUY:
+                stop_loss = entry_price * 0.95
+            else:
+                stop_loss = entry_price * 1.05
+
+        if take_profit_1 is None or take_profit_1 == 0:
+            # Default to 10% above entry for BUY, 10% below for SELL
+            if self.signal_type == SignalType.BUY:
+                take_profit_1 = entry_price * 1.10
+            else:
+                take_profit_1 = entry_price * 0.90
+
         return {
             'signal_timestamp': ts,
             'scanner_name': self.scanner_name,
             'ticker': self.ticker,
             'signal_type': self.signal_type.value,
-            'entry_price': float(self.entry_price),
-            'stop_loss': float(self.stop_loss),
-            'take_profit_1': float(self.take_profit_1),
-            'take_profit_2': float(self.take_profit_2) if self.take_profit_2 else None,
-            'risk_reward_ratio': float(self.risk_reward_ratio),
-            'risk_percent': float(self.risk_percent),
+            'entry_price': entry_price,
+            'stop_loss': stop_loss,
+            'take_profit_1': take_profit_1,
+            'take_profit_2': sanitize_float(self.take_profit_2),
+            'risk_reward_ratio': sanitize_float(self.risk_reward_ratio) or 0.0,
+            'risk_percent': sanitize_float(self.risk_percent) or 0.0,
             'composite_score': self.composite_score,
             'quality_tier': self.quality_tier.value,
-            'trend_score': float(self.trend_score),
-            'momentum_score': float(self.momentum_score),
-            'volume_score': float(self.volume_score),
-            'pattern_score': float(self.pattern_score),
-            'confluence_score': float(self.confluence_score),
+            'trend_score': sanitize_float(self.trend_score) or 0.0,
+            'momentum_score': sanitize_float(self.momentum_score) or 0.0,
+            'volume_score': sanitize_float(self.volume_score) or 0.0,
+            'pattern_score': sanitize_float(self.pattern_score) or 0.0,
+            'confluence_score': sanitize_float(self.confluence_score) or 0.0,
             'setup_description': self.setup_description,
             'confluence_factors': self.confluence_factors,
             'timeframe': self.timeframe,
             'market_regime': self.market_regime,
-            'suggested_position_size_pct': float(self.suggested_position_size_pct),
-            'max_risk_per_trade_pct': float(self.max_risk_per_trade_pct),
+            'suggested_position_size_pct': sanitize_float(self.suggested_position_size_pct) or 0.0,
+            'max_risk_per_trade_pct': sanitize_float(self.max_risk_per_trade_pct) or 1.5,
         }
 
     def to_tradingview_dict(self) -> Dict[str, Any]:

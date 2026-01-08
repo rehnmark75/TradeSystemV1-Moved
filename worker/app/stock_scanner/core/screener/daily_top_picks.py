@@ -155,7 +155,8 @@ class DailyTopPicks:
         logger.info("=" * 60)
 
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            # Use today's date - represents when pipeline ran
+            calculation_date = datetime.now().date()
 
         # Get all eligible candidates
         candidates = await self._get_eligible_candidates(calculation_date)

@@ -76,7 +76,7 @@ class RSCalculator:
         start_time = datetime.now()
 
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         # Step 1: Get SPY 20-day return
         spy_return = await self._get_benchmark_return(SPY_TICKER, calculation_date, 20)
@@ -311,7 +311,7 @@ class RSCalculator:
         logger.info("Calculating Sector RS...")
 
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         # Get SPY return
         spy_return = await self._get_benchmark_return(SPY_TICKER, calculation_date, 20)
@@ -474,7 +474,7 @@ class MarketRegimeCalculator:
         logger.info("Calculating Market Regime...")
 
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         # Get SPY data
         spy_data = await self._get_spy_metrics(calculation_date)

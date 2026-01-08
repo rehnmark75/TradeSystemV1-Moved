@@ -64,7 +64,8 @@ class MetricsCalculator:
         start_time = datetime.now()
 
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            # Use today's date - represents when the pipeline ran
+            calculation_date = datetime.now().date()
 
         # Get tickers to process
         if ticker:

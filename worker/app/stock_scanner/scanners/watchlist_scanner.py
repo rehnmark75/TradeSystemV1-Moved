@@ -206,6 +206,8 @@ class WatchlistScanner:
             Dict mapping watchlist_name to list of matching WatchlistResults
         """
         if calculation_date is None:
+            # Use today's date - represents when the pipeline ran
+            # (even though data is from previous trading day's close)
             calculation_date = datetime.now()
 
         if isinstance(calculation_date, datetime):
@@ -661,8 +663,9 @@ class WatchlistScanner:
                         r.vwap,
                     )
                 else:
-                    # For event watchlists: simple insert (each day is independent)
-                    # Delete old entries first for this watchlist
+                    # For event watchlists: use UPSERT to handle re-detection of same ticker
+                    # The partial unique index on (watchlist_name, ticker) WHERE status = 'active'
+                    # prevents duplicates, so we use ON CONFLICT to update existing entries
                     query = """
                         INSERT INTO stock_watchlist_results (
                             watchlist_name, ticker, scan_date, crossover_date, status,
@@ -671,6 +674,24 @@ class WatchlistScanner:
                             rsi_14, macd, macd_signal, macd_histogram,
                             gap_pct, price_change_1d, vwap
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                        ON CONFLICT (watchlist_name, ticker) WHERE status = 'active'
+                        DO UPDATE SET
+                            scan_date = EXCLUDED.scan_date,
+                            crossover_date = EXCLUDED.crossover_date,
+                            price = EXCLUDED.price,
+                            volume = EXCLUDED.volume,
+                            avg_volume = EXCLUDED.avg_volume,
+                            ema_20 = EXCLUDED.ema_20,
+                            ema_50 = EXCLUDED.ema_50,
+                            ema_200 = EXCLUDED.ema_200,
+                            rsi_14 = EXCLUDED.rsi_14,
+                            macd = EXCLUDED.macd,
+                            macd_signal = EXCLUDED.macd_signal,
+                            macd_histogram = EXCLUDED.macd_histogram,
+                            gap_pct = EXCLUDED.gap_pct,
+                            price_change_1d = EXCLUDED.price_change_1d,
+                            vwap = EXCLUDED.vwap,
+                            created_at = NOW()
                     """
                     values = (
                         r.watchlist_name,

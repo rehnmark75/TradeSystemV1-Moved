@@ -190,7 +190,7 @@ class SMCStockAnalyzer:
         start_time = datetime.now()
 
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         # Get tickers to analyze
         if tickers is None:
@@ -243,7 +243,7 @@ class SMCStockAnalyzer:
             SMCAnalysis object or None if insufficient data
         """
         if calculation_date is None:
-            calculation_date = datetime.now().date() - timedelta(days=1)
+            calculation_date = datetime.now().date()  # Use today - represents when pipeline ran
 
         # Fetch daily candles
         candles = await self._get_daily_candles(ticker, self.config.lookback_days)

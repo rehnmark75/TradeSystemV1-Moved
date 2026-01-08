@@ -1043,6 +1043,23 @@ class StockScheduler:
     ):
         """Log pipeline execution to database"""
         import json
+        import math
+
+        def sanitize_for_json(obj):
+            """
+            Recursively sanitize an object for JSON serialization.
+            Replaces NaN, Infinity, -Infinity with None.
+            """
+            if isinstance(obj, dict):
+                return {k: sanitize_for_json(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [sanitize_for_json(v) for v in obj]
+            elif isinstance(obj, float):
+                if math.isnan(obj) or math.isinf(obj):
+                    return None
+                return obj
+            else:
+                return obj
 
         # Determine status
         status = 'success'
@@ -1064,12 +1081,14 @@ class StockScheduler:
         """
 
         try:
+            # Sanitize results to remove NaN/Infinity values before JSON serialization
+            sanitized_results = sanitize_for_json(results)
             await self.db.execute(
                 query,
                 pipeline_name,
                 datetime.now().date(),
                 round(duration_seconds, 2),
-                json.dumps(results, default=str),
+                json.dumps(sanitized_results, default=str),
                 status
             )
         except Exception as e:

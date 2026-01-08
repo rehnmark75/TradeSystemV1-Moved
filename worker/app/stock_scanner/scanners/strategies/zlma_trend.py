@@ -122,8 +122,8 @@ class ZLMATrendScanner(BaseScanner):
         logger.info(f"Starting {self.scanner_name} scan")
 
         if calculation_date is None:
-            from datetime import timedelta
-            calculation_date = (datetime.now() - timedelta(days=1)).date()
+            # Use today's date - represents when pipeline ran
+            calculation_date = datetime.now().date()
 
         # Ensure calculation_date is a date object
         if hasattr(calculation_date, 'date'):
