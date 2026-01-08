@@ -249,10 +249,11 @@ class BacktestScanner(IntelligentForexScanner):
             # Create a new signal detector but replace its data_fetcher with BacktestDataFetcher
             backtest_data_fetcher = BacktestDataFetcher(self.db_manager, getattr(config, 'USER_TIMEZONE', 'Europe/Stockholm'))
 
-            # CRITICAL FIX: Set initial backtest time to end_date so the data fetcher knows the time window
-            # This ensures the first call to get_enhanced_data fetches historical data, not current data
-            backtest_data_fetcher.set_backtest_time(self.end_date)
-            self.logger.info(f"⏰ BacktestDataFetcher initialized with end_date: {self.end_date}")
+            # CRITICAL FIX: Set initial backtest time with BOTH start_date and end_date
+            # This ensures the cache is populated for the ENTIRE backtest period (Jan 2026 fix)
+            # Pass start_date so lookback calculation covers from backtest_start - indicator_warmup to backtest_end
+            backtest_data_fetcher.set_backtest_time(self.end_date, end_date=self.end_date, start_date=self.start_date)
+            self.logger.info(f"⏰ BacktestDataFetcher initialized with period: {self.start_date} to {self.end_date}")
 
             # Replace the data_fetcher in the existing signal_detector
             self.signal_detector.data_fetcher = backtest_data_fetcher
@@ -650,8 +651,9 @@ class BacktestScanner(IntelligentForexScanner):
 
         # 🔧 CRITICAL FIX: Set backtest time BEFORE fetching data
         # This ensures BacktestDataFetcher only returns data UP TO this timestamp
+        # Pass start_date and end_date so cache is populated for entire backtest period (Jan 2026 fix)
         if hasattr(self.signal_detector, 'data_fetcher') and hasattr(self.signal_detector.data_fetcher, 'set_backtest_time'):
-            self.signal_detector.data_fetcher.set_backtest_time(timestamp)
+            self.signal_detector.data_fetcher.set_backtest_time(timestamp, end_date=self.end_date, start_date=self.start_date)
             self.logger.debug(f"⏰ Backtest time set to: {timestamp}")
 
         for epic in self.epic_list:

@@ -19,6 +19,14 @@ except ImportError:
     from forex_scanner.core.database import DatabaseManager
 
 
+class DecimalEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles Decimal objects"""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super().default(obj)
+
+
 class BacktestOrderLogger:
     """
     Logs trading signals to backtest database tables instead of executing orders
@@ -305,13 +313,13 @@ class BacktestOrderLogger:
             params = (
                 int(self.execution_id), epic, timeframe, signal_timestamp, signal_type, strategy_name,
                 open_price, high_price, low_price, close_price, volume,
-                confidence_score, signal_strength, json.dumps(indicator_values),
+                confidence_score, signal_strength, json.dumps(indicator_values, cls=DecimalEncoder),
                 entry_price, stop_loss_price, take_profit_price, risk_reward_ratio,
                 exit_price, exit_timestamp, exit_reason, pips_gained, trade_result,
                 holding_time_minutes, max_favorable_excursion_pips, max_adverse_excursion_pips,
-                data_completeness, json.dumps(validation_flags if isinstance(validation_flags, list) else []),
-                validation_passed, json.dumps(validation_reasons if isinstance(validation_reasons, list) else []), trade_validator_version,
-                json.dumps(market_intelligence), smart_money_score, smart_money_validated
+                data_completeness, json.dumps(validation_flags if isinstance(validation_flags, list) else [], cls=DecimalEncoder),
+                validation_passed, json.dumps(validation_reasons if isinstance(validation_reasons, list) else [], cls=DecimalEncoder), trade_validator_version,
+                json.dumps(market_intelligence, cls=DecimalEncoder), smart_money_score, smart_money_validated
             )
 
             # Use raw psycopg2 connection for INSERT with positional parameters (%s placeholders)

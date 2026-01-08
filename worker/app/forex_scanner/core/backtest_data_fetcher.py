@@ -326,6 +326,10 @@ class BacktestDataFetcher(DataFetcher):
         self.backtest_mode = True
         self.batch_size = 50000  # Larger batches for backtest
         self.current_backtest_time = None
+        # CRITICAL FIX (Jan 2026): Store backtest date range for proper cache population
+        # The _resampled_cache must contain data for the ENTIRE backtest period
+        self.backtest_start_date = None
+        self.backtest_end_date = None
         self.data_validator = BacktestDataValidator(db_manager)
 
         # CRITICAL FIX: Disable reduced_lookback for backtesting
@@ -362,9 +366,34 @@ class BacktestDataFetcher(DataFetcher):
         else:
             self.logger.warning("⚠️ In-memory cache failed to load, using database fallback")
 
-    def set_backtest_time(self, current_time: datetime):
-        """Set the current backtest time for data filtering"""
+    def set_backtest_time(self, current_time: datetime, end_date: datetime = None, start_date: datetime = None):
+        """Set the current backtest time for data filtering
+
+        Args:
+            current_time: The current timestamp in the backtest simulation
+            end_date: The END of the entire backtest period (for cache population)
+                     This is CRITICAL - cache must contain data up to end_date,
+                     not just current_time, so future iterations can filter correctly
+            start_date: The START of the entire backtest period (for cache population)
+                       This ensures we fetch data covering the entire simulation range
+        """
         self.current_backtest_time = current_time
+
+        # CRITICAL FIX (Jan 2026): Store backtest date range for proper cache population
+        # Cache must contain data for the ENTIRE backtest period, from start_date to end_date
+        if start_date is not None:
+            self.backtest_start_date = start_date
+        elif self.backtest_start_date is None:
+            # First call without start_date - use current_time but log warning
+            self.backtest_start_date = current_time
+            self.logger.warning("⚠️ set_backtest_time called without start_date - cache may not cover full period")
+
+        if end_date is not None:
+            self.backtest_end_date = end_date
+        elif self.backtest_end_date is None:
+            # First call without end_date - use current_time but log warning
+            self.backtest_end_date = current_time
+            self.logger.warning("⚠️ set_backtest_time called without end_date - cache may not contain future data")
 
         # CRITICAL FIX: Override timezone_manager's get_lookback_time_utc to use backtest time
         # This ensures data is fetched relative to the backtest timestamp, not real current time
@@ -507,6 +536,11 @@ class BacktestDataFetcher(DataFetcher):
 
         In backtest mode, this method respects the current_backtest_time to provide
         only data up to the current simulation timestamp, ensuring realistic backtesting.
+
+        CRITICAL FIX (Jan 2026): The _resampled_cache now stores data for the ENTIRE
+        backtest period (up to backtest_end_date), then filters to current_backtest_time.
+        Previously, cache stored only data up to the first call's current_backtest_time,
+        causing subsequent iterations to see no new data.
         """
         try:
             # If we're in backtest mode and have a current timestamp, filter data accordingly
@@ -520,14 +554,45 @@ class BacktestDataFetcher(DataFetcher):
                     self._resampled_cache_hits += 1
                     self.logger.debug(f"⚡ CACHE HIT: Reused {timeframe} data for {epic} (hits: {self._resampled_cache_hits})")
                 else:
-                    # Cache MISS - need to fetch and resample
-                    full_df = super().get_enhanced_data(epic, pair, timeframe, **kwargs)
+                    # Cache MISS - need to fetch data for ENTIRE backtest period
+                    # CRITICAL FIX (Jan 2026): Calculate lookback to cover from backtest_start_date to backtest_end_date
+                    # The lookback must be calculated from backtest_end_date back to backtest_start_date (plus extra for indicators)
+
+                    # Save current backtest time
+                    original_backtest_time = self.current_backtest_time
+
+                    # Calculate extended lookback to cover entire backtest period
+                    extended_lookback_hours = kwargs.get('lookback_hours')
+                    if hasattr(self, 'backtest_start_date') and self.backtest_start_date and \
+                       hasattr(self, 'backtest_end_date') and self.backtest_end_date:
+                        # Calculate hours from backtest_end_date back to backtest_start_date
+                        backtest_duration_hours = (self.backtest_end_date - self.backtest_start_date).total_seconds() / 3600
+                        # Add the original lookback_hours on top (for indicator warmup at backtest_start_date)
+                        original_lookback = kwargs.get('lookback_hours', 24)
+                        extended_lookback_hours = int(backtest_duration_hours + original_lookback + 24)  # +24h buffer
+
+                        self.logger.debug(f"📊 Cache population: extended lookback from {original_lookback}h to {extended_lookback_hours}h "
+                                         f"(backtest duration: {backtest_duration_hours:.1f}h)")
+
+                        # Temporarily set current_backtest_time to end_date for proper end point
+                        self.current_backtest_time = self.backtest_end_date
+
+                    try:
+                        # Pass extended lookback if calculated
+                        cache_kwargs = kwargs.copy()
+                        if extended_lookback_hours:
+                            cache_kwargs['lookback_hours'] = extended_lookback_hours
+                        full_df = super().get_enhanced_data(epic, pair, timeframe, **cache_kwargs)
+                    finally:
+                        # Restore original backtest time
+                        self.current_backtest_time = original_backtest_time
 
                     # Store in cache for future iterations (only if valid data)
                     if full_df is not None and len(full_df) > 0:
                         self._resampled_cache[cache_key] = full_df.copy()
                         self._resampled_cache_misses += 1
-                        self.logger.debug(f"💾 CACHE MISS: Stored {timeframe} data for {epic} (misses: {self._resampled_cache_misses})")
+                        max_time = full_df['start_time'].max() if 'start_time' in full_df.columns else 'unknown'
+                        self.logger.debug(f"💾 CACHE MISS: Stored {timeframe} data for {epic}, {len(full_df)} rows up to {max_time}")
                     else:
                         full_df = None
 
@@ -756,12 +821,18 @@ class BacktestDataFetcher(DataFetcher):
             tf_minutes = timeframe_map.get(timeframe, 5)
 
             # Determine source timeframe for resampling
-            # Use 5m as base for all higher timeframes
-            if timeframe in ('15m', '1h', '4h'):
-                source_tf = 5
-                # Increase lookback for resampling buffer
+            # ALWAYS use 1m as base for all timeframes (future-proof: only 1m candles will be stored)
+            # This matches the parent class behavior when use_1m_base_synthesis=True
+            if timeframe in ('5m', '15m', '1h', '4h'):
+                source_tf = 1  # Always use 1m candles as base
+                # Calculate lookback multiplier based on target timeframe
+                # 5m needs 5x more 1m bars, 15m needs 15x, 1h needs 60x, 4h needs 240x
+                multipliers = {'5m': 5, '15m': 15, '1h': 60, '4h': 240}
+                base_multiplier = multipliers.get(timeframe, 15)
+                # Add 20% buffer for resampling edge cases
                 adjusted_lookback = int(lookback_hours * 1.2)
                 since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+                self.logger.debug(f"📊 Using 1m base synthesis for {timeframe} (multiplier={base_multiplier}x)")
             else:
                 source_tf = tf_minutes
 
@@ -834,17 +905,20 @@ class BacktestDataFetcher(DataFetcher):
             # Add timezone columns
             df = tz_manager.add_timezone_columns_to_df(df)
 
-            # Resample if needed
-            if source_tf == 5:
-                if timeframe == '15m':
-                    self.logger.debug(f"🔄 Resampling 5m→15m for {epic}")
-                    df = self._resample_to_15m_optimized(df)
+            # Resample from 1m base candles to target timeframe
+            if source_tf == 1:
+                if timeframe == '5m':
+                    self.logger.debug(f"🔄 Resampling 1m→5m for {epic}")
+                    df = self._resample_to_5m_from_1m(df)
+                elif timeframe == '15m':
+                    self.logger.debug(f"🔄 Resampling 1m→15m for {epic}")
+                    df = self._resample_to_15m_from_1m(df)
                 elif timeframe == '1h':
-                    self.logger.debug(f"🔄 Resampling 5m→1h for {epic}")
-                    df = self._resample_to_60m_optimized(df)
+                    self.logger.debug(f"🔄 Resampling 1m→1h for {epic}")
+                    df = self._resample_to_60m_from_1m(df)
                 elif timeframe == '4h':
-                    self.logger.debug(f"🔄 Resampling 5m→4h for {epic}")
-                    df = self._resample_to_4h_optimized(df)
+                    self.logger.debug(f"🔄 Resampling 1m→4h for {epic}")
+                    df = self._resample_to_4h_from_1m(df)
 
                 if df is None or len(df) == 0:
                     self.logger.error(f"❌ Resampling failed for {epic} {timeframe}")
