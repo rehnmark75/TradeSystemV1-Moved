@@ -139,6 +139,7 @@ class SignalProcessor:
         self.smc_reject_on_order_flow_conflict = self._scanner_cfg.smc_reject_order_flow_conflict
         self.smc_reject_on_ranging_structure = self._scanner_cfg.smc_reject_ranging_structure
         self.smc_min_structure_score = self._scanner_cfg.smc_min_structure_score
+        self.smc_conflict_tolerance = self._scanner_cfg.smc_conflict_tolerance  # Number of conflicts allowed before rejecting
         self.enable_claude = self._scanner_cfg.require_claude_approval  # For accurate status display
         self.claude_analysis_mode = self._scanner_cfg.claude_analysis_mode
         self.claude_timeout = self._scanner_cfg.claude_timeout
@@ -732,18 +733,29 @@ class SignalProcessor:
                 if structure_bias not in ['BULLISH', 'BEARISH']:
                     conflicts.append(f"Structure score too low ({structure_score:.2f} < {self.smc_min_structure_score})")
 
-            if conflicts:
+            # Use tolerance: reject only if conflicts exceed tolerance threshold
+            # tolerance=0 means reject on ANY conflict (strict mode)
+            # tolerance=1 means allow 1 conflict, reject on 2+
+            if len(conflicts) > self.smc_conflict_tolerance:
                 return {
                     'should_reject': True,
                     'reason': '; '.join(conflicts),
                     'conflicts': conflicts,
+                    'conflict_count': len(conflicts),
+                    'tolerance': self.smc_conflict_tolerance,
                     'order_flow_bias': order_flow.get('order_flow_bias'),
                     'structure_bias': market_structure.get('current_bias'),
                     'structure_score': structure_score,
                     'directional_consensus': directional_consensus
                 }
 
-            return {'should_reject': False, 'reason': None}
+            # Pass but log if there were minor conflicts within tolerance
+            if conflicts:
+                self.logger.debug(
+                    f"⚠️ SMC conflicts within tolerance: {len(conflicts)}/{self.smc_conflict_tolerance} - {'; '.join(conflicts)}"
+                )
+
+            return {'should_reject': False, 'reason': None, 'conflicts_within_tolerance': conflicts}
 
         except Exception as e:
             self.logger.error(f"❌ SMC conflict check failed: {e}")

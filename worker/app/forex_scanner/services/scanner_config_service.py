@@ -165,6 +165,7 @@ class ScannerConfig:
     smc_reject_order_flow_conflict: bool = False
     smc_reject_ranging_structure: bool = False
     smc_min_structure_score: float = 0.0
+    smc_conflict_tolerance: int = 0  # Number of conflicts to allow before rejecting (0 = reject on any conflict)
 
     # CLAUDE TRADE VALIDATION SETTINGS
     require_claude_approval: bool = False
@@ -603,7 +604,7 @@ class ScannerConfigService:
             'smart_money_min_sweep_quality',
             'smc_conflict_filter_enabled', 'smc_min_directional_consensus',
             'smc_reject_order_flow_conflict', 'smc_reject_ranging_structure',
-            'smc_min_structure_score',
+            'smc_min_structure_score', 'smc_conflict_tolerance',
             'require_claude_approval', 'claude_fail_secure', 'claude_model',
             'min_claude_quality_score', 'claude_include_chart', 'claude_vision_enabled',
             'claude_vision_save_directory', 'claude_validate_in_backtest', 'save_claude_rejections',
@@ -694,6 +695,7 @@ class ScannerConfigService:
             'market_condition_cache_minutes',
             # Smart Money integer fields
             'smart_money_min_data_points', 'smart_money_liquidity_sweep_lookback_bars',
+            'smc_conflict_tolerance',
             # Order Executor integer fields
             'order_max_retries', 'order_circuit_breaker_threshold',
             # Performance/Data Fetching integer fields

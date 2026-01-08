@@ -46,7 +46,7 @@ def _get_connection_string(db_type: str = "trading") -> str:
             pass
 
     # Fallback to environment variables
-    if db_type == "trading":
+    if db_type == "trading" or db_type == "forex":
         return os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/forex")
     elif db_type == "config":
         return os.getenv("CONFIG_DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/forex_config")

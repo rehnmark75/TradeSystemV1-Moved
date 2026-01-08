@@ -796,6 +796,60 @@ def render_pair_overrides(config: Dict[str, Any]):
             if not _values_equal(new_macd, macd_effective):
                 override_changes['macd_filter_enabled'] = new_macd
 
+        # Swing & Filter Settings - new per-pair parameters for optimizer recommendations
+        st.markdown("**Swing & Filter Settings**")
+        st.caption("These settings control TIER2 swing validation. Lower values = more lenient swing detection.")
+        col_swing1, col_swing2 = st.columns(2)
+        with col_swing1:
+            # Min Swing ATR Multiplier - inherit from global
+            swing_atr_value = existing.get('min_swing_atr_multiplier')
+            global_swing_atr = config.get('min_swing_atr_multiplier', 0.25)
+            swing_atr_effective = float(swing_atr_value) if swing_atr_value is not None else float(global_swing_atr)
+            new_swing_atr = st.number_input(
+                "Min Swing ATR Multiplier",
+                value=swing_atr_effective,
+                min_value=0.0, max_value=1.0, step=0.05,
+                format="%.2f",
+                help=f"{'Inherited from global (' + str(global_swing_atr) + ')' if swing_atr_value is None else 'Explicit override for this pair'}. Lower = more lenient swing validation.",
+                key=f"override_swing_atr_{selected_pair}"
+            )
+            if not _values_equal(new_swing_atr, swing_atr_effective):
+                override_changes['min_swing_atr_multiplier'] = new_swing_atr
+
+        with col_swing2:
+            # Swing Lookback Bars - inherit from global
+            swing_lookback_value = existing.get('swing_lookback_bars')
+            global_swing_lookback = config.get('swing_lookback_bars', 20)
+            swing_lookback_effective = int(swing_lookback_value) if swing_lookback_value is not None else int(global_swing_lookback)
+            new_swing_lookback = st.number_input(
+                "Swing Lookback Bars",
+                value=swing_lookback_effective,
+                min_value=5, max_value=100, step=5,
+                help=f"{'Inherited from global (' + str(global_swing_lookback) + ')' if swing_lookback_value is None else 'Explicit override for this pair'}. Bars to look back for swing detection.",
+                key=f"override_swing_lookback_{selected_pair}"
+            )
+            if not _values_equal(new_swing_lookback, swing_lookback_effective):
+                override_changes['swing_lookback_bars'] = new_swing_lookback
+
+        # SMC Conflict Tolerance - how many conflicts to allow before rejecting
+        st.markdown("**SMC Conflict Filter**")
+        col_smc1, col_smc2 = st.columns(2)
+        with col_smc1:
+            conflict_tol_value = existing.get('smc_conflict_tolerance')
+            global_conflict_tol = config.get('smc_conflict_tolerance', 0)
+            conflict_tol_effective = int(conflict_tol_value) if conflict_tol_value is not None else int(global_conflict_tol)
+            new_conflict_tol = st.number_input(
+                "SMC Conflict Tolerance",
+                value=conflict_tol_effective,
+                min_value=0, max_value=4, step=1,
+                help=f"{'Inherited from global (' + str(global_conflict_tol) + ')' if conflict_tol_value is None else 'Explicit override for this pair'}. Number of SMC conflicts to allow (0 = strict, reject on any conflict; 1+ = allow minor conflicts).",
+                key=f"override_conflict_tol_{selected_pair}"
+            )
+            if not _values_equal(new_conflict_tol, conflict_tol_effective):
+                override_changes['smc_conflict_tolerance'] = new_conflict_tol
+        with col_smc2:
+            st.caption("💡 Tolerance controls how strict the SMC conflict filter is. 0 = reject on ANY conflict (order flow, ranging, consensus). 1 = allow 1 minor conflict to pass.")
+
         # Min Volume Ratio - pair-specific threshold for volume filter
         st.markdown("**Volume Filter Settings**")
         col_vol1, col_vol2 = st.columns(2)
@@ -1195,7 +1249,8 @@ def render_pair_overrides(config: Dict[str, Any]):
         df = pd.DataFrame(overrides)
         display_cols = ['epic', 'is_enabled', 'fixed_stop_loss_pips', 'fixed_take_profit_pips',
                        'sl_buffer_pips', 'min_confidence', 'max_confidence',
-                       'allow_asian_session', 'macd_filter_enabled', 'description']
+                       'allow_asian_session', 'macd_filter_enabled',
+                       'min_swing_atr_multiplier', 'smc_conflict_tolerance', 'description']
         available_cols = [c for c in display_cols if c in df.columns]
         st.dataframe(df[available_cols], use_container_width=True)
     else:
