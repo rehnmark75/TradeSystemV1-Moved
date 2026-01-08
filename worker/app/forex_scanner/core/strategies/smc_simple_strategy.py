@@ -130,7 +130,7 @@ class SMCSimpleStrategy:
         self._load_config()
 
         # State tracking
-        self.pair_cooldowns = {}  # {pair: last_signal_time}
+        self.pair_cooldowns = {}  # {pair: last_signal_time} - ONLY used in backtest mode
         self.recent_signals = {}  # {pair: [(timestamp, price), ...]}
         self.pending_entries = {}  # {pair: pending_entry_data}
 
@@ -139,9 +139,9 @@ class SMCSimpleStrategy:
         self.pair_last_session = {}  # {pair: session_name} - track session changes
         self._trade_outcome_cache = {}  # {pair: {'outcome': dict, 'cached_at': datetime}}
 
-        # v3.1.0: Load cooldowns from database on startup (persist across restarts)
-        if self._db_manager is not None and not self._backtest_mode:
-            self._load_cooldowns_from_db()
+        # v3.2.0: Cooldowns now read directly from alert_history database (single source of truth)
+        # No startup load needed - each cooldown check queries the database directly
+        # This eliminates state sync issues and simplifies the code
 
         # Rejection tracking (v2.2.0) - initialized after config is loaded
         # DISABLED in backtest mode to avoid polluting DB and improve performance
@@ -1619,8 +1619,12 @@ class SMCSimpleStrategy:
             self.logger.info(f"\n   {signal['description']}")
             self.logger.info(f"{'='*70}\n")
 
-            # Update cooldown (use candle timestamp for backtest compatibility)
-            self._update_cooldown(pair, candle_dt)
+            # Cooldown handling differs between live and backtest modes:
+            # - BACKTEST: Update in-memory cooldown immediately (no external validation pipeline)
+            # - LIVE: Cooldowns read directly from alert_history database (single source of truth)
+            #   No in-memory update needed - database is updated when alert is saved
+            if self._backtest_mode:
+                self._update_cooldown_backtest(pair, candle_dt)
 
             # ================================================================
             # PERFORMANCE METRICS: Calculate enhanced metrics for analysis
@@ -2586,7 +2590,10 @@ class SMCSimpleStrategy:
     def _check_cooldown(self, pair: str, current_time: datetime = None) -> Tuple[bool, str]:
         """Check if pair is in cooldown period using adaptive or static logic
 
-        v3.0.0: Now uses adaptive cooldown based on trade outcomes, win rates,
+        v3.2.0: Now queries alert_history database directly for live trading (single source of truth).
+        Backtest mode still uses in-memory tracking for performance.
+
+        v3.0.0: Uses adaptive cooldown based on trade outcomes, win rates,
         and market context when ADAPTIVE_COOLDOWN_ENABLED is True.
 
         Args:
@@ -2596,11 +2603,18 @@ class SMCSimpleStrategy:
         # Use provided time for backtest, or real time for live trading
         check_time = current_time if current_time is not None else datetime.now()
 
-        # No previous signal = no cooldown
-        if pair not in self.pair_cooldowns:
-            return True, "No cooldown (first signal)"
-
-        last_signal = self.pair_cooldowns[pair]
+        # Get last signal time - different sources for backtest vs live
+        if self._backtest_mode:
+            # Backtest: use in-memory tracking (no database writes in backtest)
+            if pair not in self.pair_cooldowns:
+                return True, "No cooldown (first signal)"
+            last_signal = self.pair_cooldowns[pair]
+        else:
+            # Live: query alert_history database directly (single source of truth)
+            epic = self._get_epic_for_pair(pair)
+            last_signal = self._get_last_alert_time_from_db(epic)
+            if last_signal is None:
+                return True, "No cooldown (no recent alerts)"
 
         # Handle timezone-aware vs naive datetime comparison
         if hasattr(last_signal, 'tzinfo') and last_signal.tzinfo is not None:
@@ -2725,6 +2739,48 @@ class SMCSimpleStrategy:
             'AUDJPY': 'CS.D.AUDJPY.MINI.IP',
         }
         return pair_to_epic.get(pair.upper(), f'CS.D.{pair.upper()}.MINI.IP')
+
+    def _get_last_alert_time_from_db(self, epic: str) -> Optional[datetime]:
+        """Query alert_history for most recent alert timestamp for this epic.
+
+        v3.2.0: Database is the single source of truth for cooldowns in live mode.
+        This eliminates state sync issues between in-memory tracking and database.
+
+        Args:
+            epic: IG Markets epic code (e.g., 'CS.D.EURUSD.CEEM.IP')
+
+        Returns:
+            datetime of last alert, or None if no recent alerts found
+        """
+        if self._db_manager is None:
+            return None
+
+        try:
+            conn = self._db_manager.get_connection()
+            cursor = conn.cursor()
+
+            # Query for most recent alert within the max cooldown window
+            max_lookback_hours = getattr(self, 'max_cooldown_hours', 12.0)
+
+            query = """
+                SELECT MAX(alert_timestamp) as last_signal
+                FROM alert_history
+                WHERE epic = %s
+                  AND alert_timestamp >= NOW() - INTERVAL '%s hours'
+                  AND strategy LIKE '%%SMC%%'
+            """
+            cursor.execute(query, (epic, max_lookback_hours))
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if row and row[0]:
+                return row[0]
+            return None
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to query last alert time for {epic}: {e}")
+            return None
 
     def _get_last_trade_outcome(self, epic: str) -> Optional[Dict]:
         """Query database for most recent closed trade on this pair
@@ -2880,13 +2936,20 @@ class SMCSimpleStrategy:
         else:
             return 'new_york'
 
-    def _update_cooldown(self, pair: str, signal_time: datetime = None):
-        """Update cooldown after signal generation
+    def _update_cooldown_backtest(self, pair: str, signal_time: datetime = None):
+        """Update in-memory cooldown for backtest mode only.
+
+        v3.2.0: This is ONLY used in backtest mode. Live mode reads directly from
+        alert_history database (single source of truth).
 
         Args:
             pair: Currency pair name
-            signal_time: Signal timestamp (for backtest mode). If None, uses datetime.now()
+            signal_time: Signal timestamp. If None, uses datetime.now()
         """
+        if not self._backtest_mode:
+            # Live mode: cooldowns are read from database, no in-memory update needed
+            return
+
         effective_time = signal_time if signal_time is not None else datetime.now()
         self.pair_cooldowns[pair] = effective_time
 
@@ -2922,67 +2985,17 @@ class SMCSimpleStrategy:
             del self._trade_outcome_cache[epic]
 
     def reset_cooldowns(self):
-        """Reset all cooldowns - call this at the start of each backtest to ensure fresh state"""
+        """Reset all cooldowns - call this at the start of each backtest to ensure fresh state.
+
+        v3.2.0: Only resets in-memory state used by backtest mode. Live mode reads
+        cooldowns directly from alert_history database.
+        """
         self.pair_cooldowns = {}
         self.pair_consecutive_losses = {}
         self.pair_last_session = {}
         self._trade_outcome_cache = {}
         if self.logger:
-            self.logger.info("🔄 SMC Simple strategy cooldowns reset for new backtest (v3.0.0 adaptive state cleared)")
-
-    def _load_cooldowns_from_db(self):
-        """Load cooldown state from alert_history on startup (v3.1.0)
-
-        This ensures cooldowns persist across container restarts by loading
-        the last signal time for each pair from the database.
-        """
-        if self._db_manager is None:
-            return
-
-        try:
-            conn = self._db_manager.get_connection()
-            cursor = conn.cursor()
-
-            # Get the last alert time for each epic within the max cooldown window
-            # Only look back max_cooldown_hours to avoid loading very old data
-            max_lookback_hours = getattr(self, 'max_cooldown_hours', 12.0)
-
-            query = """
-                SELECT epic, MAX(alert_timestamp) as last_signal
-                FROM alert_history
-                WHERE alert_timestamp >= NOW() - INTERVAL '%s hours'
-                  AND strategy LIKE '%%SMC%%'
-                GROUP BY epic
-            """
-            cursor.execute(query, (max_lookback_hours,))
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-
-            loaded_count = 0
-            for row in rows:
-                epic = row[0]
-                last_signal = row[1]
-
-                if last_signal:
-                    # v2.14.1: Extract pair name from epic for consistent key usage
-                    # Epic format: CS.D.EURUSD.MINI.IP or CS.D.EURUSD.CEEM.IP -> EURUSD
-                    # The _check_cooldown and _update_cooldown methods use pair name, not epic
-                    pair = epic.split('.')[2] if '.' in epic else epic
-                    self.pair_cooldowns[pair] = last_signal
-                    loaded_count += 1
-
-            if loaded_count > 0:
-                self.logger.info(f"📥 Loaded {loaded_count} cooldown states from database (persist across restarts)")
-                for pair, last_signal in self.pair_cooldowns.items():
-                    hours_ago = (datetime.now() - last_signal.replace(tzinfo=None)).total_seconds() / 3600
-                    self.logger.debug(f"   {pair}: last signal {hours_ago:.1f}h ago")
-            else:
-                self.logger.debug("📥 No recent cooldown states to load from database")
-
-        except Exception as e:
-            self.logger.warning(f"⚠️ Failed to load cooldowns from database: {e}")
-            # Continue without loaded cooldowns - not critical
+            self.logger.info("🔄 SMC Simple strategy cooldowns reset for new backtest (v3.2.0 in-memory state cleared)")
 
     def _build_description(
         self,

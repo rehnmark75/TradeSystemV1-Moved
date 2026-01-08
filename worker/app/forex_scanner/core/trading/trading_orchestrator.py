@@ -927,6 +927,9 @@ class TradingOrchestrator:
                         claude_result=processed_claude_result
                     )
 
+                # v3.2.0: No notification needed - strategy reads cooldowns directly from
+                # alert_history database (single source of truth)
+
                 # Enhanced logging with Claude status
                 claude_status = "No Claude"
                 if processed_claude_result:
