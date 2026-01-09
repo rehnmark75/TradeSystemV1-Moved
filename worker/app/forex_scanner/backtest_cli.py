@@ -210,9 +210,9 @@ Signal Display Format:
         parser.add_argument(
             '--use-historical-intelligence',
             action='store_true',
-            default=True,
+            default=False,
             dest='use_historical_intelligence',
-            help='Use stored market intelligence from database instead of recalculating (default: True). '
+            help='Use stored market intelligence from database instead of recalculating (default: False). '
                  'This ensures backtest results match what live trading would have done.'
         )
 
@@ -261,6 +261,49 @@ Signal Display Format:
             metavar='FILEPATH',
             help='Save chart to specified file path (e.g., /tmp/backtest_chart.png). '
                  'If not specified, chart is saved to default location.'
+        )
+
+        # Parameter variation options
+        parser.add_argument(
+            '--vary',
+            action='append',
+            metavar='PARAM=SPEC',
+            help='Vary parameter across range or list. '
+                 'Formats: param=start:end:step (e.g., fixed_stop_loss_pips=8:12:2) '
+                 'OR param=val1,val2,val3 (e.g., min_confidence=0.45,0.50,0.55). '
+                 'Can be used multiple times for multiple parameters.'
+        )
+
+        parser.add_argument(
+            '--vary-json',
+            type=str,
+            metavar='JSON_OR_FILE',
+            help='JSON parameter grid. Can be inline JSON or path to .json file. '
+                 'Example: \'{"fixed_stop_loss_pips": [8,10,12], "min_confidence": [0.45,0.50]}\''
+        )
+
+        parser.add_argument(
+            '--vary-workers',
+            type=int,
+            default=4,
+            metavar='N',
+            help='Number of parallel workers for variation testing (default: 4).'
+        )
+
+        parser.add_argument(
+            '--rank-by',
+            type=str,
+            default='composite_score',
+            choices=['win_rate', 'total_pips', 'profit_factor', 'composite_score', 'expectancy'],
+            help='Metric to rank variation results by (default: composite_score).'
+        )
+
+        parser.add_argument(
+            '--top-n',
+            type=int,
+            default=10,
+            metavar='N',
+            help='Show top N variation results (default: 10).'
         )
 
         return parser
@@ -484,6 +527,15 @@ Signal Display Format:
                     use_historical_intelligence=use_historical_intelligence
                 )
 
+            # Parameter variation mode
+            if getattr(args, 'vary', None) or getattr(args, 'vary_json', None):
+                return self._run_param_variations(
+                    args=args,
+                    start_date=start_date,
+                    end_date=end_date,
+                    use_historical_intelligence=use_historical_intelligence
+                )
+
             # Parallel backtest mode
             if args.parallel:
                 return self._run_parallel_backtest(
@@ -531,6 +583,117 @@ Signal Display Format:
                 import traceback
                 traceback.print_exc()
             return False
+
+    def _run_param_variations(self, args, start_date, end_date, use_historical_intelligence) -> bool:
+        """
+        Run parallel parameter variation testing.
+
+        Tests multiple parameter combinations for the same epic in parallel.
+        Results are ranked by the specified metric.
+        """
+        from forex_scanner.core.param_variation import (
+            ParameterGridGenerator,
+            ParallelVariationRunner,
+            VariationRunConfig
+        )
+
+        print("\n" + "=" * 70)
+        print("🔬 PARAMETER VARIATION MODE")
+        print("=" * 70)
+
+        # Validate epic is specified
+        if not args.epic:
+            print("❌ --epic is required for parameter variation mode")
+            return False
+
+        # Parse parameter variations
+        try:
+            grid_gen = ParameterGridGenerator()
+            param_sets = grid_gen.parse_all(
+                vary_specs=getattr(args, 'vary', None),
+                json_input=getattr(args, 'vary_json', None)
+            )
+        except ValueError as e:
+            print(f"❌ Failed to parse parameter variations: {e}")
+            return False
+
+        if not param_sets:
+            print("❌ No parameter combinations generated")
+            return False
+
+        # Show summary
+        total_combinations = len(param_sets)
+        if total_combinations > 100:
+            print(f"⚠️ Warning: {total_combinations} combinations will take a long time")
+            print(f"   Consider reducing parameter ranges or using fewer parameters")
+
+        print(f"\n📊 Configuration:")
+        print(f"   Epic: {args.epic}")
+        print(f"   Days: {args.days}")
+        print(f"   Strategy: {args.strategy}")
+        print(f"   Workers: {args.vary_workers}")
+        print(f"   Total combinations: {total_combinations}")
+        print(f"   Rank by: {args.rank_by}")
+
+        # Show first few combinations
+        print(f"\n   Sample combinations:")
+        for i, params in enumerate(param_sets[:3]):
+            print(f"   [{i+1}] {params}")
+        if total_combinations > 3:
+            print(f"   ... and {total_combinations - 3} more")
+
+        print("\n" + "-" * 70)
+
+        # Create runner config
+        config = VariationRunConfig(
+            epic=args.epic,
+            days=args.days,
+            strategy=args.strategy,
+            timeframe=args.timeframe,
+            max_workers=args.vary_workers,
+            rank_by=args.rank_by,
+            top_n=args.top_n,
+            use_historical_intelligence=use_historical_intelligence,
+            pipeline=args.pipeline,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        # Run variations
+        runner = ParallelVariationRunner(config)
+        results = runner.run_variations(param_sets)
+
+        # Display results
+        if results:
+            print("\n" + "=" * 70)
+            print(f"🔬 Parameter Variation Results - {args.epic} ({args.days} days)")
+            print("=" * 70)
+
+            # Format and print table
+            table = runner.format_results(results)
+            print(table)
+
+            print("=" * 70)
+
+            # Show best result
+            completed = [r for r in results if r.status == 'completed']
+            if completed:
+                best = completed[0]
+                print(f"\n✨ Best parameters:")
+                for k, v in best.params.items():
+                    print(f"   {k}: {v}")
+                print(f"\n   Win rate: {best.win_rate:.1f}%")
+                print(f"   Total pips: {best.total_pips:+.1f}")
+                print(f"   Profit factor: {best.profit_factor:.2f}")
+                print(f"   Composite score: {best.composite_score:.3f}")
+
+            # Export if requested
+            csv_export = getattr(args, 'csv_export', None)
+            if csv_export:
+                runner.export_results(results, csv_export)
+                print(f"\n📤 Results exported to: {csv_export}")
+
+        return True
 
     def _run_parallel_backtest(self, args, start_date, end_date, config_override, use_historical_intelligence) -> bool:
         """

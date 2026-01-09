@@ -997,8 +997,29 @@ def health_check():
     
     return health_status
 
+# Backtest router for direct execution
+try:
+    from routers.backtest_router import router as backtest_router
+    BACKTEST_AVAILABLE = True
+    print("✅ Backtest router imported successfully")
+except ImportError as e:
+    print(f"⚠️ Backtest router not available: {e}")
+    BACKTEST_AVAILABLE = False
+    backtest_router = None
+
 # Register routers
 app.include_router(orders_router, prefix="/orders", tags=["orders"])
+
+# Backtest router
+if BACKTEST_AVAILABLE and backtest_router:
+    app.include_router(backtest_router, tags=["backtest"])
+    print("✅ Backtest router registered")
+    print("📊 Backtest endpoints available:")
+    print("   • POST /api/backtest/run - Run backtest synchronously")
+    print("   • POST /api/backtest/run-async - Run backtest in background")
+    print("   • GET  /api/backtest/status/{job_id} - Check async job status")
+    print("   • GET  /api/backtest/health - Check backtest service health")
+    print("   • GET  /api/backtest/epics - List available currency pairs")
 
 # Include analytics status router and set availability
 from routers.analytics_status_router import set_analytics_availability

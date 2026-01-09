@@ -29,8 +29,8 @@ import os
 def main():
     """Main wrapper function"""
 
-    # Base command
-    base_cmd = ["python3", "/app/forex_scanner/backtest_cli.py"]
+    # Base command - use -u for unbuffered output for real-time progress tracking
+    base_cmd = ["python3", "-u", "/app/forex_scanner/backtest_cli.py"]
 
     args = sys.argv[1:]
 
@@ -137,6 +137,37 @@ def main():
                 i += 1
                 processed_args.append(args[i])
                 print(f"💾 Chart output: {args[i]}")
+
+            # Handle parameter variation flags
+            elif arg == "--vary" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🔬 Vary parameter: {args[i]}")
+
+            elif arg == "--vary-json" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🔬 Vary JSON: {args[i][:50]}...")
+
+            elif arg == "--vary-workers" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🔬 Variation workers: {args[i]}")
+
+            elif arg == "--rank-by" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🔬 Rank by: {args[i]}")
+
+            elif arg == "--top-n" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🔬 Show top: {args[i]}")
 
             # Pass through other flags
             elif arg.startswith("--"):

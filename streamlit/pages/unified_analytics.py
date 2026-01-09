@@ -76,6 +76,9 @@ def lazy_import_tab(tab_name: str) -> Callable:
     elif tab_name == "backtest_results":
         from components.tabs import render_backtest_results_tab
         return render_backtest_results_tab
+    elif tab_name == "backtest_config":
+        from components.tabs import render_backtest_config_tab
+        return render_backtest_config_tab
     else:
         raise ValueError(f"Unknown tab: {tab_name}")
 
@@ -194,7 +197,8 @@ def main():
             "Market Intelligence",
             "Performance Snapshots",
             "Breakeven Optimizer",
-            "Backtest Results"
+            "Backtest Results",
+            "Backtest Config"
         ]
         analysis_sub = st.radio(
             "Analysis Section",
@@ -221,6 +225,9 @@ def main():
             render_func()
         elif analysis_sub == "Backtest Results":
             render_func = lazy_import_tab("backtest_results")
+            render_func()
+        elif analysis_sub == "Backtest Config":
+            render_func = lazy_import_tab("backtest_config")
             render_func()
 
     elif selected_main == "Performance":
