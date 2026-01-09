@@ -17,6 +17,7 @@ try:
     from core.database import DatabaseManager
     from core.trading.backtest_order_logger import BacktestOrderLogger
     from core.trading.trailing_stop_simulator import TrailingStopSimulator
+    from core.backtest_candles_manager import BacktestCandlesManager
     from configdata.strategies import config_momentum_strategy
 except ImportError:
     from forex_scanner import config
@@ -24,6 +25,7 @@ except ImportError:
     from forex_scanner.core.database import DatabaseManager
     from forex_scanner.core.trading.backtest_order_logger import BacktestOrderLogger
     from forex_scanner.core.trading.trailing_stop_simulator import TrailingStopSimulator
+    from forex_scanner.core.backtest_candles_manager import BacktestCandlesManager
     try:
         from forex_scanner.configdata.strategies import config_momentum_strategy
     except ImportError:
@@ -441,12 +443,50 @@ class BacktestScanner(IntelligentForexScanner):
             self.logger.error(f"❌ Failed to override signal detector for backtest: {e}")
             raise
 
+    def _ensure_backtest_candles_current(self):
+        """
+        Ensure the ig_candles_backtest table has up-to-date pre-computed candles.
+
+        First run: Populates the table with resampled 5m, 15m, 4h candles (slower)
+        Subsequent runs: Validates freshness, only updates if stale (fast)
+
+        This eliminates runtime resampling during backtest iterations.
+        """
+        try:
+            manager = BacktestCandlesManager(self.db_manager)
+
+            # Check and update backtest candles for our epics and period
+            result = manager.ensure_data_current(
+                epics=self.epic_list,
+                start_date=self.start_date,
+                end_date=self.end_date,
+                max_staleness_hours=1  # Update if more than 1 hour behind source
+            )
+
+            if result['updated']:
+                self.logger.info(
+                    f"📊 Backtest candles updated: {result['total_rows_inserted']:,} rows "
+                    f"in {result['time_taken_seconds']:.1f}s"
+                )
+            else:
+                self.logger.info("⚡ Backtest candles table is current - using pre-computed data")
+
+        except Exception as e:
+            # Don't fail the backtest if candle validation fails - just warn
+            # The backtest can still run using runtime resampling (slower)
+            self.logger.warning(f"⚠️ Backtest candles validation failed: {e}")
+            self.logger.warning("   Continuing with runtime resampling (may be slower)")
+
     def run_historical_backtest(self) -> Dict:
         """
         Run complete historical backtest for the specified period
         Returns comprehensive results including signals and performance metrics
         """
         self.logger.info(f"🚀 Starting historical backtest execution {self.execution_id}")
+
+        # STEP 0: Ensure backtest candles table is up-to-date
+        # First run populates data (slower), subsequent runs skip if fresh
+        self._ensure_backtest_candles_current()
 
         try:
             with self.order_logger:
