@@ -1,0 +1,22 @@
+FROM postgres:15
+
+# Install required packages for backup operations
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    docker.io \
+    bc \
+    findutils \
+    curl \
+    gpg \
+    lsb-release \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Azure CLI
+RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify az cli is installed
+RUN az --version
+
+# Default command (can be overridden in docker-compose)
+CMD ["bash"]

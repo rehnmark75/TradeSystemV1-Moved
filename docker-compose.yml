@@ -318,14 +318,17 @@ services:
       start_period: 30s
 
   db-backup:
-    image: postgres:15
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    image: db-backup:latest
     container_name: db-backup
-    restart: unless-stopped  # Auto-restart for continuous backup service
+    restart: unless-stopped
     environment:
       - BACKUP_SCHEDULE=0 2 * * *  # Daily at 2 AM
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      # Azure Blob Storage configuration (Azure-only mode, no local storage)
+      # Azure Blob Storage configuration
       - AZURE_STORAGE_ACCOUNT=klirrbackup
       - AZURE_STORAGE_KEY=${AZURE_STORAGE_KEY}
       - AZURE_STORAGE_CONTAINER=klirrbackup
@@ -341,8 +344,6 @@ services:
       - postgres
     command: >
       sh -c "
-        apt-get update && apt-get install -y docker.io bc findutils curl gpg lsb-release &&
-        curl -sL https://aka.ms/InstallAzureCLIDeb | bash &&
         while true; do
           echo 'Running scheduled Azure backup...' &&
           /scripts/azure_backup.sh &&
@@ -351,11 +352,11 @@ services:
         done
       "
     healthcheck:
-      test: ["CMD-SHELL", "az storage container exists --account-name $AZURE_STORAGE_ACCOUNT --account-key $AZURE_STORAGE_KEY --name $AZURE_STORAGE_CONTAINER --query exists -o tsv | grep -q true"]
+      test: ["CMD-SHELL", "which az && test -f /scripts/azure_backup.sh"]
       interval: 6h
-      timeout: 60s
+      timeout: 30s
       retries: 2
-      start_period: 2h
+      start_period: 30s
 
 volumes:
   pgadmin_data:
