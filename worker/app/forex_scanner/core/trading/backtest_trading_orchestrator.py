@@ -86,7 +86,14 @@ class BacktestTradingOrchestrator:
         self.logger = logger or logging.getLogger(__name__)
 
         # Core components - SAME as live trading
-        self.data_fetcher = BacktestDataFetcher(self.db_manager, config.USER_TIMEZONE)
+        # PERFORMANCE OPTIMIZATION (Jan 2026): Pass dates to load only needed data into cache
+        self.data_fetcher = BacktestDataFetcher(
+            self.db_manager,
+            config.USER_TIMEZONE,
+            start_date=backtest_config.get('start_date'),
+            end_date=backtest_config.get('end_date'),
+            epics=backtest_config.get('epics')
+        )
         self.signal_detector = SignalDetector(self.db_manager, config.USER_TIMEZONE, config_override=self._config_override)
 
         # Force-initialize the requested strategy for backtest (regardless of config flags)

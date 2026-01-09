@@ -56,6 +56,96 @@ class InMemoryForexCache:
 
         self.logger.info("🧠 InMemoryForexCache initialized")
 
+    def load_data_for_period(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        epics: List[str] = None,
+        lookback_hours: int = 168,  # 7 days extra for indicator warmup
+        force_reload: bool = False,
+        use_backtest_table: bool = True  # Use pre-computed backtest candles
+    ) -> bool:
+        """
+        Load only the data needed for a specific backtest period (FAST)
+
+        Args:
+            start_date: Start of backtest period
+            end_date: End of backtest period
+            epics: Optional list of epics to load (None = all epics)
+            lookback_hours: Extra hours before start_date for indicator warmup
+            force_reload: Force reload even if cache is already loaded
+            use_backtest_table: If True, load from ig_candles_backtest (5m, 15m, 4h pre-computed)
+
+        Returns True if successful, False otherwise
+        """
+        with self.load_lock:
+            if self.is_loaded and not force_reload:
+                # Check if existing cache covers the requested period
+                if (self.stats.data_range_start and self.stats.data_range_end and
+                    self.stats.data_range_start <= start_date - timedelta(hours=lookback_hours) and
+                    self.stats.data_range_end >= end_date):
+                    self.logger.info("📊 Cache already covers requested period, skipping")
+                    return True
+
+            try:
+                load_start_time = datetime.now()
+
+                # Calculate actual data range needed (with lookback for indicators)
+                data_start = start_date - timedelta(hours=lookback_hours)
+
+                # Use backtest table (pre-computed 5m, 15m, 4h) for instant loading
+                table_name = "ig_candles_backtest" if use_backtest_table else "ig_candles"
+
+                self.logger.info(f"🚀 Loading forex data for period: {data_start.date()} to {end_date.date()}")
+                self.logger.info(f"   (backtest: {start_date.date()} to {end_date.date()} + {lookback_hours}h lookback)")
+                self.logger.info(f"   📊 Source: {table_name}")
+
+                # Clear existing cache
+                self.cache.clear()
+                gc.collect()
+
+                # Build query with date filter
+                if epics:
+                    # Create parameterized query for specific epics
+                    epic_placeholders = ', '.join([f':epic_{i}' for i in range(len(epics))])
+                    query = f"""
+                    SELECT start_time, epic, timeframe, open, high, low, close, volume, COALESCE(ltv, 0) as ltv
+                    FROM {table_name}
+                    WHERE start_time >= :data_start
+                      AND start_time <= :end_date
+                      AND epic IN ({epic_placeholders})
+                    ORDER BY epic, timeframe, start_time
+                    """
+                    params = {'data_start': data_start, 'end_date': end_date}
+                    for i, epic in enumerate(epics):
+                        params[f'epic_{i}'] = epic
+                else:
+                    query = f"""
+                    SELECT start_time, epic, timeframe, open, high, low, close, volume, COALESCE(ltv, 0) as ltv
+                    FROM {table_name}
+                    WHERE start_time >= :data_start
+                      AND start_time <= :end_date
+                    ORDER BY epic, timeframe, start_time
+                    """
+                    params = {'data_start': data_start, 'end_date': end_date}
+
+                df_all = self.db_manager.execute_query(query, params)
+
+                if df_all.empty:
+                    self.logger.warning(f"❌ No data found for period {data_start} to {end_date}")
+                    return False
+
+                # Process the data (same as load_all_data)
+                return self._process_loaded_data(df_all, load_start_time)
+
+            except Exception as e:
+                self.logger.error(f"❌ Failed to load cache for period: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+                self.cache.clear()
+                self.is_loaded = False
+                return False
+
     def load_all_data(self, force_reload: bool = False) -> bool:
         """
         Load entire ig_candles table into memory
@@ -87,63 +177,86 @@ class InMemoryForexCache:
                     self.logger.warning("❌ No data found in ig_candles table")
                     return False
 
-                # Convert start_time to datetime if it's not already
-                df_all['start_time'] = pd.to_datetime(df_all['start_time'])
-
-                # Group by epic and timeframe for efficient storage
-                self.logger.info(f"📈 Organizing {len(df_all):,} rows into cache structure...")
-
-                grouped = df_all.groupby(['epic', 'timeframe'])
-
-                for (epic, timeframe), group_df in grouped:
-                    # Initialize epic cache if needed
-                    if epic not in self.cache:
-                        self.cache[epic] = {}
-
-                    # Set start_time as index for fast time-based lookups
-                    indexed_df = group_df.set_index('start_time').sort_index()
-
-                    # Drop epic and timeframe columns since they're in the keys
-                    indexed_df = indexed_df.drop(['epic', 'timeframe'], axis=1)
-
-                    # Apply compression if enabled
-                    if self.compression_enabled:
-                        # Convert to more memory-efficient dtypes
-                        indexed_df['open'] = indexed_df['open'].astype('float32')
-                        indexed_df['high'] = indexed_df['high'].astype('float32')
-                        indexed_df['low'] = indexed_df['low'].astype('float32')
-                        indexed_df['close'] = indexed_df['close'].astype('float32')
-                        indexed_df['volume'] = indexed_df['volume'].astype('int32')
-                        indexed_df['ltv'] = indexed_df['ltv'].astype('int32')
-
-                    self.cache[epic][timeframe] = indexed_df
-
-                    self.logger.debug(f"✅ Cached {epic} {timeframe}min: {len(indexed_df):,} rows")
-
-                # Calculate statistics
-                end_time = datetime.now()
-                self.stats.load_time_seconds = (end_time - start_time).total_seconds()
-                self.stats.total_rows = len(df_all)
-                self.stats.epics_cached = len(self.cache)
-                self.stats.data_range_start = df_all['start_time'].min()
-                self.stats.data_range_end = df_all['start_time'].max()
-                self.stats.total_memory_mb = self._calculate_memory_usage()
-
-                self.is_loaded = True
-
-                self.logger.info(f"✅ Cache loaded successfully!")
-                self.logger.info(f"   📊 {self.stats.total_rows:,} rows across {self.stats.epics_cached} epics")
-                self.logger.info(f"   🕒 Load time: {self.stats.load_time_seconds:.1f} seconds")
-                self.logger.info(f"   💾 Memory usage: {self.stats.total_memory_mb:.1f} MB")
-                self.logger.info(f"   📅 Data range: {self.stats.data_range_start} to {self.stats.data_range_end}")
-
-                return True
+                # Process the data using shared method
+                return self._process_loaded_data(df_all, start_time)
 
             except Exception as e:
                 self.logger.error(f"❌ Failed to load cache: {e}")
                 self.cache.clear()
                 self.is_loaded = False
                 return False
+
+    def _process_loaded_data(self, df_all: pd.DataFrame, load_start_time: datetime) -> bool:
+        """
+        Process loaded DataFrame into cache structure (shared by load_all_data and load_data_for_period)
+
+        Args:
+            df_all: DataFrame with columns: start_time, epic, timeframe, open, high, low, close, volume, ltv
+            load_start_time: When the load started (for timing stats)
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Convert start_time to datetime if it's not already
+            df_all['start_time'] = pd.to_datetime(df_all['start_time'])
+
+            # Group by epic and timeframe for efficient storage
+            self.logger.info(f"📈 Organizing {len(df_all):,} rows into cache structure...")
+
+            grouped = df_all.groupby(['epic', 'timeframe'])
+
+            for (epic, timeframe), group_df in grouped:
+                # Initialize epic cache if needed
+                if epic not in self.cache:
+                    self.cache[epic] = {}
+
+                # Set start_time as index for fast time-based lookups
+                indexed_df = group_df.set_index('start_time').sort_index()
+
+                # Drop epic and timeframe columns since they're in the keys
+                indexed_df = indexed_df.drop(['epic', 'timeframe'], axis=1)
+
+                # Apply compression if enabled
+                if self.compression_enabled:
+                    # Convert to more memory-efficient dtypes
+                    indexed_df['open'] = indexed_df['open'].astype('float32')
+                    indexed_df['high'] = indexed_df['high'].astype('float32')
+                    indexed_df['low'] = indexed_df['low'].astype('float32')
+                    indexed_df['close'] = indexed_df['close'].astype('float32')
+                    indexed_df['volume'] = indexed_df['volume'].astype('int32')
+                    indexed_df['ltv'] = indexed_df['ltv'].astype('int32')
+
+                self.cache[epic][timeframe] = indexed_df
+
+                self.logger.debug(f"✅ Cached {epic} {timeframe}min: {len(indexed_df):,} rows")
+
+            # Calculate statistics
+            end_time = datetime.now()
+            self.stats.load_time_seconds = (end_time - load_start_time).total_seconds()
+            self.stats.total_rows = len(df_all)
+            self.stats.epics_cached = len(self.cache)
+            self.stats.data_range_start = df_all['start_time'].min()
+            self.stats.data_range_end = df_all['start_time'].max()
+            self.stats.total_memory_mb = self._calculate_memory_usage()
+
+            self.is_loaded = True
+
+            self.logger.info(f"✅ Cache loaded successfully!")
+            self.logger.info(f"   📊 {self.stats.total_rows:,} rows across {self.stats.epics_cached} epics")
+            self.logger.info(f"   🕒 Load time: {self.stats.load_time_seconds:.1f} seconds")
+            self.logger.info(f"   💾 Memory usage: {self.stats.total_memory_mb:.1f} MB")
+            self.logger.info(f"   📅 Data range: {self.stats.data_range_start} to {self.stats.data_range_end}")
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to process loaded data: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            self.cache.clear()
+            self.is_loaded = False
+            return False
 
     def get_historical_data(
         self,

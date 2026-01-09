@@ -320,7 +320,28 @@ class BacktestDataValidator:
 class BacktestDataFetcher(DataFetcher):
     """Enhanced DataFetcher optimized for backtest scenarios"""
 
-    def __init__(self, db_manager: DatabaseManager, user_timezone: str = 'UTC'):
+    def __init__(
+        self,
+        db_manager: DatabaseManager,
+        user_timezone: str = 'UTC',
+        start_date: datetime = None,
+        end_date: datetime = None,
+        epics: List[str] = None
+    ):
+        """
+        Initialize BacktestDataFetcher with optional period-based cache loading.
+
+        Args:
+            db_manager: Database manager instance
+            user_timezone: User's timezone string
+            start_date: Optional backtest start date (for optimized cache loading)
+            end_date: Optional backtest end date (for optimized cache loading)
+            epics: Optional list of epics to load (for even faster loading)
+
+        If start_date and end_date are provided, only data for that period
+        (plus lookback for indicators) will be loaded into cache - MUCH faster
+        than loading all historical data.
+        """
         super().__init__(db_manager, user_timezone)
 
         self.backtest_mode = True
@@ -328,8 +349,8 @@ class BacktestDataFetcher(DataFetcher):
         self.current_backtest_time = None
         # CRITICAL FIX (Jan 2026): Store backtest date range for proper cache population
         # The _resampled_cache must contain data for the ENTIRE backtest period
-        self.backtest_start_date = None
-        self.backtest_end_date = None
+        self.backtest_start_date = start_date
+        self.backtest_end_date = end_date
         self.data_validator = BacktestDataValidator(db_manager)
 
         # CRITICAL FIX: Disable reduced_lookback for backtesting
@@ -350,9 +371,20 @@ class BacktestDataFetcher(DataFetcher):
         # Initialize in-memory cache for ultra-fast data access
         self.memory_cache = get_forex_cache(db_manager)
         if self.memory_cache is None:
-            self.memory_cache = initialize_cache(db_manager, auto_load=True)
+            self.memory_cache = initialize_cache(db_manager, auto_load=False)  # Don't auto-load
+
+        # PERFORMANCE OPTIMIZATION: Load only data for backtest period if dates provided
+        if start_date and end_date:
+            self.logger.info(f"⚡ Loading cache for backtest period only: {start_date.date()} to {end_date.date()}")
+            self.memory_cache.load_data_for_period(
+                start_date=start_date,
+                end_date=end_date,
+                epics=epics,
+                lookback_hours=168,  # 7 days for indicator warmup
+                force_reload=True
+            )
         else:
-            # Ensure cache is loaded
+            # Fallback to loading all data (slower, but works for unknown periods)
             if not self.memory_cache.is_loaded:
                 self.memory_cache.load_all_data()
 
@@ -821,20 +853,44 @@ class BacktestDataFetcher(DataFetcher):
             tf_minutes = timeframe_map.get(timeframe, 5)
 
             # Determine source timeframe for resampling
-            # ALWAYS use 1m as base for all timeframes (future-proof: only 1m candles will be stored)
-            # This matches the parent class behavior when use_1m_base_synthesis=True
-            if timeframe in ('5m', '15m', '1h', '4h'):
-                source_tf = 1  # Always use 1m candles as base
-                # Calculate lookback multiplier based on target timeframe
-                # 5m needs 5x more 1m bars, 15m needs 15x, 1h needs 60x, 4h needs 240x
-                multipliers = {'5m': 5, '15m': 15, '1h': 60, '4h': 240}
-                base_multiplier = multipliers.get(timeframe, 15)
-                # Add 20% buffer for resampling edge cases
+            # OPTIMIZATION: Use highest available timeframe from cache to minimize resampling
+            # Check if target timeframe exists directly in cache first
+            source_tf = tf_minutes  # Default: use target timeframe directly if available
+            needs_resampling = False
+
+            if self.memory_cache and self.memory_cache.is_loaded:
+                # Check what timeframes are available in cache for this epic
+                available_tfs = []
+                if epic in self.memory_cache.cache:
+                    available_tfs = list(self.memory_cache.cache[epic].keys())
+
+                if tf_minutes in available_tfs:
+                    # Target timeframe exists directly - no resampling needed!
+                    source_tf = tf_minutes
+                    needs_resampling = False
+                    self.logger.debug(f"⚡ Using {timeframe} directly from cache (no resampling)")
+                elif timeframe == '4h' and 60 in available_tfs:
+                    # 4h not available but 1h is - resample from 1h (4x faster than from 1m)
+                    source_tf = 60
+                    needs_resampling = True
+                    self.logger.debug(f"📊 Using 1h base for {timeframe} (4x resample)")
+                elif timeframe in ('15m', '1h', '4h') and 5 in available_tfs:
+                    # Use 5m as base (faster than 1m)
+                    source_tf = 5
+                    needs_resampling = True
+                    self.logger.debug(f"📊 Using 5m base for {timeframe}")
+                elif 1 in available_tfs:
+                    # Fallback to 1m
+                    source_tf = 1
+                    needs_resampling = True
+                    self.logger.debug(f"📊 Using 1m base for {timeframe} (slowest)")
+                else:
+                    self.logger.warning(f"⚠️ No suitable source timeframe found for {timeframe}")
+
+            # Adjust lookback if resampling is needed
+            if needs_resampling:
                 adjusted_lookback = int(lookback_hours * 1.2)
                 since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
-                self.logger.debug(f"📊 Using 1m base synthesis for {timeframe} (multiplier={base_multiplier}x)")
-            else:
-                source_tf = tf_minutes
 
             # 🚀 FAST PATH: Try in-memory cache first
             df = None

@@ -247,11 +247,17 @@ class BacktestScanner(IntelligentForexScanner):
                     self.logger.warning(f"⚠️ BacktestScanner: Could not force-init '{strategy_name}': {message}")
 
             # Create a new signal detector but replace its data_fetcher with BacktestDataFetcher
-            backtest_data_fetcher = BacktestDataFetcher(self.db_manager, getattr(config, 'USER_TIMEZONE', 'Europe/Stockholm'))
+            # PERFORMANCE OPTIMIZATION (Jan 2026): Pass start/end dates to load only needed data into cache
+            backtest_data_fetcher = BacktestDataFetcher(
+                self.db_manager,
+                getattr(config, 'USER_TIMEZONE', 'Europe/Stockholm'),
+                start_date=self.start_date,
+                end_date=self.end_date,
+                epics=self.epic_list  # Only load data for tested epics (from parent class)
+            )
 
-            # CRITICAL FIX: Set initial backtest time with BOTH start_date and end_date
-            # This ensures the cache is populated for the ENTIRE backtest period (Jan 2026 fix)
-            # Pass start_date so lookback calculation covers from backtest_start - indicator_warmup to backtest_end
+            # Set initial backtest time with BOTH start_date and end_date
+            # This ensures data filtering works correctly during backtest iterations
             backtest_data_fetcher.set_backtest_time(self.end_date, end_date=self.end_date, start_date=self.start_date)
             self.logger.info(f"⏰ BacktestDataFetcher initialized with period: {self.start_date} to {self.end_date}")
 
@@ -1404,12 +1410,13 @@ class BacktestScanner(IntelligentForexScanner):
             expected_bars_per_scan = int((optimal_lookback * 60) / timeframe_minutes)
 
             self.logger.info(f"Expected bars per scan: {expected_bars_per_scan}")
-            self.logger.info(f"Minimum bars required: {config.MIN_BARS_FOR_SIGNAL}")
+            min_bars = getattr(config, 'MIN_BARS_FOR_SIGNAL', 50)
+            self.logger.info(f"Minimum bars required: {min_bars}")
 
-            if expected_bars_per_scan < config.MIN_BARS_FOR_SIGNAL:
+            if expected_bars_per_scan < min_bars:
                 self.logger.warning(
                     f"⚠️ WARNING: Lookback may be insufficient! "
-                    f"Expected {expected_bars_per_scan} < MIN_BARS {config.MIN_BARS_FOR_SIGNAL}"
+                    f"Expected {expected_bars_per_scan} < MIN_BARS {min_bars}"
                 )
             else:
                 self.logger.info(f"✅ Lookback validation PASSED")
