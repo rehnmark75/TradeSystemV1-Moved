@@ -5,6 +5,7 @@ Ensures live scanner performance is never compromised by backtest execution
 """
 
 import asyncio
+import os
 import threading
 import time
 import logging

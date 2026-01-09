@@ -48,8 +48,9 @@ class EnhancedBacktestCommands:
         pipeline: bool = False,
         csv_export: str = None,
         config_override: dict = None,
-        use_historical_intelligence: bool = True
-    ) -> bool:
+        use_historical_intelligence: bool = True,
+        return_results: bool = False
+    ):
         """
         Run enhanced backtest using the new integrated pipeline
 
@@ -148,17 +149,22 @@ class EnhancedBacktestCommands:
                 # Run the complete orchestration
                 results = orchestrator.run_backtest_orchestration()
 
-                # Display results
-                self._display_backtest_results(
-                    execution_id,
-                    results,
-                    epic_list,
-                    show_signals,
-                    max_signals_display,
-                    csv_export
-                )
+                # Display results (unless return_results is True for silent mode)
+                if not return_results:
+                    self._display_backtest_results(
+                        execution_id,
+                        results,
+                        epic_list,
+                        show_signals,
+                        max_signals_display,
+                        csv_export
+                    )
 
             self.logger.info("✅ Enhanced backtest completed successfully")
+
+            if return_results:
+                # Return results dict for programmatic use
+                return results
             return True
 
         except Exception as e:
@@ -166,6 +172,8 @@ class EnhancedBacktestCommands:
             import traceback
             if hasattr(self.logger, 'debug'):
                 self.logger.debug(traceback.format_exc())
+            if return_results:
+                return None
             return False
 
     def _display_backtest_results(

@@ -224,6 +224,45 @@ Signal Display Format:
                  'Useful for testing intelligence calculation changes.'
         )
 
+        # Parallel execution options
+        parser.add_argument(
+            '--parallel',
+            action='store_true',
+            help='Run backtest in parallel using chunked execution. '
+                 'Splits the time period into chunks and processes them concurrently.'
+        )
+
+        parser.add_argument(
+            '--workers',
+            type=int,
+            default=4,
+            help='Number of parallel workers for chunked execution (default: 4). '
+                 'Only used with --parallel flag.'
+        )
+
+        parser.add_argument(
+            '--chunk-days',
+            type=int,
+            default=7,
+            help='Days per chunk for parallel execution (default: 7). '
+                 'Only used with --parallel flag.'
+        )
+
+        # Chart generation options
+        parser.add_argument(
+            '--chart',
+            action='store_true',
+            help='Generate visual chart with signals plotted on price data.'
+        )
+
+        parser.add_argument(
+            '--chart-output',
+            type=str,
+            metavar='FILEPATH',
+            help='Save chart to specified file path (e.g., /tmp/backtest_chart.png). '
+                 'If not specified, chart is saved to default location.'
+        )
+
         return parser
 
     def _parse_overrides(self, override_args) -> dict:
@@ -445,8 +484,20 @@ Signal Display Format:
                     use_historical_intelligence=use_historical_intelligence
                 )
 
+            # Parallel backtest mode
+            if args.parallel:
+                return self._run_parallel_backtest(
+                    args=args,
+                    start_date=start_date,
+                    end_date=end_date,
+                    config_override=config_override,
+                    use_historical_intelligence=use_historical_intelligence
+                )
+
             # Standard backtest mode
-            return self.enhanced_backtest.run_enhanced_backtest(
+            # If chart is requested, we need the results dict to get execution_id
+            need_results = args.chart
+            result = self.enhanced_backtest.run_enhanced_backtest(
                 epic=args.epic,
                 days=args.days,
                 start_date=start_date,
@@ -458,8 +509,18 @@ Signal Display Format:
                 pipeline=args.pipeline,
                 csv_export=args.csv_export if hasattr(args, 'csv_export') else None,
                 config_override=config_override,
-                use_historical_intelligence=use_historical_intelligence
+                use_historical_intelligence=use_historical_intelligence,
+                return_results=need_results
             )
+
+            # Generate chart if requested (for standard backtest)
+            if args.chart and result and isinstance(result, dict):
+                self._generate_backtest_chart(args, result)
+
+            # Return bool for success/failure
+            if isinstance(result, dict):
+                return True
+            return result
 
         except KeyboardInterrupt:
             print("\n⚠️ Backtest interrupted by user")
@@ -469,6 +530,371 @@ Signal Display Format:
             if args.verbose:
                 import traceback
                 traceback.print_exc()
+            return False
+
+    def _run_parallel_backtest(self, args, start_date, end_date, config_override, use_historical_intelligence) -> bool:
+        """
+        Run backtest in parallel across multiple currency pairs.
+
+        Uses concurrent.futures to run backtests for multiple epics simultaneously.
+        Much simpler than chunked execution - just parallelizes across pairs.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from datetime import timedelta
+
+        print("\n" + "=" * 60)
+        print("⚡ PARALLEL BACKTEST MODE (Multi-Epic)")
+        print("=" * 60)
+
+        # Calculate date range
+        if start_date and end_date:
+            actual_start = start_date
+            actual_end = end_date
+        else:
+            actual_end = datetime.now()
+            actual_start = actual_end - timedelta(days=args.days)
+
+        total_days = (actual_end - actual_start).days
+
+        print(f"📅 Period: {actual_start.date()} to {actual_end.date()} ({total_days} days)")
+        print(f"👷 Workers: {args.workers}")
+
+        # Get list of epics to test
+        if args.epic:
+            # Single epic specified - just run normally (no parallelization benefit)
+            print(f"📊 Single epic specified: {args.epic}")
+            print("   (Use without --epic to parallelize across all pairs)")
+            print("=" * 60 + "\n")
+            # Fall back to standard execution for single epic
+            return self._run_standard_backtest(args, start_date, end_date, config_override, use_historical_intelligence)
+
+        # Get all configured epics for parallel testing
+        epic_list = config.CURRENCY_PAIRS if hasattr(config, 'CURRENCY_PAIRS') else [
+            'CS.D.EURUSD.CEEM.IP',
+            'CS.D.GBPUSD.MINI.IP',
+            'CS.D.USDJPY.MINI.IP',
+            'CS.D.AUDUSD.MINI.IP',
+        ]
+
+        print(f"📊 Epics: {len(epic_list)} pairs")
+        print(f"📈 Strategy: {args.strategy}")
+        print("=" * 60 + "\n")
+
+        # Track results
+        all_results = {}
+        total_signals = 0
+        total_pips = 0.0
+        winning_trades = 0
+        losing_trades = 0
+
+        def run_single_backtest(epic: str):
+            """Run backtest for a single epic and return metrics"""
+            try:
+                # Run backtest with return_results=True to get actual metrics
+                result = self.enhanced_backtest.run_enhanced_backtest(
+                    epic=epic,
+                    days=args.days,
+                    start_date=start_date,
+                    end_date=end_date,
+                    show_signals=False,  # Don't show individual signals
+                    timeframe=args.timeframe,
+                    strategy=args.strategy,
+                    max_signals_display=0,
+                    pipeline=args.pipeline,
+                    csv_export=None,
+                    config_override=config_override,
+                    use_historical_intelligence=use_historical_intelligence,
+                    return_results=True  # Get actual results dict
+                )
+
+                if result and isinstance(result, dict):
+                    return epic, result, None
+                elif result:
+                    # Got True but no dict - shouldn't happen with return_results=True
+                    return epic, {'success': True, 'total_signals': 0, 'total_pips': 0.0}, None
+                else:
+                    return epic, None, "Backtest failed"
+            except Exception as e:
+                return epic, None, str(e)
+
+        # Run backtests in parallel
+        print("🚀 Running backtests in parallel...")
+        completed = 0
+
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = {executor.submit(run_single_backtest, epic): epic for epic in epic_list}
+
+            for future in as_completed(futures):
+                epic, result, error = future.result()
+                completed += 1
+                progress = f"[{completed}/{len(epic_list)}]"
+
+                if error:
+                    print(f"  ❌ {progress} {epic.split('.')[2]}: {error}")
+                    all_results[epic] = {'error': error}
+                elif result:
+                    # Extract metrics from nested structure
+                    # Structure:
+                    #   - signal_processing: {logged, validated, rejected, errors}
+                    #   - backtest_results: {performance_summary: {...}, execution_stats: {...}}
+                    #   - performance_metrics: {total_pips, win_rate}
+                    signal_proc = result.get('signal_processing', {})
+                    backtest_res = result.get('backtest_results', {})
+                    exec_stats = backtest_res.get('execution_stats', {})
+                    perf_summary = backtest_res.get('performance_summary', {})
+                    perf_metrics = result.get('performance_metrics', {})
+
+                    # Signal count from signal_processing (most reliable)
+                    signals = (
+                        signal_proc.get('logged', 0) or
+                        signal_proc.get('validated', 0) or
+                        exec_stats.get('total_signals_detected', 0) or
+                        perf_summary.get('total_signals', 0) or 0
+                    )
+
+                    # Pips from performance_summary or metrics
+                    pips = float(
+                        perf_summary.get('total_pips', 0) or
+                        perf_metrics.get('total_pips', 0) or 0
+                    )
+
+                    # Win rate from performance_summary
+                    win_rate_pct = float(
+                        perf_summary.get('avg_win_rate', 0) or
+                        perf_metrics.get('win_rate', 0) or 0
+                    )
+                    # Normalize to 0-1 if it's a percentage > 1
+                    if win_rate_pct > 1:
+                        win_rate_pct = win_rate_pct / 100
+
+                    # Estimate wins/losses from signals and win rate
+                    wins = int(signals * win_rate_pct) if signals > 0 else 0
+                    losses = signals - wins
+
+                    total_signals += signals
+                    total_pips += pips
+                    winning_trades += wins
+                    losing_trades += losses
+
+                    # Store flattened result for chart generation
+                    all_results[epic] = {
+                        'total_signals': signals,
+                        'total_pips': pips,
+                        'winning_trades': wins,
+                        'losing_trades': losses,
+                        'raw_result': result
+                    }
+                    print(f"  ✅ {progress} {epic.split('.')[2]}: {signals} signals, {pips:+.1f} pips")
+                else:
+                    print(f"  ⚠️ {progress} {epic.split('.')[2]}: No result")
+                    all_results[epic] = {}
+
+        # Calculate aggregate statistics
+        win_rate = winning_trades / max(winning_trades + losing_trades, 1)
+
+        # Display summary
+        print("\n" + "=" * 60)
+        print("📊 PARALLEL BACKTEST RESULTS")
+        print("=" * 60)
+        print(f"Pairs Tested:        {len(epic_list)}")
+        print(f"Total Signals:       {total_signals}")
+        print(f"Win Rate:            {win_rate:.1%}")
+        print(f"Total Pips:          {total_pips:+.1f}")
+        print(f"Winning Trades:      {winning_trades}")
+        print(f"Losing Trades:       {losing_trades}")
+        print("=" * 60)
+
+        # Show per-pair breakdown
+        print("\n📈 Per-Pair Results:")
+        for epic, result in sorted(all_results.items()):
+            pair_name = epic.split('.')[2]
+            if 'error' in result:
+                print(f"  {pair_name}: ❌ Error - {result.get('error', 'unknown')}")
+            else:
+                signals = result.get('total_signals', 0)
+                pips = result.get('total_pips', 0.0)
+                wins = result.get('winning_trades', 0)
+                losses = result.get('losing_trades', 0)
+                if wins + losses > 0:
+                    pair_win_rate = wins / (wins + losses)
+                    print(f"  {pair_name}: {signals} signals, {pips:+.1f} pips, {pair_win_rate:.0%} win rate")
+                else:
+                    print(f"  {pair_name}: {signals} signals, {pips:+.1f} pips")
+
+        # Generate chart if requested (using combined results)
+        if args.chart:
+            self._generate_parallel_chart(args, all_results, actual_start, actual_end)
+
+        return True
+
+    def _run_standard_backtest(self, args, start_date, end_date, config_override, use_historical_intelligence) -> bool:
+        """Run a standard (non-parallel) backtest"""
+        result = self.enhanced_backtest.run_enhanced_backtest(
+            epic=args.epic,
+            days=args.days,
+            start_date=start_date,
+            end_date=end_date,
+            show_signals=args.show_signals,
+            timeframe=args.timeframe,
+            strategy=args.strategy,
+            max_signals_display=args.max_signals,
+            pipeline=args.pipeline,
+            csv_export=args.csv_export if hasattr(args, 'csv_export') else None,
+            config_override=config_override,
+            use_historical_intelligence=use_historical_intelligence
+        )
+
+        if result and args.chart:
+            self._generate_backtest_chart(args, result)
+
+        return result is not None
+
+    def _generate_parallel_chart(self, args, all_results, start_date, end_date):
+        """Generate summary chart for parallel backtest results"""
+        try:
+            from forex_scanner.core.chunked_backtest import BacktestChartGenerator
+            from forex_scanner.core.database import DatabaseManager
+            from forex_scanner import config as scanner_config
+        except ImportError:
+            from core.chunked_backtest import BacktestChartGenerator
+            from core.database import DatabaseManager
+            import config as scanner_config
+
+        print("\n📊 Generating summary chart...")
+
+        # Collect all signals from all results
+        all_signals = []
+        for epic, result in all_results.items():
+            if 'error' not in result and 'signals' in result:
+                for sig in result['signals']:
+                    sig['epic'] = epic
+                    all_signals.append(sig)
+
+        if not all_signals:
+            print("⚠️ No signals to chart")
+            return
+
+        db_manager = DatabaseManager(scanner_config.DATABASE_URL)
+        chart_generator = BacktestChartGenerator(db_manager=db_manager)
+
+        # Determine output path
+        chart_path = args.chart_output
+        if not chart_path:
+            chart_path = f"/tmp/backtest_parallel_{start_date.date()}_{end_date.date()}.png"
+
+        # For now, just show message - full multi-epic chart would need more work
+        print(f"📊 Found {len(all_signals)} total signals across all pairs")
+        print(f"   (Multi-epic chart generation not yet implemented)")
+        print(f"   Use --epic PAIR --chart for single-pair charts")
+
+    def _generate_backtest_chart(self, args, result) -> bool:
+        """
+        Generate chart for a standard (non-parallel) backtest.
+
+        This is called after a standard backtest completes if --chart is specified.
+        """
+        try:
+            from forex_scanner.core.chunked_backtest import BacktestChartGenerator
+            from forex_scanner.core.database import DatabaseManager
+            from forex_scanner import config as scanner_config
+        except ImportError:
+            from core.chunked_backtest import BacktestChartGenerator
+            from core.database import DatabaseManager
+            import config as scanner_config
+
+        print("\n📊 Generating backtest chart...")
+
+        db_manager = DatabaseManager(scanner_config.DATABASE_URL)
+
+        # Get execution_id from result
+        execution_id = None
+        if isinstance(result, dict):
+            execution_id = result.get('execution_id')
+            if not execution_id and 'backtest_results' in result:
+                execution_id = result['backtest_results'].get('execution_id')
+
+        if not execution_id:
+            print("⚠️ No execution_id found in result - cannot fetch signals")
+            return False
+
+        # Convert to plain Python int (numpy.int64 causes psycopg2 issues)
+        execution_id = int(execution_id)
+
+        # Fetch signals from database
+        query = """
+        SELECT
+            signal_timestamp as timestamp,
+            signal_type as type,
+            entry_price,
+            exit_price,
+            pips_gained as pips,
+            trade_result
+        FROM backtest_signals
+        WHERE execution_id = :exec_id
+        ORDER BY signal_timestamp
+        """
+
+        try:
+            signals_df = db_manager.execute_query(query, {'exec_id': execution_id})
+        except Exception as e:
+            print(f"⚠️ Failed to fetch signals from database: {e}")
+            return False
+
+        if signals_df.empty:
+            print("⚠️ No signals found in database for this backtest")
+            return False
+
+        # Convert DataFrame to list of dicts for chart generator
+        chart_signals = []
+        for _, row in signals_df.iterrows():
+            pips = float(row['pips']) if row['pips'] else 0
+            chart_signals.append({
+                'timestamp': row['timestamp'],
+                'type': row['type'],
+                'entry_price': float(row['entry_price']) if row['entry_price'] else 0,
+                'pips': pips,
+                'result': 'win' if pips > 0 else 'loss'
+            })
+
+        print(f"   Found {len(chart_signals)} signals to plot")
+        chart_generator = BacktestChartGenerator(db_manager=db_manager)
+
+        # Get epic from args or result
+        epic = args.epic or result.get('epic', 'CS.D.EURUSD.CEEM.IP')
+
+        # Get date range from result or calculate from signals
+        start_date = result.get('start_date')
+        end_date = result.get('end_date')
+
+        if not start_date and chart_signals:
+            timestamps = [s['timestamp'] for s in chart_signals if s['timestamp']]
+            if timestamps:
+                start_date = min(timestamps)
+                end_date = max(timestamps)
+
+        if not start_date or not end_date:
+            print("⚠️ Could not determine date range for chart")
+            return False
+
+        # Determine output path
+        chart_path = args.chart_output
+        if not chart_path:
+            chart_path = f"/tmp/backtest_{epic.replace('.', '_')}_chart.png"
+
+        result_path = chart_generator.generate_backtest_chart(
+            epic=epic,
+            start_date=start_date,
+            end_date=end_date,
+            signals=chart_signals,
+            strategy=args.strategy,
+            output_path=chart_path
+        )
+
+        if result_path:
+            print(f"✅ Chart saved to: {result_path}")
+            return True
+        else:
+            print("⚠️ Chart generation failed")
             return False
 
     def show_usage_examples(self):

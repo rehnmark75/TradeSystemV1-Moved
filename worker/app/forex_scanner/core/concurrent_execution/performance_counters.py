@@ -584,3 +584,169 @@ def benchmark_function(func: Callable, *args, iterations: int = 1000, **kwargs) 
         "p95_time_us": stats.p95,
         "p99_time_us": stats.p99
     }
+
+
+class PerformanceCounters:
+    """
+    High-level performance counters manager for backtest execution.
+
+    Provides a unified interface for collecting and tracking performance
+    metrics across backtest workers and system resources.
+    """
+
+    def __init__(self, logger: logging.Logger = None):
+        self.logger = logger or logging.getLogger(__name__)
+
+        # System-level performance monitoring
+        self.system_counters = SystemPerformanceCounters(self.logger)
+
+        # Worker-specific counters (keyed by worker_id)
+        self.worker_counters: Dict[int, WorkerPerformanceCounters] = {}
+
+        # Application-level counters
+        self.counters: Dict[str, PerformanceCounter] = {}
+
+        # Initialize standard application counters
+        self._init_standard_counters()
+
+        # State tracking
+        self.is_monitoring = False
+
+    def _init_standard_counters(self):
+        """Initialize standard performance counters"""
+        counter_definitions = [
+            ("backtest_execution", CounterType.TIMING),
+            ("chunk_processing", CounterType.TIMING),
+            ("result_aggregation", CounterType.TIMING),
+            ("database_operations", CounterType.TIMING),
+            ("signal_validation", CounterType.TIMING),
+            ("job_queue_wait", CounterType.LATENCY),
+            ("total_throughput", CounterType.THROUGHPUT),
+        ]
+
+        for name, counter_type in counter_definitions:
+            self.counters[name] = PerformanceCounter(name, counter_type)
+
+    def start(self):
+        """Start system and application performance monitoring"""
+        self.start_monitoring()
+
+    def start_monitoring(self):
+        """Start system and application performance monitoring"""
+        self.is_monitoring = True
+        self.system_counters.start()
+        self.logger.info("📊 Performance monitoring started")
+
+    def stop(self):
+        """Stop system and application performance monitoring"""
+        self.stop_monitoring()
+
+    def stop_monitoring(self):
+        """Stop system and application performance monitoring"""
+        self.is_monitoring = False
+        self.system_counters.stop()
+        self.logger.info("📊 Performance monitoring stopped")
+
+    def update(self):
+        """Update performance metrics (called periodically from monitoring loop)"""
+        # This method is called periodically to refresh metrics
+        # Most updates happen through individual record_value calls
+        # This is a convenience method for bulk updates
+        pass
+
+    def get_or_create_worker_counters(self, worker_id: int) -> WorkerPerformanceCounters:
+        """Get or create performance counters for a worker"""
+        if worker_id not in self.worker_counters:
+            self.worker_counters[worker_id] = WorkerPerformanceCounters(
+                worker_id, self.logger
+            )
+        return self.worker_counters[worker_id]
+
+    def start_timer(self, counter_name: str, context: str = None) -> int:
+        """Start a timer for a specific counter"""
+        counter = self.counters.get(counter_name)
+        if counter:
+            return counter.start_timer(context)
+        return 0
+
+    def stop_timer(self, counter_name: str, timer_id: int = None, context: str = None) -> float:
+        """Stop a timer for a specific counter"""
+        counter = self.counters.get(counter_name)
+        if counter:
+            return counter.stop_timer(timer_id, context)
+        return 0.0
+
+    def record_value(self, counter_name: str, value: float, context: str = None):
+        """Record a performance value"""
+        counter = self.counters.get(counter_name)
+        if counter:
+            counter.record_value(value, context)
+
+    def get_system_metrics(self) -> Dict[str, Any]:
+        """Get current system performance metrics"""
+        return self.system_counters.get_current_system_metrics()
+
+    def get_all_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive statistics from all counters"""
+        stats = {
+            "system": self.get_system_metrics(),
+            "application": {},
+            "workers": {}
+        }
+
+        # Application-level counters
+        for name, counter in self.counters.items():
+            counter_stats = counter.get_stats()
+            stats["application"][name] = {
+                "count": counter_stats.count,
+                "average": counter_stats.average,
+                "min": counter_stats.min_value if counter_stats.min_value != float('inf') else 0,
+                "max": counter_stats.max_value,
+                "p50": counter_stats.p50,
+                "p95": counter_stats.p95,
+                "p99": counter_stats.p99
+            }
+
+        # Worker counters
+        for worker_id, worker_counters in self.worker_counters.items():
+            stats["workers"][worker_id] = worker_counters.get_statistics()
+
+        return stats
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Get high-level performance summary"""
+        all_stats = self.get_all_statistics()
+
+        return {
+            "cpu_usage": all_stats.get("system", {}).get("cpu", {}).get("total_percent", 0),
+            "memory_usage": all_stats.get("system", {}).get("memory", {}).get("used_percent", 0),
+            "active_workers": len(self.worker_counters),
+            "total_operations": sum(
+                s.get("count", 0) for s in all_stats.get("application", {}).values()
+            ),
+            "avg_latency_us": self._calculate_avg_latency(all_stats)
+        }
+
+    def _calculate_avg_latency(self, stats: Dict[str, Any]) -> float:
+        """Calculate average latency from application counters"""
+        app_stats = stats.get("application", {})
+        total_avg = 0.0
+        count = 0
+
+        for counter_stats in app_stats.values():
+            if counter_stats.get("count", 0) > 0:
+                total_avg += counter_stats.get("average", 0)
+                count += 1
+
+        return total_avg / max(count, 1)
+
+    def reset_all(self):
+        """Reset all performance counters"""
+        for counter in self.counters.values():
+            counter.reset()
+
+        for worker_counters in self.worker_counters.values():
+            for counter in worker_counters.counters.values():
+                counter.reset()
+
+        self.logger.info("📊 All performance counters reset")

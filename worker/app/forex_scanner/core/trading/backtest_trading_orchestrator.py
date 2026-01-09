@@ -75,13 +75,29 @@ class BacktestTradingOrchestrator:
                  logger: Optional[logging.Logger] = None,
                  pipeline_mode: bool = False,
                  config_override: dict = None,
-                 use_historical_intelligence: bool = True):
+                 use_historical_intelligence: bool = True,
+                 signal_start_filter: datetime = None):
+        """
+        Initialize BacktestTradingOrchestrator
 
+        Args:
+            execution_id: ID of the backtest execution
+            backtest_config: Backtest configuration dict
+            db_manager: Database manager instance
+            logger: Logger instance
+            pipeline_mode: Use full validation pipeline (slower but matches live)
+            config_override: Parameter overrides for testing
+            use_historical_intelligence: Replay stored market intelligence
+            signal_start_filter: Only record signals AFTER this timestamp
+                                 (used for chunked parallel backtests to avoid
+                                 recording signals during warmup period)
+        """
         self.execution_id = execution_id
         self.backtest_config = backtest_config
         self.pipeline_mode = pipeline_mode
         self._config_override = config_override
         self._use_historical_intelligence = use_historical_intelligence
+        self._signal_start_filter = signal_start_filter or backtest_config.get('signal_start_filter')
         self.db_manager = db_manager or DatabaseManager(config.DATABASE_URL)
         self.logger = logger or logging.getLogger(__name__)
 
@@ -279,12 +295,21 @@ class BacktestTradingOrchestrator:
         """
         CRITICAL FIX: Process signals from scanner through orchestrator validation pipeline
 
-        This ensures signals go through the same validation as live trading
+        This ensures signals go through the same validation as live trading.
+
+        If signal_start_filter is set, signals before that timestamp are skipped.
+        This is used for chunked parallel backtests to avoid recording signals
+        during the warmup period (which is needed for indicator calculation).
         """
         try:
             signals_processed = 0
+            signals_filtered = 0
 
             self.logger.info(f"🔍 DEBUG: Backtest results keys: {list(backtest_results.keys())}")
+
+            # Log signal_start_filter if set
+            if self._signal_start_filter:
+                self.logger.info(f"🔍 Signal start filter active: only recording signals after {self._signal_start_filter}")
 
             # Extract signals from backtest results structure: results['signals_by_epic'][epic]
             signals_by_epic = backtest_results.get('signals_by_epic', {})
@@ -297,6 +322,19 @@ class BacktestTradingOrchestrator:
                 if isinstance(signals, list):
                     for signal in signals:
                         if isinstance(signal, dict):
+                            # Apply signal_start_filter if set (for chunked backtests)
+                            if self._signal_start_filter:
+                                signal_timestamp = signal.get('timestamp') or signal.get('signal_timestamp')
+                                if signal_timestamp:
+                                    # Convert string to datetime if needed
+                                    if isinstance(signal_timestamp, str):
+                                        signal_timestamp = pd.to_datetime(signal_timestamp)
+
+                                    # Skip signals before the filter timestamp
+                                    if signal_timestamp < self._signal_start_filter:
+                                        signals_filtered += 1
+                                        continue
+
                             signals_processed += 1
 
                             # Process each signal through the validation pipeline
@@ -308,6 +346,8 @@ class BacktestTradingOrchestrator:
                                 self.logger.debug(f"❌ Signal {signals_processed} ({epic}) failed validation: {message}")
 
             self.logger.info(f"🔄 Processed {signals_processed} signals through orchestrator validation pipeline")
+            if signals_filtered > 0:
+                self.logger.info(f"🔍 Filtered out {signals_filtered} signals (before signal_start_filter)")
 
         except Exception as e:
             self.logger.error(f"Error processing scanner signals through validation: {e}")

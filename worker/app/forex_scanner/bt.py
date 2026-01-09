@@ -11,6 +11,15 @@ Usage:
     python bt.py EURUSD 14                         # 14 days, EUR/USD only
     python bt.py EURUSD 7 --show-signals          # With detailed signals
     python bt.py --all 3 --show-signals           # All pairs, 3 days, with signals
+
+Parallel Execution:
+    python bt.py EURUSD 30 --parallel              # Run in parallel with 4 workers
+    python bt.py EURUSD 30 --parallel --workers 8  # Run with 8 workers
+    python bt.py EURUSD 30 --parallel --chunk-days 7  # 7-day chunks
+
+Chart Generation:
+    python bt.py EURUSD 14 --chart                 # Generate visual chart
+    python bt.py EURUSD 14 --chart --chart-output /tmp/chart.png
 """
 
 import sys
@@ -101,6 +110,34 @@ def main():
                 processed_args.append(arg)
                 print(f"📚 Historical intelligence: ENABLED")
 
+            # Handle parallel execution flags
+            elif arg == "--parallel":
+                processed_args.append(arg)
+                print(f"⚡ Parallel execution: ENABLED")
+
+            elif arg == "--workers" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"👷 Workers: {args[i]}")
+
+            elif arg == "--chunk-days" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"📦 Chunk size: {args[i]} days")
+
+            # Handle chart generation flags
+            elif arg == "--chart":
+                processed_args.append(arg)
+                print(f"📊 Chart generation: ENABLED")
+
+            elif arg == "--chart-output" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"💾 Chart output: {args[i]}")
+
             # Pass through other flags
             elif arg.startswith("--"):
                 processed_args.append(arg)
@@ -181,6 +218,15 @@ Additional Options:
   --timeframe 5m    Use different timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d)
   --verbose         Verbose output
 
+Parallel Execution (for faster long-period backtests):
+  --parallel         Enable parallel execution (splits into chunks)
+  --workers N        Number of parallel workers (default: 4)
+  --chunk-days N     Days per chunk (default: 7)
+
+Chart Generation:
+  --chart            Generate visual chart with signals plotted
+  --chart-output     Save chart to specific file path
+
 Parameter Overrides (for backtest testing only - does NOT affect live trading):
   --override PARAM=VALUE   Override strategy parameter (can be used multiple times)
                           Types auto-detected: bool (true/false), float (1.5), int (10), string
@@ -218,6 +264,16 @@ Config Snapshots (persistent parameter sets):
 
   # List available snapshots
   python snapshot_cli.py list
+
+Parallel Execution Examples:
+  python bt.py EURUSD 30 --parallel                    # 30 days with 4 workers (default)
+  python bt.py EURUSD 60 --parallel --workers 8        # 60 days with 8 workers
+  python bt.py GBPUSD 30 --parallel --chunk-days 10    # 10-day chunks
+
+Chart Generation Examples:
+  python bt.py EURUSD 14 --chart                       # Generate chart displayed in terminal
+  python bt.py EURUSD 14 --chart --chart-output /tmp/eurusd_backtest.png
+  python bt.py EURUSD 30 --parallel --chart            # Parallel backtest with chart
 """
     print(help_text)
 

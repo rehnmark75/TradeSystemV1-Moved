@@ -20,10 +20,14 @@ except ImportError:
 
 
 class DecimalEncoder(json.JSONEncoder):
-    """Custom JSON encoder that handles Decimal objects"""
+    """Custom JSON encoder that handles Decimal and datetime objects"""
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if hasattr(obj, 'isoformat'):  # Handle other date/time types
+            return obj.isoformat()
         return super().default(obj)
 
 
