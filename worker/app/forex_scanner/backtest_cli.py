@@ -876,26 +876,72 @@ Signal Display Format:
             print("⚠️ Could not determine date range for chart")
             return False
 
-        # Determine output path
-        chart_path = args.chart_output
-        if not chart_path:
-            chart_path = f"/tmp/backtest_{epic.replace('.', '_')}_chart.png"
-
-        result_path = chart_generator.generate_backtest_chart(
-            epic=epic,
-            start_date=start_date,
-            end_date=end_date,
-            signals=chart_signals,
-            strategy=args.strategy,
-            output_path=chart_path
-        )
-
-        if result_path:
-            print(f"✅ Chart saved to: {result_path}")
-            return True
+        # Try MinIO upload first (preferred), fall back to disk if specified
+        if args.chart_output:
+            # User specified output path - save to disk
+            result_path = chart_generator.generate_backtest_chart(
+                epic=epic,
+                start_date=start_date,
+                end_date=end_date,
+                signals=chart_signals,
+                strategy=args.strategy,
+                output_path=args.chart_output
+            )
+            if result_path:
+                print(f"✅ Chart saved to: {result_path}")
+                return True
+            else:
+                print("⚠️ Chart generation failed")
+                return False
         else:
-            print("⚠️ Chart generation failed")
-            return False
+            # Upload to MinIO
+            minio_result = chart_generator.generate_and_upload_chart(
+                epic=epic,
+                start_date=start_date,
+                end_date=end_date,
+                signals=chart_signals,
+                execution_id=execution_id,
+                strategy=args.strategy,
+                timeframe=args.timeframe or '15m'
+            )
+
+            if minio_result:
+                # Save URL to database
+                try:
+                    update_query = """
+                    UPDATE backtest_executions
+                    SET chart_url = :chart_url,
+                        chart_object_name = :object_name
+                    WHERE id = :exec_id
+                    """
+                    db_manager.execute_query(update_query, {
+                        'chart_url': minio_result['url'],
+                        'object_name': minio_result['object_name'],
+                        'exec_id': execution_id
+                    })
+                    print(f"✅ Chart uploaded to MinIO: {minio_result['object_name']}")
+                    print(f"   URL: {minio_result['url']}")
+                    return True
+                except Exception as e:
+                    print(f"⚠️ Chart uploaded but failed to save URL to database: {e}")
+                    return True
+            else:
+                # MinIO not available - fall back to temp file
+                temp_path = f"/tmp/backtest_{epic.replace('.', '_')}_chart.png"
+                result_path = chart_generator.generate_backtest_chart(
+                    epic=epic,
+                    start_date=start_date,
+                    end_date=end_date,
+                    signals=chart_signals,
+                    strategy=args.strategy,
+                    output_path=temp_path
+                )
+                if result_path:
+                    print(f"✅ Chart saved to: {result_path} (MinIO unavailable)")
+                    return True
+                else:
+                    print("⚠️ Chart generation failed")
+                    return False
 
     def show_usage_examples(self):
         """Show usage examples"""

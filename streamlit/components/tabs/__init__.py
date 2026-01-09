@@ -21,6 +21,7 @@ from .smc_config_tab import render_smc_config_tab
 from .scanner_config_tab import render_scanner_config_tab
 from .intelligence_config_tab import render_intelligence_config_tab
 from .performance_snapshot_tab import render_performance_snapshot_tab
+from .backtest_results_tab import render_backtest_results_tab
 
 __all__ = [
     'render_smc_rejections_tab',
@@ -38,4 +39,5 @@ __all__ = [
     'render_scanner_config_tab',
     'render_intelligence_config_tab',
     'render_performance_snapshot_tab',
+    'render_backtest_results_tab',
 ]

@@ -585,6 +585,117 @@ class BacktestChartGenerator:
             plt.close('all')
 
 
+    def upload_chart_to_minio(
+        self,
+        chart_data: str,
+        execution_id: int,
+        epic: str,
+        timeframe: str = '15m'
+    ) -> Optional[dict]:
+        """
+        Upload chart to MinIO and return URL info.
+
+        Args:
+            chart_data: Base64-encoded PNG or file path
+            execution_id: Backtest execution ID
+            epic: Currency pair epic
+            timeframe: Chart timeframe
+
+        Returns:
+            Dict with 'url' and 'object_name', or None on failure
+        """
+        try:
+            from forex_scanner.services.minio_client import get_minio_client
+        except ImportError:
+            self.logger.warning("MinIO client not available")
+            return None
+
+        try:
+            minio_client = get_minio_client()
+
+            if not minio_client.is_available:
+                self.logger.warning("MinIO client not connected")
+                return None
+
+            # Get image bytes
+            if chart_data.startswith('/') or chart_data.startswith('.'):
+                # It's a file path
+                with open(chart_data, 'rb') as f:
+                    image_bytes = f.read()
+            else:
+                # It's base64
+                image_bytes = base64.b64decode(chart_data)
+
+            # Create object name
+            epic_clean = epic.replace('.', '_').replace(':', '_')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            object_name = f"backtest_{execution_id}_{epic_clean}_{timeframe}_{timestamp}_chart.png"
+
+            # Upload to MinIO
+            url = minio_client.upload_chart(image_bytes, object_name)
+
+            if url:
+                self.logger.info(f"Chart uploaded to MinIO: {object_name}")
+                return {
+                    'url': url,
+                    'object_name': object_name
+                }
+            else:
+                self.logger.error("Failed to upload chart to MinIO")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"Error uploading chart to MinIO: {e}")
+            return None
+
+    def generate_and_upload_chart(
+        self,
+        epic: str,
+        start_date: datetime,
+        end_date: datetime,
+        signals: List[Dict[str, Any]],
+        execution_id: int,
+        strategy: str = 'SMC_SIMPLE',
+        timeframe: str = '15m'
+    ) -> Optional[dict]:
+        """
+        Generate chart and upload to MinIO in one operation.
+
+        Args:
+            epic: Currency pair
+            start_date: Start of backtest period
+            end_date: End of backtest period
+            signals: List of signal dicts
+            execution_id: Backtest execution ID
+            strategy: Strategy name
+            timeframe: Chart timeframe
+
+        Returns:
+            Dict with 'url' and 'object_name', or None on failure
+        """
+        # Generate chart as base64
+        chart_base64 = self.generate_backtest_chart(
+            epic=epic,
+            start_date=start_date,
+            end_date=end_date,
+            signals=signals,
+            strategy=strategy,
+            timeframe=timeframe,
+            output_path=None  # Return base64
+        )
+
+        if not chart_base64:
+            return None
+
+        # Upload to MinIO
+        return self.upload_chart_to_minio(
+            chart_data=chart_base64,
+            execution_id=execution_id,
+            epic=epic,
+            timeframe=timeframe
+        )
+
+
 # Factory function
 def create_backtest_chart_generator(
         data_fetcher: Optional[DataFetcher] = None,
