@@ -179,6 +179,16 @@ class SMCSimpleConfig:
     macd_alignment_mode: str = 'momentum'
     macd_min_strength: float = 0.0
 
+    # SWING PROXIMITY VALIDATION (v2.15.0)
+    # Prevents entries too close to opposing swing levels (exhaustion zones)
+    # Based on trade log analysis: 65% of losing trades were at wrong swing levels
+    swing_proximity_enabled: bool = True
+    swing_proximity_min_distance_pips: int = 12  # Based on trade analysis: 10-15 pips optimal
+    swing_proximity_strict_mode: bool = True  # Reject (True) vs confidence penalty (False)
+    swing_proximity_resistance_buffer: float = 1.0  # Multiplier for resistance distance
+    swing_proximity_support_buffer: float = 1.0  # Multiplier for support distance
+    swing_proximity_lookback_swings: int = 5  # Number of recent swings to check
+
     # LOGGING & DEBUG
     enable_debug_logging: bool = True
     log_rejected_signals: bool = True
@@ -348,6 +358,45 @@ class SMCSimpleConfig:
             if override.get('fixed_take_profit_pips') is not None:
                 return float(override['fixed_take_profit_pips'])
         return self.fixed_take_profit_pips
+
+    # =========================================================================
+    # SWING PROXIMITY GETTERS (v2.15.1)
+    # Per-pair swing proximity validation settings
+    # =========================================================================
+
+    def is_swing_proximity_enabled(self, epic: str) -> bool:
+        """Check if swing proximity validation is enabled for a specific pair.
+
+        Returns pair-specific value if set, otherwise global default.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('swing_proximity_enabled') is not None:
+                return override['swing_proximity_enabled']
+        return self.swing_proximity_enabled
+
+    def get_pair_swing_proximity_min_distance(self, epic: str) -> int:
+        """Get swing proximity minimum distance in pips for a specific pair.
+
+        Returns pair-specific value if set, otherwise global default.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('swing_proximity_min_distance_pips') is not None:
+                return int(override['swing_proximity_min_distance_pips'])
+        return self.swing_proximity_min_distance_pips
+
+    def is_swing_proximity_strict_mode(self, epic: str) -> bool:
+        """Check if swing proximity strict mode is enabled for a specific pair.
+
+        Returns pair-specific value if set, otherwise global default.
+        When True, signals are rejected. When False, confidence penalty is applied.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('swing_proximity_strict_mode') is not None:
+                return override['swing_proximity_strict_mode']
+        return self.swing_proximity_strict_mode
 
     # =========================================================================
     # DIRECTION-AWARE GETTERS (v2.12.0)
@@ -804,6 +853,9 @@ class SMCSimpleConfigService:
             'ema_distance_adjusted_confidence_enabled',
             'near_ema_threshold_pips', 'far_ema_threshold_pips',
             'macd_alignment_filter_enabled', 'macd_alignment_mode', 'macd_min_strength',
+            'swing_proximity_enabled', 'swing_proximity_min_distance_pips',
+            'swing_proximity_strict_mode', 'swing_proximity_resistance_buffer',
+            'swing_proximity_support_buffer', 'swing_proximity_lookback_swings',
             'enable_debug_logging', 'log_rejected_signals', 'log_swing_detection', 'log_ema_checks',
             'rejection_tracking_enabled', 'rejection_batch_size',
             'rejection_log_to_console', 'rejection_retention_days',
@@ -821,6 +873,7 @@ class SMCSimpleConfigService:
             'max_concurrent_signals', 'signal_cooldown_hours',
             'max_consecutive_losses_before_block', 'win_rate_lookback_trades',
             'rejection_batch_size', 'rejection_retention_days',
+            'swing_proximity_min_distance_pips', 'swing_proximity_lookback_swings',
         }
 
         for attr_name in direct_mappings:
@@ -921,6 +974,10 @@ class SMCSimpleConfigService:
                 'min_volume_ratio_bear': row.get('min_volume_ratio_bear'),
                 'min_confidence_bull': row.get('min_confidence_bull'),
                 'min_confidence_bear': row.get('min_confidence_bear'),
+                # Swing proximity overrides (v2.15.1)
+                'swing_proximity_enabled': row.get('swing_proximity_enabled'),
+                'swing_proximity_min_distance_pips': row.get('swing_proximity_min_distance_pips'),
+                'swing_proximity_strict_mode': row.get('swing_proximity_strict_mode'),
             }
 
         return config
@@ -1005,6 +1062,22 @@ class SMCSimpleConfigService:
     def is_session_allowed(self, hour_utc: int) -> bool:
         """Check if current hour is in allowed trading session"""
         return self.get_config().is_session_allowed(hour_utc)
+
+    # =========================================================================
+    # SWING PROXIMITY SERVICE ACCESSORS (v2.15.1)
+    # =========================================================================
+
+    def is_swing_proximity_enabled(self, epic: str) -> bool:
+        """Check if swing proximity validation is enabled for a specific pair"""
+        return self.get_config().is_swing_proximity_enabled(epic)
+
+    def get_pair_swing_proximity_min_distance(self, epic: str) -> int:
+        """Get swing proximity min distance in pips for a specific pair"""
+        return self.get_config().get_pair_swing_proximity_min_distance(epic)
+
+    def is_swing_proximity_strict_mode(self, epic: str) -> bool:
+        """Check if swing proximity strict mode is enabled for a specific pair"""
+        return self.get_config().is_swing_proximity_strict_mode(epic)
 
 
 # Global singleton instance

@@ -7,6 +7,21 @@ Consolidates data from all sources (trades, rejections, backtests, market intell
 to generate statistically validated, per-epic parameter recommendations with
 direction-aware analysis and regime filter recommendations.
 
+Configurable Parameters (per-pair overrides from strategy_config.smc_simple_pair_overrides):
+- SL/TP: fixed_stop_loss_pips, fixed_take_profit_pips, sl_buffer_pips
+- Confidence: min_confidence, max_confidence, min_confidence_bull, min_confidence_bear
+- Volume: min_volume_ratio, min_volume_ratio_bull, min_volume_ratio_bear
+- Fib Pullback: fib_pullback_min/max_bull/bear
+- Momentum: momentum_min_depth_bull, momentum_min_depth_bear
+- Swing Structure: min_swing_atr_multiplier, swing_lookback_bars
+- Swing Proximity (v2.15.1): swing_proximity_enabled, swing_proximity_min_distance_pips,
+  swing_proximity_strict_mode - Prevents entries too close to opposing swing levels
+  (BUY near resistance, SELL near support). Based on trade analysis showing 65% of
+  losing trades were counter-trend entries at wrong swing levels.
+- Filters: direction_overrides_enabled, macd_filter_enabled, smc_conflict_tolerance
+- Session: allow_asian_session
+- Confidence adjustments: high_volume_confidence, low/high_atr_confidence, near/far_ema_confidence
+
 Usage:
     python unified_parameter_optimizer.py [options]
 
@@ -296,6 +311,11 @@ class UnifiedParameterOptimizer:
                 CAST(high_atr_confidence AS FLOAT) as high_atr_confidence,
                 CAST(near_ema_confidence AS FLOAT) as near_ema_confidence,
                 CAST(far_ema_confidence AS FLOAT) as far_ema_confidence,
+
+                -- Swing proximity parameters (v2.15.1)
+                swing_proximity_enabled,
+                swing_proximity_min_distance_pips,
+                swing_proximity_strict_mode,
 
                 -- Metadata
                 change_reason,

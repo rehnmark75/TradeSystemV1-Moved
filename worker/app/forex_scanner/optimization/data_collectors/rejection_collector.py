@@ -2,6 +2,14 @@
 """
 Rejection data collector for unified parameter optimizer.
 Collects rejected signal outcomes from smc_simple_rejections and smc_rejection_outcomes.
+
+Includes swing proximity data (v2.15.1):
+- swing_proximity_distance: Distance in pips from opposing swing level
+- nearest_swing_price: Price of the nearest opposing swing
+- swing_proximity_type: Type of swing (support/resistance) that was too close
+
+Rejection stages captured include:
+- TIER1_STRUCTURE, TIER2_MOMENTUM, TIER3_CONFIRMATION, TIER4_PROXIMITY, etc.
 """
 
 import logging
@@ -139,6 +147,11 @@ class RejectionCollector(BaseCollector):
             CAST(r.kama_value AS FLOAT) as kama_value,
             CAST(r.kama_er AS FLOAT) as kama_er,
             r.kama_trend,
+
+            -- Swing Proximity (v2.15.1) - extracted from context JSONB
+            CAST(r.context->>'swing_proximity_distance' AS FLOAT) as swing_proximity_distance,
+            CAST(r.context->>'nearest_swing_price' AS FLOAT) as nearest_swing_price,
+            r.context->>'swing_type' as swing_proximity_type,
 
             -- Outcome analysis (cast to float)
             o.outcome,

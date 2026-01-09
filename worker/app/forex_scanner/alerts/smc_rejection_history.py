@@ -65,6 +65,8 @@ class SMCRejectionHistoryManager:
     STAGE_VOLUME_NO_DATA = 'VOLUME_NO_DATA'  # No volume data available
     # v2.10.0: MACD momentum alignment filter
     STAGE_MACD_MISALIGNED = 'MACD_MISALIGNED'  # Trade direction against MACD momentum
+    # v2.15.0: Swing Proximity validation rejection
+    STAGE_TIER4_PROXIMITY = 'TIER4_PROXIMITY'  # Entry too close to swing support/resistance
     # v2.11.0: TradeValidator rejection stages
     STAGE_SR_LEVEL = 'SR_LEVEL'  # S/R proximity rejection (too close to S/R)
     STAGE_SR_CLUSTER = 'SR_CLUSTER'  # S/R cluster risk rejection
@@ -79,7 +81,7 @@ class SMCRejectionHistoryManager:
         STAGE_TIER3_PULLBACK, STAGE_RISK_LIMIT, STAGE_RISK_RR, STAGE_RISK_TP,
         STAGE_CONFIDENCE, STAGE_SR_PATH_BLOCKED, STAGE_SMC_CONFLICT,
         STAGE_CONFIDENCE_CAP, STAGE_VOLUME_LOW, STAGE_VOLUME_NO_DATA,
-        STAGE_MACD_MISALIGNED,
+        STAGE_MACD_MISALIGNED, STAGE_TIER4_PROXIMITY,
         # v2.11.0: TradeValidator rejection stages
         STAGE_SR_LEVEL, STAGE_SR_CLUSTER, STAGE_EMA200_FILTER,
         STAGE_CLAUDE_FILTER, STAGE_NEWS_FILTER, STAGE_MARKET_HOURS,

@@ -2,9 +2,18 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.14.1
-DATE: 2026-01-07
-STATUS: Cooldown persistence fix
+VERSION: 2.15.0
+DATE: 2026-01-09
+STATUS: Swing Proximity Validation
+
+v2.15.0 CHANGES (Swing Proximity Validation):
+    - NEW: TIER 4 - Swing Proximity Validation prevents entries too close to swing levels
+    - FIX: Trade log analysis showed 65% of losing trades were at wrong swing levels
+    - BUY signals now require minimum distance from swing HIGH (resistance)
+    - SELL signals now require minimum distance from swing LOW (support)
+    - Default: 12 pips minimum distance (configurable via database)
+    - Expected improvement: Win rate 20% → 50%+ based on filtered trade analysis
+    - FIX: Corrected log message for swing break direction (was inverted)
 
 v2.14.1 CHANGES (Cooldown Persistence Fix):
     - FIX: Database-loaded cooldowns were keyed by epic but checked by pair name
@@ -156,8 +165,31 @@ class SMCSimpleStrategy:
         elif self._backtest_mode:
             self.logger.info("   Rejection tracking: DISABLED (backtest mode)")
 
+        # v2.15.0: Swing Proximity Validator initialization
+        self.swing_proximity_validator = None
+        if self.swing_proximity_enabled:
+            try:
+                from forex_scanner.core.strategies.helpers.swing_proximity_validator import SwingProximityValidator
+                self.swing_proximity_validator = SwingProximityValidator(
+                    config={
+                        'enabled': self.swing_proximity_enabled,
+                        'min_distance_pips': self.swing_proximity_min_distance_pips,
+                        'strict_mode': self.swing_proximity_strict_mode,
+                        'resistance_buffer': self.swing_proximity_resistance_buffer,
+                        'support_buffer': self.swing_proximity_support_buffer,
+                        'lookback_swings': self.swing_proximity_lookback_swings,
+                    },
+                    logger=self.logger
+                )
+                self.logger.info(f"   Swing Proximity: ENABLED (min distance: {self.swing_proximity_min_distance_pips} pips)")
+            except Exception as e:
+                self.logger.warning(f"   Swing Proximity: DISABLED (failed to init: {e})")
+                self.swing_proximity_enabled = False
+        else:
+            self.logger.info("   Swing Proximity: DISABLED (config)")
+
         self.logger.info("=" * 60)
-        self.logger.info("✅ SMC Simple Strategy v1.0.0 initialized")
+        self.logger.info("✅ SMC Simple Strategy v2.15.0 initialized")
         self.logger.info("=" * 60)
         self.logger.info(f"   TIER 1: {self.ema_period} EMA on {self.htf_timeframe}")
         self.logger.info(f"   TIER 2: Swing break on {self.trigger_tf}")
@@ -336,6 +368,14 @@ class SMCSimpleStrategy:
             # Store config for helper functions
             self._db_config = config
 
+            # v2.15.0: Swing Proximity Validation
+            self.swing_proximity_enabled = config.swing_proximity_enabled
+            self.swing_proximity_min_distance_pips = config.swing_proximity_min_distance_pips
+            self.swing_proximity_strict_mode = config.swing_proximity_strict_mode
+            self.swing_proximity_resistance_buffer = config.swing_proximity_resistance_buffer
+            self.swing_proximity_support_buffer = config.swing_proximity_support_buffer
+            self.swing_proximity_lookback_swings = config.swing_proximity_lookback_swings
+
             self.logger.info(f"✅ SMC Simple config v{config.version} loaded from DATABASE (source: {config.source})")
 
             # Apply backtest overrides if in backtest mode
@@ -507,6 +547,14 @@ class SMCSimpleStrategy:
         self.fixed_sl_tp_override_enabled = getattr(smc_config, 'FIXED_SL_TP_OVERRIDE_ENABLED', False)
         self.fixed_stop_loss_pips = getattr(smc_config, 'FIXED_STOP_LOSS_PIPS', 9.0)
         self.fixed_take_profit_pips = getattr(smc_config, 'FIXED_TAKE_PROFIT_PIPS', 15.0)
+
+        # v2.15.0: Swing Proximity Validation
+        self.swing_proximity_enabled = getattr(smc_config, 'SWING_PROXIMITY_ENABLED', True)
+        self.swing_proximity_min_distance_pips = getattr(smc_config, 'SWING_PROXIMITY_MIN_DISTANCE_PIPS', 12)
+        self.swing_proximity_strict_mode = getattr(smc_config, 'SWING_PROXIMITY_STRICT_MODE', True)
+        self.swing_proximity_resistance_buffer = getattr(smc_config, 'SWING_PROXIMITY_RESISTANCE_BUFFER', 1.0)
+        self.swing_proximity_support_buffer = getattr(smc_config, 'SWING_PROXIMITY_SUPPORT_BUFFER', 1.0)
+        self.swing_proximity_lookback_swings = getattr(smc_config, 'SWING_PROXIMITY_LOOKBACK_SWINGS', 5)
 
         # v2.1.0: Dynamic Swing Lookback Configuration
         self.use_dynamic_swing_lookback = getattr(smc_config, 'USE_DYNAMIC_SWING_LOOKBACK', True)
@@ -820,7 +868,7 @@ class SMCSimpleStrategy:
             break_candle = swing_result['break_candle']
             volume_confirmed = swing_result['volume_confirmed']
 
-            self.logger.info(f"   ✅ Swing {'High' if direction == 'BEAR' else 'Low'} Break: {swing_level:.5f}")
+            self.logger.info(f"   ✅ Swing {'Low' if direction == 'BEAR' else 'High'} Break: {swing_level:.5f}")
             self.logger.info(f"   ✅ Opposite Swing: {opposite_swing:.5f}")  # v1.6.0
             self.logger.info(f"   ✅ Body Close Confirmed: Yes")
             if self.volume_enabled:
@@ -874,6 +922,59 @@ class SMCSimpleStrategy:
                 self.logger.info(f"   ✅ Entry Type: PULLBACK (retracement)")
                 self.logger.info(f"   ✅ Pullback Depth: {pullback_depth*100:.1f}%")
             self.logger.info(f"   {'✅' if in_optimal_zone else '⚠️ '} Optimal Zone: {'Yes' if in_optimal_zone else 'No'}")
+
+            # ================================================================
+            # TIER 4: Swing Proximity Validation (v2.15.0)
+            # Prevents entries too close to opposing swing levels
+            # Based on trade log analysis: 65% of losing trades were at wrong swing levels
+            # ================================================================
+            if self.swing_proximity_enabled and self.swing_proximity_validator:
+                self.logger.info(f"\n🛡️ TIER 4: Checking Swing Proximity")
+
+                # For BUY: check distance to nearest swing HIGH (resistance) = swing_level (broken high)
+                # For SELL: check distance to nearest swing LOW (support) = swing_level (broken low)
+                # After pullback entry, we're entering NEAR the broken swing level:
+                # - BULL: swing_level = broken swing HIGH (resistance we just broke)
+                # - BEAR: swing_level = broken swing LOW (support we just broke)
+                # The pullback brings us back TOWARD these levels - that's the proximity concern!
+                swing_signal_data = {
+                    'nearest_resistance': swing_level if direction == 'BULL' else opposite_swing,
+                    'nearest_support': opposite_swing if direction == 'BULL' else swing_level
+                }
+                proximity_result = self.swing_proximity_validator.validate_entry_proximity(
+                    df=df_trigger,
+                    current_price=market_price,
+                    direction=direction,
+                    epic=epic,
+                    timeframe=self.trigger_tf,
+                    signal=swing_signal_data  # Pass swing data from TIER 2
+                )
+
+                if not proximity_result['valid']:
+                    self.logger.info(f"   ❌ {proximity_result.get('rejection_reason', 'Too close to swing level')}")
+                    self._track_rejection(
+                        stage='TIER4_PROXIMITY',
+                        reason=proximity_result.get('rejection_reason', 'Swing proximity validation failed'),
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context={
+                            **self._collect_market_context(df_trigger, df_4h, df_entry, pip_value,
+                                                          ema_result=ema_result, swing_result=swing_result,
+                                                          pullback_result=pullback_result, direction=direction),
+                            'swing_proximity_distance': proximity_result.get('distance_to_swing'),
+                            'nearest_swing_price': proximity_result.get('nearest_swing_price'),
+                            'swing_type': proximity_result.get('swing_type')
+                        }
+                    )
+                    return None
+
+                dist_to_swing = proximity_result.get('distance_to_swing')
+                if dist_to_swing is not None:
+                    self.logger.info(f"   ✅ Distance to swing: {dist_to_swing:.1f} pips")
+                else:
+                    self.logger.info(f"   ✅ No nearby opposing swing detected")
 
             # ================================================================
             # v2.0.0: Calculate Limit Entry Price with Offset

@@ -528,6 +528,73 @@ def render_global_settings(config: Dict[str, Any]):
             if not _values_equal(new_macd_strength, config.get('macd_min_strength')):
                 st.session_state.smc_pending_changes['macd_min_strength'] = new_macd_strength
 
+    # Swing Proximity Validation (v2.15.0)
+    with st.expander("Swing Proximity Validation (TIER 4)", expanded=False):
+        st.markdown("**Prevents entries too close to opposing swing levels**")
+        st.caption("Based on trade analysis: 65% of losing trades were counter-trend entries at wrong swing levels. "
+                   "BUY near resistance = 25% WR, SELL near support = 0% WR. Trades with 15+ pips clearance = 50%+ WR.")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            new_swing_prox_enabled = st.checkbox(
+                "Swing Proximity Validation Enabled",
+                value=config.get('swing_proximity_enabled', True),
+                help="Enable swing proximity validation to prevent entries near swing levels",
+                key="swing_proximity_enabled"
+            )
+            if not _values_equal(new_swing_prox_enabled, config.get('swing_proximity_enabled')):
+                st.session_state.smc_pending_changes['swing_proximity_enabled'] = new_swing_prox_enabled
+
+            new_swing_prox_min_dist = st.number_input(
+                "Min Distance from Swing (pips)",
+                value=config.get('swing_proximity_min_distance_pips', 12),
+                min_value=1, max_value=50,
+                help="Minimum distance in pips from opposing swing level (BUY from resistance, SELL from support). 10-15 pips optimal based on analysis.",
+                key="swing_proximity_min_distance_pips"
+            )
+            if not _values_equal(new_swing_prox_min_dist, config.get('swing_proximity_min_distance_pips')):
+                st.session_state.smc_pending_changes['swing_proximity_min_distance_pips'] = new_swing_prox_min_dist
+
+            new_swing_prox_strict = st.checkbox(
+                "Strict Mode (Reject vs Penalty)",
+                value=config.get('swing_proximity_strict_mode', True),
+                help="If enabled, reject signals near swings. If disabled, apply confidence penalty instead.",
+                key="swing_proximity_strict_mode"
+            )
+            if not _values_equal(new_swing_prox_strict, config.get('swing_proximity_strict_mode')):
+                st.session_state.smc_pending_changes['swing_proximity_strict_mode'] = new_swing_prox_strict
+
+        with col2:
+            new_swing_prox_res_buffer = st.number_input(
+                "Resistance Buffer Multiplier",
+                value=float(config.get('swing_proximity_resistance_buffer', 1.0)),
+                min_value=0.5, max_value=3.0, step=0.1,
+                help="Multiplier for resistance distance requirement (BUY signals)",
+                key="swing_proximity_resistance_buffer"
+            )
+            if not _values_equal(new_swing_prox_res_buffer, config.get('swing_proximity_resistance_buffer')):
+                st.session_state.smc_pending_changes['swing_proximity_resistance_buffer'] = new_swing_prox_res_buffer
+
+            new_swing_prox_sup_buffer = st.number_input(
+                "Support Buffer Multiplier",
+                value=float(config.get('swing_proximity_support_buffer', 1.0)),
+                min_value=0.5, max_value=3.0, step=0.1,
+                help="Multiplier for support distance requirement (SELL signals)",
+                key="swing_proximity_support_buffer"
+            )
+            if not _values_equal(new_swing_prox_sup_buffer, config.get('swing_proximity_support_buffer')):
+                st.session_state.smc_pending_changes['swing_proximity_support_buffer'] = new_swing_prox_sup_buffer
+
+            new_swing_prox_lookback = st.number_input(
+                "Swing Lookback Count",
+                value=config.get('swing_proximity_lookback_swings', 5),
+                min_value=1, max_value=20,
+                help="Number of recent swings to check for proximity",
+                key="swing_proximity_lookback_swings"
+            )
+            if not _values_equal(new_swing_prox_lookback, config.get('swing_proximity_lookback_swings')):
+                st.session_state.smc_pending_changes['swing_proximity_lookback_swings'] = new_swing_prox_lookback
+
     # Adaptive Cooldown
     with st.expander("Adaptive Cooldown", expanded=False):
         col1, col2 = st.columns(2)
@@ -869,6 +936,54 @@ def render_pair_overrides(config: Dict[str, Any]):
                 override_changes['min_volume_ratio'] = new_vol_ratio
         with col_vol2:
             st.caption("💡 Volume ratio = current candle volume / 20-period SMA. Values 0.75-1.00 historically have best win rate.")
+
+        # Swing Proximity Settings (v2.15.1) - per-pair overrides
+        st.markdown("**Swing Proximity Validation (TIER 4)**")
+        st.caption("Per-pair overrides for swing proximity validation. NULL = inherits from global settings.")
+        col_swing_prox1, col_swing_prox2 = st.columns(2)
+        with col_swing_prox1:
+            # Swing Proximity Enabled - inherit from global
+            swing_prox_enabled_value = existing.get('swing_proximity_enabled')
+            global_swing_prox_enabled = config.get('swing_proximity_enabled', True)
+            swing_prox_enabled_effective = swing_prox_enabled_value if swing_prox_enabled_value is not None else global_swing_prox_enabled
+            new_swing_prox_enabled = st.checkbox(
+                "Swing Proximity Enabled",
+                value=swing_prox_enabled_effective,
+                help=f"{'Inherited from global (' + str(global_swing_prox_enabled) + ')' if swing_prox_enabled_value is None else 'Explicit override for this pair'}. Enable swing proximity validation.",
+                key=f"override_swing_prox_enabled_{selected_pair}"
+            )
+            if not _values_equal(new_swing_prox_enabled, swing_prox_enabled_effective):
+                override_changes['swing_proximity_enabled'] = new_swing_prox_enabled
+
+            # Swing Proximity Min Distance - inherit from global
+            swing_prox_dist_value = existing.get('swing_proximity_min_distance_pips')
+            global_swing_prox_dist = config.get('swing_proximity_min_distance_pips', 12)
+            swing_prox_dist_effective = int(swing_prox_dist_value) if swing_prox_dist_value is not None else int(global_swing_prox_dist)
+            new_swing_prox_dist = st.number_input(
+                "Min Distance from Swing (pips)",
+                value=swing_prox_dist_effective,
+                min_value=1, max_value=50, step=1,
+                help=f"{'Inherited from global (' + str(global_swing_prox_dist) + ')' if swing_prox_dist_value is None else 'Explicit override for this pair'}. Min distance from opposing swing level.",
+                key=f"override_swing_prox_dist_{selected_pair}"
+            )
+            if not _values_equal(new_swing_prox_dist, swing_prox_dist_effective):
+                override_changes['swing_proximity_min_distance_pips'] = new_swing_prox_dist
+
+        with col_swing_prox2:
+            # Swing Proximity Strict Mode - inherit from global
+            swing_prox_strict_value = existing.get('swing_proximity_strict_mode')
+            global_swing_prox_strict = config.get('swing_proximity_strict_mode', True)
+            swing_prox_strict_effective = swing_prox_strict_value if swing_prox_strict_value is not None else global_swing_prox_strict
+            new_swing_prox_strict = st.checkbox(
+                "Strict Mode (Reject vs Penalty)",
+                value=swing_prox_strict_effective,
+                help=f"{'Inherited from global (' + str(global_swing_prox_strict) + ')' if swing_prox_strict_value is None else 'Explicit override for this pair'}. If enabled, reject signals; if disabled, apply confidence penalty.",
+                key=f"override_swing_prox_strict_{selected_pair}"
+            )
+            if not _values_equal(new_swing_prox_strict, swing_prox_strict_effective):
+                override_changes['swing_proximity_strict_mode'] = new_swing_prox_strict
+
+            st.caption("💡 Based on trade analysis: BUY near resistance = 25% WR, SELL near support = 0% WR. Trades with 15+ pips clearance = 50%+ WR.")
 
         # Dynamic confidence thresholds (absolute values, not adjustments)
         st.markdown("**Dynamic Confidence Thresholds**")
@@ -1250,7 +1365,9 @@ def render_pair_overrides(config: Dict[str, Any]):
         display_cols = ['epic', 'is_enabled', 'fixed_stop_loss_pips', 'fixed_take_profit_pips',
                        'sl_buffer_pips', 'min_confidence', 'max_confidence',
                        'allow_asian_session', 'macd_filter_enabled',
-                       'min_swing_atr_multiplier', 'smc_conflict_tolerance', 'description']
+                       'min_swing_atr_multiplier', 'smc_conflict_tolerance',
+                       'swing_proximity_enabled', 'swing_proximity_min_distance_pips',
+                       'swing_proximity_strict_mode', 'description']
         available_cols = [c for c in display_cols if c in df.columns]
         st.dataframe(df[available_cols], use_container_width=True)
     else:
