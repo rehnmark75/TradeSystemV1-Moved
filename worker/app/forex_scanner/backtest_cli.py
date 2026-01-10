@@ -42,12 +42,23 @@ class BacktestCLI:
 
     def setup_logging(self, verbose: bool = False):
         """Setup logging configuration"""
+        import sys
         level = logging.DEBUG if verbose else logging.INFO
-        logging.basicConfig(
-            level=level,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%H:%M:%S'
-        )
+
+        # Force reconfigure logging to ensure output goes to stdout
+        # This is necessary because other modules may have already configured logging
+        root_logger = logging.getLogger()
+        root_logger.setLevel(level)
+
+        # Remove existing handlers and add a fresh stdout handler
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(level)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+        handler.setFormatter(formatter)
+        root_logger.addHandler(handler)
 
     def create_parser(self) -> argparse.ArgumentParser:
         """Create argument parser"""

@@ -376,12 +376,15 @@ class BacktestDataFetcher(DataFetcher):
         # PERFORMANCE OPTIMIZATION: Load only data for backtest period if dates provided
         if start_date and end_date:
             self.logger.info(f"⚡ Loading cache for backtest period only: {start_date.date()} to {end_date.date()}")
+            # CRITICAL FIX (Jan 2026): Don't use force_reload=True when running parallel variations
+            # force_reload=True causes race conditions where one thread clears the cache while another is reading
+            # The cache lock in load_data_for_period handles thread safety correctly with force_reload=False
             self.memory_cache.load_data_for_period(
                 start_date=start_date,
                 end_date=end_date,
                 epics=epics,
                 lookback_hours=168,  # 7 days for indicator warmup
-                force_reload=True
+                force_reload=False  # Let the cache check if it already covers the period
             )
         else:
             # Fallback to loading all data (slower, but works for unknown periods)

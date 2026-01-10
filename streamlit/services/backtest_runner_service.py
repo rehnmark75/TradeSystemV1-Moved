@@ -680,9 +680,28 @@ class BacktestRunnerService:
             'ema_period': 50,
             'swing_lookback_bars': 20,
             'macd_filter_enabled': True,
-            'volume_filter_enabled': False,
+            'volume_filter_enabled': True,
             'require_ema_alignment': True,
             'trend_filter_enabled': True,
+
+            # Volume Settings
+            'min_volume_ratio': 0.50,
+            'volume_sma_period': 20,
+            'volume_spike_multiplier': 1.3,
+            'volume_enabled': True,
+            'high_volume_threshold': 0.70,
+            'allow_no_volume_data': True,
+            'high_volume_confidence': 0.45,
+
+            # Swing & ATR Settings (per-pair overrides)
+            'min_swing_atr_multiplier': 0.25,
+            'swing_proximity_enabled': True,
+            'swing_proximity_min_distance_pips': 12,
+            'swing_proximity_strict_mode': True,
+
+            # Fibonacci Pullback Settings
+            'fib_pullback_min': 0.20,
+            'fib_pullback_max': 0.70,
 
             # Session Filters
             'block_asian_session': True,

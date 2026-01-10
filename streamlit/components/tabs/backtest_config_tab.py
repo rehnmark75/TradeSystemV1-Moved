@@ -568,6 +568,77 @@ def _render_parameter_overrides(service: BacktestRunnerService) -> Dict[str, Any
             if trend_filter != defaults['trend_filter_enabled']:
                 overrides['trend_filter_enabled'] = trend_filter
 
+        # Volume Settings (6 params)
+        st.markdown("##### Volume Settings")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            volume_enabled = st.checkbox(
+                "Volume Confirmation",
+                value=defaults.get('volume_enabled', True),
+                help="Require volume confirmation on swing break",
+                key="ov_vol_enabled"
+            )
+            if volume_enabled != defaults.get('volume_enabled', True):
+                overrides['volume_enabled'] = volume_enabled
+
+            min_vol_ratio = st.number_input(
+                "Min Volume Ratio",
+                value=defaults.get('min_volume_ratio', 0.50),
+                min_value=0.0,
+                max_value=2.0,
+                step=0.05,
+                help="Minimum volume vs SMA ratio (filter)",
+                key="ov_min_vol"
+            )
+            if abs(min_vol_ratio - defaults.get('min_volume_ratio', 0.50)) > 0.01:
+                overrides['min_volume_ratio'] = min_vol_ratio
+
+        with col2:
+            vol_sma = st.number_input(
+                "Volume SMA Period",
+                value=defaults.get('volume_sma_period', 20),
+                min_value=5,
+                max_value=50,
+                help="Period for volume moving average",
+                key="ov_vol_sma"
+            )
+            if vol_sma != defaults.get('volume_sma_period', 20):
+                overrides['volume_sma_period'] = vol_sma
+
+            vol_spike = st.number_input(
+                "Volume Spike Multiplier",
+                value=defaults.get('volume_spike_multiplier', 1.3),
+                min_value=1.0,
+                max_value=3.0,
+                step=0.1,
+                help="Multiplier to confirm volume spike",
+                key="ov_vol_spike"
+            )
+            if abs(vol_spike - defaults.get('volume_spike_multiplier', 1.3)) > 0.05:
+                overrides['volume_spike_multiplier'] = vol_spike
+
+        with col3:
+            high_vol_thresh = st.number_input(
+                "High Volume Threshold",
+                value=defaults.get('high_volume_threshold', 0.70),
+                min_value=0.0,
+                max_value=2.0,
+                step=0.05,
+                help="Threshold for high-volume confidence boost",
+                key="ov_high_vol"
+            )
+            if abs(high_vol_thresh - defaults.get('high_volume_threshold', 0.70)) > 0.01:
+                overrides['high_volume_threshold'] = high_vol_thresh
+
+            allow_no_vol = st.checkbox(
+                "Allow No Volume Data",
+                value=defaults.get('allow_no_volume_data', True),
+                help="Allow signals without volume data",
+                key="ov_allow_no_vol"
+            )
+            if allow_no_vol != defaults.get('allow_no_volume_data', True):
+                overrides['allow_no_volume_data'] = allow_no_vol
+
         # Session Filters (6 params)
         st.markdown("##### Session Filters")
         col1, col2 = st.columns(2)
@@ -677,6 +748,95 @@ def _render_parameter_overrides(service: BacktestRunnerService) -> Dict[str, Any
             )
             if disp_mult != defaults['displacement_atr_multiplier']:
                 overrides['displacement_atr_multiplier'] = disp_mult
+
+        # Swing & ATR Settings (Per-pair parameters)
+        st.markdown("##### Swing & ATR Settings")
+        col1, col2 = st.columns(2)
+        with col1:
+            min_swing_atr = st.number_input(
+                "Min Swing ATR Multiplier",
+                value=defaults.get('min_swing_atr_multiplier', 0.25),
+                min_value=0.0,
+                max_value=1.0,
+                step=0.05,
+                help="Lower = more lenient swing validation",
+                key="ov_swing_atr"
+            )
+            if abs(min_swing_atr - defaults.get('min_swing_atr_multiplier', 0.25)) > 0.01:
+                overrides['min_swing_atr_multiplier'] = min_swing_atr
+
+            swing_prox_enabled = st.checkbox(
+                "Swing Proximity Enabled",
+                value=defaults.get('swing_proximity_enabled', True),
+                help="Enable TIER 4 swing proximity validation",
+                key="ov_swing_prox_enabled"
+            )
+            if swing_prox_enabled != defaults.get('swing_proximity_enabled', True):
+                overrides['swing_proximity_enabled'] = swing_prox_enabled
+
+        with col2:
+            swing_prox_dist = st.number_input(
+                "Swing Proximity Min Distance (pips)",
+                value=defaults.get('swing_proximity_min_distance_pips', 12),
+                min_value=1,
+                max_value=50,
+                help="Min distance from opposing swing level",
+                key="ov_swing_prox_dist"
+            )
+            if swing_prox_dist != defaults.get('swing_proximity_min_distance_pips', 12):
+                overrides['swing_proximity_min_distance_pips'] = swing_prox_dist
+
+            swing_prox_strict = st.checkbox(
+                "Swing Proximity Strict Mode",
+                value=defaults.get('swing_proximity_strict_mode', True),
+                help="Strict = reject; Non-strict = confidence penalty",
+                key="ov_swing_prox_strict"
+            )
+            if swing_prox_strict != defaults.get('swing_proximity_strict_mode', True):
+                overrides['swing_proximity_strict_mode'] = swing_prox_strict
+
+        # Fibonacci Pullback Settings
+        st.markdown("##### Fibonacci Pullback Settings")
+        col1, col2 = st.columns(2)
+        with col1:
+            fib_min = st.number_input(
+                "Fib Pullback Min",
+                value=defaults.get('fib_pullback_min', 0.20),
+                min_value=0.0,
+                max_value=0.5,
+                step=0.05,
+                help="Minimum pullback depth (0.20 = 20%)",
+                key="ov_fib_min"
+            )
+            if abs(fib_min - defaults.get('fib_pullback_min', 0.20)) > 0.01:
+                overrides['fib_pullback_min'] = fib_min
+
+        with col2:
+            fib_max = st.number_input(
+                "Fib Pullback Max",
+                value=defaults.get('fib_pullback_max', 0.70),
+                min_value=0.3,
+                max_value=1.0,
+                step=0.05,
+                help="Maximum pullback depth (0.70 = 70%)",
+                key="ov_fib_max"
+            )
+            if abs(fib_max - defaults.get('fib_pullback_max', 0.70)) > 0.01:
+                overrides['fib_pullback_max'] = fib_max
+
+        # High Volume Confidence
+        st.markdown("##### Dynamic Confidence Settings")
+        high_vol_conf = st.number_input(
+            "High Volume Confidence",
+            value=defaults.get('high_volume_confidence', 0.45),
+            min_value=0.0,
+            max_value=1.0,
+            step=0.01,
+            help="Confidence threshold when high volume detected",
+            key="ov_high_vol_conf"
+        )
+        if abs(high_vol_conf - defaults.get('high_volume_confidence', 0.45)) > 0.01:
+            overrides['high_volume_confidence'] = high_vol_conf
 
         # Show active overrides
         if overrides:
@@ -861,6 +1021,101 @@ def _render_param_variation_section() -> Dict[str, Any]:
                             v += pb_max_step
                         variation_config['param_grid']['fib_pullback_max'] = pb_max_values
                         st.caption(f"Values: {pb_max_values}")
+
+            st.markdown("---")
+            st.markdown("**Volume Parameters**")
+
+            # Volume parameter variations
+            col1, col2 = st.columns(2)
+
+            with col1:
+                vary_min_vol = st.checkbox("Vary Min Volume Ratio", key="bt_vary_min_vol")
+                if vary_min_vol:
+                    vol_min_start = st.number_input("Min Ratio Start", value=0.30, step=0.05, key="bt_vol_min_start")
+                    vol_min_end = st.number_input("Min Ratio End", value=0.60, step=0.05, key="bt_vol_min_end")
+                    vol_min_step = st.number_input("Step", value=0.10, step=0.05, key="bt_vol_min_step")
+
+                    if vol_min_step > 0 and vol_min_end >= vol_min_start:
+                        vol_min_values = []
+                        v = vol_min_start
+                        while v <= vol_min_end + 0.001:
+                            vol_min_values.append(round(v, 2))
+                            v += vol_min_step
+                        variation_config['param_grid']['min_volume_ratio'] = vol_min_values
+                        st.caption(f"Values: {vol_min_values}")
+
+            with col2:
+                vary_vol_spike = st.checkbox("Vary Volume Spike Multiplier", key="bt_vary_vol_spike")
+                if vary_vol_spike:
+                    spike_start = st.number_input("Spike Start", value=1.1, step=0.1, key="bt_spike_start")
+                    spike_end = st.number_input("Spike End", value=1.5, step=0.1, key="bt_spike_end")
+                    spike_step = st.number_input("Step", value=0.1, step=0.05, key="bt_spike_step")
+
+                    if spike_step > 0 and spike_end >= spike_start:
+                        spike_values = []
+                        v = spike_start
+                        while v <= spike_end + 0.001:
+                            spike_values.append(round(v, 2))
+                            v += spike_step
+                        variation_config['param_grid']['volume_spike_multiplier'] = spike_values
+                        st.caption(f"Values: {spike_values}")
+
+            # High volume threshold variation
+            vary_high_vol = st.checkbox("Vary High Volume Threshold", key="bt_vary_high_vol")
+            if vary_high_vol:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    high_vol_start = st.number_input("Start", value=0.50, step=0.05, key="bt_high_vol_start")
+                with col2:
+                    high_vol_end = st.number_input("End", value=0.90, step=0.05, key="bt_high_vol_end")
+                with col3:
+                    high_vol_step = st.number_input("Step", value=0.10, step=0.05, key="bt_high_vol_step")
+
+                if high_vol_step > 0 and high_vol_end >= high_vol_start:
+                    high_vol_values = []
+                    v = high_vol_start
+                    while v <= high_vol_end + 0.001:
+                        high_vol_values.append(round(v, 2))
+                        v += high_vol_step
+                    variation_config['param_grid']['high_volume_threshold'] = high_vol_values
+                    st.caption(f"Values: {high_vol_values}")
+
+            st.markdown("---")
+            st.markdown("**ATR & Confidence Parameters**")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                vary_swing_atr = st.checkbox("Vary Swing ATR Multiplier", key="bt_vary_swing_atr")
+                if vary_swing_atr:
+                    atr_start = st.number_input("ATR Start", value=0.15, step=0.05, key="bt_atr_start")
+                    atr_end = st.number_input("ATR End", value=0.35, step=0.05, key="bt_atr_end")
+                    atr_step = st.number_input("Step", value=0.05, step=0.01, key="bt_atr_step")
+
+                    if atr_step > 0 and atr_end >= atr_start:
+                        atr_values = []
+                        v = atr_start
+                        while v <= atr_end + 0.001:
+                            atr_values.append(round(v, 3))
+                            v += atr_step
+                        variation_config['param_grid']['min_swing_atr_multiplier'] = atr_values
+                        st.caption(f"Values: {atr_values}")
+
+            with col2:
+                vary_high_vol_conf = st.checkbox("Vary High Volume Confidence", key="bt_vary_high_vol_conf")
+                if vary_high_vol_conf:
+                    hvc_start = st.number_input("HVC Start", value=0.35, step=0.05, key="bt_hvc_start")
+                    hvc_end = st.number_input("HVC End", value=0.55, step=0.05, key="bt_hvc_end")
+                    hvc_step = st.number_input("Step", value=0.05, step=0.01, key="bt_hvc_step")
+
+                    if hvc_step > 0 and hvc_end >= hvc_start:
+                        hvc_values = []
+                        v = hvc_start
+                        while v <= hvc_end + 0.001:
+                            hvc_values.append(round(v, 2))
+                            v += hvc_step
+                        variation_config['param_grid']['high_volume_confidence'] = hvc_values
+                        st.caption(f"Values: {hvc_values}")
 
             st.markdown("---")
 

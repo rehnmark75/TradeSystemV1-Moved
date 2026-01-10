@@ -80,11 +80,13 @@ class InMemoryForexCache:
         """
         with self.load_lock:
             if self.is_loaded and not force_reload:
-                # Check if existing cache covers the requested period
-                if (self.stats.data_range_start and self.stats.data_range_end and
-                    self.stats.data_range_start <= start_date - timedelta(hours=lookback_hours) and
-                    self.stats.data_range_end >= end_date):
-                    self.logger.info("📊 Cache already covers requested period, skipping")
+                # CRITICAL FIX (Jan 2026): For parallel variation testing, just check if cache is loaded
+                # Don't be too strict about date range - all parallel workers use the same period anyway
+                # The strict check was causing race conditions where one thread would clear the cache
+                # while another was still reading from it
+                if self.stats.data_range_start and self.stats.data_range_end:
+                    # Log that we're reusing the cache
+                    self.logger.info(f"📊 Cache already loaded ({self.stats.total_rows:,} rows), reusing")
                     return True
 
             try:

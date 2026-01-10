@@ -513,6 +513,7 @@ class SMCSimpleStrategy:
         # v2.11.0: Volume-adjusted confidence thresholds (per-pair)
         self.volume_adjusted_confidence_enabled = getattr(smc_config, 'VOLUME_ADJUSTED_CONFIDENCE_ENABLED', True)
         self.high_volume_threshold = getattr(smc_config, 'HIGH_VOLUME_THRESHOLD', 0.70)
+        self.high_volume_confidence = getattr(smc_config, 'HIGH_VOLUME_CONFIDENCE', 0.45)  # Global default for backtest overrides
         self.pair_high_volume_confidence = getattr(smc_config, 'PAIR_HIGH_VOLUME_CONFIDENCE', {})
 
         # v2.11.0: ATR-adjusted confidence thresholds (per-pair)
@@ -643,9 +644,15 @@ class SMCSimpleStrategy:
 
             # Volume Settings
             'volume_confirmation_enabled': 'volume_enabled',
+            'volume_enabled': 'volume_enabled',  # Alias
             'volume_sma_period': 'volume_sma_period',
             'volume_spike_multiplier': 'volume_multiplier',
+            'volume_multiplier': 'volume_multiplier',  # Alias
             'volume_filter_enabled': 'volume_filter_enabled',
+            'min_volume_ratio': 'min_volume_ratio',
+            'allow_no_volume_data': 'allow_no_volume_data',
+            'volume_adjusted_confidence_enabled': 'volume_adjusted_confidence_enabled',
+            'high_volume_threshold': 'high_volume_threshold',
 
             # Session/Filter Settings
             'session_filter_enabled': 'session_filter_enabled',
@@ -674,6 +681,18 @@ class SMCSimpleStrategy:
             'use_atr_swing_validation': 'use_atr_swing_validation',
             'min_swing_atr_multiplier': 'min_swing_atr_multiplier',
 
+            # Swing Proximity Settings (CRITICAL: These were missing - added Jan 2026)
+            'swing_proximity_enabled': 'swing_proximity_enabled',
+            'swing_proximity_min_distance_pips': 'swing_proximity_min_distance_pips',
+            'swing_proximity_strict_mode': 'swing_proximity_strict_mode',
+            'swing_proximity_resistance_buffer': 'swing_proximity_resistance_buffer',
+            'swing_proximity_support_buffer': 'swing_proximity_support_buffer',
+            'swing_proximity_lookback_swings': 'swing_proximity_lookback_swings',
+
+            # Per-Pair Override Parameters (from SMC Config Tab)
+            'smc_conflict_tolerance': 'smc_conflict_tolerance',
+            'high_volume_confidence': 'high_volume_confidence',
+
             # Limit Order Settings
             'limit_order_enabled': 'limit_order_enabled',
             'limit_expiry_minutes': 'limit_expiry_minutes',
@@ -699,6 +718,24 @@ class SMCSimpleStrategy:
                 setattr(self, attr_name, value)
                 self.logger.info(f"   [OVERRIDE] {param}: {old_value} → {value}")
                 overrides_applied += 1
+
+        # CRITICAL (Jan 2026): Disable dynamic features when testing their base parameters
+        # Otherwise the dynamic calculation will override the test value
+        if 'swing_lookback_bars' in self._config_override or 'swing_lookback' in self._config_override:
+            self.use_dynamic_swing_lookback = False
+            self.logger.info(f"   [AUTO-DISABLE] use_dynamic_swing_lookback: True → False (testing swing_lookback)")
+
+        if 'min_confidence' in self._config_override:
+            # Disable all dynamic confidence adjustments to test the raw threshold
+            self.ema_distance_adjusted_confidence_enabled = False
+            self.atr_adjusted_confidence_enabled = False
+            self.volume_adjusted_confidence_enabled = False
+            self.logger.info(f"   [AUTO-DISABLE] Dynamic confidence adjustments disabled (testing min_confidence)")
+
+        if 'fixed_stop_loss_pips' in self._config_override or 'fixed_take_profit_pips' in self._config_override:
+            # Auto-enable fixed SL/TP when testing these parameters
+            self.fixed_sl_tp_override_enabled = True
+            self.logger.info(f"   [AUTO-ENABLE] fixed_sl_tp_override_enabled: True (testing fixed SL/TP)")
 
         self.logger.info(f"   Total overrides applied: {overrides_applied}")
         self.logger.info("=" * 60)
@@ -1264,7 +1301,12 @@ class SMCSimpleStrategy:
             # Priority: EMA distance > ATR > Volume > Pair-specific > Default
             # EMA distance is the strongest predictor of CONFIDENCE rejection outcomes
             # v2.12.0: Added direction-aware confidence threshold support
-            if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+            # CRITICAL FIX (Jan 2026): In backtest mode with overrides, use the overridden value
+            # instead of querying database config (which ignores the override)
+            if self._backtest_mode and self._config_override and 'min_confidence' in self._config_override:
+                # Backtest mode with min_confidence override - use the overridden instance variable
+                pair_min_confidence = self.min_confidence
+            elif hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
                 pair_min_confidence = self._db_config.get_min_confidence_directional(epic, direction)
             else:
                 pair_min_confidence = self.pair_min_confidence.get(pair, self.pair_min_confidence.get(epic, self.min_confidence))
@@ -1322,10 +1364,16 @@ class SMCSimpleStrategy:
                 self.volume_adjusted_confidence_enabled and
                 volume_ratio is not None and
                 volume_ratio >= self.high_volume_threshold):
-                # Check if this pair has a volume-adjusted threshold
-                high_vol_confidence = self.pair_high_volume_confidence.get(
-                    pair, self.pair_high_volume_confidence.get(epic)
-                )
+                # Check for backtest override first, then pair-specific
+                high_vol_confidence = None
+                if hasattr(self, '_config_override') and self._config_override and 'high_volume_confidence' in self._config_override:
+                    # Use overridden global value for backtest testing
+                    high_vol_confidence = self.high_volume_confidence
+                else:
+                    # Check if this pair has a volume-adjusted threshold
+                    high_vol_confidence = self.pair_high_volume_confidence.get(
+                        pair, self.pair_high_volume_confidence.get(epic)
+                    )
                 if high_vol_confidence is not None:
                     pair_min_confidence = high_vol_confidence
                     adjustment_type = "high-volume"
@@ -1419,7 +1467,11 @@ class SMCSimpleStrategy:
             # ================================================================
             if self.volume_filter_enabled:
                 # v2.12.0: Get direction-aware volume ratio threshold
-                if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+                # Priority: backtest overrides -> direction-specific -> pair parameter_overrides -> global
+                if hasattr(self, '_config_override') and self._config_override and 'min_volume_ratio' in self._config_override:
+                    # Use the overridden instance variable directly
+                    pair_min_volume = self.min_volume_ratio
+                elif hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
                     pair_min_volume = self._db_config.get_min_volume_ratio_directional(epic, direction)
                 else:
                     pair_min_volume = self._get_pair_param(epic, 'MIN_VOLUME_RATIO', self.min_volume_ratio)
@@ -2289,8 +2341,15 @@ class SMCSimpleStrategy:
             }
 
         # v2.12.0: Get direction-aware Fib thresholds
-        # Priority: direction-specific -> pair parameter_overrides -> global
-        if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+        # Priority: backtest overrides -> direction-specific -> pair parameter_overrides -> global
+        # Check if we're in backtest mode with fib overrides - use instance variables directly
+        if hasattr(self, '_config_override') and self._config_override and \
+           ('fib_pullback_min' in self._config_override or 'fib_min' in self._config_override or
+            'fib_pullback_max' in self._config_override or 'fib_max' in self._config_override):
+            # Use the overridden instance variables directly
+            pair_fib_min = self.fib_min
+            pair_fib_max = self.fib_max
+        elif hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
             pair_fib_min = self._db_config.get_fib_pullback_min(epic, direction)
             pair_fib_max = self._db_config.get_fib_pullback_max(epic, direction)
         else:

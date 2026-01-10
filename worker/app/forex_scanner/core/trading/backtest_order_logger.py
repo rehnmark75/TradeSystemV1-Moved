@@ -147,6 +147,16 @@ class BacktestOrderLogger:
             profit_pips = signal.get('max_profit_pips') or signal.get('potential_profit_pips', 0)
             loss_pips = signal.get('max_loss_pips') or signal.get('potential_loss_pips', 0)
 
+            # Get pips_gained from various possible sources
+            pips_gained = signal.get('pips_gained', 0)
+            if pips_gained == 0:
+                # Fallback: calculate from trade result
+                trade_result = signal.get('trade_result', '')
+                if trade_result == 'win':
+                    pips_gained = profit_pips if profit_pips > 0 else signal.get('limit_distance', 15)
+                elif trade_result == 'loss':
+                    pips_gained = -loss_pips if loss_pips > 0 else -signal.get('stop_distance', 9)
+
             signal_record = {
                 'id': self.signals_logged,
                 'timestamp': timestamp,
@@ -157,6 +167,7 @@ class BacktestOrderLogger:
                 'confidence': confidence,
                 'profit': profit_pips,
                 'loss': loss_pips,
+                'pips_gained': pips_gained,  # Critical for variation testing
                 'risk_reward': signal.get('profit_loss_ratio') or signal.get('risk_reward_ratio', 0),
                 'validation_passed': validation_passed,
                 'rejection_reason': 'N/A' if validation_passed else (failure_reason or 'Unknown'),
@@ -762,6 +773,78 @@ class BacktestOrderLogger:
             'validation_rate': self.validation_passed / max(1, self.signals_logged),
             'signals_by_epic': self.signals_by_epic,
             'signals_by_strategy': self.signals_by_strategy,
+            'bull_signals': self.bull_signals,
+            'bear_signals': self.bear_signals
+        }
+
+    def get_summary_statistics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive summary statistics for variation testing.
+
+        Returns statistics in the format expected by ParallelVariationRunner._extract_metrics()
+        This enables proper result extraction for parameter variation tests.
+
+        Added: Jan 2026 - Critical fix for variation testing showing 0 signals
+        """
+        # Calculate wins and losses from all_signals
+        wins = []
+        losses = []
+
+        for sig in self.all_signals:
+            pips = sig.get('pips_gained', 0)
+            if pips is None:
+                continue
+            if pips > 0:
+                wins.append(pips)
+            elif pips < 0:
+                losses.append(pips)
+
+        total_signals = len(self.all_signals)
+        winning_trades = len(wins)
+        losing_trades = len(losses)
+        total_pips = sum(wins) + sum(losses)
+
+        # Calculate win rate
+        if total_signals > 0:
+            win_rate = (winning_trades / total_signals) * 100
+        else:
+            win_rate = 0.0
+
+        # Calculate averages
+        avg_win_pips = sum(wins) / len(wins) if wins else 0.0
+        avg_loss_pips = sum(losses) / len(losses) if losses else 0.0
+
+        # Calculate profit factor
+        total_wins_amount = sum(wins)
+        total_losses_amount = abs(sum(losses))
+        if total_losses_amount > 0:
+            profit_factor = total_wins_amount / total_losses_amount
+        else:
+            profit_factor = float('inf') if total_wins_amount > 0 else 0.0
+
+        # Calculate max drawdown (simplified - running minimum)
+        cumulative = 0.0
+        peak = 0.0
+        max_drawdown = 0.0
+        for sig in self.all_signals:
+            pips = sig.get('pips_gained', 0) or 0
+            cumulative += pips
+            if cumulative > peak:
+                peak = cumulative
+            drawdown = peak - cumulative
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+
+        return {
+            'total_signals': total_signals,
+            'winning_trades': winning_trades,
+            'losing_trades': losing_trades,
+            'total_pips': total_pips,
+            'win_rate': win_rate,
+            'profit_factor': profit_factor if profit_factor != float('inf') else 999.0,
+            'avg_win_pips': avg_win_pips,
+            'avg_loss_pips': avg_loss_pips,
+            'max_drawdown_pips': max_drawdown,
             'bull_signals': self.bull_signals,
             'bear_signals': self.bear_signals
         }
