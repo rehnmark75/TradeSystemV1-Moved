@@ -40,6 +40,11 @@ class SMCSimpleConfig:
     require_close_beyond_ema: bool = True
     min_distance_from_ema_pips: float = 3.0
 
+    # v2.16.0: EMA SLOPE VALIDATION (prevents counter-trend trades)
+    ema_slope_validation_enabled: bool = True
+    ema_slope_lookback_bars: int = 5
+    ema_slope_min_atr_multiplier: float = 0.5
+
     # TIER 2: 15M ENTRY TRIGGER
     trigger_timeframe: str = "15m"
     swing_lookback_bars: int = 20
@@ -822,6 +827,7 @@ class SMCSimpleConfigService:
             'version', 'strategy_name', 'strategy_status',
             'htf_timeframe', 'ema_period', 'ema_buffer_pips',
             'require_close_beyond_ema', 'min_distance_from_ema_pips',
+            'ema_slope_validation_enabled', 'ema_slope_lookback_bars', 'ema_slope_min_atr_multiplier',
             'trigger_timeframe', 'swing_lookback_bars', 'swing_strength_bars',
             'require_body_close_break', 'wick_tolerance_pips',
             'volume_confirmation_enabled', 'volume_sma_period', 'volume_spike_multiplier',
