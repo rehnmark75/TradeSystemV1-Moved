@@ -89,8 +89,27 @@ def render_chart_tab(service):
         if current_ticker:
             st.info(f"Viewing: **{current_ticker}** (from navigation)")
         elif source == "Signals":
-            # Get active signal tickers
-            signal_tickers = _get_signal_tickers(service)
+            # Date filter for signals
+            date_col1, date_col2 = st.columns(2)
+            with date_col1:
+                signal_date_from = st.date_input(
+                    "From date",
+                    value=datetime.now() - timedelta(days=30),
+                    key="chart_signal_date_from"
+                )
+            with date_col2:
+                signal_date_to = st.date_input(
+                    "To date",
+                    value=datetime.now(),
+                    key="chart_signal_date_to"
+                )
+
+            # Get active signal tickers with date filter
+            signal_tickers = _get_signal_tickers(
+                service,
+                date_from=signal_date_from.strftime('%Y-%m-%d') if signal_date_from else None,
+                date_to=signal_date_to.strftime('%Y-%m-%d') if signal_date_to else None
+            )
             if signal_tickers:
                 selected_ticker = st.selectbox(
                     "Select from active signals",
@@ -98,9 +117,24 @@ def render_chart_tab(service):
                     key="chart_signal_ticker"
                 )
             else:
-                st.info("No active signals available")
+                st.info("No active signals available for selected date range")
 
         elif source == "Watchlist":
+            # Date filter for watchlist
+            date_col1, date_col2 = st.columns(2)
+            with date_col1:
+                watchlist_date_from = st.date_input(
+                    "From date",
+                    value=datetime.now() - timedelta(days=30),
+                    key="chart_watchlist_date_from"
+                )
+            with date_col2:
+                watchlist_date_to = st.date_input(
+                    "To date",
+                    value=datetime.now(),
+                    key="chart_watchlist_date_to"
+                )
+
             # Watchlist type selector
             watchlist_types = [
                 "EMA 50 Cross Over",
@@ -116,8 +150,13 @@ def render_chart_tab(service):
                 key="chart_watchlist_type"
             )
 
-            # Get tickers for selected watchlist
-            watchlist_tickers = _get_watchlist_tickers(service, watchlist_type)
+            # Get tickers for selected watchlist with date filter
+            watchlist_tickers = _get_watchlist_tickers(
+                service,
+                watchlist_type,
+                date_from=watchlist_date_from.strftime('%Y-%m-%d') if watchlist_date_from else None,
+                date_to=watchlist_date_to.strftime('%Y-%m-%d') if watchlist_date_to else None
+            )
             if watchlist_tickers:
                 selected_ticker = st.selectbox(
                     "Select ticker",
@@ -125,7 +164,7 @@ def render_chart_tab(service):
                     key="chart_watchlist_ticker"
                 )
             else:
-                st.info(f"No tickers in {watchlist_type} watchlist")
+                st.info(f"No tickers in {watchlist_type} watchlist for selected date range")
 
         else:  # Manual Entry
             manual_input = st.text_input(
@@ -214,6 +253,25 @@ def render_chart_tab(service):
             if markers_data:
                 # Show markers summary above chart
                 _render_markers_summary(markers_data)
+
+    # Chart Legend (color-coded)
+    legend_parts = [
+        '<span style="color: #2196F3;">━</span> EMA 20 &nbsp;&nbsp;',
+        '<span style="color: #FF9800;">━</span> EMA 50 &nbsp;&nbsp;',
+        '<span style="color: #9C27B0;">━</span> EMA 100 &nbsp;&nbsp;',
+        '<span style="color: #F44336;">━</span> EMA 200',
+    ]
+    if show_macd:
+        legend_parts.append(
+            '&nbsp;&nbsp;│&nbsp;&nbsp;'
+            '<span style="color: #2962FF;">━</span> MACD &nbsp;&nbsp;'
+            '<span style="color: #FF6D00;">━</span> Signal &nbsp;&nbsp;'
+            '<span style="color: #26a69a;">▮</span>/<span style="color: #ef5350;">▮</span> Histogram'
+        )
+    st.markdown(
+        f'<div style="margin-bottom: 8px; font-size: 12px;">{"".join(legend_parts)}</div>',
+        unsafe_allow_html=True
+    )
 
     # Build and render charts
     if show_mtf:
@@ -332,10 +390,15 @@ def _render_position_calculator_section(ticker: str, metrics: dict, active_signa
     )
 
 
-def _get_signal_tickers(service) -> list:
-    """Get unique tickers from active signals."""
+def _get_signal_tickers(service, date_from: str = None, date_to: str = None) -> list:
+    """Get unique tickers from active signals, optionally filtered by date range."""
     try:
-        signals = service.get_scanner_signals(status='active', limit=100)
+        signals = service.get_scanner_signals(
+            status='active',
+            limit=100,
+            signal_date_from=date_from,
+            signal_date_to=date_to
+        )
         if signals:
             tickers = list(set(s.get('ticker') for s in signals if s.get('ticker')))
             return sorted(tickers)
@@ -344,8 +407,8 @@ def _get_signal_tickers(service) -> list:
     return []
 
 
-def _get_watchlist_tickers(service, watchlist_type: str) -> list:
-    """Get tickers for a specific watchlist type."""
+def _get_watchlist_tickers(service, watchlist_type: str, date_from: str = None, date_to: str = None) -> list:
+    """Get tickers for a specific watchlist type, optionally filtered by date range."""
     try:
         if watchlist_type == "All Tickers":
             return service.get_all_tickers()
@@ -359,12 +422,31 @@ def _get_watchlist_tickers(service, watchlist_type: str) -> list:
             "RSI Oversold Bounce": "rsi_oversold_bounce",
         }
 
+        # Crossover watchlists use crossover_date, event watchlists use scan_date
+        crossover_watchlists = {"ema_50_crossover", "ema_20_crossover", "macd_bullish_cross"}
+
         watchlist_name = watchlist_name_map.get(watchlist_type)
         if watchlist_name:
             # get_watchlist_results returns a DataFrame
             df = service.get_watchlist_results(watchlist_name)
             if df is not None and not df.empty and 'ticker' in df.columns:
-                return sorted(df['ticker'].unique().tolist())
+                # Apply date filter based on watchlist type
+                date_col = 'crossover_date' if watchlist_name in crossover_watchlists else 'scan_date'
+
+                if date_col in df.columns and (date_from or date_to):
+                    # Convert date column to datetime for comparison
+                    df[date_col] = pd.to_datetime(df[date_col])
+
+                    if date_from:
+                        date_from_dt = pd.to_datetime(date_from)
+                        df = df[df[date_col] >= date_from_dt]
+
+                    if date_to:
+                        date_to_dt = pd.to_datetime(date_to)
+                        df = df[df[date_col] <= date_to_dt]
+
+                if not df.empty:
+                    return sorted(df['ticker'].unique().tolist())
     except Exception:
         pass
 
@@ -502,9 +584,9 @@ def _build_price_chart(df: pd.DataFrame, smc_data: dict = None, markers_data: di
                     "options": {
                         "color": color,
                         "lineWidth": 1,
-                        "title": title,
                         "priceLineVisible": False,
-                        "lastValueVisible": False
+                        "lastValueVisible": False,
+                        "crosshairMarkerVisible": True
                     }
                 })
 
@@ -577,8 +659,9 @@ def _build_macd_chart(df: pd.DataFrame) -> dict:
             "options": {
                 "color": "#2962FF",
                 "lineWidth": 2,
-                "title": "MACD",
-                "priceLineVisible": False
+                "priceLineVisible": False,
+                "lastValueVisible": False,
+                "crosshairMarkerVisible": True
             }
         },
         {
@@ -587,8 +670,9 @@ def _build_macd_chart(df: pd.DataFrame) -> dict:
             "options": {
                 "color": "#FF6D00",
                 "lineWidth": 2,
-                "title": "Signal",
-                "priceLineVisible": False
+                "priceLineVisible": False,
+                "lastValueVisible": False,
+                "crosshairMarkerVisible": True
             }
         }
     ]

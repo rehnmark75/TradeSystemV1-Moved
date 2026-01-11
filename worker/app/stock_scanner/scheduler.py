@@ -43,7 +43,7 @@ import asyncio
 import logging
 import sys
 import os
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date
 import pytz
 
 sys.path.insert(0, '/app')
@@ -288,9 +288,14 @@ class StockScheduler:
         target += timedelta(days=days_until_sunday)
         return target
 
-    async def run_pipeline(self):
+    async def run_pipeline(self, data_date: date = None):
         """
         Run the complete daily pipeline.
+
+        Args:
+            data_date: The trading day to analyze. Defaults to the last trading day.
+                       On Saturday, this will be Friday. On Monday, this will be the
+                       previous Friday (if market was closed over weekend).
 
         Stages:
         1. Sync 1H candles
@@ -298,13 +303,24 @@ class StockScheduler:
         3. Calculate metrics
         4. Build watchlist
         5. Run ZLMA strategy
+
+        Signal Deduplication:
+        - All signals use data_date (not scan date) for signal_timestamp
+        - This ensures Saturday runs and Monday runs don't create duplicates
+        - The unique constraint on (ticker, scanner_name, signal_date) prevents duplicates
         """
+        # Determine the data date (trading day being analyzed)
+        if data_date is None:
+            now = datetime.now(self.ET)
+            data_date = get_last_trading_day(now).date() if hasattr(get_last_trading_day(now), 'date') else get_last_trading_day(now)
+
         logger.info("=" * 80)
         logger.info(" DAILY PIPELINE - Starting")
         logger.info("=" * 80)
+        logger.info(f" Data Date: {data_date} (trading day being analyzed)")
 
         pipeline_start = datetime.now()
-        results = {}
+        results = {'data_date': str(data_date)}
 
         # === STAGE 1: Sync 1H Candles ===
         logger.info("\n[STAGE 1/6] Syncing 1H candle data...")
@@ -329,7 +345,7 @@ class StockScheduler:
         # === STAGE 3: Calculate Metrics ===
         logger.info("\n[STAGE 3/11] Calculating screening metrics...")
         try:
-            metrics_stats = await self.calculator.calculate_all_metrics()
+            metrics_stats = await self.calculator.calculate_all_metrics(calculation_date=data_date)
             results['metrics'] = metrics_stats
             logger.info(f"[OK] Metrics: {metrics_stats['successful']} stocks")
         except Exception as e:
@@ -339,7 +355,7 @@ class StockScheduler:
         # === STAGE 4: Relative Strength (RS) Calculation ===
         logger.info("\n[STAGE 4/13] Calculating Relative Strength vs SPY...")
         try:
-            rs_stats = await self.rs_populator.populate_rs()
+            rs_stats = await self.rs_populator.populate_rs(calc_date=data_date)
             results['rs'] = rs_stats
             if 'error' in rs_stats:
                 logger.warning(f"[WARN] RS: {rs_stats['error']}")
@@ -428,7 +444,7 @@ class StockScheduler:
         logger.info("\n[STAGE 7/10] Running all scanner strategies...")
         try:
             if self.scanner_manager:
-                scanner_signals = await self.scanner_manager.run_all_scanners()
+                scanner_signals = await self.scanner_manager.run_all_scanners(calculation_date=data_date)
                 results['scanner_signals'] = {
                     'total': len(scanner_signals),
                     'by_scanner': self.scanner_manager.get_scan_stats().get('signals_by_scanner', {}),
@@ -448,7 +464,7 @@ class StockScheduler:
         logger.info("\n[STAGE 8/10] Running watchlist scanner (5 predefined screens)...")
         try:
             if self.scanner_manager:
-                watchlist_results = await self.scanner_manager.run_watchlist_scanner()
+                watchlist_results = await self.scanner_manager.run_watchlist_scanner(calculation_date=data_date)
                 results['watchlist_scanner'] = watchlist_results
                 total_wl = sum(watchlist_results.values())
                 logger.info(f"[OK] Watchlist Scanner: {total_wl} total matches")
@@ -1094,6 +1110,29 @@ class StockScheduler:
         except Exception as e:
             logger.error(f"Failed to log pipeline run: {e}")
 
+    def _should_run_saturday_analysis(self) -> bool:
+        """
+        Check if we should run Saturday analysis.
+
+        Saturday runs analyze Friday's data to give you time to review signals
+        before Monday. This is useful for weekend analysis/preparation.
+
+        Returns:
+            True if today is Saturday and we haven't run analysis for Friday yet
+        """
+        now = datetime.now(self.ET)
+
+        # Only run on Saturday
+        if now.weekday() != 5:  # 5 = Saturday
+            return False
+
+        # Get last trading day (should be Friday)
+        last_trading = get_last_trading_day(now)
+        if hasattr(last_trading, 'date'):
+            last_trading = last_trading.date()
+
+        return True
+
     async def check_and_run_missed_tasks(self):
         """
         Check if any daily tasks were missed today and run them if needed.
@@ -1101,18 +1140,54 @@ class StockScheduler:
         This handles the case where the scheduler starts after the scheduled time
         (e.g., after a weekend or restart). If the task hasn't run today, run it now.
 
-        Respects market holidays - won't run on non-trading days.
+        Also handles Saturday analysis runs for Friday data.
         """
         now = datetime.now(self.ET)
         today = now.date()
 
+        # Special handling for Saturday - run analysis for Friday data
+        if now.weekday() == 5:  # Saturday
+            last_trading = get_last_trading_day(now)
+            if hasattr(last_trading, 'date'):
+                data_date = last_trading.date()
+            else:
+                data_date = last_trading
+
+            # Check if we already ran analysis for the last trading day
+            query = """
+                SELECT COUNT(*) FROM stock_pipeline_log
+                WHERE pipeline_name = 'daily_pipeline'
+                AND results->>'data_date' = $1
+            """
+            try:
+                count = await self.db.fetchval(query, str(data_date))
+
+                if count == 0:
+                    pipeline_time = self.SCHEDULE['full_pipeline']['time']
+                    scheduled = datetime.combine(today, pipeline_time)
+                    scheduled = self.ET.localize(scheduled)
+
+                    if now > scheduled:
+                        logger.info("=" * 60)
+                        logger.info(f"SATURDAY ANALYSIS - Running pipeline for {data_date}")
+                        logger.info("=" * 60)
+                        await self.run_pipeline(data_date=data_date)
+                        return True
+                else:
+                    logger.info(f"Saturday: Already ran analysis for {data_date}")
+            except Exception as e:
+                logger.warning(f"Could not check Saturday pipeline status: {e}")
+            return False
+
+        # Skip Sunday
+        if now.weekday() == 6:  # Sunday
+            logger.info("Sunday - skipping missed task check")
+            return False
+
         # Check if today is a trading day (weekday + not a holiday)
         if not is_trading_day(now):
-            if now.weekday() >= 5:
-                logger.info("Weekend - skipping missed task check")
-            else:
-                logger.info("Market holiday - skipping missed task check")
-            return
+            logger.info("Market holiday - skipping missed task check")
+            return False
 
         # Check if full_pipeline has run today
         query = """
@@ -1141,6 +1216,29 @@ class StockScheduler:
 
         return False
 
+    def _is_valid_pipeline_day(self, dt: datetime) -> bool:
+        """
+        Check if a given day is valid for running the pipeline.
+
+        Valid days are:
+        - Trading days (Mon-Fri, not holidays)
+        - Saturday (for weekend analysis of Friday data)
+
+        Sunday is NOT valid for pipeline runs.
+        """
+        weekday = dt.weekday()
+
+        # Saturday is valid for weekend analysis
+        if weekday == 5:
+            return True
+
+        # Sunday is never valid
+        if weekday == 6:
+            return False
+
+        # Check if it's a trading day (Mon-Fri, not holiday)
+        return is_trading_day(dt)
+
     def get_next_scheduled_task(self) -> tuple:
         """
         Get the next scheduled task and its time.
@@ -1148,28 +1246,28 @@ class StockScheduler:
         Returns:
             Tuple of (task_name, next_time)
 
-        Note: Skips weekends and market holidays when scheduling.
+        Note: Runs on trading days AND Saturdays (for weekend analysis).
+              Skips Sundays and market holidays.
         """
         now = datetime.now(self.ET)
         today = now.date()
 
         candidates = []
 
-        # Always add daily scans - they run on trading days only
-        # If today is not a trading day, schedule for next trading day
+        # Always add daily scans - they run on trading days AND Saturdays
         for task_name, config in self.SCHEDULE.items():
             target = datetime.combine(today, config['time'])
             target = self.ET.localize(target)
 
-            # If we've passed the time or today is not a trading day, find next valid slot
-            if now >= target or not is_trading_day(now):
+            # If we've passed the time or today is not a valid day, find next valid slot
+            if now >= target or not self._is_valid_pipeline_day(now):
                 # Start from tomorrow
                 if now >= target:
                     target += timedelta(days=1)
-                # Skip weekends and holidays
+                # Skip invalid days (Sundays, holidays)
                 max_attempts = 10  # Safety limit
                 attempts = 0
-                while not is_trading_day(target) and attempts < max_attempts:
+                while not self._is_valid_pipeline_day(target) and attempts < max_attempts:
                     target += timedelta(days=1)
                     attempts += 1
 
