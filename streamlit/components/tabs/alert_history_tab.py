@@ -40,7 +40,7 @@ def render_alert_history_tab():
     # Filters row
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        days_filter = st.selectbox("Time Period", [7, 14, 30, 60, 90], index=0, key="alert_history_days")
+        days_filter = st.selectbox("Time Period", [1, 3, 7, 14, 30], index=0, key="alert_history_days")
     with col2:
         status_filter = st.selectbox("Claude Status", ["All", "Approved", "Rejected"], key="alert_history_status")
     with col3:
@@ -77,8 +77,32 @@ def render_alert_history_tab():
 
     st.markdown("---")
 
-    # Display alerts with expandable details
-    for idx, row in df.iterrows():
+    # Pagination settings
+    ITEMS_PER_PAGE = 25
+    total_pages = (len(df) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+
+    # Page selector
+    page_col1, page_col2, page_col3 = st.columns([1, 2, 1])
+    with page_col2:
+        if total_pages > 1:
+            current_page = st.selectbox(
+                f"Page (showing {ITEMS_PER_PAGE} per page)",
+                range(1, total_pages + 1),
+                key="alert_history_page",
+                format_func=lambda x: f"Page {x} of {total_pages}"
+            )
+        else:
+            current_page = 1
+
+    # Calculate slice for current page
+    start_idx = (current_page - 1) * ITEMS_PER_PAGE
+    end_idx = min(start_idx + ITEMS_PER_PAGE, len(df))
+
+    st.caption(f"Showing alerts {start_idx + 1}-{end_idx} of {len(df)}")
+
+    # Display only current page of alerts
+    page_df = df.iloc[start_idx:end_idx]
+    for idx, row in page_df.iterrows():
         _render_alert_row(row)
 
 

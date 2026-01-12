@@ -93,7 +93,7 @@ class AlertHistoryService:
                 params.append(pair_filter)
                 params.append(f"%{pair_filter}%")
 
-            query += " ORDER BY alert_timestamp DESC LIMIT 500"
+            query += " ORDER BY alert_timestamp DESC LIMIT 100"
 
             df = pd.read_sql_query(query, conn, params=params)
             return df
