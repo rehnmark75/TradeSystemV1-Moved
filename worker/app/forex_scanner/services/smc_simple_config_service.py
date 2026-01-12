@@ -101,6 +101,13 @@ class SMCSimpleConfig:
     max_sl_absolute_pips: float = 30.0
     max_risk_after_offset_pips: float = 55.0
 
+    # v2.17.0: CONFIDENCE-BASED ORDER ROUTING
+    # High confidence + strong trend = market order (immediate entry)
+    # Lower confidence = stop order (momentum confirmation)
+    market_order_min_confidence: float = 0.65  # Min confidence for market order
+    market_order_min_ema_slope: float = 1.0    # Min EMA slope (ATR multiple) for market order
+    low_confidence_extra_offset: float = 2.0   # Extra pips for low confidence (0.50-0.54)
+
     # RISK MANAGEMENT
     min_rr_ratio: float = 1.5
     optimal_rr_ratio: float = 2.5
@@ -429,6 +436,36 @@ class SMCSimpleConfig:
             if override.get('ema_slope_validation_enabled') is not None:
                 return override['ema_slope_validation_enabled']
         return self.ema_slope_validation_enabled
+
+    # =========================================================================
+    # STOP OFFSET GETTERS (v2.17.0)
+    # Per-pair stop entry offset for momentum confirmation
+    # =========================================================================
+
+    def get_pair_stop_offset(self, epic: str, entry_type: str = 'MOMENTUM') -> float:
+        """Get stop entry offset in pips for a specific pair.
+
+        Returns pair-specific value if set, otherwise global default based on entry type.
+        For PULLBACK entries, returns pullback_offset_max_pips.
+        For MOMENTUM entries, returns momentum_offset_pips.
+
+        Args:
+            epic: Trading pair epic
+            entry_type: 'PULLBACK' or 'MOMENTUM'
+
+        Returns:
+            Stop offset in pips
+        """
+        # Check pair-specific override first
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('stop_offset_pips') is not None:
+                return float(override['stop_offset_pips'])
+
+        # Fall back to global default based on entry type
+        if entry_type == 'PULLBACK':
+            return self.pullback_offset_max_pips
+        return self.momentum_offset_pips
 
     # =========================================================================
     # DIRECTION-AWARE GETTERS (v2.12.0)
@@ -873,6 +910,7 @@ class SMCSimpleConfigService:
             'pullback_offset_atr_factor', 'pullback_offset_min_pips', 'pullback_offset_max_pips',
             'momentum_offset_pips', 'min_risk_after_offset_pips',
             'max_sl_atr_multiplier', 'max_sl_absolute_pips', 'max_risk_after_offset_pips',
+            'market_order_min_confidence', 'market_order_min_ema_slope', 'low_confidence_extra_offset',
             'min_rr_ratio', 'optimal_rr_ratio', 'max_rr_ratio',
             'sl_buffer_pips', 'sl_atr_multiplier', 'use_atr_stop',
             'min_tp_pips', 'use_swing_target', 'tp_structure_lookback', 'risk_per_trade_pct',
@@ -1014,6 +1052,8 @@ class SMCSimpleConfigService:
                 # EMA overrides (v2.16.0)
                 'ema_period': row.get('ema_period'),
                 'ema_slope_validation_enabled': row.get('ema_slope_validation_enabled'),
+                # Stop offset override (v2.17.0)
+                'stop_offset_pips': row.get('stop_offset_pips'),
             }
 
         return config
@@ -1126,6 +1166,14 @@ class SMCSimpleConfigService:
     def is_ema_slope_validation_enabled(self, epic: str) -> bool:
         """Check if EMA slope validation is enabled for a specific pair"""
         return self.get_config().is_ema_slope_validation_enabled(epic)
+
+    # =========================================================================
+    # STOP OFFSET SERVICE ACCESSORS (v2.17.0)
+    # =========================================================================
+
+    def get_pair_stop_offset(self, epic: str, entry_type: str = 'MOMENTUM') -> float:
+        """Get stop entry offset in pips for a specific pair"""
+        return self.get_config().get_pair_stop_offset(epic, entry_type)
 
 
 # Global singleton instance

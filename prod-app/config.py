@@ -1,6 +1,7 @@
 # Ticker maps of IG specific ticker names
+# NOTE: EURUSD uses CEEM contract (not MINI) - IG changed this in late 2025
 EPIC_MAP = {
-    "EURUSD.1.MINI": "CS.D.EURUSD.MINI.IP",
+    "EURUSD.1.MINI": "CS.D.EURUSD.CEEM.IP",  # CEEM, not MINI!
     "GBPUSD.1.MINI": "CS.D.GBPUSD.MINI.IP",
     "USDJPY.100.MINI": "CS.D.USDJPY.MINI.IP",
     "AUDUSD.1.MINI": "CS.D.AUDUSD.MINI.IP"

@@ -1055,15 +1055,33 @@ class SMCSimpleStrategy:
 
             # ================================================================
             # v2.0.0: Calculate Limit Entry Price with Offset
+            # v2.17.0: Pass epic for per-pair offset override
             # ================================================================
             self.logger.info(f"\n📊 LIMIT ORDER: Calculating Entry Offset")
             entry_price, limit_offset_pips = self._calculate_limit_entry(
-                market_price, direction, entry_type, pip_value, entry_df
+                market_price, direction, entry_type, pip_value, entry_df, epic
             )
 
-            # Determine order type based on config
+            # ================================================================
+            # v2.17.0: Preliminary Order Type (will be refined after confidence)
+            # Store EMA slope for later confidence-based routing decision
+            # ================================================================
+            ema_slope_strength = abs(ema_result.get('ema_slope_atr', 0))
+
+            # Load routing thresholds from database config
+            market_order_min_confidence = 0.65  # Default
+            market_order_min_ema_slope = 1.0    # Default
+            low_confidence_extra_offset = 2.0   # Default
+
+            if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+                # _db_config is already the SMCSimpleConfig object (not the service)
+                market_order_min_confidence = getattr(self._db_config, 'market_order_min_confidence', 0.65)
+                market_order_min_ema_slope = getattr(self._db_config, 'market_order_min_ema_slope', 1.0)
+                low_confidence_extra_offset = getattr(self._db_config, 'low_confidence_extra_offset', 2.0)
+
+            # Preliminary order type - will be finalized after confidence calculation
             order_type = 'limit' if self.limit_order_enabled and limit_offset_pips > 0 else 'market'
-            self.logger.info(f"   📋 Order Type: {order_type.upper()}")
+            self.logger.info(f"   📋 Preliminary Order Type: {order_type.upper()} (offset={limit_offset_pips:.1f} pips)")
 
             # ================================================================
             # STEP 4: Calculate Stop Loss and Take Profit
@@ -1648,6 +1666,49 @@ class SMCSimpleStrategy:
                         self.logger.info(f"   ✅ MACD aligned: {macd_reason}")
             except ImportError:
                 pass  # Config not available, skip MACD filter
+
+            # ================================================================
+            # v2.17.0: FINALIZE ORDER TYPE BASED ON CONFIDENCE
+            # Now that confidence is calculated, finalize the order routing decision
+            # High confidence + strong trend = market order (immediate entry)
+            # Lower confidence = stop order (momentum confirmation needed)
+            # ================================================================
+            if self.limit_order_enabled:
+                if confidence >= market_order_min_confidence and ema_slope_strength >= market_order_min_ema_slope:
+                    # High confidence + strong trend = immediate market entry
+                    order_type = 'market'
+                    entry_price = market_price  # Use current market price
+                    limit_offset_pips = 0
+                    # Recalculate risk/reward with new entry price
+                    if direction == 'BULL':
+                        risk_pips = (entry_price - stop_loss) / pip_value
+                        reward_pips = (take_profit - entry_price) / pip_value if take_profit else 0
+                    else:
+                        risk_pips = (stop_loss - entry_price) / pip_value
+                        reward_pips = (entry_price - take_profit) / pip_value if take_profit else 0
+                    rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
+                    self.logger.info(f"\n📋 FINAL Order Type: MARKET (high quality: conf={confidence:.1%}, slope={ema_slope_strength:.2f}x ATR)")
+                elif order_type == 'limit':
+                    # v2.17.0: Add extra offset for low confidence signals (0.50-0.54)
+                    if confidence < 0.55 and low_confidence_extra_offset > 0:
+                        limit_offset_pips += low_confidence_extra_offset
+                        # Recalculate entry price with extra offset
+                        extra_offset = low_confidence_extra_offset * pip_value
+                        if direction == 'BULL':
+                            entry_price += extra_offset
+                        else:
+                            entry_price -= extra_offset
+                        # Recalculate risk/reward with new entry price
+                        if direction == 'BULL':
+                            risk_pips = (entry_price - stop_loss) / pip_value
+                            reward_pips = (take_profit - entry_price) / pip_value if take_profit else 0
+                        else:
+                            risk_pips = (stop_loss - entry_price) / pip_value
+                            reward_pips = (entry_price - take_profit) / pip_value if take_profit else 0
+                        rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
+                        self.logger.info(f"\n📋 FINAL Order Type: STOP (low conf: +{low_confidence_extra_offset:.0f} pips extra, total={limit_offset_pips:.1f} pips)")
+                    else:
+                        self.logger.info(f"\n📋 FINAL Order Type: STOP (conf={confidence:.1%}, offset={limit_offset_pips:.1f} pips)")
 
             # ================================================================
             # v2.5.0: PAIR-SPECIFIC BLOCKING CHECK
@@ -2759,7 +2820,8 @@ class SMCSimpleStrategy:
         direction: str,
         entry_type: str,
         pip_value: float,
-        df: pd.DataFrame
+        df: pd.DataFrame,
+        epic: str = None
     ) -> Tuple[float, float]:
         """
         Calculate limit entry price with offset for momentum confirmation.
@@ -2767,7 +2829,9 @@ class SMCSimpleStrategy:
         v2.2.0: Stop-entry style - confirm price is moving in intended direction:
         - BUY orders placed ABOVE current price (enter when price breaks up)
         - SELL orders placed BELOW current price (enter when price breaks down)
-        - Max offset: 3 pips (user request)
+
+        v2.17.0: Per-pair stop offset support - choppy pairs (AUDUSD, NZDUSD) use
+        wider offset (5 pips) while trending pairs use standard offset (3 pips).
 
         Args:
             current_close: Current market price
@@ -2775,6 +2839,7 @@ class SMCSimpleStrategy:
             entry_type: Entry type ('PULLBACK' or 'MOMENTUM')
             pip_value: Pip value for the pair (e.g., 0.0001 for EURUSD)
             df: DataFrame for ATR calculation
+            epic: Trading pair epic for per-pair offset override (v2.17.0)
 
         Returns:
             Tuple of (limit_entry_price, offset_pips)
@@ -2783,22 +2848,34 @@ class SMCSimpleStrategy:
             # Limit orders disabled - return current price (market order behavior)
             return current_close, 0.0
 
-        if entry_type == 'PULLBACK':
-            # ATR-based offset for pullback entries (adapts to volatility)
-            atr = self._calculate_atr(df)
-            if atr > 0:
-                atr_pips = atr / pip_value
-                # Calculate offset as percentage of ATR, clamped to min/max
-                offset_pips = atr_pips * self.pullback_offset_atr_factor
-                offset_pips = min(max(offset_pips, self.pullback_offset_min_pips), self.pullback_offset_max_pips)
+        # v2.17.0: Check for per-pair stop offset override first
+        pair_offset = None
+        if epic and hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+            pair_offset = self._db_config.get_pair_stop_offset(epic, entry_type)
+            if pair_offset != self.momentum_offset_pips and pair_offset != self.pullback_offset_max_pips:
+                # Per-pair override is set - use it directly
+                offset_pips = pair_offset
+                self.logger.info(f"   📉 Limit offset ({entry_type}): {offset_pips:.1f} pips (per-pair override)")
             else:
-                # Fallback if ATR unavailable
-                offset_pips = self.pullback_offset_min_pips
-            self.logger.info(f"   📉 Limit offset (PULLBACK): {offset_pips:.1f} pips (ATR-based)")
-        else:
-            # Fixed offset for momentum entries (trend is strong)
-            offset_pips = self.momentum_offset_pips
-            self.logger.info(f"   📉 Limit offset (MOMENTUM): {offset_pips:.1f} pips (fixed)")
+                pair_offset = None  # No override, use normal logic
+
+        if pair_offset is None:
+            if entry_type == 'PULLBACK':
+                # ATR-based offset for pullback entries (adapts to volatility)
+                atr = self._calculate_atr(df)
+                if atr > 0:
+                    atr_pips = atr / pip_value
+                    # Calculate offset as percentage of ATR, clamped to min/max
+                    offset_pips = atr_pips * self.pullback_offset_atr_factor
+                    offset_pips = min(max(offset_pips, self.pullback_offset_min_pips), self.pullback_offset_max_pips)
+                else:
+                    # Fallback if ATR unavailable
+                    offset_pips = self.pullback_offset_min_pips
+                self.logger.info(f"   📉 Limit offset (PULLBACK): {offset_pips:.1f} pips (ATR-based)")
+            else:
+                # Fixed offset for momentum entries (trend is strong)
+                offset_pips = self.momentum_offset_pips
+                self.logger.info(f"   📉 Limit offset (MOMENTUM): {offset_pips:.1f} pips (fixed)")
 
         # Calculate offset in price terms
         offset = offset_pips * pip_value

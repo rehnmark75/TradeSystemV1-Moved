@@ -409,7 +409,7 @@ class OrderExecutor:
             # v2.0.0: Check order type for limit order routing
             order_type = signal.get('order_type', 'market')
             entry_level = signal.get('entry_price')  # For limit orders, this is the offset price
-            limit_expiry_minutes = signal.get('limit_expiry_minutes', 6)
+            limit_expiry_minutes = signal.get('limit_expiry_minutes', 15)
             limit_offset_pips = signal.get('limit_offset_pips', 0)
 
             if order_type == 'limit' and entry_level:
@@ -454,7 +454,7 @@ class OrderExecutor:
     def _execute_with_retry(self, signal: Dict, external_epic: str, direction: str,
                            stop_distance: int, limit_distance: int, custom_label: str, alert_id: int,
                            order_type: str = 'market', entry_level: float = None,
-                           limit_expiry_minutes: int = 6) -> Dict:
+                           limit_expiry_minutes: int = 15) -> Dict:
         """
         ENHANCED: Execute order with retry logic and exponential backoff
         v2.0.0: Added limit order support
@@ -586,7 +586,7 @@ class OrderExecutor:
                limit_distance: int = None, size: float = None, custom_label: str = None,
                risk_reward: float = None, alert_id: int = None,
                order_type: str = 'market', entry_level: float = None,
-               limit_expiry_minutes: int = 6):
+               limit_expiry_minutes: int = 15):
         """
         ENHANCED: Send order to your trading platform via API using correct format with timeout handling
         v2.0.0: Added limit order support

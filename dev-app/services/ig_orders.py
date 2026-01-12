@@ -490,13 +490,20 @@ async def place_working_order(
         logger.warning(f"⚠️ Invalid order type '{order_type}', defaulting to STOP")
         order_type = "STOP"
 
+    # CEEM epics use scaled pricing (e.g., 11621.6 instead of 1.16216)
+    # IG API expects level in scaled format for CEEM contracts
+    level_for_api = level
+    if "CEEM" in epic:
+        level_for_api = level * 10000
+        logger.info(f"📐 [CEEM] Scaling entry level: {level} → {level_for_api}")
+
     payload = {
         "epic": epic,
         "expiry": "-",
         "direction": direction.upper(),
         "size": size,
         "type": order_type,
-        "level": level,
+        "level": level_for_api,
         "currencyCode": currency_code,
         "timeInForce": "GOOD_TILL_DATE",
         "goodTillDate": good_till_date,
@@ -505,7 +512,7 @@ async def place_working_order(
         "limitDistance": limit_distance
     }
 
-    logger.info(f"📤 [WORKING ORDER] Placing {order_type} order: {epic} {direction} at {level}")
+    logger.info(f"📤 [WORKING ORDER] Placing {order_type} order: {epic} {direction} at {level_for_api}")
     logger.info(f"   Stop: {stop_distance}pts, Limit: {limit_distance}pts, Expiry: {good_till_date} UTC")
     logger.info(f"   Payload: {json.dumps(payload, indent=2)}")
 
