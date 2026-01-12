@@ -2,7 +2,6 @@ FROM postgres:15
 
 # Install required packages for backup operations
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    docker.io \
     bc \
     findutils \
     curl \
@@ -10,6 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsb-release \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI (standalone binary, not full docker.io package)
+# Using 27.x to match minimum API version 1.44+
+RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.3.1.tgz | tar -xzC /tmp \
+    && mv /tmp/docker/docker /usr/local/bin/ \
+    && rm -rf /tmp/docker
 
 # Install Azure CLI
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash \
