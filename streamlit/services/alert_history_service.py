@@ -69,7 +69,9 @@ class AlertHistoryService:
                 claude_raw_response,
                 vision_chart_url,
                 status,
-                alert_level
+                alert_level,
+                htf_candle_direction,
+                htf_candle_direction_prev
             FROM alert_history
             WHERE alert_timestamp >= NOW() - INTERVAL '%s days'
             """

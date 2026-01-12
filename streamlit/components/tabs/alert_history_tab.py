@@ -150,8 +150,22 @@ def _render_alert_row(row: pd.Series):
     score = row.get('claude_score', 0)
     score_str = f"{int(score)}/10" if score and not pd.isna(score) else 'N/A'
 
+    # Get 4H candle direction for title indicator
+    htf_dir = row.get('htf_candle_direction', '')
+    htf_indicator = ""
+    if htf_dir == 'BULLISH':
+        htf_indicator = "4H:▲"
+    elif htf_dir == 'BEARISH':
+        htf_indicator = "4H:▼"
+    elif htf_dir:
+        htf_indicator = "4H:━"
+
     # Create expander for each row
-    expander_title = f"{status_icon} {timestamp_str} | {pair} | {strategy} | {signal_type} | {price_str} | {session} | Score: {score_str}"
+    title_parts = [status_icon, timestamp_str, pair]
+    if htf_indicator:
+        title_parts.append(htf_indicator)
+    title_parts.extend([strategy, signal_type, price_str, session, f"Score: {score_str}"])
+    expander_title = " | ".join(title_parts)
 
     with st.expander(expander_title, expanded=False):
         # Two columns: details and chart
@@ -167,6 +181,15 @@ def _render_alert_row(row: pd.Series):
             st.write(f"- **Session:** {session}")
             st.write(f"- **Claude Score:** {score_str}")
             st.write(f"- **Claude Mode:** {row.get('claude_mode', 'N/A')}")
+
+            # 4H Candle Direction
+            htf_dir_detail = row.get('htf_candle_direction', None)
+            htf_prev = row.get('htf_candle_direction_prev', None)
+            if htf_dir_detail and not pd.isna(htf_dir_detail):
+                dir_symbols = {'BULLISH': '▲', 'BEARISH': '▼', 'NEUTRAL': '━'}
+                dir_symbol = dir_symbols.get(htf_dir_detail, '?')
+                prev_symbol = dir_symbols.get(htf_prev, '?') if htf_prev and not pd.isna(htf_prev) else '?'
+                st.write(f"- **4H Candle:** {dir_symbol} {htf_dir_detail} (prev: {prev_symbol} {htf_prev or 'N/A'})")
 
             # Claude reason
             reason = row.get('claude_reason', '')

@@ -908,6 +908,18 @@ class SMCSimpleStrategy:
             self.logger.info(f"   ✅ Distance: {ema_distance:.1f} pips from EMA")
 
             # ================================================================
+            # Extract 4H candle direction for analytics
+            # Note: iloc[-1] is forming candle, iloc[-2] is last CLOSED candle
+            # ================================================================
+            htf_candle_direction = self._get_candle_direction(
+                df_4h['open'].iloc[-2], df_4h['close'].iloc[-2]
+            )
+            htf_candle_direction_prev = self._get_candle_direction(
+                df_4h['open'].iloc[-3], df_4h['close'].iloc[-3]
+            )
+            self.logger.debug(f"   📊 4H Candle: {htf_candle_direction} (prev: {htf_candle_direction_prev})")
+
+            # ================================================================
             # TIER 2: Swing Break Confirmation (15m or 1H based on config)
             # ================================================================
             self.logger.info(f"\n📈 TIER 2: Checking {self.trigger_tf} Swing Break")
@@ -1581,8 +1593,12 @@ class SMCSimpleStrategy:
             # Check if MACD momentum direction aligns with trade direction
             # Analysis: BULL + bullish MACD = 71% WR, misaligned = 38% WR
             try:
-                # Use database config service if available
-                if self._config_service and hasattr(self._config_service, 'is_macd_filter_enabled'):
+                # CRITICAL FIX (Jan 2026): Backtest overrides should take precedence over database
+                # Priority: backtest override -> database config -> instance attribute
+                if self._backtest_mode and self._config_override and 'macd_filter_enabled' in self._config_override:
+                    # Use the overridden instance variable directly (set by _apply_config_overrides)
+                    macd_filter_enabled = self.macd_alignment_filter_enabled
+                elif self._config_service and hasattr(self._config_service, 'is_macd_filter_enabled'):
                     macd_filter_enabled = self._config_service.is_macd_filter_enabled(epic)
                 else:
                     macd_filter_enabled = getattr(self, 'macd_alignment_filter_enabled', True)
@@ -1675,6 +1691,10 @@ class SMCSimpleStrategy:
                 'in_optimal_zone': in_optimal_zone,
                 'entry_type': entry_type,  # v1.8.0: PULLBACK or MOMENTUM
 
+                # v2.17.0: 4H candle direction for HTF momentum analysis
+                'htf_candle_direction': htf_candle_direction,
+                'htf_candle_direction_prev': htf_candle_direction_prev,
+
                 # v2.0.0: Limit order fields
                 'order_type': order_type,  # 'limit' or 'market'
                 'market_price': market_price,  # Current market price (before offset)
@@ -1695,7 +1715,9 @@ class SMCSimpleStrategy:
                         'ema_period': self.ema_period,
                         'ema_value': ema_value,
                         'distance_pips': ema_distance,
-                        'direction': direction
+                        'direction': direction,
+                        'htf_candle_direction': htf_candle_direction,
+                        'htf_candle_direction_prev': htf_candle_direction_prev
                     },
                     'tier2_swing': {
                         'timeframe': self.trigger_tf,
@@ -1854,6 +1876,21 @@ class SMCSimpleStrategy:
             import traceback
             traceback.print_exc()
             return None
+
+    def _get_candle_direction(self, open_price: float, close_price: float) -> str:
+        """
+        Determine candle direction based on open/close prices.
+
+        Returns:
+            'BULLISH' if close > open
+            'BEARISH' if close < open
+            'NEUTRAL' if close == open (doji)
+        """
+        if close_price > open_price:
+            return 'BULLISH'
+        elif close_price < open_price:
+            return 'BEARISH'
+        return 'NEUTRAL'
 
     def _check_ema_bias(self, df_4h: pd.DataFrame, pip_value: float) -> Dict:
         """

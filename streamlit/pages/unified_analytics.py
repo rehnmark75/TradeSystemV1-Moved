@@ -79,6 +79,9 @@ def lazy_import_tab(tab_name: str) -> Callable:
     elif tab_name == "backtest_config":
         from components.tabs import render_backtest_config_tab
         return render_backtest_config_tab
+    elif tab_name == "htf_analysis":
+        from components.tabs import render_htf_analysis_tab
+        return render_htf_analysis_tab
     else:
         raise ValueError(f"Unknown tab: {tab_name}")
 
@@ -194,6 +197,7 @@ def main():
         analysis_options = [
             "Strategy",
             "Trade Analysis",
+            "HTF Analysis",
             "Market Intelligence",
             "Performance Snapshots",
             "Breakeven Optimizer",
@@ -213,6 +217,9 @@ def main():
             render_func()
         elif analysis_sub == "Trade Analysis":
             render_func = lazy_import_tab("trade_analysis")
+            render_func()
+        elif analysis_sub == "HTF Analysis":
+            render_func = lazy_import_tab("htf_analysis")
             render_func()
         elif analysis_sub == "Market Intelligence":
             render_func = lazy_import_tab("market_intelligence")

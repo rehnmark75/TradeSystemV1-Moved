@@ -530,7 +530,8 @@ class AlertHistoryManager:
                         supertrend_value, supertrend_direction,
                         rsi_zone, rsi_divergence,
                         ema_9, ema_21, ema_50, ema_200, price_vs_ema_200, ema_stack_order,
-                        candle_body_pips, candle_upper_wick_pips, candle_lower_wick_pips, candle_type
+                        candle_body_pips, candle_upper_wick_pips, candle_lower_wick_pips, candle_type,
+                        htf_candle_direction, htf_candle_direction_prev
                     ) VALUES (
                         %(alert_timestamp)s,
                         %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(price)s, %(bid_price)s, %(ask_price)s,
@@ -565,7 +566,8 @@ class AlertHistoryManager:
                         %(supertrend_value)s, %(supertrend_direction)s,
                         %(rsi_zone)s, %(rsi_divergence)s,
                         %(ema_9)s, %(ema_21)s, %(ema_50)s, %(ema_200)s, %(price_vs_ema_200)s, %(ema_stack_order)s,
-                        %(candle_body_pips)s, %(candle_upper_wick_pips)s, %(candle_lower_wick_pips)s, %(candle_type)s
+                        %(candle_body_pips)s, %(candle_upper_wick_pips)s, %(candle_lower_wick_pips)s, %(candle_type)s,
+                        %(htf_candle_direction)s, %(htf_candle_direction_prev)s
                     ) RETURNING id
                 '''
 
@@ -1532,6 +1534,10 @@ class AlertHistoryManager:
                 'candle_upper_wick_pips': signal.get('candle_upper_wick_pips'),
                 'candle_lower_wick_pips': signal.get('candle_lower_wick_pips'),
                 'candle_type': signal.get('candle_type'),
+
+                # 4H Candle Direction (for HTF momentum analysis)
+                'htf_candle_direction': signal.get('htf_candle_direction'),
+                'htf_candle_direction_prev': signal.get('htf_candle_direction_prev'),
 
                 # Deduplication
                 'signal_hash': signal_hash,
