@@ -13,9 +13,33 @@ import os
 
 try:
     from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import QueuePool
 except ImportError:
     create_engine = None
     text = None
+    QueuePool = None
+
+# Module-level connection pool (shared across all service instances)
+_shared_engine = None
+
+
+def _get_shared_engine():
+    """Get or create the shared database engine with connection pooling."""
+    global _shared_engine
+    if _shared_engine is None and create_engine:
+        database_url = os.getenv(
+            'DATABASE_URL',
+            'postgresql://postgres:postgres@postgres:5432/forex'
+        )
+        _shared_engine = create_engine(
+            database_url,
+            poolclass=QueuePool,
+            pool_size=5,
+            max_overflow=10,
+            pool_timeout=30,
+            pool_pre_ping=True  # Verify connections before use
+        )
+    return _shared_engine
 
 
 class BacktestService:
@@ -27,22 +51,17 @@ class BacktestService:
     - Fetch signals for specific execution
     - Get performance metrics
     - Chart URL retrieval
+    - Shared connection pooling for efficiency
     """
 
     def __init__(self):
-        """Initialize service with database connection."""
-        self.database_url = os.getenv(
-            'DATABASE_URL',
-            'postgresql://postgres:postgres@postgres:5432/forex'
-        )
-        self._engine = None
+        """Initialize service with shared database connection pool."""
+        pass  # Use shared engine
 
     @property
     def engine(self):
-        """Lazy-load database engine."""
-        if self._engine is None and create_engine:
-            self._engine = create_engine(self.database_url)
-        return self._engine
+        """Get shared database engine."""
+        return _get_shared_engine()
 
     @st.cache_data(ttl=60)
     def fetch_backtest_executions(_self, days: int = 30, strategy: str = "All") -> pd.DataFrame:
@@ -79,7 +98,11 @@ class BacktestService:
             COALESCE(bs.signal_count, 0) as signal_count,
             COALESCE(bs.win_count, 0) as win_count,
             COALESCE(bs.loss_count, 0) as loss_count,
-            COALESCE(bs.total_pips, 0) as total_pips
+            COALESCE(bs.total_pips, 0) as total_pips,
+            COALESCE(bs.win_pips, 0) as win_pips,
+            COALESCE(bs.loss_pips, 0) as loss_pips,
+            COALESCE(bs.avg_win, 0) as avg_win,
+            COALESCE(bs.avg_loss, 0) as avg_loss
         FROM backtest_executions be
         LEFT JOIN (
             SELECT
@@ -87,7 +110,11 @@ class BacktestService:
                 COUNT(*) as signal_count,
                 SUM(CASE WHEN pips_gained > 0 THEN 1 ELSE 0 END) as win_count,
                 SUM(CASE WHEN pips_gained <= 0 THEN 1 ELSE 0 END) as loss_count,
-                COALESCE(SUM(pips_gained), 0) as total_pips
+                COALESCE(SUM(pips_gained), 0) as total_pips,
+                COALESCE(SUM(CASE WHEN pips_gained > 0 THEN pips_gained ELSE 0 END), 0) as win_pips,
+                ABS(COALESCE(SUM(CASE WHEN pips_gained <= 0 THEN pips_gained ELSE 0 END), 0)) as loss_pips,
+                COALESCE(AVG(CASE WHEN pips_gained > 0 THEN pips_gained END), 0) as avg_win,
+                ABS(COALESCE(AVG(CASE WHEN pips_gained <= 0 THEN pips_gained END), 0)) as avg_loss
             FROM backtest_signals
             GROUP BY execution_id
         ) bs ON be.id = bs.execution_id
@@ -160,10 +187,10 @@ class BacktestService:
         Get available filter options from database.
 
         Returns:
-            Dict with 'strategies' list
+            Dict with 'strategies' and 'epics' lists
         """
         if not _self.engine:
-            return {'strategies': ['All']}
+            return {'strategies': ['All'], 'epics': ['All']}
 
         try:
             with _self.engine.connect() as conn:
@@ -176,9 +203,18 @@ class BacktestService:
                 """))
                 strategies = ['All'] + [row[0] for row in result.fetchall()]
 
-                return {'strategies': strategies}
+                # Get unique epics from epics_tested array
+                result = conn.execute(text("""
+                    SELECT DISTINCT unnest(epics_tested) as epic
+                    FROM backtest_executions
+                    WHERE epics_tested IS NOT NULL
+                    ORDER BY epic
+                """))
+                epics = ['All'] + [row[0] for row in result.fetchall()]
+
+                return {'strategies': strategies, 'epics': epics}
         except Exception as e:
-            return {'strategies': ['All']}
+            return {'strategies': ['All'], 'epics': ['All']}
 
     def get_execution_details(_self, execution_id: int) -> Optional[Dict[str, Any]]:
         """

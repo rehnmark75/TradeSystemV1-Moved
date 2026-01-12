@@ -881,14 +881,21 @@ class SMCSimpleStrategy:
 
             if not ema_result['valid']:
                 self.logger.info(f"   ❌ {ema_result['reason']}")
-                # Track rejection
+                # v2.16.0: Track EMA slope rejections separately from EMA position rejections
+                rejection_stage = ema_result.get('rejection_type', 'TIER1_EMA')
+                # Build context with EMA slope data if available
+                context = self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result)
+                if 'ema_slope_atr' in ema_result:
+                    context['ema_slope_atr'] = ema_result['ema_slope_atr']
+                # Track rejection with appropriate stage
                 self._track_rejection(
-                    stage='TIER1_EMA',
+                    stage=rejection_stage,
                     reason=ema_result['reason'],
                     epic=epic,
                     pair=pair,
                     candle_timestamp=candle_timestamp,
-                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result)
+                    direction=ema_result.get('attempted_direction'),
+                    context=context
                 )
                 return None
 
@@ -1939,12 +1946,18 @@ class SMCSimpleStrategy:
                 # Price is above EMA but EMA is falling = bearish retest, NOT bullish
                 return {
                     'valid': False,
+                    'rejection_type': 'EMA_SLOPE',  # v2.16.0: Track slope rejections separately
+                    'ema_slope_atr': ema_slope_atr,
+                    'attempted_direction': direction,
                     'reason': f"BULL rejected: EMA is FALLING (slope: {ema_slope_atr:.3f}x ATR) - need rising EMA for BULL"
                 }
             elif direction == 'BEAR' and ema_slope_atr > 0:
                 # Price is below EMA but EMA is rising = bullish retest, NOT bearish
                 return {
                     'valid': False,
+                    'rejection_type': 'EMA_SLOPE',  # v2.16.0: Track slope rejections separately
+                    'ema_slope_atr': ema_slope_atr,
+                    'attempted_direction': direction,
                     'reason': f"BEAR rejected: EMA is RISING (slope: {ema_slope_atr:.3f}x ATR) - need falling EMA for BEAR"
                 }
 

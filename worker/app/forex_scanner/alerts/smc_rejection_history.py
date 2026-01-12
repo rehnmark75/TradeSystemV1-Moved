@@ -67,6 +67,8 @@ class SMCRejectionHistoryManager:
     STAGE_MACD_MISALIGNED = 'MACD_MISALIGNED'  # Trade direction against MACD momentum
     # v2.15.0: Swing Proximity validation rejection
     STAGE_TIER4_PROXIMITY = 'TIER4_PROXIMITY'  # Entry too close to swing support/resistance
+    # v2.16.0: EMA Slope validation rejection (counter-trend prevention)
+    STAGE_EMA_SLOPE = 'EMA_SLOPE'  # Trade against EMA slope direction (counter-trend)
     # v2.11.0: TradeValidator rejection stages
     STAGE_SR_LEVEL = 'SR_LEVEL'  # S/R proximity rejection (too close to S/R)
     STAGE_SR_CLUSTER = 'SR_CLUSTER'  # S/R cluster risk rejection
@@ -81,7 +83,7 @@ class SMCRejectionHistoryManager:
         STAGE_TIER3_PULLBACK, STAGE_RISK_LIMIT, STAGE_RISK_RR, STAGE_RISK_TP,
         STAGE_CONFIDENCE, STAGE_SR_PATH_BLOCKED, STAGE_SMC_CONFLICT,
         STAGE_CONFIDENCE_CAP, STAGE_VOLUME_LOW, STAGE_VOLUME_NO_DATA,
-        STAGE_MACD_MISALIGNED, STAGE_TIER4_PROXIMITY,
+        STAGE_MACD_MISALIGNED, STAGE_TIER4_PROXIMITY, STAGE_EMA_SLOPE,
         # v2.11.0: TradeValidator rejection stages
         STAGE_SR_LEVEL, STAGE_SR_CLUSTER, STAGE_EMA200_FILTER,
         STAGE_CLAUDE_FILTER, STAGE_NEWS_FILTER, STAGE_MARKET_HOURS,
@@ -261,12 +263,13 @@ class SMCRejectionHistoryManager:
                     efficiency_ratio, market_regime_detected, bb_width_percentile,
                     volatility_state, adx_value, adx_trend_strength, performance_metrics,
                     sr_blocking_level, sr_blocking_type, sr_blocking_distance_pips,
-                    sr_path_blocked_pct, target_distance_pips
+                    sr_path_blocked_pct, target_distance_pips,
+                    ema_slope_atr
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT DO NOTHING
             """
@@ -353,7 +356,9 @@ class SMCRejectionHistoryManager:
                     data.get('sr_blocking_type'),
                     self._safe_float(data.get('sr_blocking_distance_pips')),
                     self._safe_float(data.get('sr_path_blocked_pct')),
-                    self._safe_float(data.get('target_distance_pips'))
+                    self._safe_float(data.get('target_distance_pips')),
+                    # v2.16.0: EMA Slope validation
+                    self._safe_float(data.get('ema_slope_atr'))
                 )
 
                 cursor.execute(insert_sql, values)

@@ -327,6 +327,25 @@ docker exec postgres psql -U postgres -c "CREATE DATABASE strategy_config;" 2>/d
 echo "  Importing strategy_config..."
 docker exec -i postgres psql -U postgres -d strategy_config < /data/sync/strategy_config.sql
 
+# Verify strategy_config import
+echo "  Verifying strategy_config import..."
+GLOBAL_CONFIG_COUNT=\$(docker exec postgres psql -U postgres -d strategy_config -t -c "SELECT COUNT(*) FROM smc_simple_global_config WHERE is_active = TRUE;" 2>/dev/null || echo "0")
+PAIR_OVERRIDE_COUNT=\$(docker exec postgres psql -U postgres -d strategy_config -t -c "SELECT COUNT(*) FROM smc_simple_pair_overrides;" 2>/dev/null || echo "0")
+SCANNER_CONFIG_COUNT=\$(docker exec postgres psql -U postgres -d strategy_config -t -c "SELECT COUNT(*) FROM scanner_global_config WHERE is_active = TRUE;" 2>/dev/null || echo "0")
+
+echo "    smc_simple_global_config (active): \${GLOBAL_CONFIG_COUNT}"
+echo "    smc_simple_pair_overrides: \${PAIR_OVERRIDE_COUNT}"
+echo "    scanner_global_config (active): \${SCANNER_CONFIG_COUNT}"
+
+if [[ "\${GLOBAL_CONFIG_COUNT}" -lt 1 ]] || [[ "\${PAIR_OVERRIDE_COUNT}" -lt 1 ]]; then
+    echo ""
+    echo "  *** WARNING: strategy_config import may have failed! ***"
+    echo "  Expected at least 1 active global config and pair overrides."
+    echo "  Please verify the configuration on the Azure VM."
+else
+    echo "  strategy_config import verified successfully"
+fi
+
 echo "  Creating backtest functions..."
 docker exec postgres psql -U postgres -d forex -c "
 CREATE OR REPLACE FUNCTION public.calculate_backtest_performance(p_execution_id integer, p_epic character varying DEFAULT NULL::character varying)
@@ -427,6 +446,31 @@ echo "  ig_candles row count: \${CANDLE_COUNT}"
 BACKTEST_CANDLE_COUNT=\$(docker exec postgres psql -U postgres -d forex -t -c "SELECT COUNT(*) FROM ig_candles_backtest;" 2>/dev/null || echo "0")
 echo "  ig_candles_backtest row count: \${BACKTEST_CANDLE_COUNT}"
 
+# Final strategy_config verification with actual values
+echo ""
+echo "  === FINAL IMPORT VERIFICATION ==="
+FINAL_GLOBAL=\$(docker exec postgres psql -U postgres -d strategy_config -t -c "SELECT COUNT(*) FROM smc_simple_global_config WHERE is_active = TRUE;" 2>/dev/null || echo "ERROR")
+FINAL_PAIRS=\$(docker exec postgres psql -U postgres -d strategy_config -t -c "SELECT COUNT(*) FROM smc_simple_pair_overrides;" 2>/dev/null || echo "ERROR")
+FINAL_SCANNER=\$(docker exec postgres psql -U postgres -d strategy_config -t -c "SELECT COUNT(*) FROM scanner_global_config WHERE is_active = TRUE;" 2>/dev/null || echo "ERROR")
+
+echo "  ig_candles:              \${CANDLE_COUNT} rows"
+echo "  ig_candles_backtest:     \${BACKTEST_CANDLE_COUNT} rows"
+echo "  smc_simple_global_config: \${FINAL_GLOBAL} active config(s)"
+echo "  smc_simple_pair_overrides: \${FINAL_PAIRS} pair(s)"
+echo "  scanner_global_config:   \${FINAL_SCANNER} active config(s)"
+
+# Show per-pair settings as final confirmation
+echo ""
+echo "  Per-pair SL/TP settings imported:"
+docker exec postgres psql -U postgres -d strategy_config -c "
+SELECT epic,
+       COALESCE(fixed_stop_loss_pips::text, 'default') as sl_pips,
+       COALESCE(fixed_take_profit_pips::text, 'default') as tp_pips,
+       COALESCE(min_confidence::text, 'default') as min_conf
+FROM smc_simple_pair_overrides
+ORDER BY epic;" 2>/dev/null || echo "  Could not query pair overrides"
+
+echo ""
 echo "  Cleanup sync files..."
 rm -f /data/sync/*.csv /data/sync/*.sql /data/sync/*.gz
 REMOTE_SCRIPT

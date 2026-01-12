@@ -28,7 +28,10 @@ def render_backtest_results_tab():
         st.header("Backtest Results")
     with header_col2:
         if st.button("Refresh", key="backtest_refresh", help="Refresh backtest data"):
-            st.cache_data.clear()
+            # Clear only backtest-related cache (not all cache)
+            service.fetch_backtest_executions.clear()
+            service.fetch_backtest_signals.clear()
+            service.get_filter_options.clear()
             st.rerun()
 
     st.markdown("View backtest execution history with performance metrics and charts")
@@ -36,9 +39,10 @@ def render_backtest_results_tab():
     # Get filter options
     filter_options = service.get_filter_options()
     strategies = filter_options.get('strategies', ['All'])
+    epics = filter_options.get('epics', ['All'])
 
     # Filters row
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         days_filter = st.selectbox(
             "Time Period",
@@ -52,9 +56,19 @@ def render_backtest_results_tab():
             strategies,
             key="backtest_strategy"
         )
+    with col3:
+        epic_filter = st.selectbox(
+            "Epic/Pair",
+            epics,
+            key="backtest_epic"
+        )
 
     # Fetch executions
     df = service.fetch_backtest_executions(days_filter, strategy_filter)
+
+    # Apply epic filter client-side (epics_tested is an array)
+    if epic_filter != "All" and not df.empty:
+        df = df[df['epics_tested'].apply(lambda x: epic_filter in x if isinstance(x, list) else False)]
 
     if df.empty:
         st.info("No backtest executions found for the selected filters.")
@@ -82,8 +96,32 @@ def render_backtest_results_tab():
 
     st.markdown("---")
 
-    # Display backtests with expandable details
-    for idx, row in df.iterrows():
+    # Pagination settings
+    ITEMS_PER_PAGE = 25
+    total_pages = (len(df) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+
+    # Page selector
+    page_col1, page_col2, page_col3 = st.columns([1, 2, 1])
+    with page_col2:
+        if total_pages > 1:
+            current_page = st.selectbox(
+                f"Page (showing {ITEMS_PER_PAGE} per page)",
+                range(1, total_pages + 1),
+                key="backtest_page",
+                format_func=lambda x: f"Page {x} of {total_pages}"
+            )
+        else:
+            current_page = 1
+
+    # Calculate slice for current page
+    start_idx = (current_page - 1) * ITEMS_PER_PAGE
+    end_idx = min(start_idx + ITEMS_PER_PAGE, len(df))
+
+    st.caption(f"Showing backtests {start_idx + 1}-{end_idx} of {len(df)}")
+
+    # Display only current page of backtests
+    page_df = df.iloc[start_idx:end_idx]
+    for idx, row in page_df.iterrows():
         _render_backtest_row(row, service)
 
 
@@ -179,31 +217,35 @@ def _render_backtest_row(row: pd.Series, service: BacktestService):
             st.write(f"- **Win Rate:** {win_rate:.1f}%")
             st.write(f"- **Total Pips:** {pips_color}{total_pips:.1f}")
 
-            # Profit factor
+            # Profit factor (pre-computed in main query to avoid N+1)
             if win_count > 0 and loss_count > 0:
-                # Fetch signals to calculate proper profit factor
-                signals_df = service.fetch_backtest_signals(execution_id)
-                if not signals_df.empty:
-                    metrics = service.calculate_performance_metrics(signals_df)
-                    pf = metrics.get('profit_factor', 0)
-                    if pf == float('inf'):
-                        st.write("- **Profit Factor:** ∞")
-                    else:
-                        st.write(f"- **Profit Factor:** {pf:.2f}")
-                    st.write(f"- **Expectancy:** {metrics.get('expectancy', 0):.2f} pips/trade")
+                win_pips = row.get('win_pips', 0)
+                loss_pips = row.get('loss_pips', 0)
+                if loss_pips > 0:
+                    pf = win_pips / loss_pips
+                    st.write(f"- **Profit Factor:** {pf:.2f}")
+                elif win_pips > 0:
+                    st.write("- **Profit Factor:** ∞")
+
+                # Expectancy
+                if signal_count > 0:
+                    expectancy = total_pips / signal_count
+                    st.write(f"- **Expectancy:** {expectancy:.2f} pips/trade")
 
         with chart_col:
             st.markdown("**Chart:**")
 
             chart_url = row.get('chart_url')
             if chart_url and pd.notna(chart_url):
-                try:
-                    # Fetch image server-side (minio:9000 not accessible from browser)
-                    with urllib.request.urlopen(chart_url, timeout=10) as response:
-                        image_bytes = response.read()
-                    st.image(image_bytes, caption="Backtest Chart", width="stretch")
-                except Exception as e:
-                    st.warning(f"Chart unavailable: {e}")
+                # Lazy load chart only when user clicks
+                if st.button("Load Chart", key=f"load_chart_{execution_id}"):
+                    try:
+                        # Fetch image server-side with shorter timeout
+                        with urllib.request.urlopen(chart_url, timeout=5) as response:
+                            image_bytes = response.read()
+                        st.image(image_bytes, caption="Backtest Chart", width="stretch")
+                    except Exception as e:
+                        st.warning(f"Chart unavailable: {e}")
             else:
                 st.info("No chart available for this backtest")
 
