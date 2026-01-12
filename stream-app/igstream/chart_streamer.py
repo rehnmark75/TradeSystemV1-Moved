@@ -404,10 +404,10 @@ class StreamManager:
     
     def setup_subscriptions(self):
         """Set up chart subscriptions for multiple timeframes"""
-        # UPDATED: 5-minute + 1-minute for future migration - 60m synthesized from 5m data
-        # 1-minute data will allow us to eventually synthesize ALL timeframes from 1m base
+        # v2.17.0: Stream only 1-minute candles - all higher timeframes (5m, 15m, 60m, 4h)
+        # are now synthesized from 1m base data. This reduces IG API load by 50%.
         # CORRECTED: IG uses "1MINUTE" format, not "MINUTE"
-        timeframes = {5: "5MINUTE", 1: "1MINUTE"}
+        timeframes = {1: "1MINUTE"}
         
         for tf_minutes, tf_str in timeframes.items():
             try:

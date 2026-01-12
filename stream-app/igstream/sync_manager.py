@@ -19,12 +19,12 @@ AUTH_REFRESH_INTERVAL = 55 * 60      # IG tokens expire hourly
 RECONNECT_BACKOFF = 60               # Minimum wait before reconnecting
 
 # ✅ Active streaming timeframes (matches chart_streamer.py configuration)
-ACTIVE_TIMEFRAMES = [1, 5]  # 1m and 5m timeframes currently being streamed
+# v2.17.0: Only 1m candles are streamed - all higher TFs synthesized from 1m base
+ACTIVE_TIMEFRAMES = [1]  # Only 1m candles streamed
 
 # Staleness thresholds per timeframe (in seconds) - only for active timeframes
 STALENESS_THRESHOLDS = {
     1: 120,      # 1m candles: stale after 2 minutes
-    5: 300,      # 5m candles: stale after 5 minutes
 }
 
 # ✅ Define the epics you want to stream (imported from config)
@@ -109,12 +109,12 @@ async def check_all_epics_data_freshness() -> dict:
         for timeframe in ACTIVE_TIMEFRAMES:
             timeframe_status[f"{timeframe}m"] = await check_data_freshness(epic, timeframe)
         
-        # Consider overall healthy if primary timeframe (5m) is fresh
-        primary_tf_fresh = timeframe_status.get("5m", False)
-        
+        # Consider overall healthy if primary timeframe (1m) is fresh
+        primary_tf_fresh = timeframe_status.get("1m", False)
+
         freshness_status[epic] = {
             **timeframe_status,
-            "overall": primary_tf_fresh  # 5m is the primary indicator of active streaming
+            "overall": primary_tf_fresh  # 1m is the primary indicator of active streaming
         }
     
     return freshness_status
@@ -184,7 +184,7 @@ async def watchdog():
                     # Log gaps by epic
                     for epic, epic_gaps in gap_stats["gaps_by_epic"].items():
                         if epic_gaps["missing_candles"] > 0:
-                            logger.warning(f"   {epic}: {epic_gaps['5m']} gaps in 5m "
+                            logger.warning(f"   {epic}: {epic_gaps.get('1m', 0)} gaps in 1m "
                                          f"({epic_gaps['missing_candles']} candles)")
                 else:
                     logger.info("✅ No gaps detected in candle data")

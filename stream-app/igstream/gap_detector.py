@@ -392,14 +392,14 @@ class GapDetector:
         }
         
         try:
-            all_gaps = self.detect_all_gaps(epics, [5])
-            
+            all_gaps = self.detect_all_gaps(epics, [1])  # v2.17.0: Only check 1m gaps
+
             for key, gaps in all_gaps.items():
                 epic = key.rsplit("_", 1)[0]
                 timeframe = int(key.rsplit("_", 1)[1].replace("m", ""))
-                
+
                 if epic not in stats["gaps_by_epic"]:
-                    stats["gaps_by_epic"][epic] = {"5m": 0, "missing_candles": 0}
+                    stats["gaps_by_epic"][epic] = {"1m": 0, "missing_candles": 0}
                 
                 stats["gaps_by_epic"][epic][f"{timeframe}m"] = len(gaps)
                 stats["gaps_by_timeframe"][timeframe] += len(gaps)

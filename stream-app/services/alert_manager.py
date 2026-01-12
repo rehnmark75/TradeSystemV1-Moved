@@ -191,10 +191,8 @@ class AlertManager:
                         details = []
                         if not stream_info.get("task_running", True):
                             details.append("not running")
-                        if not stream_info.get("data_fresh_5m", True):
-                            details.append("stale 5m data")
-                        if not stream_info.get("data_fresh_60m", True):
-                            details.append("stale 60m data")
+                        if not stream_info.get("data_fresh_1m", True):
+                            details.append("stale 1m data")
                         
                         if details:
                             message += f" ({', '.join(details)})"
