@@ -500,3 +500,480 @@ class DeepAnalysisOrchestrator:
 
         row = await self.db.fetchrow(query)
         return dict(row) if row else {}
+
+    # =========================================================================
+    # WATCHLIST ANALYSIS METHODS
+    # =========================================================================
+
+    async def analyze_watchlist_ticker(
+        self,
+        ticker: str,
+        watchlist_id: int,
+        tier: int,
+        save_to_db: bool = True
+    ) -> Optional[DeepAnalysisResult]:
+        """
+        Run deep analysis for a watchlist ticker (not tied to a scanner signal).
+
+        Args:
+            ticker: Stock ticker
+            watchlist_id: Watchlist row ID
+            tier: Watchlist tier (1-5)
+            save_to_db: Whether to save results to watchlist table
+
+        Returns:
+            DeepAnalysisResult or None if analysis fails
+        """
+        start_time = time.time()
+        logger.info(f"Starting watchlist deep analysis for {ticker} (tier={tier})")
+
+        try:
+            # Get sector
+            sector = await self._get_ticker_sector(ticker)
+
+            # Create synthetic signal dict for analyzers (using BUY as default direction)
+            synthetic_signal = {
+                'ticker': ticker,
+                'signal_type': 'BUY',  # Default direction for watchlist
+                'scanner_name': 'watchlist',
+            }
+
+            # Run all analyzers in parallel
+            technical_result, fundamental_result, contextual_result = await asyncio.gather(
+                self.technical_analyzer.analyze(ticker, synthetic_signal),
+                self.fundamental_analyzer.analyze(ticker, synthetic_signal),
+                self.contextual_analyzer.analyze(ticker, synthetic_signal, sector),
+            )
+
+            # Create result (signal_id=0 since this is watchlist-based)
+            result = DeepAnalysisResult(
+                signal_id=0,  # No signal ID for watchlist analysis
+                ticker=ticker,
+                analysis_timestamp=datetime.now(),
+                technical=technical_result,
+                fundamental=fundamental_result,
+                contextual=contextual_result,
+                components_analyzed=['mtf', 'volume', 'smc', 'quality', 'catalyst', 'news', 'regime', 'sector'],
+            )
+
+            # Calculate composite DAQ score
+            result.calculate_daq_score()
+
+            # Record duration
+            result.analysis_duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                f"Watchlist deep analysis complete for {ticker}: "
+                f"DAQ={result.daq_score} ({result.daq_grade.value}) "
+                f"in {result.analysis_duration_ms}ms"
+            )
+
+            # Save to watchlist table
+            if save_to_db:
+                await self._save_watchlist_daq(watchlist_id, result)
+
+            # Update stats
+            self._update_stats(result)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Watchlist deep analysis failed for {ticker}: {e}")
+            self.stats['failed_analyses'] += 1
+            return None
+
+    async def analyze_watchlist_batch(
+        self,
+        tickers: List[Dict[str, Any]],
+        save_to_db: bool = True,
+        max_concurrent: int = 5
+    ) -> List[DeepAnalysisResult]:
+        """
+        Run deep analysis for multiple watchlist tickers.
+
+        Args:
+            tickers: List of dicts with {id, ticker, calculation_date, tier}
+            save_to_db: Whether to save results
+            max_concurrent: Max concurrent analyses
+
+        Returns:
+            List of DeepAnalysisResult objects
+        """
+        logger.info(f"Starting batch watchlist analysis for {len(tickers)} tickers")
+
+        results = []
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def analyze_with_limit(t: Dict) -> Optional[DeepAnalysisResult]:
+            async with semaphore:
+                return await self.analyze_watchlist_ticker(
+                    ticker=t['ticker'],
+                    watchlist_id=t['id'],
+                    tier=t['tier'],
+                    save_to_db=save_to_db
+                )
+
+        tasks = [analyze_with_limit(t) for t in tickers]
+        all_results = await asyncio.gather(*tasks)
+
+        results = [r for r in all_results if r is not None]
+
+        logger.info(f"Batch watchlist analysis complete: {len(results)}/{len(tickers)} successful")
+        return results
+
+    async def auto_analyze_watchlist(
+        self,
+        max_tier: int = 2,
+        calculation_date: Optional[str] = None,
+        max_tickers: int = 50,
+        skip_analyzed: bool = True
+    ) -> List[DeepAnalysisResult]:
+        """
+        Automatically analyze top-tier watchlist stocks.
+
+        Args:
+            max_tier: Maximum tier to analyze (1 = best, default includes 1 and 2)
+            calculation_date: Specific date to analyze (default: latest)
+            max_tickers: Maximum tickers to analyze
+            skip_analyzed: Skip tickers that already have DAQ scores
+
+        Returns:
+            List of DeepAnalysisResult objects
+        """
+        if not self.config.enabled:
+            logger.info("Deep analysis is disabled")
+            return []
+
+        # Build query for top-tier watchlist stocks
+        date_filter = f"calculation_date = '{calculation_date}'" if calculation_date else """
+            calculation_date = (SELECT MAX(calculation_date) FROM stock_watchlist)
+        """
+
+        analyzed_filter = "AND daq_score IS NULL" if skip_analyzed else ""
+
+        query = f"""
+            SELECT id, ticker, calculation_date, tier
+            FROM stock_watchlist
+            WHERE {date_filter}
+              AND tier <= $1
+              {analyzed_filter}
+            ORDER BY tier, rank_in_tier
+            LIMIT $2
+        """
+
+        rows = await self.db.fetch(query, max_tier, max_tickers)
+
+        if not rows:
+            logger.info("No unanalyzed watchlist tickers found")
+            return []
+
+        tickers = [dict(row) for row in rows]
+        logger.info(f"Found {len(tickers)} tier 1-{max_tier} watchlist tickers to analyze")
+
+        return await self.analyze_watchlist_batch(
+            tickers,
+            save_to_db=True,
+            max_concurrent=self.config.max_concurrent_analyses
+        )
+
+    async def _save_watchlist_daq(self, watchlist_id: int, result: DeepAnalysisResult) -> bool:
+        """Save DAQ results to watchlist table"""
+        try:
+            query = """
+                UPDATE stock_watchlist SET
+                    daq_score = $1,
+                    daq_grade = $2,
+                    daq_mtf_score = $3,
+                    daq_volume_score = $4,
+                    daq_smc_score = $5,
+                    daq_quality_score = $6,
+                    daq_catalyst_score = $7,
+                    daq_news_score = $8,
+                    daq_regime_score = $9,
+                    daq_sector_score = $10,
+                    daq_earnings_risk = $11,
+                    daq_high_short_interest = $12,
+                    daq_sector_underperforming = $13,
+                    daq_analyzed_at = NOW()
+                WHERE id = $14
+                RETURNING id
+            """
+
+            result_id = await self.db.fetchval(
+                query,
+                result.daq_score,
+                result.daq_grade.value,
+                result.technical.mtf.score,
+                result.technical.volume.score,
+                result.technical.smc.score,
+                result.fundamental.quality.score,
+                result.fundamental.catalyst.score,
+                result.contextual.news.score,
+                result.contextual.regime.score,
+                result.contextual.sector.score,
+                result.earnings_within_7d,
+                result.high_short_interest,
+                result.sector_underperforming,
+                watchlist_id,
+            )
+
+            if result_id:
+                logger.debug(f"Saved DAQ to watchlist {watchlist_id}")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to save watchlist DAQ: {e}")
+            return False
+
+    # =========================================================================
+    # TECHNICAL WATCHLIST ANALYSIS (stock_watchlist_results table)
+    # =========================================================================
+
+    async def analyze_technical_watchlist_ticker(
+        self,
+        ticker: str,
+        result_id: int,
+        watchlist_name: str,
+        save_to_db: bool = True,
+    ) -> Optional[DeepAnalysisResult]:
+        """
+        Analyze a single ticker from technical watchlist (stock_watchlist_results).
+
+        Args:
+            ticker: Stock ticker symbol
+            result_id: The id from stock_watchlist_results table
+            watchlist_name: Type of watchlist (ema_50_crossover, macd_bullish_cross, etc.)
+            save_to_db: Whether to save results to database
+
+        Returns:
+            DeepAnalysisResult or None if analysis fails
+        """
+        start_time = time.time()
+        logger.info(f"Starting technical watchlist deep analysis for {ticker} (type={watchlist_name})")
+
+        try:
+            # Get sector
+            sector = await self._get_ticker_sector(ticker)
+
+            # Create synthetic signal dict for analyzers (using BUY as default direction)
+            synthetic_signal = {
+                'ticker': ticker,
+                'signal_type': 'BUY',  # Default direction for watchlist
+                'scanner_name': watchlist_name,
+            }
+
+            # Run all analyzers in parallel
+            technical_result, fundamental_result, contextual_result = await asyncio.gather(
+                self.technical_analyzer.analyze(ticker, synthetic_signal),
+                self.fundamental_analyzer.analyze(ticker, synthetic_signal),
+                self.contextual_analyzer.analyze(ticker, synthetic_signal, sector),
+            )
+
+            # Create result (signal_id=0 since this is watchlist-based)
+            result = DeepAnalysisResult(
+                signal_id=0,  # No signal ID for technical watchlist analysis
+                ticker=ticker,
+                analysis_timestamp=datetime.now(),
+                technical=technical_result,
+                fundamental=fundamental_result,
+                contextual=contextual_result,
+                components_analyzed=['mtf', 'volume', 'smc', 'quality', 'catalyst', 'news', 'regime', 'sector'],
+            )
+
+            # Calculate composite DAQ score
+            result.calculate_daq_score()
+
+            # Record duration
+            result.analysis_duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                f"Technical watchlist deep analysis complete for {ticker}: "
+                f"DAQ={result.daq_score} ({result.daq_grade.value}) "
+                f"in {result.analysis_duration_ms}ms"
+            )
+
+            # Save to technical watchlist table
+            if save_to_db:
+                await self._save_technical_watchlist_daq(result_id, result)
+
+            # Update stats
+            self._update_stats(result)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Technical watchlist deep analysis failed for {ticker}: {e}")
+            self.stats['failed_analyses'] += 1
+            return None
+
+    async def analyze_technical_watchlist_batch(
+        self,
+        tickers: List[Dict[str, Any]],
+        save_to_db: bool = True,
+        max_concurrent: int = 5,
+    ) -> List[DeepAnalysisResult]:
+        """
+        Analyze multiple tickers from technical watchlist concurrently.
+
+        Args:
+            tickers: List of dicts with keys: ticker, id, watchlist_name
+            save_to_db: Whether to save results to database
+            max_concurrent: Maximum concurrent analyses
+
+        Returns:
+            List of successful DeepAnalysisResult objects
+        """
+        results = []
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def analyze_with_semaphore(item: Dict[str, Any]) -> Optional[DeepAnalysisResult]:
+            async with semaphore:
+                return await self.analyze_technical_watchlist_ticker(
+                    ticker=item["ticker"],
+                    result_id=item["id"],
+                    watchlist_name=item["watchlist_name"],
+                    save_to_db=save_to_db,
+                )
+
+        tasks = [analyze_with_semaphore(item) for item in tickers]
+        completed = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for i, result in enumerate(completed):
+            if isinstance(result, Exception):
+                logger.error(f"Analysis failed for {tickers[i]['ticker']}: {result}")
+            elif result:
+                results.append(result)
+
+        return results
+
+    async def auto_analyze_technical_watchlist(
+        self,
+        watchlist_name: Optional[str] = None,
+        scan_date: Optional[str] = None,
+        max_tickers: int = 50,
+        skip_analyzed: bool = True,
+    ) -> List[DeepAnalysisResult]:
+        """
+        Auto-analyze technical watchlist stocks that don't have DAQ scores.
+
+        Args:
+            watchlist_name: Filter by watchlist type (None = all types)
+            scan_date: Filter by scan date (None = most recent)
+            max_tickers: Maximum tickers to analyze
+            skip_analyzed: Skip tickers that already have DAQ scores
+
+        Returns:
+            List of DeepAnalysisResult objects
+        """
+        # Build query to get technical watchlist stocks
+        conditions = []
+        params = []
+        param_idx = 1
+
+        if skip_analyzed:
+            conditions.append("daq_score IS NULL")
+
+        if watchlist_name:
+            conditions.append(f"watchlist_name = ${param_idx}")
+            params.append(watchlist_name)
+            param_idx += 1
+
+        if scan_date:
+            conditions.append(f"DATE(scan_date) = ${param_idx}")
+            params.append(scan_date)
+            param_idx += 1
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        query = f"""
+            SELECT id, ticker, watchlist_name, scan_date
+            FROM stock_watchlist_results
+            WHERE {where_clause}
+            ORDER BY scan_date DESC, volume DESC NULLS LAST
+            LIMIT {max_tickers}
+        """
+
+        rows = await self.db.fetch(query, *params)
+
+        if not rows:
+            logger.info("No technical watchlist stocks to analyze")
+            return []
+
+        # Prepare ticker list for batch analysis
+        tickers = [
+            {
+                "id": row["id"],
+                "ticker": row["ticker"],
+                "watchlist_name": row["watchlist_name"],
+            }
+            for row in rows
+        ]
+
+        logger.info(f"Auto-analyzing {len(tickers)} technical watchlist stocks")
+
+        # Run batch analysis
+        return await self.analyze_technical_watchlist_batch(tickers, save_to_db=True)
+
+    async def _save_technical_watchlist_daq(
+        self, result_id: int, result: DeepAnalysisResult
+    ) -> bool:
+        """
+        Save DAQ scores to stock_watchlist_results table.
+
+        Args:
+            result_id: The id from stock_watchlist_results
+            result: DeepAnalysisResult with scores
+
+        Returns:
+            True if saved successfully
+        """
+        try:
+            query = """
+                UPDATE stock_watchlist_results
+                SET daq_score = $1,
+                    daq_grade = $2,
+                    daq_mtf_score = $3,
+                    daq_volume_score = $4,
+                    daq_smc_score = $5,
+                    daq_quality_score = $6,
+                    daq_catalyst_score = $7,
+                    daq_news_score = $8,
+                    daq_regime_score = $9,
+                    daq_sector_score = $10,
+                    daq_earnings_risk = $11,
+                    daq_high_short_interest = $12,
+                    daq_sector_underperforming = $13,
+                    daq_analyzed_at = NOW()
+                WHERE id = $14
+                RETURNING id
+            """
+
+            updated_id = await self.db.fetchval(
+                query,
+                result.daq_score,
+                result.daq_grade.value,
+                result.technical.mtf.score,
+                result.technical.volume.score,
+                result.technical.smc.score,
+                result.fundamental.quality.score,
+                result.fundamental.catalyst.score,
+                result.contextual.news.score,
+                result.contextual.regime.score,
+                result.contextual.sector.score,
+                result.earnings_within_7d,
+                result.high_short_interest,
+                result.sector_underperforming,
+                result_id,
+            )
+
+            if updated_id:
+                logger.debug(f"Saved DAQ to technical watchlist result {result_id}")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to save technical watchlist DAQ: {e}")
+            return False

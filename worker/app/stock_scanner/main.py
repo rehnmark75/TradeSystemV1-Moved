@@ -1059,6 +1059,413 @@ class StockScannerCLI:
                 print(f"   ! {e}")
 
     # =========================================================================
+    # WATCHLIST DEEP ANALYSIS COMMANDS
+    # =========================================================================
+
+    async def cmd_watchlist_deep_analyze(
+        self,
+        calculation_date: Optional[str] = None,
+        max_tier: int = 2,
+        ticker: Optional[str] = None,
+        force: bool = False
+    ):
+        """
+        Run deep analysis on watchlist stocks.
+
+        Args:
+            calculation_date: Specific date to analyze (YYYY-MM-DD), defaults to latest
+            max_tier: Maximum tier to analyze (1-5, default 2)
+            ticker: Specific ticker to analyze (optional)
+            force: Re-analyze even if already analyzed
+        """
+        print("\n[WATCHLIST DEEP ANALYSIS] Starting...")
+        print("=" * 60)
+
+        try:
+            from .services.deep_analysis import DeepAnalysisOrchestrator
+
+            orchestrator = DeepAnalysisOrchestrator(self.db)
+
+            if ticker:
+                # Single ticker analysis
+                print(f"[INFO] Analyzing single ticker: {ticker}")
+
+                # Find watchlist entry
+                date_filter = f"calculation_date = '{calculation_date}'" if calculation_date else """
+                    calculation_date = (SELECT MAX(calculation_date) FROM stock_watchlist)
+                """
+
+                query = f"""
+                    SELECT id, ticker, calculation_date, tier
+                    FROM stock_watchlist
+                    WHERE {date_filter}
+                      AND ticker = $1
+                    LIMIT 1
+                """
+                row = await self.db.fetchrow(query, ticker)
+
+                if not row:
+                    print(f"[ERROR] Ticker {ticker} not found in watchlist")
+                    return False
+
+                result = await orchestrator.analyze_watchlist_ticker(
+                    ticker=row['ticker'],
+                    watchlist_id=row['id'],
+                    tier=row['tier'],
+                    save_to_db=True
+                )
+
+                if result:
+                    self._print_deep_analysis_result(result)
+                    print(f"\n[SUCCESS] DAQ saved to watchlist")
+                    return True
+                else:
+                    print(f"[ERROR] Analysis failed for {ticker}")
+                    return False
+
+            else:
+                # Batch analysis for top tiers
+                results = await orchestrator.auto_analyze_watchlist(
+                    max_tier=max_tier,
+                    calculation_date=calculation_date,
+                    max_tickers=100,
+                    skip_analyzed=not force
+                )
+
+                if not results:
+                    print("[INFO] No watchlist tickers to analyze")
+                    return True
+
+                # Summary
+                print(f"\n[RESULTS] Analyzed {len(results)} watchlist tickers")
+                print("-" * 60)
+
+                # Group by grade
+                by_grade = {'A+': [], 'A': [], 'B': [], 'C': [], 'D': []}
+                for r in results:
+                    by_grade[r.daq_grade.value].append(r)
+
+                for grade in ['A+', 'A', 'B', 'C', 'D']:
+                    if by_grade[grade]:
+                        print(f"\n[GRADE {grade}] ({len(by_grade[grade])} tickers)")
+                        for r in by_grade[grade][:5]:  # Show top 5 per grade
+                            print(f"   {r.ticker}: DAQ={r.daq_score}")
+
+                avg_daq = sum(r.daq_score for r in results) / len(results)
+                print(f"\n[AVERAGE DAQ] {avg_daq:.1f}")
+
+                return True
+
+        except ImportError as e:
+            print(f"[ERROR] Deep analysis module not available: {e}")
+            return False
+        except Exception as e:
+            print(f"[ERROR] Watchlist deep analysis failed: {e}")
+            logger.exception("Watchlist deep analysis error")
+            return False
+
+    async def cmd_watchlist_daq_list(
+        self,
+        calculation_date: Optional[str] = None,
+        min_daq: int = 0,
+        limit: int = 50
+    ):
+        """
+        List watchlist stocks with their DAQ scores.
+
+        Args:
+            calculation_date: Specific date (YYYY-MM-DD), defaults to latest
+            min_daq: Minimum DAQ score filter
+            limit: Maximum results to show
+        """
+        print("\n[WATCHLIST DAQ] DAQ Scores")
+        print("=" * 60)
+
+        try:
+            date_filter = f"calculation_date = '{calculation_date}'" if calculation_date else """
+                calculation_date = (SELECT MAX(calculation_date) FROM stock_watchlist)
+            """
+
+            query = f"""
+                SELECT
+                    ticker, tier, rank_in_tier, score,
+                    daq_score, daq_grade,
+                    daq_mtf_score, daq_volume_score, daq_smc_score,
+                    daq_quality_score, daq_catalyst_score,
+                    daq_news_score, daq_regime_score, daq_sector_score,
+                    daq_earnings_risk, daq_analyzed_at
+                FROM stock_watchlist
+                WHERE {date_filter}
+                  AND daq_score IS NOT NULL
+                  AND daq_score >= $1
+                ORDER BY daq_score DESC, tier, rank_in_tier
+                LIMIT $2
+            """
+
+            rows = await self.db.fetch(query, min_daq, limit)
+
+            if not rows:
+                print("[INFO] No watchlist tickers with DAQ scores found")
+                return True
+
+            # Header
+            print(f"{'Ticker':<8} {'Tier':>4} {'Score':>6} {'DAQ':>4} {'Grade':>5} "
+                  f"{'MTF':>4} {'Vol':>4} {'SMC':>4} {'Qual':>4} {'Cat':>4} "
+                  f"{'News':>4} {'Reg':>4} {'Sec':>4}")
+            print("-" * 90)
+
+            for row in rows:
+                earnings_flag = "!" if row.get('daq_earnings_risk') else " "
+                print(
+                    f"{row['ticker']:<8} "
+                    f"{row['tier']:>4} "
+                    f"{row['score']:>6.1f} "
+                    f"{row['daq_score']:>4} "
+                    f"{row['daq_grade'] or '-':>5} "
+                    f"{row.get('daq_mtf_score') or '-':>4} "
+                    f"{row.get('daq_volume_score') or '-':>4} "
+                    f"{row.get('daq_smc_score') or '-':>4} "
+                    f"{row.get('daq_quality_score') or '-':>4} "
+                    f"{row.get('daq_catalyst_score') or '-':>4} "
+                    f"{row.get('daq_news_score') or '-':>4} "
+                    f"{row.get('daq_regime_score') or '-':>4} "
+                    f"{row.get('daq_sector_score') or '-':>4} "
+                    f"{earnings_flag}"
+                )
+
+            print(f"\n[TOTAL] {len(rows)} tickers with DAQ >= {min_daq}")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to list watchlist DAQ: {e}")
+            logger.exception("Watchlist DAQ list error")
+            return False
+
+    # =========================================================================
+    # TECHNICAL WATCHLIST DAQ COMMANDS (stock_watchlist_results)
+    # =========================================================================
+
+    async def cmd_technical_watchlist_daq(
+        self,
+        ticker: Optional[str] = None,
+        watchlist_type: Optional[str] = None,
+        scan_date: Optional[str] = None,
+        max_tickers: int = 50,
+        force: bool = False
+    ):
+        """
+        Run deep analysis on technical watchlist stocks.
+
+        Args:
+            ticker: Specific ticker to analyze (optional)
+            watchlist_type: Filter by watchlist type (ema_50_crossover, etc.)
+            scan_date: Scan date filter (YYYY-MM-DD), defaults to latest
+            max_tickers: Maximum tickers to analyze
+            force: Re-analyze even if already analyzed
+        """
+        print("\n[TECHNICAL WATCHLIST DAQ] Starting...")
+        print("=" * 60)
+
+        try:
+            from .services.deep_analysis import DeepAnalysisOrchestrator
+
+            orchestrator = DeepAnalysisOrchestrator(self.db)
+
+            if ticker:
+                # Single ticker analysis - find in technical watchlist
+                print(f"[INFO] Analyzing single ticker: {ticker}")
+
+                conditions = ["ticker = $1"]
+                params = [ticker]
+                param_idx = 2
+
+                if watchlist_type:
+                    conditions.append(f"watchlist_name = ${param_idx}")
+                    params.append(watchlist_type)
+                    param_idx += 1
+
+                if scan_date:
+                    conditions.append(f"DATE(scan_date) = ${param_idx}")
+                    params.append(scan_date)
+                else:
+                    # Latest scan
+                    conditions.append("scan_date = (SELECT MAX(scan_date) FROM stock_watchlist_results)")
+
+                where_clause = " AND ".join(conditions)
+
+                query = f"""
+                    SELECT id, ticker, watchlist_name, scan_date
+                    FROM stock_watchlist_results
+                    WHERE {where_clause}
+                    ORDER BY scan_date DESC
+                    LIMIT 1
+                """
+                row = await self.db.fetchrow(query, *params)
+
+                if not row:
+                    print(f"[ERROR] Ticker {ticker} not found in technical watchlist")
+                    return False
+
+                result = await orchestrator.analyze_technical_watchlist_ticker(
+                    ticker=row['ticker'],
+                    result_id=row['id'],
+                    watchlist_name=row['watchlist_name'],
+                    save_to_db=True
+                )
+
+                if result:
+                    self._print_deep_analysis_result(result)
+                    print(f"\n[SUCCESS] DAQ saved to technical watchlist")
+                    return True
+                else:
+                    print(f"[ERROR] Analysis failed for {ticker}")
+                    return False
+
+            else:
+                # Batch analysis
+                results = await orchestrator.auto_analyze_technical_watchlist(
+                    watchlist_name=watchlist_type,
+                    scan_date=scan_date,
+                    max_tickers=max_tickers,
+                    skip_analyzed=not force
+                )
+
+                if not results:
+                    print("[INFO] No technical watchlist tickers to analyze")
+                    return True
+
+                # Summary
+                print(f"\n[RESULTS] Analyzed {len(results)} technical watchlist tickers")
+                print("-" * 60)
+
+                # Group by grade
+                by_grade = {'A+': [], 'A': [], 'B': [], 'C': [], 'D': []}
+                for r in results:
+                    by_grade[r.daq_grade.value].append(r)
+
+                for grade in ['A+', 'A', 'B', 'C', 'D']:
+                    if by_grade[grade]:
+                        print(f"\n[GRADE {grade}] ({len(by_grade[grade])} tickers)")
+                        for r in by_grade[grade][:5]:
+                            print(f"   {r.ticker}: DAQ={r.daq_score}")
+
+                avg_daq = sum(r.daq_score for r in results) / len(results)
+                print(f"\n[AVERAGE DAQ] {avg_daq:.1f}")
+
+                return True
+
+        except ImportError as e:
+            print(f"[ERROR] Deep analysis module not available: {e}")
+            return False
+        except Exception as e:
+            print(f"[ERROR] Technical watchlist DAQ failed: {e}")
+            logger.exception("Technical watchlist DAQ error")
+            return False
+
+    async def cmd_technical_watchlist_daq_list(
+        self,
+        watchlist_type: Optional[str] = None,
+        scan_date: Optional[str] = None,
+        min_daq: int = 0,
+        limit: int = 50
+    ):
+        """
+        List technical watchlist stocks with their DAQ scores.
+
+        Args:
+            watchlist_type: Filter by watchlist type
+            scan_date: Scan date filter (YYYY-MM-DD), defaults to latest
+            min_daq: Minimum DAQ score filter
+            limit: Maximum results to show
+        """
+        print("\n[TECHNICAL WATCHLIST DAQ] DAQ Scores")
+        print("=" * 60)
+
+        try:
+            conditions = ["daq_score IS NOT NULL", "daq_score >= $1"]
+            params = [min_daq]
+            param_idx = 2
+
+            if watchlist_type:
+                conditions.append(f"watchlist_name = ${param_idx}")
+                params.append(watchlist_type)
+                param_idx += 1
+
+            if scan_date:
+                conditions.append(f"DATE(scan_date) = ${param_idx}")
+                params.append(scan_date)
+            else:
+                # Latest scan for each watchlist type
+                conditions.append("scan_date = (SELECT MAX(scan_date) FROM stock_watchlist_results)")
+
+            where_clause = " AND ".join(conditions)
+
+            params.append(limit)
+            query = f"""
+                SELECT
+                    ticker, watchlist_name, price,
+                    daq_score, daq_grade,
+                    daq_mtf_score, daq_volume_score, daq_smc_score,
+                    daq_quality_score, daq_catalyst_score,
+                    daq_news_score, daq_regime_score, daq_sector_score,
+                    daq_earnings_risk, daq_analyzed_at
+                FROM stock_watchlist_results
+                WHERE {where_clause}
+                ORDER BY daq_score DESC
+                LIMIT ${param_idx}
+            """
+
+            rows = await self.db.fetch(query, *params)
+
+            if not rows:
+                print("[INFO] No technical watchlist tickers with DAQ scores found")
+                return True
+
+            # Compact watchlist type names
+            type_abbrev = {
+                'ema_50_crossover': 'EMA50',
+                'ema_20_crossover': 'EMA20',
+                'macd_bullish_cross': 'MACD',
+                'gap_up_continuation': 'GAP',
+                'rsi_oversold_bounce': 'RSI'
+            }
+
+            # Header
+            print(f"{'Ticker':<8} {'Type':<6} {'Price':>8} {'DAQ':>4} {'Grade':>5} "
+                  f"{'MTF':>4} {'Vol':>4} {'SMC':>4} {'Qual':>4} {'Cat':>4} "
+                  f"{'News':>4} {'Reg':>4} {'Sec':>4}")
+            print("-" * 95)
+
+            for row in rows:
+                wl_type = type_abbrev.get(row['watchlist_name'], row['watchlist_name'][:6])
+                earnings_flag = "!" if row.get('daq_earnings_risk') else " "
+                price = row.get('price') or 0
+                print(
+                    f"{row['ticker']:<8} "
+                    f"{wl_type:<6} "
+                    f"${price:>7.2f} "
+                    f"{row['daq_score']:>4} "
+                    f"{row['daq_grade'] or '-':>5} "
+                    f"{row.get('daq_mtf_score') or '-':>4} "
+                    f"{row.get('daq_volume_score') or '-':>4} "
+                    f"{row.get('daq_smc_score') or '-':>4} "
+                    f"{row.get('daq_quality_score') or '-':>4} "
+                    f"{row.get('daq_catalyst_score') or '-':>4} "
+                    f"{row.get('daq_news_score') or '-':>4} "
+                    f"{row.get('daq_regime_score') or '-':>4} "
+                    f"{row.get('daq_sector_score') or '-':>4} "
+                    f"{earnings_flag}"
+                )
+
+            print(f"\n[TOTAL] {len(rows)} tickers with DAQ >= {min_daq}")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to list technical watchlist DAQ: {e}")
+            logger.exception("Technical watchlist DAQ list error")
+            return False
+
+    # =========================================================================
     # BROKER TRADE STATISTICS COMMANDS
     # =========================================================================
 
@@ -1486,6 +1893,119 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # =========================================================================
+    # WATCHLIST DEEP ANALYSIS COMMANDS
+    # =========================================================================
+
+    # watchlist-deep-analyze
+    watchlist_deep_parser = subparsers.add_parser(
+        "watchlist-deep-analyze",
+        help="Run deep analysis on watchlist stocks (DAQ scoring)"
+    )
+    watchlist_deep_parser.add_argument(
+        "ticker",
+        nargs="?",
+        help="Specific ticker to analyze (optional - analyzes tier 1-2 if not provided)"
+    )
+    watchlist_deep_parser.add_argument(
+        "--date",
+        help="Watchlist calculation date (YYYY-MM-DD, default: latest)"
+    )
+    watchlist_deep_parser.add_argument(
+        "--max-tier",
+        type=int,
+        default=2,
+        choices=[1, 2, 3, 4, 5],
+        help="Maximum tier to analyze (default: 2)"
+    )
+    watchlist_deep_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-analyze even if already analyzed"
+    )
+
+    # watchlist-daq-list
+    watchlist_daq_list_parser = subparsers.add_parser(
+        "watchlist-daq-list",
+        help="List watchlist stocks with their DAQ scores"
+    )
+    watchlist_daq_list_parser.add_argument(
+        "--date",
+        help="Watchlist calculation date (YYYY-MM-DD, default: latest)"
+    )
+    watchlist_daq_list_parser.add_argument(
+        "--min-daq",
+        type=int,
+        default=0,
+        help="Minimum DAQ score filter (default: 0)"
+    )
+    watchlist_daq_list_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum results to show (default: 50)"
+    )
+
+    # technical-watchlist-daq
+    tech_wl_daq_parser = subparsers.add_parser(
+        "technical-watchlist-daq",
+        help="Run deep analysis on technical watchlist stocks (EMA crossovers, MACD, etc.)"
+    )
+    tech_wl_daq_parser.add_argument(
+        "ticker",
+        nargs="?",
+        help="Optional: analyze a specific ticker"
+    )
+    tech_wl_daq_parser.add_argument(
+        "--type",
+        dest="watchlist_type",
+        choices=["ema_50_crossover", "ema_20_crossover", "macd_bullish_cross", "gap_up_continuation", "rsi_oversold_bounce"],
+        help="Filter by watchlist type"
+    )
+    tech_wl_daq_parser.add_argument(
+        "--date",
+        help="Scan date filter (YYYY-MM-DD, default: latest)"
+    )
+    tech_wl_daq_parser.add_argument(
+        "--max",
+        type=int,
+        default=50,
+        help="Maximum tickers to analyze (default: 50)"
+    )
+    tech_wl_daq_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-analyze even if DAQ score exists"
+    )
+
+    # technical-watchlist-daq-list
+    tech_wl_daq_list_parser = subparsers.add_parser(
+        "technical-watchlist-daq-list",
+        help="List technical watchlist stocks with their DAQ scores"
+    )
+    tech_wl_daq_list_parser.add_argument(
+        "--type",
+        dest="watchlist_type",
+        choices=["ema_50_crossover", "ema_20_crossover", "macd_bullish_cross", "gap_up_continuation", "rsi_oversold_bounce"],
+        help="Filter by watchlist type"
+    )
+    tech_wl_daq_list_parser.add_argument(
+        "--date",
+        help="Scan date filter (YYYY-MM-DD, default: latest)"
+    )
+    tech_wl_daq_list_parser.add_argument(
+        "--min-daq",
+        type=int,
+        default=0,
+        help="Minimum DAQ score filter (default: 0)"
+    )
+    tech_wl_daq_list_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum results to show (default: 50)"
+    )
+
+    # =========================================================================
     # BROKER TRADE STATISTICS COMMANDS
     # =========================================================================
 
@@ -1655,6 +2175,39 @@ async def main():
             success = await cli.cmd_deep_summary(
                 days=getattr(args, "days", 7)
             )
+
+        # Watchlist Deep Analysis Commands
+        elif args.command == "watchlist-deep-analyze":
+            success = await cli.cmd_watchlist_deep_analyze(
+                calculation_date=getattr(args, "date", None),
+                max_tier=getattr(args, "max_tier", 2),
+                ticker=getattr(args, "ticker", None),
+                force=getattr(args, "force", False)
+            )
+        elif args.command == "watchlist-daq-list":
+            success = await cli.cmd_watchlist_daq_list(
+                calculation_date=getattr(args, "date", None),
+                min_daq=getattr(args, "min_daq", 0),
+                limit=getattr(args, "limit", 50)
+            )
+
+        # Technical Watchlist DAQ Commands
+        elif args.command == "technical-watchlist-daq":
+            success = await cli.cmd_technical_watchlist_daq(
+                ticker=getattr(args, "ticker", None),
+                watchlist_type=getattr(args, "watchlist_type", None),
+                scan_date=getattr(args, "date", None),
+                max_tickers=getattr(args, "max", 50),
+                force=getattr(args, "force", False)
+            )
+        elif args.command == "technical-watchlist-daq-list":
+            success = await cli.cmd_technical_watchlist_daq_list(
+                watchlist_type=getattr(args, "watchlist_type", None),
+                scan_date=getattr(args, "date", None),
+                min_daq=getattr(args, "min_daq", 0),
+                limit=getattr(args, "limit", 50)
+            )
+
         else:
             parser.print_help()
             success = False
