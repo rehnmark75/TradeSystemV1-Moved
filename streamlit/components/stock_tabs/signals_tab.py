@@ -11,7 +11,7 @@ Unified view of all scanner signals with:
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 
 # Tier and action color mappings
@@ -87,6 +87,129 @@ DAQ_COLORS = {
 def _get_daq_color(grade: str) -> str:
     """Get color for DAQ grade."""
     return DAQ_COLORS.get(grade, '#6c757d')
+
+
+# DAQ component weights (for display)
+DAQ_WEIGHTS = {
+    'mtf': 20,      # Multi-timeframe confluence
+    'volume': 10,   # Volume analysis
+    'smc': 15,      # Smart Money Concepts
+    'quality': 15,  # Financial quality
+    'catalyst': 10, # Catalyst timing
+    'news': 10,     # News sentiment
+    'regime': 10,   # Market regime
+    'sector': 10,   # Sector rotation
+}
+
+
+def _render_score_bar(score: Optional[int], max_points: int, label: str) -> str:
+    """Render a visual score bar for DAQ components."""
+    if score is None or pd.isna(score):
+        return f'<div style="color: #999;">{label}: N/A</div>'
+
+    # Calculate weighted contribution (score is 0-100, weight is max points)
+    weighted = int((score / 100) * max_points)
+    pct = score  # Already 0-100
+
+    # Color based on score
+    if pct >= 70:
+        color = '#28a745'  # Green
+    elif pct >= 50:
+        color = '#ffc107'  # Yellow
+    else:
+        color = '#dc3545'  # Red
+
+    bar_width = min(pct, 100)
+    return f'''
+    <div style="margin: 2px 0;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="width: 70px; font-size: 0.75rem; color: #555;">{label}</span>
+            <div style="flex: 1; background: #e9ecef; border-radius: 4px; height: 10px; max-width: 120px;">
+                <div style="width: {bar_width}%; background: {color}; height: 100%; border-radius: 4px;"></div>
+            </div>
+            <span style="font-size: 0.75rem; font-weight: bold; width: 40px;">{weighted}/{max_points}</span>
+        </div>
+    </div>
+    '''
+
+
+def _get_risk_badges_html(earnings_risk: bool, high_short: bool, sector_weak: bool) -> str:
+    """Generate risk flag badges HTML for signals."""
+    badges = []
+    if earnings_risk:
+        badges.append('<span style="background: #dc3545; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem; margin-right: 4px;" title="Earnings within 7 days">EARNINGS</span>')
+    if high_short:
+        badges.append('<span style="background: #fd7e14; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem; margin-right: 4px;" title="High short interest >20%">HIGH SI</span>')
+    if sector_weak:
+        badges.append('<span style="background: #6c757d; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem;" title="Sector underperforming SPY">SECTOR WEAK</span>')
+    return ''.join(badges) if badges else ''
+
+
+def _render_daq_visual_breakdown(
+    daq_score: int,
+    daq_grade: str,
+    mtf_score: Optional[int],
+    volume_score: Optional[int],
+    smc_score: Optional[int],
+    quality_score: Optional[int],
+    catalyst_score: Optional[int],
+    news_score: Optional[int],
+    regime_score: Optional[int],
+    sector_score: Optional[int],
+    earnings_risk: bool = False,
+    high_short: bool = False,
+    sector_weak: bool = False
+) -> None:
+    """Render visual DAQ breakdown with score bars."""
+    grade_color = _get_daq_color(daq_grade)
+    risk_html = _get_risk_badges_html(earnings_risk, high_short, sector_weak)
+
+    # Header with score, grade, and risk badges
+    st.markdown(f'''
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="background: {grade_color}; color: white; padding: 6px 14px; border-radius: 6px; font-size: 1.1rem; font-weight: bold;">
+            {int(daq_score)} {daq_grade}
+        </div>
+        <div>{risk_html}</div>
+    </div>
+    ''', unsafe_allow_html=True)
+
+    # Three columns for component categories
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        # Calculate technical total
+        tech_total = sum([
+            int((mtf_score or 0) / 100 * 20),
+            int((volume_score or 0) / 100 * 10),
+            int((smc_score or 0) / 100 * 15),
+        ])
+        st.markdown(f'<div style="font-weight: bold; margin-bottom: 4px; color: #1a5f7a; font-size: 0.85rem;">TECHNICAL ({tech_total}/45)</div>', unsafe_allow_html=True)
+        st.markdown(_render_score_bar(mtf_score, 20, 'MTF'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(volume_score, 10, 'Volume'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(smc_score, 15, 'SMC'), unsafe_allow_html=True)
+
+    with col2:
+        # Calculate fundamental total
+        fund_total = sum([
+            int((quality_score or 0) / 100 * 15),
+            int((catalyst_score or 0) / 100 * 10),
+        ])
+        st.markdown(f'<div style="font-weight: bold; margin-bottom: 4px; color: #1a5f7a; font-size: 0.85rem;">FUNDAMENTAL ({fund_total}/25)</div>', unsafe_allow_html=True)
+        st.markdown(_render_score_bar(quality_score, 15, 'Quality'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(catalyst_score, 10, 'Catalyst'), unsafe_allow_html=True)
+
+    with col3:
+        # Calculate contextual total
+        ctx_total = sum([
+            int((news_score or 0) / 100 * 10),
+            int((regime_score or 0) / 100 * 10),
+            int((sector_score or 0) / 100 * 10),
+        ])
+        st.markdown(f'<div style="font-weight: bold; margin-bottom: 4px; color: #1a5f7a; font-size: 0.85rem;">CONTEXTUAL ({ctx_total}/30)</div>', unsafe_allow_html=True)
+        st.markdown(_render_score_bar(news_score, 10, 'News'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(regime_score, 10, 'Regime'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(sector_score, 10, 'Sector'), unsafe_allow_html=True)
 
 def _get_rs_color(percentile: int) -> str:
     """Get color for RS percentile value."""
@@ -623,45 +746,25 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
                 stage_color = {'leading': 'green', 'improving': 'blue', 'weakening': 'orange', 'lagging': 'red'}.get(sector_stage, 'gray')
                 st.markdown(f"**Sector Stage:** :{stage_color}[{sector_stage or 'N/A'}]")
 
-        # Deep Analysis Quality (DAQ) Section
+        # Deep Analysis Quality (DAQ) Section - Visual Breakdown
         if has_daq:
             st.markdown("---")
             st.markdown("#### 📊 Deep Analysis Quality")
-
-            # DAQ Score and Grade
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                daq_color = _get_daq_color(daq_grade)
-                st.markdown(f"**DAQ Score:** <span style='color: {daq_color}; font-weight: bold; font-size: 1.2em;'>{daq_score}/100 ({daq_grade})</span>", unsafe_allow_html=True)
-            with col2:
-                st.markdown(f"**MTF Confluence:** {daq_mtf_score or '-'}/100")
-            with col3:
-                st.markdown(f"**SMC Structure:** {daq_smc_score or '-'}/100")
-            with col4:
-                st.markdown(f"**Quality Score:** {daq_quality_score or '-'}/100")
-
-            # Component breakdown
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.markdown(f"**Volume:** {daq_volume_score or '-'}/100")
-            with col2:
-                st.markdown(f"**Catalyst:** {daq_catalyst_score or '-'}/100")
-            with col3:
-                st.markdown(f"**News:** {daq_news_score or '-'}/100")
-            with col4:
-                st.markdown(f"**Regime:** {daq_regime_score or '-'}/100")
-
-            # Risk flags
-            risk_flags = []
-            if daq_earnings_risk:
-                risk_flags.append("⚠️ Earnings within 7 days")
-            if daq_high_short:
-                risk_flags.append("📉 High short interest")
-            if daq_sector_weak:
-                risk_flags.append("📊 Sector underperforming")
-
-            if risk_flags:
-                st.caption("**Risk Flags:** " + " | ".join(risk_flags))
+            _render_daq_visual_breakdown(
+                daq_score=daq_score,
+                daq_grade=daq_grade,
+                mtf_score=daq_mtf_score,
+                volume_score=daq_volume_score,
+                smc_score=daq_smc_score,
+                quality_score=daq_quality_score,
+                catalyst_score=daq_catalyst_score,
+                news_score=daq_news_score,
+                regime_score=daq_regime_score,
+                sector_score=daq_sector_score,
+                earnings_risk=daq_earnings_risk,
+                high_short=daq_high_short,
+                sector_weak=daq_sector_weak
+            )
 
         # Claude AI Analysis Section
         if has_claude:

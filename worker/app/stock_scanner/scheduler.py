@@ -342,6 +342,16 @@ class StockScheduler:
             logger.error(f"[FAIL] Synthesis: {e}")
             results['synthesis'] = {'error': str(e)}
 
+        # === STAGE 2b: Synthesize Weekly Candles (for MTF analysis) ===
+        logger.info("\n[STAGE 2b] Synthesizing weekly candles...")
+        try:
+            weekly_stats = await self.synthesizer.synthesize_all_weekly(incremental=True)
+            results['weekly_synthesis'] = weekly_stats
+            logger.info(f"[OK] Weekly Synthesis: {weekly_stats['total_weekly_candles']:,} weekly candles")
+        except Exception as e:
+            logger.error(f"[FAIL] Weekly Synthesis: {e}")
+            results['weekly_synthesis'] = {'error': str(e)}
+
         # === STAGE 3: Calculate Metrics ===
         logger.info("\n[STAGE 3/11] Calculating screening metrics...")
         try:

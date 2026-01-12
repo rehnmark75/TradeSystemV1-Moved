@@ -379,8 +379,9 @@ class DeepAnalysisConfig:
     extreme_volatility_threshold: float = 5.0  # ATR%
     earnings_risk_days: int = 7
 
-    # Timeframes for MTF analysis
-    mtf_timeframes: List[str] = field(default_factory=lambda: ['1h', '4h', '1d'])
+    # Timeframes for MTF analysis (aligned with daily trading timeframe)
+    # 4h = entry confirmation, 1d = trading timeframe, 1w = major trend
+    mtf_timeframes: List[str] = field(default_factory=lambda: ['4h', '1d', '1w'])
 
     # Rate limiting
     max_concurrent_analyses: int = 5

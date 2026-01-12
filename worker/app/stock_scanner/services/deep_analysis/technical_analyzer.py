@@ -107,14 +107,44 @@ class TechnicalDeepAnalyzer:
         """
         Fetch candles from database with technical indicators.
 
+        Data sources:
+        - 4h: Resampled from 1h candles (stock_candles)
+        - 1d: Synthesized daily candles (stock_candles_synthesized)
+        - 1w: Synthesized weekly candles (stock_candles_synthesized)
+
         Args:
             ticker: Stock ticker
-            timeframe: Timeframe (1h, 4h, 1d)
+            timeframe: Timeframe (4h, 1d, 1w)
             limit: Number of candles to fetch
 
         Returns:
             DataFrame with OHLCV and indicators
         """
+        if timeframe == '4h':
+            # Resample 1h to 4h on-the-fly
+            df = await self._get_4h_from_1h(ticker, limit)
+        elif timeframe in ('1d', '1w'):
+            # Fetch from synthesized table
+            df = await self._get_synthesized_candles(ticker, timeframe, limit)
+        else:
+            # Fallback to raw candles table
+            df = await self._get_raw_candles(ticker, timeframe, limit)
+
+        if df.empty:
+            return df
+
+        # Calculate indicators
+        df = self._calculate_indicators(df)
+
+        return df
+
+    async def _get_raw_candles(
+        self,
+        ticker: str,
+        timeframe: str,
+        limit: int = 200
+    ) -> pd.DataFrame:
+        """Fetch raw candles from stock_candles table."""
         query = """
             SELECT timestamp, open, high, low, close, volume
             FROM stock_candles
@@ -129,11 +159,80 @@ class TechnicalDeepAnalyzer:
 
         df = pd.DataFrame([dict(row) for row in rows])
         df = df.sort_values("timestamp").reset_index(drop=True)
-
-        # Calculate indicators
-        df = self._calculate_indicators(df)
-
         return df
+
+    async def _get_synthesized_candles(
+        self,
+        ticker: str,
+        timeframe: str,
+        limit: int = 200
+    ) -> pd.DataFrame:
+        """Fetch synthesized candles (1d, 1w) from stock_candles_synthesized."""
+        query = """
+            SELECT timestamp, open, high, low, close, volume
+            FROM stock_candles_synthesized
+            WHERE ticker = $1 AND timeframe = $2
+            ORDER BY timestamp DESC
+            LIMIT $3
+        """
+        rows = await self.db.fetch(query, ticker, timeframe, limit)
+
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame([dict(row) for row in rows])
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        return df
+
+    async def _get_4h_from_1h(
+        self,
+        ticker: str,
+        limit: int = 200
+    ) -> pd.DataFrame:
+        """
+        Resample 1h candles to 4h on-the-fly.
+
+        Groups by 4-hour blocks aligned to market hours:
+        - Block 1: 09:30-13:00 (9:30, 10:30, 11:30, 12:30)
+        - Block 2: 13:00-16:00 (13:30, 14:30, 15:30)
+        """
+        # Fetch enough 1h candles to produce the requested 4h candles
+        # Need 4x as many 1h candles, plus buffer for incomplete blocks
+        query = """
+            SELECT timestamp, open, high, low, close, volume
+            FROM stock_candles
+            WHERE ticker = $1 AND timeframe = '1h'
+            ORDER BY timestamp DESC
+            LIMIT $2
+        """
+        rows = await self.db.fetch(query, ticker, limit * 4 + 20)
+
+        if not rows or len(rows) < 4:
+            return pd.DataFrame()
+
+        df = pd.DataFrame([dict(row) for row in rows])
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        # Resample to 4H using pandas
+        # Use 4H offset, label='right' to get end of period
+        df = df.set_index('timestamp')
+
+        resampled = df.resample('4h', label='right', closed='right').agg({
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum'
+        }).dropna()
+
+        resampled = resampled.reset_index()
+
+        # Limit to requested number of candles
+        if len(resampled) > limit:
+            resampled = resampled.tail(limit).reset_index(drop=True)
+
+        return resampled
 
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate technical indicators on DataFrame"""

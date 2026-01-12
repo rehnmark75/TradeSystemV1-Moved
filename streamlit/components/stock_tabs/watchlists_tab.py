@@ -12,6 +12,7 @@ Stock Scanner Watchlists Tab
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
+from typing import Dict, Any, Optional
 
 # RS Percentile color helpers
 def _get_rs_color(percentile):
@@ -66,6 +67,128 @@ WATCHLIST_DEFINITIONS = {
 # Define which are crossover vs event watchlists
 CROSSOVER_WATCHLISTS = {'ema_50_crossover', 'ema_20_crossover', 'macd_bullish_cross'}
 EVENT_WATCHLISTS = {'gap_up_continuation', 'rsi_oversold_bounce'}
+
+# DAQ component weights (for display)
+DAQ_WEIGHTS = {
+    'mtf': 20,      # Multi-timeframe confluence
+    'volume': 10,   # Volume analysis
+    'smc': 15,      # Smart Money Concepts
+    'quality': 15,  # Financial quality
+    'catalyst': 10, # Catalyst timing
+    'news': 10,     # News sentiment
+    'regime': 10,   # Market regime
+    'sector': 10,   # Sector rotation
+}
+
+
+def _render_score_bar(score: Optional[int], max_points: int, label: str) -> str:
+    """Render a visual score bar for DAQ components."""
+    if score is None or pd.isna(score):
+        return f'<div style="color: #999;">{label}: N/A</div>'
+
+    # Calculate weighted contribution (score is 0-100, weight is max points)
+    weighted = int((score / 100) * max_points)
+    pct = score  # Already 0-100
+
+    # Color based on score
+    if pct >= 70:
+        color = '#28a745'  # Green
+    elif pct >= 50:
+        color = '#ffc107'  # Yellow
+    else:
+        color = '#dc3545'  # Red
+
+    bar_width = min(pct, 100)
+    return f'''
+    <div style="margin: 2px 0;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="width: 90px; font-size: 0.8rem; color: #555;">{label}</span>
+            <div style="flex: 1; background: #e9ecef; border-radius: 4px; height: 12px; max-width: 150px;">
+                <div style="width: {bar_width}%; background: {color}; height: 100%; border-radius: 4px;"></div>
+            </div>
+            <span style="font-size: 0.8rem; font-weight: bold; width: 50px;">{weighted}/{max_points}</span>
+        </div>
+    </div>
+    '''
+
+
+def _get_risk_badges(row: Dict[str, Any]) -> str:
+    """Generate risk flag badges HTML."""
+    badges = []
+    if row.get('daq_earnings_risk'):
+        badges.append('<span style="background: #dc3545; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem; margin-right: 4px;" title="Earnings within 7 days">EARNINGS</span>')
+    if row.get('daq_high_short_interest'):
+        badges.append('<span style="background: #fd7e14; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem; margin-right: 4px;" title="High short interest >20%">HIGH SI</span>')
+    if row.get('daq_sector_underperforming'):
+        badges.append('<span style="background: #6c757d; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem;" title="Sector underperforming SPY">SECTOR WEAK</span>')
+    return ''.join(badges) if badges else ''
+
+
+def _render_daq_detail(row: Dict[str, Any]) -> None:
+    """Render DAQ detail breakdown inside an expander."""
+    daq_score = row.get('daq_score')
+    daq_grade = row.get('daq_grade', '')
+
+    if pd.isna(daq_score) or daq_score is None:
+        st.info("No DAQ analysis available for this stock")
+        return
+
+    # Grade color
+    grade_colors = {
+        'A+': '#1e7e34', 'A': '#28a745', 'B': '#17a2b8',
+        'C': '#ffc107', 'D': '#6c757d'
+    }
+    grade_color = grade_colors.get(daq_grade, '#6c757d')
+
+    # Risk badges
+    risk_html = _get_risk_badges(row)
+
+    # Header with score and grade
+    st.markdown(f'''
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="background: {grade_color}; color: white; padding: 8px 16px; border-radius: 8px; font-size: 1.2rem; font-weight: bold;">
+            {int(daq_score)} {daq_grade}
+        </div>
+        <div>{risk_html}</div>
+    </div>
+    ''', unsafe_allow_html=True)
+
+    # Three columns for component categories
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        # Calculate technical total
+        tech_total = sum([
+            int((row.get('daq_mtf_score', 0) or 0) / 100 * 20),
+            int((row.get('daq_volume_score', 0) or 0) / 100 * 10),
+            int((row.get('daq_smc_score', 0) or 0) / 100 * 15),
+        ])
+        st.markdown(f'<div style="font-weight: bold; margin-bottom: 6px; color: #1a5f7a;">TECHNICAL ({tech_total}/45)</div>', unsafe_allow_html=True)
+        st.markdown(_render_score_bar(row.get('daq_mtf_score'), 20, 'MTF'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(row.get('daq_volume_score'), 10, 'Volume'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(row.get('daq_smc_score'), 15, 'SMC'), unsafe_allow_html=True)
+
+    with col2:
+        # Calculate fundamental total
+        fund_total = sum([
+            int((row.get('daq_quality_score', 0) or 0) / 100 * 15),
+            int((row.get('daq_catalyst_score', 0) or 0) / 100 * 10),
+        ])
+        st.markdown(f'<div style="font-weight: bold; margin-bottom: 6px; color: #1a5f7a;">FUNDAMENTAL ({fund_total}/25)</div>', unsafe_allow_html=True)
+        st.markdown(_render_score_bar(row.get('daq_quality_score'), 15, 'Quality'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(row.get('daq_catalyst_score'), 10, 'Catalyst'), unsafe_allow_html=True)
+
+    with col3:
+        # Calculate contextual total
+        ctx_total = sum([
+            int((row.get('daq_news_score', 0) or 0) / 100 * 10),
+            int((row.get('daq_regime_score', 0) or 0) / 100 * 10),
+            int((row.get('daq_sector_score', 0) or 0) / 100 * 10),
+        ])
+        st.markdown(f'<div style="font-weight: bold; margin-bottom: 6px; color: #1a5f7a;">CONTEXTUAL ({ctx_total}/30)</div>', unsafe_allow_html=True)
+        st.markdown(_render_score_bar(row.get('daq_news_score'), 10, 'News'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(row.get('daq_regime_score'), 10, 'Regime'), unsafe_allow_html=True)
+        st.markdown(_render_score_bar(row.get('daq_sector_score'), 10, 'Sector'), unsafe_allow_html=True)
 
 
 def render_watchlists_tab(service):
@@ -194,6 +317,18 @@ def render_watchlists_tab(service):
     # Days column - for crossover watchlists this is days since crossover
     display_df['Days'] = display_df['days_on_list'].apply(lambda x: f"{int(x)}d" if pd.notnull(x) else '1d')
 
+    # DAQ Score column - Deep Analysis Quality score if available
+    if 'daq_score' in display_df.columns:
+        def format_daq(row):
+            score = row.get('daq_score')
+            grade = row.get('daq_grade', '')
+            if pd.isna(score) or score is None:
+                return '-'
+            return f"{int(score)} {grade}" if grade else f"{int(score)}"
+        display_df['DAQ'] = display_df.apply(format_daq, axis=1)
+    else:
+        display_df['DAQ'] = '-'
+
     # RS Percentile column - color-coded relative strength
     if 'rs_percentile' in display_df.columns:
         def format_rs(row):
@@ -230,27 +365,37 @@ def render_watchlists_tab(service):
     # Conditional columns based on watchlist type
     # Include Trade column if any stocks are in trade
     has_trades = display_df['Trade'].any()
+    # Include DAQ column if any stocks have DAQ scores
+    has_daq = 'daq_score' in df.columns and df['daq_score'].notna().any()
 
     if selected_watchlist == 'gap_up_continuation':
         display_df['Gap %'] = display_df['gap_pct'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
         cols = ['ticker', 'RS', 'Price', 'Gap %', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+        if has_daq:
+            cols.insert(2, 'DAQ')
         if has_trades:
             cols.insert(1, 'Trade')
         result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
     elif selected_watchlist == 'rsi_oversold_bounce':
         cols = ['ticker', 'RS', 'Price', 'RSI', 'Volume', '1D Chg', 'Avg/Day']
+        if has_daq:
+            cols.insert(2, 'DAQ')
         if has_trades:
             cols.insert(1, 'Trade')
         result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
     elif selected_watchlist == 'macd_bullish_cross':
         display_df['MACD'] = display_df['macd'].apply(lambda x: f"{x:.3f}" if pd.notnull(x) else '-')
         cols = ['ticker', 'RS', 'Days', 'Crossover', 'Price', 'MACD', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+        if has_daq:
+            cols.insert(2, 'DAQ')
         if has_trades:
             cols.insert(1, 'Trade')
         result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
     else:
         # EMA crossover watchlists
         cols = ['ticker', 'RS', 'Days', 'Crossover', 'Price', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+        if has_daq:
+            cols.insert(2, 'DAQ')
         if has_trades:
             cols.insert(1, 'Trade')
         result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
@@ -315,6 +460,27 @@ def render_watchlists_tab(service):
             pass
         return ''
 
+    def style_daq(val):
+        """Style the DAQ column based on score and grade"""
+        if val == '-' or not val:
+            return ''
+        try:
+            # Extract score from string like "75 A" or "85 A+"
+            score = int(''.join(filter(str.isdigit, str(val).split()[0])))
+            if score >= 85:  # A+
+                return 'background-color: #1e7e34; color: white; font-weight: bold;'
+            elif score >= 70:  # A
+                return 'background-color: #28a745; color: white; font-weight: bold;'
+            elif score >= 60:  # B
+                return 'background-color: #17a2b8; color: white;'
+            elif score >= 50:  # C
+                return 'background-color: #ffc107; color: #212529;'
+            else:  # D
+                return 'background-color: #6c757d; color: white;'
+        except (ValueError, TypeError, IndexError):
+            pass
+        return ''
+
     styled_df = result_df.style.map(style_change, subset=['1D Chg'])
     if 'Days' in result_df.columns:
         styled_df = styled_df.map(style_days, subset=['Days'])
@@ -326,8 +492,91 @@ def render_watchlists_tab(service):
         styled_df = styled_df.map(style_trade, subset=['Trade'])
     if 'RS' in result_df.columns:
         styled_df = styled_df.map(style_rs, subset=['RS'])
+    if 'DAQ' in result_df.columns:
+        styled_df = styled_df.map(style_daq, subset=['DAQ'])
 
-    st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
+    # View mode toggle - Table vs Detail (with DAQ breakdown)
+    view_col1, view_col2 = st.columns([3, 1])
+    with view_col2:
+        view_mode = st.radio(
+            "View",
+            ["Table", "Detail"],
+            horizontal=True,
+            key="watchlist_view_mode",
+            help="Detail view shows DAQ score breakdown for each stock"
+        )
+
+    if view_mode == "Table":
+        # Standard table view
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
+    else:
+        # Detail view with expandable DAQ breakdown
+        st.markdown('<div style="max-height: 600px; overflow-y: auto;">', unsafe_allow_html=True)
+
+        for idx, row in df.iterrows():
+            ticker = row['ticker']
+            price = row.get('price', 0)
+            rs = row.get('rs_percentile')
+            rs_trend = row.get('rs_trend', '')
+            daq_score = row.get('daq_score')
+            daq_grade = row.get('daq_grade', '')
+            change_1d = row.get('price_change_1d', 0)
+
+            # Build summary line
+            rs_icon = RS_TREND_ICONS.get(rs_trend, '')
+            rs_str = f"RS {int(rs)}{rs_icon}" if rs and not pd.isna(rs) else ""
+
+            # DAQ badge with color
+            if daq_score and not pd.isna(daq_score):
+                grade_colors = {'A+': '#1e7e34', 'A': '#28a745', 'B': '#17a2b8', 'C': '#ffc107', 'D': '#6c757d'}
+                daq_color = grade_colors.get(daq_grade, '#6c757d')
+                daq_str = f'<span style="background: {daq_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.85rem;">{int(daq_score)} {daq_grade}</span>'
+            else:
+                daq_str = ""
+
+            # Risk badges
+            risk_badges = _get_risk_badges(row.to_dict())
+
+            # Change string for expander title (plain text)
+            if change_1d and not pd.isna(change_1d):
+                change_prefix = "+" if change_1d >= 0 else ""
+                change_str_plain = f"({change_prefix}{change_1d:.1f}%)"
+                change_color = '#28a745' if change_1d >= 0 else '#dc3545'
+                change_str_html = f'<span style="color: {change_color}; font-weight: bold;">{change_1d:+.1f}%</span>'
+            else:
+                change_str_plain = ""
+                change_str_html = ""
+
+            # Build expander label with DAQ indicator
+            daq_indicator = f" | DAQ {int(daq_score)}{daq_grade}" if daq_score and not pd.isna(daq_score) else ""
+            risk_indicator = ""
+            if row.get('daq_earnings_risk'):
+                risk_indicator += " ⚠️"
+            if row.get('daq_high_short_interest'):
+                risk_indicator += " 🩳"
+
+            # Expander title with key metrics
+            with st.expander(f"{ticker} - ${price:.2f} {change_str_plain}{daq_indicator}{risk_indicator}", expanded=False):
+                # Summary row
+                st.markdown(f'''
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;">
+                    <span style="font-size: 1.1rem; font-weight: bold;">{ticker}</span>
+                    <span style="color: #555;">${price:.2f}</span>
+                    {change_str_html}
+                    <span style="background: #e8f4f8; padding: 2px 8px; border-radius: 4px;">{rs_str}</span>
+                    {daq_str}
+                    {risk_badges}
+                </div>
+                ''', unsafe_allow_html=True)
+
+                # DAQ detail breakdown (only if DAQ data exists)
+                if daq_score and not pd.isna(daq_score):
+                    st.markdown("---")
+                    _render_daq_detail(row.to_dict())
+                else:
+                    st.caption("No DAQ analysis available - run deep analysis to see breakdown")
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # Quick actions
     st.markdown("---")

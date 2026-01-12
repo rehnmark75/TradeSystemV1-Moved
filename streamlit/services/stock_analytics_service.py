@@ -745,6 +745,19 @@ class StockAnalyticsService:
                         COALESCE(w.claude_stop_adjustment, ss.claude_stop_adjustment) as claude_stop_adjustment,
                         COALESCE(w.claude_time_horizon, ss.claude_time_horizon) as claude_time_horizon,
                         COALESCE(w.claude_analyzed_at, ss.claude_analyzed_at) as claude_analyzed_at,
+                        -- DAQ columns
+                        w.daq_score,
+                        w.daq_grade,
+                        w.daq_mtf_score,
+                        w.daq_volume_score,
+                        w.daq_smc_score,
+                        w.daq_quality_score,
+                        w.daq_catalyst_score,
+                        w.daq_news_score,
+                        w.daq_regime_score,
+                        w.daq_sector_score,
+                        w.daq_earnings_risk,
+                        w.daq_analyzed_at,
                         m.price_change_1d,
                         m.price_change_5d,
                         m.rsi_14,
@@ -2919,7 +2932,22 @@ Respond in this exact JSON format:
                     m.rs_vs_spy,
                     CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
                     t.side as trade_side,
-                    t.profit as trade_profit
+                    t.profit as trade_profit,
+                    w.daq_score,
+                    w.daq_grade,
+                    -- DAQ component scores
+                    w.daq_mtf_score,
+                    w.daq_volume_score,
+                    w.daq_smc_score,
+                    w.daq_quality_score,
+                    w.daq_catalyst_score,
+                    w.daq_news_score,
+                    w.daq_regime_score,
+                    w.daq_sector_score,
+                    -- DAQ risk flags
+                    w.daq_earnings_risk,
+                    w.daq_high_short_interest,
+                    w.daq_sector_underperforming
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
                 LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -2976,7 +3004,22 @@ Respond in this exact JSON format:
                     m.rs_vs_spy,
                     CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
                     t.side as trade_side,
-                    t.profit as trade_profit
+                    t.profit as trade_profit,
+                    w.daq_score,
+                    w.daq_grade,
+                    -- DAQ component scores
+                    w.daq_mtf_score,
+                    w.daq_volume_score,
+                    w.daq_smc_score,
+                    w.daq_quality_score,
+                    w.daq_catalyst_score,
+                    w.daq_news_score,
+                    w.daq_regime_score,
+                    w.daq_sector_score,
+                    -- DAQ risk flags
+                    w.daq_earnings_risk,
+                    w.daq_high_short_interest,
+                    w.daq_sector_underperforming
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
                 LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
