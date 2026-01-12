@@ -160,8 +160,8 @@ class ContextualDeepAnalyzer:
                 SELECT
                     news_sentiment_score,
                     news_sentiment_level,
-                    news_articles_count,
-                    news_top_headlines
+                    news_headlines_count,
+                    news_factors
                 FROM stock_scanner_signals
                 WHERE ticker = $1
                   AND news_analyzed_at IS NOT NULL
@@ -173,8 +173,10 @@ class ContextualDeepAnalyzer:
             if signal_row and signal_row.get('news_sentiment_score') is not None:
                 sentiment_value = float(signal_row['news_sentiment_score'])
                 sentiment_level = signal_row.get('news_sentiment_level', 'neutral')
-                articles_count = signal_row.get('news_articles_count', 0)
-                top_headlines = signal_row.get('news_top_headlines', [])
+                articles_count = signal_row.get('news_headlines_count', 0) or 0
+                # news_factors contains headline strings
+                news_factors = signal_row.get('news_factors', []) or []
+                top_headlines = [{'headline': h, 'sentiment': 0} for h in news_factors[:3]]
 
                 score = self._sentiment_to_score(sentiment_value)
 

@@ -75,6 +75,19 @@ RS_TREND_ICONS = {
     'deteriorating': '↘️',
 }
 
+# DAQ (Deep Analysis Quality) color coding
+DAQ_COLORS = {
+    'A+': '#1e7e34',  # Dark green
+    'A': '#28a745',   # Green
+    'B': '#17a2b8',   # Blue
+    'C': '#ffc107',   # Yellow
+    'D': '#dc3545',   # Red
+}
+
+def _get_daq_color(grade: str) -> str:
+    """Get color for DAQ grade."""
+    return DAQ_COLORS.get(grade, '#6c757d')
+
 def _get_rs_color(percentile: int) -> str:
     """Get color for RS percentile value."""
     if percentile is None:
@@ -132,6 +145,16 @@ def render_signals_tab(service):
     col2.metric("Claude A/A+", stats.get('claude_high_grade', 0), help="Claude high-grade signals")
     col3.metric("Strong Buys", stats.get('claude_strong_buys', 0), help="Claude STRONG BUY recommendations")
     col4.metric("Awaiting Analysis", stats.get('awaiting_analysis', 0), help="Active signals not yet analyzed")
+
+    # Deep Analysis (DAQ) stats - Row 3
+    daq_stats = service.get_deep_analysis_summary(days=7)
+    if daq_stats and daq_stats.get('total', 0) > 0:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Deep Analyzed", daq_stats.get('total', 0), help="Signals with Deep Analysis Quality (DAQ) score")
+        col2.metric("Avg DAQ Score", f"{daq_stats.get('avg_daq', 0)}/100", help="Average DAQ score (0-100)")
+        grade_summary = f"A+:{daq_stats.get('grade_a_plus', 0)} A:{daq_stats.get('grade_a', 0)} B:{daq_stats.get('grade_b', 0)}"
+        col3.metric("DAQ A+/A/B", grade_summary, help="DAQ grades breakdown")
+        col4.metric("DAQ C/D", f"{daq_stats.get('grade_c', 0)}/{daq_stats.get('grade_d', 0)}", help="Lower DAQ grades")
 
     st.markdown("---")
 
@@ -470,6 +493,22 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
     news_analyzed_at = signal.get('news_analyzed_at')
     has_news = news_sentiment_score is not None
 
+    # Deep Analysis Quality (DAQ) data
+    daq_score = signal.get('daq_score')
+    daq_grade = signal.get('daq_grade')
+    daq_mtf_score = signal.get('mtf_score')
+    daq_volume_score = signal.get('daq_volume_score')
+    daq_smc_score = signal.get('daq_smc_score')
+    daq_quality_score = signal.get('daq_quality_score')
+    daq_catalyst_score = signal.get('daq_catalyst_score')
+    daq_news_score = signal.get('daq_news_score')
+    daq_regime_score = signal.get('daq_regime_score')
+    daq_sector_score = signal.get('daq_sector_score')
+    daq_earnings_risk = signal.get('earnings_within_7d', False)
+    daq_high_short = signal.get('high_short_interest', False)
+    daq_sector_weak = signal.get('sector_underperforming', False)
+    has_daq = daq_score is not None
+
     # Stock metrics
     avg_daily_change = signal.get('avg_daily_change_5d', 0) or 0
 
@@ -539,7 +578,13 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
         else:
             rs_badge = f" | RS: :red[{rs_percentile}]{rs_trend_icon}"
 
-    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{rs_badge}{claude_badge}{news_badge}{days_badge}{trade_badge}{timestamp_part}", expanded=False):
+    # DAQ badge - shows Deep Analysis Quality score
+    daq_badge = ""
+    if has_daq:
+        daq_color = 'green' if daq_score >= 70 else 'orange' if daq_score >= 50 else 'red'
+        daq_badge = f" | DAQ: :{daq_color}[{daq_score}]({daq_grade})"
+
+    with st.expander(f"**{ticker}** | :{tier_color}[{tier}] | Score: {score} | {scanner_icon} {scanner}{rs_badge}{daq_badge}{claude_badge}{news_badge}{days_badge}{trade_badge}{timestamp_part}", expanded=False):
 
         # Metrics row
         col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -577,6 +622,46 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
             with col4:
                 stage_color = {'leading': 'green', 'improving': 'blue', 'weakening': 'orange', 'lagging': 'red'}.get(sector_stage, 'gray')
                 st.markdown(f"**Sector Stage:** :{stage_color}[{sector_stage or 'N/A'}]")
+
+        # Deep Analysis Quality (DAQ) Section
+        if has_daq:
+            st.markdown("---")
+            st.markdown("#### 📊 Deep Analysis Quality")
+
+            # DAQ Score and Grade
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                daq_color = _get_daq_color(daq_grade)
+                st.markdown(f"**DAQ Score:** <span style='color: {daq_color}; font-weight: bold; font-size: 1.2em;'>{daq_score}/100 ({daq_grade})</span>", unsafe_allow_html=True)
+            with col2:
+                st.markdown(f"**MTF Confluence:** {daq_mtf_score or '-'}/100")
+            with col3:
+                st.markdown(f"**SMC Structure:** {daq_smc_score or '-'}/100")
+            with col4:
+                st.markdown(f"**Quality Score:** {daq_quality_score or '-'}/100")
+
+            # Component breakdown
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown(f"**Volume:** {daq_volume_score or '-'}/100")
+            with col2:
+                st.markdown(f"**Catalyst:** {daq_catalyst_score or '-'}/100")
+            with col3:
+                st.markdown(f"**News:** {daq_news_score or '-'}/100")
+            with col4:
+                st.markdown(f"**Regime:** {daq_regime_score or '-'}/100")
+
+            # Risk flags
+            risk_flags = []
+            if daq_earnings_risk:
+                risk_flags.append("⚠️ Earnings within 7 days")
+            if daq_high_short:
+                risk_flags.append("📉 High short interest")
+            if daq_sector_weak:
+                risk_flags.append("📊 Sector underperforming")
+
+            if risk_flags:
+                st.caption("**Risk Flags:** " + " | ".join(risk_flags))
 
         # Claude AI Analysis Section
         if has_claude:

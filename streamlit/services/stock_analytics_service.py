@@ -1691,7 +1691,22 @@ Analyze and respond in this exact JSON format:
                 m.rs_trend,
                 sa.rs_vs_spy as sector_rs,
                 sa.sector_stage,
-                i.sector
+                i.sector,
+                -- Deep Analysis Quality (DAQ) fields
+                d.daq_score,
+                d.daq_grade,
+                d.mtf_score,
+                d.volume_score as daq_volume_score,
+                d.smc_score as daq_smc_score,
+                d.quality_score as daq_quality_score,
+                d.catalyst_score as daq_catalyst_score,
+                d.news_score as daq_news_score,
+                d.regime_score as daq_regime_score,
+                d.sector_score as daq_sector_score,
+                d.earnings_within_7d,
+                d.high_short_interest,
+                d.sector_underperforming,
+                d.analysis_timestamp as daq_analyzed_at
             FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN latest_news n ON s.ticker = n.ticker
@@ -1701,6 +1716,7 @@ Analyze and respond in this exact JSON format:
             LEFT JOIN open_trades t ON s.ticker = t.ticker
             LEFT JOIN sector_analysis sa ON i.sector = sa.sector
                 AND sa.calculation_date = (SELECT MAX(calculation_date) FROM sector_analysis)
+            LEFT JOIN stock_deep_analysis d ON s.id = d.signal_id
         """
 
         # Add RS filter conditions if any
@@ -3898,6 +3914,200 @@ Respond in this exact JSON format:
             ORDER BY w.scan_date DESC, w.watchlist_name
         """
         results = _self._execute_query(query % ('%s', days), (ticker,))
+        return pd.DataFrame(results) if results else pd.DataFrame()
+
+    # =========================================================================
+    # DEEP ANALYSIS QUERIES
+    # =========================================================================
+
+    @st.cache_data(ttl=300)
+    def get_deep_analysis_for_signals(_self, signal_ids: List[int] = None) -> Dict[int, Dict]:
+        """
+        Get deep analysis data for signals.
+
+        Args:
+            signal_ids: List of signal IDs to fetch (None = all recent)
+
+        Returns:
+            Dict mapping signal_id to deep analysis data
+        """
+        if signal_ids:
+            placeholders = ','.join(['%s'] * len(signal_ids))
+            query = f"""
+                SELECT
+                    signal_id,
+                    ticker,
+                    daq_score,
+                    daq_grade,
+                    mtf_score,
+                    volume_score,
+                    smc_score,
+                    quality_score,
+                    catalyst_score,
+                    news_score,
+                    regime_score,
+                    sector_score,
+                    earnings_within_7d,
+                    high_short_interest,
+                    sector_underperforming,
+                    analysis_timestamp
+                FROM stock_deep_analysis
+                WHERE signal_id IN ({placeholders})
+            """
+            results = _self._execute_query(query, tuple(signal_ids))
+        else:
+            query = """
+                SELECT
+                    signal_id,
+                    ticker,
+                    daq_score,
+                    daq_grade,
+                    mtf_score,
+                    volume_score,
+                    smc_score,
+                    quality_score,
+                    catalyst_score,
+                    news_score,
+                    regime_score,
+                    sector_score,
+                    earnings_within_7d,
+                    high_short_interest,
+                    sector_underperforming,
+                    analysis_timestamp
+                FROM stock_deep_analysis
+                WHERE analysis_timestamp > NOW() - INTERVAL '7 days'
+            """
+            results = _self._execute_query(query, ())
+
+        return {r['signal_id']: r for r in results} if results else {}
+
+    @st.cache_data(ttl=300)
+    def get_deep_analysis_summary(_self, days: int = 7) -> Dict[str, Any]:
+        """
+        Get summary statistics for deep analysis.
+
+        Args:
+            days: Number of days to look back
+
+        Returns:
+            Dict with summary statistics
+        """
+        query = """
+            SELECT
+                COUNT(*) as total,
+                ROUND(AVG(daq_score)::numeric, 1) as avg_daq,
+                ROUND(AVG(mtf_score)::numeric, 1) as avg_mtf,
+                ROUND(AVG(volume_score)::numeric, 1) as avg_volume,
+                ROUND(AVG(smc_score)::numeric, 1) as avg_smc,
+                ROUND(AVG(quality_score)::numeric, 1) as avg_quality,
+                ROUND(AVG(news_score)::numeric, 1) as avg_news,
+                ROUND(AVG(regime_score)::numeric, 1) as avg_regime,
+                ROUND(AVG(sector_score)::numeric, 1) as avg_sector,
+                SUM(CASE WHEN daq_grade = 'A+' THEN 1 ELSE 0 END) as grade_a_plus,
+                SUM(CASE WHEN daq_grade = 'A' THEN 1 ELSE 0 END) as grade_a,
+                SUM(CASE WHEN daq_grade = 'B' THEN 1 ELSE 0 END) as grade_b,
+                SUM(CASE WHEN daq_grade = 'C' THEN 1 ELSE 0 END) as grade_c,
+                SUM(CASE WHEN daq_grade = 'D' THEN 1 ELSE 0 END) as grade_d
+            FROM stock_deep_analysis
+            WHERE analysis_timestamp > NOW() - INTERVAL '%s days'
+        """
+        results = _self._execute_query(query % days, ())
+        return results[0] if results else {}
+
+    @st.cache_data(ttl=300)
+    def get_deep_analysis_detail(_self, signal_id: int) -> Dict[str, Any]:
+        """
+        Get detailed deep analysis for a specific signal.
+
+        Args:
+            signal_id: Signal ID
+
+        Returns:
+            Dict with full deep analysis data including JSONB details
+        """
+        query = """
+            SELECT
+                d.*,
+                s.ticker,
+                s.scanner_name,
+                s.quality_tier as signal_tier,
+                s.composite_score as signal_score,
+                s.signal_type,
+                s.entry_price,
+                s.stop_loss,
+                s.take_profit_1
+            FROM stock_deep_analysis d
+            JOIN stock_scanner_signals s ON d.signal_id = s.id
+            WHERE d.signal_id = %s
+        """
+        results = _self._execute_query(query, (signal_id,))
+        return results[0] if results else {}
+
+    @st.cache_data(ttl=300)
+    def get_signals_with_deep_analysis(_self, hours: int = 24, min_daq: int = None) -> pd.DataFrame:
+        """
+        Get signals joined with deep analysis data.
+
+        Args:
+            hours: Hours to look back
+            min_daq: Minimum DAQ score filter
+
+        Returns:
+            DataFrame with signals and deep analysis
+        """
+        query = """
+            SELECT
+                s.id as signal_id,
+                s.signal_timestamp,
+                s.ticker,
+                i.name,
+                s.signal_type,
+                s.entry_price,
+                s.stop_loss,
+                s.take_profit_1 as take_profit,
+                s.composite_score as confidence,
+                s.scanner_name,
+                s.quality_tier,
+                s.claude_grade,
+                s.claude_action,
+                s.news_sentiment_score,
+                s.news_sentiment_level,
+                -- Deep Analysis fields
+                d.daq_score,
+                d.daq_grade,
+                d.mtf_score,
+                d.volume_score,
+                d.smc_score,
+                d.quality_score as daq_quality_score,
+                d.news_score as daq_news_score,
+                d.regime_score,
+                d.sector_score,
+                d.earnings_within_7d,
+                d.high_short_interest,
+                d.sector_underperforming,
+                -- Watchlist data
+                w.tier as watchlist_tier,
+                w.score as watchlist_score
+            FROM stock_scanner_signals s
+            LEFT JOIN stock_instruments i ON s.ticker = i.ticker
+            LEFT JOIN stock_deep_analysis d ON s.id = d.signal_id
+            LEFT JOIN stock_watchlist w ON s.ticker = w.ticker
+                AND w.calculation_date = (SELECT MAX(calculation_date) FROM stock_watchlist)
+            WHERE s.signal_timestamp > NOW() - INTERVAL '%s hours'
+            AND s.status = 'active'
+        """
+
+        if min_daq:
+            query += f" AND d.daq_score >= {min_daq}"
+
+        query += """
+            ORDER BY
+                CASE WHEN d.daq_score IS NOT NULL THEN 0 ELSE 1 END,
+                d.daq_score DESC NULLS LAST,
+                s.signal_timestamp DESC
+        """
+
+        results = _self._execute_query(query % hours, ())
         return pd.DataFrame(results) if results else pd.DataFrame()
 
 
