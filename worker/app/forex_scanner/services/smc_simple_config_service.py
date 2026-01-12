@@ -404,6 +404,33 @@ class SMCSimpleConfig:
         return self.swing_proximity_strict_mode
 
     # =========================================================================
+    # EMA OVERRIDES GETTERS (v2.16.0)
+    # Per-pair EMA period and slope validation settings
+    # =========================================================================
+
+    def get_pair_ema_period(self, epic: str) -> int:
+        """Get EMA period for a specific pair.
+
+        Returns pair-specific value if set, otherwise global default.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('ema_period') is not None:
+                return int(override['ema_period'])
+        return self.ema_period
+
+    def is_ema_slope_validation_enabled(self, epic: str) -> bool:
+        """Check if EMA slope validation is enabled for a specific pair.
+
+        Returns pair-specific value if set, otherwise global default.
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('ema_slope_validation_enabled') is not None:
+                return override['ema_slope_validation_enabled']
+        return self.ema_slope_validation_enabled
+
+    # =========================================================================
     # DIRECTION-AWARE GETTERS (v2.12.0)
     # These methods return direction-specific values when enabled, otherwise
     # fall back to non-directional pair overrides, then global defaults.
@@ -984,6 +1011,9 @@ class SMCSimpleConfigService:
                 'swing_proximity_enabled': row.get('swing_proximity_enabled'),
                 'swing_proximity_min_distance_pips': row.get('swing_proximity_min_distance_pips'),
                 'swing_proximity_strict_mode': row.get('swing_proximity_strict_mode'),
+                # EMA overrides (v2.16.0)
+                'ema_period': row.get('ema_period'),
+                'ema_slope_validation_enabled': row.get('ema_slope_validation_enabled'),
             }
 
         return config
@@ -1084,6 +1114,18 @@ class SMCSimpleConfigService:
     def is_swing_proximity_strict_mode(self, epic: str) -> bool:
         """Check if swing proximity strict mode is enabled for a specific pair"""
         return self.get_config().is_swing_proximity_strict_mode(epic)
+
+    # =========================================================================
+    # EMA OVERRIDES SERVICE ACCESSORS (v2.16.0)
+    # =========================================================================
+
+    def get_pair_ema_period(self, epic: str) -> int:
+        """Get EMA period for a specific pair"""
+        return self.get_config().get_pair_ema_period(epic)
+
+    def is_ema_slope_validation_enabled(self, epic: str) -> bool:
+        """Check if EMA slope validation is enabled for a specific pair"""
+        return self.get_config().is_ema_slope_validation_enabled(epic)
 
 
 # Global singleton instance

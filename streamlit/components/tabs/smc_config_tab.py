@@ -985,6 +985,41 @@ def render_pair_overrides(config: Dict[str, Any]):
 
             st.caption("💡 Based on trade analysis: BUY near resistance = 25% WR, SELL near support = 0% WR. Trades with 15+ pips clearance = 50%+ WR.")
 
+        # EMA Overrides (v2.16.0) - per-pair EMA settings for optimization
+        st.markdown("**EMA Settings (TIER 1)**")
+        st.caption("Per-pair overrides for EMA trend validation. NULL = inherits from global settings.")
+        col_ema1, col_ema2 = st.columns(2)
+        with col_ema1:
+            # EMA Period - inherit from global
+            ema_period_value = existing.get('ema_period')
+            global_ema_period = config.get('ema_period', 50)
+            ema_period_effective = int(ema_period_value) if ema_period_value is not None else int(global_ema_period)
+            new_ema_period = st.number_input(
+                "EMA Period",
+                value=ema_period_effective,
+                min_value=10, max_value=200, step=5,
+                help=f"{'Inherited from global (' + str(global_ema_period) + ')' if ema_period_value is None else 'Explicit override for this pair'}. Period for 4H EMA trend filter.",
+                key=f"override_ema_period_{selected_pair}"
+            )
+            if not _values_equal(new_ema_period, ema_period_effective):
+                override_changes['ema_period'] = new_ema_period
+
+        with col_ema2:
+            # EMA Slope Validation Enabled - inherit from global
+            ema_slope_value = existing.get('ema_slope_validation_enabled')
+            global_ema_slope = config.get('ema_slope_validation_enabled', True)
+            ema_slope_effective = ema_slope_value if ema_slope_value is not None else global_ema_slope
+            new_ema_slope = st.checkbox(
+                "EMA Slope Validation",
+                value=ema_slope_effective,
+                help=f"{'Inherited from global (' + str(global_ema_slope) + ')' if ema_slope_value is None else 'Explicit override for this pair'}. Reject counter-trend trades (BULL when EMA falling, BEAR when EMA rising).",
+                key=f"override_ema_slope_{selected_pair}"
+            )
+            if not _values_equal(new_ema_slope, ema_slope_effective):
+                override_changes['ema_slope_validation_enabled'] = new_ema_slope
+
+            st.caption("💡 EMA slope validation prevents counter-trend trades. Higher EMA period = smoother, slower trend detection.")
+
         # Dynamic confidence thresholds (absolute values, not adjustments)
         st.markdown("**Dynamic Confidence Thresholds**")
         st.caption("These are absolute confidence thresholds that override the global minimum when conditions are met. NULL = uses global min_confidence.")
