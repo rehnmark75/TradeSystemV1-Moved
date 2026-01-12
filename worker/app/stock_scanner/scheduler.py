@@ -440,19 +440,32 @@ class StockScheduler:
             logger.error(f"[FAIL] ZLMA Signals: {e}")
             results['zlma_signals'] = {'error': str(e)}
 
-        # === STAGE 7: All Scanner Strategies ===
-        logger.info("\n[STAGE 7/10] Running all scanner strategies...")
+        # === STAGE 7: All Scanner Strategies + Deep Analysis ===
+        logger.info("\n[STAGE 7/10] Running all scanner strategies + deep analysis...")
         try:
             if self.scanner_manager:
                 scanner_signals = await self.scanner_manager.run_all_scanners(calculation_date=data_date)
+                scan_stats = self.scanner_manager.get_scan_stats()
                 results['scanner_signals'] = {
                     'total': len(scanner_signals),
-                    'by_scanner': self.scanner_manager.get_scan_stats().get('signals_by_scanner', {}),
-                    'by_tier': self.scanner_manager.get_scan_stats().get('signals_by_tier', {}),
+                    'by_scanner': scan_stats.get('signals_by_scanner', {}),
+                    'by_tier': scan_stats.get('signals_by_tier', {}),
                     'high_quality': sum(1 for s in scanner_signals if s.is_high_quality)
                 }
                 logger.info(f"[OK] Scanner Signals: {len(scanner_signals)} total "
                            f"(A/A+: {results['scanner_signals']['high_quality']})")
+
+                # Log deep analysis results (automatically run inside run_all_scanners)
+                deep_stats = scan_stats.get('deep_analysis', {})
+                if deep_stats and not deep_stats.get('error'):
+                    results['deep_analysis'] = deep_stats
+                    logger.info(f"[OK] Deep Analysis: {deep_stats.get('successful', 0)}/{deep_stats.get('attempted', 0)} "
+                               f"signals analyzed (avg DAQ: {deep_stats.get('avg_daq_score', 0):.1f})")
+                elif deep_stats.get('error'):
+                    results['deep_analysis'] = deep_stats
+                    logger.warning(f"[WARN] Deep Analysis error: {deep_stats.get('error')}")
+                else:
+                    results['deep_analysis'] = {'skipped': True, 'reason': 'no A+/A signals'}
             else:
                 logger.warning("[SKIP] Scanner Manager not available")
                 results['scanner_signals'] = {'skipped': True}

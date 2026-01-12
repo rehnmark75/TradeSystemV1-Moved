@@ -774,6 +774,291 @@ class StockScannerCLI:
         print(f"   Latency: {analysis.latency_ms}ms")
 
     # =========================================================================
+    # DEEP ANALYSIS COMMANDS
+    # =========================================================================
+
+    async def cmd_deep_analyze(
+        self,
+        ticker: str = None,
+        signal_id: int = None,
+        batch: bool = False,
+        min_tier: str = 'A'
+    ):
+        """
+        Run deep analysis on signals.
+
+        Args:
+            ticker: Specific ticker to analyze
+            signal_id: Specific signal ID to analyze
+            batch: Analyze all unanalyzed A+/A signals
+            min_tier: Minimum tier for batch analysis
+        """
+        print("\n[DEEP ANALYSIS] Running Deep Analysis")
+        print("=" * 60)
+
+        try:
+            from .services.deep_analysis import DeepAnalysisOrchestrator
+
+            orchestrator = DeepAnalysisOrchestrator(self.db)
+
+            if signal_id:
+                # Analyze specific signal
+                print(f"Analyzing signal ID {signal_id}...")
+                result = await orchestrator.analyze_signal(signal_id)
+
+                if result:
+                    self._print_deep_analysis_result(result)
+                    print(f"\n[OK] Analysis complete: DAQ={result.daq_score} ({result.daq_grade.value})")
+                    return True
+                else:
+                    print(f"[ERROR] Failed to analyze signal {signal_id}")
+                    return False
+
+            elif ticker:
+                # Find most recent signal for ticker and analyze
+                query = """
+                    SELECT id FROM stock_scanner_signals
+                    WHERE ticker = $1 AND status = 'active'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """
+                row = await self.db.fetchrow(query, ticker.upper())
+
+                if not row:
+                    print(f"[ERROR] No active signal found for {ticker}")
+                    return False
+
+                print(f"Analyzing {ticker} (signal ID {row['id']})...")
+                result = await orchestrator.analyze_signal(row['id'])
+
+                if result:
+                    self._print_deep_analysis_result(result)
+                    print(f"\n[OK] Analysis complete: DAQ={result.daq_score} ({result.daq_grade.value})")
+                    return True
+                else:
+                    print(f"[ERROR] Failed to analyze {ticker}")
+                    return False
+
+            else:
+                # Batch analyze unanalyzed signals
+                print(f"Batch analyzing unanalyzed {min_tier}+ signals...")
+                results = await orchestrator.auto_analyze_high_quality_signals(
+                    min_tier=min_tier,
+                    days_back=1,
+                    max_signals=50
+                )
+
+                if results:
+                    print(f"\n[RESULTS] Analyzed {len(results)} signals:")
+                    for r in results[:10]:  # Show first 10
+                        print(f"   {r.ticker}: DAQ={r.daq_score} ({r.daq_grade.value})")
+
+                    if len(results) > 10:
+                        print(f"   ... and {len(results) - 10} more")
+
+                    avg_daq = sum(r.daq_score for r in results) / len(results)
+                    print(f"\n   Average DAQ: {avg_daq:.1f}")
+                    return True
+                else:
+                    print("[INFO] No unanalyzed signals found")
+                    return True
+
+        except ImportError as e:
+            print(f"[ERROR] Deep analysis module not available: {e}")
+            return False
+        except Exception as e:
+            print(f"[ERROR] Deep analysis failed: {e}")
+            logger.exception("Deep analysis error")
+            return False
+
+    async def cmd_deep_list(
+        self,
+        limit: int = 20,
+        min_daq: int = None,
+        min_grade: str = None
+    ):
+        """List recent deep analyses"""
+        print("\n[DEEP ANALYSIS] Recent Analyses")
+        print("=" * 60)
+
+        try:
+            from .services.deep_analysis import DeepAnalysisOrchestrator
+
+            orchestrator = DeepAnalysisOrchestrator(self.db)
+            analyses = await orchestrator.get_recent_analyses(
+                limit=limit,
+                min_daq_score=min_daq,
+                min_grade=min_grade
+            )
+
+            if not analyses:
+                print("[INFO] No deep analyses found")
+                return True
+
+            print(f"\n{'ID':>6} | {'Ticker':^8} | {'DAQ':^5} | {'Grade':^5} | {'Tier':^5} | {'MTF':^4} | {'SMC':^4} | {'News':^4}")
+            print("-" * 70)
+
+            for a in analyses:
+                print(
+                    f"{a['signal_id']:>6} | {a['ticker']:^8} | {a['daq_score']:^5} | {a['daq_grade']:^5} | "
+                    f"{a.get('signal_tier', '-'):^5} | {a.get('mtf_score', 0):^4} | {a.get('smc_score', 0):^4} | {a.get('news_score', 0):^4}"
+                )
+
+            print(f"\nTotal: {len(analyses)} analyses")
+            return True
+
+        except ImportError as e:
+            print(f"[ERROR] Deep analysis module not available: {e}")
+            return False
+        except Exception as e:
+            print(f"[ERROR] Failed to list analyses: {e}")
+            logger.exception("Deep list error")
+            return False
+
+    async def cmd_deep_detail(self, signal_id: int):
+        """Show detailed deep analysis for a signal"""
+        print(f"\n[DEEP ANALYSIS] Signal #{signal_id} Details")
+        print("=" * 60)
+
+        try:
+            from .services.deep_analysis import DeepAnalysisOrchestrator
+
+            orchestrator = DeepAnalysisOrchestrator(self.db)
+            analysis = await orchestrator.get_analysis_by_signal(signal_id)
+
+            if not analysis:
+                print(f"[ERROR] No deep analysis found for signal {signal_id}")
+                return False
+
+            print(f"\n[SIGNAL] {analysis['ticker']} (ID: {signal_id})")
+            print(f"   DAQ Score: {analysis['daq_score']} ({analysis['daq_grade']})")
+            print(f"   Analyzed: {analysis['created_at']}")
+
+            print(f"\n[TECHNICAL SCORES]")
+            print(f"   Multi-TF:  {analysis.get('mtf_score', '-')}/100")
+            print(f"   Volume:    {analysis.get('volume_score', '-')}/100")
+            print(f"   SMC:       {analysis.get('smc_score', '-')}/100")
+
+            print(f"\n[FUNDAMENTAL SCORES]")
+            print(f"   Quality:   {analysis.get('quality_score', '-')}/100")
+            print(f"   Catalyst:  {analysis.get('catalyst_score', '-')}/100")
+
+            print(f"\n[CONTEXTUAL SCORES]")
+            print(f"   News:      {analysis.get('news_score', '-')}/100")
+            print(f"   Regime:    {analysis.get('regime_score', '-')}/100")
+            print(f"   Sector:    {analysis.get('sector_score', '-')}/100")
+
+            print(f"\n[RISK FLAGS]")
+            flags = []
+            if analysis.get('earnings_within_7d'):
+                flags.append("Earnings within 7 days")
+            if analysis.get('high_short_interest'):
+                flags.append("High short interest")
+            if analysis.get('sector_underperforming'):
+                flags.append("Sector underperforming")
+            if flags:
+                for f in flags:
+                    print(f"   ! {f}")
+            else:
+                print("   None")
+
+            if analysis.get('news_summary'):
+                print(f"\n[NEWS SUMMARY]")
+                print(f"   {analysis['news_summary']}")
+
+            print(f"\n[META]")
+            print(f"   Duration: {analysis.get('analysis_duration_ms', 0)}ms")
+
+            return True
+
+        except ImportError as e:
+            print(f"[ERROR] Deep analysis module not available: {e}")
+            return False
+        except Exception as e:
+            print(f"[ERROR] Failed to get analysis details: {e}")
+            logger.exception("Deep detail error")
+            return False
+
+    async def cmd_deep_summary(self, days: int = 7):
+        """Show deep analysis summary statistics"""
+        print(f"\n[DEEP ANALYSIS] Summary Statistics - Last {days} Days")
+        print("=" * 60)
+
+        try:
+            from .services.deep_analysis import DeepAnalysisOrchestrator
+
+            orchestrator = DeepAnalysisOrchestrator(self.db)
+            summary = await orchestrator.get_analysis_summary(days=days)
+
+            if not summary or not summary.get('total_analyses'):
+                print("[INFO] No deep analyses found in the specified period")
+                return True
+
+            print(f"\n[OVERVIEW]")
+            print(f"   Total Analyses: {summary.get('total_analyses', 0)}")
+            print(f"   Average DAQ:    {summary.get('avg_daq_score', 0):.1f}")
+
+            print(f"\n[BY GRADE]")
+            print(f"   A+: {summary.get('a_plus_count', 0)}")
+            print(f"   A:  {summary.get('a_count', 0)}")
+            print(f"   B:  {summary.get('b_count', 0)}")
+            print(f"   C:  {summary.get('c_count', 0)}")
+            print(f"   D:  {summary.get('d_count', 0)}")
+
+            print(f"\n[COMPONENT AVERAGES]")
+            print(f"   MTF:      {summary.get('avg_mtf_score', 0):.1f}")
+            print(f"   Volume:   {summary.get('avg_volume_score', 0):.1f}")
+            print(f"   SMC:      {summary.get('avg_smc_score', 0):.1f}")
+            print(f"   Quality:  {summary.get('avg_quality_score', 0):.1f}")
+            print(f"   News:     {summary.get('avg_news_score', 0):.1f}")
+            print(f"   Regime:   {summary.get('avg_regime_score', 0):.1f}")
+            print(f"   Sector:   {summary.get('avg_sector_score', 0):.1f}")
+
+            print(f"\n[PERFORMANCE]")
+            print(f"   Avg Duration: {summary.get('avg_duration_ms', 0):.0f}ms")
+
+            return True
+
+        except ImportError as e:
+            print(f"[ERROR] Deep analysis module not available: {e}")
+            return False
+        except Exception as e:
+            print(f"[ERROR] Failed to get summary: {e}")
+            logger.exception("Deep summary error")
+            return False
+
+    def _print_deep_analysis_result(self, result):
+        """Print formatted deep analysis result"""
+        print(f"\n[SIGNAL] {result.ticker}")
+        print(f"   DAQ Score: {result.daq_score} ({result.daq_grade.value})")
+
+        print(f"\n[TECHNICAL] (45% weight)")
+        print(f"   MTF Confluence: {result.technical.mtf.score}/100 "
+              f"({result.technical.mtf.confluence_count}/{result.technical.mtf.total_timeframes} TFs aligned)")
+        print(f"   Volume Profile: {result.technical.volume.score}/100 "
+              f"(rel_vol: {result.technical.volume.relative_volume:.2f}x)")
+        print(f"   SMC Structure:  {result.technical.smc.score}/100 "
+              f"({result.technical.smc.smc_trend or 'N/A'})")
+
+        print(f"\n[FUNDAMENTAL] (25% weight)")
+        print(f"   Quality:   {result.fundamental.quality.score}/100")
+        print(f"   Catalyst:  {result.fundamental.catalyst.score}/100 "
+              f"(earnings {'in ' + str(result.fundamental.catalyst.days_to_earnings) + 'd' if result.fundamental.catalyst.days_to_earnings else 'N/A'})")
+
+        print(f"\n[CONTEXTUAL] (30% weight)")
+        print(f"   News:      {result.contextual.news.score}/100 "
+              f"({result.contextual.news.sentiment_level})")
+        print(f"   Regime:    {result.contextual.regime.score}/100 "
+              f"({result.contextual.regime.regime.value})")
+        print(f"   Sector:    {result.contextual.sector.score}/100 "
+              f"({'outperforming' if result.contextual.sector.sector_outperforming else 'underperforming'})")
+
+        if result.errors:
+            print(f"\n[ERRORS]")
+            for e in result.errors:
+                print(f"   ! {e}")
+
+    # =========================================================================
     # BROKER TRADE STATISTICS COMMANDS
     # =========================================================================
 
@@ -1125,6 +1410,82 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # =========================================================================
+    # DEEP ANALYSIS COMMANDS
+    # =========================================================================
+
+    # deep-analyze
+    deep_analyze_parser = subparsers.add_parser(
+        "deep-analyze",
+        help="Run deep analysis on a signal (DAQ scoring)"
+    )
+    deep_analyze_parser.add_argument(
+        "ticker",
+        nargs="?",
+        help="Specific ticker to analyze (optional - analyzes all A+/A if not provided)"
+    )
+    deep_analyze_parser.add_argument(
+        "--signal-id",
+        type=int,
+        help="Analyze a specific signal by ID"
+    )
+    deep_analyze_parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Analyze all unanalyzed A+/A signals"
+    )
+    deep_analyze_parser.add_argument(
+        "--min-tier",
+        default="A",
+        choices=["A+", "A", "B"],
+        help="Minimum tier for batch analysis (default: A)"
+    )
+
+    # deep-list
+    deep_list_parser = subparsers.add_parser(
+        "deep-list",
+        help="List recent deep analyses"
+    )
+    deep_list_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum results to show (default: 20)"
+    )
+    deep_list_parser.add_argument(
+        "--min-daq",
+        type=int,
+        help="Minimum DAQ score filter"
+    )
+    deep_list_parser.add_argument(
+        "--min-grade",
+        choices=["A+", "A", "B", "C", "D"],
+        help="Minimum grade filter"
+    )
+
+    # deep-detail
+    deep_detail_parser = subparsers.add_parser(
+        "deep-detail",
+        help="Show detailed deep analysis for a signal"
+    )
+    deep_detail_parser.add_argument(
+        "signal_id",
+        type=int,
+        help="Signal ID to show deep analysis for"
+    )
+
+    # deep-summary
+    deep_summary_parser = subparsers.add_parser(
+        "deep-summary",
+        help="Show deep analysis summary statistics"
+    )
+    deep_summary_parser.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Days of history to summarize (default: 7)"
+    )
+
+    # =========================================================================
     # BROKER TRADE STATISTICS COMMANDS
     # =========================================================================
 
@@ -1271,6 +1632,28 @@ async def main():
         elif args.command == "broker-db-stats":
             success = await cli.cmd_broker_db_stats(
                 days=getattr(args, "days", 30)
+            )
+        # Deep Analysis commands
+        elif args.command == "deep-analyze":
+            success = await cli.cmd_deep_analyze(
+                ticker=getattr(args, "ticker", None),
+                signal_id=getattr(args, "signal_id", None),
+                batch=getattr(args, "batch", False),
+                min_tier=getattr(args, "min_tier", "A")
+            )
+        elif args.command == "deep-list":
+            success = await cli.cmd_deep_list(
+                limit=getattr(args, "limit", 20),
+                min_daq=getattr(args, "min_daq", None),
+                min_grade=getattr(args, "min_grade", None)
+            )
+        elif args.command == "deep-detail":
+            success = await cli.cmd_deep_detail(
+                signal_id=args.signal_id
+            )
+        elif args.command == "deep-summary":
+            success = await cli.cmd_deep_summary(
+                days=getattr(args, "days", 7)
             )
         else:
             parser.print_help()

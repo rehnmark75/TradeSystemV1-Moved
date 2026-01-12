@@ -49,6 +49,15 @@ except ImportError:
     NewsEnrichmentService = None
     EnrichmentResult = None
 
+# Deep analysis imports
+try:
+    from ..services.deep_analysis import DeepAnalysisOrchestrator, DeepAnalysisConfig
+    DEEP_ANALYSIS_AVAILABLE = True
+except ImportError:
+    DEEP_ANALYSIS_AVAILABLE = False
+    DeepAnalysisOrchestrator = None
+    DeepAnalysisConfig = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -219,6 +228,10 @@ class ScannerManager:
         if save_to_db and deduplicated:
             await self._auto_enrich_signals_with_news(deduplicated)
 
+        # Auto-run deep analysis on high-quality signals
+        if save_to_db and deduplicated:
+            await self._auto_deep_analysis(deduplicated)
+
         return deduplicated
 
     async def _auto_enrich_signals_with_news(
@@ -337,6 +350,99 @@ class ScannerManager:
             'successful': successful,
         }
         logger.info(f"[NEWS] Enrichment complete: {successful}/{len(enrichment_results)} successful")
+
+    async def _auto_deep_analysis(
+        self,
+        signals: List[SignalSetup],
+        min_tier: str = 'A',
+    ):
+        """
+        Automatically run deep analysis on high-quality signals.
+
+        This runs after signals are saved to database, performing deep
+        technical, fundamental, and contextual analysis on A+ and A tier signals.
+
+        Args:
+            signals: List of SignalSetup objects
+            min_tier: Minimum tier to auto-analyze (default: 'A')
+        """
+        if not DEEP_ANALYSIS_AVAILABLE:
+            logger.debug("Deep analysis not available - skipping auto-analysis")
+            return
+
+        # Filter to high-quality signals only
+        tier_order = {'D': 0, 'C': 1, 'B': 2, 'A': 3, 'A+': 4}
+        min_tier_value = tier_order.get(min_tier, 3)
+
+        high_quality = [
+            s for s in signals
+            if tier_order.get(s.quality_tier.value, 0) >= min_tier_value
+        ]
+
+        if not high_quality:
+            logger.debug("No high-quality signals for deep analysis")
+            return
+
+        logger.info(f"[DEEP] Starting deep analysis for {len(high_quality)} A+/A signals")
+
+        # Get signal IDs from database (recently created)
+        scan_start_time = datetime.now() - timedelta(minutes=10)
+        signal_ids = []
+
+        for signal in high_quality:
+            try:
+                query = """
+                    SELECT id FROM stock_scanner_signals
+                    WHERE ticker = $1
+                    AND scanner_name = $2
+                    AND created_at >= $3
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """
+                row = await self.db.fetchrow(
+                    query,
+                    signal.ticker,
+                    signal.scanner_name,
+                    scan_start_time
+                )
+                if row:
+                    signal_ids.append(row['id'])
+            except Exception as e:
+                logger.debug(f"Could not find signal ID for {signal.ticker}: {e}")
+                continue
+
+        if not signal_ids:
+            logger.debug("No signal IDs found for deep analysis")
+            return
+
+        # Initialize orchestrator and run analysis
+        try:
+            orchestrator = DeepAnalysisOrchestrator(self.db)
+            results = await orchestrator.analyze_signals_batch(
+                signal_ids,
+                save_to_db=True,
+                max_concurrent=5
+            )
+
+            # Summary
+            self._scan_stats['deep_analysis'] = {
+                'attempted': len(signal_ids),
+                'successful': len(results),
+                'avg_daq_score': sum(r.daq_score for r in results) / len(results) if results else 0,
+            }
+
+            logger.info(
+                f"[DEEP] Analysis complete: {len(results)}/{len(signal_ids)} successful, "
+                f"avg DAQ={self._scan_stats['deep_analysis']['avg_daq_score']:.1f}"
+            )
+
+        except Exception as e:
+            logger.error(f"[DEEP] Deep analysis batch failed: {e}")
+            self._scan_stats['deep_analysis'] = {
+                'attempted': len(signal_ids),
+                'successful': 0,
+                'error': str(e),
+            }
 
     async def _run_scanner_safe(
         self,
