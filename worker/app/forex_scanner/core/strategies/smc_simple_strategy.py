@@ -2,9 +2,23 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.16.0
-DATE: 2026-01-11
-STATUS: EMA Slope Validation
+VERSION: 2.18.0
+DATE: 2026-01-13
+STATUS: Extension Filter + Staleness Prevention
+
+v2.18.0 CHANGES (Extension Filter - Entry Timing Improvement):
+    - NEW: ATR-based extension filter prevents chasing extended moves
+    - ANALYSIS: Trades with >15% extension showed 33-38% win rate vs 53% for pullbacks
+    - ROOT CAUSE: Momentum entries allowed up to 20% extension, often exhausted
+    - FIX: Reject momentum entries beyond 0.5 ATR from swing break point
+    - FIX: Reject momentum entries if swing break happened >8 bars ago (staleness)
+    - CONFIG: max_extension_atr (default: 0.50 = ~10-15 pips)
+    - CONFIG: max_extension_atr_enabled (default: true)
+    - CONFIG: momentum_staleness_enabled (default: true)
+    - CONFIG: max_momentum_staleness_bars (default: 8 = ~2 hours on 15m)
+    - FIX: EURUSD BEAR had momentum_min_depth=-1.0 (100% extension allowed!) - now -0.10
+    - FIX: Global momentum_min_depth tightened from -0.20 to -0.15
+    - Expected improvement: Win rate 37% → 50%+ on momentum entries
 
 v2.16.0 CHANGES (EMA Slope Validation - Counter-Trend Prevention):
     - NEW: ATR-based EMA slope validation prevents counter-trend trades
@@ -324,6 +338,14 @@ class SMCSimpleStrategy:
             self.min_breakout_atr_ratio = config.min_breakout_atr_ratio
             self.min_body_percentage = config.min_body_percentage
 
+            # v2.18.0: ATR-based Extension Filter (prevents chasing extended moves)
+            self.max_extension_atr = getattr(config, 'max_extension_atr', 0.50)
+            self.max_extension_atr_enabled = getattr(config, 'max_extension_atr_enabled', True)
+
+            # v2.18.0: Momentum Staleness Filter (rejects old swing breaks)
+            self.momentum_staleness_enabled = getattr(config, 'momentum_staleness_enabled', True)
+            self.max_momentum_staleness_bars = getattr(config, 'max_momentum_staleness_bars', 8)
+
             # v1.9.0: Pair-specific SL buffers and confidence floors (now from DB)
             self.pair_sl_buffers = {}  # Loaded from per-pair overrides in DB
             self.pair_min_confidence = {}  # Loaded from per-pair overrides in DB
@@ -524,6 +546,14 @@ class SMCSimpleStrategy:
         self.momentum_quality_enabled = getattr(smc_config, 'MOMENTUM_QUALITY_ENABLED', True)
         self.min_breakout_atr_ratio = getattr(smc_config, 'MIN_BREAKOUT_ATR_RATIO', 0.5)
         self.min_body_percentage = getattr(smc_config, 'MIN_BODY_PERCENTAGE', 0.60)
+
+        # v2.18.0: ATR-based Extension Filter (prevents chasing extended moves)
+        self.max_extension_atr = getattr(smc_config, 'MAX_EXTENSION_ATR', 0.50)
+        self.max_extension_atr_enabled = getattr(smc_config, 'MAX_EXTENSION_ATR_ENABLED', True)
+
+        # v2.18.0: Momentum Staleness Filter (rejects old swing breaks)
+        self.momentum_staleness_enabled = getattr(smc_config, 'MOMENTUM_STALENESS_ENABLED', True)
+        self.max_momentum_staleness_bars = getattr(smc_config, 'MAX_MOMENTUM_STALENESS_BARS', 8)
 
         # v1.9.0: Pair-specific SL buffers and confidence floors
         self.pair_sl_buffers = getattr(smc_config, 'PAIR_SL_BUFFERS', {})
@@ -2489,6 +2519,32 @@ class SMCSimpleStrategy:
                 # v1.8.0: Allow momentum entries within configured range
                 # v2.12.0: Use direction-aware momentum_min_depth
                 if pair_momentum_min <= pullback_depth <= self.momentum_max_depth:
+
+                    # v2.18.0: ATR-based extension filter (prevents chasing extended moves)
+                    if self.max_extension_atr_enabled:
+                        atr = self._calculate_atr(df)
+                        if atr > 0 and swing_range > 0:
+                            # Calculate extension in ATR units
+                            extension_distance = abs(pullback_depth) * swing_range
+                            extension_atr = extension_distance / atr
+
+                            if extension_atr > self.max_extension_atr:
+                                extension_pips = extension_distance / pip_value
+                                max_pips = (self.max_extension_atr * atr) / pip_value
+                                return {
+                                    'valid': False,
+                                    'reason': f"Extension too far ({extension_atr:.2f} ATR / {extension_pips:.1f} pips > {self.max_extension_atr} ATR / {max_pips:.1f} pips max)"
+                                }
+
+                    # v2.18.0: Momentum staleness filter (rejects old swing breaks)
+                    if self.momentum_staleness_enabled and break_candle:
+                        bars_since_break = break_candle.get('bars_ago', 0)
+                        if bars_since_break > self.max_momentum_staleness_bars:
+                            return {
+                                'valid': False,
+                                'reason': f"Momentum entry too stale ({bars_since_break} bars since break > {self.max_momentum_staleness_bars} max)"
+                            }
+
                     entry_type = 'MOMENTUM'
                     # Momentum entries are not in "optimal" Fib zone
                     return {

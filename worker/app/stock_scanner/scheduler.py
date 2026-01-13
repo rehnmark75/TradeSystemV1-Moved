@@ -96,6 +96,14 @@ except ImportError:
     BrokerTradeSync = None
     RoboMarketsClient = None
 
+# Import deep analysis orchestrator for watchlist DAQ scoring
+try:
+    from stock_scanner.services.deep_analysis import DeepAnalysisOrchestrator
+    DEEP_ANALYSIS_AVAILABLE = True
+except ImportError:
+    DEEP_ANALYSIS_AVAILABLE = False
+    DeepAnalysisOrchestrator = None
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -196,6 +204,7 @@ class StockScheduler:
         self.scanner_manager: ScannerManager = None
         self.performance_tracker: PerformanceTracker = None
         self.premarket_service: PreMarketService = None
+        self.deep_analysis_orchestrator: DeepAnalysisOrchestrator = None
         self.running = False
 
     async def setup(self):
@@ -220,6 +229,11 @@ class StockScheduler:
         self.fundamentals = FundamentalsFetcher(db_manager=self.db)
         self.watchlist_builder = WatchlistBuilder(db_manager=self.db)
         self.zlma_strategy = ZeroLagMATrendStrategy(db_manager=self.db)
+
+        # Initialize deep analysis orchestrator if available
+        if DEEP_ANALYSIS_AVAILABLE:
+            self.deep_analysis_orchestrator = DeepAnalysisOrchestrator(self.db)
+            logger.info("Deep Analysis Orchestrator initialized")
 
         # Initialize scanner manager if available
         if SCANNER_MANAGER_AVAILABLE:
@@ -424,9 +438,9 @@ class StockScheduler:
         # === STAGE 6: Build Watchlist ===
         logger.info("\n[STAGE 6/11] Building watchlist...")
         try:
-            watchlist_stats = await self.watchlist_builder.build_watchlist()
+            watchlist_stats = await self.watchlist_builder.build_watchlist(calculation_date=data_date)
             results['watchlist'] = watchlist_stats
-            logger.info(f"[OK] Watchlist: {watchlist_stats['passed_filters']} stocks")
+            logger.info(f"[OK] Watchlist: {watchlist_stats.get('passed_filters', 0)} stocks")
             logger.info(f"     Tier 1: {watchlist_stats['tier_1']}, "
                        f"Tier 2: {watchlist_stats['tier_2']}, "
                        f"Tier 3: {watchlist_stats['tier_3']}, "
@@ -435,8 +449,34 @@ class StockScheduler:
             logger.error(f"[FAIL] Watchlist: {e}")
             results['watchlist'] = {'error': str(e)}
 
-        # === STAGE 6: ZLMA Strategy Signals ===
-        logger.info("\n[STAGE 6/10] Running ZLMA strategy...")
+        # === STAGE 6b: Watchlist DAQ Scoring ===
+        logger.info("\n[STAGE 6b/11] Running watchlist DAQ scoring...")
+        try:
+            if self.deep_analysis_orchestrator and DEEP_ANALYSIS_AVAILABLE:
+                # Run DAQ analysis on tier 1-2 watchlist stocks (top 200)
+                daq_results = await self.deep_analysis_orchestrator.auto_analyze_watchlist(
+                    max_tier=2,
+                    calculation_date=data_date,
+                    max_tickers=200,
+                    skip_analyzed=True  # Don't re-analyze stocks that already have DAQ
+                )
+                successful = [r for r in daq_results if r.daq_score is not None]
+                avg_daq = sum(r.daq_score for r in successful) / max(1, len(successful)) if successful else 0
+                results['watchlist_daq'] = {
+                    'analyzed': len(daq_results),
+                    'successful': len(successful),
+                    'avg_daq': round(avg_daq, 1)
+                }
+                logger.info(f"[OK] Watchlist DAQ: {len(successful)}/{len(daq_results)} stocks scored (avg: {avg_daq:.1f})")
+            else:
+                logger.warning("[SKIP] Deep Analysis Orchestrator not available")
+                results['watchlist_daq'] = {'skipped': True}
+        except Exception as e:
+            logger.error(f"[FAIL] Watchlist DAQ: {e}")
+            results['watchlist_daq'] = {'error': str(e)}
+
+        # === STAGE 6c: ZLMA Strategy Signals ===
+        logger.info("\n[STAGE 6c/11] Running ZLMA strategy...")
         try:
             signals = await self.zlma_strategy.scan_all_stocks()
             results['zlma_signals'] = {
@@ -500,8 +540,34 @@ class StockScheduler:
             logger.error(f"[FAIL] Watchlist Scanner: {e}")
             results['watchlist_scanner'] = {'error': str(e)}
 
+        # === STAGE 8b: Technical Watchlist DAQ Scoring ===
+        logger.info("\n[STAGE 8b/11] Running technical watchlist DAQ scoring...")
+        try:
+            if self.deep_analysis_orchestrator and DEEP_ANALYSIS_AVAILABLE:
+                # Run DAQ analysis on technical watchlist stocks (EMA crossovers, MACD, etc.)
+                tech_wl_results = await self.deep_analysis_orchestrator.auto_analyze_technical_watchlist(
+                    watchlist_name=None,  # Analyze all watchlist types
+                    scan_date=str(data_date),
+                    max_tickers=200,
+                    skip_analyzed=True  # Don't re-analyze stocks that already have DAQ
+                )
+                successful = [r for r in tech_wl_results if r.daq_score is not None]
+                avg_daq = sum(r.daq_score for r in successful) / max(1, len(successful)) if successful else 0
+                results['technical_watchlist_daq'] = {
+                    'analyzed': len(tech_wl_results),
+                    'successful': len(successful),
+                    'avg_daq': round(avg_daq, 1)
+                }
+                logger.info(f"[OK] Technical Watchlist DAQ: {len(successful)}/{len(tech_wl_results)} stocks scored (avg: {avg_daq:.1f})")
+            else:
+                logger.warning("[SKIP] Deep Analysis Orchestrator not available for technical watchlist")
+                results['technical_watchlist_daq'] = {'skipped': True}
+        except Exception as e:
+            logger.error(f"[FAIL] Technical Watchlist DAQ: {e}")
+            results['technical_watchlist_daq'] = {'error': str(e)}
+
         # === STAGE 9: Performance Tracking ===
-        logger.info("\n[STAGE 9/10] Updating signal performance...")
+        logger.info("\n[STAGE 9/11] Updating signal performance...")
         try:
             if self.performance_tracker:
                 status_updates = await self.performance_tracker.update_signal_statuses()
@@ -516,7 +582,7 @@ class StockScheduler:
             results['performance'] = {'error': str(e)}
 
         # === STAGE 10: Claude AI Analysis ===
-        logger.info("\n[STAGE 10/10] Running Claude AI analysis on top signals...")
+        logger.info("\n[STAGE 10/11] Running Claude AI analysis on top signals...")
         try:
             if not config.CLAUDE_ANALYSIS_ENABLED:
                 logger.info("[SKIP] Claude Analysis disabled in config")
@@ -1419,9 +1485,22 @@ async def run_once(task: str):
             await scheduler.fundamentals.run_fundamentals_pipeline()
         elif task == "brokersync":
             await scheduler.run_broker_sync()
+        elif task == "techwldaq":
+            if scheduler.deep_analysis_orchestrator:
+                results = await scheduler.deep_analysis_orchestrator.auto_analyze_technical_watchlist(
+                    watchlist_name=None,
+                    scan_date=None,
+                    max_tickers=200,
+                    skip_analyzed=True
+                )
+                successful = [r for r in results if r.daq_score is not None]
+                avg_daq = sum(r.daq_score for r in successful) / max(1, len(successful)) if successful else 0
+                print(f"Analyzed {len(successful)}/{len(results)} technical watchlist stocks (avg DAQ: {avg_daq:.1f})")
+            else:
+                print("Deep Analysis Orchestrator not available")
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, rs, smc, watchlist, signals, scanners, premarket, premarketpricing, intraday, postmarket, weekly, fundamentals, brokersync")
+            print("Available: pipeline, sync, synthesize, metrics, rs, smc, watchlist, signals, scanners, premarket, premarketpricing, intraday, postmarket, weekly, fundamentals, brokersync, techwldaq")
     finally:
         await scheduler.cleanup()
 
@@ -1433,7 +1512,8 @@ def main():
     parser.add_argument('command', nargs='?', default='run',
                        choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'smc',
                                'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing',
-                               'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync', 'status'],
+                               'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync',
+                               'techwldaq', 'status'],
                        help='Command to execute')
     args = parser.parse_args()
 
@@ -1451,7 +1531,7 @@ def main():
 
     elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'smc', 'watchlist',
                           'signals', 'scanners', 'premarket', 'premarketpricing', 'intraday',
-                          'postmarket', 'weekly', 'fundamentals', 'brokersync']:
+                          'postmarket', 'weekly', 'fundamentals', 'brokersync', 'techwldaq']:
         print(f"Running {args.command}...")
         asyncio.run(run_once(args.command))
 
@@ -1474,11 +1554,12 @@ def main():
         print("  4. rs         - Calculate Relative Strength vs SPY")
         print("  5. smc        - Smart Money Concepts analysis")
         print("  6. watchlist  - Build tiered, scored watchlist")
+        print("  6b. watchlist_daq - DAQ analysis for main watchlist")
         print("  7. zlma       - Run ZLMA strategy")
-        print("  8. scanners   - Run all scanner strategies")
-        print("  9. watchlist_screens - Run 5 predefined watchlist screens")
-        print("  10. performance - Update signal performance tracking")
-        print("  11. claude    - Run Claude AI analysis on top signals")
+        print("  8. scanners   - Run all scanner strategies + DAQ")
+        print("  8b. tech_wl_daq - DAQ analysis for technical watchlists")
+        print("  9. performance - Update signal performance tracking")
+        print("  10. claude    - Run Claude AI analysis on top signals")
 
         print(f"\nNext scheduled tasks:")
         print(f"  Full pipeline: {scheduler.get_next_pipeline()}")
@@ -1499,6 +1580,7 @@ def main():
         print("  smc              - Run SMC analysis only")
         print("  watchlist        - Build watchlist only")
         print("  brokersync       - Sync broker trades to database")
+        print("  techwldaq        - Run DAQ analysis for technical watchlists")
 
 
 if __name__ == '__main__':

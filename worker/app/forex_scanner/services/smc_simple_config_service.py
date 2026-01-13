@@ -89,6 +89,16 @@ class SMCSimpleConfig:
     min_breakout_atr_ratio: float = 0.5
     min_body_percentage: float = 0.20
 
+    # v2.18.0: ATR-BASED EXTENSION FILTER
+    # Prevents chasing extended moves beyond swing break
+    max_extension_atr: float = 0.50  # Max extension in ATR units (0.5 ATR = ~10-15 pips)
+    max_extension_atr_enabled: bool = True  # Enable/disable ATR-based extension filter
+
+    # v2.18.0: MOMENTUM STALENESS FILTER
+    # Rejects momentum entries if swing break is too old
+    momentum_staleness_enabled: bool = True
+    max_momentum_staleness_bars: int = 8  # Max bars since swing break (~2 hours on 15m)
+
     # LIMIT ORDER CONFIGURATION
     limit_order_enabled: bool = True
     limit_expiry_minutes: int = 45
@@ -906,6 +916,8 @@ class SMCSimpleConfigService:
             'use_atr_swing_validation', 'atr_period', 'min_swing_atr_multiplier',
             'fallback_min_swing_pips',
             'momentum_quality_enabled', 'min_breakout_atr_ratio', 'min_body_percentage',
+            'max_extension_atr', 'max_extension_atr_enabled',
+            'momentum_staleness_enabled', 'max_momentum_staleness_bars',
             'limit_order_enabled', 'limit_expiry_minutes',
             'pullback_offset_atr_factor', 'pullback_offset_min_pips', 'pullback_offset_max_pips',
             'momentum_offset_pips', 'min_risk_after_offset_pips',
@@ -945,6 +957,7 @@ class SMCSimpleConfigService:
             'max_consecutive_losses_before_block', 'win_rate_lookback_trades',
             'rejection_batch_size', 'rejection_retention_days',
             'swing_proximity_min_distance_pips', 'swing_proximity_lookback_swings',
+            'max_momentum_staleness_bars',
         }
 
         for attr_name in direct_mappings:
