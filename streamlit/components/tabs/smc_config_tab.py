@@ -690,6 +690,9 @@ def render_global_settings(config: Dict[str, Any]):
                 if success:
                     st.success("Configuration saved successfully!")
                     st.session_state.smc_pending_changes = {}
+                    # Clear the cache so fresh data is loaded
+                    get_global_config.clear()
+                    get_pair_overrides.clear()
                     st.rerun()
                 else:
                     st.error("Failed to save configuration")
@@ -1297,6 +1300,8 @@ def render_pair_overrides(config: Dict[str, Any]):
                     )
                     if success:
                         st.success("Override saved!")
+                        get_global_config.clear()
+                        get_pair_overrides.clear()
                         st.rerun()
 
         with col_delete:
@@ -1307,6 +1312,8 @@ def render_pair_overrides(config: Dict[str, Any]):
                     )
                     if success:
                         st.success("Override deleted!")
+                        get_global_config.clear()
+                        get_pair_overrides.clear()
                         st.rerun()
 
     else:
@@ -1390,6 +1397,8 @@ def render_pair_overrides(config: Dict[str, Any]):
             )
             if success:
                 st.success("Override created!")
+                get_global_config.clear()
+                get_pair_overrides.clear()
                 st.rerun()
 
     # Show all existing overrides
