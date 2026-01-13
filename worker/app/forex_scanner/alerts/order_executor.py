@@ -16,6 +16,10 @@ v3.1.0 (2026-01-13): Status-based cooldowns + fresh price recalculation
     - NEW: _get_fresh_price() fetches live bid/ask for entry recalculation
     - NEW: Entry recalculation with R:R validation (rejects if R:R < 1.3 after drift)
     - IMPACT: Expired orders only trigger 30min cooldown instead of 4h
+v3.1.1 (2026-01-13): STOP order validation fix
+    - FIXED: _get_fresh_price() now uses ig_candles instead of non-existent bid/ask columns
+    - NEW: STOP order validation - validates entry level is above/below market for BUY/SELL
+    - IMPACT: Prevents ATTACHED_ORDER_LEVEL_ERROR from IG by pre-validating entry levels
 """
 
 import requests
@@ -475,6 +479,56 @@ class OrderExecutor:
 
                         entry_level = new_entry
                         signal['entry_price'] = new_entry
+
+            # v2.19.1: Validate STOP order entry level against current market price
+            # For working orders (limit entries), IG uses STOP type where:
+            # - BUY STOP: entry must be ABOVE current market price (triggered when price rises)
+            # - SELL STOP: entry must be BELOW current market price (triggered when price falls)
+            if order_type == 'limit' and entry_level:
+                fresh = self._get_fresh_price(internal_epic)
+                if fresh.get('valid'):
+                    current_price = fresh['price']
+                    pip_value = fresh['pip_value']
+                    min_buffer_pips = 1.0  # Minimum buffer to avoid race conditions
+                    min_buffer = min_buffer_pips * pip_value
+
+                    if direction == 'BUY':
+                        # BUY STOP: entry must be above current price
+                        if entry_level <= current_price + min_buffer:
+                            gap_pips = (current_price - entry_level) / pip_value
+                            self.logger.warning(
+                                f"❌ BUY STOP invalid: entry {entry_level:.5f} must be above market {current_price:.5f} "
+                                f"(gap: {gap_pips:.1f} pips)"
+                            )
+                            if alert_id:
+                                self._update_alert_status(alert_id, 'rejected')
+                            return {
+                                'status': 'error',
+                                'message': f'BUY STOP entry {entry_level:.5f} invalid - market at {current_price:.5f}',
+                                'alert_id': alert_id,
+                                'reason': 'STOP_LEVEL_INVALID'
+                            }
+                    else:  # SELL
+                        # SELL STOP: entry must be below current price
+                        if entry_level >= current_price - min_buffer:
+                            gap_pips = (entry_level - current_price) / pip_value
+                            self.logger.warning(
+                                f"❌ SELL STOP invalid: entry {entry_level:.5f} must be below market {current_price:.5f} "
+                                f"(gap: {gap_pips:.1f} pips)"
+                            )
+                            if alert_id:
+                                self._update_alert_status(alert_id, 'rejected')
+                            return {
+                                'status': 'error',
+                                'message': f'SELL STOP entry {entry_level:.5f} invalid - market at {current_price:.5f}',
+                                'alert_id': alert_id,
+                                'reason': 'STOP_LEVEL_INVALID'
+                            }
+
+                    self.logger.info(
+                        f"✅ STOP order validated: {direction} @ {entry_level:.5f}, market @ {current_price:.5f} "
+                        f"(buffer: {abs(entry_level - current_price) / pip_value:.1f} pips)"
+                    )
 
             if order_type == 'limit' and entry_level:
                 self.logger.info(f"📊 LIMIT Order: Entry={entry_level:.5f}, Stop={stop_distance}pips, TP={limit_distance}pips ({confidence:.1%})")
@@ -1601,15 +1655,18 @@ class OrderExecutor:
             return False
 
     def _get_fresh_price(self, epic: str) -> Dict:
-        """Get fresh bid/ask from preferred_forex_prices table.
+        """Get fresh price from ig_candles table (latest 1m candle close).
 
         v2.19.0: Used for entry price recalculation to prevent stale entries.
+        v2.19.1: Fixed to use ig_candles instead of non-existent bid/ask columns.
+        v2.19.2: Use 1m candles (timeframe=1) since that's what Lightstreamer streams.
+                 Higher timeframes (5m, 15m, etc.) are synthesized on-the-fly.
 
         Args:
             epic: IG Markets epic code (internal format)
 
         Returns:
-            Dict with: valid, price, pip_value, age_seconds, bid, ask
+            Dict with: valid, price, pip_value, age_seconds
         """
         import psycopg2
         try:
@@ -1620,11 +1677,13 @@ class OrderExecutor:
                 password='postgres'
             )
             cursor = conn.cursor()
+            # Use 1m candles - this is what Lightstreamer actually streams
+            # Higher timeframes are synthesized on-the-fly by DataFetcher
             cursor.execute("""
-                SELECT bid, ask, updated_at
-                FROM preferred_forex_prices
-                WHERE epic = %s
-                ORDER BY updated_at DESC
+                SELECT close, high, low, start_time
+                FROM ig_candles
+                WHERE epic = %s AND timeframe = 1
+                ORDER BY start_time DESC
                 LIMIT 1
             """, (epic,))
             row = cursor.fetchone()
@@ -1632,21 +1691,24 @@ class OrderExecutor:
             conn.close()
 
             if row:
-                bid, ask, updated_at = row
-                age = (datetime.now() - updated_at).total_seconds()
+                close_price, high, low, start_time = row
+                age = (datetime.now() - start_time).total_seconds()
                 pip_value = 0.01 if 'JPY' in epic else 0.0001
-                mid_price = (float(bid) + float(ask)) / 2
+
+                # Consider stale if older than 5 minutes (market might be closed)
+                if age > 300:
+                    self.logger.warning(f"⚠️ Fresh price is {age:.0f}s old - market may be closed")
 
                 return {
                     'valid': True,
-                    'price': mid_price,
-                    'bid': float(bid),
-                    'ask': float(ask),
+                    'price': float(close_price),
+                    'high': float(high),
+                    'low': float(low),
                     'pip_value': pip_value,
                     'age_seconds': age
                 }
 
-            return {'valid': False, 'reason': 'No price data found'}
+            return {'valid': False, 'reason': 'No 1m price data found'}
 
         except Exception as e:
             self.logger.error(f"❌ Fresh price fetch error: {e}")
