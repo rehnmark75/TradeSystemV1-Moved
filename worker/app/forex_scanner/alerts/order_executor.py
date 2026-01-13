@@ -9,6 +9,13 @@ ENHANCED: Added robust retry logic with exponential backoff and circuit breaker
 ENHANCED: Comprehensive timeout handling for HTTPConnectionPool errors
 v2.0.0: Added limit order (working order) support for SMC_SIMPLE strategy
 v3.0.0: Migrated to database-only configuration - NO FALLBACK to config.py
+v3.1.0 (2026-01-13): Status-based cooldowns + fresh price recalculation
+    - NEW: _update_alert_status() updates order lifecycle (pending->placed->filled/expired/rejected)
+    - NEW: check_working_order_expiry() detects expired limit orders
+    - NEW: mark_alert_filled() called when trade opens (triggers full cooldown)
+    - NEW: _get_fresh_price() fetches live bid/ask for entry recalculation
+    - NEW: Entry recalculation with R:R validation (rejects if R:R < 1.3 after drift)
+    - IMPACT: Expired orders only trigger 30min cooldown instead of 4h
 """
 
 import requests
@@ -412,6 +419,63 @@ class OrderExecutor:
             limit_expiry_minutes = signal.get('limit_expiry_minutes', 15)
             limit_offset_pips = signal.get('limit_offset_pips', 0)
 
+            # v2.19.0: Fresh price recalculation for limit orders
+            if order_type == 'limit' and entry_level:
+                fresh = self._get_fresh_price(internal_epic)
+                if fresh.get('valid'):
+                    original_entry = entry_level
+                    drift_pips = abs(fresh['price'] - original_entry) / fresh['pip_value']
+
+                    # Check if drift is unfavorable (price moved against us)
+                    if direction == 'BUY':
+                        unfavorable = fresh['price'] > original_entry  # Price went up, worse entry
+                    else:
+                        unfavorable = fresh['price'] < original_entry  # Price went down, worse entry
+
+                    # Tighter threshold for unfavorable drift
+                    max_drift = 2.0 if unfavorable else 3.0
+
+                    if drift_pips > max_drift:
+                        # Recalculate entry price from fresh data
+                        offset = limit_offset_pips * fresh['pip_value']
+                        new_entry = fresh['price'] + offset if direction == 'BUY' else fresh['price'] - offset
+
+                        # Revalidate R:R after recalculation
+                        stop_loss = signal.get('stop_loss')
+                        take_profit = signal.get('take_profit')
+
+                        if stop_loss and take_profit:
+                            new_sl_distance = abs(new_entry - float(stop_loss))
+                            new_tp_distance = abs(float(take_profit) - new_entry)
+                            new_rr = new_tp_distance / new_sl_distance if new_sl_distance > 0 else 0
+
+                            if new_rr < 1.3:  # Minimum R:R after recalc
+                                self.logger.warning(
+                                    f"❌ Entry rejected: R:R degraded to {new_rr:.2f} after recalc "
+                                    f"(drift: {drift_pips:.1f} pips {'unfavorable' if unfavorable else 'favorable'})"
+                                )
+                                # Mark as rejected if we have alert_id
+                                if alert_id:
+                                    self._update_alert_status(alert_id, 'rejected')
+                                return {
+                                    'status': 'error',
+                                    'message': f'R:R too low after price drift: {new_rr:.2f}',
+                                    'alert_id': alert_id
+                                }
+
+                            self.logger.info(
+                                f"🔄 Entry recalculated: {original_entry:.5f} -> {new_entry:.5f} "
+                                f"(drift: {drift_pips:.1f} pips, R:R: {new_rr:.2f})"
+                            )
+                        else:
+                            self.logger.info(
+                                f"🔄 Entry recalculated: {original_entry:.5f} -> {new_entry:.5f} "
+                                f"(drift: {drift_pips:.1f} pips, no R:R validation)"
+                            )
+
+                        entry_level = new_entry
+                        signal['entry_price'] = new_entry
+
             if order_type == 'limit' and entry_level:
                 self.logger.info(f"📊 LIMIT Order: Entry={entry_level:.5f}, Stop={stop_distance}pips, TP={limit_distance}pips ({confidence:.1%})")
                 self.logger.info(f"   Offset: {limit_offset_pips:.1f} pips, Expiry: {limit_expiry_minutes} min")
@@ -423,17 +487,26 @@ class OrderExecutor:
                 signal, external_epic, direction, stop_distance, limit_distance,
                 custom_label, alert_id, order_type, entry_level, limit_expiry_minutes
             )
-            
+
             # Record success with circuit breaker
             self.circuit_breaker.record_success()
             self.request_stats['successful_requests'] += 1
-            
+
+            # v2.19.0: Update order status based on result
+            if alert_id:
+                result_status = result.get('status')
+                if result_status in ['success', 'pending']:
+                    # Order placed successfully (market filled or limit pending)
+                    self._update_alert_status(alert_id, 'placed')
+                elif result_status == 'error':
+                    self._update_alert_status(alert_id, 'rejected')
+
             # Track pending trade for performance monitoring (use internal epic for consistency)
             if result.get('status') == 'success':
                 trade_id = self._extract_trade_id(result)
                 if trade_id:
                     self._track_pending_trade(trade_id, signal, direction, stop_distance, limit_distance, alert_id)
-            
+
             return result
             
         except Exception as e:
@@ -1385,3 +1458,196 @@ class OrderExecutor:
             return int(min_sl)
 
         return stop_distance
+
+    # ========== v2.19.0: STATUS-BASED COOLDOWN SUPPORT ==========
+
+    def _update_alert_status(self, alert_id: int, status: str) -> bool:
+        """Update order_status in alert_history for status-based cooldowns.
+
+        v2.19.0: Tracks order lifecycle for intelligent cooldown management.
+        Status values: pending, placed, filled, expired, rejected
+
+        Args:
+            alert_id: Database ID of the alert
+            status: New order status
+
+        Returns:
+            True if update successful, False otherwise
+        """
+        import psycopg2
+        try:
+            conn = psycopg2.connect(
+                host='postgres',
+                database='forex',
+                user='postgres',
+                password='postgres'
+            )
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE alert_history
+                SET order_status = %s, updated_at = NOW()
+                WHERE id = %s
+            """, (status, alert_id))
+            conn.commit()
+            rows_updated = cursor.rowcount
+            cursor.close()
+            conn.close()
+
+            if rows_updated > 0:
+                self.logger.info(f"📊 Alert {alert_id} status -> {status}")
+                return True
+            else:
+                self.logger.warning(f"⚠️ Alert {alert_id} not found for status update")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to update alert status: {e}")
+            return False
+
+    def check_working_order_expiry(self) -> int:
+        """Check for expired working orders and update status.
+
+        v2.19.0: Detects limit orders that expired without filling,
+        allowing status-based cooldowns to free up the pair sooner.
+
+        Returns:
+            Number of orders marked as expired
+        """
+        import psycopg2
+        try:
+            conn = psycopg2.connect(
+                host='postgres',
+                database='forex',
+                user='postgres',
+                password='postgres'
+            )
+            cursor = conn.cursor()
+
+            # Find alerts that are 'placed' but older than expiry window (10 min safety buffer)
+            cursor.execute("""
+                UPDATE alert_history
+                SET order_status = 'expired', updated_at = NOW()
+                WHERE order_status = 'placed'
+                  AND alert_timestamp < NOW() - INTERVAL '10 minutes'
+                RETURNING id, epic
+            """)
+
+            expired = cursor.fetchall()
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            for alert_id, epic in expired:
+                self.logger.info(f"⏰ Alert {alert_id} ({epic}) marked expired")
+
+            return len(expired)
+
+        except Exception as e:
+            self.logger.error(f"❌ Expiry check error: {e}")
+            return 0
+
+    def mark_alert_filled(self, epic: str, deal_reference: str = None) -> bool:
+        """Mark the most recent placed alert as filled when trade opens.
+
+        v2.19.0: Called when a trade is confirmed open, triggers full 4h cooldown.
+
+        Args:
+            epic: IG Markets epic code
+            deal_reference: Optional broker deal reference for logging
+
+        Returns:
+            True if an alert was marked filled, False otherwise
+        """
+        import psycopg2
+        try:
+            conn = psycopg2.connect(
+                host='postgres',
+                database='forex',
+                user='postgres',
+                password='postgres'
+            )
+            cursor = conn.cursor()
+
+            # Find most recent 'placed' alert for this epic
+            cursor.execute("""
+                UPDATE alert_history
+                SET order_status = 'filled', updated_at = NOW()
+                WHERE id = (
+                    SELECT id FROM alert_history
+                    WHERE epic = %s
+                      AND order_status = 'placed'
+                      AND alert_timestamp >= NOW() - INTERVAL '15 minutes'
+                    ORDER BY alert_timestamp DESC
+                    LIMIT 1
+                )
+                RETURNING id
+            """, (epic,))
+
+            result = cursor.fetchone()
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            if result:
+                deal_info = f" (deal: {deal_reference})" if deal_reference else ""
+                self.logger.info(f"✅ Alert {result[0]} marked filled{deal_info}")
+                return True
+            else:
+                self.logger.debug(f"No recent placed alert found for {epic}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"❌ Fill update error: {e}")
+            return False
+
+    def _get_fresh_price(self, epic: str) -> Dict:
+        """Get fresh bid/ask from preferred_forex_prices table.
+
+        v2.19.0: Used for entry price recalculation to prevent stale entries.
+
+        Args:
+            epic: IG Markets epic code (internal format)
+
+        Returns:
+            Dict with: valid, price, pip_value, age_seconds, bid, ask
+        """
+        import psycopg2
+        try:
+            conn = psycopg2.connect(
+                host='postgres',
+                database='forex',
+                user='postgres',
+                password='postgres'
+            )
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT bid, ask, updated_at
+                FROM preferred_forex_prices
+                WHERE epic = %s
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """, (epic,))
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if row:
+                bid, ask, updated_at = row
+                age = (datetime.now() - updated_at).total_seconds()
+                pip_value = 0.01 if 'JPY' in epic else 0.0001
+                mid_price = (float(bid) + float(ask)) / 2
+
+                return {
+                    'valid': True,
+                    'price': mid_price,
+                    'bid': float(bid),
+                    'ask': float(ask),
+                    'pip_value': pip_value,
+                    'age_seconds': age
+                }
+
+            return {'valid': False, 'reason': 'No price data found'}
+
+        except Exception as e:
+            self.logger.error(f"❌ Fresh price fetch error: {e}")
+            return {'valid': False, 'reason': str(e)}
