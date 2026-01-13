@@ -62,6 +62,13 @@ UPDATE smc_simple_global_config SET fib_pullback_min = 0.15 WHERE is_active = TR
 -- Expected: +5 more signals/day
 UPDATE smc_simple_global_config SET fib_pullback_max = 0.80 WHERE is_active = TRUE;
 
+-- 1.9: Disable MACD Alignment Filter
+-- Before: enabled | After: disabled
+-- Rationale: EMA slope validation (v2.16.0) now handles direction confirmation
+-- The MACD filter was added when EMA slope was broken, now redundant
+-- 7 rejections/day removed
+UPDATE smc_simple_global_config SET macd_alignment_filter_enabled = FALSE WHERE is_active = TRUE;
+
 -- ============================================================================
 -- ROLLBACK (if needed):
 -- ============================================================================
@@ -75,7 +82,8 @@ UPDATE smc_simple_global_config SET
     min_breakout_atr_ratio = 0.50,
     ema_slope_min_atr_multiplier = 0.5,
     fib_pullback_min = 0.20,
-    fib_pullback_max = 0.70
+    fib_pullback_max = 0.70,
+    macd_alignment_filter_enabled = TRUE
 WHERE is_active = TRUE;
 */
 
