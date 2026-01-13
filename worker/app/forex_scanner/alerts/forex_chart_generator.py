@@ -211,6 +211,11 @@ class ForexChartGenerator:
                     self._add_entry_price_marker(ax, df, signal)
                     self._add_current_price_marker(ax, df)
 
+                # [CHART_IMPROVE_V2] Add entry arrow marker and trade summary box on 5m
+                if tf == '5m' and signal:
+                    self._add_entry_arrow_marker(ax, df, signal)
+                    self._add_trade_summary_box(ax, df, signal)
+
                 # [CHART_IMPROVE_V1] Add swing break level on 15m and 5m (always, not just when smc_data present)
                 if tf in ['15m', '5m'] and signal:
                     self._add_swing_break_level(ax, df, signal, tf)
@@ -583,6 +588,174 @@ class ForexChartGenerator:
     # ========================================================================
     # [CHART_IMPROVE_V1] New methods for improved Claude vision analysis
     # ========================================================================
+
+    def _add_entry_arrow_marker(
+        self,
+        ax,
+        df: pd.DataFrame,
+        signal: Dict[str, Any]
+    ) -> None:
+        """
+        [CHART_IMPROVE_V2] Add a prominent arrow marker at the entry level.
+
+        Draws a large, highly visible arrow pointing to where the trade entry
+        is planned. This makes it unmistakably clear to Claude where the entry is.
+        """
+        try:
+            # Get entry price
+            entry_price = (
+                signal.get('entry_price') or
+                signal.get('price') or
+                signal.get('limit_price')
+            )
+
+            if not entry_price:
+                return
+
+            x_max = len(df) - 1
+            direction = signal.get('signal_type', signal.get('signal', '')).upper()
+
+            # Determine arrow direction based on trade direction
+            if direction in ['BULL', 'BUY']:
+                arrow_symbol = '▲'
+                arrow_color = '#00e676'  # Bright green
+                y_offset = -0.0003  # Arrow below entry for BULL
+            else:
+                arrow_symbol = '▼'
+                arrow_color = '#ff1744'  # Bright red
+                y_offset = 0.0003  # Arrow above entry for BEAR
+
+            # Draw a large arrow at the right side of the chart pointing to entry
+            ax.annotate(
+                arrow_symbol,
+                xy=(x_max - 3, entry_price),
+                fontsize=24,
+                fontweight='bold',
+                color=arrow_color,
+                ha='center',
+                va='center',
+                zorder=15,
+                bbox=dict(
+                    boxstyle='circle,pad=0.1',
+                    facecolor='white',
+                    edgecolor=arrow_color,
+                    linewidth=2,
+                    alpha=0.95
+                )
+            )
+
+            # Draw a horizontal line from arrow to entry price on right edge
+            ax.annotate(
+                '',
+                xy=(x_max, entry_price),
+                xytext=(x_max - 2, entry_price),
+                arrowprops=dict(
+                    arrowstyle='-|>',
+                    color=arrow_color,
+                    lw=2,
+                    mutation_scale=15
+                ),
+                zorder=14
+            )
+
+            logger.debug(f"Added entry arrow marker at {entry_price}")
+
+        except Exception as e:
+            logger.warning(f"Error adding entry arrow marker: {e}")
+
+    def _add_trade_summary_box(
+        self,
+        ax,
+        df: pd.DataFrame,
+        signal: Dict[str, Any]
+    ) -> None:
+        """
+        [CHART_IMPROVE_V2] Add a compact trade summary box to the chart.
+
+        This box contains key trading stats in a highly visible format:
+        - Entry type (PULLBACK/MOMENTUM)
+        - Stop Loss in pips
+        - Take Profit in pips
+        - Risk:Reward ratio
+        - Confidence score
+
+        Positioned in the lower-left to avoid overlapping with price action.
+        """
+        try:
+            # Extract key trade data
+            direction = signal.get('signal_type', signal.get('signal', '')).upper()
+            entry_type = signal.get('entry_type', 'UNKNOWN')
+            confidence = signal.get('confidence_score', 0)
+            rr_ratio = signal.get('rr_ratio', 0)
+
+            # Get SL/TP from strategy_indicators or signal
+            strategy_indicators = signal.get('strategy_indicators', {})
+            risk_mgmt = strategy_indicators.get('risk_management', {})
+
+            risk_pips = risk_mgmt.get('risk_pips', signal.get('risk_pips', 0))
+            reward_pips = risk_mgmt.get('reward_pips', signal.get('reward_pips', 0))
+
+            # Get pullback depth for context
+            tier3_entry = strategy_indicators.get('tier3_entry', {})
+            pullback_depth = tier3_entry.get('pullback_depth', signal.get('pullback_depth', 0))
+
+            # Build summary text
+            dir_emoji = '🟢' if direction in ['BULL', 'BUY'] else '🔴'
+            entry_emoji = '⬇' if entry_type == 'PULLBACK' else '⚡'
+
+            summary_lines = [
+                f"{dir_emoji} {direction}",
+                f"{entry_emoji} {entry_type}",
+                f"──────────",
+                f"SL: {risk_pips:.1f} pips",
+                f"TP: {reward_pips:.1f} pips",
+                f"R:R {rr_ratio:.2f}:1",
+                f"──────────",
+                f"Conf: {confidence:.0%}",
+            ]
+
+            # Add pullback depth if relevant
+            if entry_type == 'PULLBACK' and pullback_depth:
+                summary_lines.append(f"Depth: {abs(pullback_depth)*100:.0f}%")
+
+            summary_text = '\n'.join(summary_lines)
+
+            # Position in lower-left of chart
+            y_min = df['Low'].min()
+            y_range = df['High'].max() - y_min
+
+            # Determine box color based on direction
+            if direction in ['BULL', 'BUY']:
+                box_color = '#1b5e20'  # Dark green
+                border_color = '#4caf50'  # Light green
+            else:
+                box_color = '#b71c1c'  # Dark red
+                border_color = '#f44336'  # Light red
+
+            # Draw the summary box
+            ax.annotate(
+                summary_text,
+                xy=(2, y_min + y_range * 0.05),
+                fontsize=9,
+                fontfamily='monospace',
+                fontweight='bold',
+                color='white',
+                ha='left',
+                va='bottom',
+                zorder=20,
+                bbox=dict(
+                    boxstyle='round,pad=0.5',
+                    facecolor=box_color,
+                    edgecolor=border_color,
+                    linewidth=2,
+                    alpha=0.92
+                )
+            )
+
+            logger.debug(f"Added trade summary box: {direction} {entry_type}")
+
+        except Exception as e:
+            logger.warning(f"Error adding trade summary box: {e}")
 
     def _add_entry_price_marker(
         self,
@@ -1050,13 +1223,13 @@ class ForexChartGenerator:
                 if ob_low > price_max or ob_high < price_min:
                     continue  # OB outside visible range
 
-                # [CHART_IMPROVE_V1] Improved OB visualization
+                # [CHART_IMPROVE_V2] Narrow OB visualization - just indicate the zone
                 # Get start index for the rectangle
                 start_idx = ob.get('start_index', max(0, x_max - 40))
 
-                # [CHART_IMPROVE_V1] Limit OB width to max 15 bars to reduce clutter
-                # OBs are zones, not infinite extensions
-                ob_width = min(15, x_max - start_idx)
+                # [CHART_IMPROVE_V2] Very narrow OB width - just 5 bars max
+                # OBs should indicate the zone, not dominate the chart
+                ob_width = min(5, max(2, x_max - start_idx))
 
                 # Determine colors based on OB type
                 if 'bull' in str(ob_type).lower():
@@ -1068,49 +1241,48 @@ class ForexChartGenerator:
                     border_color = self.COLORS['order_block_border_bear']
                     label = 'Bear OB'
 
-                # [CHART_IMPROVE_V1] Draw Order Block as a limited-width rectangle
-                # Also draw a horizontal line extending to show the zone level
+                # [CHART_IMPROVE_V2] Draw Order Block as a narrow rectangle
                 rect = plt.Rectangle(
                     (start_idx, ob_low),
-                    ob_width,  # Limited width instead of x_max - start_idx
+                    ob_width,  # Narrow width - just 5 bars max
                     ob_high - ob_low,
                     facecolor=fill_color,
                     edgecolor=border_color,
-                    linewidth=2,
-                    linestyle='-',  # Solid border for better visibility
-                    alpha=0.4,  # Slightly reduced opacity
+                    linewidth=1.5,
+                    linestyle='-',
+                    alpha=0.25,  # Lower opacity to not obscure candles
                     label=label if ob_count == 0 else None
                 )
                 ax.add_patch(rect)
 
-                # [CHART_IMPROVE_V1] Add horizontal dashed line showing OB zone extends
+                # [CHART_IMPROVE_V2] Add horizontal dashed line showing OB zone level extends
                 mid_price = (ob_high + ob_low) / 2
                 ax.axhline(
                     y=mid_price,
-                    xmin=(start_idx + ob_width) / x_max,
+                    xmin=(start_idx + ob_width) / x_max if x_max > 0 else 0,
                     xmax=1.0,
                     color=border_color,
                     linestyle=':',
                     linewidth=1,
-                    alpha=0.5
+                    alpha=0.4
                 )
 
                 # Add label on the left side of the OB
                 ax.annotate(
                     'OB',
                     xy=(start_idx + 1, mid_price),
-                    fontsize=9,
+                    fontsize=8,
                     color=border_color,
                     fontweight='bold',
                     ha='left',
                     va='center',
-                    alpha=0.95,
+                    alpha=0.9,
                     bbox=dict(
-                        boxstyle='round,pad=0.2',
+                        boxstyle='round,pad=0.15',
                         facecolor='white',
                         edgecolor=border_color,
-                        linewidth=1.5,
-                        alpha=0.9
+                        linewidth=1,
+                        alpha=0.85
                     )
                 )
 

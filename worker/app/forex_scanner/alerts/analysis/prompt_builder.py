@@ -728,6 +728,10 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 **Key Visual Markers (on 5m chart):**
 - YELLOW shaded zone: Fibonacci optimal entry zone (38.2%-61.8%)
 - Entry Type Box (top-right): Shows PULLBACK/MOMENTUM, depth %, zone status, volume ✓/✗
+- LARGE ARROW MARKER (▲/▼ in circle): Points to the EXACT entry price level - this is where the trade will be entered
+- TRADE SUMMARY BOX (lower-left): Contains key stats - Direction, Entry Type, SL pips, TP pips, R:R ratio, Confidence %
+- GREEN dashed line with "ENTRY" label: Entry price level
+- "NOW" marker: Shows where current price is relative to entry
 {momentum_note}
 **CRITICAL CHART ANALYSIS CHECKLIST:**
 1. ✓ Is price clearly respecting the 4H EMA trend direction?
