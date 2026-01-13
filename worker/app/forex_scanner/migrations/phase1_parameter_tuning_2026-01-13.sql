@@ -55,6 +55,13 @@ UPDATE smc_simple_global_config SET ema_slope_min_atr_multiplier = 0.2 WHERE is_
 -- Expected: +8 more signals/day
 UPDATE smc_simple_global_config SET fib_pullback_min = 0.15 WHERE is_active = TRUE;
 
+-- 1.8: Pullback Maximum Threshold
+-- Before: 0.70 (70%) | After: 0.80 (80%)
+-- Rationale: 13 rejections in 24h, 5 at 70-80% (borderline valid deep pullbacks)
+-- Risk: Deeper pullbacks have higher failure rate - MONITOR CLOSELY
+-- Expected: +5 more signals/day
+UPDATE smc_simple_global_config SET fib_pullback_max = 0.80 WHERE is_active = TRUE;
+
 -- ============================================================================
 -- ROLLBACK (if needed):
 -- ============================================================================
@@ -67,7 +74,8 @@ UPDATE smc_simple_global_config SET
     max_extension_atr = 0.50,
     min_breakout_atr_ratio = 0.50,
     ema_slope_min_atr_multiplier = 0.5,
-    fib_pullback_min = 0.20
+    fib_pullback_min = 0.20,
+    fib_pullback_max = 0.70
 WHERE is_active = TRUE;
 */
 
