@@ -49,6 +49,12 @@ UPDATE smc_simple_global_config SET min_breakout_atr_ratio = 0.35 WHERE is_activ
 -- Expected: Fewer false rejections during consolidation
 UPDATE smc_simple_global_config SET ema_slope_min_atr_multiplier = 0.2 WHERE is_active = TRUE;
 
+-- 1.7: Pullback Minimum Threshold
+-- Before: 0.20 (20%) | After: 0.15 (15%)
+-- Rationale: 42 rejections in 24h, 8 at 15-20% (borderline good entries)
+-- Expected: +8 more signals/day
+UPDATE smc_simple_global_config SET fib_pullback_min = 0.15 WHERE is_active = TRUE;
+
 -- ============================================================================
 -- ROLLBACK (if needed):
 -- ============================================================================
@@ -60,7 +66,8 @@ UPDATE smc_simple_global_config SET
     max_momentum_staleness_bars = 8,
     max_extension_atr = 0.50,
     min_breakout_atr_ratio = 0.50,
-    ema_slope_min_atr_multiplier = 0.5
+    ema_slope_min_atr_multiplier = 0.5,
+    fib_pullback_min = 0.20
 WHERE is_active = TRUE;
 */
 
