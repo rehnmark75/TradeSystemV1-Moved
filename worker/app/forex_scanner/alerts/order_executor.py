@@ -365,12 +365,27 @@ class OrderExecutor:
             else:
                 self.logger.debug(f"📋 Using strategy-provided limit_distance: {limit_distance} pips")
 
-            # === FIXED SL/TP OVERRIDE (database-driven, per-pair configurable) ===
+            # === SL/TP OVERRIDE (database-driven, per-pair configurable) ===
+            # NOTE: In scalp mode, broker SL must be ~10 pips as SAFETY NET
+            # The actual tight stop (3-4 pips) is handled by VSL streaming service
             try:
                 from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
 
                 smc_config = get_smc_simple_config()
-                if smc_config.fixed_sl_tp_override_enabled:
+
+                # v3.2.0: In scalp mode, set broker SL to safety net value and override TP
+                if getattr(smc_config, 'scalp_mode_enabled', False):
+                    BROKER_SAFETY_SL_PIPS = 10  # Safety net if VSL streaming fails
+                    scalp_tp = getattr(smc_config, 'scalp_tp_pips', 5.0)
+                    original_sl = stop_distance
+                    original_tp = limit_distance
+                    stop_distance = BROKER_SAFETY_SL_PIPS  # Broker SL as safety net
+                    limit_distance = int(scalp_tp)
+                    self.logger.info(
+                        f"🎯 [SCALP MODE] SL/TP [{internal_epic}]: SL {original_sl}→{stop_distance} (safety net), "
+                        f"TP {original_tp}→{limit_distance} pips (VSL handles tight 3-4 pip stop)"
+                    )
+                elif smc_config.fixed_sl_tp_override_enabled:
                     # Get per-pair SL/TP (falls back to global if not set)
                     pair_sl = smc_config.get_pair_fixed_stop_loss(internal_epic)
                     pair_tp = smc_config.get_pair_fixed_take_profit(internal_epic)
@@ -538,10 +553,26 @@ class OrderExecutor:
             else:
                 self.logger.info(f"📊 MARKET Order: Stop={stop_distance}pips, TP={limit_distance}pips ({confidence:.1%})")
 
+            # v3.2.0: Detect scalp mode from SMC config for VSL (Virtual Stop Loss) system
+            # NOTE: virtual_sl_pips is NOT passed - VSL service uses its own per-pair config
+            # (3 pips for majors, 4 pips for JPY) from config_virtual_stop.py
+            # The broker SL (~10 pips) is just a safety net if streaming fails
+            is_scalp_trade = False
+            virtual_sl_pips = None  # Let VSL service use its per-pair config
+            try:
+                from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+                smc_config = get_smc_simple_config()
+                if getattr(smc_config, 'scalp_mode_enabled', False):
+                    is_scalp_trade = True
+                    self.logger.info(f"🎯 [SCALP MODE] VSL enabled: is_scalp_trade=True (VSL uses per-pair config)")
+            except Exception as e:
+                self.logger.debug(f"Scalp mode check failed (using default): {e}")
+
             # v2.0.0: Execute with retry logic (now supports both market and limit orders)
             result = self._execute_with_retry(
                 signal, external_epic, direction, stop_distance, limit_distance,
-                custom_label, alert_id, order_type, entry_level, limit_expiry_minutes
+                custom_label, alert_id, order_type, entry_level, limit_expiry_minutes,
+                is_scalp_trade, virtual_sl_pips
             )
 
             # Record success with circuit breaker
@@ -583,10 +614,12 @@ class OrderExecutor:
     def _execute_with_retry(self, signal: Dict, external_epic: str, direction: str,
                            stop_distance: int, limit_distance: int, custom_label: str, alert_id: int,
                            order_type: str = 'market', entry_level: float = None,
-                           limit_expiry_minutes: int = 15) -> Dict:
+                           limit_expiry_minutes: int = 15,
+                           is_scalp_trade: bool = False, virtual_sl_pips: float = None) -> Dict:
         """
         ENHANCED: Execute order with retry logic and exponential backoff
         v2.0.0: Added limit order support
+        v3.2.0: Added scalp mode support for VSL
 
         Args:
             signal: Original signal dict
@@ -599,6 +632,8 @@ class OrderExecutor:
             order_type: 'market' or 'limit' (v2.0.0)
             entry_level: Entry price for limit orders (v2.0.0)
             limit_expiry_minutes: Minutes until limit order expires (v2.0.0)
+            is_scalp_trade: True if scalp trade requiring VSL (v3.2.0)
+            virtual_sl_pips: Custom VSL distance in pips (v3.2.0)
         """
         last_exception = None
 
@@ -626,7 +661,9 @@ class OrderExecutor:
                         alert_id=alert_id,
                         order_type='limit',
                         entry_level=entry_level,
-                        limit_expiry_minutes=limit_expiry_minutes
+                        limit_expiry_minutes=limit_expiry_minutes,
+                        is_scalp_trade=is_scalp_trade,
+                        virtual_sl_pips=virtual_sl_pips
                     )
                 else:
                     # Execute market order (default)
@@ -638,7 +675,9 @@ class OrderExecutor:
                         size=self.position_size,
                         custom_label=custom_label,
                         risk_reward=self.default_risk_reward,
-                        alert_id=alert_id
+                        alert_id=alert_id,
+                        is_scalp_trade=is_scalp_trade,
+                        virtual_sl_pips=virtual_sl_pips
                     )
 
                 # Check if order was successful or skipped (both are valid outcomes)
@@ -715,10 +754,12 @@ class OrderExecutor:
                limit_distance: int = None, size: float = None, custom_label: str = None,
                risk_reward: float = None, alert_id: int = None,
                order_type: str = 'market', entry_level: float = None,
-               limit_expiry_minutes: int = 15):
+               limit_expiry_minutes: int = 15,
+               is_scalp_trade: bool = False, virtual_sl_pips: float = None):
         """
         ENHANCED: Send order to your trading platform via API using correct format with timeout handling
         v2.0.0: Added limit order support
+        v3.2.0: Added scalp mode support for Virtual Stop Loss (VSL) system
 
         Args:
             external_epic: Trading symbol (e.g., 'EURUSD')
@@ -732,6 +773,8 @@ class OrderExecutor:
             order_type: 'market' or 'limit' (v2.0.0)
             entry_level: Entry price for limit orders (v2.0.0)
             limit_expiry_minutes: Minutes until limit order expires (v2.0.0)
+            is_scalp_trade: True if this is a scalp trade requiring VSL monitoring (v3.2.0)
+            virtual_sl_pips: Custom VSL distance in pips (v3.2.0)
 
         Returns:
             API response or None if failed
@@ -776,6 +819,13 @@ class OrderExecutor:
         if alert_id is not None:
             order_data["alert_id"] = alert_id  # Add to request body
             self.logger.info(f"📊 Sending order with alert_id: {alert_id}")
+
+        # v3.2.0: Add scalp mode fields for VSL (Virtual Stop Loss) system
+        if is_scalp_trade:
+            order_data["is_scalp_trade"] = True
+            if virtual_sl_pips is not None:
+                order_data["virtual_sl_pips"] = virtual_sl_pips
+            self.logger.info(f"🎯 [SCALP] VSL enabled: is_scalp_trade=True, virtual_sl_pips={virtual_sl_pips}")
 
         # Log SL/TP being sent
         order_type_label = "LIMIT" if order_type == 'limit' else "MARKET"

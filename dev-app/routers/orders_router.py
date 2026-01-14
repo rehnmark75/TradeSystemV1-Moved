@@ -315,7 +315,10 @@ async def ig_place_order(
     epic = body.epic.strip().upper()
     direction = body.direction.strip().upper()
     logger.info(f"Place-Order: Parsed EPIC: {epic}, Direction: {direction}")
-    
+
+    # v3.2.0: Log scalp trade flag for VSL debugging
+    logger.info(f"Place-Order: is_scalp_trade={body.is_scalp_trade}, virtual_sl_pips={body.virtual_sl_pips}")
+
     # Log alert_id if provided
     alert_id = body.alert_id
 
@@ -604,6 +607,33 @@ async def ig_place_order(
                     # - entry_price = stop-entry level (momentum confirmation price)
                     # - limit_price = TAKE PROFIT level (not the limit order entry!)
                     # - sl_price = stop loss level
+
+                    # v3.2.0: Calculate VSL fields for scalp trades (limit orders)
+                    is_scalp = body.is_scalp_trade or (sl_limit and sl_limit <= 8)
+                    virtual_sl_pips_value = body.virtual_sl_pips
+                    virtual_sl_price_value = None
+
+                    if is_scalp:
+                        try:
+                            from config_virtual_stop import get_virtual_sl_pips
+                            from services.ig_orders import get_point_value
+
+                            if virtual_sl_pips_value is None:
+                                virtual_sl_pips_value = get_virtual_sl_pips(symbol)
+
+                            point_value = get_point_value(symbol)
+                            sl_distance = virtual_sl_pips_value * point_value
+
+                            if direction.upper() == "BUY":
+                                virtual_sl_price_value = body.entry_level - sl_distance
+                            else:  # SELL
+                                virtual_sl_price_value = body.entry_level + sl_distance
+
+                            logger.info(f"⚡ [LIMIT] Scalp trade: VSL @ {virtual_sl_price_value:.5f} ({virtual_sl_pips_value} pips)")
+                        except ImportError:
+                            logger.warning("⚠️ VSL config not available for limit order")
+                            is_scalp = False
+
                     trade_log = TradeLog(
                         symbol=symbol,
                         entry_price=body.entry_level,  # Stop-entry price (momentum confirmation)
@@ -614,12 +644,18 @@ async def ig_place_order(
                         endpoint="dev-limit",  # Identify as limit order
                         status="pending_limit",  # New status for limit orders
                         alert_id=alert_id,
-                        monitor_until=expiry_time  # Use monitor_until for expiry tracking
+                        monitor_until=expiry_time,  # Use monitor_until for expiry tracking
+                        # v3.2.0: VSL fields for scalp trades
+                        is_scalp_trade=is_scalp,
+                        virtual_sl_pips=virtual_sl_pips_value,
+                        virtual_sl_price=virtual_sl_price_value,
                     )
 
                     db.add(trade_log)
                     db.commit()
                     logger.info(f"✅ Limit order logged to database: {symbol} @ {body.entry_level}")
+                    if is_scalp:
+                        logger.info(f"   ⚡ Scalp trade: is_scalp_trade=True, VSL={virtual_sl_pips_value} pips")
                     logger.info(f"   Deal Ref: {deal_reference}, Expiry: {expiry_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
                     if alert_id:
                         logger.info(f"   Linked to alert_id: {alert_id}")

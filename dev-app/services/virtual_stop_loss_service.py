@@ -33,6 +33,8 @@ from config_virtual_stop import (
     get_virtual_sl_pips,
     is_virtual_sl_enabled,
 )
+# Import DEMO auth headers for closing trades (production headers are for streaming only)
+from dependencies import get_ig_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -332,13 +334,17 @@ class VirtualStopLossService:
         try:
             logger.info(f"[VSL CLOSE] 🔴 Triggering close for Trade {position.trade_id} {position.epic}")
 
+            # Get DEMO auth headers for closing (production headers are for streaming only)
+            # Trades are executed on demo account, so close must use demo credentials
+            demo_headers = await get_ig_auth_headers()
+
             # Execute full position close using existing ig_orders function
             result = await partial_close_position(
                 deal_id=position.deal_id,
                 epic=position.epic,
                 direction=position.direction,
                 size_to_close=position.position_size,  # Close full position
-                auth_headers=self.auth_headers
+                auth_headers=demo_headers  # Use DEMO headers, not production
             )
 
             if result.get('success'):

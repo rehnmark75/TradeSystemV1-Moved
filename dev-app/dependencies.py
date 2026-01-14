@@ -117,6 +117,10 @@ async def get_prod_auth_headers(force_refresh: bool = False):
         print(f"✅ PRODUCTION auth successful - Account: {tokens['ACCOUNT_ID']}")
 
     return {
+        "Accept": "application/json; charset=UTF-8",
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-IG-API-KEY": get_secret(PROD_IG_API_KEY),
+        "Version": "2",
         "CST": prod_token_cache["CST"],
         "X-SECURITY-TOKEN": prod_token_cache["X-SECURITY-TOKEN"],
         "accountId": prod_token_cache["ACCOUNT_ID"]
