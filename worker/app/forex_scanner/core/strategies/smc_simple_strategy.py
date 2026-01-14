@@ -898,6 +898,10 @@ class SMCSimpleStrategy:
         # Override EMA for faster reaction
         self.ema_period = self.scalp_ema_period
 
+        # Relax EMA buffer for scalp mode (smaller moves on faster timeframes)
+        # Reduce buffer from 2.5 pips to 1.0 pip for more entries
+        self.ema_buffer_pips = 1.0
+
         # Override SL/TP for scalping (5 pip targets)
         self.fixed_stop_loss_pips = self.scalp_sl_pips
         self.fixed_take_profit_pips = self.scalp_tp_pips
@@ -953,6 +957,7 @@ class SMCSimpleStrategy:
         self.logger.info(f"   Min Confidence: {self.min_confidence*100:.0f}%")
         self.logger.info(f"   Cooldown: {self.cooldown_hours*60:.0f} minutes")
         self.logger.info(f"   Max Spread: {self.scalp_max_spread_pips} pips")
+        self.logger.info(f"   EMA Buffer: {self.ema_buffer_pips} pips (relaxed for scalp)")
         self.logger.info(f"   Swing Lookback: {self.swing_lookback} bars")
         self.logger.info("   Filters DISABLED: EMA slope, Swing proximity, Volume")
         self.logger.info("=" * 60)
@@ -1170,7 +1175,7 @@ class SMCSimpleStrategy:
             # ================================================================
             # TIER 1: 4H EMA Directional Bias
             # ================================================================
-            self.logger.info(f"\n📊 TIER 1: Checking 4H {self.ema_period} EMA Bias")
+            self.logger.info(f"\n📊 TIER 1: Checking {self.htf_timeframe.upper()} {self.ema_period} EMA Bias")
 
             ema_result = self._check_ema_bias(df_4h, pip_value)
 
@@ -1658,23 +1663,30 @@ class SMCSimpleStrategy:
                 self.logger.info(f"   ⚠️  Momentum entry penalty: -{self.momentum_confidence_penalty*100:.0f}%")
 
             # v2.11.0: Dynamic confidence threshold based on EMA distance, ATR, and Volume
-            # Priority: EMA distance > ATR > Volume > Pair-specific > Default
+            # Priority: Scalp mode > Backtest override > EMA distance > ATR > Volume > Pair-specific > Default
             # EMA distance is the strongest predictor of CONFIDENCE rejection outcomes
             # v2.12.0: Added direction-aware confidence threshold support
-            # CRITICAL FIX (Jan 2026): In backtest mode with overrides, use the overridden value
-            # instead of querying database config (which ignores the override)
-            if self._backtest_mode and self._config_override and 'min_confidence' in self._config_override:
+            # v2.20.0: Scalp mode always uses scalp_min_confidence (highest priority)
+            if self.scalp_mode_enabled:
+                # SCALP MODE: Always use scalp confidence threshold (highest priority)
+                pair_min_confidence = self.scalp_min_confidence
+                adjustment_type = "scalp-mode"
+                self.logger.info(f"   🎯 Scalp mode threshold: {self.scalp_min_confidence*100:.0f}%")
+            elif self._backtest_mode and self._config_override and 'min_confidence' in self._config_override:
                 # Backtest mode with min_confidence override - use the overridden instance variable
                 pair_min_confidence = self.min_confidence
+                adjustment_type = "backtest-override"
             elif hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
                 pair_min_confidence = self._db_config.get_min_confidence_directional(epic, direction)
+                adjustment_type = "pair-specific"
             else:
                 pair_min_confidence = self.pair_min_confidence.get(pair, self.pair_min_confidence.get(epic, self.min_confidence))
-            adjustment_type = "pair-specific"
+                adjustment_type = "pair-specific"
 
             # v2.11.0: EMA distance-adjusted confidence threshold (HIGHEST PRIORITY)
             # Near EMA (trend-aligned) = lower threshold, Far from EMA (extended) = higher threshold
-            if self.ema_distance_adjusted_confidence_enabled and ema_distance is not None:
+            # SKIP in scalp mode - scalp uses fixed confidence threshold
+            if adjustment_type != "scalp-mode" and self.ema_distance_adjusted_confidence_enabled and ema_distance is not None:
                 ema_distance_pips = ema_distance / pip_value
                 if ema_distance_pips < self.near_ema_threshold_pips:
                     # Near EMA - trend aligned, high win rate
@@ -1698,7 +1710,8 @@ class SMCSimpleStrategy:
             # v2.11.0: ATR-adjusted confidence threshold (only if EMA didn't adjust)
             # In calm markets (low ATR), lower the threshold - price is more predictable
             # In volatile markets (high ATR), raise the threshold - need higher confidence
-            if adjustment_type == "pair-specific" and self.atr_adjusted_confidence_enabled and atr is not None:
+            # SKIP in scalp mode - scalp uses fixed confidence threshold
+            if adjustment_type not in ("scalp-mode", "backtest-override") and self.atr_adjusted_confidence_enabled and atr is not None:
                 if atr < self.low_atr_threshold:
                     # Calm market - check for lower threshold
                     low_atr_confidence = self.pair_low_atr_confidence.get(
