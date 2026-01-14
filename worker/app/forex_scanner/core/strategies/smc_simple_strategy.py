@@ -1390,13 +1390,18 @@ class SMCSimpleStrategy:
             using_fixed_sl_tp = False
 
             if self.fixed_sl_tp_override_enabled:
-                # Priority: backtest override > per-pair DB setting > global DB setting
+                # Priority: scalp mode > backtest override > per-pair DB setting > global DB setting
                 # Check if backtest override was applied (indicated by _config_override having SL/TP)
                 has_backtest_sl_override = self._config_override and 'fixed_stop_loss_pips' in self._config_override
                 has_backtest_tp_override = self._config_override and 'fixed_take_profit_pips' in self._config_override
 
-                if has_backtest_sl_override or has_backtest_tp_override:
-                    # Use backtest overrides (highest priority)
+                if self.scalp_mode_enabled:
+                    # SCALP MODE: Always use scalp SL/TP (highest priority for scalp trades)
+                    fixed_sl_pips = self.scalp_sl_pips
+                    fixed_tp_pips = self.scalp_tp_pips
+                    self.logger.info(f"   🎯 Using SCALP MODE SL/TP")
+                elif has_backtest_sl_override or has_backtest_tp_override:
+                    # Use backtest overrides (highest priority after scalp mode)
                     fixed_sl_pips = self.fixed_stop_loss_pips
                     fixed_tp_pips = self.fixed_take_profit_pips
                     self.logger.info(f"   🧪 Using BACKTEST OVERRIDE SL/TP")
