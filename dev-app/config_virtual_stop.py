@@ -174,3 +174,81 @@ def get_lightstreamer_url() -> str:
     if USE_DEMO_ENDPOINT:
         return LIGHTSTREAMER_DEMO_URL
     return LIGHTSTREAMER_PROD_URL
+
+
+# =============================================================================
+# DYNAMIC VSL TRAILING CONFIGURATION
+# =============================================================================
+
+# Master toggle for dynamic VSL (moves SL to breakeven when in profit)
+DYNAMIC_VSL_ENABLED = True
+
+# Spread-aware threshold adjustment
+# When spread widens, require more profit before triggering breakeven
+SPREAD_AWARE_TRIGGERS_ENABLED = True
+BASELINE_SPREAD_PIPS = 1.0  # Normal spread assumption
+MAX_SPREAD_PENALTY_PIPS = 2.0  # Cap adjustment at +2 pips max
+
+# Default dynamic VSL configuration for majors
+DEFAULT_DYNAMIC_VSL_CONFIG = {
+    'initial_vsl_pips': 3.0,        # Starting VSL (same as current fixed)
+    'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit
+    'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
+    'stage1_trigger_pips': 4.5,     # Move to stage1 when +4.5 pips
+    'stage1_lock_pips': 2.0,        # Lock +2 pips at stage1
+    'target_pips': 5.0,             # TP target (close at this level)
+}
+
+# Default dynamic VSL configuration for JPY pairs (higher volatility)
+DEFAULT_JPY_DYNAMIC_VSL_CONFIG = {
+    'initial_vsl_pips': 4.0,        # Starting VSL (same as current fixed)
+    'breakeven_trigger_pips': 3.5,  # Move to BE when +3.5 pips profit
+    'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
+    'stage1_trigger_pips': 5.0,     # Move to stage1 when +5 pips
+    'stage1_lock_pips': 2.0,        # Lock +2 pips at stage1
+    'target_pips': 6.0,             # TP target (higher for JPY)
+}
+
+# Per-pair dynamic VSL configuration
+PAIR_DYNAMIC_VSL_CONFIGS = {
+    # Major pairs - use default major config
+    'CS.D.EURUSD.CEEM.IP': DEFAULT_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.EURUSD.MINI.IP': DEFAULT_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.GBPUSD.MINI.IP': DEFAULT_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.GBPUSD.CEEM.IP': DEFAULT_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.USDCHF.MINI.IP': DEFAULT_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.USDCAD.MINI.IP': DEFAULT_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.AUDUSD.MINI.IP': DEFAULT_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.NZDUSD.MINI.IP': DEFAULT_DYNAMIC_VSL_CONFIG.copy(),
+
+    # JPY pairs - use JPY config (higher volatility)
+    'CS.D.USDJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.EURJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.GBPJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
+    'CS.D.AUDJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
+}
+
+
+def get_dynamic_vsl_config(epic: str) -> dict:
+    """
+    Get dynamic VSL configuration for an epic.
+
+    Args:
+        epic: Market epic (e.g., 'CS.D.EURUSD.CEEM.IP')
+
+    Returns:
+        dict with dynamic VSL stage configuration
+    """
+    if epic in PAIR_DYNAMIC_VSL_CONFIGS:
+        return PAIR_DYNAMIC_VSL_CONFIGS[epic]
+
+    # Check if it's a JPY pair by name
+    if 'JPY' in epic:
+        return DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy()
+
+    return DEFAULT_DYNAMIC_VSL_CONFIG.copy()
+
+
+def is_dynamic_vsl_enabled() -> bool:
+    """Check if dynamic VSL trailing is enabled globally."""
+    return DYNAMIC_VSL_ENABLED and VIRTUAL_STOP_LOSS_ENABLED

@@ -634,6 +634,21 @@ async def ig_place_order(
                             logger.warning("⚠️ VSL config not available for limit order")
                             is_scalp = False
 
+                    # Calculate trigger_distance for limit orders (troubleshooting IG rejections)
+                    # trigger_distance = gap between entry level and current market price
+                    trigger_distance_value = None
+                    try:
+                        from services.ig_orders import get_point_value
+                        point_value = get_point_value(symbol)
+                        if point_value > 0:
+                            # For BUY: entry is above ask, for SELL: entry is below bid
+                            # bid_price is already fetched above from get_current_bid_price()
+                            trigger_distance_value = abs(body.entry_level - bid_price) / point_value
+                            logger.info(f"📊 [LIMIT] Trigger distance: {trigger_distance_value:.2f} pips "
+                                       f"(entry={body.entry_level:.5f}, bid={bid_price:.5f}, min_distance={min_distance})")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not calculate trigger_distance: {e}")
+
                     trade_log = TradeLog(
                         symbol=symbol,
                         entry_price=body.entry_level,  # Stop-entry price (momentum confirmation)
@@ -649,6 +664,9 @@ async def ig_place_order(
                         is_scalp_trade=is_scalp,
                         virtual_sl_pips=virtual_sl_pips_value,
                         virtual_sl_price=virtual_sl_price_value,
+                        # v3.3.0: Troubleshooting data for IG rejections
+                        min_stop_distance_points=min_distance,
+                        trigger_distance=trigger_distance_value,
                     )
 
                     db.add(trade_log)
@@ -683,14 +701,39 @@ async def ig_place_order(
 
             except httpx.HTTPStatusError as broker_error:
                 error_text = broker_error.response.text if hasattr(broker_error.response, 'text') else str(broker_error)
-                logger.error(f"❌ Limit order failed: {error_text}")
+
+                # Calculate trigger_distance for rejection logging
+                trigger_dist_log = None
+                try:
+                    from services.ig_orders import get_point_value
+                    point_value = get_point_value(symbol)
+                    if point_value > 0:
+                        trigger_dist_log = abs(body.entry_level - bid_price) / point_value
+                except:
+                    pass
+
+                # Enhanced logging for IG rejection troubleshooting
+                logger.error(f"❌ Limit order REJECTED: {symbol} {direction}")
+                logger.error(f"   Entry Level: {body.entry_level:.5f}, Current Bid: {bid_price:.5f}")
+                logger.error(f"   Trigger Distance: {trigger_dist_log:.2f} pips" if trigger_dist_log else "   Trigger Distance: N/A")
+                logger.error(f"   Min Stop Distance: {min_distance} points")
+                logger.error(f"   SL: {sl_limit}pts, TP: {limit_distance}pts")
+                logger.error(f"   Error: {error_text}")
+
                 raise HTTPException(
                     status_code=broker_error.response.status_code if hasattr(broker_error, 'response') else 500,
                     detail={
                         "error": "Limit order placement failed",
                         "message": error_text[:500],
                         "epic": symbol,
-                        "alert_id": alert_id
+                        "alert_id": alert_id,
+                        # Include diagnostic data in rejection response
+                        "entry_level": body.entry_level,
+                        "current_bid": bid_price,
+                        "trigger_distance_pips": trigger_dist_log,
+                        "min_stop_distance_points": min_distance,
+                        "sl_distance": sl_limit,
+                        "tp_distance": limit_distance,
                     }
                 )
 

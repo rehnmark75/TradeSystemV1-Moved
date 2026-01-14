@@ -6,11 +6,22 @@ Updated to match live trading system with:
 - Stage 1: Initial profit lock
 - Stage 2: Meaningful profit lock
 - Stage 3: Percentage-based dynamic trailing
+
+Also supports VSL (Virtual Stop Loss) trailing for scalping mode:
+- Dynamic VSL that moves to breakeven when in profit
+- Stage-based profit protection (BE → Stage1)
 """
 
 import logging
 from typing import Dict, Any, Optional, Tuple
 import pandas as pd
+
+# Import VSL trailing simulator for scalp mode
+try:
+    from core.trading.vsl_trailing_simulator import VSLTrailingSimulator, create_vsl_trailing_simulator
+    VSL_SIMULATOR_AVAILABLE = True
+except ImportError:
+    VSL_SIMULATOR_AVAILABLE = False
 
 
 class TrailingStopSimulator:
@@ -177,6 +188,9 @@ class TrailingStopSimulator:
         """
         Simulate trade execution with Progressive 3-Stage trailing stop
 
+        For scalp trades with VSL mode, delegates to VSLTrailingSimulator
+        which implements the dynamic VSL trailing logic (BE → Stage1).
+
         Args:
             signal: Signal dictionary with entry information
             df: DataFrame with OHLC price data
@@ -185,6 +199,14 @@ class TrailingStopSimulator:
         Returns:
             Enhanced signal dictionary with trade outcome metrics
         """
+        # Check if this is a scalp trade that should use VSL trailing
+        is_scalp_trade = signal.get('is_scalp_trade', False)
+        use_vsl_trailing = signal.get('use_vsl_trailing', False) or is_scalp_trade
+
+        if use_vsl_trailing and VSL_SIMULATOR_AVAILABLE:
+            # Delegate to VSL trailing simulator for scalp trades
+            return self._simulate_with_vsl_trailing(signal, df, signal_idx)
+
         try:
             enhanced_signal = signal.copy()
 
@@ -323,6 +345,65 @@ class TrailingStopSimulator:
                 'is_loser': False,
             })
             return enhanced_signal
+
+    def _simulate_with_vsl_trailing(self,
+                                     signal: Dict[str, Any],
+                                     df: pd.DataFrame,
+                                     signal_idx: int) -> Dict[str, Any]:
+        """
+        Simulate scalp trade with dynamic VSL trailing.
+
+        Delegates to VSLTrailingSimulator for scalp-specific logic:
+        - Initial VSL at -3 pips (majors) or -4 pips (JPY)
+        - Moves to breakeven when +3 pips profit reached
+        - Moves to stage1 (+2 pips lock) when +4.5 pips reached
+
+        Args:
+            signal: Signal dictionary with entry information
+            df: DataFrame with OHLC price data
+            signal_idx: Index in df where signal occurred
+
+        Returns:
+            Enhanced signal dictionary with trade outcome metrics
+        """
+        try:
+            epic = signal.get('epic') or self.epic
+
+            if not VSL_SIMULATOR_AVAILABLE:
+                self.logger.warning("[VSL] VSL simulator not available, falling back to standard simulation")
+                # Fall back to standard simulation
+                return self.simulate_trade({**signal, 'use_vsl_trailing': False}, df, signal_idx)
+
+            # Create VSL simulator for this epic
+            vsl_simulator = create_vsl_trailing_simulator(epic=epic, logger=self.logger)
+
+            # Determine timeframe from data
+            if len(df) >= 2:
+                time_diff = (df.index[1] - df.index[0]).total_seconds() / 60
+                timeframe_minutes = int(time_diff) if time_diff > 0 else 5
+            else:
+                timeframe_minutes = 5  # Default to 5m for scalping
+
+            # Delegate to VSL simulator
+            result = vsl_simulator.simulate_trade(
+                signal=signal,
+                df=df,
+                signal_idx=signal_idx,
+                timeframe_minutes=timeframe_minutes
+            )
+
+            self.logger.debug(f"[VSL] Scalp trade simulated: {result.get('trade_outcome')}, "
+                            f"pips={result.get('pips_gained', 0):.1f}, "
+                            f"stage={result.get('vsl_stage', 'initial')}")
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"[VSL] Error in VSL simulation: {e}, falling back to standard")
+            # Fall back to standard simulation on error
+            enhanced_signal = signal.copy()
+            enhanced_signal['use_vsl_trailing'] = False
+            return self.simulate_trade(enhanced_signal, df, signal_idx)
 
     def _calculate_atr_stops(self, df: pd.DataFrame, signal_idx: int, signal: Dict[str, Any]) -> Dict[str, float]:
         """Calculate ATR-based stop loss and profit targets"""

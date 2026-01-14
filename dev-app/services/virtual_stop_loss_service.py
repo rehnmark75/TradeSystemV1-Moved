@@ -32,6 +32,13 @@ from config_virtual_stop import (
     CLOSE_ATTEMPT_COOLDOWN_SECONDS,
     get_virtual_sl_pips,
     is_virtual_sl_enabled,
+    # Dynamic VSL imports
+    DYNAMIC_VSL_ENABLED,
+    SPREAD_AWARE_TRIGGERS_ENABLED,
+    BASELINE_SPREAD_PIPS,
+    MAX_SPREAD_PENALTY_PIPS,
+    get_dynamic_vsl_config,
+    is_dynamic_vsl_enabled,
 )
 # Import DEMO auth headers for closing trades (production headers are for streaming only)
 from dependencies import get_ig_auth_headers
@@ -48,13 +55,20 @@ class ScalpPosition:
     direction: str  # BUY or SELL
     entry_price: float
     virtual_sl_pips: float
-    virtual_sl_price: float
+    virtual_sl_price: float  # Initial/fixed VSL price
     position_size: float
     opened_at: datetime
     last_price: Optional[float] = None
     last_price_time: Optional[datetime] = None
     last_close_attempt: Optional[float] = None  # timestamp of last close attempt
     close_in_progress: bool = False
+
+    # Dynamic VSL tracking fields
+    peak_profit_pips: float = 0.0              # Maximum favorable excursion (MFE)
+    current_stage: str = "initial"             # initial, breakeven, stage1
+    breakeven_triggered: bool = False          # Has BE been triggered?
+    stage1_triggered: bool = False             # Has stage1 been triggered?
+    dynamic_vsl_price: Optional[float] = None  # Current dynamic VSL level (None = use fixed)
 
 
 class VirtualStopLossService:
@@ -253,6 +267,10 @@ class VirtualStopLossService:
         This is called on every price tick from Lightstreamer.
         Must be fast and non-blocking.
 
+        With Dynamic VSL enabled:
+        1. Update dynamic VSL level based on profit (move to BE, stage1)
+        2. Check for breach using the effective VSL (dynamic if set, else fixed)
+
         Args:
             price: MarketPrice with current BID/OFFER
         """
@@ -273,10 +291,21 @@ class VirtualStopLossService:
                     position.last_price = price.mid
                     position.last_price_time = price.timestamp
 
-                # Check for VSL breach (outside lock to prevent blocking)
-                breached = self._check_vsl_breach(position, price)
+                # Update dynamic VSL if enabled (may move VSL to BE or stage1)
+                self._update_dynamic_vsl(position, price)
+
+                # Determine effective VSL price (dynamic if set, else original fixed)
+                effective_vsl_price = position.dynamic_vsl_price or position.virtual_sl_price
+
+                # Check for VSL breach at effective level
+                breached = self._check_vsl_breach_at_level(position, price, effective_vsl_price)
 
                 if breached:
+                    # Log which VSL level was breached
+                    stage_info = f" (stage: {position.current_stage})" if position.dynamic_vsl_price else ""
+                    logger.warning(f"[VSL BREACH] 🚨 Trade {position.trade_id} {position.epic} {position.direction}: "
+                                 f"VSL @ {effective_vsl_price:.5f}{stage_info}")
+
                     # Check cooldown to prevent rapid-fire attempts
                     now = time.time()
                     if position.last_close_attempt:
@@ -322,6 +351,159 @@ class VirtualStopLossService:
                          f"(Entry: {position.entry_price:.5f}, VSL pips: {position.virtual_sl_pips})")
 
         return breached
+
+    def _check_vsl_breach_at_level(self, position: ScalpPosition, price: MarketPrice, vsl_price: float) -> bool:
+        """
+        Check if virtual stop loss has been breached at a specific price level.
+
+        Args:
+            position: ScalpPosition to check
+            price: Current MarketPrice
+            vsl_price: The VSL price level to check against
+
+        Returns:
+            True if VSL breached
+        """
+        if position.direction == "BUY":
+            check_price = price.bid
+            breached = check_price <= vsl_price
+        else:  # SELL
+            check_price = price.offer
+            breached = check_price >= vsl_price
+
+        return breached
+
+    def _calculate_profit_pips(self, position: ScalpPosition, price: MarketPrice) -> float:
+        """
+        Calculate current profit in pips for a position.
+
+        Uses the appropriate price for direction:
+        - BUY: Use BID (you sell at BID to close)
+        - SELL: Use OFFER (you buy at OFFER to close)
+
+        Args:
+            position: ScalpPosition to calculate profit for
+            price: Current MarketPrice
+
+        Returns:
+            Profit in pips (positive = profit, negative = loss)
+        """
+        point_value = get_point_value(position.epic)
+
+        if position.direction == "BUY":
+            # BUY: Profit when price > entry (use bid for closing)
+            profit = (price.bid - position.entry_price) / point_value
+        else:  # SELL
+            # SELL: Profit when price < entry (use offer for closing)
+            profit = (position.entry_price - price.offer) / point_value
+
+        return profit
+
+    def _get_effective_be_trigger(self, epic: str, current_spread_pips: float) -> float:
+        """
+        Get the effective breakeven trigger, adjusted for spread.
+
+        When spread widens (news events, low liquidity), require more profit
+        before triggering breakeven to avoid premature exits.
+
+        Args:
+            epic: Market epic
+            current_spread_pips: Current spread in pips
+
+        Returns:
+            Effective breakeven trigger in pips
+        """
+        config = get_dynamic_vsl_config(epic)
+        base_trigger = config['breakeven_trigger_pips']
+
+        if not SPREAD_AWARE_TRIGGERS_ENABLED:
+            return base_trigger
+
+        # Add penalty if spread is wider than baseline
+        if current_spread_pips > BASELINE_SPREAD_PIPS:
+            spread_penalty = min(
+                current_spread_pips - BASELINE_SPREAD_PIPS,
+                MAX_SPREAD_PENALTY_PIPS
+            )
+            adjusted_trigger = base_trigger + spread_penalty
+            logger.debug(f"[VSL] Spread-adjusted BE trigger for {epic}: "
+                        f"{base_trigger} + {spread_penalty:.1f} = {adjusted_trigger:.1f} pips "
+                        f"(spread: {current_spread_pips:.1f})")
+            return adjusted_trigger
+
+        return base_trigger
+
+    def _update_dynamic_vsl(self, position: ScalpPosition, price: MarketPrice) -> None:
+        """
+        Update VSL level based on current profit - the core dynamic VSL logic.
+
+        Stage progression (one-way, never goes back):
+        1. Initial: VSL at -3 pips (or -4 for JPY) - the starting protection
+        2. Breakeven: When +3 pips reached, VSL moves to entry +0.5 pip
+        3. Stage 1: When +4.5 pips reached, VSL moves to entry +2 pips
+
+        Args:
+            position: ScalpPosition to update
+            price: Current MarketPrice
+        """
+        if not is_dynamic_vsl_enabled():
+            return
+
+        # Calculate current profit
+        current_profit_pips = self._calculate_profit_pips(position, price)
+
+        # Update peak profit tracking (MFE)
+        if current_profit_pips > position.peak_profit_pips:
+            position.peak_profit_pips = current_profit_pips
+
+        # Get dynamic VSL config for this pair
+        config = get_dynamic_vsl_config(position.epic)
+        point_value = get_point_value(position.epic)
+
+        # Calculate current spread in pips
+        spread_pips = (price.offer - price.bid) / point_value
+
+        # Get spread-adjusted breakeven trigger
+        effective_be_trigger = self._get_effective_be_trigger(position.epic, spread_pips)
+
+        # Stage 1 check (highest priority - check this first)
+        if not position.stage1_triggered:
+            if current_profit_pips >= config['stage1_trigger_pips']:
+                position.stage1_triggered = True
+                position.current_stage = "stage1"
+                lock_distance = config['stage1_lock_pips'] * point_value
+
+                if position.direction == "BUY":
+                    position.dynamic_vsl_price = position.entry_price + lock_distance
+                else:  # SELL
+                    position.dynamic_vsl_price = position.entry_price - lock_distance
+
+                logger.info(f"[VSL] 📈 Trade {position.trade_id} → STAGE 1: "
+                           f"Profit={current_profit_pips:.1f} pips, "
+                           f"Locking +{config['stage1_lock_pips']} pips @ {position.dynamic_vsl_price:.5f}")
+
+                # Update stats
+                self._stats["stage1_triggered_count"] = self._stats.get("stage1_triggered_count", 0) + 1
+                return
+
+        # Breakeven check (only if stage1 not triggered yet)
+        if not position.breakeven_triggered:
+            if current_profit_pips >= effective_be_trigger:
+                position.breakeven_triggered = True
+                position.current_stage = "breakeven"
+                lock_distance = config['breakeven_lock_pips'] * point_value
+
+                if position.direction == "BUY":
+                    position.dynamic_vsl_price = position.entry_price + lock_distance
+                else:  # SELL
+                    position.dynamic_vsl_price = position.entry_price - lock_distance
+
+                logger.info(f"[VSL] 🎯 Trade {position.trade_id} → BREAKEVEN: "
+                           f"Profit={current_profit_pips:.1f} pips (trigger={effective_be_trigger:.1f}), "
+                           f"VSL moved to {position.dynamic_vsl_price:.5f} (+{config['breakeven_lock_pips']} pips)")
+
+                # Update stats
+                self._stats["breakeven_triggered_count"] = self._stats.get("breakeven_triggered_count", 0) + 1
 
     async def _trigger_vsl_close(self, position: ScalpPosition, price: MarketPrice):
         """
@@ -375,7 +557,7 @@ class VirtualStopLossService:
 
     async def _update_trade_closed(self, position: ScalpPosition, price: MarketPrice, reason: str):
         """
-        Update trade_log with closure details.
+        Update trade_log with closure details including dynamic VSL stage info.
 
         Args:
             position: Closed ScalpPosition
@@ -406,9 +588,25 @@ class VirtualStopLossService:
                         pips = (position.entry_price - exit_price) / point_value
                     trade.pips_gained = pips
 
+                    # Record dynamic VSL stage info (if columns exist)
+                    try:
+                        if hasattr(trade, 'vsl_stage'):
+                            trade.vsl_stage = position.current_stage
+                        if hasattr(trade, 'vsl_breakeven_triggered'):
+                            trade.vsl_breakeven_triggered = position.breakeven_triggered
+                        if hasattr(trade, 'vsl_stage1_triggered'):
+                            trade.vsl_stage1_triggered = position.stage1_triggered
+                        if hasattr(trade, 'vsl_peak_profit_pips'):
+                            trade.vsl_peak_profit_pips = position.peak_profit_pips
+                    except Exception as stage_err:
+                        logger.debug(f"[VSL] Could not update stage columns (may not exist yet): {stage_err}")
+
                     db.commit()
+
+                    # Enhanced logging with stage info
+                    stage_info = f", stage={position.current_stage}, peak={position.peak_profit_pips:.1f}pips" if position.breakeven_triggered else ""
                     logger.info(f"[VSL] 📝 Updated trade {position.trade_id}: "
-                              f"exit={exit_price:.5f}, pips={pips:.1f}, reason={reason}")
+                              f"exit={exit_price:.5f}, pips={pips:.1f}, reason={reason}{stage_info}")
 
         except Exception as e:
             logger.error(f"[VSL] Error updating trade {position.trade_id}: {e}")
@@ -474,6 +672,14 @@ class VirtualStopLossService:
                     "last_price": pos.last_price,
                     "last_price_time": pos.last_price_time.isoformat() if pos.last_price_time else None,
                     "close_in_progress": pos.close_in_progress,
+                    # Dynamic VSL info
+                    "dynamic_vsl_enabled": is_dynamic_vsl_enabled(),
+                    "current_stage": pos.current_stage,
+                    "dynamic_vsl_price": pos.dynamic_vsl_price,
+                    "effective_vsl_price": pos.dynamic_vsl_price or pos.virtual_sl_price,
+                    "breakeven_triggered": pos.breakeven_triggered,
+                    "stage1_triggered": pos.stage1_triggered,
+                    "peak_profit_pips": pos.peak_profit_pips,
                 }
                 for tid, pos in self.positions.items()
             }
@@ -482,6 +688,7 @@ class VirtualStopLossService:
 
         return {
             "enabled": VIRTUAL_STOP_LOSS_ENABLED,
+            "dynamic_vsl_enabled": is_dynamic_vsl_enabled(),
             "running": self._running,
             "stream_connected": stream_status.get("connected", False),
             "positions_tracked": len(self.positions),
@@ -517,6 +724,13 @@ class VirtualStopLossService:
                 "position_size": pos.position_size,
                 "last_price": pos.last_price,
                 "opened_at": pos.opened_at.isoformat() if pos.opened_at else None,
+                # Dynamic VSL info
+                "current_stage": pos.current_stage,
+                "dynamic_vsl_price": pos.dynamic_vsl_price,
+                "effective_vsl_price": pos.dynamic_vsl_price or pos.virtual_sl_price,
+                "breakeven_triggered": pos.breakeven_triggered,
+                "stage1_triggered": pos.stage1_triggered,
+                "peak_profit_pips": pos.peak_profit_pips,
             }
 
 
