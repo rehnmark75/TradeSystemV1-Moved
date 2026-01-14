@@ -453,23 +453,25 @@ class OrderExecutor:
                             new_tp_distance = abs(float(take_profit) - new_entry)
                             new_rr = new_tp_distance / new_sl_distance if new_sl_distance > 0 else 0
 
-                            if new_rr < 1.3:  # Minimum R:R after recalc
-                                self.logger.warning(
-                                    f"❌ Entry rejected: R:R degraded to {new_rr:.2f} after recalc "
-                                    f"(drift: {drift_pips:.1f} pips {'unfavorable' if unfavorable else 'favorable'})"
-                                )
-                                # Mark as rejected if we have alert_id
-                                if alert_id:
-                                    self._update_alert_status(alert_id, 'rejected')
-                                return {
-                                    'status': 'error',
-                                    'message': f'R:R too low after price drift: {new_rr:.2f}',
-                                    'alert_id': alert_id
-                                }
+                            # R:R check after recalc - TEMPORARILY DISABLED for small profit testing
+                            # TODO: Re-enable after testing
+                            # if new_rr < 1.3:  # Minimum R:R after recalc
+                            #     self.logger.warning(
+                            #         f"❌ Entry rejected: R:R degraded to {new_rr:.2f} after recalc "
+                            #         f"(drift: {drift_pips:.1f} pips {'unfavorable' if unfavorable else 'favorable'})"
+                            #     )
+                            #     # Mark as rejected if we have alert_id
+                            #     if alert_id:
+                            #         self._update_alert_status(alert_id, 'rejected')
+                            #     return {
+                            #         'status': 'error',
+                            #         'message': f'R:R too low after price drift: {new_rr:.2f}',
+                            #         'alert_id': alert_id
+                            #     }
 
                             self.logger.info(
                                 f"🔄 Entry recalculated: {original_entry:.5f} -> {new_entry:.5f} "
-                                f"(drift: {drift_pips:.1f} pips, R:R: {new_rr:.2f})"
+                                f"(drift: {drift_pips:.1f} pips, R:R: {new_rr:.2f}) ⚠️ R:R check DISABLED"
                             )
                         else:
                             self.logger.info(

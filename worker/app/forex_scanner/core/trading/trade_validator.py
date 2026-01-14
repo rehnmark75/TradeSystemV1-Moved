@@ -228,12 +228,14 @@ class TradeValidator:
 
                 if self.use_enhanced_sr_validation:
                     # Enhanced validator with level flip detection
+                    # TODO: Re-enable cluster detection after small profit testing
                     self.sr_validator = EnhancedSupportResistanceValidator(
                         recent_flip_bars=self._scanner_cfg.sr_recent_flip_bars,
                         min_flip_strength=self._scanner_cfg.sr_min_flip_strength,
+                        enable_cluster_detection=False,  # TEMPORARILY DISABLED for small profit testing
                         **sr_config
                     )
-                    self.logger.info("✅ Enhanced S/R Validator with level flip detection initialized")
+                    self.logger.info("✅ Enhanced S/R Validator initialized (cluster detection DISABLED)")
                 else:
                     # Basic S/R validator
                     self.sr_validator = SupportResistanceValidator(**sr_config)
