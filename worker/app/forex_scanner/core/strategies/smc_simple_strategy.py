@@ -932,8 +932,14 @@ class SMCSimpleStrategy:
         self.cooldown_hours = self.scalp_cooldown_minutes / 60.0
 
         # Scalp swing detection settings
-        self.swing_lookback = self.scalp_swing_lookback_bars
+        # Override swing lookback to 12 bars (60 min on 5m TF) for better swing detection
+        # Default scalp_swing_lookback_bars=5 was too short, causing 70% of swing rejections
+        self.swing_lookback = 12
         self.use_dynamic_swing_lookback = False  # Use fixed lookback in scalp mode
+
+        # Relax swing break tolerance for scalp mode (allow near-breaks)
+        # Many rejections were within 0.5-1.5 pips of confirmation
+        self.scalp_swing_break_tolerance_pips = 0.5
 
         # Disable dynamic confidence adjustments in scalp mode
         self.ema_distance_adjusted_confidence_enabled = False
@@ -965,7 +971,8 @@ class SMCSimpleStrategy:
         self.logger.info(f"   Cooldown: {self.cooldown_hours*60:.0f} minutes")
         self.logger.info(f"   Max Spread: {self.scalp_max_spread_pips} pips")
         self.logger.info(f"   EMA Buffer: {self.ema_buffer_pips} pips (relaxed for scalp)")
-        self.logger.info(f"   Swing Lookback: {self.swing_lookback} bars")
+        self.logger.info(f"   Swing Lookback: {self.swing_lookback} bars (increased for better detection)")
+        self.logger.info(f"   Swing Break Tolerance: {self.scalp_swing_break_tolerance_pips} pips (allows near-breaks)")
         self.logger.info("   Filters DISABLED: EMA slope, Swing proximity, Volume")
         self.logger.info("=" * 60)
 
@@ -2060,6 +2067,9 @@ class SMCSimpleStrategy:
                 'entry_price': entry_price,
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
+
+                # Scalp mode: Skip S/R validation (2 pip tolerance too restrictive for 5 pip targets)
+                'skip_sr_validation': self.scalp_mode_enabled,
                 'partial_tp': None,  # Not using partial TP in simple version
                 'partial_percent': None,
                 'risk_pips': round(risk_pips, 1),
@@ -2523,10 +2533,15 @@ class SMCSimpleStrategy:
             best_swing_idx = None
             best_break_idx = None
 
+            # Scalp mode: allow near-breaks with tolerance (0.5 pips)
+            scalp_tolerance = getattr(self, 'scalp_swing_break_tolerance_pips', 0) * pip_value if self.scalp_mode_enabled else 0
+
             for swing_idx, swing_level in recent_highs:
                 # Check all candles AFTER this swing for a break
+                # In scalp mode, allow breaks within tolerance (near-breaks)
+                break_threshold = swing_level - scalp_tolerance
                 for check_idx in range(swing_idx + 1, current_idx + 1):
-                    if highs[check_idx] > swing_level:
+                    if highs[check_idx] > break_threshold:
                         # Found a break of this swing!
                         if not break_found or swing_level > best_swing_level:
                             # Prefer higher swing levels (stronger breaks)
@@ -2542,10 +2557,17 @@ class SMCSimpleStrategy:
                 swing_level = highest_swing[1]
                 current_high = highs[-1]
                 gap_pips = (swing_level - current_high) / pip_value
-                return {
-                    'valid': False,
-                    'reason': f"BULL: High {current_high:.5f} below swing {swing_level:.5f} (need +{gap_pips:.1f} pips)"
-                }
+                # In scalp mode, also check with tolerance
+                if self.scalp_mode_enabled and gap_pips <= getattr(self, 'scalp_swing_break_tolerance_pips', 0):
+                    break_found = True
+                    best_swing_level = swing_level
+                    best_swing_idx = highest_swing[0]
+                    best_break_idx = current_idx
+                else:
+                    return {
+                        'valid': False,
+                        'reason': f"BULL: High {current_high:.5f} below swing {swing_level:.5f} (need +{gap_pips:.1f} pips)"
+                    }
 
             swing_level = best_swing_level
             swing_idx = best_swing_idx
@@ -2578,10 +2600,15 @@ class SMCSimpleStrategy:
             best_swing_idx = None
             best_break_idx = None
 
+            # Scalp mode: allow near-breaks with tolerance (0.5 pips)
+            scalp_tolerance = getattr(self, 'scalp_swing_break_tolerance_pips', 0) * pip_value if self.scalp_mode_enabled else 0
+
             for swing_idx, swing_level in recent_lows:
                 # Check all candles AFTER this swing for a break
+                # In scalp mode, allow breaks within tolerance (near-breaks)
+                break_threshold = swing_level + scalp_tolerance
                 for check_idx in range(swing_idx + 1, current_idx + 1):
-                    if lows[check_idx] < swing_level:
+                    if lows[check_idx] < break_threshold:
                         # Found a break of this swing!
                         if not break_found or swing_level < best_swing_level:
                             # Prefer lower swing levels (stronger breaks)
@@ -2597,10 +2624,17 @@ class SMCSimpleStrategy:
                 swing_level = lowest_swing[1]
                 current_low = lows[-1]
                 gap_pips = (current_low - swing_level) / pip_value
-                return {
-                    'valid': False,
-                    'reason': f"BEAR: Low {current_low:.5f} above swing {swing_level:.5f} (need -{gap_pips:.1f} pips)"
-                }
+                # In scalp mode, also check with tolerance
+                if self.scalp_mode_enabled and gap_pips <= getattr(self, 'scalp_swing_break_tolerance_pips', 0):
+                    break_found = True
+                    best_swing_level = swing_level
+                    best_swing_idx = lowest_swing[0]
+                    best_break_idx = current_idx
+                else:
+                    return {
+                        'valid': False,
+                        'reason': f"BEAR: Low {current_low:.5f} above swing {swing_level:.5f} (need -{gap_pips:.1f} pips)"
+                    }
 
             swing_level = best_swing_level
             swing_idx = best_swing_idx
@@ -2876,9 +2910,13 @@ class SMCSimpleStrategy:
             }
 
         # v2.12.0: Get direction-aware Fib thresholds
-        # Priority: backtest overrides -> direction-specific -> pair parameter_overrides -> global
-        # Check if we're in backtest mode with fib overrides - use instance variables directly
-        if hasattr(self, '_config_override') and self._config_override and \
+        # Priority: scalp mode -> backtest overrides -> direction-specific -> pair parameter_overrides -> global
+        # Scalp mode uses relaxed fib settings (0-100%) - skip database lookup
+        if self.scalp_mode_enabled:
+            # SCALP MODE: Use scalp-configured fib settings (highest priority)
+            pair_fib_min = self.fib_min  # Set to 0.0 in _configure_scalp_mode
+            pair_fib_max = self.fib_max  # Set to 1.0 in _configure_scalp_mode
+        elif hasattr(self, '_config_override') and self._config_override and \
            ('fib_pullback_min' in self._config_override or 'fib_min' in self._config_override or
             'fib_pullback_max' in self._config_override or 'fib_max' in self._config_override):
             # Use the overridden instance variables directly
@@ -4443,9 +4481,10 @@ class SMCSimpleStrategy:
                 'fvg_min_size': 3,  # Minimum 3 pips for FVG
                 'fvg_max_age': 30,  # Max 30 bars old
                 'order_block_length': 3,
-                'order_block_volume_factor': 1.3,
+                'order_block_volume_factor': 1.2,  # Reduced from 1.3 - IG ltv data is sparse
+                'order_block_min_confidence': 0.3,  # Lowered from 0.4 default for more OB detection
                 'bos_threshold': pip_value * 5,
-                'max_order_blocks': 3
+                'max_order_blocks': 5  # Increased from 3 for better visualization
             }
 
             # Detect FVGs on trigger timeframe (15m)

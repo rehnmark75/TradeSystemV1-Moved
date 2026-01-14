@@ -131,14 +131,17 @@ class SMCOrderBlocks:
             order_block_length = config.get('order_block_length', 3)
             volume_factor = config.get('order_block_volume_factor', 1.5)
             min_price_movement = config.get('bos_threshold', 0.0001) * 2
-            
+
             # Calculate average volume for comparison
+            # Prefer 'ltv' (Last Traded Volume) over 'volume' - IG provides actual data in ltv
             volumes = []
             for i in range(len(df)):
-                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                row = df.iloc[i]
+                # Check ltv first (IG's actual volume), then volume, then default to 1
+                vol = row.get('ltv', 0) or row.get('volume', 0) or 1
                 if vol and vol > 0:
                     volumes.append(vol)
-            
+
             avg_volume = sum(volumes) / len(volumes) if volumes else 1
             
             # Scan for order block patterns with FVG validation
@@ -275,14 +278,17 @@ class SMCOrderBlocks:
             order_block_length = config.get('order_block_length', 3)
             volume_factor = config.get('order_block_volume_factor', 1.5)
             min_price_movement = config.get('bos_threshold', 0.0001) * 2  # Minimum price movement
-            
+
             # Calculate average volume for comparison
+            # Prefer 'ltv' (Last Traded Volume) over 'volume' - IG provides actual data in ltv
             volumes = []
             for i in range(len(df)):
-                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                row = df.iloc[i]
+                # Check ltv first (IG's actual volume), then volume, then default to 1
+                vol = row.get('ltv', 0) or row.get('volume', 0) or 1
                 if vol and vol > 0:
                     volumes.append(vol)
-            
+
             avg_volume = sum(volumes) / len(volumes) if volumes else 1
             
             # Scan for order block patterns
@@ -350,7 +356,7 @@ class SMCOrderBlocks:
             # Check volume confirmation
             move_volumes = []
             for i in range(move_start, move_end + 1):
-                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                vol = df.iloc[i].get('ltv', 0) or df.iloc[i].get('volume', 0) or 1
                 if vol and vol > 0:
                     move_volumes.append(vol)
             
@@ -482,7 +488,7 @@ class SMCOrderBlocks:
             # Check volume confirmation
             move_volumes = []
             for i in range(move_start, move_end + 1):
-                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                vol = df.iloc[i].get('ltv', 0) or df.iloc[i].get('volume', 0) or 1
                 if vol and vol > 0:
                     move_volumes.append(vol)
             
@@ -619,7 +625,7 @@ class SMCOrderBlocks:
             # Check volume confirmation
             move_volumes = []
             for i in range(move_start, move_end + 1):
-                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                vol = df.iloc[i].get('ltv', 0) or df.iloc[i].get('volume', 0) or 1
                 if vol and vol > 0:
                     move_volumes.append(vol)
             
@@ -721,7 +727,7 @@ class SMCOrderBlocks:
             # Check volume confirmation
             move_volumes = []
             for i in range(move_start, move_end + 1):
-                vol = df.iloc[i].get('volume', df.iloc[i].get('ltv', 1))
+                vol = df.iloc[i].get('ltv', 0) or df.iloc[i].get('volume', 0) or 1
                 if vol and vol > 0:
                     move_volumes.append(vol)
             
