@@ -497,50 +497,47 @@ class OrderExecutor:
                         entry_level = new_entry
                         signal['entry_price'] = new_entry
 
-            # v2.19.1: Validate STOP order entry level against current market price
+            # v2.19.1: Validate and DYNAMICALLY ADJUST STOP order entry level
             # For working orders (limit entries), IG uses STOP type where:
             # - BUY STOP: entry must be ABOVE current market price (triggered when price rises)
             # - SELL STOP: entry must be BELOW current market price (triggered when price falls)
+            # v3.2.1: Instead of rejecting, dynamically adjust entry to maintain buffer
             if order_type == 'limit' and entry_level:
                 fresh = self._get_fresh_price(internal_epic)
                 if fresh.get('valid'):
                     current_price = fresh['price']
                     pip_value = fresh['pip_value']
-                    min_buffer_pips = 1.0  # Minimum buffer to avoid race conditions
+                    min_buffer_pips = 1.2  # Minimum buffer with 20% safety margin
                     min_buffer = min_buffer_pips * pip_value
 
                     if direction == 'BUY':
                         # BUY STOP: entry must be above current price
-                        if entry_level <= current_price + min_buffer:
-                            gap_pips = (current_price - entry_level) / pip_value
-                            self.logger.warning(
-                                f"❌ BUY STOP invalid: entry {entry_level:.5f} must be above market {current_price:.5f} "
-                                f"(gap: {gap_pips:.1f} pips)"
+                        current_gap = entry_level - current_price
+                        if current_gap < min_buffer:
+                            # v3.2.1: DYNAMIC ADJUSTMENT - adjust entry instead of rejecting
+                            original_entry = entry_level
+                            entry_level = current_price + min_buffer
+                            adjustment_pips = (entry_level - original_entry) / pip_value
+                            self.logger.info(
+                                f"🔄 BUY STOP adjusted: {original_entry:.5f} → {entry_level:.5f} "
+                                f"(+{adjustment_pips:.1f} pips to maintain {min_buffer_pips:.1f} pip buffer)"
                             )
-                            if alert_id:
-                                self._update_alert_status(alert_id, 'rejected')
-                            return {
-                                'status': 'error',
-                                'message': f'BUY STOP entry {entry_level:.5f} invalid - market at {current_price:.5f}',
-                                'alert_id': alert_id,
-                                'reason': 'STOP_LEVEL_INVALID'
-                            }
+                            # Update signal for downstream use
+                            signal['entry_price'] = entry_level
                     else:  # SELL
                         # SELL STOP: entry must be below current price
-                        if entry_level >= current_price - min_buffer:
-                            gap_pips = (entry_level - current_price) / pip_value
-                            self.logger.warning(
-                                f"❌ SELL STOP invalid: entry {entry_level:.5f} must be below market {current_price:.5f} "
-                                f"(gap: {gap_pips:.1f} pips)"
+                        current_gap = current_price - entry_level
+                        if current_gap < min_buffer:
+                            # v3.2.1: DYNAMIC ADJUSTMENT - adjust entry instead of rejecting
+                            original_entry = entry_level
+                            entry_level = current_price - min_buffer
+                            adjustment_pips = (original_entry - entry_level) / pip_value
+                            self.logger.info(
+                                f"🔄 SELL STOP adjusted: {original_entry:.5f} → {entry_level:.5f} "
+                                f"(-{adjustment_pips:.1f} pips to maintain {min_buffer_pips:.1f} pip buffer)"
                             )
-                            if alert_id:
-                                self._update_alert_status(alert_id, 'rejected')
-                            return {
-                                'status': 'error',
-                                'message': f'SELL STOP entry {entry_level:.5f} invalid - market at {current_price:.5f}',
-                                'alert_id': alert_id,
-                                'reason': 'STOP_LEVEL_INVALID'
-                            }
+                            # Update signal for downstream use
+                            signal['entry_price'] = entry_level
 
                     self.logger.info(
                         f"✅ STOP order validated: {direction} @ {entry_level:.5f}, market @ {current_price:.5f} "
