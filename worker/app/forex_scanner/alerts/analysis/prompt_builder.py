@@ -896,14 +896,14 @@ Analyze the signal (and chart if provided) then respond with EXACTLY these three
 
 SCORE: [1-10]
 DECISION: [APPROVE/REJECT]
-REASON: [2-3 sentences explaining your professional assessment. Focus on: trend alignment, entry quality, R:R ratio, and any visual concerns from the chart]
+REASON: [2-3 sentences explaining your professional assessment. Focus on: trend alignment, entry quality, and any visual concerns from the chart. Do NOT penalize for low R:R or small TP - we are testing small quick profits.]
 
-**SCORING GUIDELINES FOR v2.8.1:**
+**SCORING GUIDELINES FOR v2.8.1 (SMALL PROFIT TEST MODE):**
 - 8-10: Strong trend alignment, clean swing break on 15m, volume confirmed, EMA 9/21 aligned on 15m
 - 6-7: Good setup with minor concerns (e.g., momentum slightly extended, volume not confirmed, S/R nearby but manageable)
 - 4-5: Marginal setup - weak trend, entry quality issues, or EMA micro-structure conflict on 15m
 - 1-3: Poor setup - counter-trend, S/R blocking target, or technical breakdown
-NOTE: R:R is fixed at 1.67:1 (9 pip SL / 15 pip TP) - do not penalize for R:R.
+⚠️ TESTING MODE: R:R and TP minimums are DISABLED. We are testing small, quick profits. Do NOT reject based on low R:R or small TP. Focus on trend alignment and entry quality only.
 
 **ENTRY TYPE EVALUATION:**
 - PULLBACK entries: Prefer entries in 38.2%-61.8% Fib zone (check 5m chart). Outside zone = lower score but not automatic rejection

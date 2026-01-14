@@ -1288,57 +1288,59 @@ class SMCSimpleStrategy:
                 self.logger.info(f"   Take Profit: {take_profit:.5f} ({reward_pips:.1f} pips)")
                 self.logger.info(f"   R:R Ratio: {rr_ratio:.2f}")
 
-            # Validate R:R
-            if rr_ratio < self.min_rr_ratio:
-                reason = f"R:R too low ({rr_ratio:.2f} < {self.min_rr_ratio})"
-                self.logger.info(f"   ❌ {reason}")
-                # Track rejection
-                risk_result = {
-                    'entry_price': entry_price,
-                    'stop_loss': stop_loss,
-                    'take_profit': take_profit,
-                    'risk_pips': risk_pips,
-                    'reward_pips': reward_pips,
-                    'rr_ratio': rr_ratio,
-                }
-                self._track_rejection(
-                    stage='RISK_RR',
-                    reason=reason,
-                    epic=epic,
-                    pair=pair,
-                    candle_timestamp=candle_timestamp,
-                    direction=direction,
-                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
-                )
-                return None
+            # Validate R:R - TEMPORARILY DISABLED
+            # TODO: Re-enable R:R validation after testing
+            # if rr_ratio < self.min_rr_ratio:
+            #     reason = f"R:R too low ({rr_ratio:.2f} < {self.min_rr_ratio})"
+            #     self.logger.info(f"   ❌ {reason}")
+            #     # Track rejection
+            #     risk_result = {
+            #         'entry_price': entry_price,
+            #         'stop_loss': stop_loss,
+            #         'take_profit': take_profit,
+            #         'risk_pips': risk_pips,
+            #         'reward_pips': reward_pips,
+            #         'rr_ratio': rr_ratio,
+            #     }
+            #     self._track_rejection(
+            #         stage='RISK_RR',
+            #         reason=reason,
+            #         epic=epic,
+            #         pair=pair,
+            #         candle_timestamp=candle_timestamp,
+            #         direction=direction,
+            #         context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
+            #     )
+            #     return None
 
-            self.logger.info(f"   ✅ R:R meets minimum ({rr_ratio:.2f} >= {self.min_rr_ratio})")
+            self.logger.info(f"   ⚠️ R:R check DISABLED - ratio: {rr_ratio:.2f} (min was {self.min_rr_ratio})")
 
-            # Validate minimum TP
-            if reward_pips < self.min_tp_pips:
-                reason = f"TP too small ({reward_pips:.1f} < {self.min_tp_pips} pips)"
-                self.logger.info(f"   ❌ {reason}")
-                # Track rejection
-                risk_result = {
-                    'entry_price': entry_price,
-                    'stop_loss': stop_loss,
-                    'take_profit': take_profit,
-                    'risk_pips': risk_pips,
-                    'reward_pips': reward_pips,
-                    'rr_ratio': rr_ratio,
-                }
-                self._track_rejection(
-                    stage='RISK_TP',
-                    reason=reason,
-                    epic=epic,
-                    pair=pair,
-                    candle_timestamp=candle_timestamp,
-                    direction=direction,
-                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
-                )
-                return None
+            # Validate minimum TP - TEMPORARILY DISABLED
+            # TODO: Re-enable TP validation after testing
+            # if reward_pips < self.min_tp_pips:
+            #     reason = f"TP too small ({reward_pips:.1f} < {self.min_tp_pips} pips)"
+            #     self.logger.info(f"   ❌ {reason}")
+            #     # Track rejection
+            #     risk_result = {
+            #         'entry_price': entry_price,
+            #         'stop_loss': stop_loss,
+            #         'take_profit': take_profit,
+            #         'risk_pips': risk_pips,
+            #         'reward_pips': reward_pips,
+            #         'rr_ratio': rr_ratio,
+            #     }
+            #     self._track_rejection(
+            #         stage='RISK_TP',
+            #         reason=reason,
+            #         epic=epic,
+            #         pair=pair,
+            #         candle_timestamp=candle_timestamp,
+            #         direction=direction,
+            #         context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
+            #     )
+            #     return None
 
-            self.logger.info(f"   ✅ TP meets minimum ({reward_pips:.1f} >= {self.min_tp_pips} pips)")
+            self.logger.info(f"   ⚠️ TP check DISABLED - reward: {reward_pips:.1f} pips (min was {self.min_tp_pips})")
 
             # ================================================================
             # STEP 5: Calculate Confidence Score
