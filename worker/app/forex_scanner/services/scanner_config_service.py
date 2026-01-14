@@ -51,7 +51,7 @@ class ScannerConfig:
     scan_interval: int = 0
     min_confidence: float = 0.0
     default_timeframe: str = ""
-    use_1m_base_synthesis: bool = False
+    use_1m_base_synthesis: bool = True  # Always True - 5m data no longer streamed (Jan 2026)
     scan_align_to_boundaries: bool = False
     scan_boundary_offset_seconds: int = 0
     spread_pips: float = 1.5

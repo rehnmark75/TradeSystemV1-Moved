@@ -2100,61 +2100,28 @@ class DataFetcher:
         
         # Convert timeframe to database format
         timeframe_map = {
+            '1m': 1,
             '5m': 5,
             '15m': 15,
             '1h': 60
         }
         
-        tf_minutes = timeframe_map.get(timeframe, 5)
-        
+        tf_minutes = timeframe_map.get(timeframe, 1)
+
         # Calculate lookback time in UTC (database time)
         since_utc = tz_manager.get_lookback_time_utc(lookback_hours)
-        
-        # Determine source timeframe based on synthesis mode (from database - NO FALLBACK)
-        # USE_1M_BASE_SYNTHESIS: Use 1m candles as base (better gap resilience)
-        # Default (False): Use 5m candles as base (current behavior)
-        if self._scanner_config:
-            use_1m_base = self._scanner_config.use_1m_base_synthesis
-        else:
-            # Hardcoded default if no config available (should not happen in normal operation)
-            use_1m_base = False
 
-        if use_1m_base:
-            # 1M BASE SYNTHESIS MODE
-            # Benefits: 1 gap = 6.7% loss vs 33% with 5m base, fresher data
-            if timeframe in ('15m', '1h', '4h', '5m'):
-                source_tf = 1  # Fetch 1m data for all resampling
-                # Calculate lookback multiplier based on target timeframe
-                # 15m needs 15x more 1m bars, 1h needs 60x, 4h needs 240x, 5m needs 5x
-                multipliers = {'5m': 5, '15m': 15, '1h': 60, '4h': 240}
-                base_multiplier = multipliers.get(timeframe, 15)
-                # Add 20% buffer for resampling edge cases
-                adjusted_lookback = lookback_hours * 1.2
-                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
-                self.logger.debug(f"📊 Using 1m base synthesis for {timeframe} (source_tf=1)")
-            else:
-                source_tf = tf_minutes
+        # ALWAYS use 1m candles as source - 5m data is no longer streamed (Jan 2026)
+        # All higher timeframes (5m, 15m, 1h, 4h) are resampled from 1m candles
+        if timeframe in ('5m', '15m', '1h', '4h'):
+            source_tf = 1  # Fetch 1m data for all resampling
+            # Add 20% buffer for resampling edge cases
+            adjusted_lookback = lookback_hours * 1.2
+            since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
+            self.logger.debug(f"📊 Using 1m base synthesis for {timeframe} (source_tf=1)")
         else:
-            # 5M BASE SYNTHESIS MODE (default - current behavior)
-            if timeframe == '15m':
-                source_tf = 5  # Always fetch 5m data for 15m resampling
-                # Increase lookback to ensure we have enough 5m data
-                # 15m needs 3x more 5m bars, so increase lookback accordingly
-                adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
-                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
-            elif timeframe == '1h':
-                source_tf = 5  # Always fetch 5m data for 60m resampling
-                # Increase lookback to ensure we have enough 5m data
-                # 60m needs 12x more 5m bars, so increase lookback accordingly
-                adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
-                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
-            elif timeframe == '4h':
-                source_tf = 5  # Always fetch 5m data for 4h resampling
-                # 4h needs 48x more 5m bars (48 x 5m = 4h), increase lookback accordingly
-                adjusted_lookback = lookback_hours * 1.2  # 20% buffer for resampling
-                since_utc = tz_manager.get_lookback_time_utc(adjusted_lookback)
-            else:
-                source_tf = tf_minutes
+            # For 1m requests, use 1m directly
+            source_tf = tf_minutes
         
         # Use validated preferred prices for trading safety
         # Optimize data fetching: for large requests (backtesting), get most recent data
