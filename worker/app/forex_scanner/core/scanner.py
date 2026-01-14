@@ -1325,10 +1325,13 @@ class IntelligentForexScanner:
 
     def _calculate_boundary_aligned_sleep(self, scan_duration: float) -> float:
         """
-        Calculate sleep time to align with 15m candle boundaries.
+        Calculate sleep time to align with candle boundaries.
 
         When SCAN_ALIGN_TO_BOUNDARIES is enabled, scans are timed to occur
-        shortly after 15m candle closes (:00, :15, :30, :45 + offset).
+        shortly after candle closes + offset.
+
+        In scalp mode (5m trigger), aligns to 5m boundaries (:00, :05, :10, etc.)
+        In swing mode (15m trigger), aligns to 15m boundaries (:00, :15, :30, :45)
 
         Returns:
             float: Seconds to sleep before next scan
@@ -1338,15 +1341,25 @@ class IntelligentForexScanner:
         # Get offset from database config - NO FALLBACK
         offset_seconds = self._scanner_cfg.scan_boundary_offset_seconds
 
+        # Check if scalp mode is enabled - use 5m boundaries instead of 15m
+        try:
+            from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+            smc_config = get_smc_simple_config()
+            scalp_mode = getattr(smc_config, 'scalp_mode_enabled', False)
+        except Exception:
+            scalp_mode = False
+
+        # Boundary interval: 5 minutes for scalp, 15 minutes for swing
+        boundary_minutes = 5 if scalp_mode else 15
+
         now = datetime.utcnow()
         current_minute = now.minute
-        current_second = now.second
 
-        # Find next 15m boundary (0, 15, 30, 45)
-        next_boundary_minute = ((current_minute // 15) + 1) * 15 % 60
+        # Find next boundary based on mode
+        next_boundary_minute = ((current_minute // boundary_minutes) + 1) * boundary_minutes % 60
 
         # Calculate time to next boundary
-        if next_boundary_minute == 0 and current_minute >= 45:
+        if next_boundary_minute == 0 and current_minute >= (60 - boundary_minutes):
             # Boundary is at next hour
             next_boundary = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
         else:
@@ -1362,10 +1375,11 @@ class IntelligentForexScanner:
 
         # If we're already past the target time for this boundary, calculate for next
         if sleep_seconds < 0:
-            sleep_seconds += 15 * 60  # Add 15 minutes
+            sleep_seconds += boundary_minutes * 60
 
         # Log boundary alignment info
-        self.logger.debug(f"⏰ Boundary scan: next at {target_scan_time.strftime('%H:%M:%S')} UTC (sleeping {sleep_seconds:.0f}s)")
+        mode_str = "SCALP 5m" if scalp_mode else "SWING 15m"
+        self.logger.debug(f"⏰ Boundary scan ({mode_str}): next at {target_scan_time.strftime('%H:%M:%S')} UTC (sleeping {sleep_seconds:.0f}s)")
 
         return max(10, sleep_seconds)  # Minimum 10 seconds between scans
 
@@ -1379,12 +1393,23 @@ class IntelligentForexScanner:
         boundary_offset = scanner_config.scan_boundary_offset_seconds
         use_1m_base = scanner_config.use_1m_base_synthesis
 
-        self.logger.info(f"🚀 Starting continuous scanning")
+        # Check if scalp mode is enabled - affects boundary interval
+        try:
+            from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+            smc_config = get_smc_simple_config()
+            scalp_mode = getattr(smc_config, 'scalp_mode_enabled', False)
+        except Exception:
+            scalp_mode = False
+
+        boundary_interval = "5m" if scalp_mode else "15m"
+        mode_str = "SCALP MODE" if scalp_mode else "SWING MODE"
+
+        self.logger.info(f"🚀 Starting continuous scanning ({mode_str})")
         self.logger.info(f"   Interval: {self.scan_interval}s")
         self.logger.info(f"   Epics: {len(self.epic_list)}")
         self.logger.info(f"   SignalProcessor: {'✅ Active' if self.use_signal_processor else '❌ Inactive'}")
         self.logger.info(f"   1m Base Synthesis: {'✅ Enabled' if use_1m_base else '❌ Disabled (5m base)'}")
-        self.logger.info(f"   Boundary Scanning: {'✅ Enabled (offset: ' + str(boundary_offset) + 's)' if boundary_aligned else '❌ Disabled'}")
+        self.logger.info(f"   Boundary Scanning: {'✅ Enabled (' + boundary_interval + ' boundaries, offset: ' + str(boundary_offset) + 's)' if boundary_aligned else '❌ Disabled'}")
 
         try:
             while self.running:
