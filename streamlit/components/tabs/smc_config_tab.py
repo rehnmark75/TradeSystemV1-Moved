@@ -818,6 +818,23 @@ def render_global_settings(config: Dict[str, Any]):
         if not _values_equal(new_require_spread, config.get('scalp_require_tight_spread')):
             st.session_state.smc_pending_changes['scalp_require_tight_spread'] = new_require_spread
 
+        # Claude AI toggle
+        st.markdown("---")
+        st.markdown("**🤖 AI Integration**")
+        new_enable_claude = st.checkbox(
+            "Enable Claude AI Validation",
+            value=config.get('scalp_enable_claude_ai', True),
+            help="Enable Claude AI to validate scalp trade signals before execution",
+            key="scalp_enable_claude_ai"
+        )
+        if not _values_equal(new_enable_claude, config.get('scalp_enable_claude_ai')):
+            st.session_state.smc_pending_changes['scalp_enable_claude_ai'] = new_enable_claude
+
+        if new_enable_claude:
+            st.info("🤖 Claude AI will validate each scalp signal before execution")
+        else:
+            st.warning("⚠️ Scalp trades will execute WITHOUT AI validation")
+
         # Warning message
         if new_scalp_enabled:
             st.warning("""

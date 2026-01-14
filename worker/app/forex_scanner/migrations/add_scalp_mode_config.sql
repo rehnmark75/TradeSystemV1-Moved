@@ -85,6 +85,10 @@ ADD COLUMN IF NOT EXISTS scalp_swing_lookback_bars INTEGER DEFAULT 5;
 ALTER TABLE smc_simple_global_config
 ADD COLUMN IF NOT EXISTS scalp_range_position_threshold DECIMAL(4,2) DEFAULT 0.80;
 
+-- Scalp Claude AI integration (enable AI validation for scalp trades)
+ALTER TABLE smc_simple_global_config
+ADD COLUMN IF NOT EXISTS scalp_enable_claude_ai BOOLEAN DEFAULT TRUE;
+
 -- ============================================================================
 -- PER-PAIR OVERRIDES: Add scalp-specific columns
 -- ============================================================================
@@ -117,7 +121,8 @@ VALUES
     ('scalp_ema_period', 'Scalp EMA Period', 'Scalp', 'integer', '20', 'Faster EMA period for scalp mode'),
     ('scalp_min_confidence', 'Scalp Min Confidence', 'Scalp', 'decimal', '0.30', 'Lower confidence threshold for more scalp entries'),
     ('scalp_cooldown_minutes', 'Scalp Cooldown', 'Scalp', 'integer', '15', 'Cooldown between scalp trades (minutes)'),
-    ('scalp_require_tight_spread', 'Require Tight Spread', 'Scalp', 'boolean', 'true', 'Only trade when spread is below max threshold')
+    ('scalp_require_tight_spread', 'Require Tight Spread', 'Scalp', 'boolean', 'true', 'Only trade when spread is below max threshold'),
+    ('scalp_enable_claude_ai', 'Enable Claude AI', 'Scalp', 'boolean', 'true', 'Enable Claude AI validation for scalp trades')
 ON CONFLICT (parameter_name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     category = EXCLUDED.category,

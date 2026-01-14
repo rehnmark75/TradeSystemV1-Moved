@@ -250,6 +250,7 @@ class SMCSimpleConfig:
     scalp_require_tight_spread: bool = True
     scalp_swing_lookback_bars: int = 5
     scalp_range_position_threshold: float = 0.80
+    scalp_enable_claude_ai: bool = True
 
     # ENABLED PAIRS
     enabled_pairs: List[str] = field(default_factory=lambda: [
@@ -977,6 +978,7 @@ class SMCSimpleConfigService:
             'scalp_fib_pullback_min', 'scalp_fib_pullback_max',
             'scalp_cooldown_minutes', 'scalp_require_tight_spread',
             'scalp_swing_lookback_bars', 'scalp_range_position_threshold',
+            'scalp_enable_claude_ai',
         ]
 
         # Fields that must be integers (used for DataFrame slicing, loop counts, etc.)

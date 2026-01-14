@@ -221,6 +221,15 @@ class TradingOrchestrator:
         else:
             self.enable_claude = self._scanner_cfg.require_claude_approval
 
+        # SCALP MODE CLAUDE OVERRIDE: Enable Claude AI validation when scalp mode is active
+        if getattr(self._smc_cfg, 'scalp_mode_enabled', False):
+            scalp_claude_enabled = getattr(self._smc_cfg, 'scalp_enable_claude_ai', True)
+            if scalp_claude_enabled and not self.enable_claude:
+                self.enable_claude = True
+                self.logger.info("🎯 [SCALP MODE] Claude AI validation enabled for scalp trades")
+            elif not scalp_claude_enabled:
+                self.logger.info("🎯 [SCALP MODE] Claude AI validation disabled per scalp config")
+
         self.claude_analysis_mode = claude_analysis_mode or 'minimal'
         self.claude_analysis_level = claude_analysis_level or 'institutional'
         self.use_advanced_claude_prompts = use_advanced_claude_prompts if use_advanced_claude_prompts is not None else True
