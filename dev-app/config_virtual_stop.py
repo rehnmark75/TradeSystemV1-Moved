@@ -21,7 +21,9 @@ VIRTUAL_STOP_LOSS_ENABLED = True
 
 # Default virtual stop loss distance in pips
 # Trade will be closed when price moves this many pips against entry
-DEFAULT_VIRTUAL_SL_PIPS = 4.0
+# Using 3 pips as default - since scalp trades use limit order offset,
+# if price reverses after triggering, it's likely a bad trade
+DEFAULT_VIRTUAL_SL_PIPS = 3.0
 
 # Broker safety net SL (set on IG as actual stop loss)
 # This catches the trade if streaming fails - should be IG's minimum
@@ -60,57 +62,59 @@ LIGHTSTREAMER_MAX_RECONNECT_ATTEMPTS = 10
 # =============================================================================
 
 # Virtual SL settings per currency pair
-# Pairs with higher volatility may need wider virtual stops
+# Moderate settings: 3 pips for majors, 4 pips for JPY crosses
+# Since scalp trades use limit order offset (1 pip), if price reverses
+# after triggering, it's likely a bad trade - keep VSL tight
 PAIR_VIRTUAL_SL_CONFIGS = {
-    # Major pairs - tighter stops
+    # Major pairs - 3 pips VSL
     'CS.D.EURUSD.CEEM.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 3.0,
         'enabled': True,
     },
     'CS.D.EURUSD.MINI.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 3.0,
         'enabled': True,
     },
     'CS.D.GBPUSD.MINI.IP': {
-        'virtual_sl_pips': 5.0,  # Slightly wider for GBP volatility
+        'virtual_sl_pips': 3.0,
         'enabled': True,
     },
     'CS.D.GBPUSD.CEEM.IP': {
-        'virtual_sl_pips': 5.0,
+        'virtual_sl_pips': 3.0,
         'enabled': True,
     },
     'CS.D.USDCHF.MINI.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 3.0,
         'enabled': True,
     },
     'CS.D.USDCAD.MINI.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 3.0,
         'enabled': True,
     },
     'CS.D.AUDUSD.MINI.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 3.0,
         'enabled': True,
     },
     'CS.D.NZDUSD.MINI.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 3.0,
         'enabled': True,
     },
 
-    # JPY pairs - different pip value, slightly wider
+    # JPY pairs - 4 pips VSL (higher volatility)
     'CS.D.USDJPY.MINI.IP': {
-        'virtual_sl_pips': 5.0,
+        'virtual_sl_pips': 4.0,
         'enabled': True,
     },
     'CS.D.EURJPY.MINI.IP': {
-        'virtual_sl_pips': 5.0,
+        'virtual_sl_pips': 4.0,
         'enabled': True,
     },
     'CS.D.GBPJPY.MINI.IP': {
-        'virtual_sl_pips': 6.0,  # GBP/JPY is volatile
+        'virtual_sl_pips': 4.0,
         'enabled': True,
     },
     'CS.D.AUDJPY.MINI.IP': {
-        'virtual_sl_pips': 5.0,
+        'virtual_sl_pips': 4.0,
         'enabled': True,
     },
 }
