@@ -89,6 +89,10 @@ ADD COLUMN IF NOT EXISTS scalp_range_position_threshold DECIMAL(4,2) DEFAULT 0.8
 ALTER TABLE smc_simple_global_config
 ADD COLUMN IF NOT EXISTS scalp_enable_claude_ai BOOLEAN DEFAULT TRUE;
 
+-- Scalp market order mode (faster fills, spread filter is the safeguard)
+ALTER TABLE smc_simple_global_config
+ADD COLUMN IF NOT EXISTS scalp_use_market_orders BOOLEAN DEFAULT TRUE;
+
 -- ============================================================================
 -- PER-PAIR OVERRIDES: Add scalp-specific columns
 -- ============================================================================
@@ -122,7 +126,8 @@ VALUES
     ('scalp_min_confidence', 'Scalp Min Confidence', 'Scalp', 'decimal', '0.30', 'Lower confidence threshold for more scalp entries'),
     ('scalp_cooldown_minutes', 'Scalp Cooldown', 'Scalp', 'integer', '15', 'Cooldown between scalp trades (minutes)'),
     ('scalp_require_tight_spread', 'Require Tight Spread', 'Scalp', 'boolean', 'true', 'Only trade when spread is below max threshold'),
-    ('scalp_enable_claude_ai', 'Enable Claude AI', 'Scalp', 'boolean', 'true', 'Enable Claude AI validation for scalp trades')
+    ('scalp_enable_claude_ai', 'Enable Claude AI', 'Scalp', 'boolean', 'true', 'Enable Claude AI validation for scalp trades'),
+    ('scalp_use_market_orders', 'Use Market Orders', 'Scalp', 'boolean', 'true', 'Use market orders for faster fills (spread filter is the safeguard)')
 ON CONFLICT (parameter_name) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     category = EXCLUDED.category,

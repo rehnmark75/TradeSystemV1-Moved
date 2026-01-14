@@ -870,6 +870,9 @@ class SMCSimpleStrategy:
         self.scalp_swing_lookback_bars = getattr(config, 'scalp_swing_lookback_bars', 5)
         self.scalp_range_position_threshold = getattr(config, 'scalp_range_position_threshold', 0.80)
 
+        # Scalp market orders (faster fills, spread filter is the safeguard)
+        self.scalp_use_market_orders = getattr(config, 'scalp_use_market_orders', True)
+
     def _configure_scalp_mode(self):
         """Configure strategy for high-frequency scalping mode.
 
@@ -932,6 +935,13 @@ class SMCSimpleStrategy:
         self.ema_distance_adjusted_confidence_enabled = False
         self.atr_adjusted_confidence_enabled = False
         self.volume_adjusted_confidence_enabled = False
+
+        # Use market orders for faster fills (spread filter is the safeguard)
+        if self.scalp_use_market_orders:
+            self.limit_order_enabled = False
+            self.logger.info("   Order Type: MARKET (faster fills, spread-filtered)")
+        else:
+            self.logger.info("   Order Type: LIMIT (as configured)")
 
         # Log configuration
         self.logger.info(f"   HTF Timeframe: {self.htf_timeframe}")

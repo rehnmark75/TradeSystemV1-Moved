@@ -835,6 +835,23 @@ def render_global_settings(config: Dict[str, Any]):
         else:
             st.warning("⚠️ Scalp trades will execute WITHOUT AI validation")
 
+        # Market orders toggle
+        st.markdown("---")
+        st.markdown("**📈 Order Execution**")
+        new_use_market = st.checkbox(
+            "Use Market Orders",
+            value=config.get('scalp_use_market_orders', True),
+            help="Use market orders for faster fills. Spread filter is the safeguard against slippage.",
+            key="scalp_use_market_orders"
+        )
+        if not _values_equal(new_use_market, config.get('scalp_use_market_orders')):
+            st.session_state.smc_pending_changes['scalp_use_market_orders'] = new_use_market
+
+        if new_use_market:
+            st.info("⚡ MARKET orders: Instant fills, spread filter guards against slippage")
+        else:
+            st.info("📋 LIMIT orders: Better price control, may miss fast-moving entries")
+
         # Warning message
         if new_scalp_enabled:
             st.warning("""
