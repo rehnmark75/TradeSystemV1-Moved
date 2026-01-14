@@ -140,6 +140,14 @@ Signal Display Format:
         )
 
         parser.add_argument(
+            '--scalp',
+            action='store_true',
+            help='Enable scalping mode with Virtual Stop Loss (VSL) emulation. '
+                 'Uses per-pair VSL values: 3 pips for majors, 4 pips for JPY pairs. '
+                 'Take profit defaults to 5 pips. Override with --override scalp_tp_pips=X.'
+        )
+
+        parser.add_argument(
             '--timeframe',
             type=str,
             default='15m',
@@ -360,6 +368,71 @@ Signal Display Format:
 
         return overrides if overrides else None
 
+    def _build_scalp_config_overrides(self, epic: str = None, existing_overrides: dict = None) -> dict:
+        """
+        Build config overrides for scalp mode with Virtual Stop Loss (VSL) emulation.
+
+        VSL allows tighter stop losses than IG's broker minimum by monitoring prices
+        in real-time and closing programmatically. In backtest, we emulate this by
+        using the VSL values as the stop loss distance.
+
+        Per-pair VSL values (matching live trading):
+        - Majors (EURUSD, GBPUSD, etc.): 3 pips
+        - JPY pairs (USDJPY, EURJPY, etc.): 4 pips
+
+        Args:
+            epic: Specific epic to test (used for display purposes)
+            existing_overrides: Any existing overrides (to check for scalp_tp_pips override)
+
+        Returns:
+            Dict of scalp mode config overrides
+        """
+        try:
+            from forex_scanner.config_virtual_stop_backtest import (
+                get_vsl_pips, DEFAULT_SCALP_TP_PIPS, PAIR_VSL_CONFIGS
+            )
+        except ImportError:
+            from config_virtual_stop_backtest import (
+                get_vsl_pips, DEFAULT_SCALP_TP_PIPS, PAIR_VSL_CONFIGS
+            )
+
+        # Get scalp TP from overrides or use default
+        scalp_tp = DEFAULT_SCALP_TP_PIPS
+        if existing_overrides and 'scalp_tp_pips' in existing_overrides:
+            scalp_tp = existing_overrides['scalp_tp_pips']
+
+        overrides = {
+            'scalp_mode_enabled': True,
+            'scalp_tp_pips': scalp_tp,
+            'use_vsl_mode': True,  # Flag for BacktestScanner to use VSL simulation
+        }
+
+        # Display VSL configuration
+        print(f"\n🎯 Scalp Mode Configuration (Virtual Stop Loss Emulation):")
+        print(f"   Take Profit: {scalp_tp} pips")
+
+        if epic:
+            # Single epic - show its VSL
+            vsl_pips = get_vsl_pips(epic)
+            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            print(f"   {pair}: VSL = {vsl_pips} pips")
+        else:
+            # Multiple epics - show summary
+            print(f"   Per-pair Virtual Stop Loss:")
+            # Group by VSL value
+            majors = [e for e, c in PAIR_VSL_CONFIGS.items() if c['vsl_pips'] == 3.0]
+            jpy_pairs = [e for e, c in PAIR_VSL_CONFIGS.items() if c['vsl_pips'] == 4.0]
+
+            if majors:
+                major_names = [e.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '') for e in majors[:4]]
+                print(f"   - Majors (3 pips): {', '.join(major_names)}...")
+            if jpy_pairs:
+                jpy_names = [e.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '') for e in jpy_pairs[:4]]
+                print(f"   - JPY pairs (4 pips): {', '.join(jpy_names)}")
+
+        print()
+        return overrides
+
     def _load_snapshot_overrides(self, snapshot_name: str) -> dict:
         """
         Load parameter overrides from a saved snapshot.
@@ -485,6 +558,14 @@ Signal Display Format:
                     print(f"   (merged with {len(inline_overrides)} inline overrides)")
                 else:
                     config_override = inline_overrides
+
+            # Handle scalp mode with VSL emulation
+            if getattr(args, 'scalp', False):
+                scalp_overrides = self._build_scalp_config_overrides(args.epic, config_override)
+                if config_override:
+                    config_override.update(scalp_overrides)
+                else:
+                    config_override = scalp_overrides
 
             # Validate date range parameters
             if (args.start_date and not args.end_date) or (args.end_date and not args.start_date):

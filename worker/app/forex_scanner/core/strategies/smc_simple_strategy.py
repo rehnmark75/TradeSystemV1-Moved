@@ -940,6 +940,9 @@ class SMCSimpleStrategy:
         self.atr_adjusted_confidence_enabled = False
         self.volume_adjusted_confidence_enabled = False
 
+        # Disable low-confidence extra offset in scalp mode (keep 1 pip offset)
+        self.scalp_disable_low_confidence_offset = True
+
         # Use market orders for faster fills (spread filter is the safeguard)
         if self.scalp_use_market_orders:
             self.limit_order_enabled = False
@@ -2009,7 +2012,9 @@ class SMCSimpleStrategy:
                     self.logger.info(f"\n📋 FINAL Order Type: MARKET (high quality: conf={confidence:.1%}, slope={ema_slope_strength:.2f}x ATR)")
                 elif order_type == 'limit':
                     # v2.17.0: Add extra offset for low confidence signals (0.50-0.54)
-                    if confidence < 0.55 and low_confidence_extra_offset > 0:
+                    # SCALP MODE: Skip extra offset - use fixed 1 pip offset for all signals
+                    skip_extra_offset = getattr(self, 'scalp_disable_low_confidence_offset', False)
+                    if confidence < 0.55 and low_confidence_extra_offset > 0 and not skip_extra_offset:
                         limit_offset_pips += low_confidence_extra_offset
                         # Recalculate entry price with extra offset
                         extra_offset = low_confidence_extra_offset * pip_value
@@ -2236,18 +2241,20 @@ class SMCSimpleStrategy:
 
             # ================================================================
             # SMC DATA: Detect FVGs and Order Blocks for chart visualization
+            # Skip in backtest mode to improve performance (unless chart_mode enabled)
             # ================================================================
-            try:
-                signal = self._add_smc_chart_data(
-                    signal=signal,
-                    df_trigger=df_trigger,
-                    df_entry=entry_df,
-                    epic=epic,
-                    pip_value=pip_value
-                )
-            except Exception as smc_error:
-                # Don't fail the signal if SMC data detection fails
-                self.logger.warning(f"⚠️ SMC chart data detection failed: {smc_error}")
+            if not self._backtest_mode or getattr(self, '_chart_mode_enabled', False):
+                try:
+                    signal = self._add_smc_chart_data(
+                        signal=signal,
+                        df_trigger=df_trigger,
+                        df_entry=entry_df,
+                        epic=epic,
+                        pip_value=pip_value
+                    )
+                except Exception as smc_error:
+                    # Don't fail the signal if SMC data detection fails
+                    self.logger.warning(f"⚠️ SMC chart data detection failed: {smc_error}")
 
             return signal
 
@@ -2796,9 +2803,13 @@ class SMCSimpleStrategy:
         entry_type = 'PULLBACK'  # Default
 
         # v2.12.0: Get direction-aware momentum min depth
-        # Priority: direction-specific -> pair parameter_overrides -> global
+        # Priority: scalp mode override -> direction-specific -> pair parameter_overrides -> global
+        # FIX: Scalp mode sets self.momentum_min_depth to scalp_momentum_min_depth, so use it as floor
         if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
-            pair_momentum_min = self._db_config.get_momentum_min_depth(epic, direction)
+            db_momentum_min = self._db_config.get_momentum_min_depth(epic, direction)
+            # In scalp mode, use the more permissive value (lower = allows more extension)
+            # self.momentum_min_depth is set to scalp_momentum_min_depth (-0.30) in scalp mode
+            pair_momentum_min = min(db_momentum_min, self.momentum_min_depth)
         else:
             pair_momentum_min = self._get_pair_param(epic, 'MOMENTUM_MIN_DEPTH', self.momentum_min_depth)
 
@@ -3194,8 +3205,12 @@ class SMCSimpleStrategy:
             return current_close, 0.0
 
         # v2.17.0: Check for per-pair stop offset override first
+        # SCALP MODE: Skip database override - use scalp-configured 1 pip offset
         pair_offset = None
-        if epic and hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+        if self.scalp_mode_enabled:
+            # Scalp mode uses fixed 1 pip offset - don't check database
+            self.logger.debug(f"   📉 Scalp mode: using configured offset (skip DB override)")
+        elif epic and hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
             pair_offset = self._db_config.get_pair_stop_offset(epic, entry_type)
             if pair_offset != self.momentum_offset_pips and pair_offset != self.pullback_offset_max_pips:
                 # Per-pair override is set - use it directly
@@ -3753,6 +3768,49 @@ class SMCSimpleStrategy:
         # Track current session for session change detection
         if self.adaptive_cooldown_enabled:
             self.pair_last_session[pair] = self._get_current_session(effective_time)
+
+    def adjust_cooldown_for_unfilled_order(self, pair: str, signal_time: datetime):
+        """Adjust cooldown when a limit order expires without filling.
+
+        v3.4.0: In live trading, expired limit orders only trigger 30min cooldown
+        instead of full 4h. This method replicates that behavior in backtest mode
+        by advancing the cooldown time to allow sooner re-entry.
+
+        The reduced cooldown prevents "wasting" a full cooldown period when
+        no actual trade occurred.
+
+        Args:
+            pair: Currency pair name (e.g., 'EURUSD')
+            signal_time: Original signal timestamp
+        """
+        if not self._backtest_mode:
+            return
+
+        # Live mode uses 0.5h (30min) cooldown for expired orders
+        # Advance the cooldown timestamp so only 30min effective cooldown remains
+        reduced_cooldown_hours = 0.5
+
+        # Get current full cooldown (adaptive or static)
+        if self.adaptive_cooldown_enabled:
+            full_cooldown, _ = self._calculate_adaptive_cooldown(pair, signal_time)
+        else:
+            full_cooldown = self.cooldown_hours
+
+        # Calculate how much to advance the cooldown timestamp
+        # If full cooldown is 1.5h and reduced is 0.5h, advance by 1h
+        cooldown_reduction = full_cooldown - reduced_cooldown_hours
+
+        if cooldown_reduction > 0 and pair in self.pair_cooldowns:
+            # Subtract the reduction from the original signal time
+            # This makes it appear the signal happened earlier, so cooldown expires sooner
+            original_time = self.pair_cooldowns[pair]
+            adjusted_time = original_time - timedelta(hours=cooldown_reduction)
+            self.pair_cooldowns[pair] = adjusted_time
+
+            self.logger.debug(
+                f"🔄 {pair}: Cooldown adjusted for unfilled limit order "
+                f"(reduced from {full_cooldown:.1f}h to {reduced_cooldown_hours}h effective)"
+            )
 
     def update_trade_outcome(self, pair: str, profitable: bool):
         """Update consecutive loss tracking after a trade closes

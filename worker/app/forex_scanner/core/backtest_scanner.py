@@ -136,7 +136,40 @@ class BacktestScanner(IntelligentForexScanner):
 
         # 🔥 SCALPING-SPECIFIC CONFIGURATION: Still uses fixed SL/TP (no trailing)
         self._use_scalping_mode = 'SCALPING' in self.strategy_name.upper()
-        if self._use_scalping_mode:
+
+        # 🎯 VSL MODE: Virtual Stop Loss emulation for scalping backtests
+        # When enabled via --scalp flag, uses per-pair VSL values from config
+        self._use_vsl_mode = False
+        self._vsl_config = {}
+        if self._config_override and self._config_override.get('use_vsl_mode'):
+            self._use_vsl_mode = True
+            self._use_scalping_mode = False  # VSL mode takes precedence
+            try:
+                from forex_scanner.config_virtual_stop_backtest import (
+                    get_vsl_pips, DEFAULT_SCALP_TP_PIPS, PAIR_VSL_CONFIGS
+                )
+            except ImportError:
+                from config_virtual_stop_backtest import (
+                    get_vsl_pips, DEFAULT_SCALP_TP_PIPS, PAIR_VSL_CONFIGS
+                )
+
+            # Get TP from config override or use default
+            scalp_tp = self._config_override.get('scalp_tp_pips', DEFAULT_SCALP_TP_PIPS)
+
+            # Pre-load VSL configs for all epics
+            for epic in self.epic_list:
+                self._vsl_config[epic] = {
+                    'vsl_pips': get_vsl_pips(epic),
+                    'tp_pips': scalp_tp
+                }
+
+            self.logger.info(f"🎯 VSL Mode: ENABLED (Virtual Stop Loss Emulation)")
+            self.logger.info(f"   Take Profit: {scalp_tp} pips")
+            for epic, cfg in self._vsl_config.items():
+                pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                self.logger.info(f"   {pair}: VSL={cfg['vsl_pips']} pips, TP={cfg['tp_pips']} pips")
+
+        elif self._use_scalping_mode:
             try:
                 from configdata.strategies.config_scalping_strategy import SCALPING_MODE, SCALPING_STRATEGY_CONFIG
                 scalping_config = SCALPING_STRATEGY_CONFIG.get(SCALPING_MODE, {})
@@ -1106,7 +1139,20 @@ class BacktestScanner(IntelligentForexScanner):
             return self._trailing_stop_simulators[epic]
 
         # Create new simulator with pair-specific config
-        if self._use_scalping_mode:
+        if self._use_vsl_mode and epic in self._vsl_config:
+            # 🎯 VSL Mode: Virtual Stop Loss emulation for scalping
+            # Uses per-pair VSL values from config (3 pips majors, 4 pips JPY)
+            vsl_cfg = self._vsl_config[epic]
+            simulator = TrailingStopSimulator(
+                epic=epic,
+                target_pips=vsl_cfg['tp_pips'],
+                initial_stop_pips=vsl_cfg['vsl_pips'],  # VSL as stop loss
+                max_bars=200,  # Scalp trades should resolve quickly
+                use_fixed_sl_tp=True,  # CRITICAL: No trailing, pure VSL behavior
+                logger=self.logger
+            )
+            self.logger.debug(f"🎯 Created VSL simulator for {epic}: VSL={vsl_cfg['vsl_pips']} pips, TP={vsl_cfg['tp_pips']} pips")
+        elif self._use_scalping_mode:
             # Scalping uses fixed SL/TP, no trailing
             simulator = TrailingStopSimulator(
                 epic=epic,
@@ -1141,6 +1187,17 @@ class BacktestScanner(IntelligentForexScanner):
                 self.logger.warning("Signal missing epic, skipping trade simulation")
                 return signal
 
+            # 🎯 VSL MODE: Override signal's SL/TP with VSL config values
+            # This ensures the simulator uses VSL (3-4 pips) instead of strategy SL (5 pips)
+            if self._use_vsl_mode and epic in self._vsl_config:
+                vsl_cfg = self._vsl_config[epic]
+                signal['risk_pips'] = vsl_cfg['vsl_pips']  # Override SL with VSL
+                signal['reward_pips'] = vsl_cfg['tp_pips']  # Override TP with scalp TP
+                # Override limit expiry to 20 minutes for better fill probability
+                if signal.get('order_type') == 'limit':
+                    signal['limit_expiry_minutes'] = 20
+                self.logger.debug(f"🎯 VSL Override: SL={vsl_cfg['vsl_pips']} pips, TP={vsl_cfg['tp_pips']} pips, Expiry=20min")
+
             # Get per-epic trailing stop simulator with pair-specific config
             trailing_simulator = self._get_trailing_stop_simulator(epic)
 
@@ -1168,6 +1225,17 @@ class BacktestScanner(IntelligentForexScanner):
                             f"loss={enhanced_signal.get('max_loss_pips', 0):.1f}, "
                             f"result={enhanced_signal.get('trade_result', 'UNKNOWN')}, "
                             f"stage={enhanced_signal.get('stage_reached', 0)}")
+
+            # v3.4.0: Adjust cooldown for unfilled limit orders
+            # In live trading, expired limit orders only trigger 30min cooldown instead of full cooldown
+            # This replicates that behavior in backtest to match live trading more accurately
+            trade_outcome = enhanced_signal.get('trade_outcome', '')
+            if trade_outcome == 'LIMIT_NOT_FILLED':
+                pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                # Get strategy from signal_detector to adjust cooldown
+                if hasattr(self.signal_detector, 'smc_simple_strategy') and self.signal_detector.smc_simple_strategy:
+                    self.signal_detector.smc_simple_strategy.adjust_cooldown_for_unfilled_order(pair, signal_timestamp)
+                    self.logger.debug(f"🔄 Cooldown adjusted for unfilled limit order on {pair}")
 
             return enhanced_signal
 

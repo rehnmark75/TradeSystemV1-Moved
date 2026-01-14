@@ -110,11 +110,13 @@ class TradeValidator:
                  logger: Optional[logging.Logger] = None,
                  db_manager: Optional[object] = None,  # NEW: Optional db_manager for S/R validation
                  backtest_mode: bool = False,  # NEW: Backtest mode parameter
-                 alert_history_manager: Optional[object] = None):  # NEW: For saving Claude rejections to DB
+                 alert_history_manager: Optional[object] = None,  # NEW: For saving Claude rejections to DB
+                 enable_claude_filtering: Optional[bool] = None):  # NEW: Override Claude filtering (for scalp mode)
 
         self.logger = logger or logging.getLogger(__name__)
         self.backtest_mode = backtest_mode
         self.alert_history_manager = alert_history_manager  # Store for Claude rejection saving
+        self._claude_override = enable_claude_filtering  # Store override for later use
 
         # Load scanner config from database - REQUIRED, NO FALLBACK
         if not SCANNER_CONFIG_AVAILABLE:
@@ -183,8 +185,15 @@ class TradeValidator:
             ENHANCED_SR_VALIDATOR_AVAILABLE
         )
         
-        # Claude filtering configuration from database ONLY - no fallback
-        self.enable_claude_filtering = bool(self._scanner_cfg.require_claude_approval)
+        # Claude filtering configuration - supports override from orchestrator (scalp mode)
+        # Priority: 1. Explicit override (from orchestrator), 2. Database config
+        if self._claude_override is not None:
+            self.enable_claude_filtering = self._claude_override
+            self.logger.info(f"[CONFIG:OVERRIDE] Claude filtering: {self.enable_claude_filtering} (override from orchestrator)")
+        else:
+            self.enable_claude_filtering = bool(self._scanner_cfg.require_claude_approval)
+            self.logger.info(f"[CONFIG:DB] Claude filtering: {self.enable_claude_filtering}")
+
         self.min_claude_score = int(self._scanner_cfg.min_claude_quality_score)
         self.claude_fail_secure = bool(self._scanner_cfg.claude_fail_secure)
         self.claude_validate_in_backtest = bool(self._scanner_cfg.claude_validate_in_backtest)
@@ -192,7 +201,7 @@ class TradeValidator:
         self.claude_save_vision_artifacts = bool(self._scanner_cfg.claude_save_vision_artifacts)
         self.claude_vision_save_directory = self._scanner_cfg.claude_vision_save_directory
         self.claude_include_chart = bool(self._scanner_cfg.claude_include_chart)
-        self.logger.info(f"[CONFIG:DB] Claude filtering: {self.enable_claude_filtering}, min_score: {self.min_claude_score}")
+        self.logger.info(f"[CONFIG:DB] Claude min_score: {self.min_claude_score}")
 
         # Economic news filtering configuration from database ONLY - no fallback
         self.enable_news_filtering = (

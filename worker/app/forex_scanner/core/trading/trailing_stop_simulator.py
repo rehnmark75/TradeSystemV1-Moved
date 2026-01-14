@@ -239,10 +239,22 @@ class TrailingStopSimulator:
                 else:
                     exit_price = future_data.iloc[-1]['close'] if len(future_data) > 0 else entry_price
 
+                # Map trade_outcome to database-valid trade_result
+                # Database constraint only allows: 'win', 'loss', 'breakeven'
+                trade_outcome = trade_result['trade_outcome']
+                if trade_outcome in ('PROFIT_TARGET', 'TRAILING_STOP', 'STAGE1', 'STAGE2', 'STAGE3'):
+                    db_trade_result = 'win'
+                elif trade_outcome in ('STOP_LOSS', 'VSL_STOP', 'TIME_EXIT', 'TIMEOUT_LOSS'):
+                    db_trade_result = 'loss'
+                else:
+                    # BREAKEVEN, TIMEOUT, NO_DATA, LIMIT_NOT_FILLED, etc.
+                    db_trade_result = 'breakeven'
+
                 # Update signal with comprehensive metrics
                 enhanced_signal.update({
                     # Trade outcome
-                    'trade_result': trade_result['trade_outcome'],
+                    'trade_result': db_trade_result,  # DB-compatible value
+                    'trade_outcome': trade_outcome,   # Original detailed outcome
                     'exit_reason': trade_result['exit_reason'],
                     'exit_price': exit_price,
                     'exit_timestamp': exit_timestamp,
@@ -379,6 +391,62 @@ class TrailingStopSimulator:
         Returns:
             Dictionary with trade simulation results
         """
+        # Normalize signal type
+        is_long = signal_type in ['BUY', 'BULL', 'LONG']
+        is_short = signal_type in ['SELL', 'BEAR', 'SHORT']
+
+        # =================================================================
+        # LIMIT ORDER FILL SIMULATION (for scalping/limit orders)
+        # =================================================================
+        # For limit orders, we need to wait for price to reach the limit entry
+        # before starting the trade simulation
+        order_type = signal.get('order_type', 'market') if signal else 'market'
+        limit_expiry_minutes = signal.get('limit_expiry_minutes', 20) if signal else 20  # Default 20 min for limit orders
+        market_price = signal.get('market_price') if signal else None
+
+        if order_type == 'limit' and market_price is not None:
+            # Calculate expiry in bars (assuming 5m timeframe for scalping)
+            bar_minutes = 5  # Scalping uses 5m bars
+            expiry_bars = max(1, int(limit_expiry_minutes / bar_minutes))
+
+            # Find fill bar - when price reaches limit entry level
+            fill_bar = None
+            for bar_idx, (_, bar) in enumerate(future_data.iterrows()):
+                if bar_idx >= expiry_bars:
+                    break  # Limit order expired
+
+                if is_long:
+                    # BUY limit: fills when price goes UP to limit entry (stop entry style)
+                    if bar['high'] >= entry_price:
+                        fill_bar = bar_idx
+                        break
+                elif is_short:
+                    # SELL limit: fills when price goes DOWN to limit entry (stop entry style)
+                    if bar['low'] <= entry_price:
+                        fill_bar = bar_idx
+                        break
+
+            if fill_bar is None:
+                # Limit order not filled - return no trade result
+                self.logger.debug(f"Limit order not filled within {limit_expiry_minutes} min expiry")
+                return {
+                    'trade_outcome': 'LIMIT_NOT_FILLED',
+                    'exit_reason': 'LIMIT_EXPIRED',
+                    'is_winner': False,
+                    'is_loser': False,
+                    'exit_pnl': 0.0,
+                    'exit_bar': None,
+                    'final_profit': 0.0,
+                    'final_loss': 0.0,
+                    'best_profit_pips': 0.0,
+                    'worst_loss_pips': 0.0,
+                    'stage_reached': 0
+                }
+
+            # Slice future data to start from fill bar
+            self.logger.debug(f"Limit order filled at bar {fill_bar}, entry={entry_price}")
+            future_data = future_data.iloc[fill_bar:]
+
         # Priority for SL/TP:
         # 1. Signal's risk_pips/reward_pips (calculated from fixed or structural)
         # 2. ATR-based stops
@@ -412,10 +480,6 @@ class TrailingStopSimulator:
         stage3_triggered = False
         mfe_protection_triggered = False  # 🆕 Stage 2.5: MFE Protection
         stage_reached = 0
-
-        # Normalize signal type
-        is_long = signal_type in ['BUY', 'BULL', 'LONG']
-        is_short = signal_type in ['SELL', 'BEAR', 'SHORT']
 
         # Determine pip multiplier based on epic (JPY pairs use 100, others use 10000)
         check_epic = epic or self.epic  # Use passed epic or instance epic
