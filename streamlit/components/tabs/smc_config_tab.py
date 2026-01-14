@@ -711,12 +711,12 @@ def render_global_settings(config: Dict[str, Any]):
 
             new_htf_tf = st.selectbox(
                 "HTF Timeframe",
-                options=["1h", "2h", "4h"],
-                index=["1h", "2h", "4h"].index(config.get('scalp_htf_timeframe', '1h')),
-                help="Higher timeframe for scalp mode bias",
+                options=["15m", "1h", "4h"],
+                index=["15m", "1h", "4h"].index(config.get('scalp_htf_timeframe', '15m')),
+                help="Higher timeframe for scalp mode bias (15m recommended for 5m trigger)",
                 key="scalp_htf_timeframe"
             )
-            if new_htf_tf != config.get('scalp_htf_timeframe', '1h'):
+            if new_htf_tf != config.get('scalp_htf_timeframe', '15m'):
                 st.session_state.smc_pending_changes['scalp_htf_timeframe'] = new_htf_tf
 
             new_trigger_tf = st.selectbox(

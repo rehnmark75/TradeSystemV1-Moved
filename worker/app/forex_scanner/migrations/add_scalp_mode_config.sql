@@ -28,7 +28,7 @@ ADD COLUMN IF NOT EXISTS scalp_max_spread_pips DECIMAL(4,2) DEFAULT 1.0;
 
 -- Scalp timeframes (faster than swing mode)
 ALTER TABLE smc_simple_global_config
-ADD COLUMN IF NOT EXISTS scalp_htf_timeframe VARCHAR(10) DEFAULT '1h';
+ADD COLUMN IF NOT EXISTS scalp_htf_timeframe VARCHAR(10) DEFAULT '15m';
 
 ALTER TABLE smc_simple_global_config
 ADD COLUMN IF NOT EXISTS scalp_trigger_timeframe VARCHAR(10) DEFAULT '5m';
@@ -115,7 +115,7 @@ VALUES
     ('scalp_tp_pips', 'Scalp Take Profit', 'Scalp', 'decimal', '5.0', 'Take profit target for scalp trades (pips)'),
     ('scalp_sl_pips', 'Scalp Stop Loss', 'Scalp', 'decimal', '5.0', 'Stop loss for scalp trades (pips) - 1:1 R:R'),
     ('scalp_max_spread_pips', 'Max Spread Filter', 'Scalp', 'decimal', '1.0', 'Maximum spread allowed for scalp entries (pips)'),
-    ('scalp_htf_timeframe', 'Scalp HTF', 'Scalp', 'string', '1h', 'Higher timeframe for scalp mode bias'),
+    ('scalp_htf_timeframe', 'Scalp HTF', 'Scalp', 'string', '15m', 'Higher timeframe for scalp mode bias'),
     ('scalp_trigger_timeframe', 'Scalp Trigger TF', 'Scalp', 'string', '5m', 'Trigger timeframe for scalp mode'),
     ('scalp_entry_timeframe', 'Scalp Entry TF', 'Scalp', 'string', '1m', 'Entry timeframe for scalp mode'),
     ('scalp_ema_period', 'Scalp EMA Period', 'Scalp', 'integer', '20', 'Faster EMA period for scalp mode'),

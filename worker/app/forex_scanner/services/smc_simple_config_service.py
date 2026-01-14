@@ -233,7 +233,7 @@ class SMCSimpleConfig:
     scalp_tp_pips: float = 5.0
     scalp_sl_pips: float = 5.0
     scalp_max_spread_pips: float = 1.0
-    scalp_htf_timeframe: str = "1h"
+    scalp_htf_timeframe: str = "15m"
     scalp_trigger_timeframe: str = "5m"
     scalp_entry_timeframe: str = "1m"
     scalp_ema_period: int = 20
