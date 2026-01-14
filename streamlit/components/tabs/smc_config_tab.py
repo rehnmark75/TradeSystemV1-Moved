@@ -635,6 +635,198 @@ def render_global_settings(config: Dict[str, Any]):
             except json.JSONDecodeError:
                 st.warning("Invalid JSON format for cooldown config")
 
+    # Scalp Mode Configuration
+    with st.expander("🎯 Scalp Mode (High-Frequency Trading)", expanded=False):
+        st.markdown("""
+        **Scalp Mode** enables high-frequency trading with:
+        - 5 pip TP / 5 pip SL (1:1 R:R)
+        - Faster timeframes: 1H → 5m → 1m
+        - Relaxed filters for more signals
+        - Spread filter (only trade when spread < 1 pip)
+        """)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # Master toggle
+            new_scalp_enabled = st.checkbox(
+                "Enable Scalp Mode",
+                value=config.get('scalp_mode_enabled', False),
+                help="Master toggle for high-frequency scalping mode",
+                key="scalp_mode_enabled"
+            )
+            if not _values_equal(new_scalp_enabled, config.get('scalp_mode_enabled')):
+                st.session_state.smc_pending_changes['scalp_mode_enabled'] = new_scalp_enabled
+
+            if new_scalp_enabled:
+                st.success("⚡ Scalp Mode ACTIVE")
+            else:
+                st.info("📊 Swing Mode (default)")
+
+            st.markdown("---")
+            st.markdown("**Risk Settings**")
+
+            new_scalp_tp = st.number_input(
+                "Scalp Take Profit (pips)",
+                value=float(config.get('scalp_tp_pips', 5.0)),
+                min_value=1.0, max_value=20.0, step=0.5,
+                help="Take profit target for scalp trades",
+                key="scalp_tp_pips"
+            )
+            if not _values_equal(new_scalp_tp, config.get('scalp_tp_pips')):
+                st.session_state.smc_pending_changes['scalp_tp_pips'] = new_scalp_tp
+
+            new_scalp_sl = st.number_input(
+                "Scalp Stop Loss (pips)",
+                value=float(config.get('scalp_sl_pips', 5.0)),
+                min_value=1.0, max_value=20.0, step=0.5,
+                help="Stop loss for scalp trades",
+                key="scalp_sl_pips"
+            )
+            if not _values_equal(new_scalp_sl, config.get('scalp_sl_pips')):
+                st.session_state.smc_pending_changes['scalp_sl_pips'] = new_scalp_sl
+
+            new_scalp_spread = st.number_input(
+                "Max Spread Filter (pips)",
+                value=float(config.get('scalp_max_spread_pips', 1.0)),
+                min_value=0.1, max_value=5.0, step=0.1,
+                help="Maximum spread allowed for scalp entries",
+                key="scalp_max_spread_pips"
+            )
+            if not _values_equal(new_scalp_spread, config.get('scalp_max_spread_pips')):
+                st.session_state.smc_pending_changes['scalp_max_spread_pips'] = new_scalp_spread
+
+            new_scalp_confidence = st.number_input(
+                "Min Confidence",
+                value=float(config.get('scalp_min_confidence', 0.30)),
+                min_value=0.0, max_value=1.0, step=0.05,
+                help="Lower threshold for more scalp entries",
+                key="scalp_min_confidence"
+            )
+            if not _values_equal(new_scalp_confidence, config.get('scalp_min_confidence')):
+                st.session_state.smc_pending_changes['scalp_min_confidence'] = new_scalp_confidence
+
+        with col2:
+            st.markdown("**Timeframe Settings**")
+
+            new_htf_tf = st.selectbox(
+                "HTF Timeframe",
+                options=["1h", "2h", "4h"],
+                index=["1h", "2h", "4h"].index(config.get('scalp_htf_timeframe', '1h')),
+                help="Higher timeframe for scalp mode bias",
+                key="scalp_htf_timeframe"
+            )
+            if new_htf_tf != config.get('scalp_htf_timeframe', '1h'):
+                st.session_state.smc_pending_changes['scalp_htf_timeframe'] = new_htf_tf
+
+            new_trigger_tf = st.selectbox(
+                "Trigger Timeframe",
+                options=["1m", "5m", "15m"],
+                index=["1m", "5m", "15m"].index(config.get('scalp_trigger_timeframe', '5m')),
+                help="Trigger timeframe for scalp mode",
+                key="scalp_trigger_timeframe"
+            )
+            if new_trigger_tf != config.get('scalp_trigger_timeframe', '5m'):
+                st.session_state.smc_pending_changes['scalp_trigger_timeframe'] = new_trigger_tf
+
+            new_entry_tf = st.selectbox(
+                "Entry Timeframe",
+                options=["1m", "5m"],
+                index=["1m", "5m"].index(config.get('scalp_entry_timeframe', '1m')),
+                help="Entry timeframe for scalp mode",
+                key="scalp_entry_timeframe"
+            )
+            if new_entry_tf != config.get('scalp_entry_timeframe', '1m'):
+                st.session_state.smc_pending_changes['scalp_entry_timeframe'] = new_entry_tf
+
+            st.markdown("---")
+            st.markdown("**Timing Settings**")
+
+            new_scalp_ema = st.number_input(
+                "EMA Period",
+                value=config.get('scalp_ema_period', 20),
+                min_value=5, max_value=50,
+                help="Faster EMA period for scalp mode",
+                key="scalp_ema_period"
+            )
+            if not _values_equal(new_scalp_ema, config.get('scalp_ema_period')):
+                st.session_state.smc_pending_changes['scalp_ema_period'] = new_scalp_ema
+
+            new_scalp_cooldown = st.number_input(
+                "Cooldown (minutes)",
+                value=config.get('scalp_cooldown_minutes', 15),
+                min_value=1, max_value=60,
+                help="Cooldown between scalp trades",
+                key="scalp_cooldown_minutes"
+            )
+            if not _values_equal(new_scalp_cooldown, config.get('scalp_cooldown_minutes')):
+                st.session_state.smc_pending_changes['scalp_cooldown_minutes'] = new_scalp_cooldown
+
+        # Filter toggles
+        st.markdown("---")
+        st.markdown("**Filter Overrides** (Scalp mode relaxes filters for more signals)")
+
+        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+
+        with filter_col1:
+            new_disable_ema_slope = st.checkbox(
+                "Disable EMA Slope",
+                value=config.get('scalp_disable_ema_slope_validation', True),
+                help="Skip EMA slope validation in scalp mode",
+                key="scalp_disable_ema_slope_validation"
+            )
+            if not _values_equal(new_disable_ema_slope, config.get('scalp_disable_ema_slope_validation')):
+                st.session_state.smc_pending_changes['scalp_disable_ema_slope_validation'] = new_disable_ema_slope
+
+        with filter_col2:
+            new_disable_swing_prox = st.checkbox(
+                "Disable Swing Proximity",
+                value=config.get('scalp_disable_swing_proximity', True),
+                help="Skip swing proximity check in scalp mode",
+                key="scalp_disable_swing_proximity"
+            )
+            if not _values_equal(new_disable_swing_prox, config.get('scalp_disable_swing_proximity')):
+                st.session_state.smc_pending_changes['scalp_disable_swing_proximity'] = new_disable_swing_prox
+
+        with filter_col3:
+            new_disable_volume = st.checkbox(
+                "Disable Volume Filter",
+                value=config.get('scalp_disable_volume_filter', True),
+                help="Skip volume confirmation in scalp mode",
+                key="scalp_disable_volume_filter"
+            )
+            if not _values_equal(new_disable_volume, config.get('scalp_disable_volume_filter')):
+                st.session_state.smc_pending_changes['scalp_disable_volume_filter'] = new_disable_volume
+
+        with filter_col4:
+            new_disable_macd = st.checkbox(
+                "Disable MACD Filter",
+                value=config.get('scalp_disable_macd_filter', True),
+                help="Skip MACD alignment in scalp mode",
+                key="scalp_disable_macd_filter"
+            )
+            if not _values_equal(new_disable_macd, config.get('scalp_disable_macd_filter')):
+                st.session_state.smc_pending_changes['scalp_disable_macd_filter'] = new_disable_macd
+
+        # Spread filter toggle
+        new_require_spread = st.checkbox(
+            "Require Tight Spread (24/7 trading with spread gate)",
+            value=config.get('scalp_require_tight_spread', True),
+            help="Only enter trades when spread is below max threshold",
+            key="scalp_require_tight_spread"
+        )
+        if not _values_equal(new_require_spread, config.get('scalp_require_tight_spread')):
+            st.session_state.smc_pending_changes['scalp_require_tight_spread'] = new_require_spread
+
+        # Warning message
+        if new_scalp_enabled:
+            st.warning("""
+            ⚠️ **Scalp Mode Risk Warnings:**
+            - 5 pip TP with 1 pip spread = 20% profit reduction
+            - Requires 65%+ win rate for profitability
+            - Monitor drawdown closely during high-frequency trading
+            """)
+
     # Enabled Pairs
     with st.expander("Enabled Trading Pairs", expanded=False):
         enabled_pairs = config.get('enabled_pairs', [])
