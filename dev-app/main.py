@@ -51,6 +51,23 @@ except ImportError as e:
     TRADE_ANALYSIS_AVAILABLE = False
     trade_analysis_router = None
 
+# 🆕 NEW: Virtual Stop Loss router for scalping mode
+VSL_AVAILABLE = False
+vsl_router = None
+try:
+    from routers.virtual_stop_loss_router import router as vsl_router
+    from services.virtual_stop_loss_service import VirtualStopLossService, set_vsl_service
+    from config_virtual_stop import VIRTUAL_STOP_LOSS_ENABLED
+    VSL_AVAILABLE = True
+    print("✅ Virtual Stop Loss service imported successfully")
+    print("   🎯 Real-time price streaming for scalp trades")
+    print("   ⚡ Sub-second virtual stop loss triggers")
+    print("   🔒 Bypasses IG minimum SL restrictions")
+except ImportError as e:
+    print(f"⚠️ Virtual Stop Loss service not available: {e}")
+    VSL_AVAILABLE = False
+    VIRTUAL_STOP_LOSS_ENABLED = False
+
 from threading import Thread
 import logging
 from logging.handlers import RotatingFileHandler
@@ -640,6 +657,47 @@ async def startup_coordinator():
             logger.error(f"❌ Background task scheduling failed: {task_error}")
 
         # ═══════════════════════════════════════════════════════════════
+        # PHASE 3.5: VIRTUAL STOP LOSS SERVICE (Scalping Mode)
+        # ═══════════════════════════════════════════════════════════════
+        if VSL_AVAILABLE and VIRTUAL_STOP_LOSS_ENABLED:
+            logger.info("⚡ Phase 3.5: Virtual Stop Loss service initialization...")
+            try:
+                # Use PRODUCTION credentials for VSL streaming (same as stream-app)
+                from dependencies import get_prod_auth_headers
+
+                async def start_vsl_service():
+                    """Initialize VSL service with PRODUCTION trading headers"""
+                    try:
+                        trading_headers = await get_prod_auth_headers()
+                        if trading_headers:
+                            vsl_service = VirtualStopLossService(trading_headers)
+                            started = await vsl_service.start()
+                            if started:
+                                set_vsl_service(vsl_service)
+                                logger.info("✅ Virtual Stop Loss service started")
+                                logger.info("   🎯 Real-time price streaming active")
+                                logger.info("   ⚡ Sub-second VSL triggers enabled")
+                            else:
+                                logger.warning("⚠️ Virtual Stop Loss service failed to start")
+                        else:
+                            logger.warning("⚠️ No trading headers available for VSL service")
+                    except Exception as vsl_start_error:
+                        logger.error(f"❌ VSL service start error: {vsl_start_error}")
+
+                # Schedule VSL service start (needs auth headers from async context)
+                asyncio.create_task(start_vsl_service())
+                logger.info("✅ Virtual Stop Loss service scheduled for startup")
+
+            except Exception as vsl_error:
+                startup_errors.append(f"VSL initialization: {vsl_error}")
+                logger.error(f"❌ Virtual Stop Loss initialization failed: {vsl_error}")
+        else:
+            if not VSL_AVAILABLE:
+                logger.info("⚠️ Virtual Stop Loss service not available")
+            elif not VIRTUAL_STOP_LOSS_ENABLED:
+                logger.info("⚠️ Virtual Stop Loss service disabled in config")
+
+        # ═══════════════════════════════════════════════════════════════
         # PHASE 4: STARTUP COMPLETION LOGGING
         # ═══════════════════════════════════════════════════════════════
         logger.info("🎉 Phase 4: Startup completion...")
@@ -679,6 +737,16 @@ async def startup_coordinator():
                 logger.info("🚀 Core P/L tracking ready - install new services for full functionality!")
         else:
             logger.info("   • Enhanced trading analytics ❌ Not available")
+
+        # 🆕 Virtual Stop Loss service status
+        if VSL_AVAILABLE and VIRTUAL_STOP_LOSS_ENABLED:
+            logger.info("   • ⚡ Virtual Stop Loss (Scalping) ✅ ACTIVE")
+            logger.info("   • 🎯 Real-time price streaming ✅")
+            logger.info("   • 🔒 Bypasses IG min SL restrictions ✅")
+        elif VSL_AVAILABLE:
+            logger.info("   • ⚡ Virtual Stop Loss ⚠️ Disabled in config")
+        else:
+            logger.info("   • ⚡ Virtual Stop Loss ❌ Not available")
 
         logger.info("🎯 Key improvements:")
         logger.info("   • Removed global asyncio.Lock() causing timeouts")
@@ -1043,6 +1111,18 @@ if TRADE_ANALYSIS_AVAILABLE and trade_analysis_router:
 if REJECTION_OUTCOME_AVAILABLE and rejection_outcome_router:
     app.include_router(rejection_outcome_router, tags=["rejection-outcome-analysis"])
     print("✅ Rejection outcome analysis router registered")
+
+# 🆕 Virtual Stop Loss router for scalping mode
+if VSL_AVAILABLE and vsl_router:
+    app.include_router(vsl_router, tags=["virtual-stop-loss"])
+    print("✅ Virtual Stop Loss router registered")
+    print("⚡ VSL endpoints available:")
+    print("   • GET  /api/vsl/status - Service status and tracked positions")
+    print("   • GET  /api/vsl/health - Health check")
+    print("   • POST /api/vsl/refresh - Force position sync")
+    print("   • GET  /api/vsl/position/{trade_id} - Get position details")
+    print("   • POST /api/vsl/position/{trade_id} - Add position to tracking")
+    print("   • DELETE /api/vsl/position/{trade_id} - Remove from tracking")
     print("📊 Rejection outcome endpoints available:")
     print("   • GET /api/rejection-outcomes/summary")
     print("   • GET /api/rejection-outcomes/win-rate-by-stage")
@@ -1077,16 +1157,28 @@ else:
 
 # 🔥 ENHANCED: Graceful shutdown handling - FIXED
 @app.on_event("shutdown")
-def shutdown():
+async def shutdown():
     """Graceful shutdown with cleanup - FIXED"""
     global monitor_running
     monitor_running = False
     logger.info("🛑 Enhanced FastAPI Trading API v3.1.1 shutting down...")
     logger.info("   • Trade monitor stopped")
-    logger.info("   • Background tasks cancelled") 
+    logger.info("   • Background tasks cancelled")
     logger.info("   • Analytics services cleaned up")
     logger.info("   • Complete P/L calculation system cleaned up")       # Existing
     logger.info("   • 🆕 Transaction-based P/L correlation cleaned up")  # NEW
     logger.info("   • 🆕 Integrated automation service cleaned up")      # NEW
+
+    # 🆕 Stop Virtual Stop Loss service
+    if VSL_AVAILABLE:
+        try:
+            from services.virtual_stop_loss_service import get_vsl_service
+            vsl_service = get_vsl_service()
+            if vsl_service:
+                await vsl_service.stop()
+                logger.info("   • ⚡ Virtual Stop Loss service stopped")
+        except Exception as vsl_stop_error:
+            logger.warning(f"   • ⚠️ VSL service stop error: {vsl_stop_error}")
+
     logger.info("   • Database connections properly closed")             # NEW
     logger.info("✅ Enhanced shutdown complete - no hanging connections")

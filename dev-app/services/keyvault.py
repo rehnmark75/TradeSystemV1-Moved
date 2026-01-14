@@ -6,9 +6,9 @@ SECRET_ENV_MAP = {
     # Demo/Development credentials for dev-app
     "demoapikey": "IG_API_KEY",  # Uses DEMO_API_KEY from docker-compose
     "demopwd": "IG_PWD",         # Uses DEMO_PASSWORD from docker-compose
-    # Production credentials (in case they're needed)
-    "prodapikey": "IG_API_KEY",  # Fallback to same env var
-    "prodpwd": "IG_PWD",         # Fallback to same env var
+    # Production credentials (for VSL streaming - must use production account)
+    "prodapikey": "PROD_IG_API_KEY",  # Uses PROD_API_KEY from docker-compose
+    "prodpwd": "PROD_IG_PWD",         # Uses PROD_PASSWORD from docker-compose
     # Other secrets
     "gemini": "GEMINI_API_KEY"
 }

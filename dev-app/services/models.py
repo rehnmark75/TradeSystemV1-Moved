@@ -107,6 +107,13 @@ class TradeLog(Base):
     pnl_calculation_method = Column(String(20))
     pnl_calculated_at = Column(DateTime)
 
+    # Virtual Stop Loss fields (for scalping mode)
+    is_scalp_trade = Column(Boolean, default=False)  # True if scalp trade with VSL monitoring
+    virtual_sl_pips = Column(Float, nullable=True)  # VSL distance in pips (e.g., 4.0)
+    virtual_sl_price = Column(Float, nullable=True)  # Calculated VSL price level
+    virtual_sl_triggered = Column(Boolean, default=False)  # True if VSL was triggered
+    virtual_sl_triggered_at = Column(DateTime, nullable=True)  # When VSL triggered
+
     def __repr__(self):
         return f"<TradeLog(id={self.id}, symbol={self.symbol}, deal_id={self.deal_id}, profit_loss={self.profit_loss})>"
 

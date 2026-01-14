@@ -23,6 +23,9 @@ services:
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - IG_API_KEY=${DEMO_API_KEY}
       - IG_PWD=${DEMO_PASSWORD}
+      # Production credentials for VSL streaming (same as stream-app)
+      - PROD_IG_API_KEY=${PROD_API_KEY}
+      - PROD_IG_PWD=${PROD_PASSWORD}
     networks:
       - lab-net
     depends_on:

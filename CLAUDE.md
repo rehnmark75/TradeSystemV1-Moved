@@ -188,6 +188,7 @@ For detailed information, see these docs (read with Read tool when needed):
 | Parameter Optimization | `claude-optimization.md` |
 | Market Intelligence | `claude-intelligence.md` |
 | Trailing Stop System | `claude-trailing-system.md` |
+| Virtual Stop Loss (Scalping) | `claude-vsl-system.md` |
 | Development Best Practices | `claude-development.md` |
 | Configuration System | `claude-configuration.md` |
 
@@ -379,5 +380,6 @@ This file controls:
 - ✅ Progressive trailing stop system with 4 stages
 - ✅ Claude AI trade analysis integration
 - ✅ Smart Money Concepts (SMC) analysis
+- ✅ Virtual Stop Loss for scalping mode (bypasses IG min SL restrictions)
 
 For detailed setup and usage instructions, start with the [Overview & Navigation](claude-overview.md).

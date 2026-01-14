@@ -64,6 +64,10 @@ class TradeRequest(BaseModel):
     entry_level: Optional[float] = None   # Required for limit orders - the entry price
     limit_expiry_minutes: Optional[int] = 35  # Minutes until limit order expires (default 35)
 
+    # NEW: Scalping mode fields for Virtual Stop Loss
+    is_scalp_trade: Optional[bool] = False  # True if this is a scalp trade requiring VSL
+    virtual_sl_pips: Optional[float] = None  # Custom VSL distance (defaults to config if not set)
+
 # Simple in-memory cache for positions
 _cached_positions = {"data": None, "timestamp": 0}
 
@@ -849,6 +853,35 @@ async def ig_place_order(
 
         # Save to database
         try:
+            # Check if this is a scalp trade (explicitly set or detected from tight SL)
+            is_scalp = body.is_scalp_trade or (sl_limit and sl_limit <= 8)  # <=8 pips = scalp trade
+            virtual_sl_pips_value = body.virtual_sl_pips
+
+            # Calculate virtual SL price if scalp trade
+            virtual_sl_price_value = None
+            if is_scalp:
+                try:
+                    from config_virtual_stop import get_virtual_sl_pips
+                    from services.ig_orders import get_point_value
+
+                    # Use provided VSL pips or get from config
+                    if virtual_sl_pips_value is None:
+                        virtual_sl_pips_value = get_virtual_sl_pips(symbol)
+
+                    # Calculate VSL price
+                    point_value = get_point_value(symbol)
+                    sl_distance = virtual_sl_pips_value * point_value
+
+                    if direction.upper() == "BUY":
+                        virtual_sl_price_value = entry_price - sl_distance
+                    else:  # SELL
+                        virtual_sl_price_value = entry_price + sl_distance
+
+                    logger.info(f"⚡ Scalp trade detected: VSL @ {virtual_sl_price_value:.5f} ({virtual_sl_pips_value} pips)")
+                except ImportError:
+                    logger.warning("⚠️ VSL config not available, skipping virtual SL calculation")
+                    is_scalp = False
+
             trade_log = TradeLog(
                 symbol=symbol,
                 entry_price=entry_price,
@@ -860,15 +893,33 @@ async def ig_place_order(
                 deal_reference=deal_reference,
                 endpoint="dev",
                 status="pending",
-                alert_id=alert_id
+                alert_id=alert_id,
+                # Virtual Stop Loss fields
+                is_scalp_trade=is_scalp,
+                virtual_sl_pips=virtual_sl_pips_value,
+                virtual_sl_price=virtual_sl_price_value,
             )
-            
+
             db.add(trade_log)
             logger.info(f"🔍 DEBUG: TradeLog added to session, alert_id: {trade_log.alert_id}")
             db.commit()
+            db.refresh(trade_log)  # Get the ID after commit
             logger.info(f"✅ Trade logged: {symbol} {entry_price} {direction}")
             if alert_id is not None:
                 logger.info(f"✅ Trade linked to alert_id: {alert_id}")
+
+            # Register scalp trade with Virtual Stop Loss service
+            if is_scalp:
+                try:
+                    from services.virtual_stop_loss_service import get_vsl_service
+                    vsl_service = get_vsl_service()
+                    if vsl_service and vsl_service._running:
+                        vsl_service.add_scalp_position(trade_log)
+                        logger.info(f"⚡ Trade {trade_log.id} registered with VSL service")
+                    else:
+                        logger.warning("⚠️ VSL service not running, scalp trade not monitored in real-time")
+                except Exception as vsl_error:
+                    logger.warning(f"⚠️ Failed to register with VSL service: {vsl_error}")
                 
         except SQLAlchemyError as e:
             db.rollback()
