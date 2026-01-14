@@ -945,7 +945,11 @@ class SMCSimpleStrategy:
             self.limit_order_enabled = False
             self.logger.info("   Order Type: MARKET (faster fills, spread-filtered)")
         else:
-            self.logger.info("   Order Type: LIMIT (as configured)")
+            # Limit orders with reduced offset for scalping (1 pip vs 3 pip swing)
+            self.momentum_offset_pips = 1.0
+            self.pullback_offset_min_pips = 1.0
+            self.pullback_offset_max_pips = 1.0
+            self.logger.info("   Order Type: LIMIT (1 pip offset for scalp)")
 
         # Log configuration
         self.logger.info(f"   HTF Timeframe: {self.htf_timeframe}")
