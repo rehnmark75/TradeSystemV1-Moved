@@ -227,6 +227,30 @@ class SMCSimpleConfig:
     backtest_spread_pips: float = 1.5
     backtest_slippage_pips: float = 0.5
 
+    # SCALP MODE CONFIGURATION
+    # High-frequency trading mode with 5 pip TP targets
+    scalp_mode_enabled: bool = False
+    scalp_tp_pips: float = 5.0
+    scalp_sl_pips: float = 5.0
+    scalp_max_spread_pips: float = 1.0
+    scalp_htf_timeframe: str = "1h"
+    scalp_trigger_timeframe: str = "5m"
+    scalp_entry_timeframe: str = "1m"
+    scalp_ema_period: int = 20
+    scalp_min_confidence: float = 0.30
+    scalp_disable_ema_slope_validation: bool = True
+    scalp_disable_swing_proximity: bool = True
+    scalp_disable_volume_filter: bool = True
+    scalp_disable_macd_filter: bool = True
+    scalp_use_momentum_only: bool = True
+    scalp_momentum_min_depth: float = -0.30
+    scalp_fib_pullback_min: float = 0.0
+    scalp_fib_pullback_max: float = 1.0
+    scalp_cooldown_minutes: int = 15
+    scalp_require_tight_spread: bool = True
+    scalp_swing_lookback_bars: int = 5
+    scalp_range_position_threshold: float = 0.80
+
     # ENABLED PAIRS
     enabled_pairs: List[str] = field(default_factory=lambda: [
         'CS.D.EURUSD.CEEM.IP',
@@ -943,6 +967,16 @@ class SMCSimpleConfigService:
             'rejection_tracking_enabled', 'rejection_batch_size',
             'rejection_log_to_console', 'rejection_retention_days',
             'backtest_spread_pips', 'backtest_slippage_pips',
+            # SCALP MODE FIELDS
+            'scalp_mode_enabled', 'scalp_tp_pips', 'scalp_sl_pips', 'scalp_max_spread_pips',
+            'scalp_htf_timeframe', 'scalp_trigger_timeframe', 'scalp_entry_timeframe',
+            'scalp_ema_period', 'scalp_min_confidence',
+            'scalp_disable_ema_slope_validation', 'scalp_disable_swing_proximity',
+            'scalp_disable_volume_filter', 'scalp_disable_macd_filter',
+            'scalp_use_momentum_only', 'scalp_momentum_min_depth',
+            'scalp_fib_pullback_min', 'scalp_fib_pullback_max',
+            'scalp_cooldown_minutes', 'scalp_require_tight_spread',
+            'scalp_swing_lookback_bars', 'scalp_range_position_threshold',
         ]
 
         # Fields that must be integers (used for DataFrame slicing, loop counts, etc.)
@@ -958,6 +992,8 @@ class SMCSimpleConfigService:
             'rejection_batch_size', 'rejection_retention_days',
             'swing_proximity_min_distance_pips', 'swing_proximity_lookback_swings',
             'max_momentum_staleness_bars',
+            # Scalp mode int fields
+            'scalp_ema_period', 'scalp_cooldown_minutes', 'scalp_swing_lookback_bars',
         }
 
         for attr_name in direct_mappings:

@@ -2,9 +2,21 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.19.0
-DATE: 2026-01-13
-STATUS: Status-Based Cooldowns + Extension Filter
+VERSION: 2.20.0
+DATE: 2026-01-14
+STATUS: Scalp Mode for High-Frequency Trading
+
+v2.20.0 CHANGES (Scalp Mode - High Frequency Trading):
+    - NEW: scalp_mode_enabled toggle for high-frequency 5 pip TP trading
+    - NEW: Faster timeframes: 1H/5m/1m instead of 4H/15m/5m
+    - NEW: Spread filter blocks entries when spread > 1 pip (critical for scalp profitability)
+    - NEW: Relaxed filters: Disable EMA slope, swing proximity, volume in scalp mode
+    - NEW: 15-minute cooldown instead of 3 hours
+    - NEW: Lower confidence threshold (30% vs 48%) for more entries
+    - CONFIG: scalp_mode_enabled (default: false), scalp_tp_pips (5), scalp_sl_pips (5)
+    - CONFIG: scalp_max_spread_pips (1.0), scalp_require_tight_spread (true)
+    - CONFIG: All scalp settings stored in database smc_simple_global_config table
+    - Expected improvement: 10-20+ signals/day vs current 0.07 signals/day
 
 v2.19.0 CHANGES (Status-Based Cooldowns - Expiry Optimization):
     - NEW: Order status tracking (pending, placed, filled, expired, rejected)
@@ -428,6 +440,11 @@ class SMCSimpleStrategy:
             if self._backtest_mode:
                 self._apply_config_overrides()
 
+            # SCALP MODE: Load scalp configuration and apply if enabled
+            self._load_scalp_mode_config(config)
+            if self.scalp_mode_enabled:
+                self._configure_scalp_mode()
+
             return
 
         except Exception as e:
@@ -633,6 +650,13 @@ class SMCSimpleStrategy:
         # v2.6.0: Pair-specific parameter overrides
         self.pair_parameter_overrides = getattr(smc_config, 'PAIR_PARAMETER_OVERRIDES', {})
 
+        # SCALP MODE: Disabled by default in file config (database-driven feature)
+        self.scalp_mode_enabled = False
+        self.scalp_tp_pips = 5.0
+        self.scalp_sl_pips = 5.0
+        self.scalp_max_spread_pips = 1.0
+        self.scalp_require_tight_spread = True
+
         self.logger.info("✅ SMC Simple config loaded from FILE (fallback mode)")
 
         # Apply backtest overrides if in backtest mode
@@ -799,6 +823,211 @@ class SMCSimpleStrategy:
         self.logger.info(f"   Total overrides applied: {overrides_applied}")
         self.logger.info("=" * 60)
 
+    def _load_scalp_mode_config(self, config):
+        """Load scalp mode configuration from database config object.
+
+        This method loads all scalp-related parameters from the config.
+        The actual mode activation happens in _configure_scalp_mode() if enabled.
+        """
+        # Master toggle
+        self.scalp_mode_enabled = getattr(config, 'scalp_mode_enabled', False)
+
+        # Scalp SL/TP (1:1 R:R default)
+        self.scalp_tp_pips = getattr(config, 'scalp_tp_pips', 5.0)
+        self.scalp_sl_pips = getattr(config, 'scalp_sl_pips', 5.0)
+
+        # Spread filter (critical for scalping)
+        self.scalp_max_spread_pips = getattr(config, 'scalp_max_spread_pips', 1.0)
+        self.scalp_require_tight_spread = getattr(config, 'scalp_require_tight_spread', True)
+
+        # Scalp timeframes (faster than swing mode)
+        self.scalp_htf_timeframe = getattr(config, 'scalp_htf_timeframe', '1h')
+        self.scalp_trigger_timeframe = getattr(config, 'scalp_trigger_timeframe', '5m')
+        self.scalp_entry_timeframe = getattr(config, 'scalp_entry_timeframe', '1m')
+
+        # Scalp EMA settings
+        self.scalp_ema_period = getattr(config, 'scalp_ema_period', 20)
+
+        # Scalp confidence (lower to allow more entries)
+        self.scalp_min_confidence = getattr(config, 'scalp_min_confidence', 0.30)
+
+        # Scalp filter disables
+        self.scalp_disable_ema_slope_validation = getattr(config, 'scalp_disable_ema_slope_validation', True)
+        self.scalp_disable_swing_proximity = getattr(config, 'scalp_disable_swing_proximity', True)
+        self.scalp_disable_volume_filter = getattr(config, 'scalp_disable_volume_filter', True)
+        self.scalp_disable_macd_filter = getattr(config, 'scalp_disable_macd_filter', True)
+
+        # Scalp entry logic
+        self.scalp_use_momentum_only = getattr(config, 'scalp_use_momentum_only', True)
+        self.scalp_momentum_min_depth = getattr(config, 'scalp_momentum_min_depth', -0.30)
+        self.scalp_fib_pullback_min = getattr(config, 'scalp_fib_pullback_min', 0.0)
+        self.scalp_fib_pullback_max = getattr(config, 'scalp_fib_pullback_max', 1.0)
+
+        # Scalp cooldown (much shorter)
+        self.scalp_cooldown_minutes = getattr(config, 'scalp_cooldown_minutes', 15)
+
+        # Scalp swing detection
+        self.scalp_swing_lookback_bars = getattr(config, 'scalp_swing_lookback_bars', 5)
+        self.scalp_range_position_threshold = getattr(config, 'scalp_range_position_threshold', 0.80)
+
+    def _configure_scalp_mode(self):
+        """Configure strategy for high-frequency scalping mode.
+
+        When scalp_mode_enabled=True, this method overrides the standard parameters
+        with scalp-optimized values for faster entries and 5 pip TP targets.
+
+        Key changes:
+        - Faster timeframes: 1H/5m/1m instead of 4H/15m/5m
+        - Smaller targets: 5 pip TP/SL (1:1 R:R)
+        - Relaxed filters: Disable EMA slope, swing proximity, volume
+        - Spread gate: Only trade when spread < 1 pip
+        - Shorter cooldown: 15 minutes instead of 3 hours
+        """
+        self.logger.info("=" * 60)
+        self.logger.info("SCALP MODE ENABLED - High Frequency Configuration")
+        self.logger.info("=" * 60)
+
+        # Override timeframes for faster signals
+        self.htf_timeframe = self.scalp_htf_timeframe
+        self.trigger_tf = self.scalp_trigger_timeframe
+        self.entry_tf = self.scalp_entry_timeframe
+
+        # Override EMA for faster reaction
+        self.ema_period = self.scalp_ema_period
+
+        # Override SL/TP for scalping (5 pip targets)
+        self.fixed_stop_loss_pips = self.scalp_sl_pips
+        self.fixed_take_profit_pips = self.scalp_tp_pips
+        self.fixed_sl_tp_override_enabled = True
+
+        # Lower confidence threshold for more entries
+        self.min_confidence = self.scalp_min_confidence
+
+        # Disable restrictive filters
+        if self.scalp_disable_ema_slope_validation:
+            self.ema_slope_validation_enabled = False
+        if self.scalp_disable_swing_proximity:
+            self.swing_proximity_enabled = False
+        if self.scalp_disable_volume_filter:
+            self.volume_filter_enabled = False
+        if self.scalp_disable_macd_filter:
+            # MACD filter is already controlled elsewhere
+            pass
+
+        # Widen Fib zones for scalp (any pullback valid)
+        self.fib_min = self.scalp_fib_pullback_min
+        self.fib_max = self.scalp_fib_pullback_max
+
+        # Momentum settings for scalp
+        self.momentum_min_depth = self.scalp_momentum_min_depth
+
+        # Shorter cooldown (convert minutes to hours)
+        self.cooldown_hours = self.scalp_cooldown_minutes / 60.0
+
+        # Scalp swing detection settings
+        self.swing_lookback = self.scalp_swing_lookback_bars
+        self.use_dynamic_swing_lookback = False  # Use fixed lookback in scalp mode
+
+        # Disable dynamic confidence adjustments in scalp mode
+        self.ema_distance_adjusted_confidence_enabled = False
+        self.atr_adjusted_confidence_enabled = False
+        self.volume_adjusted_confidence_enabled = False
+
+        # Log configuration
+        self.logger.info(f"   HTF Timeframe: {self.htf_timeframe}")
+        self.logger.info(f"   Trigger Timeframe: {self.trigger_tf}")
+        self.logger.info(f"   Entry Timeframe: {self.entry_tf}")
+        self.logger.info(f"   EMA Period: {self.ema_period}")
+        self.logger.info(f"   Stop Loss: {self.fixed_stop_loss_pips} pips")
+        self.logger.info(f"   Take Profit: {self.fixed_take_profit_pips} pips")
+        self.logger.info(f"   Min Confidence: {self.min_confidence*100:.0f}%")
+        self.logger.info(f"   Cooldown: {self.cooldown_hours*60:.0f} minutes")
+        self.logger.info(f"   Max Spread: {self.scalp_max_spread_pips} pips")
+        self.logger.info(f"   Swing Lookback: {self.swing_lookback} bars")
+        self.logger.info("   Filters DISABLED: EMA slope, Swing proximity, Volume")
+        self.logger.info("=" * 60)
+
+    def _get_current_spread(self, epic: str, df: pd.DataFrame) -> float:
+        """Get current spread estimate based on session and pair.
+
+        For scalping, spread is critical since a 1 pip spread on 5 pip TP
+        eats 20% of profit. This method estimates spread based on:
+        - Time of day (session)
+        - Currency pair liquidity
+
+        Args:
+            epic: IG Markets epic code
+            df: DataFrame with timestamp index
+
+        Returns:
+            Estimated spread in pips
+        """
+        # Try to get spread from dataframe if available
+        if 'spread' in df.columns and len(df) > 0:
+            spread_val = df['spread'].iloc[-1]
+            if spread_val is not None and spread_val > 0:
+                return float(spread_val)
+
+        # Estimate based on session and pair
+        try:
+            last_timestamp = df.index[-1]
+            if hasattr(last_timestamp, 'hour'):
+                hour_utc = last_timestamp.hour
+            else:
+                hour_utc = 12  # Default to overlap
+        except (IndexError, AttributeError):
+            hour_utc = 12
+
+        # Extract pair from epic (e.g., 'CS.D.EURUSD.CEEM.IP' -> 'EURUSD')
+        pair = ''
+        if '.' in epic:
+            parts = epic.split('.')
+            if len(parts) >= 3:
+                pair = parts[2]
+
+        # Typical spreads by session (in pips) - conservative estimates
+        session_spreads = {
+            'asian': {'EURUSD': 1.5, 'GBPUSD': 2.0, 'USDJPY': 1.2, 'AUDUSD': 1.5, 'default': 2.0},
+            'london': {'EURUSD': 0.8, 'GBPUSD': 1.0, 'USDJPY': 0.8, 'AUDUSD': 1.0, 'default': 1.2},
+            'overlap': {'EURUSD': 0.6, 'GBPUSD': 0.8, 'USDJPY': 0.7, 'AUDUSD': 0.8, 'default': 1.0},
+            'ny': {'EURUSD': 0.8, 'GBPUSD': 1.0, 'USDJPY': 0.9, 'AUDUSD': 1.0, 'default': 1.2},
+        }
+
+        # Determine session
+        if 7 <= hour_utc < 12:
+            session = 'london'
+        elif 12 <= hour_utc < 17:
+            session = 'overlap'
+        elif 17 <= hour_utc < 21:
+            session = 'ny'
+        else:
+            session = 'asian'
+
+        return session_spreads.get(session, {}).get(pair, session_spreads[session]['default'])
+
+    def _check_scalp_spread_filter(self, epic: str, df: pd.DataFrame) -> Tuple[bool, str]:
+        """Check if current spread is acceptable for scalping.
+
+        This is a critical filter for scalp mode. With 5 pip TP targets,
+        spread must be tight to maintain profitability.
+
+        Args:
+            epic: IG Markets epic code
+            df: DataFrame with price data
+
+        Returns:
+            Tuple of (passed, reason)
+        """
+        if not self.scalp_mode_enabled or not self.scalp_require_tight_spread:
+            return True, "Spread filter not active"
+
+        current_spread = self._get_current_spread(epic, df)
+
+        if current_spread > self.scalp_max_spread_pips:
+            return False, f"Spread {current_spread:.1f} pips > max {self.scalp_max_spread_pips} pips"
+
+        return True, f"Spread OK: {current_spread:.1f} pips"
+
     def _get_pair_param(self, epic: str, param_name: str, default_value):
         """
         Get parameter with pair-specific override if configured.
@@ -883,6 +1112,24 @@ class SMCSimpleStrategy:
                     )
                     return None
                 self.logger.info(f"\n🕐 SESSION: {session_reason}")
+
+            # ================================================================
+            # PRE-FILTER: Scalp Spread Check (only in scalp mode)
+            # ================================================================
+            if self.scalp_mode_enabled:
+                spread_valid, spread_reason = self._check_scalp_spread_filter(epic, df_trigger)
+                if not spread_valid:
+                    self.logger.info(f"\n💰 SCALP SPREAD FILTER: {spread_reason}")
+                    self._track_rejection(
+                        stage='SCALP_SPREAD',
+                        reason=spread_reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value)
+                    )
+                    return None
+                self.logger.info(f"\n💰 SCALP SPREAD: {spread_reason}")
 
             # ================================================================
             # PRE-FILTER: Cooldown Check

@@ -155,14 +155,19 @@ class SignalDetector:
         """
         # Load timeframes from DATABASE config (not legacy config files)
         smc_config = get_smc_simple_config()
-        htf_tf = smc_config.htf_timeframe or '4h'
-        trigger_tf = smc_config.trigger_timeframe or '15m'
-        entry_tf = smc_config.entry_timeframe or '5m'
 
-        # Check if epic is enabled in pair overrides (database)
-        # get_smc_simple_config() already handles enabled pairs via pair_overrides table
-
-        self.logger.debug(f"🔍 [SMC_SIMPLE] Using htf_tf={htf_tf}, trigger_tf={trigger_tf}, entry_tf={entry_tf}")
+        # Check if scalp mode is enabled - use faster timeframes
+        scalp_mode = getattr(smc_config, 'scalp_mode_enabled', False)
+        if scalp_mode:
+            htf_tf = getattr(smc_config, 'scalp_htf_timeframe', '1h')
+            trigger_tf = getattr(smc_config, 'scalp_trigger_timeframe', '5m')
+            entry_tf = getattr(smc_config, 'scalp_entry_timeframe', '1m')
+            self.logger.info(f"🔍 [SMC_SIMPLE] SCALP MODE: Using htf_tf={htf_tf}, trigger_tf={trigger_tf}, entry_tf={entry_tf}")
+        else:
+            htf_tf = smc_config.htf_timeframe or '4h'
+            trigger_tf = smc_config.trigger_timeframe or '15m'
+            entry_tf = smc_config.entry_timeframe or '5m'
+            self.logger.debug(f"🔍 [SMC_SIMPLE] Using htf_tf={htf_tf}, trigger_tf={trigger_tf}, entry_tf={entry_tf}")
 
         try:
             # Initialize strategy if not already done (lazy loading)
@@ -196,10 +201,13 @@ class SignalDetector:
                     self._smc_simple_backtest_id = current_backtest_id
                     self.smc_simple_strategy.reset_cooldowns()
 
-            # Get 4H data for EMA bias
-            # Backtest needs ~60 bars minimum for EMA calculation, 4H bars = 60*4 = 240 hours
-            # Add buffer for weekends/gaps: 400 hours is sufficient (vs 4000 before)
-            htf_lookback = 400 if is_backtest else 400
+            # Get HTF data for EMA bias
+            # Scalp mode uses 1H (need ~25 bars for 20 EMA = 25 hours + buffer)
+            # Swing mode uses 4H (need ~60 bars for 50 EMA = 240 hours + buffer)
+            if scalp_mode:
+                htf_lookback = 72 if is_backtest else 48  # ~3 days for 1H scalp
+            else:
+                htf_lookback = 400 if is_backtest else 400  # ~17 days for 4H swing
             df_4h = self.data_fetcher.get_enhanced_data(
                 epic=epic,
                 pair=pair,
@@ -212,8 +220,11 @@ class SignalDetector:
                 return None
 
             # Get trigger timeframe data for swing break detection
-            # 15m bars: 30 bars minimum, ~8 hours. Use 72 hours for swing detection lookback
-            if trigger_tf == '15m':
+            # Scalp mode: 5m trigger needs fewer bars
+            # Swing mode: 15m needs 30+ bars for swing detection
+            if scalp_mode:
+                trigger_lookback = 24 if is_backtest else 12  # ~24h for 5m scalp
+            elif trigger_tf == '15m':
                 trigger_lookback = 72 if is_backtest else 30
             else:
                 trigger_lookback = 100 if is_backtest else 100
@@ -230,14 +241,20 @@ class SignalDetector:
                 return None
 
             # Get entry timeframe data for pullback entry
-            # 5m bars: need ~50 bars for pullback analysis = ~4 hours. Use 24 hours for buffer
+            # Scalp mode: 1m entry needs fewer hours
+            # Swing mode: 5m needs ~50 bars for pullback analysis
             df_entry = None
-            if entry_tf in ['15m', '5m']:
+            entry_lookback = None
+            if scalp_mode and entry_tf == '1m':
+                entry_lookback = 4 if is_backtest else 2  # ~4h for 1m scalp = 240 bars
+            elif entry_tf in ['15m', '5m']:
                 if entry_tf == '5m':
                     entry_lookback = 24 if is_backtest else 25
                 else:
                     entry_lookback = 48 if is_backtest else 50
 
+            # Fetch entry data if lookback was set
+            if entry_lookback is not None:
                 df_entry = self.data_fetcher.get_enhanced_data(
                     epic=epic,
                     pair=pair,
