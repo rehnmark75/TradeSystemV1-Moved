@@ -1031,12 +1031,24 @@ Signal Display Format:
             return self._run_standard_backtest(args, start_date, end_date, config_override, use_historical_intelligence)
 
         # Get all configured epics for parallel testing
-        epic_list = config.CURRENCY_PAIRS if hasattr(config, 'CURRENCY_PAIRS') else [
-            'CS.D.EURUSD.CEEM.IP',
-            'CS.D.GBPUSD.MINI.IP',
-            'CS.D.USDJPY.MINI.IP',
-            'CS.D.AUDUSD.MINI.IP',
-        ]
+        # Check multiple possible config attribute names for the epic list
+        if hasattr(config, 'EPIC_LIST') and config.EPIC_LIST:
+            epic_list = config.EPIC_LIST
+        elif hasattr(config, 'CURRENCY_PAIRS') and config.CURRENCY_PAIRS:
+            epic_list = config.CURRENCY_PAIRS
+        else:
+            # Fallback: Default list of major pairs
+            epic_list = [
+                'CS.D.EURUSD.CEEM.IP',
+                'CS.D.GBPUSD.MINI.IP',
+                'CS.D.USDJPY.MINI.IP',
+                'CS.D.AUDUSD.MINI.IP',
+                'CS.D.USDCHF.MINI.IP',
+                'CS.D.USDCAD.MINI.IP',
+                'CS.D.NZDUSD.MINI.IP',
+                'CS.D.EURJPY.MINI.IP',
+                'CS.D.AUDJPY.MINI.IP',
+            ]
 
         print(f"📊 Epics: {len(epic_list)} pairs")
         print(f"📈 Strategy: {args.strategy}")
