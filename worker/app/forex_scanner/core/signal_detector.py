@@ -134,6 +134,84 @@ class SignalDetector:
             return scanner_config.default_timeframe or '15m'
         return timeframe
 
+    def _filter_incomplete_candles(self, df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+        """
+        Filter out incomplete candles from the end of the DataFrame.
+
+        In live trading, the last candle may still be forming (incomplete).
+        This causes a timing mismatch with backtesting where all candles are complete.
+
+        By filtering out incomplete candles, we ensure:
+        1. Live and backtest use the same complete-candle data
+        2. No "1 candle late" timing issues
+        3. Strategy decisions are based on confirmed price action
+
+        Args:
+            df: DataFrame with candle data (may have 'is_complete' column)
+            timeframe: Timeframe string for logging (e.g., '5m', '15m', '4h')
+
+        Returns:
+            DataFrame with incomplete candles removed from the end
+        """
+        if df is None or len(df) == 0:
+            return df
+
+        # Check if we're in backtest mode - if so, all candles should be complete already
+        is_backtest = self._is_backtest_mode or (
+            hasattr(self.data_fetcher, 'current_backtest_time') and
+            self.data_fetcher.current_backtest_time is not None
+        )
+
+        if is_backtest:
+            # In backtest mode, all candles are historical and complete
+            return df
+
+        # Check if is_complete column exists
+        if 'is_complete' not in df.columns:
+            # No completeness tracking - use timestamp-based check
+            # Check if last candle's period hasn't closed yet
+            try:
+                # Get timeframe in minutes
+                tf_minutes = {
+                    '1m': 1, '5m': 5, '15m': 15, '30m': 30,
+                    '1h': 60, '4h': 240, '1d': 1440
+                }.get(timeframe.lower(), 15)
+
+                # Get last candle timestamp
+                if 'start_time' in df.columns:
+                    last_candle_start = pd.to_datetime(df['start_time'].iloc[-1])
+                elif df.index.name == 'start_time' or isinstance(df.index, pd.DatetimeIndex):
+                    last_candle_start = df.index[-1]
+                else:
+                    # Can't determine - return as-is
+                    return df
+
+                # Make timezone-aware comparison
+                now = pd.Timestamp.now(tz='UTC')
+                if last_candle_start.tz is None:
+                    last_candle_start = last_candle_start.tz_localize('UTC')
+                else:
+                    last_candle_start = last_candle_start.tz_convert('UTC')
+
+                # Calculate when this candle should close
+                candle_close_time = last_candle_start + pd.Timedelta(minutes=tf_minutes)
+
+                if now < candle_close_time:
+                    # Last candle is still forming - exclude it
+                    self.logger.debug(f"🕐 [{timeframe}] Filtering incomplete candle (closes at {candle_close_time})")
+                    return df.iloc[:-1].copy()
+
+            except Exception as e:
+                self.logger.debug(f"Could not check candle completeness by timestamp: {e}")
+                return df
+        else:
+            # Use is_complete column
+            if not df['is_complete'].iloc[-1]:
+                self.logger.debug(f"🕐 [{timeframe}] Filtering incomplete candle (is_complete=False)")
+                return df.iloc[:-1].copy()
+
+        return df
+
     # =========================================================================
     # SIGNAL DETECTION METHODS
     # =========================================================================
@@ -214,6 +292,8 @@ class SignalDetector:
                 timeframe=htf_tf,
                 lookback_hours=htf_lookback
             )
+            # Filter incomplete candles (live mode only) to align timing with backtest
+            df_4h = self._filter_incomplete_candles(df_4h, htf_tf)
 
             if df_4h is None or len(df_4h) < 60:
                 self.logger.debug(f"Insufficient {htf_tf} data for {epic} (got {len(df_4h) if df_4h is not None else 0} bars)")
@@ -235,6 +315,8 @@ class SignalDetector:
                 timeframe=trigger_tf,
                 lookback_hours=trigger_lookback
             )
+            # Filter incomplete candles (live mode only) to align timing with backtest
+            df_trigger = self._filter_incomplete_candles(df_trigger, trigger_tf)
 
             if df_trigger is None or len(df_trigger) < 30:
                 self.logger.debug(f"Insufficient {trigger_tf} data for {epic} (got {len(df_trigger) if df_trigger is not None else 0} bars)")
@@ -261,6 +343,8 @@ class SignalDetector:
                     timeframe=entry_tf,
                     lookback_hours=entry_lookback
                 )
+                # Filter incomplete candles (live mode only) to align timing with backtest
+                df_entry = self._filter_incomplete_candles(df_entry, entry_tf)
 
             df_entry_len = len(df_entry) if df_entry is not None else 0
             self.logger.info(f"🔍 [SMC_SIMPLE] Passing to strategy: 4H({len(df_4h)} bars), {trigger_tf}({len(df_trigger)} bars), {entry_tf}({df_entry_len} bars)")
