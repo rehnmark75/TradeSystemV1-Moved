@@ -26,6 +26,12 @@ services:
       # Production credentials for VSL streaming (same as stream-app)
       - PROD_IG_API_KEY=${PROD_API_KEY}
       - PROD_IG_PWD=${PROD_PASSWORD}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://localhost:8000/health', headers={'x-apim-gateway': 'verified'}), timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - lab-net
     depends_on:
