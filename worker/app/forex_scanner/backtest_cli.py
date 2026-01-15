@@ -162,7 +162,7 @@ Signal Display Format:
             default=None,
             metavar='MINUTES',
             help='Override the limit order expiry time for scalp mode. '
-                 'Default is 5 minutes. Shorter values cancel unfilled orders faster.'
+                 'Default is 7 minutes. Shorter values cancel unfilled orders faster.'
         )
 
         # Scalp Tier Settings
@@ -525,8 +525,8 @@ Signal Display Format:
         else:
             offset = default_scalp_offset
 
-        # Get scalp expiry from CLI arg, existing overrides, or use default (5 min for scalp mode)
-        default_scalp_expiry = 5  # Default scalp expiry is 5 minutes (faster than normal 45 min)
+        # Get scalp expiry from CLI arg, existing overrides, or use default (7 min for scalp mode)
+        default_scalp_expiry = 7  # Default scalp expiry is 7 minutes (faster than normal 45 min)
         if scalp_expiry is not None:
             expiry = scalp_expiry
         elif existing_overrides and 'limit_expiry_minutes' in existing_overrides:
@@ -1041,6 +1041,40 @@ Signal Display Format:
         print(f"📊 Epics: {len(epic_list)} pairs")
         print(f"📈 Strategy: {args.strategy}")
         print("=" * 60 + "\n")
+
+        # CRITICAL FIX (Jan 2026): Pre-load cache for ALL epics BEFORE spawning workers
+        # This prevents race conditions where multiple workers try to load/clear the cache simultaneously
+        print("🚀 Pre-loading data cache for all epics...")
+        try:
+            # IMPORTANT: Use same import path as BacktestDataFetcher to share the global cache
+            # BacktestDataFetcher tries 'from core.memory_cache' first, so we do the same
+            try:
+                from core.memory_cache import get_forex_cache, initialize_cache
+                from core.database import DatabaseManager
+            except ImportError:
+                from forex_scanner.core.memory_cache import get_forex_cache, initialize_cache
+                from forex_scanner.core.database import DatabaseManager
+
+            db = DatabaseManager(config.DATABASE_URL)
+            cache = get_forex_cache(db)
+            if cache is None:
+                cache = initialize_cache(db, auto_load=False)
+
+            # Load ALL epics for the full date range (not per-epic)
+            cache.load_data_for_period(
+                start_date=actual_start,
+                end_date=actual_end,
+                epics=epic_list,  # ALL epics at once
+                lookback_hours=168,  # 7 days for indicator warmup
+                force_reload=True,  # Force fresh load since we're starting parallel run
+                use_backtest_table=True
+            )
+            print(f"✅ Cache pre-loaded: {cache.stats.total_rows:,} rows for {len(epic_list)} epics")
+        except Exception as e:
+            print(f"⚠️ Cache pre-load failed: {e}")
+            import traceback
+            traceback.print_exc()
+            print("   Workers will load data individually (slower)")
 
         # Track results
         all_results = {}
