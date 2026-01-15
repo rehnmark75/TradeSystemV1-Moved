@@ -329,7 +329,11 @@ def get_effective_config_for_pair(epic: str) -> Dict[str, Any]:
         for field in ['sl_buffer_pips', 'min_confidence', 'max_confidence', 'allow_asian_session',
                      'min_volume_ratio', 'macd_filter_enabled',
                      'high_volume_confidence', 'low_atr_confidence',
-                     'high_atr_confidence', 'near_ema_confidence', 'far_ema_confidence']:
+                     'high_atr_confidence', 'near_ema_confidence', 'far_ema_confidence',
+                     # Scalp tier settings (v2.22.0)
+                     'scalp_ema_period', 'scalp_swing_lookback_bars', 'scalp_limit_offset_pips',
+                     'scalp_htf_timeframe', 'scalp_trigger_timeframe', 'scalp_entry_timeframe',
+                     'scalp_min_confidence', 'scalp_cooldown_minutes', 'scalp_swing_break_tolerance_pips']:
             if override.get(field) is not None:
                 effective[field] = override[field]
 
