@@ -2,25 +2,39 @@
 import time
 import json
 import httpx
-from services.keyvault import get_secret
+# Note: get_secret is imported by callers but not directly used here
 from config import API_BASE_URL
 
-_token_cache = {
-    "CST": None,
-    "X-SECURITY-TOKEN": None,
-    "accountId": None,
-    "expires_at": 0
-}
+# Separate caches for demo vs production to prevent token collision
+# Key: API URL, Value: token cache dict
+_token_caches = {}
+
+
+def _get_cache_for_url(api_url: str) -> dict:
+    """Get or create token cache for specific API URL."""
+    if api_url not in _token_caches:
+        _token_caches[api_url] = {
+            "CST": None,
+            "X-SECURITY-TOKEN": None,
+            "ACCOUNT_ID": None,
+            "STREAMING_URL": None,
+            "expires_at": 0
+        }
+    return _token_caches[api_url]
 
 
 async def ig_login(api_key: str, ig_pwd: str, ig_usr: str, api_url: str = API_BASE_URL, cache_ttl: int = 3600):
-    if _token_cache["CST"] and time.time() < _token_cache["expires_at"]:
-        print("Reusing cached IG token")
+    # Use URL-specific cache to avoid demo/production token collision
+    cache = _get_cache_for_url(api_url)
+
+    if cache["CST"] and time.time() < cache["expires_at"]:
+        env_type = "PRODUCTION" if "api.ig.com" in api_url else "DEMO"
+        print(f"Reusing cached IG token ({env_type})")
         return {
-            "CST": _token_cache["CST"],
-            "X-SECURITY-TOKEN": _token_cache["X-SECURITY-TOKEN"],
-            "ACCOUNT_ID": _token_cache.get("ACCOUNT_ID"),
-            "STREAMING_URL": _token_cache.get("STREAMING_URL")
+            "CST": cache["CST"],
+            "X-SECURITY-TOKEN": cache["X-SECURITY-TOKEN"],
+            "ACCOUNT_ID": cache.get("ACCOUNT_ID"),
+            "STREAMING_URL": cache.get("STREAMING_URL")
         }
 
     headers = {
@@ -52,14 +66,15 @@ async def ig_login(api_key: str, ig_pwd: str, ig_usr: str, api_url: str = API_BA
         account_id = json_data.get("currentAccountId")
         streaming_url = json_data.get("lightstreamerEndpoint")
 
-        print("✅ IG Login successful")
+        env_type = "PRODUCTION" if "api.ig.com" in api_url else "DEMO"
+        print(f"✅ IG Login successful ({env_type}) - Account: {account_id}")
 
-        _token_cache["CST"] = cst
-        _token_cache["X-SECURITY-TOKEN"] = xst
-        _token_cache["ACCOUNT_ID"] = account_id
-        _token_cache["STREAMING_URL"] = streaming_url
-        _token_cache["expires_at"] = time.time() + cache_ttl
-        print(account_id)
+        # Store in URL-specific cache
+        cache["CST"] = cst
+        cache["X-SECURITY-TOKEN"] = xst
+        cache["ACCOUNT_ID"] = account_id
+        cache["STREAMING_URL"] = streaming_url
+        cache["expires_at"] = time.time() + cache_ttl
 
         return {
             "CST": cst,
