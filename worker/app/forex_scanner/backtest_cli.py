@@ -148,6 +148,52 @@ Signal Display Format:
         )
 
         parser.add_argument(
+            '--scalp-offset',
+            type=float,
+            default=None,
+            metavar='PIPS',
+            help='Override the limit order offset (momentum confirmation) for scalp mode. '
+                 'Default is 1 pip. Higher values require more price movement before entry.'
+        )
+
+        parser.add_argument(
+            '--scalp-expiry',
+            type=int,
+            default=None,
+            metavar='MINUTES',
+            help='Override the limit order expiry time for scalp mode. '
+                 'Default is 5 minutes. Shorter values cancel unfilled orders faster.'
+        )
+
+        # Scalp Tier Settings
+        parser.add_argument(
+            '--scalp-htf',
+            type=str,
+            default=None,
+            metavar='TF',
+            help='Override TIER 1 HTF timeframe for scalp mode. '
+                 'Default is 15m. Options: 5m, 15m, 30m, 1h.'
+        )
+
+        parser.add_argument(
+            '--scalp-ema',
+            type=int,
+            default=None,
+            metavar='PERIOD',
+            help='Override TIER 1 EMA period for scalp mode. '
+                 'Default is 20. Common values: 10, 20, 50.'
+        )
+
+        parser.add_argument(
+            '--scalp-swing-lookback',
+            type=int,
+            default=None,
+            metavar='BARS',
+            help='Override TIER 2 swing lookback bars for scalp mode. '
+                 'Default is 12. Range: 5-30 bars.'
+        )
+
+        parser.add_argument(
             '--timeframe',
             type=str,
             default='15m',
@@ -368,7 +414,7 @@ Signal Display Format:
 
         return overrides if overrides else None
 
-    def _build_scalp_config_overrides(self, epic: str = None, existing_overrides: dict = None) -> dict:
+    def _build_scalp_config_overrides(self, epic: str = None, existing_overrides: dict = None, scalp_offset: float = None, scalp_expiry: int = None, scalp_htf: str = None, scalp_ema: int = None, scalp_swing_lookback: int = None) -> dict:
         """
         Build config overrides for scalp mode with Virtual Stop Loss (VSL) emulation.
 
@@ -383,6 +429,11 @@ Signal Display Format:
         Args:
             epic: Specific epic to test (used for display purposes)
             existing_overrides: Any existing overrides (to check for scalp_tp_pips override)
+            scalp_offset: Override for limit order offset in pips (default: 1 pip)
+            scalp_expiry: Override for limit order expiry in minutes (default: 5 min)
+            scalp_htf: Override TIER 1 HTF timeframe (default: 15m)
+            scalp_ema: Override TIER 1 EMA period (default: 20)
+            scalp_swing_lookback: Override TIER 2 swing lookback bars (default: 12)
 
         Returns:
             Dict of scalp mode config overrides
@@ -401,15 +452,53 @@ Signal Display Format:
         if existing_overrides and 'scalp_tp_pips' in existing_overrides:
             scalp_tp = existing_overrides['scalp_tp_pips']
 
+        # Get scalp offset from CLI arg, existing overrides, or use default (1 pip for scalp mode)
+        default_scalp_offset = 1.0  # Default scalp offset is 1 pip (tighter than normal 3 pips)
+        if scalp_offset is not None:
+            offset = scalp_offset
+        elif existing_overrides and 'scalp_limit_offset_pips' in existing_overrides:
+            offset = existing_overrides['scalp_limit_offset_pips']
+        else:
+            offset = default_scalp_offset
+
+        # Get scalp expiry from CLI arg, existing overrides, or use default (5 min for scalp mode)
+        default_scalp_expiry = 5  # Default scalp expiry is 5 minutes (faster than normal 45 min)
+        if scalp_expiry is not None:
+            expiry = scalp_expiry
+        elif existing_overrides and 'limit_expiry_minutes' in existing_overrides:
+            expiry = existing_overrides['limit_expiry_minutes']
+        else:
+            expiry = default_scalp_expiry
+
         overrides = {
             'scalp_mode_enabled': True,
             'scalp_tp_pips': scalp_tp,
+            'scalp_limit_offset_pips': offset,  # Limit order offset for momentum confirmation
+            'limit_expiry_minutes': expiry,  # Limit order expiry time
             'use_vsl_mode': True,  # Flag for BacktestScanner to use VSL simulation
         }
+
+        # Add tier settings if overridden
+        if scalp_htf is not None:
+            overrides['scalp_htf_timeframe'] = scalp_htf
+        if scalp_ema is not None:
+            overrides['scalp_ema_period'] = scalp_ema
+        if scalp_swing_lookback is not None:
+            overrides['scalp_swing_lookback_bars'] = scalp_swing_lookback
 
         # Display VSL configuration
         print(f"\n🎯 Scalp Mode Configuration (Virtual Stop Loss Emulation):")
         print(f"   Take Profit: {scalp_tp} pips")
+        print(f"   Order Offset: {offset} pips (momentum confirmation)")
+        print(f"   Order Expiry: {expiry} minutes")
+
+        # Display tier settings
+        htf_display = scalp_htf if scalp_htf else "15m (default)"
+        ema_display = scalp_ema if scalp_ema else "20 (default)"
+        swing_display = scalp_swing_lookback if scalp_swing_lookback else "12 (default)"
+        print(f"   TIER 1 HTF: {htf_display}")
+        print(f"   TIER 1 EMA: {ema_display}")
+        print(f"   TIER 2 Swing Lookback: {swing_display} bars")
 
         if epic:
             # Single epic - show its VSL
@@ -561,7 +650,15 @@ Signal Display Format:
 
             # Handle scalp mode with VSL emulation
             if getattr(args, 'scalp', False):
-                scalp_overrides = self._build_scalp_config_overrides(args.epic, config_override)
+                scalp_offset = getattr(args, 'scalp_offset', None)
+                scalp_expiry = getattr(args, 'scalp_expiry', None)
+                scalp_htf = getattr(args, 'scalp_htf', None)
+                scalp_ema = getattr(args, 'scalp_ema', None)
+                scalp_swing_lookback = getattr(args, 'scalp_swing_lookback', None)
+                scalp_overrides = self._build_scalp_config_overrides(
+                    args.epic, config_override, scalp_offset, scalp_expiry,
+                    scalp_htf, scalp_ema, scalp_swing_lookback
+                )
                 if config_override:
                     config_override.update(scalp_overrides)
                 else:

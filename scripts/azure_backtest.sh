@@ -66,6 +66,13 @@ ${YELLOW}Examples:${NC}
   $0 pull-results 42                             # Pull execution ID 42
   $0 stop-vm                                     # Stop VM to save costs
 
+${YELLOW}Scalp Mode Examples:${NC}
+  $0 run EURUSD 7 --scalp                        # Scalp mode with 3 pip VSL
+  $0 run EURUSD 7 --scalp --scalp-offset 2       # Custom limit order offset
+  $0 run EURUSD 7 --scalp --scalp-ema 10         # Custom EMA period
+  $0 run EURUSD 7 --scalp --scalp-swing-lookback 8  # Custom swing lookback
+  $0 run EURUSD 7 --scalp --scalp-htf 30m --scalp-ema 15 --scalp-swing-lookback 10
+
 ${YELLOW}Environment Variables:${NC}
   AZURE_VM_IP        Azure VM public IP (auto-detected if not set)
   SSH_KEY            Path to SSH private key (default: ~/.ssh/azure_backtest_rsa)

@@ -115,6 +115,39 @@ def main():
                 processed_args.append(arg)
                 print(f"🎯 Scalp mode: ENABLED (Virtual Stop Loss emulation)")
 
+            # Handle scalp offset override
+            elif arg == "--scalp-offset" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"📍 Scalp offset: {args[i]} pips")
+
+            # Handle scalp expiry override
+            elif arg == "--scalp-expiry" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"⏱️ Scalp expiry: {args[i]} minutes")
+
+            # Handle scalp tier settings
+            elif arg == "--scalp-htf" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"📊 Scalp HTF: {args[i]}")
+
+            elif arg == "--scalp-ema" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"📈 Scalp EMA: {args[i]}")
+
+            elif arg == "--scalp-swing-lookback" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🔍 Scalp Swing Lookback: {args[i]} bars")
+
             # Handle parallel execution flags
             elif arg == "--parallel":
                 processed_args.append(arg)
@@ -318,6 +351,9 @@ Scalping Mode Examples (VSL Emulation):
   python bt.py USDJPY 7 --scalp                        # Scalp USDJPY with 4 pip VSL (JPY pair)
   python bt.py EURUSD 7 --scalp --show-signals         # Show detailed scalp signals
   python bt.py EURUSD 7 --scalp --override scalp_tp_pips=7  # Override TP to 7 pips
+  python bt.py EURUSD 7 --scalp --scalp-offset 2       # Override order offset to 2 pips
+  python bt.py EURUSD 7 --scalp --scalp-expiry 10      # Override order expiry to 10 minutes
+  python bt.py EURUSD 7 --scalp --scalp-offset 2 --scalp-expiry 15  # Combined offset + expiry
 """
     print(help_text)
 

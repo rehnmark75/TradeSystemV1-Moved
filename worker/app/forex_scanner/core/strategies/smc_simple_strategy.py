@@ -436,12 +436,17 @@ class SMCSimpleStrategy:
 
             self.logger.info(f"✅ SMC Simple config v{config.version} loaded from DATABASE (source: {config.source})")
 
+            # SCALP MODE: Load scalp configuration first (before overrides)
+            self._load_scalp_mode_config(config)
+
             # Apply backtest overrides if in backtest mode
+            # IMPORTANT: This must happen AFTER _load_scalp_mode_config() so that
+            # CLI overrides (--scalp-ema, --scalp-swing-lookback, etc.) take precedence
+            # over database values
             if self._backtest_mode:
                 self._apply_config_overrides()
 
-            # SCALP MODE: Load scalp configuration and apply if enabled
-            self._load_scalp_mode_config(config)
+            # Apply scalp mode configuration if enabled
             if self.scalp_mode_enabled:
                 self._configure_scalp_mode()
 
@@ -779,6 +784,18 @@ class SMCSimpleStrategy:
             # Limit Order Settings
             'limit_order_enabled': 'limit_order_enabled',
             'limit_expiry_minutes': 'limit_expiry_minutes',
+            'momentum_offset_pips': 'momentum_offset_pips',
+            'scalp_limit_offset_pips': 'scalp_limit_offset_pips',  # Scalp mode offset override
+            'pullback_offset_min_pips': 'pullback_offset_min_pips',
+            'pullback_offset_max_pips': 'pullback_offset_max_pips',
+
+            # Scalp Mode Tier Settings (for parameter testing)
+            'scalp_htf_timeframe': 'scalp_htf_timeframe',
+            'scalp_trigger_timeframe': 'scalp_trigger_timeframe',
+            'scalp_entry_timeframe': 'scalp_entry_timeframe',
+            'scalp_ema_period': 'scalp_ema_period',
+            'scalp_swing_lookback_bars': 'scalp_swing_lookback_bars',
+            'scalp_swing_break_tolerance_pips': 'scalp_swing_break_tolerance_pips',
 
             # Debug
             'enable_debug_logging': 'debug_logging',
@@ -866,8 +883,8 @@ class SMCSimpleStrategy:
         # Scalp cooldown (much shorter)
         self.scalp_cooldown_minutes = getattr(config, 'scalp_cooldown_minutes', 15)
 
-        # Scalp swing detection
-        self.scalp_swing_lookback_bars = getattr(config, 'scalp_swing_lookback_bars', 5)
+        # Scalp swing detection (12 bars optimized default, 5 was too short)
+        self.scalp_swing_lookback_bars = getattr(config, 'scalp_swing_lookback_bars', 12)
         self.scalp_range_position_threshold = getattr(config, 'scalp_range_position_threshold', 0.80)
 
         # Scalp market orders (faster fills, spread filter is the safeguard)
@@ -932,14 +949,20 @@ class SMCSimpleStrategy:
         self.cooldown_hours = self.scalp_cooldown_minutes / 60.0
 
         # Scalp swing detection settings
-        # Override swing lookback to 12 bars (60 min on 5m TF) for better swing detection
-        # Default scalp_swing_lookback_bars=5 was too short, causing 70% of swing rejections
-        self.swing_lookback = 12
+        # Use self.scalp_swing_lookback_bars which comes from:
+        # 1. CLI override via --scalp-swing-lookback (highest priority)
+        # 2. Database config (if no CLI override)
+        # Default optimized value is 12 bars (60 min on 5m TF for better swing detection)
+        # Note: Original default of 5 was too short, causing 70% of swing rejections
+        self.swing_lookback = self.scalp_swing_lookback_bars
         self.use_dynamic_swing_lookback = False  # Use fixed lookback in scalp mode
 
         # Relax swing break tolerance for scalp mode (allow near-breaks)
+        # Use overridden value if provided, otherwise default to 0.5 pips
         # Many rejections were within 0.5-1.5 pips of confirmation
-        self.scalp_swing_break_tolerance_pips = 0.5
+        tolerance_override = getattr(self, 'scalp_swing_break_tolerance_pips', None)
+        if tolerance_override is None:
+            self.scalp_swing_break_tolerance_pips = 0.5
 
         # Disable dynamic confidence adjustments in scalp mode
         self.ema_distance_adjusted_confidence_enabled = False
@@ -954,11 +977,15 @@ class SMCSimpleStrategy:
             self.limit_order_enabled = False
             self.logger.info("   Order Type: MARKET (faster fills, spread-filtered)")
         else:
-            # Limit orders with reduced offset for scalping (1 pip vs 3 pip swing)
-            self.momentum_offset_pips = 1.0
-            self.pullback_offset_min_pips = 1.0
-            self.pullback_offset_max_pips = 1.0
-            self.logger.info("   Order Type: LIMIT (1 pip offset for scalp)")
+            # Limit orders with reduced offset for scalping
+            # Check for scalp_limit_offset_pips override from backtest CLI (--scalp-offset)
+            scalp_offset = getattr(self, 'scalp_limit_offset_pips', None)
+            if scalp_offset is None:
+                scalp_offset = 1.0  # Default scalp offset is 1 pip
+            self.momentum_offset_pips = scalp_offset
+            self.pullback_offset_min_pips = scalp_offset
+            self.pullback_offset_max_pips = scalp_offset
+            self.logger.info(f"   Order Type: LIMIT ({scalp_offset} pip offset for scalp)")
 
         # Log configuration
         self.logger.info(f"   HTF Timeframe: {self.htf_timeframe}")
