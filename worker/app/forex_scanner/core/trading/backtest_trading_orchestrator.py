@@ -330,8 +330,18 @@ class BacktestTradingOrchestrator:
                                     if isinstance(signal_timestamp, str):
                                         signal_timestamp = pd.to_datetime(signal_timestamp)
 
+                                    # Make both timestamps timezone-naive for comparison
+                                    filter_ts = self._signal_start_filter
+                                    sig_ts = signal_timestamp
+
+                                    # Remove timezone info for comparison if needed
+                                    if hasattr(sig_ts, 'tzinfo') and sig_ts.tzinfo is not None:
+                                        sig_ts = sig_ts.replace(tzinfo=None)
+                                    if hasattr(filter_ts, 'tzinfo') and filter_ts.tzinfo is not None:
+                                        filter_ts = filter_ts.replace(tzinfo=None)
+
                                     # Skip signals before the filter timestamp
-                                    if signal_timestamp < self._signal_start_filter:
+                                    if sig_ts < filter_ts:
                                         signals_filtered += 1
                                         continue
 

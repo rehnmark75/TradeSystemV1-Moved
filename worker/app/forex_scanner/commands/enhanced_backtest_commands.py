@@ -13,11 +13,13 @@ try:
     from core.database import DatabaseManager
     from core.scanner_factory import ScannerFactory, ScannerMode
     from core.trading.backtest_trading_orchestrator import BacktestTradingOrchestrator
+    from core.backtest_candles_manager import BacktestCandlesManager
 except ImportError:
     from forex_scanner import config
     from forex_scanner.core.database import DatabaseManager
     from forex_scanner.core.scanner_factory import ScannerFactory, ScannerMode
     from forex_scanner.core.trading.backtest_trading_orchestrator import BacktestTradingOrchestrator
+    from forex_scanner.core.backtest_candles_manager import BacktestCandlesManager
 
 
 class EnhancedBacktestCommands:
@@ -89,29 +91,61 @@ class EnhancedBacktestCommands:
             self.logger.info(f"   Mode: {'Full Pipeline' if pipeline else 'Basic Strategy Testing'}")
 
             # Calculate date range
+            # We need two date ranges:
+            # 1. Target period: the actual period user requested (signals counted here)
+            # 2. Data period: includes warmup for indicator calculation (no signals counted)
             if start_date and end_date:
                 # Use explicit date range
-                # CRITICAL FIX: Start 2 days earlier for indicator warmup
+                target_start_date = start_date
+                target_end_date = end_date
+                # Add warmup period for indicator calculation
                 actual_start_date = start_date - timedelta(days=2)
                 actual_end_date = end_date
 
                 # Calculate days for display
                 date_diff = (end_date - start_date).days
                 self.logger.info(f"   Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} ({date_diff} days)")
-                self.logger.info(f"   Warmup: Starting from {actual_start_date.strftime('%Y-%m-%d')} (2 days earlier for indicators)")
+                self.logger.info(f"   Warmup: Data loaded from {actual_start_date.strftime('%Y-%m-%d')} (2 days earlier for indicators)")
             else:
                 # Use days parameter (backward from now)
                 actual_end_date = datetime.now()
-                # CRITICAL FIX: Start early enough to capture all alerts AND have sufficient indicator data
-                # We need extra days for indicator calculation (e.g., EMA 50 needs 50+ bars)
-                # Add 2 extra days to ensure we have enough historical data before the target period
+                # Target period is exactly what user requested
+                target_end_date = actual_end_date
+                target_start_date = actual_end_date - timedelta(days=days)
+                # Data period includes warmup for indicator calculation
                 actual_start_date = actual_end_date - timedelta(days=days + 2)
 
                 self.logger.info(f"   Days: {days}")
+                self.logger.info(f"   Target period: {target_start_date.strftime('%Y-%m-%d %H:%M')} to {target_end_date.strftime('%Y-%m-%d %H:%M')}")
+                self.logger.info(f"   Data period: {actual_start_date.strftime('%Y-%m-%d')} (includes 2-day warmup for indicators)")
 
             # Normalize dates to start/end of day
             actual_start_date = actual_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
             actual_end_date = actual_end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+            # Normalize target start date (signals only count from here)
+            target_start_date = target_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+
+            # STEP 0: Ensure backtest candles table is up-to-date (auto-resample from 1m if needed)
+            # First run populates data (may take a minute), subsequent runs skip if fresh
+            try:
+                candles_manager = BacktestCandlesManager(self.db_manager)
+                update_result = candles_manager.ensure_data_current(
+                    epics=epic_list,
+                    start_date=actual_start_date,
+                    end_date=actual_end_date,
+                    max_staleness_hours=1
+                )
+                if update_result['updated']:
+                    self.logger.info(
+                        f"📊 Backtest candles updated: {update_result['total_rows_inserted']:,} rows "
+                        f"for {len(update_result['epics_updated'])} epics in {update_result['time_taken_seconds']:.1f}s"
+                    )
+                else:
+                    self.logger.info("⚡ Backtest candles table is current - using pre-computed data")
+            except Exception as e:
+                # Don't fail the backtest if candle validation fails - just warn
+                self.logger.warning(f"⚠️ Backtest candles validation failed: {e}")
+                self.logger.warning("   Continuing with runtime resampling (may be slower)")
 
             execution_id = self.scanner_factory.create_backtest_execution(
                 strategy_name=strategy,
@@ -132,7 +166,8 @@ class EnhancedBacktestCommands:
                 'end_date': actual_end_date,
                 'epics': epic_list,
                 'timeframe': timeframe,
-                'pipeline_mode': pipeline
+                'pipeline_mode': pipeline,
+                'signal_start_filter': target_start_date  # Only count signals from target period, not warmup
             }
 
             # Run backtest orchestration
@@ -143,7 +178,8 @@ class EnhancedBacktestCommands:
                 logger=self.logger,
                 pipeline_mode=pipeline,  # Pass pipeline mode to control validation
                 config_override=config_override,  # Pass config override for backtest isolation
-                use_historical_intelligence=use_historical_intelligence  # Pass historical intelligence mode (Phase 3)
+                use_historical_intelligence=use_historical_intelligence,  # Pass historical intelligence mode (Phase 3)
+                signal_start_filter=target_start_date  # Filter out warmup period signals
             ) as orchestrator:
 
                 # Run the complete orchestration

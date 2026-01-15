@@ -1168,19 +1168,23 @@ Signal Display Format:
                     pips = 0.0
 
                     order_logger = result.get('order_logger')
-                    if order_logger and hasattr(order_logger, 'signals'):
-                        # Calculate directly from logged signals
-                        logged_signals = order_logger.signals
+                    if order_logger and hasattr(order_logger, 'all_signals'):
+                        # Calculate directly from logged signals (all_signals is the in-memory list)
+                        logged_signals = order_logger.all_signals
                         for sig in logged_signals:
+                            # Check trade_result field for outcome
                             trade_result = sig.get('trade_result', '')
+                            # Also check profit/loss fields which are set during signal recording
+                            profit = sig.get('profit', 0) or 0
+                            loss = sig.get('loss', 0) or 0
                             pips_gained = sig.get('pips_gained', 0) or 0
 
-                            if trade_result == 'win':
+                            if trade_result == 'win' or profit > 0:
                                 wins += 1
-                                pips += float(pips_gained)
-                            elif trade_result == 'loss':
+                                pips += float(pips_gained) if pips_gained else float(profit)
+                            elif trade_result == 'loss' or loss > 0:
                                 losses += 1
-                                pips += float(pips_gained)  # pips_gained is negative for losses
+                                pips += float(pips_gained) if pips_gained else -float(loss)
                             elif trade_result == 'breakeven':
                                 breakevens += 1
 
