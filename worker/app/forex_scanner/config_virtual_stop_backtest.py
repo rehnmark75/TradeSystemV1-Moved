@@ -45,7 +45,7 @@ PAIR_VSL_CONFIGS = {
 DEFAULT_VSL_PIPS = 3.0
 
 # Default scalp take profit
-DEFAULT_SCALP_TP_PIPS = 5.0
+DEFAULT_SCALP_TP_PIPS = 8.0
 
 # Default limit order offset for scalping (momentum confirmation)
 # Live system uses per-pair overrides from database, this is the fallback
@@ -152,21 +152,25 @@ MAX_SPREAD_PENALTY_PIPS = 2.0  # Cap adjustment at +2 pips max
 # Default dynamic VSL configuration for majors
 DEFAULT_DYNAMIC_VSL_CONFIG = {
     'initial_vsl_pips': 3.0,        # Starting VSL (same as current fixed)
-    'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit
+    'breakeven_trigger_pips': 2.0,  # Move to BE when +2 pips profit (earlier trigger)
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
-    'stage1_trigger_pips': 4.5,     # Move to stage1 when +4.5 pips
+    'stage1_trigger_pips': 5.0,     # Move to stage1 when +5 pips profit
     'stage1_lock_pips': 2.0,        # Lock +2 pips at stage1
-    'target_pips': 5.0,             # TP target (close at this level)
+    'stage2_trigger_pips': 6.5,     # Move to stage2 when +6.5 pips profit
+    'stage2_lock_pips': 4.0,        # Lock +4 pips at stage2
+    'target_pips': 8.0,             # TP target (extended from 5.0)
 }
 
 # Default dynamic VSL configuration for JPY pairs (higher volatility)
 DEFAULT_JPY_DYNAMIC_VSL_CONFIG = {
     'initial_vsl_pips': 4.0,        # Starting VSL (same as current fixed)
-    'breakeven_trigger_pips': 3.5,  # Move to BE when +3.5 pips profit
+    'breakeven_trigger_pips': 2.5,  # Move to BE when +2.5 pips profit (earlier trigger)
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
-    'stage1_trigger_pips': 5.0,     # Move to stage1 when +5 pips
-    'stage1_lock_pips': 2.0,        # Lock +2 pips at stage1
-    'target_pips': 6.0,             # TP target (higher for JPY)
+    'stage1_trigger_pips': 6.0,     # Move to stage1 when +6 pips profit
+    'stage1_lock_pips': 2.5,        # Lock +2.5 pips at stage1
+    'stage2_trigger_pips': 8.0,     # Move to stage2 when +8 pips profit
+    'stage2_lock_pips': 5.0,        # Lock +5 pips at stage2
+    'target_pips': 10.0,            # TP target (extended from 6.0)
 }
 
 # Per-pair dynamic VSL configuration

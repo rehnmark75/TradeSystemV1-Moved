@@ -246,6 +246,7 @@ class SMCSimpleConfig:
     scalp_momentum_min_depth: float = -0.30
     scalp_fib_pullback_min: float = 0.0
     scalp_fib_pullback_max: float = 1.0
+    scalp_micro_pullback_lookback: int = 10  # v2.19.0: bars to lookback for micro-pullback on 1m
     scalp_cooldown_minutes: int = 15
     scalp_require_tight_spread: bool = True
     scalp_swing_lookback_bars: int = 5
@@ -1133,6 +1134,7 @@ class SMCSimpleConfigService:
             'scalp_disable_volume_filter', 'scalp_disable_macd_filter',
             'scalp_use_momentum_only', 'scalp_momentum_min_depth',
             'scalp_fib_pullback_min', 'scalp_fib_pullback_max',
+            'scalp_micro_pullback_lookback',
             'scalp_cooldown_minutes', 'scalp_require_tight_spread',
             'scalp_swing_lookback_bars', 'scalp_range_position_threshold',
             'scalp_enable_claude_ai', 'scalp_use_market_orders',
@@ -1160,6 +1162,7 @@ class SMCSimpleConfigService:
             'max_momentum_staleness_bars',
             # Scalp mode int fields
             'scalp_ema_period', 'scalp_cooldown_minutes', 'scalp_swing_lookback_bars',
+            'scalp_micro_pullback_lookback',
             # Scalp qualification int fields
             'scalp_rsi_bull_min', 'scalp_rsi_bull_max', 'scalp_rsi_bear_min', 'scalp_rsi_bear_max',
         }

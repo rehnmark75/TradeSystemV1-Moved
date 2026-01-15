@@ -114,6 +114,14 @@ class TradeLog(Base):
     virtual_sl_triggered = Column(Boolean, default=False)  # True if VSL was triggered
     virtual_sl_triggered_at = Column(DateTime, nullable=True)  # When VSL triggered
 
+    # Dynamic VSL state tracking (persisted for service restart resilience)
+    vsl_stage = Column(String(20), default='initial')  # Current stage: initial, breakeven, early_lock, stage1, stage2
+    vsl_breakeven_triggered = Column(Boolean, default=False)  # True when BE level reached
+    vsl_stage1_triggered = Column(Boolean, default=False)  # True when stage1 level reached
+    vsl_stage2_triggered = Column(Boolean, default=False)  # True when stage2 level reached
+    vsl_peak_profit_pips = Column(Float, default=0.0)  # Maximum favorable excursion (MFE)
+    vsl_dynamic_sl_price = Column(Float, nullable=True)  # Current dynamic SL price level
+
     def __repr__(self):
         return f"<TradeLog(id={self.id}, symbol={self.symbol}, deal_id={self.deal_id}, profit_loss={self.profit_loss})>"
 

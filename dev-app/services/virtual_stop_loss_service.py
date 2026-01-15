@@ -65,10 +65,11 @@ class ScalpPosition:
 
     # Dynamic VSL tracking fields
     peak_profit_pips: float = 0.0              # Maximum favorable excursion (MFE)
-    current_stage: str = "initial"             # initial, breakeven, early_lock, stage1
+    current_stage: str = "initial"             # initial, breakeven, stage1, stage2
     breakeven_triggered: bool = False          # Has BE been triggered?
-    early_lock_triggered: bool = False         # Has early_lock been triggered?
+    early_lock_triggered: bool = False         # Has early_lock been triggered? (legacy)
     stage1_triggered: bool = False             # Has stage1 been triggered?
+    stage2_triggered: bool = False             # Has stage2 been triggered?
     dynamic_vsl_price: Optional[float] = None  # Current dynamic VSL level (None = use fixed)
 
 
@@ -200,7 +201,8 @@ class VirtualStopLossService:
                     # SELL: SL is above entry
                     virtual_sl_price = trade.entry_price + sl_distance
 
-                # Create position tracker
+                # Create position tracker with persisted dynamic VSL state
+                # This enables service restart resilience - state survives restarts!
                 position = ScalpPosition(
                     trade_id=trade.id,
                     deal_id=trade.deal_id,
@@ -210,7 +212,14 @@ class VirtualStopLossService:
                     virtual_sl_pips=virtual_sl_pips,
                     virtual_sl_price=virtual_sl_price,
                     position_size=trade.current_size or 1.0,
-                    opened_at=trade.timestamp or datetime.utcnow()
+                    opened_at=trade.timestamp or datetime.utcnow(),
+                    # Load persisted dynamic VSL state from database
+                    peak_profit_pips=getattr(trade, 'vsl_peak_profit_pips', None) or 0.0,
+                    current_stage=getattr(trade, 'vsl_stage', None) or "initial",
+                    breakeven_triggered=getattr(trade, 'vsl_breakeven_triggered', None) or False,
+                    stage1_triggered=getattr(trade, 'vsl_stage1_triggered', None) or False,
+                    stage2_triggered=getattr(trade, 'vsl_stage2_triggered', None) or False,
+                    dynamic_vsl_price=getattr(trade, 'vsl_dynamic_sl_price', None),
                 )
 
                 self.positions[trade.id] = position
@@ -229,8 +238,16 @@ class VirtualStopLossService:
 
                 self._stats["positions_tracked"] = len(self.positions)
 
+                # Log position addition with state restoration info
+                state_info = ""
+                if position.breakeven_triggered or position.stage1_triggered or position.stage2_triggered:
+                    state_info = f" [RESTORED: stage={position.current_stage}, peak={position.peak_profit_pips:.1f}pips"
+                    if position.dynamic_vsl_price:
+                        state_info += f", dyn_vsl={position.dynamic_vsl_price:.5f}"
+                    state_info += "]"
+
                 logger.info(f"[VSL] ✅ Added position: Trade {trade.id} {trade.symbol} {direction} "
-                          f"@ {trade.entry_price:.5f}, VSL @ {virtual_sl_price:.5f} ({virtual_sl_pips} pips)")
+                          f"@ {trade.entry_price:.5f}, VSL @ {virtual_sl_price:.5f} ({virtual_sl_pips} pips){state_info}")
 
                 return True
 
@@ -467,7 +484,30 @@ class VirtualStopLossService:
         # Get spread-adjusted breakeven trigger
         effective_be_trigger = self._get_effective_be_trigger(position.epic, spread_pips)
 
-        # Stage 1 check (highest priority - check this first)
+        # Stage 2 check (highest priority - check this first)
+        if not position.stage2_triggered and 'stage2_trigger_pips' in config:
+            if current_profit_pips >= config['stage2_trigger_pips']:
+                position.stage2_triggered = True
+                position.current_stage = "stage2"
+                lock_distance = config['stage2_lock_pips'] * point_value
+
+                if position.direction == "BUY":
+                    position.dynamic_vsl_price = position.entry_price + lock_distance
+                else:  # SELL
+                    position.dynamic_vsl_price = position.entry_price - lock_distance
+
+                logger.info(f"[VSL] 🚀 Trade {position.trade_id} → STAGE 2: "
+                           f"Profit={current_profit_pips:.1f} pips, "
+                           f"Locking +{config['stage2_lock_pips']} pips @ {position.dynamic_vsl_price:.5f}")
+
+                # Update stats
+                self._stats["stage2_triggered_count"] = self._stats.get("stage2_triggered_count", 0) + 1
+
+                # Persist state to database for restart resilience
+                self._persist_vsl_state(position)
+                return
+
+        # Stage 1 check (second highest priority)
         if not position.stage1_triggered:
             if current_profit_pips >= config['stage1_trigger_pips']:
                 position.stage1_triggered = True
@@ -485,6 +525,9 @@ class VirtualStopLossService:
 
                 # Update stats
                 self._stats["stage1_triggered_count"] = self._stats.get("stage1_triggered_count", 0) + 1
+
+                # Persist state to database for restart resilience
+                self._persist_vsl_state(position)
                 return
 
         # Early lock check (between breakeven and stage1)
@@ -509,6 +552,9 @@ class VirtualStopLossService:
 
                 # Update stats
                 self._stats["early_lock_triggered_count"] = self._stats.get("early_lock_triggered_count", 0) + 1
+
+                # Persist state to database for restart resilience
+                self._persist_vsl_state(position)
                 return
 
         # Breakeven check (only if early_lock not triggered yet)
@@ -529,6 +575,35 @@ class VirtualStopLossService:
 
                 # Update stats
                 self._stats["breakeven_triggered_count"] = self._stats.get("breakeven_triggered_count", 0) + 1
+
+                # Persist state to database for restart resilience
+                self._persist_vsl_state(position)
+
+    def _persist_vsl_state(self, position: ScalpPosition) -> None:
+        """
+        Persist dynamic VSL state to database for restart resilience.
+
+        This ensures that if the service restarts, the position will be
+        restored with the correct stage, peak profit, and dynamic VSL price.
+
+        Args:
+            position: ScalpPosition with updated state to persist
+        """
+        try:
+            with SessionLocal() as db:
+                trade = db.query(TradeLog).filter(TradeLog.id == position.trade_id).first()
+                if trade:
+                    trade.vsl_stage = position.current_stage
+                    trade.vsl_breakeven_triggered = position.breakeven_triggered
+                    trade.vsl_stage1_triggered = position.stage1_triggered
+                    trade.vsl_stage2_triggered = position.stage2_triggered
+                    trade.vsl_peak_profit_pips = position.peak_profit_pips
+                    trade.vsl_dynamic_sl_price = position.dynamic_vsl_price
+                    db.commit()
+                    logger.debug(f"[VSL] 💾 Persisted state for Trade {position.trade_id}: "
+                               f"stage={position.current_stage}, peak={position.peak_profit_pips:.1f}pips")
+        except Exception as e:
+            logger.error(f"[VSL] ❌ Failed to persist state for Trade {position.trade_id}: {e}")
 
     async def _trigger_vsl_close(self, position: ScalpPosition, price: MarketPrice):
         """
@@ -705,6 +780,7 @@ class VirtualStopLossService:
                     "breakeven_triggered": pos.breakeven_triggered,
                     "early_lock_triggered": pos.early_lock_triggered,
                     "stage1_triggered": pos.stage1_triggered,
+                    "stage2_triggered": pos.stage2_triggered,
                     "peak_profit_pips": pos.peak_profit_pips,
                 }
                 for tid, pos in self.positions.items()
@@ -757,6 +833,7 @@ class VirtualStopLossService:
                 "breakeven_triggered": pos.breakeven_triggered,
                 "early_lock_triggered": pos.early_lock_triggered,
                 "stage1_triggered": pos.stage1_triggered,
+                "stage2_triggered": pos.stage2_triggered,
                 "peak_profit_pips": pos.peak_profit_pips,
             }
 

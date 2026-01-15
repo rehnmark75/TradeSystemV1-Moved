@@ -31,9 +31,10 @@ from config_virtual_stop_backtest import (
 @dataclass
 class VSLTradeState:
     """Tracks VSL state during trade simulation."""
-    current_stage: str = "initial"      # initial, breakeven, stage1
+    current_stage: str = "initial"      # initial, breakeven, stage1, stage2
     breakeven_triggered: bool = False
     stage1_triggered: bool = False
+    stage2_triggered: bool = False      # NEW: Track Stage 2
     peak_profit_pips: float = 0.0       # Maximum favorable excursion
     current_vsl_pips: float = 3.0       # Current VSL distance from entry (negative = profit lock)
     dynamic_vsl_price: Optional[float] = None
@@ -62,6 +63,10 @@ class VSLTrailingSimulator:
         self.config = get_dynamic_vsl_config(epic)
         self.pip_multiplier = get_pip_multiplier(epic)
         self.dynamic_enabled = is_dynamic_vsl_enabled()
+
+        # Max bars to fetch for simulation (4 hours of 5m bars = 48 bars)
+        # Used by backtest_scanner to determine how much future data to fetch
+        self.max_bars = 200  # ~16 hours of 5m data for scalping
 
         self.logger.debug(f"[VSL SIM] Initialized for {epic}: config={self.config}, dynamic={self.dynamic_enabled}")
 
@@ -132,7 +137,9 @@ class VSLTrailingSimulator:
                 db_result = 'win'
             elif trade_outcome in ('VSL_STOP', 'STOP_LOSS'):
                 db_result = 'loss'
-            elif trade_outcome in ('BREAKEVEN', 'STAGE1_STOP'):
+            elif trade_outcome in ('STAGE2_EXIT', 'STAGE2_STOP'):
+                db_result = 'win'  # Stage 2 locks +4 pips (majors) or +5 pips (JPY)
+            elif trade_outcome in ('BREAKEVEN', 'STAGE1_STOP', 'STAGE1_EXIT'):
                 db_result = 'breakeven' if result['exit_pnl'] <= 1.0 else 'win'
             else:
                 db_result = 'breakeven'
@@ -156,6 +163,7 @@ class VSLTrailingSimulator:
                 'vsl_stage': result['final_stage'],
                 'vsl_breakeven_triggered': result['breakeven_triggered'],
                 'vsl_stage1_triggered': result['stage1_triggered'],
+                'vsl_stage2_triggered': result['stage2_triggered'],
                 'vsl_peak_profit_pips': result['peak_profit_pips'],
                 'vsl_dynamic_enabled': self.dynamic_enabled,
 
@@ -259,7 +267,10 @@ class VSLTrailingSimulator:
 
                 # If close profit dropped to/below locked level, we exit
                 if close_profit <= locked_profit:
-                    if state.stage1_triggered:
+                    if state.stage2_triggered:
+                        exit_pnl = self.config['stage2_lock_pips']
+                        exit_reason = "STAGE2_STOP"
+                    elif state.stage1_triggered:
                         exit_pnl = self.config['stage1_lock_pips']
                         exit_reason = "STAGE1_STOP"
                     elif state.breakeven_triggered:
@@ -313,6 +324,7 @@ class VSLTrailingSimulator:
             'final_stage': state.current_stage,
             'breakeven_triggered': state.breakeven_triggered,
             'stage1_triggered': state.stage1_triggered,
+            'stage2_triggered': state.stage2_triggered,
         }
 
     def _update_dynamic_vsl(self, state: VSLTradeState, current_profit_pips: float, current_spread: float) -> None:
@@ -327,15 +339,24 @@ class VSLTrailingSimulator:
         # Get spread-adjusted breakeven trigger
         effective_be_trigger = self._get_effective_be_trigger(current_spread)
 
-        # Stage 1 check (highest priority)
+        # Stage 2 check (highest priority)
+        if not state.stage2_triggered and 'stage2_trigger_pips' in self.config:
+            if current_profit_pips >= self.config['stage2_trigger_pips']:
+                state.stage2_triggered = True
+                state.current_stage = "stage2"
+                state.current_vsl_pips = -self.config['stage2_lock_pips']  # Negative = profit lock
+
+                self.logger.debug(f"[VSL SIM] → STAGE 2: Profit={current_profit_pips:.1f} pips, "
+                                 f"Locking +{self.config['stage2_lock_pips']} pips")
+                return
+
+        # Stage 1 check (second highest priority)
         if not state.stage1_triggered:
             if current_profit_pips >= self.config['stage1_trigger_pips']:
                 state.stage1_triggered = True
                 state.current_stage = "stage1"
                 state.current_vsl_pips = -self.config['stage1_lock_pips']  # Negative = profit lock
 
-                # Calculate dynamic VSL price (entry + lock distance)
-                # Note: We set this but actual breach check uses the pips value
                 self.logger.debug(f"[VSL SIM] → STAGE 1: Profit={current_profit_pips:.1f} pips, "
                                  f"Locking +{self.config['stage1_lock_pips']} pips")
                 return
@@ -388,6 +409,8 @@ class VSLTrailingSimulator:
             return "BREAKEVEN_EXIT"
         elif exit_reason == "STAGE1_STOP":
             return "STAGE1_EXIT"
+        elif exit_reason == "STAGE2_STOP":
+            return "STAGE2_EXIT"
         elif exit_reason == "TIMEOUT":
             if exit_pnl > 1.0:
                 return "TIMEOUT_WIN"
