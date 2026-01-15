@@ -233,8 +233,63 @@ class SMCSimpleStrategy:
         else:
             self.logger.info("   Swing Proximity: DISABLED (config)")
 
+        # v2.21.0: Scalp Signal Qualifier initialization
+        self._signal_qualifier = None
+        if self.scalp_mode_enabled:
+            try:
+                from forex_scanner.core.strategies.scalp_signal_qualifier import ScalpSignalQualifier
+                self._signal_qualifier = ScalpSignalQualifier(
+                    config=self.config,
+                    logger=self.logger,
+                    db_config=self._db_config if hasattr(self, '_db_config') else None
+                )
+                # Apply backtest overrides to qualifier if provided
+                if self._config_override:
+                    if 'scalp_qualification_enabled' in self._config_override:
+                        self._signal_qualifier.enabled = self._config_override['scalp_qualification_enabled']
+                    if 'scalp_qualification_mode' in self._config_override:
+                        self._signal_qualifier.mode = self._config_override['scalp_qualification_mode']
+                    if 'scalp_min_qualification_score' in self._config_override:
+                        self._signal_qualifier.min_score = self._config_override['scalp_min_qualification_score']
+                    if 'scalp_rsi_filter_enabled' in self._config_override:
+                        self._signal_qualifier.rsi_filter_enabled = self._config_override['scalp_rsi_filter_enabled']
+                    if 'scalp_two_pole_filter_enabled' in self._config_override:
+                        self._signal_qualifier.two_pole_filter_enabled = self._config_override['scalp_two_pole_filter_enabled']
+                    if 'scalp_macd_filter_enabled' in self._config_override:
+                        self._signal_qualifier.macd_filter_enabled = self._config_override['scalp_macd_filter_enabled']
+                    # Micro-regime filter overrides (v2.21.1)
+                    if 'scalp_micro_regime_enabled' in self._config_override:
+                        self._signal_qualifier.micro_regime_enabled = self._config_override['scalp_micro_regime_enabled']
+                    if 'scalp_consecutive_candles_enabled' in self._config_override:
+                        self._signal_qualifier.consecutive_candles_enabled = self._config_override['scalp_consecutive_candles_enabled']
+                    if 'scalp_anti_chop_enabled' in self._config_override:
+                        self._signal_qualifier.anti_chop_enabled = self._config_override['scalp_anti_chop_enabled']
+                    if 'scalp_body_dominance_enabled' in self._config_override:
+                        self._signal_qualifier.body_dominance_enabled = self._config_override['scalp_body_dominance_enabled']
+                    if 'scalp_micro_range_enabled' in self._config_override:
+                        self._signal_qualifier.micro_range_enabled = self._config_override['scalp_micro_range_enabled']
+                    if 'scalp_momentum_candle_enabled' in self._config_override:
+                        self._signal_qualifier.momentum_candle_enabled = self._config_override['scalp_momentum_candle_enabled']
+                    # Micro-regime threshold overrides
+                    if 'scalp_consecutive_candles_min' in self._config_override:
+                        self._signal_qualifier.consecutive_candles_min = self._config_override['scalp_consecutive_candles_min']
+                    if 'scalp_anti_chop_lookback' in self._config_override:
+                        self._signal_qualifier.anti_chop_lookback = self._config_override['scalp_anti_chop_lookback']
+                    if 'scalp_anti_chop_max_alternations' in self._config_override:
+                        self._signal_qualifier.anti_chop_max_alternations = self._config_override['scalp_anti_chop_max_alternations']
+                    if 'scalp_body_dominance_ratio' in self._config_override:
+                        self._signal_qualifier.body_dominance_ratio = self._config_override['scalp_body_dominance_ratio']
+                    if 'scalp_micro_range_min_pips' in self._config_override:
+                        self._signal_qualifier.micro_range_min_pips = self._config_override['scalp_micro_range_min_pips']
+                    if 'scalp_momentum_candle_multiplier' in self._config_override:
+                        self._signal_qualifier.momentum_candle_multiplier = self._config_override['scalp_momentum_candle_multiplier']
+                micro_info = f", micro-regime={self._signal_qualifier.micro_regime_enabled}" if self._signal_qualifier.micro_regime_enabled else ""
+                self.logger.info(f"   Signal Qualifier: {self._signal_qualifier.mode} mode (enabled={self._signal_qualifier.enabled}{micro_info})")
+            except Exception as e:
+                self.logger.warning(f"   Signal Qualifier: DISABLED (failed to init: {e})")
+
         self.logger.info("=" * 60)
-        self.logger.info("✅ SMC Simple Strategy v2.15.0 initialized")
+        self.logger.info("✅ SMC Simple Strategy v2.21.0 initialized")
         self.logger.info("=" * 60)
         self.logger.info(f"   TIER 1: {self.ema_period} EMA on {self.htf_timeframe}")
         self.logger.info(f"   TIER 2: Swing break on {self.trigger_tf}")
@@ -2436,6 +2491,48 @@ class SMCSimpleStrategy:
                 except Exception as smc_error:
                     # Don't fail the signal if SMC data detection fails
                     self.logger.warning(f"⚠️ SMC chart data detection failed: {smc_error}")
+
+            # ================================================================
+            # SCALP SIGNAL QUALIFICATION (v2.21.0)
+            # Run momentum confirmation filters on scalp signals
+            # Mode: MONITORING (logs only) or ACTIVE (blocks signals)
+            # ================================================================
+            if self.scalp_mode_enabled and self._signal_qualifier and self._signal_qualifier.enabled:
+                try:
+                    qual_passed, qual_score, qual_results = self._signal_qualifier.qualify_signal(
+                        signal=signal,
+                        df_entry=entry_df,
+                        df_trigger=df_trigger
+                    )
+
+                    # Add qualification data to signal for logging/analysis
+                    signal['qualification_score'] = qual_score
+                    signal['qualification_results'] = qual_results
+                    signal['qualification_mode'] = self._signal_qualifier.mode
+
+                    if not qual_passed:
+                        self.logger.info(f"\n⚠️ SIGNAL BLOCKED BY QUALIFICATION")
+                        self.logger.info(f"   Score: {qual_score:.0%} (min: {self._signal_qualifier.min_score:.0%})")
+                        self._track_rejection(
+                            stage='SCALP_QUALIFICATION',
+                            reason=f'Score {qual_score:.0%} below threshold {self._signal_qualifier.min_score:.0%}',
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context={
+                                'qualification_score': qual_score,
+                                'qualification_results': qual_results,
+                                **self._collect_market_context(df_trigger, df_4h, entry_df, pip_value, direction=direction)
+                            }
+                        )
+                        return None
+                    else:
+                        self.logger.info(f"\n✅ QUALIFICATION: {qual_score:.0%} ({self._signal_qualifier.mode} mode)")
+
+                except Exception as qual_error:
+                    # Don't fail the signal if qualification fails
+                    self.logger.warning(f"⚠️ Signal qualification failed: {qual_error}")
 
             return signal
 

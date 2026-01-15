@@ -253,6 +253,21 @@ class SMCSimpleConfig:
     scalp_enable_claude_ai: bool = True
     scalp_use_market_orders: bool = True
 
+    # SCALP SIGNAL QUALIFICATION (v2.21.0)
+    # Momentum confirmation filters to improve scalp win rate
+    scalp_qualification_enabled: bool = False  # Master toggle
+    scalp_qualification_mode: str = "MONITORING"  # MONITORING or ACTIVE
+    scalp_min_qualification_score: float = 0.50  # 0.0-1.0, require 50% of filters to pass
+    scalp_rsi_filter_enabled: bool = True  # RSI momentum filter
+    scalp_two_pole_filter_enabled: bool = True  # Two-Pole oscillator filter
+    scalp_macd_filter_enabled: bool = True  # MACD direction filter
+    scalp_rsi_bull_min: int = 40  # Min RSI for BULL signals
+    scalp_rsi_bull_max: int = 75  # Max RSI for BULL signals
+    scalp_rsi_bear_min: int = 25  # Min RSI for BEAR signals
+    scalp_rsi_bear_max: int = 60  # Max RSI for BEAR signals
+    scalp_two_pole_bull_threshold: float = -0.30  # Two-Pole oversold threshold for BULL
+    scalp_two_pole_bear_threshold: float = 0.30  # Two-Pole overbought threshold for BEAR
+
     # ENABLED PAIRS
     enabled_pairs: List[str] = field(default_factory=lambda: [
         'CS.D.EURUSD.CEEM.IP',
@@ -1121,6 +1136,13 @@ class SMCSimpleConfigService:
             'scalp_cooldown_minutes', 'scalp_require_tight_spread',
             'scalp_swing_lookback_bars', 'scalp_range_position_threshold',
             'scalp_enable_claude_ai', 'scalp_use_market_orders',
+            # SCALP QUALIFICATION FIELDS (v2.21.0)
+            'scalp_qualification_enabled', 'scalp_qualification_mode',
+            'scalp_min_qualification_score',
+            'scalp_rsi_filter_enabled', 'scalp_two_pole_filter_enabled', 'scalp_macd_filter_enabled',
+            'scalp_rsi_bull_min', 'scalp_rsi_bull_max',
+            'scalp_rsi_bear_min', 'scalp_rsi_bear_max',
+            'scalp_two_pole_bull_threshold', 'scalp_two_pole_bear_threshold',
         ]
 
         # Fields that must be integers (used for DataFrame slicing, loop counts, etc.)
@@ -1138,6 +1160,8 @@ class SMCSimpleConfigService:
             'max_momentum_staleness_bars',
             # Scalp mode int fields
             'scalp_ema_period', 'scalp_cooldown_minutes', 'scalp_swing_lookback_bars',
+            # Scalp qualification int fields
+            'scalp_rsi_bull_min', 'scalp_rsi_bull_max', 'scalp_rsi_bear_min', 'scalp_rsi_bear_max',
         }
 
         for attr_name in direct_mappings:

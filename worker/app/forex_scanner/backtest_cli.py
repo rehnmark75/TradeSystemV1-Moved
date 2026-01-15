@@ -238,6 +238,92 @@ Signal Display Format:
                  'Default is 0.5 pips. Allows entries when price is very close to swing level.'
         )
 
+        # Scalp Signal Qualification options (v2.21.0)
+        parser.add_argument(
+            '--qualification-monitor',
+            action='store_true',
+            help='Enable signal qualification in MONITORING mode. '
+                 'Logs qualification results but passes all signals (for analysis).'
+        )
+
+        parser.add_argument(
+            '--qualification-active',
+            action='store_true',
+            help='Enable signal qualification in ACTIVE mode. '
+                 'Blocks signals that don\'t meet minimum qualification score.'
+        )
+
+        parser.add_argument(
+            '--qual-min-score',
+            type=float,
+            default=None,
+            metavar='SCORE',
+            help='Minimum qualification score (0.0-1.0) required in ACTIVE mode. '
+                 'Default is 0.50 (50%% of filters must pass).'
+        )
+
+        parser.add_argument(
+            '--qual-rsi-only',
+            action='store_true',
+            help='Use only RSI momentum filter for qualification (disable others).'
+        )
+
+        parser.add_argument(
+            '--qual-two-pole-only',
+            action='store_true',
+            help='Use only Two-Pole oscillator filter for qualification (disable others).'
+        )
+
+        parser.add_argument(
+            '--qual-macd-only',
+            action='store_true',
+            help='Use only MACD direction filter for qualification (disable others).'
+        )
+
+        # Micro-regime filter options
+        parser.add_argument(
+            '--micro-regime',
+            action='store_true',
+            help='Enable micro-regime validation filters (immediate price action analysis). '
+                 'Analyzes last 3-5 candles for consecutive direction, choppiness, body dominance, etc.'
+        )
+
+        parser.add_argument(
+            '--micro-consec-only',
+            action='store_true',
+            help='Test only consecutive candles filter (disable other micro-regime filters).'
+        )
+
+        parser.add_argument(
+            '--micro-antichop-only',
+            action='store_true',
+            help='Test only anti-chop filter (disable other micro-regime filters).'
+        )
+
+        parser.add_argument(
+            '--micro-body-only',
+            action='store_true',
+            help='Test only body dominance filter (disable other micro-regime filters).'
+        )
+
+        parser.add_argument(
+            '--micro-range-only',
+            action='store_true',
+            help='Test only micro-range filter (disable other micro-regime filters).'
+        )
+
+        parser.add_argument(
+            '--micro-momentum-only',
+            action='store_true',
+            help='Test only momentum candle filter (disable other micro-regime filters).'
+        )
+
+        parser.add_argument(
+            '--micro-all-filters',
+            action='store_true',
+            help='Enable all micro-regime filters at once for testing.'
+        )
+
         parser.add_argument(
             '--timeframe',
             type=str,
@@ -472,7 +558,22 @@ Signal Display Format:
         scalp_entry_tf: str = None,
         scalp_confidence: float = None,
         scalp_cooldown: int = None,
-        scalp_tolerance: float = None
+        scalp_tolerance: float = None,
+        # Qualification options (v2.21.0)
+        qualification_monitor: bool = False,
+        qualification_active: bool = False,
+        qual_min_score: float = None,
+        qual_rsi_only: bool = False,
+        qual_two_pole_only: bool = False,
+        qual_macd_only: bool = False,
+        # Micro-regime options (v2.21.1)
+        micro_regime: bool = False,
+        micro_consec_only: bool = False,
+        micro_antichop_only: bool = False,
+        micro_body_only: bool = False,
+        micro_range_only: bool = False,
+        micro_momentum_only: bool = False,
+        micro_all_filters: bool = False
     ) -> dict:
         """
         Build config overrides for scalp mode with Virtual Stop Loss (VSL) emulation.
@@ -560,6 +661,86 @@ Signal Display Format:
         if scalp_tolerance is not None:
             overrides['scalp_swing_break_tolerance_pips'] = scalp_tolerance
 
+        # Signal Qualification (v2.21.0)
+        if qualification_monitor or qualification_active:
+            overrides['scalp_qualification_enabled'] = True
+            overrides['scalp_qualification_mode'] = 'ACTIVE' if qualification_active else 'MONITORING'
+
+            if qual_min_score is not None:
+                overrides['scalp_min_qualification_score'] = qual_min_score
+
+            # Handle single-filter modes
+            if qual_rsi_only:
+                overrides['scalp_rsi_filter_enabled'] = True
+                overrides['scalp_two_pole_filter_enabled'] = False
+                overrides['scalp_macd_filter_enabled'] = False
+            elif qual_two_pole_only:
+                overrides['scalp_rsi_filter_enabled'] = False
+                overrides['scalp_two_pole_filter_enabled'] = True
+                overrides['scalp_macd_filter_enabled'] = False
+            elif qual_macd_only:
+                overrides['scalp_rsi_filter_enabled'] = False
+                overrides['scalp_two_pole_filter_enabled'] = False
+                overrides['scalp_macd_filter_enabled'] = True
+
+        # Micro-Regime Filters (v2.21.1)
+        if micro_regime or micro_consec_only or micro_antichop_only or micro_body_only or micro_range_only or micro_momentum_only or micro_all_filters:
+            # Enable qualification system if not already enabled
+            if not overrides.get('scalp_qualification_enabled'):
+                overrides['scalp_qualification_enabled'] = True
+                overrides['scalp_qualification_mode'] = 'ACTIVE'
+
+            # Enable micro-regime master toggle
+            overrides['scalp_micro_regime_enabled'] = True
+
+            # When testing individual micro-regime filters, disable momentum filters
+            # to isolate the micro-regime filter's effectiveness
+            micro_only = micro_consec_only or micro_antichop_only or micro_body_only or micro_range_only or micro_momentum_only
+            if micro_only:
+                overrides['scalp_rsi_filter_enabled'] = False
+                overrides['scalp_two_pole_filter_enabled'] = False
+                overrides['scalp_macd_filter_enabled'] = False
+
+            # Handle specific micro-regime filter modes
+            if micro_consec_only:
+                overrides['scalp_consecutive_candles_enabled'] = True
+                overrides['scalp_anti_chop_enabled'] = False
+                overrides['scalp_body_dominance_enabled'] = False
+                overrides['scalp_micro_range_enabled'] = False
+                overrides['scalp_momentum_candle_enabled'] = False
+            elif micro_antichop_only:
+                overrides['scalp_consecutive_candles_enabled'] = False
+                overrides['scalp_anti_chop_enabled'] = True
+                overrides['scalp_body_dominance_enabled'] = False
+                overrides['scalp_micro_range_enabled'] = False
+                overrides['scalp_momentum_candle_enabled'] = False
+            elif micro_body_only:
+                overrides['scalp_consecutive_candles_enabled'] = False
+                overrides['scalp_anti_chop_enabled'] = False
+                overrides['scalp_body_dominance_enabled'] = True
+                overrides['scalp_micro_range_enabled'] = False
+                overrides['scalp_momentum_candle_enabled'] = False
+            elif micro_range_only:
+                overrides['scalp_consecutive_candles_enabled'] = False
+                overrides['scalp_anti_chop_enabled'] = False
+                overrides['scalp_body_dominance_enabled'] = False
+                overrides['scalp_micro_range_enabled'] = True
+                overrides['scalp_momentum_candle_enabled'] = False
+            elif micro_momentum_only:
+                overrides['scalp_consecutive_candles_enabled'] = False
+                overrides['scalp_anti_chop_enabled'] = False
+                overrides['scalp_body_dominance_enabled'] = False
+                overrides['scalp_micro_range_enabled'] = False
+                overrides['scalp_momentum_candle_enabled'] = True
+            elif micro_all_filters:
+                # Enable all filters
+                overrides['scalp_consecutive_candles_enabled'] = True
+                overrides['scalp_anti_chop_enabled'] = True
+                overrides['scalp_body_dominance_enabled'] = True
+                overrides['scalp_micro_range_enabled'] = True
+                overrides['scalp_momentum_candle_enabled'] = True
+            # Default: use default enabled filters (consec, antichop, body, range = True, momentum = False)
+
         # Display VSL configuration
         print(f"\n🎯 Scalp Mode Configuration (Virtual Stop Loss Emulation):")
         print(f"   Take Profit: {scalp_tp} pips")
@@ -583,6 +764,40 @@ Signal Display Format:
         print(f"   Min Confidence: {conf_display}")
         print(f"   Cooldown: {cooldown_display}")
         print(f"   Swing Break Tolerance: {tolerance_display}")
+
+        # Display qualification settings if enabled
+        if qualification_monitor or qualification_active:
+            mode = 'ACTIVE' if qualification_active else 'MONITORING'
+            print(f"\n   📊 Signal Qualification: {mode} mode")
+            min_score = qual_min_score if qual_min_score else 0.50
+            print(f"   Min Score: {min_score:.0%}")
+
+            if qual_rsi_only:
+                print(f"   Momentum Filters: RSI only")
+            elif qual_two_pole_only:
+                print(f"   Momentum Filters: Two-Pole only")
+            elif qual_macd_only:
+                print(f"   Momentum Filters: MACD only")
+            else:
+                print(f"   Momentum Filters: RSI + Two-Pole + MACD (all)")
+
+        # Display micro-regime settings if enabled
+        if micro_regime or micro_consec_only or micro_antichop_only or micro_body_only or micro_range_only or micro_momentum_only or micro_all_filters:
+            print(f"\n   🔬 Micro-Regime Validation: ENABLED")
+            if micro_consec_only:
+                print(f"   Filters: Consecutive Candles only")
+            elif micro_antichop_only:
+                print(f"   Filters: Anti-Chop only")
+            elif micro_body_only:
+                print(f"   Filters: Body Dominance only")
+            elif micro_range_only:
+                print(f"   Filters: Micro-Range only")
+            elif micro_momentum_only:
+                print(f"   Filters: Momentum Candle only")
+            elif micro_all_filters:
+                print(f"   Filters: ALL (consec + antichop + body + range + momentum)")
+            else:
+                print(f"   Filters: Default (consec + antichop + body + range)")
 
         if epic:
             # Single epic - show its VSL
@@ -744,11 +959,31 @@ Signal Display Format:
                 scalp_confidence = getattr(args, 'scalp_confidence', None)
                 scalp_cooldown = getattr(args, 'scalp_cooldown', None)
                 scalp_tolerance = getattr(args, 'scalp_tolerance', None)
+                # Qualification options (v2.21.0)
+                qualification_monitor = getattr(args, 'qualification_monitor', False)
+                qualification_active = getattr(args, 'qualification_active', False)
+                qual_min_score = getattr(args, 'qual_min_score', None)
+                qual_rsi_only = getattr(args, 'qual_rsi_only', False)
+                qual_two_pole_only = getattr(args, 'qual_two_pole_only', False)
+                qual_macd_only = getattr(args, 'qual_macd_only', False)
+                # Micro-regime options (v2.21.1)
+                micro_regime = getattr(args, 'micro_regime', False)
+                micro_consec_only = getattr(args, 'micro_consec_only', False)
+                micro_antichop_only = getattr(args, 'micro_antichop_only', False)
+                micro_body_only = getattr(args, 'micro_body_only', False)
+                micro_range_only = getattr(args, 'micro_range_only', False)
+                micro_momentum_only = getattr(args, 'micro_momentum_only', False)
+                micro_all_filters = getattr(args, 'micro_all_filters', False)
                 scalp_overrides = self._build_scalp_config_overrides(
                     args.epic, config_override, scalp_offset, scalp_expiry,
                     scalp_htf, scalp_ema, scalp_swing_lookback,
                     scalp_trigger_tf, scalp_entry_tf, scalp_confidence,
-                    scalp_cooldown, scalp_tolerance
+                    scalp_cooldown, scalp_tolerance,
+                    qualification_monitor, qualification_active, qual_min_score,
+                    qual_rsi_only, qual_two_pole_only, qual_macd_only,
+                    micro_regime, micro_consec_only, micro_antichop_only,
+                    micro_body_only, micro_range_only, micro_momentum_only,
+                    micro_all_filters
                 )
                 if config_override:
                     config_override.update(scalp_overrides)

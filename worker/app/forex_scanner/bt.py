@@ -178,6 +178,33 @@ def main():
                 processed_args.append(args[i])
                 print(f"📏 Scalp Tolerance: {args[i]} pips")
 
+            # Handle scalp signal qualification flags
+            elif arg == "--qualification-monitor":
+                processed_args.append(arg)
+                print(f"📊 Signal Qualification: MONITORING mode (logs only)")
+
+            elif arg == "--qualification-active":
+                processed_args.append(arg)
+                print(f"🔒 Signal Qualification: ACTIVE mode (blocks low-score signals)")
+
+            elif arg == "--qual-min-score" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"📊 Qualification Min Score: {args[i]}")
+
+            elif arg == "--qual-rsi-only":
+                processed_args.append(arg)
+                print(f"📈 Qualification: RSI filter only")
+
+            elif arg == "--qual-two-pole-only":
+                processed_args.append(arg)
+                print(f"📈 Qualification: Two-Pole filter only")
+
+            elif arg == "--qual-macd-only":
+                processed_args.append(arg)
+                print(f"📈 Qualification: MACD filter only")
+
             # Handle parallel execution flags
             elif arg == "--parallel":
                 processed_args.append(arg)
@@ -400,6 +427,20 @@ Scalp Tier Tuning Examples:
   python bt.py GBPUSD 7 --scalp --scalp-htf 15m --scalp-trigger-tf 5m    # Custom timeframes
   python bt.py USDJPY 7 --scalp --scalp-confidence 0.40 --scalp-cooldown 20  # Higher confidence
   python bt.py EURUSD 7 --scalp --scalp-tolerance 1.0  # More tolerant swing break detection
+
+Scalp Signal Qualification (v2.21.0):
+  --qualification-monitor    Enable qualification in MONITORING mode (logs results, passes all signals)
+  --qualification-active     Enable qualification in ACTIVE mode (blocks signals below threshold)
+  --qual-min-score 0.66      Minimum qualification score required (default 0.50 = 50% of filters)
+  --qual-rsi-only            Use only RSI momentum filter
+  --qual-two-pole-only       Use only Two-Pole oscillator filter
+  --qual-macd-only           Use only MACD direction filter
+
+Qualification Examples:
+  python bt.py EURUSD 7 --scalp --qualification-monitor      # Log qualification results (recommended first)
+  python bt.py EURUSD 7 --scalp --qualification-active       # Block low-score signals
+  python bt.py EURUSD 7 --scalp --qualification-active --qual-min-score 0.66  # Require 2/3 filters to pass
+  python bt.py EURUSD 7 --scalp --qualification-monitor --qual-rsi-only  # Test RSI filter alone
 """
     print(help_text)
 
