@@ -1144,8 +1144,9 @@ Signal Display Format:
                     # Extract metrics from nested structure
                     # Structure:
                     #   - signal_processing: {logged, validated, rejected, errors}
-                    #   - backtest_results: {performance_summary: {...}, execution_stats: {...}}
+                    #   - backtest_results: {performance_summary: {...}, execution_stats: {...}, signal_summary: {...}}
                     #   - performance_metrics: {total_pips, win_rate}
+                    #   - order_logger: BacktestOrderLogger instance with actual trade data
                     signal_proc = result.get('signal_processing', {})
                     backtest_res = result.get('backtest_results', {})
                     exec_stats = backtest_res.get('execution_stats', {})
@@ -1160,24 +1161,48 @@ Signal Display Format:
                         perf_summary.get('total_signals', 0) or 0
                     )
 
-                    # Pips from performance_summary or metrics
-                    pips = float(
-                        perf_summary.get('total_pips', 0) or
-                        perf_metrics.get('total_pips', 0) or 0
-                    )
+                    # Try to get actual trade outcomes from order_logger
+                    wins = 0
+                    losses = 0
+                    breakevens = 0
+                    pips = 0.0
 
-                    # Win rate from performance_summary
-                    win_rate_pct = float(
-                        perf_summary.get('avg_win_rate', 0) or
-                        perf_metrics.get('win_rate', 0) or 0
-                    )
-                    # Normalize to 0-1 if it's a percentage > 1
-                    if win_rate_pct > 1:
-                        win_rate_pct = win_rate_pct / 100
+                    order_logger = result.get('order_logger')
+                    if order_logger and hasattr(order_logger, 'signals'):
+                        # Calculate directly from logged signals
+                        logged_signals = order_logger.signals
+                        for sig in logged_signals:
+                            trade_result = sig.get('trade_result', '')
+                            pips_gained = sig.get('pips_gained', 0) or 0
 
-                    # Estimate wins/losses from signals and win rate
-                    wins = int(signals * win_rate_pct) if signals > 0 else 0
-                    losses = signals - wins
+                            if trade_result == 'win':
+                                wins += 1
+                                pips += float(pips_gained)
+                            elif trade_result == 'loss':
+                                losses += 1
+                                pips += float(pips_gained)  # pips_gained is negative for losses
+                            elif trade_result == 'breakeven':
+                                breakevens += 1
+
+                        signals = len(logged_signals) if logged_signals else signals
+                    else:
+                        # Fallback: use performance_summary or metrics
+                        pips = float(
+                            perf_summary.get('total_pips', 0) or
+                            perf_metrics.get('total_pips', 0) or 0
+                        )
+
+                        win_rate_pct = float(
+                            perf_summary.get('avg_win_rate', 0) or
+                            perf_metrics.get('win_rate', 0) or 0
+                        )
+                        # Normalize to 0-1 if it's a percentage > 1
+                        if win_rate_pct > 1:
+                            win_rate_pct = win_rate_pct / 100
+
+                        # Estimate wins/losses from signals and win rate
+                        wins = int(signals * win_rate_pct) if signals > 0 else 0
+                        losses = signals - wins
 
                     total_signals += signals
                     total_pips += pips
@@ -1192,7 +1217,12 @@ Signal Display Format:
                         'losing_trades': losses,
                         'raw_result': result
                     }
-                    print(f"  ✅ {progress} {epic.split('.')[2]}: {signals} signals, {pips:+.1f} pips")
+                    # Show win rate in progress line
+                    if wins + losses > 0:
+                        wr = wins / (wins + losses) * 100
+                        print(f"  ✅ {progress} {epic.split('.')[2]}: {signals} signals, {pips:+.1f} pips, {wr:.0f}% win rate")
+                    else:
+                        print(f"  ✅ {progress} {epic.split('.')[2]}: {signals} signals, {pips:+.1f} pips")
                 else:
                     print(f"  ⚠️ {progress} {epic.split('.')[2]}: No result")
                     all_results[epic] = {}
