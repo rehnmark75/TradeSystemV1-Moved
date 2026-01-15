@@ -277,19 +277,26 @@ class LimitOrderSyncService:
 
         # Update trade_log with filled order data
         # Check current size to determine if it's a full or partial fill
-        current_size = float(position_data.get("size", 1.0))
-        original_size = order.current_size or 1.0
+        size_val = position_data.get("size")
+        current_size = float(size_val) if size_val is not None else 1.0
+        original_size = float(order.current_size) if order.current_size is not None else 1.0
 
         if current_size < original_size:
             order.status = "partial_closed"  # Partial fill/close
         else:
             order.status = "tracking"  # Full fill - now should be monitored like regular trades
         order.deal_id = deal_id
-        order.entry_price = float(position_data.get("open_level", order.entry_price))
-        order.sl_price = float(position_data.get("stop_level")) if position_data.get("stop_level") else order.sl_price
-        order.tp_price = float(position_data.get("limit_level")) if position_data.get("limit_level") else order.tp_price
+
+        # Safely convert price values - handle None and empty strings
+        open_level = position_data.get("open_level")
+        stop_level = position_data.get("stop_level")
+        limit_level = position_data.get("limit_level")
+
+        order.entry_price = float(open_level) if open_level is not None else order.entry_price
+        order.sl_price = float(stop_level) if stop_level is not None else order.sl_price
+        order.tp_price = float(limit_level) if limit_level is not None else order.tp_price
         order.trigger_time = datetime.utcnow()
-        order.current_size = float(position_data.get("size", 1.0))
+        order.current_size = current_size
 
         self.logger.info(
             f"🎯 [LIMIT FILLED] Order {order.id} ({order.symbol}) FILLED! "

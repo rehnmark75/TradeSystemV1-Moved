@@ -84,23 +84,10 @@ except ImportError as e:
         print(f"❌ Critical: Could not load fallback trailing system: {fallback_error}")
         print("⚠️ Trade monitoring will be disabled")
 
-# ✅ NEW: Import pair-specific configuration system if available
-try:
-    from services.pair_specific_config import (
-        get_fastapi_config_manager,
-        get_config_for_trade,
-        analyze_trade_pair,
-        FastAPIPairConfigManager
-    )
-    PAIR_CONFIG_AVAILABLE = True
-    print("✅ Pair-specific configuration system loaded successfully")
-except ImportError as e:
-    print(f"⚠️ Pair configuration system import failed: {e}")
-    print("   This is usually caused by missing dependencies (enhanced_trade_processor)")
-    PAIR_CONFIG_AVAILABLE = False
-except Exception as e:
-    print(f"⚠️ Pair configuration system initialization error: {e}")
-    PAIR_CONFIG_AVAILABLE = False
+# Pair-specific configuration is not implemented yet
+# The functions get_fastapi_config_manager, get_config_for_trade, analyze_trade_pair
+# do not exist - this feature was planned but not completed
+PAIR_CONFIG_AVAILABLE = False
 
 @dataclass
 class ApiConfig:
