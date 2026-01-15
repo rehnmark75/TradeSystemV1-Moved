@@ -3038,6 +3038,73 @@ class SMCSimpleStrategy:
         current_close = df['close'].iloc[-1]
         entry_price = current_close
 
+        # v2.19.0: SCALP MODE - Use micro-pullback on entry timeframe (1m)
+        # Instead of 5m swing levels, detect recent high/low on 1m data
+        if self.scalp_mode_enabled and self.fib_min > 0:
+            # Get micro-swing lookback (configurable, default 10 bars = 10 minutes on 1m)
+            micro_lookback = getattr(self, 'scalp_micro_pullback_lookback', 10)
+            lookback_bars = min(micro_lookback, len(df) - 1)
+
+            if lookback_bars < 3:
+                return {
+                    'valid': False,
+                    'reason': f"Insufficient 1m data for micro-pullback ({lookback_bars} bars)"
+                }
+
+            recent_df = df.iloc[-lookback_bars:]
+            micro_high = recent_df['high'].max()
+            micro_low = recent_df['low'].min()
+            micro_range = micro_high - micro_low
+
+            if micro_range <= 0:
+                return {
+                    'valid': False,
+                    'reason': "No price movement in micro-range"
+                }
+
+            # Calculate micro-pullback depth
+            if direction == 'BULL':
+                # For BUY: want price to have pulled back from recent high
+                # 0% = at micro_high (chasing), 100% = at micro_low
+                micro_pullback = (micro_high - current_close) / micro_range
+            else:  # BEAR
+                # For SELL: want price to have pulled back from recent low
+                # 0% = at micro_low (chasing), 100% = at micro_high
+                micro_pullback = (current_close - micro_low) / micro_range
+
+            micro_range_pips = micro_range / pip_value
+
+            # Get scalp fib thresholds
+            pair_fib_min = self.fib_min  # e.g., 0.05 (5%)
+            pair_fib_max = self.fib_max  # e.g., 0.30 (30%)
+
+            if self.debug_logging:
+                self.logger.debug(f"   Micro-pullback ({lookback_bars} bars): high={micro_high:.5f}, low={micro_low:.5f}")
+                self.logger.debug(f"   Current: {current_close:.5f}, micro_depth={micro_pullback*100:.1f}%")
+
+            # Validate micro-pullback
+            if micro_pullback < pair_fib_min:
+                return {
+                    'valid': False,
+                    'reason': f"Micro-pullback too shallow ({micro_pullback*100:.1f}% < {pair_fib_min*100:.1f}% on 1m)"
+                }
+            if micro_pullback > pair_fib_max:
+                return {
+                    'valid': False,
+                    'reason': f"Micro-pullback too deep ({micro_pullback*100:.1f}% > {pair_fib_max*100:.1f}% on 1m)"
+                }
+
+            # Micro-pullback is valid
+            return {
+                'valid': True,
+                'entry_price': entry_price,
+                'pullback_depth': micro_pullback,
+                'in_optimal_zone': 0.10 <= micro_pullback <= 0.20,  # Optimal micro zone
+                'entry_type': 'MICRO_PULLBACK',
+                'swing_range_pips': micro_range_pips,
+                'reason': f"Micro-pullback valid ({micro_pullback*100:.1f}% on 1m)"
+            }
+
         # v1.6.0: Use swing data from Tier 2 for consistent Fib calculation
         # swing_level = the swing that was broken (HIGH for BULL, LOW for BEAR)
         # opposite_swing = the swing on the other side (LOW for BULL, HIGH for BEAR)

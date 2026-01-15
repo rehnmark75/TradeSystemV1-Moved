@@ -100,21 +100,23 @@ PAIR_VIRTUAL_SL_CONFIGS = {
         'enabled': True,
     },
 
-    # JPY pairs - 4 pips VSL (higher volatility)
+    # JPY pairs - 6 pips VSL (higher volatility - increased from 4 pips)
+    # Analysis showed 4 pips was too tight - normal MAE is 6-14 pips
+    # Trades were in correct direction but hit VSL during retracements
     'CS.D.USDJPY.MINI.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 6.0,
         'enabled': True,
     },
     'CS.D.EURJPY.MINI.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 6.0,
         'enabled': True,
     },
     'CS.D.GBPJPY.MINI.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 6.0,
         'enabled': True,
     },
     'CS.D.AUDJPY.MINI.IP': {
-        'virtual_sl_pips': 4.0,
+        'virtual_sl_pips': 6.0,
         'enabled': True,
     },
 }
@@ -202,8 +204,10 @@ DEFAULT_DYNAMIC_VSL_CONFIG = {
 }
 
 # Default dynamic VSL configuration for JPY pairs (higher volatility)
+# Initial VSL increased from 4 to 6 pips based on analysis showing
+# normal MAE is 6-14 pips - 4 pips was too tight causing premature exits
 DEFAULT_JPY_DYNAMIC_VSL_CONFIG = {
-    'initial_vsl_pips': 4.0,        # Starting VSL (same as current fixed)
+    'initial_vsl_pips': 6.0,        # Starting VSL (increased from 4.0)
     'breakeven_trigger_pips': 2.5,  # Move to BE when +2.5 pips profit (backtested)
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
     'stage1_trigger_pips': 6.0,     # Move to stage1 when +6 pips profit

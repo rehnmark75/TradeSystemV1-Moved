@@ -1140,18 +1140,20 @@ class BacktestScanner(IntelligentForexScanner):
 
         # Create new simulator with pair-specific config
         if self._use_vsl_mode and epic in self._vsl_config:
-            # 🎯 VSL Mode: Virtual Stop Loss emulation for scalping
-            # Uses per-pair VSL values from config (3 pips majors, 4 pips JPY)
-            vsl_cfg = self._vsl_config[epic]
-            simulator = TrailingStopSimulator(
+            # 🎯 VSL Mode: Dynamic VSL trailing with stages (BE, Stage1, Stage2)
+            # Uses VSLTrailingSimulator for proper stage progression
+            try:
+                from forex_scanner.core.trading.vsl_trailing_simulator import VSLTrailingSimulator
+            except ImportError:
+                from core.trading.vsl_trailing_simulator import VSLTrailingSimulator
+
+            simulator = VSLTrailingSimulator(
                 epic=epic,
-                target_pips=vsl_cfg['tp_pips'],
-                initial_stop_pips=vsl_cfg['vsl_pips'],  # VSL as stop loss
-                max_bars=200,  # Scalp trades should resolve quickly
-                use_fixed_sl_tp=True,  # CRITICAL: No trailing, pure VSL behavior
                 logger=self.logger
             )
-            self.logger.debug(f"🎯 Created VSL simulator for {epic}: VSL={vsl_cfg['vsl_pips']} pips, TP={vsl_cfg['tp_pips']} pips")
+            self.logger.debug(f"🎯 Created DYNAMIC VSL simulator for {epic}: "
+                             f"BE={simulator.config['breakeven_trigger_pips']} pips, "
+                             f"TP={simulator.config['target_pips']} pips")
         elif self._use_scalping_mode:
             # Scalping uses fixed SL/TP, no trailing
             simulator = TrailingStopSimulator(
