@@ -20,6 +20,7 @@ class AlertType(str, Enum):
     CONTAINER_RESTARTING = "container_restarting"
     CONTAINER_RECOVERED = "container_recovered"
     HEALTH_CHECK_FAILED = "health_check_failed"
+    HEALTH_CHECK_RECOVERED = "health_check_recovered"
     HIGH_CPU = "high_cpu"
     HIGH_MEMORY = "high_memory"
     RESTART_LOOP = "restart_loop"

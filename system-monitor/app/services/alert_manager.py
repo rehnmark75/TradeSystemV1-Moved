@@ -82,6 +82,12 @@ class AlertManager:
             if alert:
                 alerts.append(alert)
 
+        # Check for health check recovery (was unhealthy, now healthy)
+        elif container.health_status == HealthStatus.HEALTHY and prev_health == HealthStatus.UNHEALTHY:
+            alert = await self._create_health_recovery_alert(container)
+            if alert:
+                alerts.append(alert)
+
         # Check for restart loops
         restart_alert = await self._check_restart_loop(container)
         if restart_alert:
@@ -192,6 +198,29 @@ class AlertManager:
             message=f"Container {container.name} health check is failing.\nConsecutive failures: {container.consecutive_failures}",
             details={
                 "consecutive_failures": container.consecutive_failures,
+                "health_endpoint": container.health_endpoint,
+            },
+        )
+
+        await self._send_alert(alert)
+        self._record_alert(alert_key)
+
+        return alert
+
+    async def _create_health_recovery_alert(self, container: ContainerHealth) -> Optional[Alert]:
+        """Create alert for health check recovery."""
+        alert_key = self._get_alert_key(AlertType.HEALTH_CHECK_RECOVERED, container.name)
+
+        if not self._should_alert(alert_key):
+            return None
+
+        alert = Alert(
+            alert_type=AlertType.HEALTH_CHECK_RECOVERED,
+            severity=AlertSeverity.INFO,
+            container_name=container.name,
+            title=f"Health Check Recovered: {container.name}",
+            message=f"Container {container.name} health check is now passing.",
+            details={
                 "health_endpoint": container.health_endpoint,
             },
         )
