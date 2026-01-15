@@ -194,6 +194,8 @@ DEFAULT_DYNAMIC_VSL_CONFIG = {
     'initial_vsl_pips': 3.0,        # Starting VSL (same as current fixed)
     'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
+    'early_lock_trigger_pips': 4.0, # Move to early_lock when +4 pips profit
+    'early_lock_pips': -2.5,        # VSL at -2.5 pips (reduces risk from -3 to -2.5)
     'stage1_trigger_pips': 4.5,     # Move to stage1 when +4.5 pips
     'stage1_lock_pips': 2.0,        # Lock +2 pips at stage1
     'target_pips': 5.0,             # TP target (close at this level)
@@ -204,7 +206,9 @@ DEFAULT_JPY_DYNAMIC_VSL_CONFIG = {
     'initial_vsl_pips': 4.0,        # Starting VSL (same as current fixed)
     'breakeven_trigger_pips': 3.5,  # Move to BE when +3.5 pips profit
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
-    'stage1_trigger_pips': 5.0,     # Move to stage1 when +5 pips
+    'early_lock_trigger_pips': 4.5, # Move to early_lock when +4.5 pips profit
+    'early_lock_pips': -3.0,        # VSL at -3 pips (reduces risk from -4 to -3)
+    'stage1_trigger_pips': 5.5,     # Move to stage1 when +5.5 pips
     'stage1_lock_pips': 2.0,        # Lock +2 pips at stage1
     'target_pips': 6.0,             # TP target (higher for JPY)
 }
