@@ -789,13 +789,18 @@ class SMCSimpleStrategy:
             'pullback_offset_min_pips': 'pullback_offset_min_pips',
             'pullback_offset_max_pips': 'pullback_offset_max_pips',
 
-            # Scalp Mode Tier Settings (for parameter testing)
+            # Scalp Mode Master Toggle and Tier Settings (for parameter testing)
+            'scalp_mode_enabled': 'scalp_mode_enabled',  # CRITICAL: Master toggle must be in mapping!
             'scalp_htf_timeframe': 'scalp_htf_timeframe',
             'scalp_trigger_timeframe': 'scalp_trigger_timeframe',
             'scalp_entry_timeframe': 'scalp_entry_timeframe',
             'scalp_ema_period': 'scalp_ema_period',
             'scalp_swing_lookback_bars': 'scalp_swing_lookback_bars',
             'scalp_swing_break_tolerance_pips': 'scalp_swing_break_tolerance_pips',
+            'scalp_tp_pips': 'scalp_tp_pips',
+            'scalp_sl_pips': 'scalp_sl_pips',
+            'scalp_min_confidence': 'scalp_min_confidence',
+            'scalp_cooldown_minutes': 'scalp_cooldown_minutes',
 
             # Debug
             'enable_debug_logging': 'debug_logging',
@@ -836,6 +841,12 @@ class SMCSimpleStrategy:
             # Auto-enable fixed SL/TP when testing these parameters
             self.fixed_sl_tp_override_enabled = True
             self.logger.info(f"   [AUTO-ENABLE] fixed_sl_tp_override_enabled: True (testing fixed SL/TP)")
+
+        # CRITICAL (Jan 2026): If scalp_mode_enabled was set via override, trigger scalp mode configuration
+        # This ensures scalp mode works in backtest parameter variation testing
+        if 'scalp_mode_enabled' in self._config_override and self.scalp_mode_enabled:
+            self.logger.info(f"   [AUTO-CONFIGURE] Scalp mode enabled via override - applying scalp tier settings")
+            self._configure_scalp_mode()
 
         self.logger.info(f"   Total overrides applied: {overrides_applied}")
         self.logger.info("=" * 60)
@@ -1003,6 +1014,131 @@ class SMCSimpleStrategy:
         self.logger.info("   Filters DISABLED: EMA slope, Swing proximity, Volume")
         self.logger.info("=" * 60)
 
+    def _get_pair_scalp_config(self, epic: str) -> dict:
+        """Get effective scalp configuration for a specific pair.
+
+        Priority order (highest to lowest):
+        1. Backtest CLI overrides (--scalp-ema, --scalp-swing-lookback, etc.)
+        2. Per-pair database overrides (smc_simple_pair_overrides table)
+        3. Global scalp defaults (smc_simple_global_config table)
+
+        Args:
+            epic: IG Markets epic code (e.g., 'CS.D.EURUSD.CEEM.IP')
+
+        Returns:
+            Dict with effective scalp settings for the pair
+        """
+        # Start with current instance values (already includes CLI overrides if any)
+        config = {
+            'ema_period': self.scalp_ema_period,
+            'swing_lookback_bars': self.scalp_swing_lookback_bars,
+            'limit_offset_pips': getattr(self, 'scalp_limit_offset_pips', 1.0),
+            'htf_timeframe': self.scalp_htf_timeframe,
+            'trigger_timeframe': self.scalp_trigger_timeframe,
+            'entry_timeframe': self.scalp_entry_timeframe,
+            'min_confidence': self.scalp_min_confidence,
+            'cooldown_minutes': self.scalp_cooldown_minutes,
+            'swing_break_tolerance_pips': getattr(self, 'scalp_swing_break_tolerance_pips', 0.5),
+        }
+
+        # Check for per-pair overrides from database
+        # Priority: CLI override (--scalp-ema etc.) > Per-pair DB override > Global default
+        # Only skip DB lookup if CLI explicitly set that specific parameter
+        if self._db_config:
+            cli_overrides = self._config_override or {}
+
+            # EMA period: CLI --scalp-ema > per-pair DB > global
+            if 'scalp_ema_period' not in cli_overrides:
+                pair_ema = self._db_config.get_pair_scalp_ema_period(epic)
+                if pair_ema is not None:
+                    config['ema_period'] = pair_ema
+
+            # Swing lookback: CLI --scalp-swing-lookback > per-pair DB > global
+            if 'scalp_swing_lookback_bars' not in cli_overrides:
+                pair_swing = self._db_config.get_pair_scalp_swing_lookback(epic)
+                if pair_swing is not None:
+                    config['swing_lookback_bars'] = pair_swing
+
+            # Limit offset: CLI --scalp-offset > per-pair DB > global
+            if 'scalp_limit_offset_pips' not in cli_overrides:
+                pair_offset = self._db_config.get_pair_scalp_limit_offset(epic)
+                if pair_offset is not None:
+                    config['limit_offset_pips'] = pair_offset
+
+            # HTF timeframe: CLI --scalp-htf > per-pair DB > global
+            if 'scalp_htf_timeframe' not in cli_overrides:
+                pair_htf = self._db_config.get_pair_scalp_htf_timeframe(epic)
+                if pair_htf is not None:
+                    config['htf_timeframe'] = pair_htf
+
+            # Trigger timeframe: per-pair DB > global (no CLI override for this)
+            pair_trigger = self._db_config.get_pair_scalp_trigger_timeframe(epic)
+            if pair_trigger is not None:
+                config['trigger_timeframe'] = pair_trigger
+
+            # Entry timeframe: per-pair DB > global (no CLI override for this)
+            pair_entry = self._db_config.get_pair_scalp_entry_timeframe(epic)
+            if pair_entry is not None:
+                config['entry_timeframe'] = pair_entry
+
+            # Min confidence: per-pair DB > global
+            pair_confidence = self._db_config.get_pair_scalp_min_confidence(epic)
+            if pair_confidence is not None:
+                config['min_confidence'] = pair_confidence
+
+            # Cooldown: per-pair DB > global
+            pair_cooldown = self._db_config.get_pair_scalp_cooldown_minutes(epic)
+            if pair_cooldown is not None:
+                config['cooldown_minutes'] = pair_cooldown
+
+            # Swing break tolerance: per-pair DB > global
+            pair_tolerance = self._db_config.get_pair_scalp_swing_break_tolerance(epic)
+            if pair_tolerance is not None:
+                config['swing_break_tolerance_pips'] = pair_tolerance
+
+        return config
+
+    def _apply_pair_scalp_config(self, epic: str) -> dict:
+        """Apply per-pair scalp configuration and return the effective settings.
+
+        This method is called during signal generation to apply pair-specific
+        scalp settings. It modifies the strategy instance variables for the
+        current pair and returns the effective configuration.
+
+        Args:
+            epic: IG Markets epic code
+
+        Returns:
+            Dict with the applied scalp settings
+        """
+        pair_config = self._get_pair_scalp_config(epic)
+
+        # Apply settings to instance
+        self.ema_period = pair_config['ema_period']
+        self.swing_lookback = pair_config['swing_lookback_bars']
+        self.htf_timeframe = pair_config['htf_timeframe']
+        self.trigger_tf = pair_config['trigger_timeframe']
+        self.entry_tf = pair_config['entry_timeframe']
+        self.min_confidence = pair_config['min_confidence']
+        self.cooldown_hours = pair_config['cooldown_minutes'] / 60.0
+        self.scalp_swing_break_tolerance_pips = pair_config['swing_break_tolerance_pips']
+
+        # v2.22.0: Apply per-pair limit offset for scalp mode
+        # This is used by _calculate_limit_entry when limit orders are enabled
+        limit_offset = pair_config.get('limit_offset_pips', 1.0)
+        self.momentum_offset_pips = limit_offset
+        self.pullback_offset_min_pips = limit_offset
+        self.pullback_offset_max_pips = limit_offset
+
+        # Log if using per-pair overrides
+        pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+        self.logger.debug(f"📊 {pair} Scalp Config: EMA={pair_config['ema_period']}, "
+                         f"Swing={pair_config['swing_lookback_bars']}, "
+                         f"HTF={pair_config['htf_timeframe']}, "
+                         f"Offset={limit_offset} pips")
+
+        return pair_config
+
     def _get_current_spread(self, epic: str, df: pd.DataFrame) -> float:
         """Get current spread estimate based on session and pair.
 
@@ -1130,10 +1266,18 @@ class SMCSimpleStrategy:
         Returns:
             Signal dict or None if no valid signal
         """
+        # ================================================================
+        # SCALP MODE: Apply per-pair configuration before signal detection
+        # ================================================================
+        if self.scalp_mode_enabled:
+            pair_scalp_config = self._apply_pair_scalp_config(epic)
+            self.logger.debug(f"🎯 Scalp config applied for {pair}: EMA={pair_scalp_config['ema_period']}, "
+                             f"Swing={pair_scalp_config['swing_lookback_bars']}")
+
         self.logger.info(f"\n{'='*70}")
         self.logger.info(f"🔍 SMC SIMPLE Strategy v{self.strategy_version} - Signal Detection")
         self.logger.info(f"   Pair: {pair} ({epic})")
-        self.logger.info(f"   Timeframes: 4H (bias) → {self.trigger_tf} (trigger) → {self.entry_tf} (entry)")
+        self.logger.info(f"   Timeframes: {self.htf_timeframe} (bias) → {self.trigger_tf} (trigger) → {self.entry_tf} (entry)")
         self.logger.info(f"   df_entry received: {'Yes, ' + str(len(df_entry)) + ' bars' if df_entry is not None else 'NO - None'}")
         self.logger.info(f"{'='*70}")
 
@@ -3270,11 +3414,20 @@ class SMCSimpleStrategy:
             return current_close, 0.0
 
         # v2.17.0: Check for per-pair stop offset override first
-        # SCALP MODE: Skip database override - use scalp-configured 1 pip offset
+        # v2.22.0: Scalp mode now supports per-pair scalp_limit_offset_pips from database
         pair_offset = None
         if self.scalp_mode_enabled:
-            # Scalp mode uses fixed 1 pip offset - don't check database
-            self.logger.debug(f"   📉 Scalp mode: using configured offset (skip DB override)")
+            # Scalp mode: check for per-pair scalp_limit_offset_pips override
+            if epic and hasattr(self, '_db_config') and self._db_config:
+                scalp_pair_offset = self._db_config.get_pair_scalp_limit_offset(epic)
+                if scalp_pair_offset is not None:
+                    pair_offset = scalp_pair_offset
+                    offset_pips = pair_offset
+                    self.logger.info(f"   📉 Scalp limit offset: {offset_pips:.1f} pips (per-pair override for {epic})")
+                else:
+                    self.logger.debug(f"   📉 Scalp mode: using global scalp offset (no per-pair override)")
+            else:
+                self.logger.debug(f"   📉 Scalp mode: using global scalp offset")
         elif epic and hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
             pair_offset = self._db_config.get_pair_stop_offset(epic, entry_type)
             if pair_offset != self.momentum_offset_pips and pair_offset != self.pullback_offset_max_pips:

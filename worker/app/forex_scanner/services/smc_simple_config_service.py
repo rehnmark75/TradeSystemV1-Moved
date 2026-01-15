@@ -733,6 +733,147 @@ class SMCSimpleConfig:
 
         return False, ""
 
+    # =========================================================================
+    # SCALP TIER GETTERS (v2.21.0)
+    # Per-pair scalp mode tier settings for optimized scalping parameters
+    # =========================================================================
+
+    def get_pair_scalp_ema_period(self, epic: str) -> Optional[int]:
+        """
+        Get per-pair scalp EMA period override.
+
+        Returns:
+            Per-pair scalp EMA period if set, None otherwise (use global scalp_ema_period)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_ema_period') is not None:
+                return int(override['scalp_ema_period'])
+        return None
+
+    def get_pair_scalp_swing_lookback(self, epic: str) -> Optional[int]:
+        """
+        Get per-pair scalp swing lookback bars override.
+
+        Returns:
+            Per-pair scalp swing lookback if set, None otherwise (use global scalp_swing_lookback_bars)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_swing_lookback_bars') is not None:
+                return int(override['scalp_swing_lookback_bars'])
+        return None
+
+    def get_pair_scalp_limit_offset(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair scalp limit order offset override.
+
+        Returns:
+            Per-pair scalp limit offset in pips if set, None otherwise (use global)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_limit_offset_pips') is not None:
+                return float(override['scalp_limit_offset_pips'])
+        return None
+
+    def get_pair_scalp_htf_timeframe(self, epic: str) -> Optional[str]:
+        """
+        Get per-pair scalp HTF timeframe override.
+
+        Returns:
+            Per-pair scalp HTF timeframe (e.g., '15m', '30m') if set, None otherwise
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_htf_timeframe'):
+                return str(override['scalp_htf_timeframe'])
+        return None
+
+    def get_pair_scalp_trigger_timeframe(self, epic: str) -> Optional[str]:
+        """
+        Get per-pair scalp trigger timeframe override.
+
+        Returns:
+            Per-pair scalp trigger timeframe (e.g., '5m', '15m') if set, None otherwise
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_trigger_timeframe'):
+                return str(override['scalp_trigger_timeframe'])
+        return None
+
+    def get_pair_scalp_entry_timeframe(self, epic: str) -> Optional[str]:
+        """
+        Get per-pair scalp entry timeframe override.
+
+        Returns:
+            Per-pair scalp entry timeframe (e.g., '1m', '5m') if set, None otherwise
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_entry_timeframe'):
+                return str(override['scalp_entry_timeframe'])
+        return None
+
+    def get_pair_scalp_min_confidence(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair scalp minimum confidence threshold override.
+
+        Returns:
+            Per-pair scalp min confidence if set, None otherwise (use global scalp_min_confidence)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_min_confidence') is not None:
+                return float(override['scalp_min_confidence'])
+        return None
+
+    def get_pair_scalp_cooldown_minutes(self, epic: str) -> Optional[int]:
+        """
+        Get per-pair scalp cooldown minutes override.
+
+        Returns:
+            Per-pair scalp cooldown in minutes if set, None otherwise (use global)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_cooldown_minutes') is not None:
+                return int(override['scalp_cooldown_minutes'])
+        return None
+
+    def get_pair_scalp_swing_break_tolerance(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair scalp swing break tolerance override.
+
+        Returns:
+            Per-pair scalp swing break tolerance in pips if set, None otherwise
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_swing_break_tolerance_pips') is not None:
+                return float(override['scalp_swing_break_tolerance_pips'])
+        return None
+
+    def get_effective_scalp_config(self, epic: str) -> dict:
+        """
+        Get effective scalp configuration for a pair, merging per-pair overrides with globals.
+
+        Returns:
+            Dict with effective scalp settings (per-pair if set, otherwise global)
+        """
+        return {
+            'ema_period': self.get_pair_scalp_ema_period(epic) or self.scalp_ema_period,
+            'swing_lookback_bars': self.get_pair_scalp_swing_lookback(epic) or self.scalp_swing_lookback_bars,
+            'limit_offset_pips': self.get_pair_scalp_limit_offset(epic) or getattr(self, 'scalp_limit_offset_pips', 1.0),
+            'htf_timeframe': self.get_pair_scalp_htf_timeframe(epic) or self.scalp_htf_timeframe,
+            'trigger_timeframe': self.get_pair_scalp_trigger_timeframe(epic) or self.scalp_trigger_timeframe,
+            'entry_timeframe': self.get_pair_scalp_entry_timeframe(epic) or self.scalp_entry_timeframe,
+            'min_confidence': self.get_pair_scalp_min_confidence(epic) or self.scalp_min_confidence,
+            'cooldown_minutes': self.get_pair_scalp_cooldown_minutes(epic) or self.scalp_cooldown_minutes,
+            'swing_break_tolerance_pips': self.get_pair_scalp_swing_break_tolerance(epic) or getattr(self, 'scalp_swing_break_tolerance_pips', 0.5),
+        }
+
     def check_macd_alignment(
         self,
         signal_type: str,
@@ -1106,6 +1247,16 @@ class SMCSimpleConfigService:
                 'ema_slope_validation_enabled': row.get('ema_slope_validation_enabled'),
                 # Stop offset override (v2.17.0)
                 'stop_offset_pips': row.get('stop_offset_pips'),
+                # Scalp tier overrides (v2.21.0)
+                'scalp_ema_period': row.get('scalp_ema_period'),
+                'scalp_swing_lookback_bars': row.get('scalp_swing_lookback_bars'),
+                'scalp_limit_offset_pips': row.get('scalp_limit_offset_pips'),
+                'scalp_htf_timeframe': row.get('scalp_htf_timeframe'),
+                'scalp_trigger_timeframe': row.get('scalp_trigger_timeframe'),
+                'scalp_entry_timeframe': row.get('scalp_entry_timeframe'),
+                'scalp_min_confidence': row.get('scalp_min_confidence'),
+                'scalp_cooldown_minutes': row.get('scalp_cooldown_minutes'),
+                'scalp_swing_break_tolerance_pips': row.get('scalp_swing_break_tolerance_pips'),
             }
 
         return config

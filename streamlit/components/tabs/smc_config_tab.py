@@ -1249,6 +1249,163 @@ def render_pair_overrides(config: Dict[str, Any]):
 
             st.caption("💡 EMA slope validation prevents counter-trend trades. Higher EMA period = smoother, slower trend detection.")
 
+        # Scalp Mode Tier Settings (v2.21.0) - per-pair scalp optimization
+        st.markdown("**Scalp Mode Tier Settings**")
+        st.caption("Per-pair overrides for scalp mode. These settings only apply when scalp_mode_enabled is TRUE. NULL = inherits from global scalp settings.")
+
+        # Row 1: EMA and Swing Lookback
+        col_scalp1, col_scalp2 = st.columns(2)
+        with col_scalp1:
+            # Scalp EMA Period
+            scalp_ema_value = existing.get('scalp_ema_period')
+            global_scalp_ema = config.get('scalp_ema_period', 20)
+            scalp_ema_effective = int(scalp_ema_value) if scalp_ema_value is not None else int(global_scalp_ema)
+            new_scalp_ema = st.number_input(
+                "Scalp EMA Period",
+                value=scalp_ema_effective,
+                min_value=5, max_value=100, step=5,
+                help=f"{'Inherited from global (' + str(global_scalp_ema) + ')' if scalp_ema_value is None else 'Explicit override for this pair'}. EMA period for scalp mode TIER 1 trend filter.",
+                key=f"override_scalp_ema_{selected_pair}"
+            )
+            if not _values_equal(new_scalp_ema, scalp_ema_effective):
+                override_changes['scalp_ema_period'] = new_scalp_ema
+
+        with col_scalp2:
+            # Scalp Swing Lookback
+            scalp_swing_value = existing.get('scalp_swing_lookback_bars')
+            global_scalp_swing = config.get('scalp_swing_lookback_bars', 12)
+            scalp_swing_effective = int(scalp_swing_value) if scalp_swing_value is not None else int(global_scalp_swing)
+            new_scalp_swing = st.number_input(
+                "Scalp Swing Lookback (bars)",
+                value=scalp_swing_effective,
+                min_value=3, max_value=30, step=1,
+                help=f"{'Inherited from global (' + str(global_scalp_swing) + ')' if scalp_swing_value is None else 'Explicit override for this pair'}. Bars to look back for swing detection in scalp mode.",
+                key=f"override_scalp_swing_{selected_pair}"
+            )
+            if not _values_equal(new_scalp_swing, scalp_swing_effective):
+                override_changes['scalp_swing_lookback_bars'] = new_scalp_swing
+
+        # Row 2: Limit Offset and HTF Timeframe
+        col_scalp3, col_scalp4 = st.columns(2)
+        with col_scalp3:
+            # Scalp Limit Offset
+            scalp_offset_value = existing.get('scalp_limit_offset_pips')
+            global_scalp_offset = 1.0  # Default for scalp mode
+            scalp_offset_effective = float(scalp_offset_value) if scalp_offset_value is not None else global_scalp_offset
+            new_scalp_offset = st.number_input(
+                "Scalp Limit Offset (pips)",
+                value=scalp_offset_effective,
+                min_value=0.0, max_value=5.0, step=0.5,
+                format="%.1f",
+                help=f"{'Using default (' + str(global_scalp_offset) + ')' if scalp_offset_value is None else 'Explicit override for this pair'}. Momentum confirmation offset for limit orders.",
+                key=f"override_scalp_offset_{selected_pair}"
+            )
+            if not _values_equal(new_scalp_offset, scalp_offset_effective):
+                override_changes['scalp_limit_offset_pips'] = new_scalp_offset
+
+        with col_scalp4:
+            # Scalp HTF Timeframe
+            scalp_htf_value = existing.get('scalp_htf_timeframe')
+            global_scalp_htf = config.get('scalp_htf_timeframe', '15m')
+            scalp_htf_effective = scalp_htf_value if scalp_htf_value is not None else global_scalp_htf
+            htf_options = ['5m', '15m', '30m', '1h']
+            htf_index = htf_options.index(scalp_htf_effective) if scalp_htf_effective in htf_options else 1
+            new_scalp_htf = st.selectbox(
+                "Scalp HTF Timeframe",
+                options=htf_options,
+                index=htf_index,
+                help=f"{'Inherited from global (' + str(global_scalp_htf) + ')' if scalp_htf_value is None else 'Explicit override for this pair'}. Higher timeframe for scalp mode bias.",
+                key=f"override_scalp_htf_{selected_pair}"
+            )
+            if new_scalp_htf != scalp_htf_effective:
+                override_changes['scalp_htf_timeframe'] = new_scalp_htf
+
+        # Row 3: Min Confidence and Cooldown
+        col_scalp5, col_scalp6 = st.columns(2)
+        with col_scalp5:
+            # Scalp Min Confidence
+            scalp_conf_value = existing.get('scalp_min_confidence')
+            global_scalp_conf = config.get('scalp_min_confidence', 0.30)
+            scalp_conf_effective = float(scalp_conf_value) if scalp_conf_value is not None else float(global_scalp_conf)
+            new_scalp_conf = st.number_input(
+                "Scalp Min Confidence",
+                value=scalp_conf_effective,
+                min_value=0.0, max_value=1.0, step=0.05,
+                format="%.2f",
+                help=f"{'Inherited from global (' + str(global_scalp_conf) + ')' if scalp_conf_value is None else 'Explicit override for this pair'}. Minimum confidence threshold for scalp entries.",
+                key=f"override_scalp_conf_{selected_pair}"
+            )
+            if not _values_equal(new_scalp_conf, scalp_conf_effective):
+                override_changes['scalp_min_confidence'] = new_scalp_conf
+
+        with col_scalp6:
+            # Scalp Cooldown
+            scalp_cooldown_value = existing.get('scalp_cooldown_minutes')
+            global_scalp_cooldown = config.get('scalp_cooldown_minutes', 15)
+            scalp_cooldown_effective = int(scalp_cooldown_value) if scalp_cooldown_value is not None else int(global_scalp_cooldown)
+            new_scalp_cooldown = st.number_input(
+                "Scalp Cooldown (minutes)",
+                value=scalp_cooldown_effective,
+                min_value=1, max_value=120, step=5,
+                help=f"{'Inherited from global (' + str(global_scalp_cooldown) + ')' if scalp_cooldown_value is None else 'Explicit override for this pair'}. Cooldown between scalp trades.",
+                key=f"override_scalp_cooldown_{selected_pair}"
+            )
+            if not _values_equal(new_scalp_cooldown, scalp_cooldown_effective):
+                override_changes['scalp_cooldown_minutes'] = new_scalp_cooldown
+
+        # Row 4: Trigger and Entry Timeframes
+        col_scalp7, col_scalp8 = st.columns(2)
+        with col_scalp7:
+            # Scalp Trigger Timeframe
+            scalp_trigger_value = existing.get('scalp_trigger_timeframe')
+            global_scalp_trigger = config.get('scalp_trigger_timeframe', '5m')
+            scalp_trigger_effective = scalp_trigger_value if scalp_trigger_value is not None else global_scalp_trigger
+            trigger_options = ['1m', '5m', '15m']
+            trigger_index = trigger_options.index(scalp_trigger_effective) if scalp_trigger_effective in trigger_options else 1
+            new_scalp_trigger = st.selectbox(
+                "Scalp Trigger Timeframe",
+                options=trigger_options,
+                index=trigger_index,
+                help=f"{'Inherited from global (' + str(global_scalp_trigger) + ')' if scalp_trigger_value is None else 'Explicit override for this pair'}. Trigger timeframe for scalp swing detection.",
+                key=f"override_scalp_trigger_{selected_pair}"
+            )
+            if new_scalp_trigger != scalp_trigger_effective:
+                override_changes['scalp_trigger_timeframe'] = new_scalp_trigger
+
+        with col_scalp8:
+            # Scalp Entry Timeframe
+            scalp_entry_value = existing.get('scalp_entry_timeframe')
+            global_scalp_entry = config.get('scalp_entry_timeframe', '1m')
+            scalp_entry_effective = scalp_entry_value if scalp_entry_value is not None else global_scalp_entry
+            entry_options = ['1m', '5m']
+            entry_index = entry_options.index(scalp_entry_effective) if scalp_entry_effective in entry_options else 0
+            new_scalp_entry = st.selectbox(
+                "Scalp Entry Timeframe",
+                options=entry_options,
+                index=entry_index,
+                help=f"{'Inherited from global (' + str(global_scalp_entry) + ')' if scalp_entry_value is None else 'Explicit override for this pair'}. Entry timeframe for scalp pullback detection.",
+                key=f"override_scalp_entry_{selected_pair}"
+            )
+            if new_scalp_entry != scalp_entry_effective:
+                override_changes['scalp_entry_timeframe'] = new_scalp_entry
+
+        # Swing Break Tolerance
+        scalp_tolerance_value = existing.get('scalp_swing_break_tolerance_pips')
+        global_scalp_tolerance = 0.5  # Default
+        scalp_tolerance_effective = float(scalp_tolerance_value) if scalp_tolerance_value is not None else global_scalp_tolerance
+        new_scalp_tolerance = st.number_input(
+            "Scalp Swing Break Tolerance (pips)",
+            value=scalp_tolerance_effective,
+            min_value=0.0, max_value=3.0, step=0.1,
+            format="%.1f",
+            help=f"{'Using default (' + str(global_scalp_tolerance) + ')' if scalp_tolerance_value is None else 'Explicit override for this pair'}. Tolerance for near-swing-breaks (allows entries when price is very close to but not quite breaking swing level).",
+            key=f"override_scalp_tolerance_{selected_pair}"
+        )
+        if not _values_equal(new_scalp_tolerance, scalp_tolerance_effective):
+            override_changes['scalp_swing_break_tolerance_pips'] = new_scalp_tolerance
+
+        st.caption("💡 Optimal scalp settings vary by pair. Use backtesting with `--scalp --vary-json` to find the best EMA/swing combo for each pair.")
+
         # Dynamic confidence thresholds (absolute values, not adjustments)
         st.markdown("**Dynamic Confidence Thresholds**")
         st.caption("These are absolute confidence thresholds that override the global minimum when conditions are met. NULL = uses global min_confidence.")

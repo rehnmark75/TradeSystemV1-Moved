@@ -148,6 +148,36 @@ def main():
                 processed_args.append(args[i])
                 print(f"🔍 Scalp Swing Lookback: {args[i]} bars")
 
+            elif arg == "--scalp-trigger-tf" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🔄 Scalp Trigger TF: {args[i]}")
+
+            elif arg == "--scalp-entry-tf" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🎯 Scalp Entry TF: {args[i]}")
+
+            elif arg == "--scalp-confidence" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"📊 Scalp Confidence: {args[i]}")
+
+            elif arg == "--scalp-cooldown" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"⏱️ Scalp Cooldown: {args[i]} min")
+
+            elif arg == "--scalp-tolerance" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"📏 Scalp Tolerance: {args[i]} pips")
+
             # Handle parallel execution flags
             elif arg == "--parallel":
                 processed_args.append(arg)
@@ -354,6 +384,22 @@ Scalping Mode Examples (VSL Emulation):
   python bt.py EURUSD 7 --scalp --scalp-offset 2       # Override order offset to 2 pips
   python bt.py EURUSD 7 --scalp --scalp-expiry 10      # Override order expiry to 10 minutes
   python bt.py EURUSD 7 --scalp --scalp-offset 2 --scalp-expiry 15  # Combined offset + expiry
+
+Scalp Tier Settings (per-tier tuning):
+  --scalp-htf 15m           TIER 1: HTF timeframe for bias (5m/15m/30m/1h)
+  --scalp-ema 30            TIER 1: EMA period (default 20, common: 10, 20, 30, 50)
+  --scalp-trigger-tf 5m     TIER 2: Trigger timeframe (1m/5m/15m)
+  --scalp-swing-lookback 8  TIER 2: Swing lookback bars (default 12, range 5-30)
+  --scalp-entry-tf 1m       TIER 3: Entry timeframe (1m/5m)
+  --scalp-confidence 0.35   Minimum confidence threshold (default 0.30)
+  --scalp-cooldown 10       Cooldown between trades in minutes (default 15)
+  --scalp-tolerance 0.8     Swing break tolerance in pips (default 0.5)
+
+Scalp Tier Tuning Examples:
+  python bt.py EURUSD 7 --scalp --scalp-ema 30 --scalp-swing-lookback 8  # Optimized EURUSD settings
+  python bt.py GBPUSD 7 --scalp --scalp-htf 15m --scalp-trigger-tf 5m    # Custom timeframes
+  python bt.py USDJPY 7 --scalp --scalp-confidence 0.40 --scalp-cooldown 20  # Higher confidence
+  python bt.py EURUSD 7 --scalp --scalp-tolerance 1.0  # More tolerant swing break detection
 """
     print(help_text)
 

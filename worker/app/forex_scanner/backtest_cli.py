@@ -194,6 +194,51 @@ Signal Display Format:
         )
 
         parser.add_argument(
+            '--scalp-trigger-tf',
+            type=str,
+            default=None,
+            choices=['1m', '5m', '15m'],
+            help='Override TIER 2 trigger timeframe for scalp mode. '
+                 'Default is 5m.'
+        )
+
+        parser.add_argument(
+            '--scalp-entry-tf',
+            type=str,
+            default=None,
+            choices=['1m', '5m'],
+            help='Override TIER 3 entry timeframe for scalp mode. '
+                 'Default is 1m.'
+        )
+
+        parser.add_argument(
+            '--scalp-confidence',
+            type=float,
+            default=None,
+            metavar='CONF',
+            help='Override minimum confidence threshold for scalp mode. '
+                 'Default is 0.30 (30%%). Range: 0.0-1.0.'
+        )
+
+        parser.add_argument(
+            '--scalp-cooldown',
+            type=int,
+            default=None,
+            metavar='MINS',
+            help='Override cooldown between scalp trades in minutes. '
+                 'Default is 15 minutes.'
+        )
+
+        parser.add_argument(
+            '--scalp-tolerance',
+            type=float,
+            default=None,
+            metavar='PIPS',
+            help='Override swing break tolerance in pips for scalp mode. '
+                 'Default is 0.5 pips. Allows entries when price is very close to swing level.'
+        )
+
+        parser.add_argument(
             '--timeframe',
             type=str,
             default='15m',
@@ -414,7 +459,21 @@ Signal Display Format:
 
         return overrides if overrides else None
 
-    def _build_scalp_config_overrides(self, epic: str = None, existing_overrides: dict = None, scalp_offset: float = None, scalp_expiry: int = None, scalp_htf: str = None, scalp_ema: int = None, scalp_swing_lookback: int = None) -> dict:
+    def _build_scalp_config_overrides(
+        self,
+        epic: str = None,
+        existing_overrides: dict = None,
+        scalp_offset: float = None,
+        scalp_expiry: int = None,
+        scalp_htf: str = None,
+        scalp_ema: int = None,
+        scalp_swing_lookback: int = None,
+        scalp_trigger_tf: str = None,
+        scalp_entry_tf: str = None,
+        scalp_confidence: float = None,
+        scalp_cooldown: int = None,
+        scalp_tolerance: float = None
+    ) -> dict:
         """
         Build config overrides for scalp mode with Virtual Stop Loss (VSL) emulation.
 
@@ -434,6 +493,11 @@ Signal Display Format:
             scalp_htf: Override TIER 1 HTF timeframe (default: 15m)
             scalp_ema: Override TIER 1 EMA period (default: 20)
             scalp_swing_lookback: Override TIER 2 swing lookback bars (default: 12)
+            scalp_trigger_tf: Override TIER 2 trigger timeframe (default: 5m)
+            scalp_entry_tf: Override TIER 3 entry timeframe (default: 1m)
+            scalp_confidence: Override minimum confidence threshold (default: 0.30)
+            scalp_cooldown: Override cooldown between trades in minutes (default: 15)
+            scalp_tolerance: Override swing break tolerance in pips (default: 0.5)
 
         Returns:
             Dict of scalp mode config overrides
@@ -485,6 +549,16 @@ Signal Display Format:
             overrides['scalp_ema_period'] = scalp_ema
         if scalp_swing_lookback is not None:
             overrides['scalp_swing_lookback_bars'] = scalp_swing_lookback
+        if scalp_trigger_tf is not None:
+            overrides['scalp_trigger_timeframe'] = scalp_trigger_tf
+        if scalp_entry_tf is not None:
+            overrides['scalp_entry_timeframe'] = scalp_entry_tf
+        if scalp_confidence is not None:
+            overrides['scalp_min_confidence'] = scalp_confidence
+        if scalp_cooldown is not None:
+            overrides['scalp_cooldown_minutes'] = scalp_cooldown
+        if scalp_tolerance is not None:
+            overrides['scalp_swing_break_tolerance_pips'] = scalp_tolerance
 
         # Display VSL configuration
         print(f"\n🎯 Scalp Mode Configuration (Virtual Stop Loss Emulation):")
@@ -496,9 +570,19 @@ Signal Display Format:
         htf_display = scalp_htf if scalp_htf else "15m (default)"
         ema_display = scalp_ema if scalp_ema else "20 (default)"
         swing_display = scalp_swing_lookback if scalp_swing_lookback else "12 (default)"
+        trigger_display = scalp_trigger_tf if scalp_trigger_tf else "5m (default)"
+        entry_display = scalp_entry_tf if scalp_entry_tf else "1m (default)"
+        conf_display = f"{scalp_confidence:.0%}" if scalp_confidence else "30% (default)"
+        cooldown_display = f"{scalp_cooldown} min" if scalp_cooldown else "15 min (default)"
+        tolerance_display = f"{scalp_tolerance} pips" if scalp_tolerance else "0.5 pips (default)"
         print(f"   TIER 1 HTF: {htf_display}")
         print(f"   TIER 1 EMA: {ema_display}")
+        print(f"   TIER 2 Trigger TF: {trigger_display}")
         print(f"   TIER 2 Swing Lookback: {swing_display} bars")
+        print(f"   TIER 3 Entry TF: {entry_display}")
+        print(f"   Min Confidence: {conf_display}")
+        print(f"   Cooldown: {cooldown_display}")
+        print(f"   Swing Break Tolerance: {tolerance_display}")
 
         if epic:
             # Single epic - show its VSL
@@ -655,9 +739,16 @@ Signal Display Format:
                 scalp_htf = getattr(args, 'scalp_htf', None)
                 scalp_ema = getattr(args, 'scalp_ema', None)
                 scalp_swing_lookback = getattr(args, 'scalp_swing_lookback', None)
+                scalp_trigger_tf = getattr(args, 'scalp_trigger_tf', None)
+                scalp_entry_tf = getattr(args, 'scalp_entry_tf', None)
+                scalp_confidence = getattr(args, 'scalp_confidence', None)
+                scalp_cooldown = getattr(args, 'scalp_cooldown', None)
+                scalp_tolerance = getattr(args, 'scalp_tolerance', None)
                 scalp_overrides = self._build_scalp_config_overrides(
                     args.epic, config_override, scalp_offset, scalp_expiry,
-                    scalp_htf, scalp_ema, scalp_swing_lookback
+                    scalp_htf, scalp_ema, scalp_swing_lookback,
+                    scalp_trigger_tf, scalp_entry_tf, scalp_confidence,
+                    scalp_cooldown, scalp_tolerance
                 )
                 if config_override:
                     config_override.update(scalp_overrides)
@@ -722,7 +813,8 @@ Signal Display Format:
                     args=args,
                     start_date=start_date,
                     end_date=end_date,
-                    use_historical_intelligence=use_historical_intelligence
+                    use_historical_intelligence=use_historical_intelligence,
+                    base_config_override=config_override  # Pass scalp mode config to merge with variations
                 )
 
             # Parallel backtest mode
@@ -773,12 +865,19 @@ Signal Display Format:
                 traceback.print_exc()
             return False
 
-    def _run_param_variations(self, args, start_date, end_date, use_historical_intelligence) -> bool:
+    def _run_param_variations(self, args, start_date, end_date, use_historical_intelligence, base_config_override=None) -> bool:
         """
         Run parallel parameter variation testing.
 
         Tests multiple parameter combinations for the same epic in parallel.
         Results are ranked by the specified metric.
+
+        Args:
+            args: CLI arguments
+            start_date: Start date for backtest
+            end_date: End date for backtest
+            use_historical_intelligence: Whether to use historical intelligence
+            base_config_override: Base config overrides (e.g., scalp mode settings) to merge with each variation
         """
         from forex_scanner.core.param_variation import (
             ParameterGridGenerator,
@@ -809,6 +908,17 @@ Signal Display Format:
         if not param_sets:
             print("❌ No parameter combinations generated")
             return False
+
+        # Merge base config overrides (e.g., scalp mode) with each variation's params
+        # The variation params override the base config where they overlap
+        if base_config_override:
+            merged_param_sets = []
+            for params in param_sets:
+                merged = base_config_override.copy()
+                merged.update(params)  # Variation params take precedence
+                merged_param_sets.append(merged)
+            param_sets = merged_param_sets
+            print(f"📋 Base config merged: {list(base_config_override.keys())}")
 
         # Show summary
         total_combinations = len(param_sets)
