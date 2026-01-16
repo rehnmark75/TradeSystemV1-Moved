@@ -150,6 +150,29 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 
+# ============================================================================
+# TRIGGER TYPE CONSTANTS (v2.23.0)
+# Used to track signal entry mechanisms for performance analysis
+# ============================================================================
+
+# Existing swing-based triggers (baseline)
+TRIGGER_SWING_PULLBACK = 'SWING_PULLBACK'     # Swing break + Fib pullback (23.6%-70%)
+TRIGGER_SWING_MOMENTUM = 'SWING_MOMENTUM'     # Swing break + momentum continuation (-20% to 0%)
+TRIGGER_SWING_OPTIMAL = 'SWING_OPTIMAL'       # Swing break + optimal Fib zone (38.2%-61.8%)
+
+# Price action pattern triggers
+TRIGGER_PIN_BAR = 'PIN_BAR'                   # Pin bar rejection pattern
+TRIGGER_ENGULFING = 'ENGULFING'               # Engulfing pattern
+TRIGGER_INSIDE_BAR = 'INSIDE_BAR'             # Inside bar breakout
+TRIGGER_HAMMER = 'HAMMER'                     # Hammer/shooting star
+
+# Pattern suffixes for combined triggers (e.g., SWING_PULLBACK+PIN)
+PATTERN_SUFFIX_PIN = '+PIN'
+PATTERN_SUFFIX_ENG = '+ENG'
+PATTERN_SUFFIX_INS = '+INS'
+PATTERN_SUFFIX_DIV = '+DIV'
+
+
 class SMCSimpleStrategy:
     """
     Simplified SMC strategy using 3-tier EMA-based approach
@@ -1457,6 +1480,7 @@ class SMCSimpleStrategy:
             direction = ema_result['direction']  # 'BULL' or 'BEAR'
             ema_value = ema_result['ema_value']
             ema_distance = ema_result['distance_pips']
+            tier1_macd_aligned = ema_result.get('macd_aligned')  # v2.23.0
 
             self.logger.info(f"   ✅ Direction: {direction}")
             self.logger.info(f"   ✅ 50 EMA: {ema_value:.5f}")
@@ -1545,6 +1569,83 @@ class SMCSimpleStrategy:
             pullback_depth = pullback_result['pullback_depth']
             in_optimal_zone = pullback_result['in_optimal_zone']
             entry_type = pullback_result.get('entry_type', 'PULLBACK')  # v1.8.0
+            trigger_type = pullback_result.get('trigger_type', TRIGGER_SWING_PULLBACK)  # v2.23.0
+
+            # v2.23.0: Pattern confirmation detection
+            pattern_data = None
+            trigger_details = {
+                'base_trigger': trigger_type,
+                'pullback_depth': pullback_depth,
+                'entry_type': entry_type,
+                'macd_aligned': tier1_macd_aligned,  # From TIER 1 EMA check
+            }
+
+            if getattr(self, 'pattern_confirmation_enabled', False):
+                try:
+                    from forex_scanner.core.strategies.helpers.smc_candlestick_patterns import SMCCandlestickPatterns
+                    pattern_detector = SMCCandlestickPatterns(self.logger)
+                    min_strength = getattr(self, 'pattern_min_strength', 0.70)
+
+                    # Use entry dataframe for pattern detection
+                    pattern = pattern_detector.detect_rejection_pattern(
+                        entry_df[-10:] if len(entry_df) >= 10 else entry_df,
+                        direction,
+                        min_strength=min_strength
+                    )
+
+                    if pattern:
+                        pattern_data = pattern
+                        trigger_details['pattern'] = pattern
+                        trigger_details['pattern_confirmed'] = True
+
+                        # Determine pattern suffix based on detected pattern type
+                        pattern_type = pattern.get('pattern_type', '')
+                        if 'pin_bar' in pattern_type:
+                            pattern_suffix = PATTERN_SUFFIX_PIN
+                        elif 'engulfing' in pattern_type:
+                            pattern_suffix = PATTERN_SUFFIX_ENG
+                        elif 'inside' in pattern_type:
+                            pattern_suffix = PATTERN_SUFFIX_INS
+                        elif 'hammer' in pattern_type or 'shooting' in pattern_type:
+                            pattern_suffix = PATTERN_SUFFIX_PIN  # Hammer/shooter similar to pin
+                        else:
+                            pattern_suffix = ''
+
+                        # Enhance trigger_type with pattern suffix
+                        if pattern_suffix and pattern.get('strength', 0) >= min_strength:
+                            trigger_type = f"{trigger_type}{pattern_suffix}"
+                            trigger_details['enhanced_trigger'] = trigger_type
+
+                        # Log pattern detection (MONITORING or ACTIVE mode)
+                        pattern_mode = getattr(self, 'pattern_confirmation_mode', 'MONITORING')
+                        self.logger.info(f"   🎯 PATTERN [{pattern_mode}]: {pattern.get('pattern_type', 'unknown')} "
+                                       f"(strength: {pattern.get('strength', 0)*100:.0f}%)")
+
+                except ImportError as e:
+                    self.logger.debug(f"   ⚠️ Pattern detection unavailable: {e}")
+                except Exception as e:
+                    self.logger.warning(f"   ⚠️ Pattern detection error: {e}")
+
+            # v2.23.0: RSI divergence detection
+            rsi_divergence_data = None
+            if getattr(self, 'rsi_divergence_enabled', False):
+                try:
+                    divergence = self._check_rsi_divergence(entry_df, direction)
+                    if divergence.get('detected'):
+                        rsi_divergence_data = divergence
+                        trigger_details['rsi_divergence'] = divergence
+
+                        # Enhance trigger type with divergence suffix
+                        if divergence.get('strength', 0) >= getattr(self, 'rsi_divergence_min_strength', 0.30):
+                            trigger_type = f"{trigger_type}{PATTERN_SUFFIX_DIV}"
+                            trigger_details['enhanced_trigger'] = trigger_type
+
+                        # Log divergence detection
+                        div_mode = getattr(self, 'rsi_divergence_mode', 'MONITORING')
+                        self.logger.info(f"   📊 DIVERGENCE [{div_mode}]: {divergence.get('type', 'unknown')} "
+                                       f"(strength: {divergence.get('strength', 0)*100:.0f}%)")
+                except Exception as e:
+                    self.logger.warning(f"   ⚠️ RSI divergence detection error: {e}")
 
             # v1.8.0: Log entry type
             if entry_type == 'MOMENTUM':
@@ -2419,6 +2520,15 @@ class SMCSimpleStrategy:
                 'in_optimal_zone': in_optimal_zone,
                 'entry_type': entry_type,  # v1.8.0: PULLBACK or MOMENTUM
 
+                # v2.23.0: Trigger type tracking for signal analytics
+                'trigger_type': trigger_type,  # e.g., SWING_PULLBACK, SWING_OPTIMAL+PIN
+                'trigger_details': trigger_details,  # Detailed breakdown of entry mechanism
+                'pattern_type': pattern_data.get('pattern_type') if pattern_data else None,
+                'pattern_strength': pattern_data.get('strength') if pattern_data else None,
+                'rsi_divergence_detected': rsi_divergence_data is not None and rsi_divergence_data.get('detected', False),
+                'rsi_divergence_type': rsi_divergence_data.get('type') if rsi_divergence_data else None,
+                'macd_aligned': tier1_macd_aligned,  # v2.23.0: TIER 1 MACD alignment status
+
                 # v2.17.0: 4H candle direction for HTF momentum analysis
                 'htf_candle_direction': htf_candle_direction,
                 'htf_candle_direction_prev': htf_candle_direction_prev,
@@ -2541,7 +2651,12 @@ class SMCSimpleStrategy:
                     'reward_pips': round(reward_pips, 1),
                     'rr_ratio': round(rr_ratio, 2),
                     'confidence': round(confidence, 2),
-                    'atr_pips': round(atr / pip_value, 1) if atr else 0.0
+                    'atr_pips': round(atr / pip_value, 1) if atr else 0.0,
+                    # v2.23.0: Trigger type tracking
+                    'trigger_type': trigger_type,
+                    'trigger_details': trigger_details,
+                    'pattern_confirmation': pattern_data,
+                    'rsi_divergence': rsi_divergence_data,
                 }
             }
 
@@ -2770,12 +2885,56 @@ class SMCSimpleStrategy:
                     'reason': f"BEAR rejected: EMA is RISING (slope: {ema_slope_atr:.3f}x ATR) - need falling EMA for BEAR"
                 }
 
+        # ================================================================
+        # v2.23.0: OPTIONAL MACD ALIGNMENT CHECK (TIER 1 Enhancement)
+        # ================================================================
+        # When enabled, checks if MACD histogram aligns with trade direction
+        # BULL: histogram > 0 and rising
+        # BEAR: histogram < 0 and falling
+        macd_aligned = None
+        macd_alignment_boost = 0.0
+        if getattr(self, 'macd_alignment_enabled', False) and 'macd_histogram' in df_4h.columns:
+            try:
+                macd_hist = df_4h['macd_histogram'].iloc[-1]
+                macd_hist_prev = df_4h['macd_histogram'].iloc[-2]
+
+                if direction == 'BULL':
+                    # BULL alignment: histogram > 0 and rising (momentum increasing)
+                    macd_aligned = macd_hist > 0 and macd_hist > macd_hist_prev
+                else:
+                    # BEAR alignment: histogram < 0 and falling (momentum decreasing)
+                    macd_aligned = macd_hist < 0 and macd_hist < macd_hist_prev
+
+                self.logger.info(f"   📉 MACD alignment: {'✅ aligned' if macd_aligned else '⚠️ not aligned'} "
+                               f"(hist={macd_hist:.6f}, prev={macd_hist_prev:.6f})")
+
+                # In strict mode (macd_alignment_required=True), reject if not aligned
+                if getattr(self, 'macd_alignment_required', False) and not macd_aligned:
+                    return {
+                        'valid': False,
+                        'rejection_type': 'MACD_ALIGNMENT',
+                        'attempted_direction': direction,
+                        'macd_histogram': macd_hist,
+                        'macd_aligned': macd_aligned,
+                        'reason': f"{direction} rejected: MACD not aligned (hist={macd_hist:.6f})"
+                    }
+
+                # Add confidence boost if aligned
+                if macd_aligned:
+                    macd_alignment_boost = getattr(self, 'macd_alignment_confidence_boost', 0.05)
+
+            except Exception as e:
+                self.logger.debug(f"   ⚠️ MACD alignment check failed: {e}")
+                macd_aligned = None
+
         return {
             'valid': True,
             'direction': direction,
             'ema_value': ema_value,
             'distance_pips': distance_pips,
             'ema_slope_atr': ema_slope_atr,
+            'macd_aligned': macd_aligned,
+            'macd_alignment_boost': macd_alignment_boost,
             'reason': f"{direction} bias confirmed (EMA slope: {ema_slope_atr:.2f}x ATR)"
         }
 
@@ -3202,12 +3361,15 @@ class SMCSimpleStrategy:
                 }
 
             # Micro-pullback is valid
+            # v2.23.0: Add trigger type for tracking
+            trigger_type = TRIGGER_SWING_PULLBACK  # Micro-pullback is a form of pullback
             return {
                 'valid': True,
                 'entry_price': entry_price,
                 'pullback_depth': micro_pullback,
                 'in_optimal_zone': 0.10 <= micro_pullback <= 0.20,  # Optimal micro zone
                 'entry_type': 'MICRO_PULLBACK',
+                'trigger_type': trigger_type,
                 'swing_range_pips': micro_range_pips,
                 'reason': f"Micro-pullback valid ({micro_pullback*100:.1f}% on 1m)"
             }
@@ -3322,6 +3484,8 @@ class SMCSimpleStrategy:
                             }
 
                     entry_type = 'MOMENTUM'
+                    # v2.23.0: Add trigger type for tracking
+                    trigger_type = TRIGGER_SWING_MOMENTUM
                     # Momentum entries are not in "optimal" Fib zone
                     return {
                         'valid': True,
@@ -3329,6 +3493,7 @@ class SMCSimpleStrategy:
                         'pullback_depth': pullback_depth,
                         'in_optimal_zone': False,
                         'entry_type': entry_type,
+                        'trigger_type': trigger_type,
                         'swing_range_pips': range_pips,
                         'reason': f"Momentum continuation ({pullback_depth*100:.1f}% beyond break)"
                     }
@@ -3386,12 +3551,19 @@ class SMCSimpleStrategy:
         # Check if in optimal zone (golden zone)
         in_optimal = self.fib_optimal[0] <= pullback_depth <= self.fib_optimal[1]
 
+        # v2.23.0: Determine trigger type based on Fib zone
+        if in_optimal:
+            trigger_type = TRIGGER_SWING_OPTIMAL  # Golden zone (38.2%-61.8%)
+        else:
+            trigger_type = TRIGGER_SWING_PULLBACK  # Standard Fib zone
+
         return {
             'valid': True,
             'entry_price': entry_price,
             'pullback_depth': pullback_depth,
             'in_optimal_zone': in_optimal,
             'entry_type': entry_type,
+            'trigger_type': trigger_type,
             'swing_range_pips': range_pips,
             'reason': f"In Fib zone ({pullback_depth*100:.1f}%)"
         }
@@ -3649,6 +3821,147 @@ class SMCSimpleStrategy:
         atr = np.mean(true_range[-period:])
 
         return atr
+
+    def _check_rsi_divergence(
+        self,
+        df: pd.DataFrame,
+        direction: str,
+        lookback: int = None
+    ) -> Dict:
+        """
+        Detect RSI divergence for momentum confirmation (v2.23.0).
+
+        Divergence occurs when price and RSI move in opposite directions:
+        - Bullish Divergence: Price makes lower low, RSI makes higher low
+        - Bearish Divergence: Price makes higher high, RSI makes lower high
+
+        Args:
+            df: OHLCV DataFrame with 'rsi' column
+            direction: Expected trade direction ('BULL' or 'BEAR')
+            lookback: Number of bars to look back for divergence (default from config)
+
+        Returns:
+            Dict with:
+                - detected: bool - Whether divergence was found
+                - type: str - 'bullish_divergence' or 'bearish_divergence' or None
+                - strength: float - Divergence strength (0-1)
+                - confidence_boost: float - Suggested confidence boost
+                - reason: str - Description of finding
+        """
+        if lookback is None:
+            lookback = getattr(self, 'rsi_divergence_lookback', 20)
+
+        # Check for RSI column
+        if 'rsi' not in df.columns or len(df) < lookback:
+            return {
+                'detected': False,
+                'type': None,
+                'strength': 0.0,
+                'confidence_boost': 0.0,
+                'reason': 'Insufficient data for RSI divergence detection'
+            }
+
+        # Get RSI and price data for lookback period
+        rsi = df['rsi'].iloc[-lookback:].values
+        highs = df['high'].iloc[-lookback:].values
+        lows = df['low'].iloc[-lookback:].values
+
+        # Find swing points in both price and RSI
+        # Simple approach: find local minima/maxima
+        min_swing_strength = 2  # Bars on each side to qualify as swing
+
+        if direction == 'BULL':
+            # Look for bullish divergence: price lower low + RSI higher low
+            price_lows = self._find_swing_points_simple(lows, 'low', min_swing_strength)
+            rsi_lows = self._find_swing_points_simple(rsi, 'low', min_swing_strength)
+
+            if len(price_lows) >= 2 and len(rsi_lows) >= 2:
+                # Compare last two swing lows
+                price_ll = price_lows[-1][1] < price_lows[-2][1]  # Price made lower low
+                rsi_hl = rsi_lows[-1][1] > rsi_lows[-2][1]  # RSI made higher low
+
+                if price_ll and rsi_hl:
+                    # Calculate divergence strength based on RSI difference
+                    rsi_diff = rsi_lows[-1][1] - rsi_lows[-2][1]
+                    strength = min(1.0, abs(rsi_diff) / 15.0)  # Normalize to 0-1
+                    min_strength = getattr(self, 'rsi_divergence_min_strength', 0.30)
+
+                    if strength >= min_strength:
+                        return {
+                            'detected': True,
+                            'type': 'bullish_divergence',
+                            'strength': round(strength, 3),
+                            'confidence_boost': getattr(self, 'rsi_divergence_confidence_boost', 0.08),
+                            'reason': f'Bullish RSI divergence: price lower low, RSI higher low (+{rsi_diff:.1f})'
+                        }
+
+        elif direction == 'BEAR':
+            # Look for bearish divergence: price higher high + RSI lower high
+            price_highs = self._find_swing_points_simple(highs, 'high', min_swing_strength)
+            rsi_highs = self._find_swing_points_simple(rsi, 'high', min_swing_strength)
+
+            if len(price_highs) >= 2 and len(rsi_highs) >= 2:
+                # Compare last two swing highs
+                price_hh = price_highs[-1][1] > price_highs[-2][1]  # Price made higher high
+                rsi_lh = rsi_highs[-1][1] < rsi_highs[-2][1]  # RSI made lower high
+
+                if price_hh and rsi_lh:
+                    # Calculate divergence strength based on RSI difference
+                    rsi_diff = rsi_highs[-2][1] - rsi_highs[-1][1]
+                    strength = min(1.0, abs(rsi_diff) / 15.0)  # Normalize to 0-1
+                    min_strength = getattr(self, 'rsi_divergence_min_strength', 0.30)
+
+                    if strength >= min_strength:
+                        return {
+                            'detected': True,
+                            'type': 'bearish_divergence',
+                            'strength': round(strength, 3),
+                            'confidence_boost': getattr(self, 'rsi_divergence_confidence_boost', 0.08),
+                            'reason': f'Bearish RSI divergence: price higher high, RSI lower high (-{rsi_diff:.1f})'
+                        }
+
+        return {
+            'detected': False,
+            'type': None,
+            'strength': 0.0,
+            'confidence_boost': 0.0,
+            'reason': 'No divergence detected'
+        }
+
+    def _find_swing_points_simple(
+        self,
+        data: np.ndarray,
+        swing_type: str,
+        strength: int = 2
+    ) -> List[Tuple[int, float]]:
+        """
+        Find swing points (local extrema) in a data array.
+
+        Args:
+            data: 1D numpy array of values
+            swing_type: 'high' for swing highs, 'low' for swing lows
+            strength: Number of bars on each side to confirm swing
+
+        Returns:
+            List of (index, value) tuples for detected swing points
+        """
+        swings = []
+        n = len(data)
+
+        for i in range(strength, n - strength):
+            if swing_type == 'high':
+                # Check if this is a swing high
+                is_swing = all(data[i] >= data[i-j] for j in range(1, strength+1)) and \
+                          all(data[i] >= data[i+j] for j in range(1, strength+1))
+            else:
+                # Check if this is a swing low
+                is_swing = all(data[i] <= data[i-j] for j in range(1, strength+1)) and \
+                          all(data[i] <= data[i+j] for j in range(1, strength+1))
+
+            if is_swing:
+                swings.append((i, float(data[i])))
+
+        return swings
 
     def _calculate_limit_entry(
         self,

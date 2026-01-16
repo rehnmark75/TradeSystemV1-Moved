@@ -508,6 +508,7 @@ class AlertHistoryManager:
                         market_session, is_market_hours, market_regime,
                         signal_trigger, signal_conditions, crossover_type,
                         trigger_type, validation_details, swing_proximity_distance, swing_proximity_valid,
+                        pattern_type, pattern_strength, rsi_divergence_detected, macd_aligned,
                         market_bias, market_bias_conflict, directional_consensus,
                         market_structure_analysis, order_flow_analysis, confluence_details,
                         ob_proximity_score, nearest_ob_distance_pips,
@@ -544,6 +545,7 @@ class AlertHistoryManager:
                         %(market_session)s, %(is_market_hours)s, %(market_regime)s,
                         %(signal_trigger)s, %(signal_conditions)s, %(crossover_type)s,
                         %(trigger_type)s, %(validation_details)s, %(swing_proximity_distance)s, %(swing_proximity_valid)s,
+                        %(pattern_type)s, %(pattern_strength)s, %(rsi_divergence_detected)s, %(macd_aligned)s,
                         %(market_bias)s, %(market_bias_conflict)s, %(directional_consensus)s,
                         %(market_structure_analysis)s, %(order_flow_analysis)s, %(confluence_details)s,
                         %(ob_proximity_score)s, %(nearest_ob_distance_pips)s,
@@ -1289,10 +1291,16 @@ class AlertHistoryManager:
             # ================================
             # VALIDATION METADATA (NEW)
             # ================================
-            trigger_type = signal.get('trigger_type')  # e.g., 'macd', 'adx', 'ema_crossover'
+            trigger_type = signal.get('trigger_type')  # e.g., 'SWING_PULLBACK', 'SWING_OPTIMAL+PIN'
             validation_details = signal.get('validation_details')  # JSON with full validation context
             swing_proximity_distance = signal.get('swing_proximity_distance')
             swing_proximity_valid = signal.get('swing_proximity_valid')
+
+            # v2.23.0: Pattern confirmation fields
+            pattern_type = signal.get('pattern_type')  # e.g., 'bullish_pin_bar', 'bearish_engulfing'
+            pattern_strength = signal.get('pattern_strength')  # 0.0-1.0 strength score
+            rsi_divergence_detected = signal.get('rsi_divergence_detected', False)
+            macd_aligned = signal.get('macd_aligned')  # True/False/None
 
             # ================================
             # MARKET BIAS TRACKING (NEW)
@@ -1454,6 +1462,12 @@ class AlertHistoryManager:
                 'validation_details': validation_details,
                 'swing_proximity_distance': swing_proximity_distance,
                 'swing_proximity_valid': swing_proximity_valid,
+
+                # v2.23.0: Pattern confirmation tracking
+                'pattern_type': pattern_type,
+                'pattern_strength': pattern_strength,
+                'rsi_divergence_detected': rsi_divergence_detected,
+                'macd_aligned': macd_aligned,
 
                 # Market bias tracking (NEW)
                 'market_bias': market_bias,

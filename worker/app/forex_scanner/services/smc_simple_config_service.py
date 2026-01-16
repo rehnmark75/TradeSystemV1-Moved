@@ -278,6 +278,31 @@ class SMCSimpleConfig:
     scalp_entry_rsi_sell_min: float = 0.0  # Min RSI for SELL entries (0 = disabled)
     scalp_min_ema_distance_pips: float = 0.0  # Min distance from EMA in pips (0 = disabled)
 
+    # PATTERN CONFIRMATION (v2.23.0) - Alternative triggers
+    # Price action patterns to boost confidence or enable marginal entries
+    pattern_confirmation_enabled: bool = False  # Master toggle
+    pattern_confirmation_mode: str = "MONITORING"  # MONITORING or ACTIVE
+    pattern_min_strength: float = 0.70  # Min pattern strength (0.0-1.0)
+    pattern_pin_bar_enabled: bool = True  # Enable pin bar detection
+    pattern_engulfing_enabled: bool = True  # Enable engulfing pattern detection
+    pattern_inside_bar_enabled: bool = True  # Enable inside bar detection
+    pattern_hammer_shooter_enabled: bool = True  # Enable hammer/shooting star detection
+    pattern_confidence_boost: float = 0.05  # Confidence boost when pattern detected
+
+    # RSI DIVERGENCE (v2.23.0)
+    # Detects momentum divergence for reversal confirmation
+    rsi_divergence_enabled: bool = False  # Master toggle
+    rsi_divergence_mode: str = "MONITORING"  # MONITORING or ACTIVE
+    rsi_divergence_lookback: int = 20  # Bars to look back for divergence
+    rsi_divergence_min_strength: float = 0.30  # Min divergence strength
+    rsi_divergence_confidence_boost: float = 0.08  # Confidence boost when divergence detected
+
+    # MACD ALIGNMENT ENHANCEMENT (v2.23.0)
+    # Additional MACD check for TIER 1 validation
+    macd_alignment_enabled: bool = False  # Enable MACD alignment check
+    macd_alignment_required: bool = False  # Reject signals if MACD not aligned
+    macd_alignment_confidence_boost: float = 0.05  # Confidence boost when MACD aligned
+
     # ENABLED PAIRS
     enabled_pairs: List[str] = field(default_factory=lambda: [
         'CS.D.EURUSD.CEEM.IP',
@@ -1158,6 +1183,18 @@ class SMCSimpleConfigService:
             'scalp_require_htf_alignment', 'scalp_momentum_only_filter',
             'scalp_entry_rsi_buy_max', 'scalp_entry_rsi_sell_min',
             'scalp_min_ema_distance_pips',
+            # PATTERN CONFIRMATION (v2.23.0) - Alternative triggers
+            'pattern_confirmation_enabled', 'pattern_confirmation_mode',
+            'pattern_min_strength', 'pattern_pin_bar_enabled',
+            'pattern_engulfing_enabled', 'pattern_inside_bar_enabled',
+            'pattern_hammer_shooter_enabled', 'pattern_confidence_boost',
+            # RSI DIVERGENCE (v2.23.0)
+            'rsi_divergence_enabled', 'rsi_divergence_mode',
+            'rsi_divergence_lookback', 'rsi_divergence_min_strength',
+            'rsi_divergence_confidence_boost',
+            # MACD ALIGNMENT ENHANCEMENT (v2.23.0)
+            'macd_alignment_enabled', 'macd_alignment_required',
+            'macd_alignment_confidence_boost',
         ]
 
         # Fields that must be integers (used for DataFrame slicing, loop counts, etc.)
@@ -1178,6 +1215,8 @@ class SMCSimpleConfigService:
             'scalp_micro_pullback_lookback',
             # Scalp qualification int fields
             'scalp_rsi_bull_min', 'scalp_rsi_bull_max', 'scalp_rsi_bear_min', 'scalp_rsi_bear_max',
+            # Pattern confirmation int fields
+            'rsi_divergence_lookback',
         }
 
         for attr_name in direct_mappings:
@@ -1186,6 +1225,9 @@ class SMCSimpleConfigService:
                 # Convert to appropriate type
                 if attr_name in int_fields:
                     value = int(value)
+                elif isinstance(value, bool):
+                    # Keep booleans as-is (must check before Decimal since bool has as_integer_ratio)
+                    pass
                 elif hasattr(value, 'as_integer_ratio'):  # Decimal to float
                     value = float(value)
                 setattr(config, attr_name, value)
