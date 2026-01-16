@@ -1154,6 +1154,10 @@ class SMCSimpleConfigService:
             'scalp_rsi_bull_min', 'scalp_rsi_bull_max',
             'scalp_rsi_bear_min', 'scalp_rsi_bear_max',
             'scalp_two_pole_bull_threshold', 'scalp_two_pole_bear_threshold',
+            # SCALP ENTRY FILTERS (v2.22.0) - Jan 2026 trade analysis
+            'scalp_require_htf_alignment', 'scalp_momentum_only_filter',
+            'scalp_entry_rsi_buy_max', 'scalp_entry_rsi_sell_min',
+            'scalp_min_ema_distance_pips',
         ]
 
         # Fields that must be integers (used for DataFrame slicing, loop counts, etc.)
