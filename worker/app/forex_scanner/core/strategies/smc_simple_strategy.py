@@ -857,6 +857,13 @@ class SMCSimpleStrategy:
             'scalp_min_confidence': 'scalp_min_confidence',
             'scalp_cooldown_minutes': 'scalp_cooldown_minutes',
 
+            # v2.22.0: Scalp Entry Filters (for backtest parameter testing)
+            'scalp_momentum_only_filter': 'scalp_momentum_only_filter',
+            'scalp_require_htf_alignment': 'scalp_require_htf_alignment',
+            'scalp_entry_rsi_buy_max': 'scalp_entry_rsi_buy_max',
+            'scalp_entry_rsi_sell_min': 'scalp_entry_rsi_sell_min',
+            'scalp_min_ema_distance_pips': 'scalp_min_ema_distance_pips',
+
             # Debug
             'enable_debug_logging': 'debug_logging',
         }
@@ -955,6 +962,14 @@ class SMCSimpleStrategy:
 
         # Scalp market orders (faster fills, spread filter is the safeguard)
         self.scalp_use_market_orders = getattr(config, 'scalp_use_market_orders', True)
+
+        # v2.22.0: Scalp entry filters (based on Jan 2026 trade analysis)
+        # These filters block non-winning entry patterns
+        self.scalp_momentum_only_filter = getattr(config, 'scalp_momentum_only_filter', False)
+        self.scalp_require_htf_alignment = getattr(config, 'scalp_require_htf_alignment', False)
+        self.scalp_entry_rsi_buy_max = getattr(config, 'scalp_entry_rsi_buy_max', 100.0)
+        self.scalp_entry_rsi_sell_min = getattr(config, 'scalp_entry_rsi_sell_min', 0.0)
+        self.scalp_min_ema_distance_pips = getattr(config, 'scalp_min_ema_distance_pips', 0.0)
 
     def _configure_scalp_mode(self):
         """Configure strategy for high-frequency scalping mode.
@@ -1539,6 +1554,98 @@ class SMCSimpleStrategy:
                 self.logger.info(f"   ✅ Entry Type: PULLBACK (retracement)")
                 self.logger.info(f"   ✅ Pullback Depth: {pullback_depth*100:.1f}%")
             self.logger.info(f"   {'✅' if in_optimal_zone else '⚠️ '} Optimal Zone: {'Yes' if in_optimal_zone else 'No'}")
+
+            # ================================================================
+            # v2.22.0: SCALP ENTRY FILTERS (based on Jan 2026 trade analysis)
+            # These filters block non-winning patterns in scalp mode:
+            # - Pullback entries had 0% win rate (26 trades, 0 winners)
+            # - Only HTF-aligned + momentum entries were profitable (40% win rate)
+            # ================================================================
+            if self.scalp_mode_enabled:
+                # Filter 1: Momentum-only (block pullback entries)
+                if self.scalp_momentum_only_filter and entry_type != 'MOMENTUM':
+                    rejection_reason = f"Scalp filter: Non-momentum entry ({entry_type}) blocked"
+                    self.logger.info(f"   ❌ {rejection_reason}")
+                    self._track_rejection(
+                        stage='SCALP_ENTRY_FILTER',
+                        reason=rejection_reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context={'entry_type': entry_type, 'filter': 'momentum_only'}
+                    )
+                    return None
+
+                # Filter 2: HTF alignment required
+                if self.scalp_require_htf_alignment:
+                    htf_aligned = (
+                        (direction == 'BULL' and htf_candle_direction == 'BULLISH') or
+                        (direction == 'BEAR' and htf_candle_direction == 'BEARISH')
+                    )
+                    if not htf_aligned:
+                        rejection_reason = f"Scalp filter: HTF misalignment ({direction} vs HTF {htf_candle_direction})"
+                        self.logger.info(f"   ❌ {rejection_reason}")
+                        self._track_rejection(
+                            stage='SCALP_ENTRY_FILTER',
+                            reason=rejection_reason,
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context={'htf_candle_direction': htf_candle_direction, 'filter': 'htf_alignment'}
+                        )
+                        return None
+
+                # Filter 3: RSI zone filter (avoid overbought buys, oversold sells)
+                rsi_value = None
+                if 'rsi' in entry_df.columns and len(entry_df) > 0:
+                    rsi_value = entry_df['rsi'].iloc[-1]
+                elif 'rsi' in df_trigger.columns and len(df_trigger) > 0:
+                    rsi_value = df_trigger['rsi'].iloc[-1]
+
+                if rsi_value is not None:
+                    if direction == 'BULL' and rsi_value > self.scalp_entry_rsi_buy_max:
+                        rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} > {self.scalp_entry_rsi_buy_max} (overbought BUY)"
+                        self.logger.info(f"   ❌ {rejection_reason}")
+                        self._track_rejection(
+                            stage='SCALP_ENTRY_FILTER',
+                            reason=rejection_reason,
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context={'rsi': rsi_value, 'filter': 'rsi_zone'}
+                        )
+                        return None
+                    if direction == 'BEAR' and rsi_value < self.scalp_entry_rsi_sell_min:
+                        rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} < {self.scalp_entry_rsi_sell_min} (oversold SELL)"
+                        self.logger.info(f"   ❌ {rejection_reason}")
+                        self._track_rejection(
+                            stage='SCALP_ENTRY_FILTER',
+                            reason=rejection_reason,
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context={'rsi': rsi_value, 'filter': 'rsi_zone'}
+                        )
+                        return None
+
+                # Filter 4: Minimum EMA distance
+                if self.scalp_min_ema_distance_pips > 0 and ema_distance < self.scalp_min_ema_distance_pips:
+                    rejection_reason = f"Scalp filter: EMA distance {ema_distance:.1f} < {self.scalp_min_ema_distance_pips} pips"
+                    self.logger.info(f"   ❌ {rejection_reason}")
+                    self._track_rejection(
+                        stage='SCALP_ENTRY_FILTER',
+                        reason=rejection_reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context={'ema_distance': ema_distance, 'filter': 'ema_distance'}
+                    )
+                    return None
 
             # ================================================================
             # TIER 4: Swing Proximity Validation (v2.15.0)

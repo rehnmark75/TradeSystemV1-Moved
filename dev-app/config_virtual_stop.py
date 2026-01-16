@@ -21,9 +21,9 @@ VIRTUAL_STOP_LOSS_ENABLED = True
 
 # Default virtual stop loss distance in pips
 # Trade will be closed when price moves this many pips against entry
-# Using 3 pips as default - since scalp trades use limit order offset,
-# if price reverses after triggering, it's likely a bad trade
-DEFAULT_VIRTUAL_SL_PIPS = 3.0
+# Using 5 pips as default - analysis showed 3 pips was too tight,
+# causing correct signals to be stopped out during normal retracements
+DEFAULT_VIRTUAL_SL_PIPS = 5.0
 
 # Broker safety net SL (set on IG as actual stop loss)
 # This catches the trade if streaming fails - should be IG's minimum
@@ -62,41 +62,43 @@ LIGHTSTREAMER_MAX_RECONNECT_ATTEMPTS = 10
 # =============================================================================
 
 # Virtual SL settings per currency pair
-# Moderate settings: 3 pips for majors, 4 pips for JPY crosses
-# Since scalp trades use limit order offset (1 pip), if price reverses
-# after triggering, it's likely a bad trade - keep VSL tight
+# Analysis from Jan 15-16, 2026 showed 3 pips was too tight for majors:
+# - 93.9% VSL hit rate with only 6.1% win rate
+# - 67% of signals were directionally correct but stopped out during retracements
+# - MAE ranged from 3.0-8.4 pips on losing trades
+# Widened to 5 pips for majors, 6 pips for JPY (higher volatility)
 PAIR_VIRTUAL_SL_CONFIGS = {
-    # Major pairs - 3 pips VSL
+    # Major pairs - 5 pips VSL (widened from 3 pips)
     'CS.D.EURUSD.CEEM.IP': {
-        'virtual_sl_pips': 3.0,
+        'virtual_sl_pips': 5.0,
         'enabled': True,
     },
     'CS.D.EURUSD.MINI.IP': {
-        'virtual_sl_pips': 3.0,
+        'virtual_sl_pips': 5.0,
         'enabled': True,
     },
     'CS.D.GBPUSD.MINI.IP': {
-        'virtual_sl_pips': 3.0,
+        'virtual_sl_pips': 5.0,
         'enabled': True,
     },
     'CS.D.GBPUSD.CEEM.IP': {
-        'virtual_sl_pips': 3.0,
+        'virtual_sl_pips': 5.0,
         'enabled': True,
     },
     'CS.D.USDCHF.MINI.IP': {
-        'virtual_sl_pips': 3.0,
+        'virtual_sl_pips': 5.0,
         'enabled': True,
     },
     'CS.D.USDCAD.MINI.IP': {
-        'virtual_sl_pips': 3.0,
+        'virtual_sl_pips': 5.0,
         'enabled': True,
     },
     'CS.D.AUDUSD.MINI.IP': {
-        'virtual_sl_pips': 3.0,
+        'virtual_sl_pips': 5.0,
         'enabled': True,
     },
     'CS.D.NZDUSD.MINI.IP': {
-        'virtual_sl_pips': 3.0,
+        'virtual_sl_pips': 5.0,
         'enabled': True,
     },
 
@@ -192,15 +194,17 @@ BASELINE_SPREAD_PIPS = 1.0  # Normal spread assumption
 MAX_SPREAD_PENALTY_PIPS = 2.0  # Cap adjustment at +2 pips max
 
 # Default dynamic VSL configuration for majors
+# Updated Jan 16, 2026: Aligned with widened initial VSL (3->5 pips)
+# Stages adjusted to give trades more room to develop
 DEFAULT_DYNAMIC_VSL_CONFIG = {
-    'initial_vsl_pips': 3.0,        # Starting VSL (same as current fixed)
-    'breakeven_trigger_pips': 2.0,  # Move to BE when +2 pips profit (backtested)
+    'initial_vsl_pips': 5.0,        # Starting VSL (widened from 3.0)
+    'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit (widened from 2.0)
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
-    'stage1_trigger_pips': 5.0,     # Move to stage1 when +5 pips profit
-    'stage1_lock_pips': 2.0,        # Lock +2 pips at stage1
-    'stage2_trigger_pips': 6.5,     # Move to stage2 when +6.5 pips profit
-    'stage2_lock_pips': 4.0,        # Lock +4 pips at stage2
-    'target_pips': 8.0,             # TP target (extended from 5.0)
+    'stage1_trigger_pips': 6.0,     # Move to stage1 when +6 pips profit (from 5.0)
+    'stage1_lock_pips': 2.5,        # Lock +2.5 pips at stage1 (from 2.0)
+    'stage2_trigger_pips': 8.0,     # Move to stage2 when +8 pips profit (from 6.5)
+    'stage2_lock_pips': 4.5,        # Lock +4.5 pips at stage2 (from 4.0)
+    'target_pips': 10.0,            # TP target (extended from 8.0)
 }
 
 # Default dynamic VSL configuration for JPY pairs (higher volatility)

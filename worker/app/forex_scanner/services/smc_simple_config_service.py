@@ -269,6 +269,15 @@ class SMCSimpleConfig:
     scalp_two_pole_bull_threshold: float = -0.30  # Two-Pole oversold threshold for BULL
     scalp_two_pole_bear_threshold: float = 0.30  # Two-Pole overbought threshold for BEAR
 
+    # SCALP ENTRY FILTERS (v2.22.0)
+    # Based on Jan 2026 trade analysis: pullback entries had 0% win rate
+    # Only momentum + HTF aligned trades showed positive results
+    scalp_momentum_only_filter: bool = False  # Block pullback/micro-pullback entries
+    scalp_require_htf_alignment: bool = False  # Require trade direction matches htf_candle_direction
+    scalp_entry_rsi_buy_max: float = 100.0  # Max RSI for BUY entries (100 = disabled)
+    scalp_entry_rsi_sell_min: float = 0.0  # Min RSI for SELL entries (0 = disabled)
+    scalp_min_ema_distance_pips: float = 0.0  # Min distance from EMA in pips (0 = disabled)
+
     # ENABLED PAIRS
     enabled_pairs: List[str] = field(default_factory=lambda: [
         'CS.D.EURUSD.CEEM.IP',
