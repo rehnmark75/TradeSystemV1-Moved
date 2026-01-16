@@ -203,7 +203,7 @@ DEFAULT_DYNAMIC_VSL_CONFIG = {
     'stage1_trigger_pips': 6.0,     # Move to stage1 when +6 pips profit (from 5.0)
     'stage1_lock_pips': 2.5,        # Lock +2.5 pips at stage1 (from 2.0)
     'stage2_trigger_pips': 8.0,     # Move to stage2 when +8 pips profit (from 6.5)
-    'stage2_lock_pips': 4.5,        # Lock +4.5 pips at stage2 (from 4.0)
+    'stage2_lock_pips': 6.0,        # Lock +6 pips at stage2
     'target_pips': 10.0,            # TP target (extended from 8.0)
 }
 
