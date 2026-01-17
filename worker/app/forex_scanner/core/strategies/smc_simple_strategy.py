@@ -512,6 +512,23 @@ class SMCSimpleStrategy:
             self.swing_proximity_support_buffer = config.swing_proximity_support_buffer
             self.swing_proximity_lookback_swings = config.swing_proximity_lookback_swings
 
+            # v2.23.0: Pattern Confirmation (price action patterns for signal enhancement)
+            self.pattern_confirmation_enabled = getattr(config, 'pattern_confirmation_enabled', False)
+            self.pattern_confirmation_mode = getattr(config, 'pattern_confirmation_mode', 'MONITORING')
+            self.pattern_min_strength = getattr(config, 'pattern_min_strength', 0.70)
+            self.pattern_confidence_boost = getattr(config, 'pattern_confidence_boost', 0.05)
+            self.pattern_pin_bar_enabled = getattr(config, 'pattern_pin_bar_enabled', True)
+            self.pattern_engulfing_enabled = getattr(config, 'pattern_engulfing_enabled', True)
+            self.pattern_hammer_shooter_enabled = getattr(config, 'pattern_hammer_shooter_enabled', True)
+            self.pattern_inside_bar_enabled = getattr(config, 'pattern_inside_bar_enabled', True)
+
+            # v2.23.0: RSI Divergence Detection
+            self.rsi_divergence_enabled = getattr(config, 'rsi_divergence_enabled', False)
+            self.rsi_divergence_mode = getattr(config, 'rsi_divergence_mode', 'MONITORING')
+            self.rsi_divergence_lookback = getattr(config, 'rsi_divergence_lookback', 20)
+            self.rsi_divergence_min_strength = getattr(config, 'rsi_divergence_min_strength', 0.30)
+            self.rsi_divergence_confidence_boost = getattr(config, 'rsi_divergence_confidence_boost', 0.08)
+
             self.logger.info(f"✅ SMC Simple config v{config.version} loaded from DATABASE (source: {config.source})")
 
             # SCALP MODE: Load scalp configuration first (before overrides)
@@ -886,6 +903,23 @@ class SMCSimpleStrategy:
             'scalp_entry_rsi_buy_max': 'scalp_entry_rsi_buy_max',
             'scalp_entry_rsi_sell_min': 'scalp_entry_rsi_sell_min',
             'scalp_min_ema_distance_pips': 'scalp_min_ema_distance_pips',
+
+            # v2.23.0: Pattern Confirmation (test ACTIVE vs MONITORING mode)
+            'pattern_confirmation_enabled': 'pattern_confirmation_enabled',
+            'pattern_confirmation_mode': 'pattern_confirmation_mode',
+            'pattern_min_strength': 'pattern_min_strength',
+            'pattern_confidence_boost': 'pattern_confidence_boost',
+            'pattern_pin_bar_enabled': 'pattern_pin_bar_enabled',
+            'pattern_engulfing_enabled': 'pattern_engulfing_enabled',
+            'pattern_hammer_shooter_enabled': 'pattern_hammer_shooter_enabled',
+            'pattern_inside_bar_enabled': 'pattern_inside_bar_enabled',
+
+            # v2.23.0: RSI Divergence Detection (test ACTIVE vs MONITORING mode)
+            'rsi_divergence_enabled': 'rsi_divergence_enabled',
+            'rsi_divergence_mode': 'rsi_divergence_mode',
+            'rsi_divergence_lookback': 'rsi_divergence_lookback',
+            'rsi_divergence_min_strength': 'rsi_divergence_min_strength',
+            'rsi_divergence_confidence_boost': 'rsi_divergence_confidence_boost',
 
             # Debug
             'enable_debug_logging': 'debug_logging',
