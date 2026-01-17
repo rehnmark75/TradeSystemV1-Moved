@@ -79,6 +79,32 @@ docker exec -it task-worker python /app/forex_scanner/bt.py GBPUSD 14 SMC --show
 **Pair shortcuts**: EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY, GBPJPY
 **Strategy shortcuts**: SMC, SMC_SIMPLE (only active strategy after January 2026 cleanup)
 
+### CRITICAL: Backtest --timeframe vs Strategy Timeframes (Jan 2026 Discovery)
+
+The `--timeframe` parameter controls **scan interval** (how often backtest evaluates), NOT strategy timeframes:
+
+```bash
+# Scan every 5 minutes (recommended for live comparison)
+docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7 --scalp --timeframe 5m
+
+# Scan every 15 minutes (default - misses mid-candle signals)
+docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7 --scalp --timeframe 15m
+```
+
+**Strategy timeframes are ALWAYS (regardless of --timeframe setting):**
+| Tier | Timeframe | Purpose |
+|------|-----------|---------|
+| TIER 1 HTF | 15m | EMA bias/direction |
+| TIER 2 Trigger | 5m | Swing break detection |
+| TIER 3 Entry | 1m | Pullback entry |
+
+**Why this matters:** Live scanner runs every 2-5 minutes. Using `--timeframe 15m` only evaluates at 15m boundaries, missing signals that occur mid-candle. Jan 15 comparison showed:
+- `--timeframe 15m`: 20 signals
+- `--timeframe 5m`: 60 signals
+- Live (2 min interval): 56 signals
+
+**Recommendation:** Use `--timeframe 5m` for accurate live vs backtest comparison.
+
 ### Backtest Parameter Isolation (January 2026)
 Test strategy parameters during backtesting WITHOUT affecting live trading:
 
