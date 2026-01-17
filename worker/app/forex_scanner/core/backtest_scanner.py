@@ -1195,16 +1195,33 @@ class BacktestScanner(IntelligentForexScanner):
                 vsl_cfg = self._vsl_config[epic]
                 signal['risk_pips'] = vsl_cfg['vsl_pips']  # Override SL with VSL
                 signal['reward_pips'] = vsl_cfg['tp_pips']  # Override TP with scalp TP
-                # Override limit expiry to 20 minutes for better fill probability
+                # Keep limit expiry at 7 minutes to match live trading behavior
+                # This is critical for realistic fill rate simulation
                 if signal.get('order_type') == 'limit':
-                    signal['limit_expiry_minutes'] = 20
-                self.logger.debug(f"🎯 VSL Override: SL={vsl_cfg['vsl_pips']} pips, TP={vsl_cfg['tp_pips']} pips, Expiry=20min")
+                    signal['limit_expiry_minutes'] = 7  # Match live trading
+                self.logger.debug(f"🎯 VSL Override: SL={vsl_cfg['vsl_pips']} pips, TP={vsl_cfg['tp_pips']} pips, "
+                                 f"OrderType={signal.get('order_type')}, Offset={signal.get('limit_offset_pips')} pips")
 
             # Get per-epic trailing stop simulator with pair-specific config
             trailing_simulator = self._get_trailing_stop_simulator(epic)
 
             # Fetch future price data for simulation
-            future_df = self._fetch_future_price_data(epic, signal_timestamp, max_bars=trailing_simulator.max_bars)
+            # VSL MODE: Use 1m candles for more accurate simulation (closer to tick-by-tick)
+            # Standard mode: Use the backtest timeframe (5m/15m)
+            if self._use_vsl_mode:
+                simulation_timeframe = '1m'
+                # For 1m candles, we need more bars to cover the same time period
+                # 4 hours = 240 1-minute bars (vs 48 5-minute bars)
+                max_bars_1m = 240
+                future_df = self._fetch_future_price_data(
+                    epic, signal_timestamp,
+                    max_bars=max_bars_1m,
+                    timeframe_override='1m'
+                )
+                timeframe_minutes = 1
+            else:
+                future_df = self._fetch_future_price_data(epic, signal_timestamp, max_bars=trailing_simulator.max_bars)
+                timeframe_minutes = 5  # Default assumption
 
             if future_df is None or len(future_df) == 0:
                 self.logger.debug(f"No future data available for {epic} at {signal_timestamp}, skipping simulation")
@@ -1216,11 +1233,17 @@ class BacktestScanner(IntelligentForexScanner):
                 return signal
 
             # Simulate trade with pair-specific trailing stop
-            self.logger.debug(f"Simulating trade for {epic} with {len(future_df)} future bars (3-stage trailing)")
+            # VSL mode uses 1m candles for 5x better resolution in SL/TP detection
+            if self._use_vsl_mode:
+                self.logger.debug(f"🎯 VSL Simulation: {epic} with {len(future_df)} 1m bars "
+                                 f"(5x resolution vs 5m, {len(future_df)} min coverage)")
+            else:
+                self.logger.debug(f"📊 Standard Simulation: {epic} with {len(future_df)} {self.timeframe} bars")
             enhanced_signal = trailing_simulator.simulate_trade(
                 signal=signal,
                 df=future_df,
-                signal_idx=0  # Signal is at the start of the future data
+                signal_idx=0,  # Signal is at the start of the future data
+                timeframe_minutes=timeframe_minutes
             )
 
             self.logger.debug(f"Simulation complete: profit={enhanced_signal.get('max_profit_pips', 0):.1f}, "
@@ -1246,7 +1269,7 @@ class BacktestScanner(IntelligentForexScanner):
             # Return original signal without simulation data
             return signal
 
-    def _fetch_future_price_data(self, epic: str, signal_timestamp: datetime, max_bars: int = 96) -> Optional[pd.DataFrame]:
+    def _fetch_future_price_data(self, epic: str, signal_timestamp: datetime, max_bars: int = 96, timeframe_override: str = None) -> Optional[pd.DataFrame]:
         """
         Fetch future price data for trade simulation using BacktestDataFetcher (in-memory cache)
 
@@ -1254,6 +1277,7 @@ class BacktestScanner(IntelligentForexScanner):
             epic: Epic code
             signal_timestamp: Signal timestamp (start of future data)
             max_bars: Maximum number of bars to fetch
+            timeframe_override: Optional timeframe to use instead of self.timeframe (e.g., '1m' for VSL mode)
 
         Returns:
             DataFrame with OHLC price data or None if no data available
@@ -1265,8 +1289,11 @@ class BacktestScanner(IntelligentForexScanner):
             # Extract pair from epic
             pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
 
+            # Use override timeframe if provided (e.g., '1m' for VSL simulation)
+            simulation_tf = timeframe_override or self.timeframe
+
             # Calculate how much data we need (from NOW back to signal time, plus future bars)
-            time_increment = self._parse_timeframe_to_timedelta(self.timeframe)
+            time_increment = self._parse_timeframe_to_timedelta(simulation_tf)
             end_timestamp = signal_timestamp + (time_increment * max_bars)
             if end_timestamp > self.end_date:
                 end_timestamp = self.end_date
@@ -1296,10 +1323,11 @@ class BacktestScanner(IntelligentForexScanner):
                 data_fetcher.current_backtest_time = None
 
                 # Get full data range that includes our signal time AND future bars
+                # Use simulation_tf (may be '1m' for VSL mode, or default timeframe otherwise)
                 full_df = data_fetcher.get_enhanced_data(
                     epic=epic,
                     pair=pair,
-                    timeframe=self.timeframe,
+                    timeframe=simulation_tf,
                     lookback_hours=lookback_hours,
                     ema_strategy=None  # Don't need strategy enhancements for simulation
                 )
