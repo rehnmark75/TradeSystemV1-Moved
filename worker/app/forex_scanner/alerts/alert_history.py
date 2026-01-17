@@ -1276,12 +1276,14 @@ class AlertHistoryManager:
             # ================================
             market_session = signal.get('market_session', signal.get('session'))
             is_market_hours = signal.get('is_market_hours', True)
-            market_regime = signal.get('market_regime')
+            # FIX: SMC_SIMPLE uses 'market_regime_detected', fallback to that field
+            market_regime = signal.get('market_regime', signal.get('market_regime_detected'))
             
             # ================================
             # SIGNAL METADATA - SAFELY HANDLE MISSING FIELDS
             # ================================
-            signal_trigger = signal.get('signal_trigger', signal.get('trigger'))
+            # FIX: SMC_SIMPLE uses 'trigger_type', fallback to that field
+            signal_trigger = signal.get('signal_trigger', signal.get('trigger', signal.get('trigger_type')))
             crossover_type = signal.get('crossover_type', 'unknown')  # DEFAULT VALUE!
             signal_conditions = signal.get('signal_conditions', signal.get('conditions'))
             signal_strength = signal.get('signal_strength')
