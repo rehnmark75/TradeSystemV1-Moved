@@ -75,9 +75,9 @@ class ScalpSignalQualifier:
     Expected improvement: Win rate +10-20% by filtering exhausted/counter-trend entries
     """
 
-    VERSION = "1.1.0"
+    VERSION = "1.2.0"
 
-    def __init__(self, config=None, logger=None, db_config=None):
+    def __init__(self, config=None, logger=None, db_config=None, persist_results: bool = True):
         """
         Initialize ScalpSignalQualifier.
 
@@ -85,10 +85,23 @@ class ScalpSignalQualifier:
             config: Main config module (optional)
             logger: Logger instance (optional)
             db_config: SMCSimpleConfig object from database (optional, preferred)
+            persist_results: Whether to persist qualification results to database (default: True)
         """
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
         self._db_config = db_config
+        self._persist_results = persist_results
+        self._qualification_logger = None
+
+        # Initialize qualification logger if persistence is enabled
+        if persist_results:
+            try:
+                from forex_scanner.core.strategies.qualification_logger import QualificationLogger
+                self._qualification_logger = QualificationLogger(logger=self.logger)
+                self.logger.info("   Qualification persistence: ENABLED")
+            except Exception as e:
+                self.logger.warning(f"   Qualification persistence: DISABLED (failed to init: {e})")
+                self._qualification_logger = None
 
         # Load configuration from database config or defaults
         self._load_config()
@@ -258,11 +271,53 @@ class ScalpSignalQualifier:
         # Determine if signal passes based on mode
         if self.mode == 'MONITORING':
             # Always pass in monitoring mode (we're just collecting data)
-            return True, score, filter_results
+            signal_passes = True
         else:
             # In ACTIVE mode, require minimum score
             signal_passes = score >= self.min_score
-            return signal_passes, score, filter_results
+
+        # Persist qualification results to database
+        log_id = self._persist_qualification(signal, score, filter_results, blocked=not signal_passes)
+        if log_id:
+            # Add log ID to signal for potential linking with alert/trade
+            signal['qualification_log_id'] = log_id
+
+        return signal_passes, score, filter_results
+
+    def _persist_qualification(
+        self,
+        signal: Dict,
+        score: float,
+        filter_results: List[Dict],
+        blocked: bool
+    ) -> Optional[int]:
+        """
+        Persist qualification results to database.
+
+        Args:
+            signal: Signal dictionary
+            score: Overall qualification score
+            filter_results: List of per-filter results
+            blocked: Whether signal was blocked
+
+        Returns:
+            Log ID if successful, None otherwise
+        """
+        if not self._qualification_logger:
+            return None
+
+        try:
+            log_id = self._qualification_logger.log_qualification(
+                signal=signal,
+                score=score,
+                filter_results=filter_results,
+                mode=self.mode,
+                blocked=blocked
+            )
+            return log_id
+        except Exception as e:
+            self.logger.warning(f"Failed to persist qualification: {e}")
+            return None
 
     def _check_rsi_momentum(self, df: pd.DataFrame, direction: str) -> Dict:
         """
