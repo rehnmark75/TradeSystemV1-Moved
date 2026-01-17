@@ -143,9 +143,11 @@ class BacktestOrderLogger:
                 failure_reason = 'Validation Failed'
                 detailed_reason = 'No specific validation message provided'
 
-            # Prefer trailing stop simulation results over potential pips
-            profit_pips = signal.get('max_profit_pips') or signal.get('potential_profit_pips', 0)
-            loss_pips = signal.get('max_loss_pips') or signal.get('potential_loss_pips', 0)
+            # Prefer actual trade simulation results (profit/loss) over MFE/MAE metrics
+            # The 'profit' and 'loss' fields are set by the trailing/VSL simulators
+            # Only fall back to max_profit_pips/max_loss_pips if actual results not available
+            profit_pips = signal.get('profit') or signal.get('max_profit_pips') or signal.get('potential_profit_pips', 0)
+            loss_pips = signal.get('loss') or signal.get('max_loss_pips') or signal.get('potential_loss_pips', 0)
 
             # Get pips_gained from various possible sources
             pips_gained = signal.get('pips_gained', 0)

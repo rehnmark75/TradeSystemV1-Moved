@@ -1769,33 +1769,39 @@ class TradingOrchestrator:
     
     def _calculate_boundary_aligned_sleep(self) -> float:
         """
-        Calculate sleep time to align with 15m candle boundaries.
+        Calculate sleep time to align with candle boundaries based on scan_interval.
 
         When SCAN_ALIGN_TO_BOUNDARIES is enabled, scans are timed to occur
-        shortly after 15m candle closes (:00, :15, :30, :45 + offset).
+        shortly after candle closes + offset. The boundary interval is derived
+        from scan_interval (e.g., 300s = 5m boundaries at :00, :05, :10, etc.).
 
         Returns:
             float: Seconds to sleep before next scan
         """
         from datetime import timedelta
 
-        # Get offset from database config - NO FALLBACK
+        # Get settings from database config
         offset_seconds = self._scanner_cfg.scan_boundary_offset_seconds
+        scan_interval = self._scanner_cfg.scan_interval
+
+        # Derive boundary interval from scan_interval (in minutes)
+        boundary_minutes = max(1, scan_interval // 60)  # Default to scan_interval
 
         now = datetime.utcnow()
         current_minute = now.minute
+        current_second = now.second
 
-        # Find next 15m boundary (0, 15, 30, 45)
-        next_boundary_minute = ((current_minute // 15) + 1) * 15 % 60
+        # Find next boundary based on scan_interval
+        # e.g., for 5m: boundaries at 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55
+        next_boundary_minute = ((current_minute // boundary_minutes) + 1) * boundary_minutes
 
         # Calculate time to next boundary
-        if next_boundary_minute == 0 and current_minute >= 45:
-            # Boundary is at next hour
-            next_boundary = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        if next_boundary_minute >= 60:
+            # Boundary is in next hour
+            next_boundary_minute = next_boundary_minute % 60
+            next_boundary = now.replace(minute=next_boundary_minute, second=0, microsecond=0) + timedelta(hours=1)
         else:
             next_boundary = now.replace(minute=next_boundary_minute, second=0, microsecond=0)
-            if next_boundary < now:
-                next_boundary += timedelta(hours=1)
 
         # Add offset (scan after boundary to allow data to settle)
         target_scan_time = next_boundary + timedelta(seconds=offset_seconds)
@@ -1805,7 +1811,7 @@ class TradingOrchestrator:
 
         # If we're already past the target time for this boundary, calculate for next
         if sleep_seconds < 0:
-            sleep_seconds += 15 * 60  # Add 15 minutes
+            sleep_seconds += boundary_minutes * 60
 
         return max(10, sleep_seconds)  # Minimum 10 seconds between scans
 
