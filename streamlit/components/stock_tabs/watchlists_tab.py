@@ -204,17 +204,37 @@ def render_watchlists_tab(service):
     watchlist_options = list(WATCHLIST_DEFINITIONS.keys())
     watchlist_labels = [f"{WATCHLIST_DEFINITIONS[k]['icon']} {WATCHLIST_DEFINITIONS[k]['name']}" for k in watchlist_options]
 
+    # Initialize selected watchlist in session state if not present
+    if 'selected_watchlist_key' not in st.session_state:
+        st.session_state.selected_watchlist_key = watchlist_options[0]
+
+    # Sync the dropdown widget state with our session state (for button clicks)
+    current_idx = watchlist_options.index(st.session_state.selected_watchlist_key) if st.session_state.selected_watchlist_key in watchlist_options else 0
+
+    # Initialize or sync dropdown state BEFORE widget renders
+    if 'watchlist_selector_dropdown' not in st.session_state:
+        st.session_state.watchlist_selector_dropdown = current_idx
+    elif st.session_state.watchlist_selector_dropdown != current_idx:
+        # Button was clicked - sync dropdown to match
+        st.session_state.watchlist_selector_dropdown = current_idx
+
+    # Callback for when dropdown changes
+    def on_watchlist_dropdown_change():
+        dropdown_idx = st.session_state.watchlist_selector_dropdown
+        st.session_state.selected_watchlist_key = watchlist_options[dropdown_idx]
+
     col_watchlist, col_date = st.columns([3, 1])
 
     with col_watchlist:
-        selected_idx = st.selectbox(
+        st.selectbox(
             "Select Watchlist",
             range(len(watchlist_options)),
             format_func=lambda i: watchlist_labels[i],
-            key="watchlist_selector"
+            key="watchlist_selector_dropdown",
+            on_change=on_watchlist_dropdown_change
         )
 
-    selected_watchlist = watchlist_options[selected_idx]
+    selected_watchlist = st.session_state.selected_watchlist_key
     watchlist_info = WATCHLIST_DEFINITIONS[selected_watchlist]
 
     # Date picker only for event watchlists
@@ -267,22 +287,47 @@ def render_watchlists_tab(service):
     </div>
     """, unsafe_allow_html=True)
 
-    # Quick summary of all watchlists
+    # Quick summary of all watchlists - clickable boxes
     st.markdown("### Watchlist Summary")
+
+    # Add custom CSS for clickable summary boxes
+    st.markdown("""
+    <style>
+    .watchlist-summary-box {
+        padding: 0.5rem;
+        border-radius: 8px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .watchlist-summary-box:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     summary_cols = st.columns(5)
+    watchlist_keys = list(WATCHLIST_DEFINITIONS.keys())
     for i, (wl_key, wl_info) in enumerate(WATCHLIST_DEFINITIONS.items()):
         with summary_cols[i]:
             count = watchlist_stats.get('counts', {}).get(wl_key, 0)
             is_selected = wl_key == selected_watchlist
             bg_color = '#e8f4f8' if is_selected else '#f8f9fa'
             border = '2px solid #1a5f7a' if is_selected else '1px solid #dee2e6'
-            st.markdown(f"""
-            <div style="background: {bg_color}; padding: 0.5rem; border-radius: 8px; text-align: center; border: {border};">
-                <div style="font-size: 1.5rem;">{wl_info['icon']}</div>
-                <div style="font-size: 0.75rem; color: #555;">{wl_info['name'].split()[0]}</div>
-                <div style="font-size: 1.2rem; font-weight: bold; color: #1a5f7a;">{count}</div>
-            </div>
-            """, unsafe_allow_html=True)
+
+            # Create a clickable button styled as a summary box
+            button_key = f"wl_summary_{wl_key}"
+            if st.button(
+                f"{wl_info['icon']} {wl_info['name'].split()[0]}: {count}",
+                key=button_key,
+                use_container_width=True,
+                type="primary" if is_selected else "secondary",
+                help=f"Click to view {wl_info['name']} ({count} stocks)"
+            ):
+                # Update session state and rerun to switch watchlist
+                st.session_state.selected_watchlist_key = wl_key
+                st.rerun()
 
     st.markdown("---")
 
@@ -495,88 +540,200 @@ def render_watchlists_tab(service):
     if 'DAQ' in result_df.columns:
         styled_df = styled_df.map(style_daq, subset=['DAQ'])
 
-    # View mode toggle - Table vs Detail (with DAQ breakdown)
+    # View mode toggle - Expandable vs Table (Expandable is default)
     view_col1, view_col2 = st.columns([3, 1])
     with view_col2:
         view_mode = st.radio(
             "View",
-            ["Table", "Detail"],
+            ["Expandable", "Table"],
             horizontal=True,
             key="watchlist_view_mode",
-            help="Detail view shows DAQ score breakdown for each stock"
+            help="Expandable view lets you click rows to see DAQ breakdown"
         )
 
     if view_mode == "Table":
         # Standard table view
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
     else:
-        # Detail view with expandable DAQ breakdown
-        st.markdown('<div style="max-height: 600px; overflow-y: auto;">', unsafe_allow_html=True)
+        # Expandable view - table-like rows that expand to show DAQ details
+        # Add CSS for table-like styling
+        st.markdown("""
+        <style>
+        .expandable-header {
+            display: grid;
+            grid-template-columns: 80px 60px 70px 60px 80px 80px 60px 70px 70px;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            font-weight: bold;
+            font-size: 0.85rem;
+            color: #495057;
+        }
+        .expandable-row {
+            display: grid;
+            grid-template-columns: 80px 60px 70px 60px 80px 80px 60px 70px 70px;
+            gap: 8px;
+            padding: 6px 12px;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+        .expandable-row:hover {
+            background: #f8f9fa;
+        }
+        .ticker-cell { font-weight: bold; }
+        .price-cell { color: #212529; }
+        .change-positive { color: #28a745; font-weight: bold; }
+        .change-negative { color: #dc3545; font-weight: bold; }
+        .rs-badge {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+        .rs-elite { background: #d4edda; color: #155724; }
+        .rs-strong { background: #d1ecf1; color: #0c5460; }
+        .rs-average { background: #fff3cd; color: #856404; }
+        .rs-weak { background: #f8d7da; color: #721c24; }
+        .daq-badge {
+            padding: 2px 8px;
+            border-radius: 4px;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .daq-aplus { background: #1e7e34; }
+        .daq-a { background: #28a745; }
+        .daq-b { background: #17a2b8; }
+        .daq-c { background: #ffc107; color: #212529; }
+        .daq-d { background: #6c757d; }
+        </style>
+        """, unsafe_allow_html=True)
 
-        for idx, row in df.iterrows():
+        # Sort by crossover date (most recent first) then by days on list
+        if 'crossover_date' in df.columns:
+            df_sorted = df.sort_values(['crossover_date', 'days_on_list'], ascending=[False, True])
+        elif 'days_on_list' in df.columns:
+            df_sorted = df.sort_values('days_on_list', ascending=True)
+        else:
+            df_sorted = df
+
+        # Rows with expanders
+        for idx, row in df_sorted.iterrows():
             ticker = row['ticker']
-            price = row.get('price', 0)
+            price = row.get('price', 0) or 0
+            volume = row.get('volume', 0) or 0
+            rsi = row.get('rsi_14')
             rs = row.get('rs_percentile')
             rs_trend = row.get('rs_trend', '')
             daq_score = row.get('daq_score')
             daq_grade = row.get('daq_grade', '')
-            change_1d = row.get('price_change_1d', 0)
+            change_1d = row.get('price_change_1d', 0) or 0
+            avg_daily = row.get('avg_daily_change_5d', 0) or 0
+            days_on_list = row.get('days_on_list', 1) or 1
 
-            # Build summary line
+            # Format values
+            price_str = f"${price:.2f}"
+            volume_str = f"{volume/1e6:.1f}M" if volume else "-"
+            rsi_str = f"{int(rsi)}" if rsi and not pd.isna(rsi) else "-"
+            days_str = f"{int(days_on_list)}d"
+            avg_str = f"{avg_daily:.1f}%" if avg_daily else "-"
+
+            # RS formatting
             rs_icon = RS_TREND_ICONS.get(rs_trend, '')
-            rs_str = f"RS {int(rs)}{rs_icon}" if rs and not pd.isna(rs) else ""
+            if rs and not pd.isna(rs):
+                rs_val = int(rs)
+                if rs_val >= 90:
+                    rs_class = "rs-elite"
+                elif rs_val >= 70:
+                    rs_class = "rs-strong"
+                elif rs_val >= 40:
+                    rs_class = "rs-average"
+                else:
+                    rs_class = "rs-weak"
+                rs_html = f'<span class="rs-badge {rs_class}">{rs_val}{rs_icon}</span>'
+            else:
+                rs_html = "-"
 
-            # DAQ badge with color
+            # DAQ formatting
             if daq_score and not pd.isna(daq_score):
-                grade_colors = {'A+': '#1e7e34', 'A': '#28a745', 'B': '#17a2b8', 'C': '#ffc107', 'D': '#6c757d'}
-                daq_color = grade_colors.get(daq_grade, '#6c757d')
-                daq_str = f'<span style="background: {daq_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.85rem;">{int(daq_score)} {daq_grade}</span>'
+                daq_val = int(daq_score)
+                if daq_val >= 85:
+                    daq_class = "daq-aplus"
+                elif daq_val >= 70:
+                    daq_class = "daq-a"
+                elif daq_val >= 60:
+                    daq_class = "daq-b"
+                elif daq_val >= 50:
+                    daq_class = "daq-c"
+                else:
+                    daq_class = "daq-d"
+                daq_html = f'<span class="daq-badge {daq_class}">{daq_val} {daq_grade}</span>'
             else:
-                daq_str = ""
+                daq_html = "-"
 
-            # Risk badges
-            risk_badges = _get_risk_badges(row.to_dict())
-
-            # Change string for expander title (plain text)
-            if change_1d and not pd.isna(change_1d):
-                change_prefix = "+" if change_1d >= 0 else ""
-                change_str_plain = f"({change_prefix}{change_1d:.1f}%)"
-                change_color = '#28a745' if change_1d >= 0 else '#dc3545'
-                change_str_html = f'<span style="color: {change_color}; font-weight: bold;">{change_1d:+.1f}%</span>'
+            # Change formatting
+            if change_1d >= 0:
+                change_html = f'<span class="change-positive">+{change_1d:.1f}%</span>'
             else:
-                change_str_plain = ""
-                change_str_html = ""
+                change_html = f'<span class="change-negative">{change_1d:.1f}%</span>'
 
-            # Build expander label with DAQ indicator
-            daq_indicator = f" | DAQ {int(daq_score)}{daq_grade}" if daq_score and not pd.isna(daq_score) else ""
+            # Risk indicators for expander title
             risk_indicator = ""
             if row.get('daq_earnings_risk'):
                 risk_indicator += " ⚠️"
             if row.get('daq_high_short_interest'):
                 risk_indicator += " 🩳"
 
-            # Expander title with key metrics
-            with st.expander(f"{ticker} - ${price:.2f} {change_str_plain}{daq_indicator}{risk_indicator}", expanded=False):
-                # Summary row
-                st.markdown(f'''
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;">
-                    <span style="font-size: 1.1rem; font-weight: bold;">{ticker}</span>
-                    <span style="color: #555;">${price:.2f}</span>
-                    {change_str_html}
-                    <span style="background: #e8f4f8; padding: 2px 8px; border-radius: 4px;">{rs_str}</span>
-                    {daq_str}
-                    {risk_badges}
+            # Build expander label with key metrics - more comprehensive header
+            # Format: TICKER | Xd | RS XX | DAQ XX G | $price (+X.X%)
+            days_label = f"{int(days_on_list)}d"
+            rs_label = f"RS {int(rs)}" if rs and not pd.isna(rs) else "RS -"
+            daq_label = f"DAQ {int(daq_score)} {daq_grade}" if daq_score and not pd.isna(daq_score) else "DAQ -"
+            change_sign = "+" if change_1d >= 0 else ""
+
+            # Get crossover date for display
+            crossover_date = row.get('crossover_date')
+            if crossover_date and not pd.isna(crossover_date):
+                crossover_str = f" | {crossover_date.strftime('%m/%d')}"
+            else:
+                crossover_str = ""
+
+            # Determine if this is an "interesting" stock worth highlighting
+            # Criteria: RS >= 70 AND DAQ >= 60 (grade B or better) AND recent crossover (≤5 days)
+            rs_val_check = int(rs) if rs and not pd.isna(rs) else 0
+            daq_val_check = int(daq_score) if daq_score and not pd.isna(daq_score) else 0
+            is_interesting = (rs_val_check >= 70 and daq_val_check >= 60 and days_on_list <= 5)
+            is_very_interesting = (rs_val_check >= 80 and daq_val_check >= 70 and days_on_list <= 3)
+
+            # Add highlight indicator to label
+            if is_very_interesting:
+                highlight_prefix = "🟢 "  # Green circle for very interesting
+            elif is_interesting:
+                highlight_prefix = "🟡 "  # Yellow circle for interesting
+            else:
+                highlight_prefix = ""
+
+            with st.expander(f"{highlight_prefix}**{ticker}** | {days_label}{crossover_str} | {rs_label} | {daq_label} | ${price:.2f} ({change_sign}{change_1d:.1f}%){risk_indicator}", expanded=False):
+                # Show row data in a formatted grid
+                st.markdown(f"""
+                <div class="expandable-row" style="background: #f8f9fa; border-radius: 4px; margin-bottom: 8px;">
+                    <span class="ticker-cell">{ticker}</span>
+                    <span>{rs_html}</span>
+                    <span>{daq_html}</span>
+                    <span>{days_str}</span>
+                    <span class="price-cell">{price_str}</span>
+                    <span>{volume_str}</span>
+                    <span>{rsi_str}</span>
+                    <span>{change_html}</span>
+                    <span>{avg_str}</span>
                 </div>
-                ''', unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
                 # DAQ detail breakdown (only if DAQ data exists)
                 if daq_score and not pd.isna(daq_score):
-                    st.markdown("---")
                     _render_daq_detail(row.to_dict())
                 else:
-                    st.caption("No DAQ analysis available - run deep analysis to see breakdown")
-
-        st.markdown('</div>', unsafe_allow_html=True)
+                    st.caption("No DAQ analysis available")
 
     # Quick actions
     st.markdown("---")

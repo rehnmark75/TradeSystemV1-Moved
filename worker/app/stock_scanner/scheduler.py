@@ -453,11 +453,12 @@ class StockScheduler:
         logger.info("\n[STAGE 6b/11] Running watchlist DAQ scoring...")
         try:
             if self.deep_analysis_orchestrator and DEEP_ANALYSIS_AVAILABLE:
-                # Run DAQ analysis on tier 1-2 watchlist stocks (top 200)
+                # Run DAQ analysis on ALL tier 1-2 watchlist stocks (no limit)
+                # Analysis averages ~600ms/stock with 5 concurrent = ~2min for 800 stocks
                 daq_results = await self.deep_analysis_orchestrator.auto_analyze_watchlist(
                     max_tier=2,
                     calculation_date=data_date,
-                    max_tickers=200,
+                    max_tickers=2000,  # Effectively no limit for tier 1-2 (~600-800 stocks)
                     skip_analyzed=True  # Don't re-analyze stocks that already have DAQ
                 )
                 successful = [r for r in daq_results if r.daq_score is not None]
@@ -544,11 +545,11 @@ class StockScheduler:
         logger.info("\n[STAGE 8b/11] Running technical watchlist DAQ scoring...")
         try:
             if self.deep_analysis_orchestrator and DEEP_ANALYSIS_AVAILABLE:
-                # Run DAQ analysis on technical watchlist stocks (EMA crossovers, MACD, etc.)
+                # Run DAQ analysis on ALL technical watchlist stocks (no limit)
                 tech_wl_results = await self.deep_analysis_orchestrator.auto_analyze_technical_watchlist(
                     watchlist_name=None,  # Analyze all watchlist types
                     scan_date=str(data_date),
-                    max_tickers=200,
+                    max_tickers=2000,  # Effectively no limit
                     skip_analyzed=True  # Don't re-analyze stocks that already have DAQ
                 )
                 successful = [r for r in tech_wl_results if r.daq_score is not None]
@@ -1490,7 +1491,7 @@ async def run_once(task: str):
                 results = await scheduler.deep_analysis_orchestrator.auto_analyze_technical_watchlist(
                     watchlist_name=None,
                     scan_date=None,
-                    max_tickers=200,
+                    max_tickers=2000,  # Effectively no limit
                     skip_analyzed=True
                 )
                 successful = [r for r in results if r.daq_score is not None]
