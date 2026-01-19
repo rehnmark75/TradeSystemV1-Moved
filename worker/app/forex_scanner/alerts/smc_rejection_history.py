@@ -77,6 +77,8 @@ class SMCRejectionHistoryManager:
     STAGE_NEWS_FILTER = 'NEWS_FILTER'  # Economic news filter rejection
     STAGE_MARKET_HOURS = 'MARKET_HOURS'  # Outside trading hours rejection
     STAGE_VALIDATION_FAILED = 'VALIDATION_FAILED'  # Generic validation failure
+    # v2.24.0: Scalp mode entry filters
+    STAGE_SCALP_ENTRY_FILTER = 'SCALP_ENTRY_FILTER'  # Scalp mode RSI/momentum filters
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
@@ -87,7 +89,9 @@ class SMCRejectionHistoryManager:
         # v2.11.0: TradeValidator rejection stages
         STAGE_SR_LEVEL, STAGE_SR_CLUSTER, STAGE_EMA200_FILTER,
         STAGE_CLAUDE_FILTER, STAGE_NEWS_FILTER, STAGE_MARKET_HOURS,
-        STAGE_VALIDATION_FAILED
+        STAGE_VALIDATION_FAILED,
+        # v2.24.0: Scalp mode filters
+        STAGE_SCALP_ENTRY_FILTER
     ]
 
     def __init__(self, db_manager, config=None):
