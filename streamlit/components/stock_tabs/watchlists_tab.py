@@ -10,6 +10,7 @@ Stock Scanner Watchlists Tab
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, date
 from typing import Dict, Any, Optional
@@ -122,6 +123,223 @@ def _get_risk_badges(row: Dict[str, Any]) -> str:
     if row.get('daq_sector_underperforming'):
         badges.append('<span style="background: #6c757d; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem;" title="Sector underperforming SPY">SECTOR WEAK</span>')
     return ''.join(badges) if badges else ''
+
+
+def _render_trade_plan(row: Dict[str, Any]) -> None:
+    """Render the Trade Plan section with entry, stop loss, targets, and R:R."""
+    price = row.get('price', 0) or 0
+    entry_low = row.get('suggested_entry_low')
+    entry_high = row.get('suggested_entry_high')
+    stop_loss = row.get('suggested_stop_loss')
+    target_1 = row.get('suggested_target_1')
+    target_2 = row.get('suggested_target_2')
+    risk_reward = row.get('risk_reward_ratio')
+    risk_percent = row.get('risk_percent')
+    atr_14 = row.get('atr_14')
+    atr_percent = row.get('atr_percent')
+    swing_high = row.get('swing_high')
+    swing_low = row.get('swing_low')
+    swing_high_date = row.get('swing_high_date')
+    swing_low_date = row.get('swing_low_date')
+    volume_trend = row.get('volume_trend', '')
+    relative_volume = row.get('relative_volume')
+    rs_percentile = row.get('rs_percentile')
+    rs_trend = row.get('rs_trend', '')
+    earnings_date = row.get('earnings_date')
+    days_to_earnings = row.get('days_to_earnings')
+    daq_earnings_risk = row.get('daq_earnings_risk', False)
+
+    # Check if we have enough data to display
+    has_trade_plan = any([entry_low, stop_loss, target_1])
+    has_sr_levels = any([swing_high, swing_low])
+    has_volatility = any([atr_14, atr_percent])
+
+    if not has_trade_plan and not has_sr_levels and not has_volatility:
+        st.caption("No trade plan data available")
+        return
+
+    # Trade Plan header
+    st.markdown("""
+    <div style="font-weight: bold; font-size: 1rem; color: #1a5f7a; margin: 10px 0 8px 0; border-bottom: 2px solid #1a5f7a; padding-bottom: 4px;">
+        Trade Plan
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Earnings warning banner (if applicable)
+    if days_to_earnings is not None and not pd.isna(days_to_earnings):
+        days_int = int(days_to_earnings)
+        earnings_str = earnings_date.strftime('%m/%d') if earnings_date and not pd.isna(earnings_date) else ''
+        if days_int <= 3:
+            # Critical - earnings imminent
+            st.markdown(f"""
+            <div style="background: #dc3545; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 0.9rem;">
+                <strong>EARNINGS IMMINENT</strong> - Reporting on {earnings_str} ({days_int} day{"s" if days_int != 1 else ""} away). High volatility expected. Consider reducing position size or avoiding.
+            </div>
+            """, unsafe_allow_html=True)
+        elif days_int <= 7:
+            # Warning - earnings within a week
+            st.markdown(f"""
+            <div style="background: #fd7e14; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 0.9rem;">
+                <strong>EARNINGS WARNING</strong> - Reports {earnings_str} ({days_int} days away). Plan exit or hedge before announcement.
+            </div>
+            """, unsafe_allow_html=True)
+        elif days_int <= 14:
+            # Info - earnings upcoming
+            st.markdown(f"""
+            <div style="background: #ffc107; color: #212529; padding: 6px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 0.85rem;">
+                Earnings: {earnings_str} ({days_int} days) - Monitor for pre-earnings run or positioning
+            </div>
+            """, unsafe_allow_html=True)
+    elif daq_earnings_risk:
+        # Fallback to DAQ flag if no specific date
+        st.markdown("""
+        <div style="background: #dc3545; color: white; padding: 6px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 0.85rem;">
+            <strong>EARNINGS RISK</strong> - Earnings expected within 7 days. High volatility possible.
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Create three columns for layout
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        # Entry Zone and Stop Loss
+        st.markdown('<div style="font-weight: bold; color: #495057; margin-bottom: 4px;">Entry & Risk</div>', unsafe_allow_html=True)
+
+        if entry_low and entry_high and not pd.isna(entry_low) and not pd.isna(entry_high):
+            entry_pct_low = ((entry_low - price) / price * 100) if price > 0 else 0
+            entry_pct_high = ((entry_high - price) / price * 100) if price > 0 else 0
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">Entry Zone:</span>
+                <span style="color: #28a745; font-weight: bold;">${entry_low:.2f} - ${entry_high:.2f}</span>
+                <span style="color: #888; font-size: 0.75rem;">({entry_pct_low:+.1f}% to {entry_pct_high:+.1f}%)</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if stop_loss and not pd.isna(stop_loss):
+            sl_pct = ((stop_loss - price) / price * 100) if price > 0 else 0
+            sl_color = '#dc3545'
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">Stop Loss:</span>
+                <span style="color: {sl_color}; font-weight: bold;">${stop_loss:.2f}</span>
+                <span style="color: #888; font-size: 0.75rem;">({sl_pct:+.1f}%)</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if risk_percent and not pd.isna(risk_percent):
+            risk_color = '#dc3545' if risk_percent > 5 else '#ffc107' if risk_percent > 3 else '#28a745'
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">Risk:</span>
+                <span style="color: {risk_color}; font-weight: bold;">{risk_percent:.1f}%</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with col2:
+        # Targets
+        st.markdown('<div style="font-weight: bold; color: #495057; margin-bottom: 4px;">Targets</div>', unsafe_allow_html=True)
+
+        if target_1 and not pd.isna(target_1):
+            t1_pct = ((target_1 - price) / price * 100) if price > 0 else 0
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">Target 1:</span>
+                <span style="color: #28a745; font-weight: bold;">${target_1:.2f}</span>
+                <span style="color: #888; font-size: 0.75rem;">(+{t1_pct:.1f}%)</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if target_2 and not pd.isna(target_2):
+            t2_pct = ((target_2 - price) / price * 100) if price > 0 else 0
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">Target 2:</span>
+                <span style="color: #17a2b8; font-weight: bold;">${target_2:.2f}</span>
+                <span style="color: #888; font-size: 0.75rem;">(+{t2_pct:.1f}%)</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if risk_reward and not pd.isna(risk_reward):
+            rr_color = '#28a745' if risk_reward >= 2 else '#ffc107' if risk_reward >= 1.5 else '#dc3545'
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">R:R Ratio:</span>
+                <span style="color: {rr_color}; font-weight: bold;">1:{risk_reward:.1f}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with col3:
+        # Support/Resistance and Volatility
+        st.markdown('<div style="font-weight: bold; color: #495057; margin-bottom: 4px;">Key Levels</div>', unsafe_allow_html=True)
+
+        if swing_high and not pd.isna(swing_high):
+            sh_pct = ((swing_high - price) / price * 100) if price > 0 else 0
+            date_str = swing_high_date.strftime('%m/%d') if swing_high_date and not pd.isna(swing_high_date) else ''
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">Resistance:</span>
+                <span style="color: #dc3545; font-weight: bold;">${swing_high:.2f}</span>
+                <span style="color: #888; font-size: 0.75rem;">(+{sh_pct:.1f}% {date_str})</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if swing_low and not pd.isna(swing_low):
+            sl_pct = ((swing_low - price) / price * 100) if price > 0 else 0
+            date_str = swing_low_date.strftime('%m/%d') if swing_low_date and not pd.isna(swing_low_date) else ''
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">Support:</span>
+                <span style="color: #28a745; font-weight: bold;">${swing_low:.2f}</span>
+                <span style="color: #888; font-size: 0.75rem;">({sl_pct:+.1f}% {date_str})</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if atr_percent and not pd.isna(atr_percent):
+            atr_color = '#dc3545' if atr_percent > 5 else '#ffc107' if atr_percent > 3 else '#28a745'
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">ATR%:</span>
+                <span style="color: {atr_color}; font-weight: bold;">{atr_percent:.1f}%</span>
+                <span style="color: #888; font-size: 0.75rem;">(${atr_14:.2f})</span>
+            </div>
+            """, unsafe_allow_html=True) if atr_14 and not pd.isna(atr_14) else None
+
+    # Second row: Volume and RS context
+    if volume_trend or relative_volume or rs_percentile:
+        st.markdown('<div style="margin-top: 8px;"></div>', unsafe_allow_html=True)
+        vol_col, rs_col = st.columns(2)
+
+        with vol_col:
+            if volume_trend:
+                vol_icons = {
+                    'accumulation': ('Accumulation', '#28a745', 'Buying pressure'),
+                    'distribution': ('Distribution', '#dc3545', 'Selling pressure'),
+                    'neutral': ('Neutral', '#6c757d', 'Balanced flow')
+                }
+                vol_label, vol_color, vol_desc = vol_icons.get(volume_trend, ('Unknown', '#6c757d', ''))
+                rvol_str = f" ({relative_volume:.1f}x avg)" if relative_volume and not pd.isna(relative_volume) else ""
+                st.markdown(f"""
+                <div style="font-size: 0.85rem;">
+                    <span style="color: #666;">Volume:</span>
+                    <span style="color: {vol_color}; font-weight: bold;">{vol_label}</span>
+                    <span style="color: #888; font-size: 0.75rem;">{rvol_str} - {vol_desc}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with rs_col:
+            if rs_percentile and not pd.isna(rs_percentile):
+                rs_val = int(rs_percentile)
+                rs_icon = RS_TREND_ICONS.get(rs_trend, '')
+                rs_color = _get_rs_color(rs_val)
+                trend_desc = {'improving': 'gaining strength', 'stable': 'holding steady', 'deteriorating': 'weakening'}.get(rs_trend, '')
+                st.markdown(f"""
+                <div style="font-size: 0.85rem;">
+                    <span style="color: #666;">Relative Strength:</span>
+                    <span style="color: {rs_color}; font-weight: bold;">{rs_val}th %ile {rs_icon}</span>
+                    <span style="color: #888; font-size: 0.75rem;">({trend_desc})</span>
+                </div>
+                """, unsafe_allow_html=True)
 
 
 def _render_daq_detail(row: Dict[str, Any]) -> None:
@@ -729,11 +947,27 @@ def render_watchlists_tab(service):
                 </div>
                 """, unsafe_allow_html=True)
 
+                # Trade Plan section - always show first as it's most actionable
+                _render_trade_plan(row.to_dict())
+
                 # DAQ detail breakdown (only if DAQ data exists)
                 if daq_score and not pd.isna(daq_score):
                     _render_daq_detail(row.to_dict())
-                else:
-                    st.caption("No DAQ analysis available")
+
+                # Button to open chart and analysis for this stock
+                if st.button(f"📈 Open {ticker} Chart & Analysis", key=f"chart_btn_{ticker}"):
+                    st.session_state.chart_ticker = ticker
+                    st.session_state.current_chart_ticker = ticker
+                    # Use components.html to inject JavaScript that clicks the Chart tab
+                    components.html("""
+                    <script>
+                        // Find and click the Chart & Analysis tab (index 7)
+                        const tabs = parent.document.querySelectorAll('[data-baseweb="tab"]');
+                        if (tabs.length >= 8) {
+                            tabs[7].click();
+                        }
+                    </script>
+                    """, height=0)
 
     # Quick actions
     st.markdown("---")

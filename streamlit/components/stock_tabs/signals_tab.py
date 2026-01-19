@@ -9,6 +9,7 @@ Unified view of all scanner signals with:
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
@@ -143,6 +144,195 @@ def _get_risk_badges_html(earnings_risk: bool, high_short: bool, sector_weak: bo
     if sector_weak:
         badges.append('<span style="background: #6c757d; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem;" title="Sector underperforming SPY">SECTOR WEAK</span>')
     return ''.join(badges) if badges else ''
+
+
+def _render_signal_trade_plan(signal: Dict[str, Any]) -> None:
+    """Render the Trade Plan section for a signal with fixed 3% SL / 5% TP.
+
+    Uses entry_price from the signal to calculate:
+    - Entry Zone: entry_price -0.5% to +1%
+    - Stop Loss: 3% below entry
+    - Target 1: 5% above entry
+    - Target 2: 10% above entry
+    - R:R Ratio: 1.67 (fixed)
+
+    Also displays support/resistance levels and ATR for context.
+    """
+    entry = float(signal.get('entry_price', 0) or 0)
+    if entry <= 0:
+        return
+
+    # Fixed trade parameters (learning phase)
+    stop_loss = entry * 0.97  # 3% below
+    target_1 = entry * 1.05   # 5% above
+    target_2 = entry * 1.10   # 10% above
+    entry_low = entry * 0.995
+    entry_high = entry * 1.01
+    risk_pct = 3.0
+    rr_ratio = 1.67
+
+    # Key levels from screening metrics (convert Decimal to float for arithmetic)
+    swing_high = float(signal.get('swing_high')) if signal.get('swing_high') is not None else None
+    swing_low = float(signal.get('swing_low')) if signal.get('swing_low') is not None else None
+    swing_high_date = signal.get('swing_high_date')
+    swing_low_date = signal.get('swing_low_date')
+    atr_14 = signal.get('atr_14')
+    atr_percent = signal.get('atr_percent')
+    relative_volume = signal.get('relative_volume')
+    rs_percentile = signal.get('rs_percentile')
+    rs_trend = signal.get('rs_trend')
+
+    # Earnings data
+    earnings_date = signal.get('earnings_date')
+    days_to_earnings = signal.get('days_to_earnings')
+    earnings_risk = signal.get('earnings_within_7d', False)
+
+    # Trade Plan header
+    st.markdown("""
+    <div style="font-weight: bold; font-size: 1rem; color: #1a5f7a; margin: 10px 0 8px 0; border-bottom: 2px solid #1a5f7a; padding-bottom: 4px;">
+        Trade Plan (3% SL / 5% TP)
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Earnings warning banner
+    if days_to_earnings is not None and not pd.isna(days_to_earnings):
+        days_int = int(days_to_earnings)
+        earnings_str = earnings_date.strftime('%m/%d') if earnings_date and not pd.isna(earnings_date) else ''
+        if days_int <= 3:
+            st.markdown(f"""
+            <div style="background: #dc3545; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 0.9rem;">
+                <strong>EARNINGS IMMINENT</strong> - Reporting on {earnings_str} ({days_int} day{"s" if days_int != 1 else ""} away). High volatility expected.
+            </div>
+            """, unsafe_allow_html=True)
+        elif days_int <= 7:
+            st.markdown(f"""
+            <div style="background: #fd7e14; color: white; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 0.9rem;">
+                <strong>EARNINGS WARNING</strong> - Reports {earnings_str} ({days_int} days away). Plan exit before announcement.
+            </div>
+            """, unsafe_allow_html=True)
+        elif days_int <= 14:
+            st.markdown(f"""
+            <div style="background: #ffc107; color: #212529; padding: 6px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 0.85rem;">
+                Earnings: {earnings_str} ({days_int} days) - Monitor for pre-earnings positioning
+            </div>
+            """, unsafe_allow_html=True)
+    elif earnings_risk:
+        st.markdown("""
+        <div style="background: #dc3545; color: white; padding: 6px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 0.85rem;">
+            <strong>EARNINGS RISK</strong> - Earnings expected within 7 days.
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Three columns layout
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown('<div style="font-weight: bold; color: #495057; margin-bottom: 4px;">Entry & Risk</div>', unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style="font-size: 0.85rem; margin: 2px 0;">
+            <span style="color: #666;">Entry Zone:</span>
+            <span style="color: #28a745; font-weight: bold;">${entry_low:.2f} - ${entry_high:.2f}</span>
+        </div>
+        <div style="font-size: 0.85rem; margin: 2px 0;">
+            <span style="color: #666;">Stop Loss:</span>
+            <span style="color: #dc3545; font-weight: bold;">${stop_loss:.2f}</span>
+            <span style="color: #888; font-size: 0.75rem;">(-{risk_pct:.0f}%)</span>
+        </div>
+        <div style="font-size: 0.85rem; margin: 2px 0;">
+            <span style="color: #666;">Risk:</span>
+            <span style="color: #28a745; font-weight: bold;">{risk_pct:.1f}%</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown('<div style="font-weight: bold; color: #495057; margin-bottom: 4px;">Targets</div>', unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style="font-size: 0.85rem; margin: 2px 0;">
+            <span style="color: #666;">Target 1:</span>
+            <span style="color: #28a745; font-weight: bold;">${target_1:.2f}</span>
+            <span style="color: #888; font-size: 0.75rem;">(+5%)</span>
+        </div>
+        <div style="font-size: 0.85rem; margin: 2px 0;">
+            <span style="color: #666;">Target 2:</span>
+            <span style="color: #17a2b8; font-weight: bold;">${target_2:.2f}</span>
+            <span style="color: #888; font-size: 0.75rem;">(+10%)</span>
+        </div>
+        <div style="font-size: 0.85rem; margin: 2px 0;">
+            <span style="color: #666;">R:R Ratio:</span>
+            <span style="color: #ffc107; font-weight: bold;">1:{rr_ratio:.1f}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown('<div style="font-weight: bold; color: #495057; margin-bottom: 4px;">Key Levels</div>', unsafe_allow_html=True)
+        levels_html = ""
+        if swing_high and not pd.isna(swing_high):
+            sh_pct = ((swing_high - entry) / entry * 100) if entry > 0 else 0
+            date_str = swing_high_date.strftime('%m/%d') if swing_high_date and not pd.isna(swing_high_date) else ''
+            levels_html += f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">Resistance:</span>
+                <span style="color: #dc3545; font-weight: bold;">${swing_high:.2f}</span>
+                <span style="color: #888; font-size: 0.75rem;">(+{sh_pct:.1f}% {date_str})</span>
+            </div>
+            """
+        if swing_low and not pd.isna(swing_low):
+            sl_pct = ((swing_low - entry) / entry * 100) if entry > 0 else 0
+            date_str = swing_low_date.strftime('%m/%d') if swing_low_date and not pd.isna(swing_low_date) else ''
+            levels_html += f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">Support:</span>
+                <span style="color: #28a745; font-weight: bold;">${swing_low:.2f}</span>
+                <span style="color: #888; font-size: 0.75rem;">({sl_pct:+.1f}% {date_str})</span>
+            </div>
+            """
+        if atr_percent and not pd.isna(atr_percent):
+            atr_color = '#dc3545' if atr_percent > 5 else '#ffc107' if atr_percent > 3 else '#28a745'
+            atr_val = f"${atr_14:.2f}" if atr_14 and not pd.isna(atr_14) else ""
+            levels_html += f"""
+            <div style="font-size: 0.85rem; margin: 2px 0;">
+                <span style="color: #666;">ATR%:</span>
+                <span style="color: {atr_color}; font-weight: bold;">{atr_percent:.1f}%</span>
+                <span style="color: #888; font-size: 0.75rem;">({atr_val})</span>
+            </div>
+            """
+        if levels_html:
+            st.markdown(levels_html, unsafe_allow_html=True)
+        else:
+            st.caption("No key levels data")
+
+    # Volume and RS context row
+    if relative_volume or rs_percentile:
+        st.markdown('<div style="margin-top: 8px;"></div>', unsafe_allow_html=True)
+        vol_col, rs_col = st.columns(2)
+
+        with vol_col:
+            if relative_volume and not pd.isna(relative_volume):
+                if relative_volume >= 1.5:
+                    vol_label, vol_color = 'Accumulation', '#28a745'
+                elif relative_volume <= 0.7:
+                    vol_label, vol_color = 'Distribution', '#dc3545'
+                else:
+                    vol_label, vol_color = 'Neutral', '#6c757d'
+                st.markdown(f"""
+                <div style="font-size: 0.85rem;">
+                    <span style="color: #666;">Volume:</span>
+                    <span style="color: {vol_color}; font-weight: bold;">{vol_label}</span>
+                    <span style="color: #888; font-size: 0.75rem;">({relative_volume:.1f}x avg)</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with rs_col:
+            if rs_percentile and not pd.isna(rs_percentile):
+                rs_val = int(rs_percentile)
+                rs_icon = RS_TREND_ICONS.get(rs_trend, '')
+                rs_color = _get_rs_color(rs_val)
+                st.markdown(f"""
+                <div style="font-size: 0.85rem;">
+                    <span style="color: #666;">Relative Strength:</span>
+                    <span style="color: {rs_color}; font-weight: bold;">{rs_val}th %ile {rs_icon}</span>
+                </div>
+                """, unsafe_allow_html=True)
 
 
 def _render_daq_visual_breakdown(
@@ -304,7 +494,7 @@ def render_signals_tab(service):
     with col3:
         status_filter = st.selectbox(
             "Status",
-            ["active", "triggered", "closed", "expired", "All"]
+            ["All", "active", "triggered", "closed", "expired"]
         )
 
     with col4:
@@ -319,8 +509,8 @@ def render_signals_tab(service):
     with col1:
         date_from = st.date_input(
             "Signal Date From",
-            value=datetime.now().date() - timedelta(days=1),
-            help="Filter signals detected from this date"
+            value=datetime.now().date() - timedelta(days=7),
+            help="Filter signals detected from this date (default: last 7 days)"
         )
 
     with col2:
@@ -730,6 +920,9 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
         if factors_str:
             st.caption(f"**Factors:** {factors_str}")
 
+        # Trade Plan Section (fixed 3% SL / 5% TP for learning)
+        _render_signal_trade_plan(signal)
+
         # Relative Strength Section (if data available)
         if rs_percentile is not None:
             st.markdown("---")
@@ -888,8 +1081,23 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
         else:
             st.caption("📰 *No news data yet - click 'Enrich with News' to fetch*")
 
-        # Position Calculator Section
+        # Chart & Analysis navigation button
         st.markdown("---")
+        if st.button(f"📈 Open {ticker} Chart & Analysis", key=f"chart_btn_{signal_id}"):
+            st.session_state.chart_ticker = ticker
+            st.session_state.current_chart_ticker = ticker
+            # Use components.html to inject JavaScript that clicks the Chart tab
+            components.html("""
+            <script>
+                // Find and click the Chart & Analysis tab (index 7)
+                const tabs = parent.document.querySelectorAll('[data-baseweb="tab"]');
+                if (tabs.length >= 8) {
+                    tabs[7].click();
+                }
+            </script>
+            """, height=0)
+
+        # Position Calculator Section
         if st.checkbox(f"📐 Calculate Position Size", key=f"pos_calc_{signal_id}", value=False):
             _render_inline_position_calculator(ticker, entry, stop, signal_id)
 

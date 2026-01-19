@@ -1719,7 +1719,22 @@ Analyze and respond in this exact JSON format:
                 d.earnings_within_7d,
                 d.high_short_interest,
                 d.sector_underperforming,
-                d.analysis_timestamp as daq_analyzed_at
+                d.analysis_timestamp as daq_analyzed_at,
+                -- Trading metrics for Trade Plan (from screening metrics)
+                m.atr_14,
+                m.atr_percent,
+                m.swing_high,
+                m.swing_low,
+                m.swing_high_date,
+                m.swing_low_date,
+                m.relative_volume,
+                -- Earnings from instruments
+                i.earnings_date,
+                CASE
+                    WHEN i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE
+                    THEN (i.earnings_date - CURRENT_DATE)
+                    ELSE NULL
+                END as days_to_earnings
             FROM latest_signals s
             LEFT JOIN stock_instruments i ON s.ticker = i.ticker
             LEFT JOIN latest_news n ON s.ticker = n.ticker
@@ -2926,9 +2941,7 @@ Respond in this exact JSON format:
                     CASE WHEN s.ticker IS NOT NULL THEN true ELSE false END as has_signal,
                     s.quality_tier as signal_tier,
                     s.signal_type,
-                    m.avg_daily_change_5d,
-                    m.rs_percentile,
-                    m.rs_trend,
+                    COALESCE(w.avg_daily_change_5d, m.avg_daily_change_5d) as avg_daily_change_5d,
                     m.rs_vs_spy,
                     CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
                     t.side as trade_side,
@@ -2947,7 +2960,36 @@ Respond in this exact JSON format:
                     -- DAQ risk flags
                     w.daq_earnings_risk,
                     w.daq_high_short_interest,
-                    w.daq_sector_underperforming
+                    w.daq_sector_underperforming,
+                    -- Trading metrics (Trade Plan)
+                    w.atr_14,
+                    w.atr_percent,
+                    w.swing_high,
+                    w.swing_low,
+                    w.swing_high_date,
+                    w.swing_low_date,
+                    w.nearest_ob_price,
+                    w.nearest_ob_type,
+                    w.nearest_ob_distance,
+                    w.suggested_entry_low,
+                    w.suggested_entry_high,
+                    w.suggested_stop_loss,
+                    w.suggested_target_1,
+                    w.suggested_target_2,
+                    w.risk_reward_ratio,
+                    w.risk_percent,
+                    w.volume_trend,
+                    w.relative_volume,
+                    -- RS trend from watchlist (if populated) or fallback to metrics
+                    COALESCE(w.rs_percentile, m.rs_percentile) as rs_percentile,
+                    COALESCE(w.rs_trend, m.rs_trend) as rs_trend,
+                    -- Earnings from instruments
+                    i.earnings_date,
+                    CASE
+                        WHEN i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE
+                        THEN (i.earnings_date - CURRENT_DATE)
+                        ELSE NULL
+                    END as days_to_earnings
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
                 LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -2998,9 +3040,7 @@ Respond in this exact JSON format:
                     CASE WHEN s.ticker IS NOT NULL THEN true ELSE false END as has_signal,
                     s.quality_tier as signal_tier,
                     s.signal_type,
-                    m.avg_daily_change_5d,
-                    m.rs_percentile,
-                    m.rs_trend,
+                    COALESCE(w.avg_daily_change_5d, m.avg_daily_change_5d) as avg_daily_change_5d,
                     m.rs_vs_spy,
                     CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
                     t.side as trade_side,
@@ -3019,7 +3059,36 @@ Respond in this exact JSON format:
                     -- DAQ risk flags
                     w.daq_earnings_risk,
                     w.daq_high_short_interest,
-                    w.daq_sector_underperforming
+                    w.daq_sector_underperforming,
+                    -- Trading metrics (Trade Plan)
+                    w.atr_14,
+                    w.atr_percent,
+                    w.swing_high,
+                    w.swing_low,
+                    w.swing_high_date,
+                    w.swing_low_date,
+                    w.nearest_ob_price,
+                    w.nearest_ob_type,
+                    w.nearest_ob_distance,
+                    w.suggested_entry_low,
+                    w.suggested_entry_high,
+                    w.suggested_stop_loss,
+                    w.suggested_target_1,
+                    w.suggested_target_2,
+                    w.risk_reward_ratio,
+                    w.risk_percent,
+                    w.volume_trend,
+                    w.relative_volume,
+                    -- RS trend from watchlist (if populated) or fallback to metrics
+                    COALESCE(w.rs_percentile, m.rs_percentile) as rs_percentile,
+                    COALESCE(w.rs_trend, m.rs_trend) as rs_trend,
+                    -- Earnings from instruments
+                    i.earnings_date,
+                    CASE
+                        WHEN i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE
+                        THEN (i.earnings_date - CURRENT_DATE)
+                        ELSE NULL
+                    END as days_to_earnings
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
                 LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker

@@ -742,4 +742,116 @@ class WatchlistScanner:
         results = await self.scan_all_watchlists(calculation_date)
         await self.save_results(results)
 
+        # Enrich results with trading metrics
+        enriched_count = await self.enrich_with_trading_metrics()
+        logger.info(f"Enriched {enriched_count} watchlist results with trading metrics")
+
         return {name: len(matches) for name, matches in results.items()}
+
+    async def enrich_with_trading_metrics(self) -> int:
+        """
+        Enrich active watchlist results with trading metrics from stock_screening_metrics.
+
+        Pulls ATR, support/resistance levels, RS data, and calculates trade plan suggestions.
+
+        Trade plan uses fixed risk parameters for learning:
+        - Stop Loss: 3% below entry
+        - Take Profit 1: 5% above entry
+        - Take Profit 2: 10% above entry (for runners)
+        - R:R Ratio: 1.67 (5/3)
+
+        Returns:
+            Number of records enriched
+        """
+        # Fixed trade parameters for learning phase:
+        # - Stop Loss: 3% below entry (0.97x)
+        # - Take Profit 1: 5% above entry (1.05x)
+        # - Take Profit 2: 10% above entry (1.10x)
+        # - R:R Ratio: 5/3 = 1.67
+
+        # Get all active watchlist results that need enrichment
+        query = """
+            UPDATE stock_watchlist_results wr
+            SET
+                -- ATR and volatility (for reference/position sizing)
+                atr_14 = sm.atr_14,
+                atr_percent = sm.atr_percent,
+
+                -- Support/Resistance from SMC analysis (for reference)
+                swing_high = sm.swing_high,
+                swing_low = sm.swing_low,
+                swing_high_date = sm.swing_high_date,
+                swing_low_date = sm.swing_low_date,
+
+                -- Nearest order block
+                nearest_ob_price = sm.nearest_ob_price,
+                nearest_ob_type = sm.nearest_ob_type,
+                nearest_ob_distance = sm.nearest_ob_distance,
+
+                -- Relative strength
+                rs_percentile = sm.rs_percentile,
+                rs_trend = sm.rs_trend,
+
+                -- Volume context
+                relative_volume = sm.relative_volume,
+                avg_daily_change_5d = sm.avg_daily_change_5d,
+
+                -- Fixed trade plan metrics (learning phase: 3% SL, 5% TP)
+                -- Entry zone: current price -0.5% to +1%
+                suggested_entry_low = wr.price * 0.995,
+                suggested_entry_high = wr.price * 1.01,
+
+                -- Stop loss: 3% below current price
+                suggested_stop_loss = wr.price * 0.97,
+
+                -- Target 1: 5% above current price
+                suggested_target_1 = wr.price * 1.05,
+
+                -- Target 2: 10% above current price (for runners)
+                suggested_target_2 = wr.price * 1.10,
+
+                -- Fixed risk metrics
+                risk_percent = 3.0,
+                risk_reward_ratio = 1.67
+
+            FROM stock_screening_metrics sm
+            WHERE wr.ticker = sm.ticker
+            AND wr.status = 'active'
+            AND sm.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+            RETURNING wr.id
+        """
+
+        try:
+            result = await self.db.fetch(query)
+            enriched_count = len(result) if result else 0
+
+            # Now calculate risk metrics that depend on the values we just set
+            await self._calculate_risk_metrics()
+
+            return enriched_count
+        except Exception as e:
+            logger.error(f"Failed to enrich watchlist with trading metrics: {e}")
+            return 0
+
+    async def _calculate_risk_metrics(self) -> None:
+        """Calculate volume trend based on relative volume.
+
+        Note: Risk percent and R:R are now fixed at 3% SL / 5% TP (1.67 R:R)
+        for the learning phase, so they're set directly in enrich_with_trading_metrics().
+        """
+        query = """
+            UPDATE stock_watchlist_results
+            SET
+                -- Volume trend based on relative volume
+                volume_trend = CASE
+                    WHEN relative_volume >= 1.5 THEN 'accumulation'
+                    WHEN relative_volume <= 0.7 THEN 'distribution'
+                    ELSE 'neutral'
+                END
+            WHERE status = 'active'
+            AND relative_volume IS NOT NULL
+        """
+        try:
+            await self.db.execute(query)
+        except Exception as e:
+            logger.error(f"Failed to calculate volume trend: {e}")
