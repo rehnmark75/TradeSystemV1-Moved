@@ -106,7 +106,7 @@ PAIR_VIRTUAL_SL_CONFIGS = {
     # Analysis showed 4 pips was too tight - normal MAE is 6-14 pips
     # Trades were in correct direction but hit VSL during retracements
     'CS.D.USDJPY.MINI.IP': {
-        'virtual_sl_pips': 6.0,
+        'virtual_sl_pips': 8.0,
         'enabled': True,
     },
     'CS.D.EURJPY.MINI.IP': {
@@ -234,7 +234,17 @@ PAIR_DYNAMIC_VSL_CONFIGS = {
     'CS.D.NZDUSD.MINI.IP': DEFAULT_DYNAMIC_VSL_CONFIG.copy(),
 
     # JPY pairs - use JPY config (higher volatility)
-    'CS.D.USDJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
+    # USDJPY: Custom config with 8 pip initial VSL (widened from 6)
+    'CS.D.USDJPY.MINI.IP': {
+        'initial_vsl_pips': 8.0,        # Widened from 6.0
+        'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit
+        'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
+        'stage1_trigger_pips': 7.0,     # Move to stage1 when +7 pips profit
+        'stage1_lock_pips': 3.0,        # Lock +3 pips at stage1
+        'stage2_trigger_pips': 10.0,    # Move to stage2 when +10 pips profit
+        'stage2_lock_pips': 6.0,        # Lock +6 pips at stage2
+        'target_pips': 12.0,            # TP target
+    },
     'CS.D.EURJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
     'CS.D.GBPJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
     'CS.D.AUDJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),

@@ -72,6 +72,11 @@ class ScalpPosition:
     stage2_triggered: bool = False             # Has stage2 been triggered?
     dynamic_vsl_price: Optional[float] = None  # Current dynamic VSL level (None = use fixed)
 
+    # MAE (Maximum Adverse Excursion) tracking - real-time tick-level
+    mae_pips: float = 0.0                      # Worst adverse excursion in pips
+    mae_price: Optional[float] = None          # Price at worst point
+    mae_timestamp: Optional[datetime] = None   # When worst was reached
+
 
 class VirtualStopLossService:
     """
@@ -220,6 +225,10 @@ class VirtualStopLossService:
                     stage1_triggered=getattr(trade, 'vsl_stage1_triggered', None) or False,
                     stage2_triggered=getattr(trade, 'vsl_stage2_triggered', None) or False,
                     dynamic_vsl_price=getattr(trade, 'vsl_dynamic_sl_price', None),
+                    # Load persisted MAE state from database
+                    mae_pips=getattr(trade, 'vsl_mae_pips', None) or 0.0,
+                    mae_price=getattr(trade, 'vsl_mae_price', None),
+                    mae_timestamp=getattr(trade, 'vsl_mae_timestamp', None),
                 )
 
                 self.positions[trade.id] = position
@@ -474,6 +483,17 @@ class VirtualStopLossService:
         if current_profit_pips > position.peak_profit_pips:
             position.peak_profit_pips = current_profit_pips
 
+        # Update MAE tracking (worst adverse excursion)
+        if current_profit_pips < 0:
+            adverse_pips = abs(current_profit_pips)
+            if adverse_pips > position.mae_pips:
+                # Get the price used for checking (BID for BUY, OFFER for SELL)
+                check_price = price.bid if position.direction == "BUY" else price.offer
+                position.mae_pips = adverse_pips
+                position.mae_price = check_price
+                position.mae_timestamp = price.timestamp
+                logger.debug(f"[MAE] Trade {position.trade_id}: New MAE {adverse_pips:.1f} pips @ {check_price:.5f}")
+
         # Get dynamic VSL config for this pair
         config = get_dynamic_vsl_config(position.epic)
         point_value = get_point_value(position.epic)
@@ -599,9 +619,13 @@ class VirtualStopLossService:
                     trade.vsl_stage2_triggered = position.stage2_triggered
                     trade.vsl_peak_profit_pips = position.peak_profit_pips
                     trade.vsl_dynamic_sl_price = position.dynamic_vsl_price
+                    # MAE tracking
+                    trade.vsl_mae_pips = position.mae_pips
+                    trade.vsl_mae_price = position.mae_price
+                    trade.vsl_mae_timestamp = position.mae_timestamp
                     db.commit()
                     logger.debug(f"[VSL] 💾 Persisted state for Trade {position.trade_id}: "
-                               f"stage={position.current_stage}, peak={position.peak_profit_pips:.1f}pips")
+                               f"stage={position.current_stage}, peak={position.peak_profit_pips:.1f}pips, mae={position.mae_pips:.1f}pips")
         except Exception as e:
             logger.error(f"[VSL] ❌ Failed to persist state for Trade {position.trade_id}: {e}")
 

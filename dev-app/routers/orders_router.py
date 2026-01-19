@@ -63,6 +63,8 @@ class TradeRequest(BaseModel):
     order_type: Optional[str] = "market"  # "market" or "limit"
     entry_level: Optional[float] = None   # Required for limit orders - the entry price
     limit_expiry_minutes: Optional[int] = 35  # Minutes until limit order expires (default 35)
+    api_order_type: Optional[str] = "STOP"  # IG API order type: "STOP" (momentum) or "LIMIT" (better price)
+    signal_price: Optional[float] = None  # Original signal price for slippage tracking
 
     # NEW: Scalping mode fields for Virtual Stop Loss
     is_scalp_trade: Optional[bool] = False  # True if this is a scalp trade requiring VSL
@@ -572,6 +574,12 @@ async def ig_place_order(
                 logger.warning(f"⚠️ Could not check existing working orders: {e}")
 
             try:
+                # v3.3.0: Pass api_order_type for LIMIT vs STOP order distinction
+                # STOP orders: momentum confirmation (entry when price breaks level)
+                # LIMIT orders: better price entry (entry when price reaches level from opposite side)
+                ig_order_type = body.api_order_type or "STOP"
+                logger.info(f"   IG Order Type: {ig_order_type} (STOP=momentum, LIMIT=better price)")
+
                 result = await place_working_order(
                     auth_headers=trading_headers,
                     epic=symbol,
@@ -581,7 +589,8 @@ async def ig_place_order(
                     limit_distance=limit_distance,
                     expiry_minutes=body.limit_expiry_minutes,
                     currency_code=currency_code,
-                    size=body.size or 1.0
+                    size=body.size or 1.0,
+                    order_type=ig_order_type
                 )
                 # For limit orders, we return early with a different response
                 # since the order is pending, not immediately filled

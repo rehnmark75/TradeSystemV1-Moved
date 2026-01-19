@@ -1531,9 +1531,18 @@ class TradingOrchestrator:
                 self.logger.info(f"✅ Successfully saved {saved_count} signals to alert_history table")
             
             # 7. Execute trades if enabled
+            # CRITICAL: Only execute signals that were successfully saved (have alert_id)
             execution_results = []
             if self.enable_trading and analyzed_signals and self.order_manager:
-                execution_results = self.order_manager.execute_signals(analyzed_signals)
+                # Filter to only signals with alert_id (successfully saved to DB)
+                signals_to_execute = [s for s in analyzed_signals if s.get('alert_id')]
+                if len(signals_to_execute) < len(analyzed_signals):
+                    skipped = len(analyzed_signals) - len(signals_to_execute)
+                    self.logger.warning(f"⚠️ Skipping {skipped} signals without alert_id (DB save failed)")
+                if signals_to_execute:
+                    execution_results = self.order_manager.execute_signals(signals_to_execute)
+                else:
+                    self.logger.warning("⚠️ No signals to execute - all failed to save to database")
             
             # 8. Track performance
             if self.performance_tracker:

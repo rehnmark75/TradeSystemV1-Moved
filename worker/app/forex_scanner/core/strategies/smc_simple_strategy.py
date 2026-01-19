@@ -2639,10 +2639,13 @@ class SMCSimpleStrategy:
                 'htf_candle_direction_prev': htf_candle_direction_prev,
 
                 # v2.0.0: Limit order fields
+                # v3.3.0: Added api_order_type (LIMIT vs STOP) and signal_price for slippage tracking
                 'order_type': order_type,  # 'limit' or 'market'
                 'market_price': market_price,  # Current market price (before offset)
+                'signal_price': market_price,  # v3.3.0: Original signal price for slippage analysis
                 'limit_offset_pips': round(limit_offset_pips, 1),  # Offset from market price
                 'limit_expiry_minutes': self.limit_expiry_minutes if order_type == 'limit' else None,
+                'api_order_type': getattr(self, '_current_api_order_type', 'STOP'),  # v3.3.0: LIMIT or STOP
 
                 # Technical indicators for analytics (alert_history compatibility)
                 'atr': round(atr, 6) if atr else 0.0,
@@ -4147,16 +4150,42 @@ class SMCSimpleStrategy:
         # Calculate offset in price terms
         offset = offset_pips * pip_value
 
-        # Apply offset based on direction (stop-entry style: confirm direction continuation)
-        if direction == 'BULL':
-            # BUY: Place limit order ABOVE current price (enter when price breaks up)
-            limit_entry = current_close + offset
-        else:
-            # SELL: Place limit order BELOW current price (enter when price breaks down)
-            limit_entry = current_close - offset
+        # v3.3.0: Check if scalp mode should use LIMIT orders (better price entry) instead of STOP orders
+        # LIMIT orders: Enter at better price when price pulls back to entry level
+        # STOP orders: Enter when price breaks through entry level (momentum confirmation)
+        use_limit_entry = False
+        if self.scalp_mode_enabled:
+            # Check for scalp_use_limit_orders config option (defaults to False for backward compatibility)
+            if hasattr(self, '_db_config') and self._db_config:
+                use_limit_entry = getattr(self._db_config, 'scalp_use_limit_orders', False)
+            else:
+                use_limit_entry = getattr(self, 'scalp_use_limit_orders', False)
 
-        self.logger.info(f"   📍 Market price: {current_close:.5f}")
-        self.logger.info(f"   📍 Limit entry: {limit_entry:.5f} ({offset_pips:.1f} pips momentum confirmation)")
+        if use_limit_entry:
+            # LIMIT ORDER STYLE: Get better entry price by placing order on pullback side
+            # This is the OPPOSITE direction from STOP orders
+            if direction == 'BULL':
+                # BUY LIMIT: Place order BELOW current price (enter when price dips to level)
+                limit_entry = current_close - offset
+            else:
+                # SELL LIMIT: Place order ABOVE current price (enter when price rises to level)
+                limit_entry = current_close + offset
+
+            self.logger.info(f"   📍 Market price: {current_close:.5f}")
+            self.logger.info(f"   📍 LIMIT entry: {limit_entry:.5f} ({offset_pips:.1f} pips better price)")
+            self._current_api_order_type = 'LIMIT'  # v3.3.0: Track for signal dict
+        else:
+            # STOP ORDER STYLE (original): Confirm price is moving in intended direction
+            if direction == 'BULL':
+                # BUY STOP: Place order ABOVE current price (enter when price breaks up)
+                limit_entry = current_close + offset
+            else:
+                # SELL STOP: Place order BELOW current price (enter when price breaks down)
+                limit_entry = current_close - offset
+
+            self.logger.info(f"   📍 Market price: {current_close:.5f}")
+            self.logger.info(f"   📍 STOP entry: {limit_entry:.5f} ({offset_pips:.1f} pips momentum confirmation)")
+            self._current_api_order_type = 'STOP'  # v3.3.0: Track for signal dict
 
         return limit_entry, offset_pips
 

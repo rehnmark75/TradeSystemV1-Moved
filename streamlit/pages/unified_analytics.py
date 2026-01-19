@@ -82,6 +82,12 @@ def lazy_import_tab(tab_name: str) -> Callable:
     elif tab_name == "htf_analysis":
         from components.tabs import render_htf_analysis_tab
         return render_htf_analysis_tab
+    elif tab_name == "mae_analysis":
+        from components.tabs import render_mae_analysis_tab
+        return render_mae_analysis_tab
+    elif tab_name == "entry_timing_analysis":
+        from components.tabs import render_entry_timing_analysis_tab
+        return render_entry_timing_analysis_tab
     else:
         raise ValueError(f"Unknown tab: {tab_name}")
 
@@ -239,7 +245,7 @@ def main():
 
     elif selected_main == "Performance":
         # Use radio buttons for sub-navigation
-        perf_options = ["Trade Performance", "Alert History"]
+        perf_options = ["Trade Performance", "Entry Timing", "MAE Analysis", "Alert History"]
         perf_sub = st.radio(
             "Performance Section",
             perf_options,
@@ -250,6 +256,12 @@ def main():
 
         if perf_sub == "Trade Performance":
             render_func = lazy_import_tab("trade_performance")
+            render_func()
+        elif perf_sub == "Entry Timing":
+            render_func = lazy_import_tab("entry_timing_analysis")
+            render_func()
+        elif perf_sub == "MAE Analysis":
+            render_func = lazy_import_tab("mae_analysis")
             render_func()
         elif perf_sub == "Alert History":
             render_func = lazy_import_tab("alert_history")

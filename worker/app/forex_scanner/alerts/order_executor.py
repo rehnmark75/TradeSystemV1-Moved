@@ -433,10 +433,13 @@ class OrderExecutor:
                 custom_label = f"forex_scanner_{external_epic}_{direction}_{int(datetime.now().timestamp())}"
 
             # v2.0.0: Check order type for limit order routing
+            # v3.3.0: Added api_order_type (LIMIT vs STOP) and signal_price for slippage tracking
             order_type = signal.get('order_type', 'market')
             entry_level = signal.get('entry_price')  # For limit orders, this is the offset price
             limit_expiry_minutes = signal.get('limit_expiry_minutes', 15)
             limit_offset_pips = signal.get('limit_offset_pips', 0)
+            api_order_type = signal.get('api_order_type', 'STOP')  # v3.3.0: LIMIT (better price) vs STOP (momentum)
+            signal_price = signal.get('signal_price') or signal.get('market_price')  # v3.3.0: Original signal price
 
             # v2.19.0: Fresh price recalculation for limit orders
             if order_type == 'limit' and entry_level:
@@ -497,11 +500,14 @@ class OrderExecutor:
                         entry_level = new_entry
                         signal['entry_price'] = new_entry
 
-            # v2.19.1: Validate and DYNAMICALLY ADJUST STOP order entry level
-            # For working orders (limit entries), IG uses STOP type where:
+            # v2.19.1: Validate and DYNAMICALLY ADJUST working order entry level
+            # v3.3.0: Support both STOP and LIMIT order types with opposite validation rules
+            # STOP orders (momentum confirmation):
             # - BUY STOP: entry must be ABOVE current market price (triggered when price rises)
             # - SELL STOP: entry must be BELOW current market price (triggered when price falls)
-            # v3.2.1: Instead of rejecting, dynamically adjust entry to maintain buffer
+            # LIMIT orders (better price entry):
+            # - BUY LIMIT: entry must be BELOW current market price (triggered when price falls to level)
+            # - SELL LIMIT: entry must be ABOVE current market price (triggered when price rises to level)
             if order_type == 'limit' and entry_level:
                 fresh = self._get_fresh_price(internal_epic)
                 if fresh.get('valid'):
@@ -510,39 +516,71 @@ class OrderExecutor:
                     min_buffer_pips = 1.2  # Minimum buffer with 20% safety margin
                     min_buffer = min_buffer_pips * pip_value
 
-                    if direction == 'BUY':
-                        # BUY STOP: entry must be above current price
-                        current_gap = entry_level - current_price
-                        if current_gap < min_buffer:
-                            # v3.2.1: DYNAMIC ADJUSTMENT - adjust entry instead of rejecting
-                            original_entry = entry_level
-                            entry_level = current_price + min_buffer
-                            adjustment_pips = (entry_level - original_entry) / pip_value
-                            self.logger.info(
-                                f"🔄 BUY STOP adjusted: {original_entry:.5f} → {entry_level:.5f} "
-                                f"(+{adjustment_pips:.1f} pips to maintain {min_buffer_pips:.1f} pip buffer)"
-                            )
-                            # Update signal for downstream use
-                            signal['entry_price'] = entry_level
-                    else:  # SELL
-                        # SELL STOP: entry must be below current price
-                        current_gap = current_price - entry_level
-                        if current_gap < min_buffer:
-                            # v3.2.1: DYNAMIC ADJUSTMENT - adjust entry instead of rejecting
-                            original_entry = entry_level
-                            entry_level = current_price - min_buffer
-                            adjustment_pips = (original_entry - entry_level) / pip_value
-                            self.logger.info(
-                                f"🔄 SELL STOP adjusted: {original_entry:.5f} → {entry_level:.5f} "
-                                f"(-{adjustment_pips:.1f} pips to maintain {min_buffer_pips:.1f} pip buffer)"
-                            )
-                            # Update signal for downstream use
-                            signal['entry_price'] = entry_level
+                    # v3.3.0: Check if this is a LIMIT order type (better price) or STOP order type (momentum)
+                    is_limit_order_type = api_order_type == 'LIMIT'
 
-                    self.logger.info(
-                        f"✅ STOP order validated: {direction} @ {entry_level:.5f}, market @ {current_price:.5f} "
-                        f"(buffer: {abs(entry_level - current_price) / pip_value:.1f} pips)"
-                    )
+                    if is_limit_order_type:
+                        # LIMIT ORDER VALIDATION (v3.3.0)
+                        if direction == 'BUY':
+                            # BUY LIMIT: entry must be BELOW current price
+                            current_gap = current_price - entry_level
+                            if current_gap < min_buffer:
+                                original_entry = entry_level
+                                entry_level = current_price - min_buffer
+                                adjustment_pips = (original_entry - entry_level) / pip_value
+                                self.logger.info(
+                                    f"🔄 BUY LIMIT adjusted: {original_entry:.5f} → {entry_level:.5f} "
+                                    f"(-{adjustment_pips:.1f} pips to maintain {min_buffer_pips:.1f} pip buffer)"
+                                )
+                                signal['entry_price'] = entry_level
+                        else:  # SELL
+                            # SELL LIMIT: entry must be ABOVE current price
+                            current_gap = entry_level - current_price
+                            if current_gap < min_buffer:
+                                original_entry = entry_level
+                                entry_level = current_price + min_buffer
+                                adjustment_pips = (entry_level - original_entry) / pip_value
+                                self.logger.info(
+                                    f"🔄 SELL LIMIT adjusted: {original_entry:.5f} → {entry_level:.5f} "
+                                    f"(+{adjustment_pips:.1f} pips to maintain {min_buffer_pips:.1f} pip buffer)"
+                                )
+                                signal['entry_price'] = entry_level
+
+                        self.logger.info(
+                            f"✅ LIMIT order validated: {direction} @ {entry_level:.5f}, market @ {current_price:.5f} "
+                            f"(buffer: {abs(entry_level - current_price) / pip_value:.1f} pips)"
+                        )
+                    else:
+                        # STOP ORDER VALIDATION (original logic)
+                        if direction == 'BUY':
+                            # BUY STOP: entry must be above current price
+                            current_gap = entry_level - current_price
+                            if current_gap < min_buffer:
+                                original_entry = entry_level
+                                entry_level = current_price + min_buffer
+                                adjustment_pips = (entry_level - original_entry) / pip_value
+                                self.logger.info(
+                                    f"🔄 BUY STOP adjusted: {original_entry:.5f} → {entry_level:.5f} "
+                                    f"(+{adjustment_pips:.1f} pips to maintain {min_buffer_pips:.1f} pip buffer)"
+                                )
+                                signal['entry_price'] = entry_level
+                        else:  # SELL
+                            # SELL STOP: entry must be below current price
+                            current_gap = current_price - entry_level
+                            if current_gap < min_buffer:
+                                original_entry = entry_level
+                                entry_level = current_price - min_buffer
+                                adjustment_pips = (original_entry - entry_level) / pip_value
+                                self.logger.info(
+                                    f"🔄 SELL STOP adjusted: {original_entry:.5f} → {entry_level:.5f} "
+                                    f"(-{adjustment_pips:.1f} pips to maintain {min_buffer_pips:.1f} pip buffer)"
+                                )
+                                signal['entry_price'] = entry_level
+
+                        self.logger.info(
+                            f"✅ STOP order validated: {direction} @ {entry_level:.5f}, market @ {current_price:.5f} "
+                            f"(buffer: {abs(entry_level - current_price) / pip_value:.1f} pips)"
+                        )
 
             if order_type == 'limit' and entry_level:
                 self.logger.info(f"📊 LIMIT Order: Entry={entry_level:.5f}, Stop={stop_distance}pips, TP={limit_distance}pips ({confidence:.1%})")
@@ -566,10 +604,11 @@ class OrderExecutor:
                 self.logger.debug(f"Scalp mode check failed (using default): {e}")
 
             # v2.0.0: Execute with retry logic (now supports both market and limit orders)
+            # v3.3.0: Added api_order_type and signal_price for slippage tracking
             result = self._execute_with_retry(
                 signal, external_epic, direction, stop_distance, limit_distance,
                 custom_label, alert_id, order_type, entry_level, limit_expiry_minutes,
-                is_scalp_trade, virtual_sl_pips
+                is_scalp_trade, virtual_sl_pips, api_order_type, signal_price
             )
 
             # Record success with circuit breaker
@@ -612,11 +651,13 @@ class OrderExecutor:
                            stop_distance: int, limit_distance: int, custom_label: str, alert_id: int,
                            order_type: str = 'market', entry_level: float = None,
                            limit_expiry_minutes: int = 15,
-                           is_scalp_trade: bool = False, virtual_sl_pips: float = None) -> Dict:
+                           is_scalp_trade: bool = False, virtual_sl_pips: float = None,
+                           api_order_type: str = 'STOP', signal_price: float = None) -> Dict:
         """
         ENHANCED: Execute order with retry logic and exponential backoff
         v2.0.0: Added limit order support
         v3.2.0: Added scalp mode support for VSL
+        v3.3.0: Added api_order_type (LIMIT vs STOP) and signal_price for slippage tracking
 
         Args:
             signal: Original signal dict
@@ -631,6 +672,8 @@ class OrderExecutor:
             limit_expiry_minutes: Minutes until limit order expires (v2.0.0)
             is_scalp_trade: True if scalp trade requiring VSL (v3.2.0)
             virtual_sl_pips: Custom VSL distance in pips (v3.2.0)
+            api_order_type: IG API order type - 'STOP' (momentum) or 'LIMIT' (better price) (v3.3.0)
+            signal_price: Original signal price for slippage analysis (v3.3.0)
         """
         last_exception = None
 
@@ -645,6 +688,7 @@ class OrderExecutor:
                     time.sleep(delay)
 
                 # v2.0.0: Route based on order type
+                # v3.3.0: Added api_order_type (LIMIT vs STOP) and signal_price
                 if order_type == 'limit' and entry_level:
                     # Execute limit order
                     result = self.send_order(
@@ -660,7 +704,9 @@ class OrderExecutor:
                         entry_level=entry_level,
                         limit_expiry_minutes=limit_expiry_minutes,
                         is_scalp_trade=is_scalp_trade,
-                        virtual_sl_pips=virtual_sl_pips
+                        virtual_sl_pips=virtual_sl_pips,
+                        api_order_type=api_order_type,
+                        signal_price=signal_price
                     )
                 else:
                     # Execute market order (default)
@@ -752,11 +798,13 @@ class OrderExecutor:
                risk_reward: float = None, alert_id: int = None,
                order_type: str = 'market', entry_level: float = None,
                limit_expiry_minutes: int = 15,
-               is_scalp_trade: bool = False, virtual_sl_pips: float = None):
+               is_scalp_trade: bool = False, virtual_sl_pips: float = None,
+               api_order_type: str = 'STOP', signal_price: float = None):
         """
         ENHANCED: Send order to your trading platform via API using correct format with timeout handling
         v2.0.0: Added limit order support
         v3.2.0: Added scalp mode support for Virtual Stop Loss (VSL) system
+        v3.3.0: Added api_order_type (LIMIT vs STOP) and signal_price for slippage tracking
 
         Args:
             external_epic: Trading symbol (e.g., 'EURUSD')
@@ -772,6 +820,8 @@ class OrderExecutor:
             limit_expiry_minutes: Minutes until limit order expires (v2.0.0)
             is_scalp_trade: True if this is a scalp trade requiring VSL monitoring (v3.2.0)
             virtual_sl_pips: Custom VSL distance in pips (v3.2.0)
+            api_order_type: IG API order type - 'STOP' (momentum) or 'LIMIT' (better price) (v3.3.0)
+            signal_price: Original signal price for slippage analysis (v3.3.0)
 
         Returns:
             API response or None if failed
@@ -804,11 +854,15 @@ class OrderExecutor:
         }
 
         # v2.0.0: Add limit order fields if this is a limit order
+        # v3.3.0: Add api_order_type (LIMIT vs STOP) and signal_price for slippage tracking
         if order_type == 'limit' and entry_level is not None:
             order_data["order_type"] = "limit"
             order_data["entry_level"] = entry_level
             order_data["limit_expiry_minutes"] = limit_expiry_minutes
-            self.logger.info(f"📋 Limit order fields: entry_level={entry_level:.5f}, expiry={limit_expiry_minutes}min")
+            order_data["api_order_type"] = api_order_type  # v3.3.0: LIMIT (better price) vs STOP (momentum)
+            if signal_price is not None:
+                order_data["signal_price"] = signal_price  # v3.3.0: For slippage analysis
+            self.logger.info(f"📋 Limit order fields: entry_level={entry_level:.5f}, expiry={limit_expiry_minutes}min, api_type={api_order_type}")
         else:
             order_data["order_type"] = "market"
 

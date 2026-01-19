@@ -122,6 +122,11 @@ class TradeLog(Base):
     vsl_peak_profit_pips = Column(Float, default=0.0)  # Maximum favorable excursion (MFE)
     vsl_dynamic_sl_price = Column(Float, nullable=True)  # Current dynamic SL price level
 
+    # MAE (Maximum Adverse Excursion) tracking - real-time tick-level
+    vsl_mae_pips = Column(Float, default=0.0)  # Worst adverse excursion in pips
+    vsl_mae_price = Column(Float, nullable=True)  # Price at worst point
+    vsl_mae_timestamp = Column(DateTime, nullable=True)  # When worst was reached
+
     def __repr__(self):
         return f"<TradeLog(id={self.id}, symbol={self.symbol}, deal_id={self.deal_id}, profit_loss={self.profit_loss})>"
 

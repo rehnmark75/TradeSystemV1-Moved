@@ -501,3 +501,392 @@ class TradingAnalyticsService:
             return []
         finally:
             conn.close()
+
+    @st.cache_data(ttl=60)
+    def fetch_scalp_mae_analysis(_self, days_back: int = 7) -> pd.DataFrame:
+        """
+        Fetch MAE (Maximum Adverse Excursion) analysis for scalp trades (cached 1 min).
+
+        This shows how much price retraced against entry before moving favorably,
+        useful for optimizing VSL (Virtual Stop Loss) settings.
+
+        Args:
+            days_back: Number of days to look back
+
+        Returns:
+            DataFrame with MAE analysis for scalp trades
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return pd.DataFrame()
+
+        try:
+            query = """
+            SELECT
+                id,
+                symbol,
+                direction,
+                entry_price,
+                timestamp,
+                status,
+                profit_loss,
+                vsl_peak_profit_pips as mfe_pips,
+                vsl_mae_pips as mae_pips,
+                vsl_mae_price as mae_price,
+                vsl_mae_timestamp as mae_time,
+                virtual_sl_pips,
+                vsl_stage,
+                vsl_breakeven_triggered as hit_breakeven,
+                vsl_stage1_triggered as hit_stage1,
+                vsl_stage2_triggered as hit_stage2
+            FROM trade_log
+            WHERE is_scalp_trade = true
+            AND timestamp >= %s
+            ORDER BY timestamp DESC
+            """
+
+            df = pd.read_sql_query(
+                query,
+                conn,
+                params=[datetime.now() - timedelta(days=days_back)]
+            )
+
+            if not df.empty:
+                # Create display-friendly columns
+                df['symbol_short'] = df['symbol'].str.replace('CS.D.', '').str.replace('.MINI.IP', '').str.replace('.CEEM.IP', '')
+
+                # Calculate MAE as % of VSL
+                df['mae_pct_of_vsl'] = (df['mae_pips'] / df['virtual_sl_pips'] * 100).round(1)
+
+                # Determine trade result
+                df['result'] = df.apply(
+                    lambda row: 'WIN' if row['profit_loss'] and row['profit_loss'] > 0
+                    else 'LOSS' if row['profit_loss'] and row['profit_loss'] < 0
+                    else 'OPEN' if row['status'] == 'tracking'
+                    else 'PENDING', axis=1
+                )
+
+            return df
+
+        except Exception as e:
+            logger.error(f"Error fetching scalp MAE analysis: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
+
+    @st.cache_data(ttl=60)
+    def fetch_mae_summary_by_pair(_self, days_back: int = 30) -> pd.DataFrame:
+        """
+        Fetch MAE summary statistics grouped by currency pair (cached 1 min).
+
+        Args:
+            days_back: Number of days to look back
+
+        Returns:
+            DataFrame with MAE statistics per pair
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return pd.DataFrame()
+
+        try:
+            query = """
+            SELECT
+                symbol,
+                COUNT(*) as total_trades,
+                AVG(vsl_mae_pips) as avg_mae_pips,
+                MAX(vsl_mae_pips) as max_mae_pips,
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY vsl_mae_pips) as median_mae_pips,
+                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY vsl_mae_pips) as p75_mae_pips,
+                PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY vsl_mae_pips) as p90_mae_pips,
+                AVG(vsl_peak_profit_pips) as avg_mfe_pips,
+                MAX(vsl_peak_profit_pips) as max_mfe_pips,
+                AVG(virtual_sl_pips) as avg_vsl_setting,
+                COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins,
+                COUNT(CASE WHEN profit_loss < 0 THEN 1 END) as losses
+            FROM trade_log
+            WHERE is_scalp_trade = true
+            AND timestamp >= %s
+            AND vsl_mae_pips IS NOT NULL
+            GROUP BY symbol
+            ORDER BY total_trades DESC
+            """
+
+            df = pd.read_sql_query(
+                query,
+                conn,
+                params=[datetime.now() - timedelta(days=days_back)]
+            )
+
+            if not df.empty:
+                df['symbol_short'] = df['symbol'].str.replace('CS.D.', '').str.replace('.MINI.IP', '').str.replace('.CEEM.IP', '')
+                df['win_rate'] = (df['wins'] / df['total_trades'] * 100).round(1)
+                # Round numeric columns
+                for col in ['avg_mae_pips', 'max_mae_pips', 'median_mae_pips', 'p75_mae_pips', 'p90_mae_pips', 'avg_mfe_pips', 'max_mfe_pips']:
+                    if col in df.columns:
+                        df[col] = df[col].round(1)
+
+            return df
+
+        except Exception as e:
+            logger.error(f"Error fetching MAE summary by pair: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
+
+    @st.cache_data(ttl=60)
+    def fetch_entry_timing_analysis(_self, days_back: int = 7) -> pd.DataFrame:
+        """
+        Fetch entry timing analysis data for scalp trades (cached 1 min).
+
+        Analyzes entry quality by looking at:
+        - Entry type (PULLBACK, MOMENTUM, MICRO_PULLBACK)
+        - Signal trigger (SWING_PULLBACK, SWING_PULLBACK+PIN, etc.)
+        - Time from entry to MAE (how quickly price moved against us)
+        - MFE before MAE (did price move favorably at all)
+        - Signal price vs entry price (slippage)
+
+        Args:
+            days_back: Number of days to look back
+
+        Returns:
+            DataFrame with entry timing analysis
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return pd.DataFrame()
+
+        try:
+            query = """
+            SELECT
+                t.id,
+                t.symbol,
+                t.direction,
+                t.entry_price,
+                t.timestamp as trade_timestamp,
+                t.status,
+                t.profit_loss,
+                t.vsl_peak_profit_pips as mfe_pips,
+                t.vsl_mae_pips as mae_pips,
+                t.vsl_mae_price,
+                t.vsl_mae_timestamp as mae_timestamp,
+                t.virtual_sl_pips,
+                t.vsl_stage,
+                t.closed_at,
+                t.is_scalp_trade,
+                -- Alert/Signal data
+                a.id as alert_id,
+                a.alert_timestamp as signal_timestamp,
+                a.price as signal_price,
+                a.confidence_score,
+                a.signal_trigger,
+                a.trigger_type,
+                -- Entry type from strategy_indicators JSON
+                a.strategy_indicators->'tier3_entry'->>'entry_type' as entry_type,
+                a.strategy_indicators->'tier3_entry'->>'order_type' as order_type,
+                a.strategy_indicators->'tier3_entry'->>'limit_offset_pips' as limit_offset_pips,
+                a.strategy_indicators->'tier3_entry'->>'pullback_depth' as pullback_depth,
+                a.strategy_indicators->'tier3_entry'->>'in_optimal_zone' as in_optimal_zone,
+                -- Pattern and divergence data (v3.3.0)
+                a.pattern_type,
+                a.pattern_strength,
+                a.rsi_divergence_detected,
+                a.rsi_divergence,
+                -- HTF alignment
+                a.htf_candle_direction,
+                a.market_session
+            FROM trade_log t
+            LEFT JOIN alert_history a ON t.alert_id = a.id
+            WHERE t.timestamp >= %s
+            AND t.status IN ('closed', 'tracking', 'expired')
+            ORDER BY t.timestamp DESC
+            """
+
+            df = pd.read_sql_query(
+                query,
+                conn,
+                params=[datetime.now() - timedelta(days=days_back)]
+            )
+
+            if not df.empty:
+                # Create display-friendly columns
+                df['symbol_short'] = df['symbol'].str.replace('CS.D.', '').str.replace('.MINI.IP', '').str.replace('.CEEM.IP', '')
+
+                # Determine trade result
+                df['result'] = df.apply(
+                    lambda row: 'WIN' if row['profit_loss'] and row['profit_loss'] > 0
+                    else 'LOSS' if row['profit_loss'] and row['profit_loss'] < 0
+                    else 'OPEN' if row['status'] == 'tracking'
+                    else 'PENDING', axis=1
+                )
+
+                # Calculate time to MAE (seconds from entry to worst point)
+                df['time_to_mae_seconds'] = None
+                mask = df['mae_timestamp'].notna() & df['trade_timestamp'].notna()
+                if mask.any():
+                    df.loc[mask, 'time_to_mae_seconds'] = (
+                        pd.to_datetime(df.loc[mask, 'mae_timestamp']) -
+                        pd.to_datetime(df.loc[mask, 'trade_timestamp'])
+                    ).dt.total_seconds()
+
+                # Calculate slippage (signal price vs entry price)
+                df['slippage_pips'] = None
+                # Get pip values per pair (simplified)
+                jpy_pairs = df['symbol'].str.contains('JPY', na=False)
+                pip_divisor = pd.Series(0.0001, index=df.index)
+                pip_divisor[jpy_pairs] = 0.01
+
+                mask = df['signal_price'].notna() & df['entry_price'].notna()
+                if mask.any():
+                    price_diff = df.loc[mask, 'entry_price'] - df.loc[mask, 'signal_price'].astype(float)
+                    # For BUY: positive slippage = worse entry (paid more)
+                    # For SELL: negative slippage = worse entry (sold for less)
+                    df.loc[mask, 'slippage_pips'] = price_diff / pip_divisor[mask]
+                    # Normalize: positive = worse entry for both directions
+                    sell_mask = mask & (df['direction'] == 'SELL')
+                    df.loc[sell_mask, 'slippage_pips'] = -df.loc[sell_mask, 'slippage_pips']
+
+                # Convert numeric strings
+                for col in ['pullback_depth', 'limit_offset_pips']:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+                # Flag trades with zero MFE (immediate adverse movement)
+                df['zero_mfe'] = (df['mfe_pips'].fillna(0) == 0) | (df['mfe_pips'].fillna(0) < 0.5)
+
+                # Calculate trade duration
+                df['duration_minutes'] = None
+                mask = df['closed_at'].notna() & df['trade_timestamp'].notna()
+                if mask.any():
+                    df.loc[mask, 'duration_minutes'] = (
+                        pd.to_datetime(df.loc[mask, 'closed_at']) -
+                        pd.to_datetime(df.loc[mask, 'trade_timestamp'])
+                    ).dt.total_seconds() / 60
+
+            return df
+
+        except Exception as e:
+            logger.error(f"Error fetching entry timing analysis: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
+
+    @st.cache_data(ttl=60)
+    def fetch_entry_timing_summary(_self, days_back: int = 7) -> pd.DataFrame:
+        """
+        Fetch entry timing summary grouped by entry type (cached 1 min).
+
+        Args:
+            days_back: Number of days to look back
+
+        Returns:
+            DataFrame with summary statistics per entry type
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return pd.DataFrame()
+
+        try:
+            query = """
+            SELECT
+                COALESCE(a.strategy_indicators->'tier3_entry'->>'entry_type', 'UNKNOWN') as entry_type,
+                COUNT(*) as total_trades,
+                COUNT(CASE WHEN t.profit_loss > 0 THEN 1 END) as wins,
+                COUNT(CASE WHEN t.profit_loss < 0 THEN 1 END) as losses,
+                COALESCE(AVG(t.profit_loss), 0) as avg_pnl,
+                COALESCE(SUM(t.profit_loss), 0) as total_pnl,
+                AVG(t.vsl_mae_pips) as avg_mae_pips,
+                AVG(t.vsl_peak_profit_pips) as avg_mfe_pips,
+                -- Count trades with zero/minimal MFE (bad timing indicator)
+                COUNT(CASE WHEN COALESCE(t.vsl_peak_profit_pips, 0) < 0.5 THEN 1 END) as zero_mfe_count,
+                AVG(a.confidence_score) as avg_confidence,
+                AVG(CAST(a.strategy_indicators->'tier3_entry'->>'pullback_depth' AS FLOAT)) as avg_pullback_depth
+            FROM trade_log t
+            LEFT JOIN alert_history a ON t.alert_id = a.id
+            WHERE t.timestamp >= %s
+            AND t.status IN ('closed', 'expired')
+            AND t.profit_loss IS NOT NULL
+            GROUP BY a.strategy_indicators->'tier3_entry'->>'entry_type'
+            ORDER BY total_trades DESC
+            """
+
+            df = pd.read_sql_query(
+                query,
+                conn,
+                params=[datetime.now() - timedelta(days=days_back)]
+            )
+
+            if not df.empty:
+                df['win_rate'] = (df['wins'] / df['total_trades'] * 100).round(1)
+                df['zero_mfe_pct'] = (df['zero_mfe_count'] / df['total_trades'] * 100).round(1)
+                # Round numeric columns
+                for col in ['avg_pnl', 'total_pnl', 'avg_mae_pips', 'avg_mfe_pips', 'avg_confidence', 'avg_pullback_depth']:
+                    if col in df.columns:
+                        df[col] = df[col].round(2)
+
+            return df
+
+        except Exception as e:
+            logger.error(f"Error fetching entry timing summary: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
+
+    @st.cache_data(ttl=60)
+    def fetch_entry_timing_by_trigger(_self, days_back: int = 7) -> pd.DataFrame:
+        """
+        Fetch entry timing summary grouped by signal trigger type (cached 1 min).
+
+        Args:
+            days_back: Number of days to look back
+
+        Returns:
+            DataFrame with summary statistics per trigger type
+        """
+        conn = _self._get_connection()
+        if not conn:
+            return pd.DataFrame()
+
+        try:
+            query = """
+            SELECT
+                COALESCE(NULLIF(a.signal_trigger, ''), 'STANDARD') as signal_trigger,
+                COALESCE(a.strategy_indicators->'tier3_entry'->>'entry_type', 'UNKNOWN') as entry_type,
+                COUNT(*) as total_trades,
+                COUNT(CASE WHEN t.profit_loss > 0 THEN 1 END) as wins,
+                COUNT(CASE WHEN t.profit_loss < 0 THEN 1 END) as losses,
+                COALESCE(AVG(t.profit_loss), 0) as avg_pnl,
+                COALESCE(SUM(t.profit_loss), 0) as total_pnl,
+                AVG(t.vsl_mae_pips) as avg_mae_pips,
+                AVG(t.vsl_peak_profit_pips) as avg_mfe_pips,
+                COUNT(CASE WHEN COALESCE(t.vsl_peak_profit_pips, 0) < 0.5 THEN 1 END) as zero_mfe_count,
+                AVG(a.confidence_score) as avg_confidence
+            FROM trade_log t
+            LEFT JOIN alert_history a ON t.alert_id = a.id
+            WHERE t.timestamp >= %s
+            AND t.status IN ('closed', 'expired')
+            AND t.profit_loss IS NOT NULL
+            GROUP BY a.signal_trigger, a.strategy_indicators->'tier3_entry'->>'entry_type'
+            ORDER BY total_trades DESC
+            """
+
+            df = pd.read_sql_query(
+                query,
+                conn,
+                params=[datetime.now() - timedelta(days=days_back)]
+            )
+
+            if not df.empty:
+                df['win_rate'] = (df['wins'] / df['total_trades'] * 100).round(1)
+                df['zero_mfe_pct'] = (df['zero_mfe_count'] / df['total_trades'] * 100).round(1)
+                for col in ['avg_pnl', 'total_pnl', 'avg_mae_pips', 'avg_mfe_pips', 'avg_confidence']:
+                    if col in df.columns:
+                        df[col] = df[col].round(2)
+
+            return df
+
+        except Exception as e:
+            logger.error(f"Error fetching entry timing by trigger: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
