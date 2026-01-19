@@ -164,11 +164,14 @@ def check_trade_cooldown(epic: str, db: Session) -> dict:
             effective_close_time = min(estimated_close_1h, recent_expiry)
 
         # === NEW: Check for recent trade OPENINGS ===
+        # IMPORTANT: Exclude limit orders that never filled (limit_not_filled, limit_rejected, limit_cancelled)
+        # These should NOT trigger opening-based cooldown since no position was ever opened
         recent_opened_trade = (
             db.query(TradeLog)
             .filter(
                 TradeLog.symbol == epic,
-                TradeLog.timestamp.isnot(None)
+                TradeLog.timestamp.isnot(None),
+                ~TradeLog.status.in_(["limit_not_filled", "limit_rejected", "limit_cancelled"])
             )
             .order_by(TradeLog.timestamp.desc())
             .first()
