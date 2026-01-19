@@ -253,6 +253,7 @@ class SMCSimpleConfig:
     scalp_range_position_threshold: float = 0.80
     scalp_enable_claude_ai: bool = True
     scalp_use_market_orders: bool = True
+    scalp_use_limit_orders: bool = False  # v3.3.0: Use LIMIT orders (better price) instead of STOP orders (momentum)
 
     # SCALP SIGNAL QUALIFICATION (v2.21.0)
     # Momentum confirmation filters to improve scalp win rate
@@ -1177,7 +1178,7 @@ class SMCSimpleConfigService:
             'scalp_micro_pullback_lookback',
             'scalp_cooldown_minutes', 'scalp_require_tight_spread',
             'scalp_swing_lookback_bars', 'scalp_range_position_threshold',
-            'scalp_enable_claude_ai', 'scalp_use_market_orders',
+            'scalp_enable_claude_ai', 'scalp_use_market_orders', 'scalp_use_limit_orders',
             # SCALP QUALIFICATION FIELDS (v2.21.0)
             'scalp_qualification_enabled', 'scalp_qualification_mode',
             'scalp_min_qualification_score',
