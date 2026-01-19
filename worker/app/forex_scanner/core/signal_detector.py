@@ -295,8 +295,22 @@ class SignalDetector:
             # Filter incomplete candles (live mode only) to align timing with backtest
             df_4h = self._filter_incomplete_candles(df_4h, htf_tf)
 
-            if df_4h is None or len(df_4h) < 60:
-                self.logger.debug(f"Insufficient {htf_tf} data for {epic} (got {len(df_4h) if df_4h is not None else 0} bars)")
+            # Dynamic minimum bars based on actual EMA period configured for this pair
+            # Scalp mode: per-pair EMA (10-30) or global default (20)
+            # Swing mode: 50 EMA (fixed)
+            # Use generous buffer to avoid edge cases after weekend opens
+            if scalp_mode:
+                # Get per-pair scalp EMA period, fallback to global
+                pair_ema = smc_config.get_pair_scalp_ema_period(epic)
+                ema_period = pair_ema if pair_ema is not None else getattr(smc_config, 'scalp_ema_period', 20)
+                # Minimum bars: EMA period + 10 bar buffer (handles weekend opens gracefully)
+                min_htf_bars = ema_period + 10
+            else:
+                ema_period = 50  # Swing mode uses 50 EMA
+                min_htf_bars = 60
+
+            if df_4h is None or len(df_4h) < min_htf_bars:
+                self.logger.info(f"⚠️ Insufficient {htf_tf} data for {epic} (got {len(df_4h) if df_4h is not None else 0} bars, need {min_htf_bars} for {ema_period} EMA)")
                 return None
 
             # Get trigger timeframe data for swing break detection
@@ -319,7 +333,7 @@ class SignalDetector:
             df_trigger = self._filter_incomplete_candles(df_trigger, trigger_tf)
 
             if df_trigger is None or len(df_trigger) < 30:
-                self.logger.debug(f"Insufficient {trigger_tf} data for {epic} (got {len(df_trigger) if df_trigger is not None else 0} bars)")
+                self.logger.info(f"⚠️ Insufficient {trigger_tf} data for {epic} (got {len(df_trigger) if df_trigger is not None else 0} bars, need 30)")
                 return None
 
             # Get entry timeframe data for pullback entry
