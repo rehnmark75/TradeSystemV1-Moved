@@ -954,6 +954,11 @@ class TradingOrchestrator:
                     claude_status = f"Claude: {decision} ({score}/10)"
 
                 self.logger.info(f"✅ Signal saved to alert_history table (ID: {alert_id}) - {claude_status}")
+
+                # v2.24.0: Set cooldown AFTER signal is saved (not at deduplication stage)
+                # This prevents "phantom cooldowns" when signals pass dedup but are rejected by SMC
+                self._set_signal_cooldown(signal)
+
                 return alert_id
             else:
                 self.logger.error(f"❌ Failed to save signal to database - AlertHistoryManager returned None")
@@ -964,6 +969,39 @@ class TradingOrchestrator:
             import traceback
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
             return None
+
+    def _set_signal_cooldown(self, signal: Dict) -> None:
+        """
+        v2.24.0: Set cooldown for a signal AFTER it has been saved to database.
+
+        This is called after all filters (deduplication, SMC, Claude) have passed
+        and the signal has been saved. This prevents "phantom cooldowns" where
+        signals that pass deduplication but are rejected by later filters
+        still block future signals.
+
+        Args:
+            signal: Signal dictionary with 'epic', 'signal_type', and 'strategy'
+        """
+        try:
+            # Get deduplication manager from scanner
+            if not self.scanner or not hasattr(self.scanner, 'deduplication_manager'):
+                return
+
+            dedup_manager = self.scanner.deduplication_manager
+            if not dedup_manager:
+                return
+
+            epic = signal.get('epic', '')
+            signal_type = signal.get('signal_type', '')
+            strategy = signal.get('strategy', 'Unknown')
+
+            if epic and signal_type:
+                dedup_manager.set_cooldown(epic, signal_type, strategy)
+            else:
+                self.logger.warning(f"Cannot set cooldown - missing epic or signal_type: {signal}")
+
+        except Exception as e:
+            self.logger.warning(f"Error setting signal cooldown: {e}")
 
     def _save_vision_artifacts_with_alert_id(
         self,

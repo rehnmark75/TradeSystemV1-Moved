@@ -546,10 +546,11 @@ class AlertDeduplicationManager:
             else:
                 self.logger.debug(f"✅ {check_name}: Passed")
         
-        # All checks passed - update caches
+        # All checks passed - update caches (but NOT cooldown - that's set on execution)
         current_time = datetime.now()
         self._signal_hash_cache[signal_hash] = current_time
-        self._cooldown_key_cache[cooldown_key] = current_time  # Prevent race condition duplicates
+        # NOTE: Cooldown is now set via set_cooldown() when signal is actually executed
+        # This prevents "phantom cooldowns" when signals pass dedup but are rejected by SMC
         self._hourly_alert_count += 1
 
         # Update in-memory cache
@@ -572,7 +573,28 @@ class AlertDeduplicationManager:
         self.logger.info(f"✅ Alert approved: {epic} {signal_type} ({strategy})")
         metadata['approved'] = True
         return True, "Alert approved", metadata
-    
+
+    def set_cooldown(self, epic: str, signal_type: str, strategy: str = None) -> None:
+        """
+        Set cooldown for a signal after it has been executed.
+
+        This should be called AFTER a signal passes all filters (including SMC)
+        and is actually sent/executed. This prevents "phantom cooldowns" where
+        signals that pass deduplication but are rejected by later filters
+        (like SMC conflict) still block future signals.
+
+        Args:
+            epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
+            signal_type: Signal direction ('BULL' or 'BEAR')
+            strategy: Strategy name (optional, for logging)
+        """
+        cooldown_key = f"{epic}_{signal_type}"
+        current_time = datetime.now()
+        self._cooldown_key_cache[cooldown_key] = current_time
+
+        strategy_str = f" ({strategy})" if strategy else ""
+        self.logger.info(f"⏰ Cooldown set: {epic} {signal_type}{strategy_str} - {self.config.epic_signal_cooldown_minutes} min")
+
     def save_alert_with_deduplication(self, alert_history_manager, signal: Dict, 
                                      alert_message: str = None, alert_level: str = 'INFO') -> Optional[int]:
         """

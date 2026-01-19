@@ -2,9 +2,20 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.20.0
-DATE: 2026-01-14
+VERSION: 2.24.0
+DATE: 2026-01-19
 STATUS: Scalp Mode for High-Frequency Trading
+
+v2.24.0 CHANGES (Alternative TIER 3 Entries - Pattern & Divergence):
+    - NEW: pattern_as_entry_enabled - allow patterns as standalone TIER 3 entry
+    - NEW: divergence_as_entry_enabled - allow RSI divergence as standalone TIER 3 entry
+    - NEW: When pullback zone fails, check for pattern/divergence as alternative entry
+    - NEW: Pattern entry requires strength >= 80% (configurable via pattern_entry_min_strength)
+    - NEW: Divergence entry requires strength >= 50% (configurable via divergence_entry_min_strength)
+    - NEW: entry_type now supports 'PATTERN' and 'DIVERGENCE' in addition to PULLBACK/MOMENTUM
+    - NEW: Scalp filter allows PATTERN and DIVERGENCE entries alongside MOMENTUM
+    - IMPACT: More entry opportunities when HTF structure is aligned but pullback zone fails
+    - CONFIG: pattern_as_entry_enabled (default: true), divergence_as_entry_enabled (default: true)
 
 v2.20.0 CHANGES (Scalp Mode - High Frequency Trading):
     - NEW: scalp_mode_enabled toggle for high-frequency 5 pip TP trading
@@ -521,6 +532,9 @@ class SMCSimpleStrategy:
             self.pattern_engulfing_enabled = getattr(config, 'pattern_engulfing_enabled', True)
             self.pattern_hammer_shooter_enabled = getattr(config, 'pattern_hammer_shooter_enabled', True)
             self.pattern_inside_bar_enabled = getattr(config, 'pattern_inside_bar_enabled', True)
+            # v2.24.0: Pattern as alternative TIER 3 entry (not just enhancement)
+            self.pattern_as_entry_enabled = getattr(config, 'pattern_as_entry_enabled', False)
+            self.pattern_entry_min_strength = getattr(config, 'pattern_entry_min_strength', 0.80)
 
             # v2.23.0: RSI Divergence Detection
             self.rsi_divergence_enabled = getattr(config, 'rsi_divergence_enabled', False)
@@ -528,6 +542,9 @@ class SMCSimpleStrategy:
             self.rsi_divergence_lookback = getattr(config, 'rsi_divergence_lookback', 20)
             self.rsi_divergence_min_strength = getattr(config, 'rsi_divergence_min_strength', 0.30)
             self.rsi_divergence_confidence_boost = getattr(config, 'rsi_divergence_confidence_boost', 0.08)
+            # v2.24.0: RSI Divergence as alternative TIER 3 entry (not just enhancement)
+            self.divergence_as_entry_enabled = getattr(config, 'divergence_as_entry_enabled', False)
+            self.divergence_entry_min_strength = getattr(config, 'divergence_entry_min_strength', 0.50)
 
             self.logger.info(f"✅ SMC Simple config v{config.version} loaded from DATABASE (source: {config.source})")
 
@@ -913,6 +930,9 @@ class SMCSimpleStrategy:
             'pattern_engulfing_enabled': 'pattern_engulfing_enabled',
             'pattern_hammer_shooter_enabled': 'pattern_hammer_shooter_enabled',
             'pattern_inside_bar_enabled': 'pattern_inside_bar_enabled',
+            # v2.24.0: Pattern as alternative entry
+            'pattern_as_entry_enabled': 'pattern_as_entry_enabled',
+            'pattern_entry_min_strength': 'pattern_entry_min_strength',
 
             # v2.23.0: RSI Divergence Detection (test ACTIVE vs MONITORING mode)
             'rsi_divergence_enabled': 'rsi_divergence_enabled',
@@ -920,6 +940,9 @@ class SMCSimpleStrategy:
             'rsi_divergence_lookback': 'rsi_divergence_lookback',
             'rsi_divergence_min_strength': 'rsi_divergence_min_strength',
             'rsi_divergence_confidence_boost': 'rsi_divergence_confidence_boost',
+            # v2.24.0: Divergence as alternative entry
+            'divergence_as_entry_enabled': 'divergence_as_entry_enabled',
+            'divergence_entry_min_strength': 'divergence_entry_min_strength',
 
             # Debug
             'enable_debug_logging': 'debug_logging',
@@ -1585,42 +1608,19 @@ class SMCSimpleStrategy:
                 epic  # v2.6.0: Pass epic for pair-specific overrides
             )
 
-            if not pullback_result['valid']:
-                self.logger.info(f"   ❌ {pullback_result['reason']}")
-                # Track rejection
-                self._track_rejection(
-                    stage='TIER3_PULLBACK',
-                    reason=pullback_result['reason'],
-                    epic=epic,
-                    pair=pair,
-                    candle_timestamp=candle_timestamp,
-                    direction=direction,
-                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, direction=direction)
-                )
-                return None
-
-            market_price = pullback_result['entry_price']  # Current close (market price)
-            pullback_depth = pullback_result['pullback_depth']
-            in_optimal_zone = pullback_result['in_optimal_zone']
-            entry_type = pullback_result.get('entry_type', 'PULLBACK')  # v1.8.0
-            trigger_type = pullback_result.get('trigger_type', TRIGGER_SWING_PULLBACK)  # v2.23.0
-
-            # v2.23.0: Pattern confirmation detection
+            # v2.24.0: Initialize pattern/divergence data for alternative entry detection
             pattern_data = None
-            trigger_details = {
-                'base_trigger': trigger_type,
-                'pullback_depth': pullback_depth,
-                'entry_type': entry_type,
-                'macd_aligned': tier1_macd_aligned,  # From TIER 1 EMA check
-            }
+            rsi_divergence_data = None
+            alternative_entry_type = None  # Will be set if pattern/divergence triggers entry
 
-            if getattr(self, 'pattern_confirmation_enabled', False):
+            # v2.24.0: Detect patterns and divergence BEFORE pullback validation
+            # This allows them to serve as alternative TIER 3 entries
+            if getattr(self, 'pattern_confirmation_enabled', False) or getattr(self, 'pattern_as_entry_enabled', False):
                 try:
                     from forex_scanner.core.strategies.helpers.smc_candlestick_patterns import SMCCandlestickPatterns
                     pattern_detector = SMCCandlestickPatterns(self.logger)
                     min_strength = getattr(self, 'pattern_min_strength', 0.70)
 
-                    # Use entry dataframe for pattern detection
                     pattern = pattern_detector.detect_rejection_pattern(
                         entry_df[-10:] if len(entry_df) >= 10 else entry_df,
                         direction,
@@ -1629,62 +1629,131 @@ class SMCSimpleStrategy:
 
                     if pattern:
                         pattern_data = pattern
-                        trigger_details['pattern'] = pattern
-                        trigger_details['pattern_confirmed'] = True
-
-                        # Determine pattern suffix based on detected pattern type
-                        pattern_type = pattern.get('pattern_type', '')
-                        if 'pin_bar' in pattern_type:
-                            pattern_suffix = PATTERN_SUFFIX_PIN
-                        elif 'engulfing' in pattern_type:
-                            pattern_suffix = PATTERN_SUFFIX_ENG
-                        elif 'inside' in pattern_type:
-                            pattern_suffix = PATTERN_SUFFIX_INS
-                        elif 'hammer' in pattern_type or 'shooting' in pattern_type:
-                            pattern_suffix = PATTERN_SUFFIX_PIN  # Hammer/shooter similar to pin
-                        else:
-                            pattern_suffix = ''
-
-                        # Enhance trigger_type with pattern suffix
-                        if pattern_suffix and pattern.get('strength', 0) >= min_strength:
-                            trigger_type = f"{trigger_type}{pattern_suffix}"
-                            trigger_details['enhanced_trigger'] = trigger_type
-
-                        # Log pattern detection (MONITORING or ACTIVE mode)
                         pattern_mode = getattr(self, 'pattern_confirmation_mode', 'MONITORING')
                         self.logger.info(f"   🎯 PATTERN [{pattern_mode}]: {pattern.get('pattern_type', 'unknown')} "
                                        f"(strength: {pattern.get('strength', 0)*100:.0f}%)")
-
                 except ImportError as e:
                     self.logger.debug(f"   ⚠️ Pattern detection unavailable: {e}")
                 except Exception as e:
                     self.logger.warning(f"   ⚠️ Pattern detection error: {e}")
 
-            # v2.23.0: RSI divergence detection
-            rsi_divergence_data = None
-            if getattr(self, 'rsi_divergence_enabled', False):
+            if getattr(self, 'rsi_divergence_enabled', False) or getattr(self, 'divergence_as_entry_enabled', False):
                 try:
                     divergence = self._check_rsi_divergence(entry_df, direction)
                     if divergence.get('detected'):
                         rsi_divergence_data = divergence
-                        trigger_details['rsi_divergence'] = divergence
-
-                        # Enhance trigger type with divergence suffix
-                        if divergence.get('strength', 0) >= getattr(self, 'rsi_divergence_min_strength', 0.30):
-                            trigger_type = f"{trigger_type}{PATTERN_SUFFIX_DIV}"
-                            trigger_details['enhanced_trigger'] = trigger_type
-
-                        # Log divergence detection
                         div_mode = getattr(self, 'rsi_divergence_mode', 'MONITORING')
                         self.logger.info(f"   📊 DIVERGENCE [{div_mode}]: {divergence.get('type', 'unknown')} "
                                        f"(strength: {divergence.get('strength', 0)*100:.0f}%)")
                 except Exception as e:
                     self.logger.warning(f"   ⚠️ RSI divergence detection error: {e}")
 
-            # v1.8.0: Log entry type
+            if not pullback_result['valid']:
+                self.logger.info(f"   ❌ {pullback_result['reason']}")
+
+                # v2.24.0: Check for alternative TIER 3 entries (pattern or divergence)
+                pattern_entry_threshold = getattr(self, 'pattern_entry_min_strength', 0.80)
+                divergence_entry_threshold = getattr(self, 'divergence_entry_min_strength', 0.50)
+                pattern_as_entry = getattr(self, 'pattern_as_entry_enabled', False)
+                divergence_as_entry = getattr(self, 'divergence_as_entry_enabled', False)
+
+                # Check if pattern can serve as alternative entry
+                if pattern_as_entry and pattern_data:
+                    pattern_strength = pattern_data.get('strength', 0)
+                    if pattern_strength >= pattern_entry_threshold:
+                        alternative_entry_type = 'PATTERN'
+                        self.logger.info(f"   ✅ ALTERNATIVE ENTRY: Pattern ({pattern_data.get('pattern_type', 'unknown')}) "
+                                       f"strength {pattern_strength*100:.0f}% >= {pattern_entry_threshold*100:.0f}% threshold")
+
+                # Check if divergence can serve as alternative entry
+                if not alternative_entry_type and getattr(self, 'divergence_as_entry_enabled', False) and rsi_divergence_data:
+                    divergence_strength = rsi_divergence_data.get('strength', 0)
+                    if divergence_strength >= divergence_entry_threshold:
+                        alternative_entry_type = 'DIVERGENCE'
+                        self.logger.info(f"   ✅ ALTERNATIVE ENTRY: RSI Divergence ({rsi_divergence_data.get('type', 'unknown')}) "
+                                       f"strength {divergence_strength*100:.0f}% >= {divergence_entry_threshold*100:.0f}% threshold")
+
+                # If no alternative entry found, reject the signal
+                if not alternative_entry_type:
+                    self._track_rejection(
+                        stage='TIER3_PULLBACK',
+                        reason=pullback_result['reason'],
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, direction=direction)
+                    )
+                    return None
+
+            # v2.24.0: Set entry variables based on pullback or alternative entry
+            if alternative_entry_type:
+                # Alternative entry: use current market price
+                market_price = entry_df['close'].iloc[-1]
+                pullback_depth = 0.0  # Not applicable for pattern/divergence entries
+                in_optimal_zone = False  # Not applicable
+
+                if alternative_entry_type == 'PATTERN':
+                    entry_type = 'PATTERN'
+                    trigger_type = f"pattern_{pattern_data.get('pattern_type', 'unknown')}"
+                else:  # DIVERGENCE
+                    entry_type = 'DIVERGENCE'
+                    trigger_type = f"divergence_{rsi_divergence_data.get('type', 'unknown')}"
+            else:
+                # Normal pullback entry
+                market_price = pullback_result['entry_price']  # Current close (market price)
+                pullback_depth = pullback_result['pullback_depth']
+                in_optimal_zone = pullback_result['in_optimal_zone']
+                entry_type = pullback_result.get('entry_type', 'PULLBACK')  # v1.8.0
+                trigger_type = pullback_result.get('trigger_type', TRIGGER_SWING_PULLBACK)  # v2.23.0
+
+            # Build trigger details
+            trigger_details = {
+                'base_trigger': trigger_type,
+                'pullback_depth': pullback_depth,
+                'entry_type': entry_type,
+                'macd_aligned': tier1_macd_aligned,  # From TIER 1 EMA check
+                'alternative_entry': alternative_entry_type,
+            }
+
+            # v2.23.0: Enhance trigger type with pattern/divergence suffixes (for pullback entries)
+            if pattern_data and not alternative_entry_type:
+                trigger_details['pattern'] = pattern_data
+                trigger_details['pattern_confirmed'] = True
+
+                pattern_type = pattern_data.get('pattern_type', '')
+                if 'pin_bar' in pattern_type:
+                    pattern_suffix = PATTERN_SUFFIX_PIN
+                elif 'engulfing' in pattern_type:
+                    pattern_suffix = PATTERN_SUFFIX_ENG
+                elif 'inside' in pattern_type:
+                    pattern_suffix = PATTERN_SUFFIX_INS
+                elif 'hammer' in pattern_type or 'shooting' in pattern_type:
+                    pattern_suffix = PATTERN_SUFFIX_PIN
+                else:
+                    pattern_suffix = ''
+
+                min_strength = getattr(self, 'pattern_min_strength', 0.70)
+                if pattern_suffix and pattern_data.get('strength', 0) >= min_strength:
+                    trigger_type = f"{trigger_type}{pattern_suffix}"
+                    trigger_details['enhanced_trigger'] = trigger_type
+
+            if rsi_divergence_data and not alternative_entry_type:
+                trigger_details['rsi_divergence'] = rsi_divergence_data
+                if rsi_divergence_data.get('strength', 0) >= getattr(self, 'rsi_divergence_min_strength', 0.30):
+                    trigger_type = f"{trigger_type}{PATTERN_SUFFIX_DIV}"
+                    trigger_details['enhanced_trigger'] = trigger_type
+
+            # v1.8.0: Log entry type (v2.24.0: added PATTERN and DIVERGENCE types)
             if entry_type == 'MOMENTUM':
                 self.logger.info(f"   ✅ Entry Type: MOMENTUM (continuation)")
                 self.logger.info(f"   ✅ Beyond Break: {pullback_depth*100:.1f}%")
+            elif entry_type == 'PATTERN':
+                self.logger.info(f"   ✅ Entry Type: PATTERN (alternative - {pattern_data.get('pattern_type', 'unknown')})")
+                self.logger.info(f"   ✅ Pattern Strength: {pattern_data.get('strength', 0)*100:.0f}%")
+            elif entry_type == 'DIVERGENCE':
+                self.logger.info(f"   ✅ Entry Type: DIVERGENCE (alternative - {rsi_divergence_data.get('type', 'unknown')})")
+                self.logger.info(f"   ✅ Divergence Strength: {rsi_divergence_data.get('strength', 0)*100:.0f}%")
             else:
                 self.logger.info(f"   ✅ Entry Type: PULLBACK (retracement)")
                 self.logger.info(f"   ✅ Pullback Depth: {pullback_depth*100:.1f}%")
@@ -1695,10 +1764,12 @@ class SMCSimpleStrategy:
             # These filters block non-winning patterns in scalp mode:
             # - Pullback entries had 0% win rate (26 trades, 0 winners)
             # - Only HTF-aligned + momentum entries were profitable (40% win rate)
+            # v2.24.0: PATTERN and DIVERGENCE entries are allowed (alternative entries)
             # ================================================================
             if self.scalp_mode_enabled:
-                # Filter 1: Momentum-only (block pullback entries)
-                if self.scalp_momentum_only_filter and entry_type != 'MOMENTUM':
+                # Filter 1: Momentum-only (block pullback entries, allow PATTERN/DIVERGENCE)
+                allowed_entry_types = ['MOMENTUM', 'PATTERN', 'DIVERGENCE']
+                if self.scalp_momentum_only_filter and entry_type not in allowed_entry_types:
                     rejection_reason = f"Scalp filter: Non-momentum entry ({entry_type}) blocked"
                     self.logger.info(f"   ❌ {rejection_reason}")
                     self._track_rejection(

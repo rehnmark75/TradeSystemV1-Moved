@@ -288,6 +288,9 @@ class SMCSimpleConfig:
     pattern_inside_bar_enabled: bool = True  # Enable inside bar detection
     pattern_hammer_shooter_enabled: bool = True  # Enable hammer/shooting star detection
     pattern_confidence_boost: float = 0.05  # Confidence boost when pattern detected
+    # v2.24.0: Pattern as alternative TIER 3 entry
+    pattern_as_entry_enabled: bool = False  # Allow pattern as standalone entry
+    pattern_entry_min_strength: float = 0.80  # Min strength for pattern-only entry
 
     # RSI DIVERGENCE (v2.23.0)
     # Detects momentum divergence for reversal confirmation
@@ -296,6 +299,9 @@ class SMCSimpleConfig:
     rsi_divergence_lookback: int = 20  # Bars to look back for divergence
     rsi_divergence_min_strength: float = 0.30  # Min divergence strength
     rsi_divergence_confidence_boost: float = 0.08  # Confidence boost when divergence detected
+    # v2.24.0: Divergence as alternative TIER 3 entry
+    divergence_as_entry_enabled: bool = False  # Allow divergence as standalone entry
+    divergence_entry_min_strength: float = 0.50  # Min strength for divergence-only entry
 
     # MACD ALIGNMENT ENHANCEMENT (v2.23.0)
     # Additional MACD check for TIER 1 validation
@@ -1188,10 +1194,14 @@ class SMCSimpleConfigService:
             'pattern_min_strength', 'pattern_pin_bar_enabled',
             'pattern_engulfing_enabled', 'pattern_inside_bar_enabled',
             'pattern_hammer_shooter_enabled', 'pattern_confidence_boost',
+            # v2.24.0: Pattern as alternative entry
+            'pattern_as_entry_enabled', 'pattern_entry_min_strength',
             # RSI DIVERGENCE (v2.23.0)
             'rsi_divergence_enabled', 'rsi_divergence_mode',
             'rsi_divergence_lookback', 'rsi_divergence_min_strength',
             'rsi_divergence_confidence_boost',
+            # v2.24.0: Divergence as alternative entry
+            'divergence_as_entry_enabled', 'divergence_entry_min_strength',
             # MACD ALIGNMENT ENHANCEMENT (v2.23.0)
             'macd_alignment_enabled', 'macd_alignment_required',
             'macd_alignment_confidence_boost',
