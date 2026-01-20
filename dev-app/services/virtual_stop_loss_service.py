@@ -551,24 +551,24 @@ class VirtualStopLossService:
                 return
 
         # Early lock check (between breakeven and stage1)
-        # Triggers at +4 pips, moves VSL to -2.5 pips (reducing risk)
+        # Triggers at +4.5 pips, locks +1.5 pips profit (protects gains between BE and stage1)
         if not position.early_lock_triggered and 'early_lock_trigger_pips' in config:
             if current_profit_pips >= config['early_lock_trigger_pips']:
                 position.early_lock_triggered = True
                 position.current_stage = "early_lock"
-                lock_pips = config['early_lock_pips']  # Negative value (e.g., -2.5)
+                lock_pips = config['early_lock_pips']  # Positive value (e.g., +1.5 pips profit)
                 lock_distance = lock_pips * point_value
 
                 if position.direction == "BUY":
-                    # BUY: negative lock_pips means below entry (e.g., entry - 2.5 pips)
+                    # BUY: lock_pips above entry (e.g., entry + 1.5 pips)
                     position.dynamic_vsl_price = position.entry_price + lock_distance
                 else:  # SELL
-                    # SELL: negative lock_pips means above entry (e.g., entry + 2.5 pips)
+                    # SELL: lock_pips below entry (e.g., entry - 1.5 pips)
                     position.dynamic_vsl_price = position.entry_price - lock_distance
 
                 logger.info(f"[VSL] 🔒 Trade {position.trade_id} → EARLY LOCK: "
                            f"Profit={current_profit_pips:.1f} pips, "
-                           f"VSL reduced to {lock_pips} pips @ {position.dynamic_vsl_price:.5f}")
+                           f"Locking +{lock_pips} pips @ {position.dynamic_vsl_price:.5f}")
 
                 # Update stats
                 self._stats["early_lock_triggered_count"] = self._stats.get("early_lock_triggered_count", 0) + 1

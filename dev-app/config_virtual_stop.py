@@ -194,31 +194,35 @@ BASELINE_SPREAD_PIPS = 1.0  # Normal spread assumption
 MAX_SPREAD_PENALTY_PIPS = 2.0  # Cap adjustment at +2 pips max
 
 # Default dynamic VSL configuration for majors
-# Updated Jan 16, 2026: Aligned with widened initial VSL (3->5 pips)
-# Stages adjusted to give trades more room to develop
+# Updated Jan 20, 2026: Added early_lock stage to protect profit between BE and stage1
+# Analysis showed trades reaching +5.75 pips were giving back to +0.5 (BE lock)
+# because stage1 didn't trigger until +6.0 pips
 DEFAULT_DYNAMIC_VSL_CONFIG = {
     'initial_vsl_pips': 5.0,        # Starting VSL (widened from 3.0)
-    'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit (widened from 2.0)
+    'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
-    'stage1_trigger_pips': 6.0,     # Move to stage1 when +6 pips profit (from 5.0)
-    'stage1_lock_pips': 2.5,        # Lock +2.5 pips at stage1 (from 2.0)
-    'stage2_trigger_pips': 8.0,     # Move to stage2 when +8 pips profit (from 6.5)
+    'early_lock_trigger_pips': 4.5, # NEW: Intermediate stage at +4.5 pips
+    'early_lock_pips': 1.5,         # NEW: Lock +1.5 pips (protects more profit)
+    'stage1_trigger_pips': 6.0,     # Move to stage1 when +6 pips profit
+    'stage1_lock_pips': 2.5,        # Lock +2.5 pips at stage1
+    'stage2_trigger_pips': 8.0,     # Move to stage2 when +8 pips profit
     'stage2_lock_pips': 6.0,        # Lock +6 pips at stage2
-    'target_pips': 10.0,            # TP target (extended from 8.0)
+    'target_pips': 10.0,            # TP target
 }
 
 # Default dynamic VSL configuration for JPY pairs (higher volatility)
-# Initial VSL increased from 4 to 6 pips based on analysis showing
-# normal MAE is 6-14 pips - 4 pips was too tight causing premature exits
+# Updated Jan 20, 2026: Added early_lock stage to protect profit
 DEFAULT_JPY_DYNAMIC_VSL_CONFIG = {
     'initial_vsl_pips': 6.0,        # Starting VSL (increased from 4.0)
-    'breakeven_trigger_pips': 2.5,  # Move to BE when +2.5 pips profit (backtested)
+    'breakeven_trigger_pips': 2.5,  # Move to BE when +2.5 pips profit
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
+    'early_lock_trigger_pips': 4.0, # NEW: Intermediate stage at +4 pips
+    'early_lock_pips': 1.5,         # NEW: Lock +1.5 pips
     'stage1_trigger_pips': 6.0,     # Move to stage1 when +6 pips profit
     'stage1_lock_pips': 2.5,        # Lock +2.5 pips at stage1
     'stage2_trigger_pips': 8.0,     # Move to stage2 when +8 pips profit
     'stage2_lock_pips': 5.0,        # Lock +5 pips at stage2
-    'target_pips': 10.0,            # TP target (extended from 6.0)
+    'target_pips': 10.0,            # TP target
 }
 
 # Per-pair dynamic VSL configuration
@@ -239,6 +243,8 @@ PAIR_DYNAMIC_VSL_CONFIGS = {
         'initial_vsl_pips': 8.0,        # Widened from 6.0
         'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit
         'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
+        'early_lock_trigger_pips': 5.0, # NEW: Intermediate stage at +5 pips
+        'early_lock_pips': 2.0,         # NEW: Lock +2 pips
         'stage1_trigger_pips': 7.0,     # Move to stage1 when +7 pips profit
         'stage1_lock_pips': 3.0,        # Lock +3 pips at stage1
         'stage2_trigger_pips': 10.0,    # Move to stage2 when +10 pips profit
