@@ -1,3 +1,4 @@
+import asyncio
 from services.ig_auth import ig_login
 from services.keyvault import get_secret
 from datetime import datetime, timedelta
@@ -9,16 +10,12 @@ PROD_IG_API_KEY = "prodapikey"
 PROD_IG_PWD = "prodpwd"
 PROD_API_BASE_URL = "https://api.ig.com/gateway/deal"
 
-# Global cache (in-memory or move to Redis if production)
-ig_token_cache = {
-    "CST": None,
-    "X-SECURITY-TOKEN": None,
-    "stream_used": False,
-    "expires_at": None
-}
+# Locks to prevent concurrent token refresh race conditions
+# Without these, multiple async tasks could all see expired token and call ig_login simultaneously
+_demo_token_lock = asyncio.Lock()
+_prod_token_lock = asyncio.Lock()
 
-
-# Global in-memory token cache
+# Global in-memory token cache (demo account)
 ig_token_cache = {
     "CST": None,
     "X-SECURITY-TOKEN": None,
@@ -28,20 +25,25 @@ ig_token_cache = {
 }
 
 async def get_ig_auth_headers(force_refresh: bool = False):
+    """
+    Get IG auth headers for demo account, with lock to prevent concurrent refresh.
+
+    The lock ensures that if multiple async tasks need to refresh the token simultaneously,
+    only one actually calls ig_login() while others wait and then use the cached result.
+    """
     now = datetime.utcnow()
 
-    # Check if refresh is needed
-    should_refresh = (
-        force_refresh or
-        ig_token_cache["CST"] is None or
-        ig_token_cache["X-SECURITY-TOKEN"] is None or
-        ig_token_cache["ACCOUNT_ID"] is None or
-        ig_token_cache["expires_at"] is None or
-        now >= ig_token_cache["expires_at"] or
-        ig_token_cache["stream_used"]
-    )
+    # Quick check without lock - if token is valid, return immediately
+    if not force_refresh and _is_token_valid(ig_token_cache, now):
+        return _build_headers(ig_token_cache, IG_API_KEY)
 
-    if should_refresh:
+    # Token needs refresh - acquire lock to prevent concurrent refresh
+    async with _demo_token_lock:
+        # Double-check after acquiring lock (another task may have refreshed)
+        now = datetime.utcnow()
+        if not force_refresh and _is_token_valid(ig_token_cache, now):
+            return _build_headers(ig_token_cache, IG_API_KEY)
+
         print("🔄 Refreshing IG token...")
 
         api_key = get_secret(IG_API_KEY)
@@ -56,14 +58,31 @@ async def get_ig_auth_headers(force_refresh: bool = False):
         ig_token_cache["stream_used"] = False
         ig_token_cache["expires_at"] = now + timedelta(minutes=55)  # Leave buffer
 
+    return _build_headers(ig_token_cache, IG_API_KEY)
+
+
+def _is_token_valid(cache: dict, now: datetime) -> bool:
+    """Check if cached token is still valid."""
+    return (
+        cache["CST"] is not None and
+        cache["X-SECURITY-TOKEN"] is not None and
+        cache["ACCOUNT_ID"] is not None and
+        cache["expires_at"] is not None and
+        now < cache["expires_at"] and
+        not cache.get("stream_used", False)
+    )
+
+
+def _build_headers(cache: dict, api_key_name: str) -> dict:
+    """Build headers dict from cache."""
     return {
         "Accept": "application/json; charset=UTF-8",
         "Content-Type": "application/json; charset=UTF-8",
-        "X-IG-API-KEY": get_secret(IG_API_KEY),  # Reuse securely
+        "X-IG-API-KEY": get_secret(api_key_name),
         "Version": "2",
-        "CST": ig_token_cache["CST"],
-        "X-SECURITY-TOKEN": ig_token_cache["X-SECURITY-TOKEN"],
-        "accountId": ig_token_cache["ACCOUNT_ID"]
+        "CST": cache["CST"],
+        "X-SECURITY-TOKEN": cache["X-SECURITY-TOKEN"],
+        "accountId": cache["ACCOUNT_ID"]
     }
 
 
@@ -82,20 +101,22 @@ async def get_prod_auth_headers(force_refresh: bool = False):
 
     This uses production credentials (same as stream-app) because
     Lightstreamer streaming requires production account.
+
+    Uses lock to prevent concurrent refresh race conditions.
     """
     now = datetime.utcnow()
 
-    # Check if refresh is needed
-    should_refresh = (
-        force_refresh or
-        prod_token_cache["CST"] is None or
-        prod_token_cache["X-SECURITY-TOKEN"] is None or
-        prod_token_cache["ACCOUNT_ID"] is None or
-        prod_token_cache["expires_at"] is None or
-        now >= prod_token_cache["expires_at"]
-    )
+    # Quick check without lock - if token is valid, return immediately
+    if not force_refresh and _is_prod_token_valid(prod_token_cache, now):
+        return _build_headers(prod_token_cache, PROD_IG_API_KEY)
 
-    if should_refresh:
+    # Token needs refresh - acquire lock to prevent concurrent refresh
+    async with _prod_token_lock:
+        # Double-check after acquiring lock (another task may have refreshed)
+        now = datetime.utcnow()
+        if not force_refresh and _is_prod_token_valid(prod_token_cache, now):
+            return _build_headers(prod_token_cache, PROD_IG_API_KEY)
+
         print("🔄 Refreshing PRODUCTION IG token for VSL...")
 
         api_key = get_secret(PROD_IG_API_KEY)
@@ -116,12 +137,15 @@ async def get_prod_auth_headers(force_refresh: bool = False):
 
         print(f"✅ PRODUCTION auth successful - Account: {tokens['ACCOUNT_ID']}")
 
-    return {
-        "Accept": "application/json; charset=UTF-8",
-        "Content-Type": "application/json; charset=UTF-8",
-        "X-IG-API-KEY": get_secret(PROD_IG_API_KEY),
-        "Version": "2",
-        "CST": prod_token_cache["CST"],
-        "X-SECURITY-TOKEN": prod_token_cache["X-SECURITY-TOKEN"],
-        "accountId": prod_token_cache["ACCOUNT_ID"]
-    }
+    return _build_headers(prod_token_cache, PROD_IG_API_KEY)
+
+
+def _is_prod_token_valid(cache: dict, now: datetime) -> bool:
+    """Check if cached production token is still valid (no stream_used check)."""
+    return (
+        cache["CST"] is not None and
+        cache["X-SECURITY-TOKEN"] is not None and
+        cache["ACCOUNT_ID"] is not None and
+        cache["expires_at"] is not None and
+        now < cache["expires_at"]
+    )
