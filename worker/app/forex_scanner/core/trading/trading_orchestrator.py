@@ -758,6 +758,10 @@ class TradingOrchestrator:
         if 'news' in reason_lower:
             return 'NEWS_FILTER'
 
+        # Market Bias Filter (v2.3.2) - counter-trend trades blocked by high consensus
+        if 'market bias filter' in reason_lower or 'market bias conflict' in reason_lower:
+            return 'MARKET_BIAS_FILTER'
+
         # Market hours
         if 'market hours' in reason_lower or 'outside trading' in reason_lower:
             return 'MARKET_HOURS'

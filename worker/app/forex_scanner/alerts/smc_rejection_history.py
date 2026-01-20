@@ -79,6 +79,8 @@ class SMCRejectionHistoryManager:
     STAGE_VALIDATION_FAILED = 'VALIDATION_FAILED'  # Generic validation failure
     # v2.24.0: Scalp mode entry filters
     STAGE_SCALP_ENTRY_FILTER = 'SCALP_ENTRY_FILTER'  # Scalp mode RSI/momentum filters
+    # v2.25.0: Market bias filter (counter-trend with high directional consensus)
+    STAGE_MARKET_BIAS_FILTER = 'MARKET_BIAS_FILTER'  # Trade direction conflicts with market bias
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
@@ -91,7 +93,9 @@ class SMCRejectionHistoryManager:
         STAGE_CLAUDE_FILTER, STAGE_NEWS_FILTER, STAGE_MARKET_HOURS,
         STAGE_VALIDATION_FAILED,
         # v2.24.0: Scalp mode filters
-        STAGE_SCALP_ENTRY_FILTER
+        STAGE_SCALP_ENTRY_FILTER,
+        # v2.25.0: Market bias filter
+        STAGE_MARKET_BIAS_FILTER
     ]
 
     def __init__(self, db_manager, config=None):
