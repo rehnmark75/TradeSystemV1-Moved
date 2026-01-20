@@ -636,9 +636,14 @@ class OrderExecutor:
             # Record failure with circuit breaker
             self.circuit_breaker.record_failure()
             self.request_stats['failed_requests'] += 1
-            
+
             error_msg = f"Order execution failed after all retries: {str(e)}"
-            self.logger.error(f"❌ {error_msg}")
+
+            # Log cooldown messages as info, not error (expected behavior)
+            if "cooldown" in str(e).lower():
+                self.logger.info(f"⏳ {error_msg}")
+            else:
+                self.logger.error(f"❌ {error_msg}")
             
             return {
                 "status": "error",

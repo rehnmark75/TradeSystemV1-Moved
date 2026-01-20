@@ -297,7 +297,12 @@ class OrderManager:
                     self.last_execution_time = datetime.now()
                     execution_results.append(result)
                 else:
-                    self.logger.warning(f"❌ Signal execution failed: {signal['epic']}")
+                    # Check if it's a cooldown (expected) vs real failure
+                    reason = result.get('reason', '') if result else ''
+                    if "cooldown" in reason.lower():
+                        self.logger.info(f"⏳ Signal skipped (cooldown): {signal['epic']}")
+                    else:
+                        self.logger.warning(f"❌ Signal execution failed: {signal['epic']}")
                     self.orders_failed += 1
                     execution_results.append(result or {
                         'signal': signal,
@@ -403,9 +408,13 @@ class OrderManager:
                     return execution_record
                 else:
                     error_msg = order_result.get('message', 'Unknown error') if order_result else 'No result returned'
-                    self.logger.error(f"❌ OrderExecutor failed: {error_msg}")
+                    # Log cooldown messages as info, not error (expected behavior)
+                    if "cooldown" in error_msg.lower():
+                        self.logger.info(f"⏳ Epic in cooldown: {error_msg}")
+                    else:
+                        self.logger.error(f"❌ OrderExecutor failed: {error_msg}")
                     return {
-                        'status': 'execution_failed', 
+                        'status': 'execution_failed',
                         'executed': False,
                         'reason': error_msg,
                         'alert_id': alert_id
