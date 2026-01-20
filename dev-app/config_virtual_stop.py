@@ -194,34 +194,38 @@ BASELINE_SPREAD_PIPS = 1.0  # Normal spread assumption
 MAX_SPREAD_PENALTY_PIPS = 2.0  # Cap adjustment at +2 pips max
 
 # Default dynamic VSL configuration for majors
-# Updated Jan 20, 2026: Added early_lock stage to protect profit between BE and stage1
+# Updated Jan 20, 2026: Added progressive lock stages to protect profit
 # Analysis showed trades reaching +5.75 pips were giving back to +0.5 (BE lock)
-# because stage1 didn't trigger until +6.0 pips
+# New staging: BE(+3)→early(+4)→mid(+5)→stage1(+6)→stage2(+8)
 DEFAULT_DYNAMIC_VSL_CONFIG = {
     'initial_vsl_pips': 5.0,        # Starting VSL (widened from 3.0)
     'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
-    'early_lock_trigger_pips': 4.5, # NEW: Intermediate stage at +4.5 pips
-    'early_lock_pips': 1.5,         # NEW: Lock +1.5 pips (protects more profit)
+    'early_lock_trigger_pips': 4.0, # Early stage at +4 pips
+    'early_lock_pips': 1.5,         # Lock +1.5 pips
+    'mid_lock_trigger_pips': 5.0,   # NEW: Mid stage at +5 pips
+    'mid_lock_pips': 4.0,           # NEW: Lock +4 pips (aggressive protection)
     'stage1_trigger_pips': 6.0,     # Move to stage1 when +6 pips profit
-    'stage1_lock_pips': 2.5,        # Lock +2.5 pips at stage1
+    'stage1_lock_pips': 4.5,        # Lock +4.5 pips at stage1
     'stage2_trigger_pips': 8.0,     # Move to stage2 when +8 pips profit
     'stage2_lock_pips': 6.0,        # Lock +6 pips at stage2
     'target_pips': 10.0,            # TP target
 }
 
 # Default dynamic VSL configuration for JPY pairs (higher volatility)
-# Updated Jan 20, 2026: Added early_lock stage to protect profit
+# Updated Jan 20, 2026: Added progressive lock stages to protect profit
 DEFAULT_JPY_DYNAMIC_VSL_CONFIG = {
     'initial_vsl_pips': 6.0,        # Starting VSL (increased from 4.0)
     'breakeven_trigger_pips': 2.5,  # Move to BE when +2.5 pips profit
     'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
-    'early_lock_trigger_pips': 4.0, # NEW: Intermediate stage at +4 pips
-    'early_lock_pips': 1.5,         # NEW: Lock +1.5 pips
+    'early_lock_trigger_pips': 4.0, # Early stage at +4 pips
+    'early_lock_pips': 1.5,         # Lock +1.5 pips
+    'mid_lock_trigger_pips': 5.0,   # NEW: Mid stage at +5 pips
+    'mid_lock_pips': 3.5,           # NEW: Lock +3.5 pips (slightly less aggressive for JPY volatility)
     'stage1_trigger_pips': 6.0,     # Move to stage1 when +6 pips profit
-    'stage1_lock_pips': 2.5,        # Lock +2.5 pips at stage1
+    'stage1_lock_pips': 4.0,        # Lock +4 pips at stage1
     'stage2_trigger_pips': 8.0,     # Move to stage2 when +8 pips profit
-    'stage2_lock_pips': 5.0,        # Lock +5 pips at stage2
+    'stage2_lock_pips': 5.5,        # Lock +5.5 pips at stage2
     'target_pips': 10.0,            # TP target
 }
 
@@ -243,12 +247,14 @@ PAIR_DYNAMIC_VSL_CONFIGS = {
         'initial_vsl_pips': 8.0,        # Widened from 6.0
         'breakeven_trigger_pips': 3.0,  # Move to BE when +3 pips profit
         'breakeven_lock_pips': 0.5,     # Lock +0.5 pip at breakeven
-        'early_lock_trigger_pips': 5.0, # NEW: Intermediate stage at +5 pips
-        'early_lock_pips': 2.0,         # NEW: Lock +2 pips
+        'early_lock_trigger_pips': 5.0, # Early stage at +5 pips
+        'early_lock_pips': 2.0,         # Lock +2 pips
+        'mid_lock_trigger_pips': 6.0,   # NEW: Mid stage at +6 pips
+        'mid_lock_pips': 4.0,           # NEW: Lock +4 pips
         'stage1_trigger_pips': 7.0,     # Move to stage1 when +7 pips profit
-        'stage1_lock_pips': 3.0,        # Lock +3 pips at stage1
+        'stage1_lock_pips': 5.0,        # Lock +5 pips at stage1
         'stage2_trigger_pips': 10.0,    # Move to stage2 when +10 pips profit
-        'stage2_lock_pips': 6.0,        # Lock +6 pips at stage2
+        'stage2_lock_pips': 7.0,        # Lock +7 pips at stage2
         'target_pips': 12.0,            # TP target
     },
     'CS.D.EURJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),

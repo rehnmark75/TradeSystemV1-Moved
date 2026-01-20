@@ -945,26 +945,45 @@ def get_monitor_status_endpoint():
 
 
 
-# 🔥 ENHANCED: Health check endpoint for all services including new P/L system - FIXED
+# 🔥 LIGHTWEIGHT: Fast health check for Docker/K8s liveness probes - prevents blocking
 @app.get("/health")
-def health_check():
+async def health_check():
+    """
+    Lightweight health check for container orchestration (Docker, K8s).
+
+    This endpoint is intentionally minimal to prevent blocking during:
+    - Container startup
+    - Service degradation
+    - Network issues
+
+    For detailed service status, use /health/detailed
+    """
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "version": "3.2.0_non_blocking"
+    }
+
+
+@app.get("/health/detailed")
+def health_check_detailed():
     """Comprehensive health check for all services including complete P/L calculation - FIXED"""
     health_status = {
         "overall": "healthy",
         "timestamp": time.time(),
-        "version": "3.1.1_timeout_fixed",  # 🆕 UPDATED
-        "database_performance": "optimal",   # 🆕 NEW
+        "version": "3.2.0_non_blocking",
+        "database_performance": "optimal",
         "services": {
             "trade_monitor": {
                 "status": "running" if (monitor_running and ENHANCED_MONITOR_AVAILABLE) else "stopped",
                 "type": "enhanced_trailing_system",
                 "available": ENHANCED_MONITOR_AVAILABLE,
-                "database_performance": "fast"  # 🆕 NEW
+                "database_performance": "fast"
             },
             "trade_sync": {
                 "status": "active",
                 "interval": "5 minutes",
-                "database_performance": "fast"  # 🆕 NEW
+                "database_performance": "fast"
             },
             "api_gateway": {
                 "status": "active",
@@ -972,38 +991,38 @@ def health_check():
             }
         }
     }
-    
+
     # Check enhanced analytics system
     if ANALYTICS_AVAILABLE:
         try:
             from services.broker_transaction_analyzer import BrokerTransactionAnalyzer
             from services.activity_pnl_correlator import create_activity_pnl_correlator
             from services.price_based_pnl_calculator import create_price_based_pnl_calculator
-            
+
             health_status["services"]["trading_analytics"] = {
                 "status": "available",
                 "features": ["ig_integration", "statistics", "correlations"],
-                "database_performance": "fast"  # 🆕 NEW
+                "database_performance": "fast"
             }
-            
+
             # 🔥 Check complete P/L calculation system
             health_status["services"]["pnl_calculation"] = {
                 "status": "available",
                 "features": [
-                    "activity_correlation", 
-                    "price_calculation", 
+                    "activity_correlation",
+                    "price_calculation",
                     "database_updates",
                     "complete_pipeline"
                 ],
-                "database_performance": "fast",         # 🆕 NEW
-                "timeout_issues": "resolved"            # 🆕 NEW
+                "database_performance": "fast",
+                "timeout_issues": "resolved"
             }
-            
+
             # 🆕 Check new transaction-based P/L correlation
             try:
                 from services.trade_pnl_correlator import TradePnLCorrelator
                 from services.trade_automation_service import TradeAutomationService
-                
+
                 health_status["services"]["transaction_pnl"] = {
                     "status": "available",
                     "features": [
@@ -1012,19 +1031,19 @@ def health_check():
                         "automated_pnl_updates",
                         "integrated_automation"
                     ],
-                    "database_performance": "fast",     # 🆕 NEW
-                    "timeout_issues": "resolved"        # 🆕 NEW
+                    "database_performance": "fast",
+                    "timeout_issues": "resolved"
                 }
             except ImportError:
                 health_status["services"]["transaction_pnl"] = {
                     "status": "pending_installation",
                     "message": "Transaction P/L correlation services not yet installed",
-                    "database_performance": "ready"     # 🆕 NEW
+                    "database_performance": "ready"
                 }
-            
+
         except Exception as e:
             health_status["services"]["trading_analytics"] = {
-                "status": "unavailable", 
+                "status": "unavailable",
                 "error": str(e)
             }
             health_status["services"]["pnl_calculation"] = {
@@ -1036,25 +1055,25 @@ def health_check():
         health_status["services"]["trading_analytics"] = {
             "status": "not_installed",
             "message": "Enhanced analytics router not available",
-            "database_performance": "ready"  # 🆕 NEW
+            "database_performance": "ready"
         }
         health_status["services"]["pnl_calculation"] = {
-            "status": "not_installed", 
+            "status": "not_installed",
             "message": "Complete P/L calculation system not available",
-            "database_performance": "ready"  # 🆕 NEW
+            "database_performance": "ready"
         }
         health_status["services"]["transaction_pnl"] = {
             "status": "not_installed",
             "message": "Transaction P/L correlation system not available",
-            "database_performance": "ready"  # 🆕 NEW
+            "database_performance": "ready"
         }
-    
+
     # ✅ FIX: Update overall status based on critical services
     if not ENHANCED_MONITOR_AVAILABLE or not monitor_running:
         health_status["overall"] = "degraded"
         health_status["warnings"] = health_status.get("warnings", [])
         health_status["warnings"].append("Trade monitoring not available")
-    
+
     # 🆕 Add database performance summary
     health_status["database_summary"] = {
         "timeout_issues": "resolved",
@@ -1062,7 +1081,7 @@ def health_check():
         "performance": "optimal",
         "concurrent_operations": "enabled"
     }
-    
+
     return health_status
 
 # Backtest router for direct execution

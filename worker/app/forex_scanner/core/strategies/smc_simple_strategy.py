@@ -2826,9 +2826,18 @@ class SMCSimpleStrategy:
             # SCALP SIGNAL QUALIFICATION (v2.21.0)
             # Run momentum confirmation filters on scalp signals
             # Mode: MONITORING (logs only) or ACTIVE (blocks signals)
+            # v2.24.1: Per-pair qualification mode support
             # ================================================================
             if self.scalp_mode_enabled and self._signal_qualifier and self._signal_qualifier.enabled:
                 try:
+                    # v2.24.1: Get per-pair qualification mode (JPY pairs use ACTIVE, others use global)
+                    effective_mode = self._signal_qualifier.mode  # Default to global mode
+                    if hasattr(self, '_db_config') and self._db_config:
+                        pair_mode = self._db_config.get_pair_scalp_qualification_mode(epic)
+                        if pair_mode:
+                            effective_mode = pair_mode
+                            self._signal_qualifier.mode = pair_mode  # Temporarily set for this signal
+
                     qual_passed, qual_score, qual_results = self._signal_qualifier.qualify_signal(
                         signal=signal,
                         df_entry=entry_df,
@@ -2838,7 +2847,7 @@ class SMCSimpleStrategy:
                     # Add qualification data to signal for logging/analysis
                     signal['qualification_score'] = qual_score
                     signal['qualification_results'] = qual_results
-                    signal['qualification_mode'] = self._signal_qualifier.mode
+                    signal['qualification_mode'] = effective_mode
 
                     if not qual_passed:
                         self.logger.info(f"\n⚠️ SIGNAL BLOCKED BY QUALIFICATION")
@@ -3448,9 +3457,13 @@ class SMCSimpleStrategy:
 
             micro_range_pips = micro_range / pip_value
 
-            # Get scalp fib thresholds
-            pair_fib_min = self.fib_min  # e.g., 0.05 (5%)
-            pair_fib_max = self.fib_max  # e.g., 0.30 (30%)
+            # v2.24.1: Get per-pair scalp fib thresholds (with fallback to global)
+            pair_fib_min = self.fib_min  # Default to global
+            pair_fib_max = self.fib_max
+            if epic and hasattr(self, '_db_config') and self._db_config:
+                pair_override = self._db_config.get_pair_scalp_fib_pullback_min(epic)
+                if pair_override is not None:
+                    pair_fib_min = pair_override
 
             if self.debug_logging:
                 self.logger.debug(f"   Micro-pullback ({lookback_bars} bars): high={micro_high:.5f}, low={micro_low:.5f}")

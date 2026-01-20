@@ -912,6 +912,34 @@ class SMCSimpleConfig:
                 return float(override['scalp_swing_break_tolerance_pips'])
         return None
 
+    def get_pair_scalp_qualification_mode(self, epic: str) -> Optional[str]:
+        """
+        Get per-pair scalp qualification mode override.
+
+        Returns:
+            Per-pair scalp qualification mode ('ACTIVE' or 'MONITORING') if set,
+            None otherwise (use global scalp_qualification_mode)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_qualification_mode'):
+                return str(override['scalp_qualification_mode']).upper()
+        return None
+
+    def get_pair_scalp_fib_pullback_min(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair scalp micro-pullback minimum threshold override.
+
+        Returns:
+            Per-pair scalp fib pullback min (e.g., 0.15 for 15%) if set,
+            None otherwise (use global scalp_fib_pullback_min)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_fib_pullback_min') is not None:
+                return float(override['scalp_fib_pullback_min'])
+        return None
+
     def get_effective_scalp_config(self, epic: str) -> dict:
         """
         Get effective scalp configuration for a pair, merging per-pair overrides with globals.
@@ -929,6 +957,8 @@ class SMCSimpleConfig:
             'min_confidence': self.get_pair_scalp_min_confidence(epic) or self.scalp_min_confidence,
             'cooldown_minutes': self.get_pair_scalp_cooldown_minutes(epic) or self.scalp_cooldown_minutes,
             'swing_break_tolerance_pips': self.get_pair_scalp_swing_break_tolerance(epic) or getattr(self, 'scalp_swing_break_tolerance_pips', 0.5),
+            'qualification_mode': self.get_pair_scalp_qualification_mode(epic) or self.scalp_qualification_mode,
+            'fib_pullback_min': self.get_pair_scalp_fib_pullback_min(epic) or self.scalp_fib_pullback_min,
         }
 
     def check_macd_alignment(
@@ -1350,6 +1380,10 @@ class SMCSimpleConfigService:
                 'scalp_min_confidence': row.get('scalp_min_confidence'),
                 'scalp_cooldown_minutes': row.get('scalp_cooldown_minutes'),
                 'scalp_swing_break_tolerance_pips': row.get('scalp_swing_break_tolerance_pips'),
+                # Scalp qualification mode override (v2.24.1) - per-pair ACTIVE/MONITORING
+                'scalp_qualification_mode': row.get('scalp_qualification_mode'),
+                # Scalp pullback threshold override (v2.24.1) - per-pair optimal threshold
+                'scalp_fib_pullback_min': row.get('scalp_fib_pullback_min'),
             }
 
         return config

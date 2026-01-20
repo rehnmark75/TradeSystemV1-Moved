@@ -983,22 +983,43 @@ class TradeMonitor:
 # Global monitor instance for status tracking
 monitor_instance = None
 
-def start_monitoring_thread(seed_data=False, dry_run=False):
-    """Start monitoring in background thread - ENHANCED WITH ERROR HANDLING"""
+def start_monitoring_thread(seed_data=False, dry_run=False, init_timeout=30):
+    """Start monitoring in background thread - ENHANCED WITH ERROR HANDLING AND TIMEOUT
+
+    Args:
+        seed_data: Whether to seed initial data
+        dry_run: Whether to run in dry run mode
+        init_timeout: Maximum seconds to wait for TradeMonitor initialization (default 30s)
+    """
     global monitor_instance
-    
+
     try:
         if not ENHANCED_PROCESSOR_AVAILABLE:
             print("❌ Cannot start monitoring - enhanced processor not available")
             print("   • Check that enhanced_trade_processor.py exists")
             print("   • Check that dependencies.py has get_ig_auth_headers()")
             return None
-        
+
         print("🔧 Creating enhanced trade monitor instance...")
-        
-        # Create trade monitor instance with detailed error reporting
+        print(f"   • Initialization timeout: {init_timeout}s")
+
+        # Create trade monitor instance with timeout to prevent blocking
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+        def create_monitor():
+            return TradeMonitor()
+
         try:
-            monitor_instance = TradeMonitor()
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(create_monitor)
+                try:
+                    monitor_instance = future.result(timeout=init_timeout)
+                except FuturesTimeoutError:
+                    print(f"❌ TradeMonitor initialization timed out after {init_timeout}s")
+                    print("   • This usually indicates a blocking HTTP call or database query")
+                    print("   • Check network connectivity to IG API and database")
+                    future.cancel()
+                    return None
         except Exception as creation_error:
             print(f"❌ Failed to create TradeMonitor instance: {creation_error}")
             import traceback

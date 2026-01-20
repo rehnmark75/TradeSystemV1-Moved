@@ -99,7 +99,7 @@ class PositionCache:
                 "Version": "2"
             }
             
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()

@@ -65,9 +65,10 @@ class ScalpPosition:
 
     # Dynamic VSL tracking fields
     peak_profit_pips: float = 0.0              # Maximum favorable excursion (MFE)
-    current_stage: str = "initial"             # initial, breakeven, stage1, stage2
+    current_stage: str = "initial"             # initial, breakeven, early_lock, mid_lock, stage1, stage2
     breakeven_triggered: bool = False          # Has BE been triggered?
-    early_lock_triggered: bool = False         # Has early_lock been triggered? (legacy)
+    early_lock_triggered: bool = False         # Has early_lock been triggered?
+    mid_lock_triggered: bool = False           # Has mid_lock been triggered? (NEW)
     stage1_triggered: bool = False             # Has stage1 been triggered?
     stage2_triggered: bool = False             # Has stage2 been triggered?
     dynamic_vsl_price: Optional[float] = None  # Current dynamic VSL level (None = use fixed)
@@ -550,20 +551,43 @@ class VirtualStopLossService:
                 self._persist_vsl_state(position)
                 return
 
-        # Early lock check (between breakeven and stage1)
-        # Triggers at +4.5 pips, locks +1.5 pips profit (protects gains between BE and stage1)
+        # Mid lock check (between early_lock and stage1)
+        # Triggers at +5 pips, locks +4 pips profit (aggressive protection)
+        if not position.mid_lock_triggered and 'mid_lock_trigger_pips' in config:
+            if current_profit_pips >= config['mid_lock_trigger_pips']:
+                position.mid_lock_triggered = True
+                position.current_stage = "mid_lock"
+                lock_pips = config['mid_lock_pips']
+                lock_distance = lock_pips * point_value
+
+                if position.direction == "BUY":
+                    position.dynamic_vsl_price = position.entry_price + lock_distance
+                else:  # SELL
+                    position.dynamic_vsl_price = position.entry_price - lock_distance
+
+                logger.info(f"[VSL] 💰 Trade {position.trade_id} → MID LOCK: "
+                           f"Profit={current_profit_pips:.1f} pips, "
+                           f"Locking +{lock_pips} pips @ {position.dynamic_vsl_price:.5f}")
+
+                # Update stats
+                self._stats["mid_lock_triggered_count"] = self._stats.get("mid_lock_triggered_count", 0) + 1
+
+                # Persist state to database for restart resilience
+                self._persist_vsl_state(position)
+                return
+
+        # Early lock check (between breakeven and mid_lock)
+        # Triggers at +4 pips, locks +1.5 pips profit
         if not position.early_lock_triggered and 'early_lock_trigger_pips' in config:
             if current_profit_pips >= config['early_lock_trigger_pips']:
                 position.early_lock_triggered = True
                 position.current_stage = "early_lock"
-                lock_pips = config['early_lock_pips']  # Positive value (e.g., +1.5 pips profit)
+                lock_pips = config['early_lock_pips']
                 lock_distance = lock_pips * point_value
 
                 if position.direction == "BUY":
-                    # BUY: lock_pips above entry (e.g., entry + 1.5 pips)
                     position.dynamic_vsl_price = position.entry_price + lock_distance
                 else:  # SELL
-                    # SELL: lock_pips below entry (e.g., entry - 1.5 pips)
                     position.dynamic_vsl_price = position.entry_price - lock_distance
 
                 logger.info(f"[VSL] 🔒 Trade {position.trade_id} → EARLY LOCK: "
@@ -803,6 +827,7 @@ class VirtualStopLossService:
                     "effective_vsl_price": pos.dynamic_vsl_price or pos.virtual_sl_price,
                     "breakeven_triggered": pos.breakeven_triggered,
                     "early_lock_triggered": pos.early_lock_triggered,
+                    "mid_lock_triggered": pos.mid_lock_triggered,
                     "stage1_triggered": pos.stage1_triggered,
                     "stage2_triggered": pos.stage2_triggered,
                     "peak_profit_pips": pos.peak_profit_pips,
@@ -856,6 +881,7 @@ class VirtualStopLossService:
                 "effective_vsl_price": pos.dynamic_vsl_price or pos.virtual_sl_price,
                 "breakeven_triggered": pos.breakeven_triggered,
                 "early_lock_triggered": pos.early_lock_triggered,
+                "mid_lock_triggered": pos.mid_lock_triggered,
                 "stage1_triggered": pos.stage1_triggered,
                 "stage2_triggered": pos.stage2_triggered,
                 "peak_profit_pips": pos.peak_profit_pips,
