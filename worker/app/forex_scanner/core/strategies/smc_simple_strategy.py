@@ -773,6 +773,12 @@ class SMCSimpleStrategy:
         self.scalp_sl_pips = 5.0
         self.scalp_max_spread_pips = 1.0
         self.scalp_require_tight_spread = True
+        self.scalp_reversal_enabled = True
+        self.scalp_reversal_min_runway_pips = 15.0
+        self.scalp_reversal_min_entry_momentum = 0.60
+        self.scalp_reversal_block_regimes = ['breakout']
+        self.scalp_reversal_block_volatility_states = ['high']
+        self.scalp_reversal_allow_rsi_extremes = True
 
         self.logger.info("✅ SMC Simple config loaded from FILE (fallback mode)")
 
@@ -921,6 +927,14 @@ class SMCSimpleStrategy:
             'scalp_entry_rsi_sell_min': 'scalp_entry_rsi_sell_min',
             'scalp_min_ema_distance_pips': 'scalp_min_ema_distance_pips',
 
+            # Scalp reversal override (counter-trend)
+            'scalp_reversal_enabled': 'scalp_reversal_enabled',
+            'scalp_reversal_min_runway_pips': 'scalp_reversal_min_runway_pips',
+            'scalp_reversal_min_entry_momentum': 'scalp_reversal_min_entry_momentum',
+            'scalp_reversal_block_regimes': 'scalp_reversal_block_regimes',
+            'scalp_reversal_block_volatility_states': 'scalp_reversal_block_volatility_states',
+            'scalp_reversal_allow_rsi_extremes': 'scalp_reversal_allow_rsi_extremes',
+
             # v2.25.0: Scalp Rejection Candle Confirmation
             'scalp_require_rejection_candle': 'scalp_require_rejection_candle',
             'scalp_rejection_min_strength': 'scalp_rejection_min_strength',
@@ -1041,6 +1055,14 @@ class SMCSimpleStrategy:
         self.scalp_momentum_min_depth = getattr(config, 'scalp_momentum_min_depth', -0.30)
         self.scalp_fib_pullback_min = getattr(config, 'scalp_fib_pullback_min', 0.0)
         self.scalp_fib_pullback_max = getattr(config, 'scalp_fib_pullback_max', 1.0)
+
+        # Scalp reversal override (counter-trend) settings
+        self.scalp_reversal_enabled = getattr(config, 'scalp_reversal_enabled', True)
+        self.scalp_reversal_min_runway_pips = getattr(config, 'scalp_reversal_min_runway_pips', 15.0)
+        self.scalp_reversal_min_entry_momentum = getattr(config, 'scalp_reversal_min_entry_momentum', 0.60)
+        self.scalp_reversal_block_regimes = getattr(config, 'scalp_reversal_block_regimes', ['breakout'])
+        self.scalp_reversal_block_volatility_states = getattr(config, 'scalp_reversal_block_volatility_states', ['high'])
+        self.scalp_reversal_allow_rsi_extremes = getattr(config, 'scalp_reversal_allow_rsi_extremes', True)
 
         # Scalp cooldown (much shorter)
         self.scalp_cooldown_minutes = getattr(config, 'scalp_cooldown_minutes', 15)
@@ -1394,6 +1416,116 @@ class SMCSimpleStrategy:
 
         return True, f"Spread OK: {current_spread:.1f} pips"
 
+    def _normalize_reversal_list(self, raw_value, default_list: List[str]) -> List[str]:
+        """Normalize reversal filter list settings from config."""
+        if raw_value is None:
+            return default_list
+        if isinstance(raw_value, list):
+            return raw_value
+        if isinstance(raw_value, tuple):
+            return list(raw_value)
+        if isinstance(raw_value, str):
+            parts = [part.strip() for part in raw_value.split(',') if part.strip()]
+            return parts or default_list
+        return default_list
+
+    def _evaluate_reversal_scalp_override(
+        self,
+        df_entry: Optional[pd.DataFrame],
+        df_trigger: pd.DataFrame,
+        df_4h: pd.DataFrame,
+        direction: str,
+        pullback_depth: float,
+        market_price: float,
+        swing_level: float,
+        pip_value: float,
+        rsi_value: Optional[float],
+        epic: str
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """Evaluate counter-trend scalp override when HTF alignment fails."""
+        details: Dict[str, Any] = {}
+        if not getattr(self, 'scalp_reversal_enabled', False):
+            return False, "Reversal override disabled", details
+
+        market_regime = 'unknown'
+        volatility_state = 'unknown'
+        entry_candle_momentum = None
+        try:
+            from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
+                get_performance_metrics_calculator
+            )
+            calculator = get_performance_metrics_calculator(self.logger)
+            metrics = calculator.calculate_metrics(
+                df_5m=df_entry,
+                df_15m=df_trigger,
+                df_4h=df_4h,
+                signal_data={'signal_type': direction, 'pullback_depth': pullback_depth},
+                epic=epic
+            )
+            market_regime = metrics.market_regime
+            volatility_state = metrics.volatility_state
+            entry_candle_momentum = metrics.entry_candle_momentum
+        except Exception as e:
+            self.logger.debug(f"Reversal metrics calculation failed: {e}")
+
+        rsi_zone = None
+        if rsi_value is not None:
+            if rsi_value > 70:
+                rsi_zone = 'overbought'
+            elif rsi_value < 30:
+                rsi_zone = 'oversold'
+            else:
+                rsi_zone = 'neutral'
+
+        runway_pips = None
+        if market_price is not None and swing_level is not None and pip_value > 0:
+            if direction == 'BULL':
+                runway_pips = (swing_level - market_price) / pip_value
+            else:
+                runway_pips = (market_price - swing_level) / pip_value
+            runway_pips = max(runway_pips, 0.0)
+
+        details.update({
+            'market_regime_detected': market_regime,
+            'volatility_state': volatility_state,
+            'entry_candle_momentum': entry_candle_momentum,
+            'rsi_zone': rsi_zone,
+            'runway_pips': runway_pips,
+        })
+
+        block_regimes = self._normalize_reversal_list(
+            getattr(self, 'scalp_reversal_block_regimes', None),
+            ['breakout']
+        )
+        block_volatility = self._normalize_reversal_list(
+            getattr(self, 'scalp_reversal_block_volatility_states', None),
+            ['high']
+        )
+
+        if market_regime in block_regimes:
+            return False, f"Reversal blocked: regime={market_regime}", details
+        if volatility_state in block_volatility:
+            return False, f"Reversal blocked: volatility={volatility_state}", details
+
+        min_runway = getattr(self, 'scalp_reversal_min_runway_pips', 15.0)
+        if runway_pips is None or runway_pips < min_runway:
+            runway_str = "N/A" if runway_pips is None else f"{runway_pips:.1f}"
+            return False, f"Reversal blocked: runway {runway_str} < {min_runway}", details
+
+        min_momentum = getattr(self, 'scalp_reversal_min_entry_momentum', 0.60)
+        momentum_ok = entry_candle_momentum is not None and entry_candle_momentum >= min_momentum
+        rsi_ok = getattr(self, 'scalp_reversal_allow_rsi_extremes', True) and rsi_zone in ('overbought', 'oversold')
+        if not (momentum_ok or rsi_ok):
+            return False, "Reversal blocked: no momentum/RSI confirmation", details
+
+        runway_display = f"{runway_pips:.1f}" if runway_pips is not None else "N/A"
+        momentum_display = f"{entry_candle_momentum:.2f}" if entry_candle_momentum is not None else "N/A"
+        reason = (
+            f"Reversal override: regime={market_regime}, vol={volatility_state}, "
+            f"runway={runway_display}, momentum={momentum_display}, rsi={rsi_zone}"
+        )
+        return True, reason, details
+
     def _get_pair_param(self, epic: str, param_name: str, default_value):
         """
         Get parameter with pair-specific override if configured.
@@ -1471,6 +1603,9 @@ class SMCSimpleStrategy:
 
         # Get pip value
         pip_value = 0.01 if 'JPY' in pair else 0.0001
+        reversal_override_applied = False
+        reversal_override_reason = None
+        reversal_override_details: Dict[str, Any] = {}
 
         try:
             # ================================================================
@@ -1823,6 +1958,13 @@ class SMCSimpleStrategy:
                     )
                     return None
 
+                # Precompute RSI value for scalp filters and reversal override
+                rsi_value = None
+                if 'rsi' in entry_df.columns and len(entry_df) > 0:
+                    rsi_value = entry_df['rsi'].iloc[-1]
+                elif 'rsi' in df_trigger.columns and len(df_trigger) > 0:
+                    rsi_value = df_trigger['rsi'].iloc[-1]
+
                 # Filter 2: HTF alignment required (v2.27.0: FIXED - now checks BOTH current AND previous HTF candles)
                 # Analysis showed 14/16 losing trades had opposite previous HTF candle
                 # When HTF prev is opposite, current candle is often a RETEST that reverses
@@ -1832,31 +1974,62 @@ class SMCSimpleStrategy:
                         (direction == 'BEAR' and htf_candle_direction == 'BEARISH' and htf_candle_direction_prev == 'BEARISH')
                     )
                     if not htf_aligned:
-                        rejection_reason = f"Scalp filter: HTF misalignment ({direction} vs HTF curr={htf_candle_direction}, prev={htf_candle_direction_prev})"
-                        self.logger.info(f"   ❌ {rejection_reason}")
-                        # Collect full market context including prices for outcome analysis
-                        context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
-                                                              ema_result=ema_result, swing_result=swing_result,
-                                                              pullback_result=pullback_result, direction=direction)
-                        context.update({'htf_candle_direction': htf_candle_direction, 'filter': 'htf_alignment'})
-                        self._track_rejection(
-                            stage='SCALP_ENTRY_FILTER',
-                            reason=rejection_reason,
-                            epic=epic,
-                            pair=pair,
-                            candle_timestamp=candle_timestamp,
-                            direction=direction,
-                            context=context
-                        )
-                        return None
+                        reversal_allowed = False
+                        reversal_reason = None
+                        if getattr(self, 'scalp_reversal_enabled', False):
+                            reversal_allowed, reversal_reason, reversal_override_details = self._evaluate_reversal_scalp_override(
+                                df_entry=entry_df,
+                                df_trigger=df_trigger,
+                                df_4h=df_4h,
+                                direction=direction,
+                                pullback_depth=pullback_depth,
+                                market_price=market_price,
+                                swing_level=swing_level,
+                                pip_value=pip_value,
+                                rsi_value=rsi_value,
+                                epic=epic
+                            )
+
+                        if reversal_allowed:
+                            reversal_override_applied = True
+                            reversal_override_reason = reversal_reason
+                            entry_type = 'REVERSAL'
+                            trigger_type = 'REVERSAL_SCALP'
+                            trigger_details['reversal_override'] = True
+                            trigger_details['reversal_reason'] = reversal_reason
+                            trigger_details['reversal_details'] = reversal_override_details
+                            self.logger.info(f"   ✅ {reversal_reason}")
+                        else:
+                            rejection_reason = (
+                                f"Scalp filter: HTF misalignment ({direction} vs HTF curr={htf_candle_direction}, "
+                                f"prev={htf_candle_direction_prev})"
+                            )
+                            if reversal_reason:
+                                rejection_reason = f"{rejection_reason} | {reversal_reason}"
+                            self.logger.info(f"   ❌ {rejection_reason}")
+                            # Collect full market context including prices for outcome analysis
+                            context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                                  ema_result=ema_result, swing_result=swing_result,
+                                                                  pullback_result=pullback_result, direction=direction)
+                            context.update({
+                                'htf_candle_direction': htf_candle_direction,
+                                'htf_candle_direction_prev': htf_candle_direction_prev,
+                                'filter': 'htf_alignment',
+                                'reversal_override_reason': reversal_reason,
+                                'reversal_override_details': reversal_override_details
+                            })
+                            self._track_rejection(
+                                stage='SCALP_ENTRY_FILTER',
+                                reason=rejection_reason,
+                                epic=epic,
+                                pair=pair,
+                                candle_timestamp=candle_timestamp,
+                                direction=direction,
+                                context=context
+                            )
+                            return None
 
                 # Filter 3: RSI zone filter (avoid overbought buys, oversold sells)
-                rsi_value = None
-                if 'rsi' in entry_df.columns and len(entry_df) > 0:
-                    rsi_value = entry_df['rsi'].iloc[-1]
-                elif 'rsi' in df_trigger.columns and len(df_trigger) > 0:
-                    rsi_value = df_trigger['rsi'].iloc[-1]
-
                 if rsi_value is not None:
                     if direction == 'BULL' and rsi_value > self.scalp_entry_rsi_buy_max:
                         rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} > {self.scalp_entry_rsi_buy_max} (overbought BUY)"
@@ -2856,6 +3029,8 @@ class SMCSimpleStrategy:
                     'rejection_candle_required': self.scalp_require_rejection_candle if self.scalp_mode_enabled else False,
                     'rejection_candle_confirmed': getattr(self, '_scalp_rejection_confirmed', False),
                     'market_order_reason': 'entry_alignment' if getattr(self, '_scalp_entry_alignment_confirmed', False) else ('rejection_candle' if getattr(self, '_scalp_rejection_confirmed', False) else 'default'),
+                    'reversal_override_applied': reversal_override_applied,
+                    'reversal_override_reason': reversal_override_reason,
                 },
 
                 # Strategy indicators (for alert_history compatibility)

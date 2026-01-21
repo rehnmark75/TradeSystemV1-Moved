@@ -212,6 +212,14 @@ def migrate_global_config(conn, smc_config):
         'backtest_spread_pips': float(getattr(smc_config, 'BACKTEST_SPREAD_PIPS', 1.5)),
         'backtest_slippage_pips': float(getattr(smc_config, 'BACKTEST_SLIPPAGE_PIPS', 0.5)),
 
+        # Scalp reversal override (counter-trend)
+        'scalp_reversal_enabled': getattr(smc_config, 'SCALP_REVERSAL_ENABLED', True),
+        'scalp_reversal_min_runway_pips': float(getattr(smc_config, 'SCALP_REVERSAL_MIN_RUNWAY_PIPS', 15.0)),
+        'scalp_reversal_min_entry_momentum': float(getattr(smc_config, 'SCALP_REVERSAL_MIN_ENTRY_MOMENTUM', 0.60)),
+        'scalp_reversal_block_regimes': getattr(smc_config, 'SCALP_REVERSAL_BLOCK_REGIMES', ['breakout']),
+        'scalp_reversal_block_volatility_states': getattr(smc_config, 'SCALP_REVERSAL_BLOCK_VOLATILITY_STATES', ['high']),
+        'scalp_reversal_allow_rsi_extremes': getattr(smc_config, 'SCALP_REVERSAL_ALLOW_RSI_EXTREMES', True),
+
         # Enabled pairs
         'enabled_pairs': getattr(smc_config, 'ENABLED_PAIRS', []),
 

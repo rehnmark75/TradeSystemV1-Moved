@@ -255,6 +255,14 @@ class SMCSimpleConfig:
     scalp_use_market_orders: bool = True
     scalp_use_limit_orders: bool = False  # v3.3.0: Use LIMIT orders (better price) instead of STOP orders (momentum)
 
+    # SCALP REVERSAL OVERRIDE (counter-trend)
+    scalp_reversal_enabled: bool = True
+    scalp_reversal_min_runway_pips: float = 15.0
+    scalp_reversal_min_entry_momentum: float = 0.60
+    scalp_reversal_block_regimes: List[str] = field(default_factory=lambda: ['breakout'])
+    scalp_reversal_block_volatility_states: List[str] = field(default_factory=lambda: ['high'])
+    scalp_reversal_allow_rsi_extremes: bool = True
+
     # SCALP SIGNAL QUALIFICATION (v2.21.0)
     # Momentum confirmation filters to improve scalp win rate
     scalp_qualification_enabled: bool = False  # Master toggle
@@ -1265,6 +1273,9 @@ class SMCSimpleConfigService:
             'scalp_cooldown_minutes', 'scalp_require_tight_spread',
             'scalp_swing_lookback_bars', 'scalp_range_position_threshold',
             'scalp_enable_claude_ai', 'scalp_use_market_orders', 'scalp_use_limit_orders',
+            'scalp_reversal_enabled', 'scalp_reversal_min_runway_pips',
+            'scalp_reversal_min_entry_momentum', 'scalp_reversal_block_regimes',
+            'scalp_reversal_block_volatility_states', 'scalp_reversal_allow_rsi_extremes',
             # SCALP QUALIFICATION FIELDS (v2.21.0)
             'scalp_qualification_enabled', 'scalp_qualification_mode',
             'scalp_min_qualification_score',

@@ -1224,6 +1224,16 @@ BACKTEST_SPREAD_PIPS = 1.5               # Assumed spread for backtesting
 BACKTEST_SLIPPAGE_PIPS = 0.5             # Assumed slippage for backtesting
 
 # ============================================================================
+# SCALP REVERSAL OVERRIDE (counter-trend)
+# ============================================================================
+SCALP_REVERSAL_ENABLED = True
+SCALP_REVERSAL_MIN_RUNWAY_PIPS = 15.0
+SCALP_REVERSAL_MIN_ENTRY_MOMENTUM = 0.60
+SCALP_REVERSAL_BLOCK_REGIMES = ['breakout']
+SCALP_REVERSAL_BLOCK_VOLATILITY_STATES = ['high']
+SCALP_REVERSAL_ALLOW_RSI_EXTREMES = True
+
+# ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
