@@ -4439,12 +4439,22 @@ class SMCSimpleStrategy:
     def _check_cooldown(self, pair: str, current_time: datetime = None) -> Tuple[bool, str]:
         """Check if pair is in cooldown period using status-based or adaptive logic.
 
+        v2.26.0: Scalp mode uses shorter status-based cooldowns (15 min even for filled orders)
+
         v3.3.0: Status-based cooldowns for live trading:
-            - filled: 4h cooldown (real trade opened)
-            - placed: 30min (order working, wait for outcome)
-            - pending: 30min (just generated)
-            - expired: 30min (didn't fill, prevents expiry spam)
-            - rejected: 15min (brief pause before retry)
+            STANDARD MODE:
+                - filled: 4h cooldown (real trade opened)
+                - placed: 30min (order working, wait for outcome)
+                - pending: 30min (just generated)
+                - expired: 30min (didn't fill, prevents expiry spam)
+                - rejected: 15min (brief pause before retry)
+
+            SCALP MODE (v2.26.0 FIX):
+                - filled: 15min (fast scalp cycles, 10-20 signals/day target)
+                - placed: 30min (order working, wait for outcome)
+                - pending: 30min (just generated)
+                - expired: 30min (didn't fill, prevents expiry spam)
+                - rejected: 15min (brief pause before retry)
 
         v3.2.0: Now queries alert_history database directly for live trading (single source of truth).
         Backtest mode still uses in-memory tracking for performance.
@@ -4484,15 +4494,27 @@ class SMCSimpleStrategy:
         hours_since = (check_time - last_signal).total_seconds() / 3600
 
         # v3.3.0: Status-based cooldown for live trading
+        # v2.26.0 FIX: Scalp mode uses shorter cooldowns even for filled orders
         if not self._backtest_mode and order_status:
-            # Status-based cooldown periods (per specialist recommendation)
-            COOLDOWN_BY_STATUS = {
-                'filled': 4.0,      # Full cooldown - real trade opened
-                'placed': 0.5,      # 30 min - order working, wait for outcome
-                'pending': 0.5,     # 30 min - just generated, brief pause
-                'expired': 0.5,     # 30 min - didn't fill, prevents expiry spam
-                'rejected': 0.25,   # 15 min - order failed, brief pause before retry
-            }
+            # Status-based cooldown periods - different for scalp vs standard mode
+            if self.scalp_mode_enabled:
+                # SCALP MODE: Fast cycles (10-20 signals/day target)
+                COOLDOWN_BY_STATUS = {
+                    'filled': 0.25,     # 15 min - fast scalp cycles
+                    'placed': 0.5,      # 30 min - order working, wait for outcome
+                    'pending': 0.5,     # 30 min - just generated, brief pause
+                    'expired': 0.5,     # 30 min - didn't fill, prevents expiry spam
+                    'rejected': 0.25,   # 15 min - order failed, brief pause before retry
+                }
+            else:
+                # STANDARD MODE: Slower cycles (1-2 signals/day target)
+                COOLDOWN_BY_STATUS = {
+                    'filled': 4.0,      # 4 hours - full cooldown after real trade
+                    'placed': 0.5,      # 30 min - order working, wait for outcome
+                    'pending': 0.5,     # 30 min - just generated, brief pause
+                    'expired': 0.5,     # 30 min - didn't fill, prevents expiry spam
+                    'rejected': 0.25,   # 15 min - order failed, brief pause before retry
+                }
 
             required_cooldown = COOLDOWN_BY_STATUS.get(order_status, 0.5)
 
