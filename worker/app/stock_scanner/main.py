@@ -20,7 +20,7 @@ import asyncio
 import argparse
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 
 from . import config
@@ -1286,7 +1286,9 @@ class StockScannerCLI:
 
                 if scan_date:
                     conditions.append(f"DATE(scan_date) = ${param_idx}")
-                    params.append(scan_date)
+                    # Convert string date to date object for asyncpg
+                    scan_date_obj = datetime.strptime(scan_date, "%Y-%m-%d").date()
+                    params.append(scan_date_obj)
                 else:
                     # Latest scan
                     conditions.append("scan_date = (SELECT MAX(scan_date) FROM stock_watchlist_results)")
@@ -1393,7 +1395,9 @@ class StockScannerCLI:
 
             if scan_date:
                 conditions.append(f"DATE(scan_date) = ${param_idx}")
-                params.append(scan_date)
+                # Convert string date to date object for asyncpg
+                scan_date_obj = datetime.strptime(scan_date, "%Y-%m-%d").date()
+                params.append(scan_date_obj)
             else:
                 # Latest scan for each watchlist type
                 conditions.append("scan_date = (SELECT MAX(scan_date) FROM stock_watchlist_results)")

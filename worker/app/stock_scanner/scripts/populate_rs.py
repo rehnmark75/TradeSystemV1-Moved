@@ -206,8 +206,8 @@ class RSPopulator:
                     # Flip to make positive returns = higher RS
                     # Down 5% vs down 10% = 0.5 ratio = outperforming
 
-                # Clamp extreme values
-                rs_vs_spy = max(0.1, min(5.0, rs_vs_spy))
+                # Prevent zero/negative values only (no upper cap)
+                rs_vs_spy = max(0.01, rs_vs_spy)
 
                 # Calculate trend
                 prev_rs = prev_rs_values.get(ticker)

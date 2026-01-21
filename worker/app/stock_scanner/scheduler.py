@@ -548,7 +548,7 @@ class StockScheduler:
                 # Run DAQ analysis on ALL technical watchlist stocks (no limit)
                 tech_wl_results = await self.deep_analysis_orchestrator.auto_analyze_technical_watchlist(
                     watchlist_name=None,  # Analyze all watchlist types
-                    scan_date=str(data_date),
+                    scan_date=data_date,  # Pass date object, not string
                     max_tickers=2000,  # Effectively no limit
                     skip_analyzed=True  # Don't re-analyze stocks that already have DAQ
                 )

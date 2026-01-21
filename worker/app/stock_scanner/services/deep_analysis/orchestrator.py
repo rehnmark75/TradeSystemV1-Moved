@@ -644,10 +644,16 @@ class DeepAnalysisOrchestrator:
             logger.info("Deep analysis is disabled")
             return []
 
-        # Build query for top-tier watchlist stocks
-        date_filter = f"calculation_date = '{calculation_date}'" if calculation_date else """
-            calculation_date = (SELECT MAX(calculation_date) FROM stock_watchlist)
-        """
+        # Build query for top-tier watchlist stocks with proper parameterization
+        params = []
+        param_idx = 1
+
+        if calculation_date:
+            date_filter = f"calculation_date = ${param_idx}"
+            params.append(calculation_date)
+            param_idx += 1
+        else:
+            date_filter = "calculation_date = (SELECT MAX(calculation_date) FROM stock_watchlist)"
 
         analyzed_filter = "AND daq_score IS NULL" if skip_analyzed else ""
 
@@ -655,13 +661,14 @@ class DeepAnalysisOrchestrator:
             SELECT id, ticker, calculation_date, tier
             FROM stock_watchlist
             WHERE {date_filter}
-              AND tier <= $1
+              AND tier <= ${param_idx}
               {analyzed_filter}
             ORDER BY tier, rank_in_tier
-            LIMIT $2
+            LIMIT ${param_idx + 1}
         """
 
-        rows = await self.db.fetch(query, max_tier, max_tickers)
+        params.extend([max_tier, max_tickers])
+        rows = await self.db.fetch(query, *params)
 
         if not rows:
             logger.info("No unanalyzed watchlist tickers found")
@@ -882,7 +889,13 @@ class DeepAnalysisOrchestrator:
 
         if scan_date:
             conditions.append(f"DATE(scan_date) = ${param_idx}")
-            params.append(scan_date)
+            # Convert string date to date object for asyncpg
+            if isinstance(scan_date, str):
+                from datetime import datetime
+                scan_date_obj = datetime.strptime(scan_date, "%Y-%m-%d").date()
+                params.append(scan_date_obj)
+            else:
+                params.append(scan_date)  # Already a date object
             param_idx += 1
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
