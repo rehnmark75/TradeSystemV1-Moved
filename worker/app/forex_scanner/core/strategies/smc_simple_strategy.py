@@ -1079,9 +1079,14 @@ class SMCSimpleStrategy:
         Key changes:
         - Faster timeframes: 1H/5m/1m instead of 4H/15m/5m
         - Smaller targets: 5 pip TP/SL (1:1 R:R)
-        - Relaxed filters: Disable EMA slope, swing proximity, volume
+        - Relaxed filters: Disable EMA slope, volume (but KEEP swing proximity)
         - Spread gate: Only trade when spread < 1 pip
         - Shorter cooldown: 15 minutes instead of 3 hours
+
+        v2.27.0 CHANGE: KEEP swing proximity enabled in scalp mode
+        - Analysis showed we're taking trades in wrong direction near swing levels
+        - Swing proximity checks 5m TRIGGER TF swings (where TIER 2 detects breaks)
+        - Uses tighter min_distance threshold (default 6 pips, configurable per-pair in database)
         """
         self.logger.info("=" * 60)
         self.logger.info("SCALP MODE ENABLED - High Frequency Configuration")
@@ -1107,11 +1112,16 @@ class SMCSimpleStrategy:
         # Lower confidence threshold for more entries
         self.min_confidence = self.scalp_min_confidence
 
-        # Disable restrictive filters
+        # Disable restrictive filters (EXCEPT swing proximity)
         if self.scalp_disable_ema_slope_validation:
             self.ema_slope_validation_enabled = False
-        if self.scalp_disable_swing_proximity:
-            self.swing_proximity_enabled = False
+
+        # v2.27.0: DON'T disable swing proximity in scalp mode - we need it!
+        # Swing proximity prevents wrong-direction entries near 5m trigger TF swings
+        # Uses tighter threshold (6 pips default vs 12 pips standard mode)
+        # if self.scalp_disable_swing_proximity:  # COMMENTED OUT
+        #     self.swing_proximity_enabled = False
+
         if self.scalp_disable_volume_filter:
             self.volume_filter_enabled = False
         if self.scalp_disable_macd_filter:
@@ -1180,7 +1190,8 @@ class SMCSimpleStrategy:
         self.logger.info(f"   EMA Buffer: {self.ema_buffer_pips} pips (relaxed for scalp)")
         self.logger.info(f"   Swing Lookback: {self.swing_lookback} bars (increased for better detection)")
         self.logger.info(f"   Swing Break Tolerance: {self.scalp_swing_break_tolerance_pips} pips (allows near-breaks)")
-        self.logger.info("   Filters DISABLED: EMA slope, Swing proximity, Volume")
+        self.logger.info("   Filters DISABLED: EMA slope, Volume")
+        self.logger.info(f"   Swing Proximity: ENABLED (checks 5m trigger TF, min_distance from database)")
         self.logger.info("=" * 60)
 
     def _get_pair_scalp_config(self, epic: str) -> dict:
@@ -1818,14 +1829,16 @@ class SMCSimpleStrategy:
                     )
                     return None
 
-                # Filter 2: HTF alignment required
+                # Filter 2: HTF alignment required (v2.27.0: FIXED - now checks BOTH current AND previous HTF candles)
+                # Analysis showed 14/16 losing trades had opposite previous HTF candle
+                # When HTF prev is opposite, current candle is often a RETEST that reverses
                 if self.scalp_require_htf_alignment:
                     htf_aligned = (
-                        (direction == 'BULL' and htf_candle_direction == 'BULLISH') or
-                        (direction == 'BEAR' and htf_candle_direction == 'BEARISH')
+                        (direction == 'BULL' and htf_candle_direction == 'BULLISH' and htf_candle_direction_prev == 'BULLISH') or
+                        (direction == 'BEAR' and htf_candle_direction == 'BEARISH' and htf_candle_direction_prev == 'BEARISH')
                     )
                     if not htf_aligned:
-                        rejection_reason = f"Scalp filter: HTF misalignment ({direction} vs HTF {htf_candle_direction})"
+                        rejection_reason = f"Scalp filter: HTF misalignment ({direction} vs HTF curr={htf_candle_direction}, prev={htf_candle_direction_prev})"
                         self.logger.info(f"   ❌ {rejection_reason}")
                         # Collect full market context including prices for outcome analysis
                         context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
