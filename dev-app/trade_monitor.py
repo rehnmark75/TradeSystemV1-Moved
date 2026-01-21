@@ -474,20 +474,19 @@ class TradeMonitor:
         
         print("✅ Enhanced processor available, continuing initialization...")
         self.monitoring_enabled = True
+        self.trailing_stops_enabled = True  # Separate flag for trailing stops
 
         # Check master trailing stop disable flag
+        # CRITICAL FIX: Trailing stops can be disabled while still monitoring order status
         try:
             from config import TRAILING_STOPS_ENABLED
             if not TRAILING_STOPS_ENABLED:
                 print("⚠️  TRAILING STOPS DISABLED via config.TRAILING_STOPS_ENABLED = False")
-                self.monitoring_enabled = False
-                # Still create logger for status reporting
-                logger_setup = TradeMonitorLogger()
-                self.logger = logger_setup.get_logger()
-                self.logger.warning("⚠️  Trailing stops disabled via config flag")
-                return
+                print("✅ ORDER MONITORING will continue (order status updates, VSL processing)")
+                self.trailing_stops_enabled = False
+                # Continue initialization - monitoring is still needed for order status tracking
         except ImportError:
-            pass  # Config not available, continue with monitoring enabled
+            pass  # Config not available, continue with both enabled
 
         # Use standard trailing config (simplified - removed progressive config)
         if trade_config is None:
@@ -783,6 +782,12 @@ class TradeMonitor:
             except Exception as config_error:
                 self.logger.warning(f"⚠️ Failed to get pair config for {trade.symbol}: {config_error}")
             
+            # ✅ FIX: Skip trailing stop processing if disabled, but still allow order status monitoring
+            if not self.trailing_stops_enabled:
+                self.logger.debug(f"⏭️ [SKIP] Trailing stops disabled - skipping processor for trade {trade.id}")
+                # Order status updates happen via fastapi-dev limit order sync, not here
+                return True  # Return success to continue monitoring other trades
+
             # ✅ FIX: Use correct method name and pass all required parameters
             with SessionLocal() as db:
                 if ENHANCED_PROCESSOR_AVAILABLE and hasattr(self.trade_processor, 'process_trade_with_combined_validation'):
@@ -799,10 +804,10 @@ class TradeMonitor:
                 else:
                     self.logger.error(f"❌ No suitable processing method found for trade {trade.id}")
                     return False
-            
+
             if not success:
                 self.logger.warning(f"⚠️ Processing failed for trade {trade.id}")
-            
+
             return success
             
         except Exception as e:
