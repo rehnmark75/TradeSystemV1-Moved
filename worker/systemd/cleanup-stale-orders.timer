@@ -1,0 +1,14 @@
+[Unit]
+Description=Run Stale Orders Cleanup Every 15 Minutes
+Documentation=file:///app/forex_scanner/maintenance/cleanup_stale_orders.py
+
+[Timer]
+# Run every 15 minutes
+OnCalendar=*:0/15
+# Run on boot if we missed a scheduled run
+Persistent=true
+# Randomize start time by up to 60 seconds to avoid load spikes
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

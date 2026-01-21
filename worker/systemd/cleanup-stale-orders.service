@@ -1,0 +1,11 @@
+[Unit]
+Description=Cleanup Stale Pending Orders in Alert History
+Documentation=file:///app/forex_scanner/maintenance/cleanup_stale_orders.py
+
+[Service]
+Type=oneshot
+WorkingDirectory=/app
+ExecStart=/usr/local/bin/python /app/forex_scanner/maintenance/cleanup_stale_orders.py
+User=root
+StandardOutput=journal
+StandardError=journal

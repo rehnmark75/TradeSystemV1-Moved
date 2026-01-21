@@ -1,0 +1,15 @@
+# Cron job to clean up stale pending orders
+# Runs every 15 minutes to expire orders older than 30 minutes
+#
+# This prevents orders stuck in "pending" status from blocking new signals
+# due to cooldown logic. Orders should normally transition to "expired" or
+# "filled" via the order monitoring service, but this provides a safety net.
+#
+# Install with: crontab -e
+# Or via docker exec: docker exec task-worker crontab /app/cron/cleanup-stale-orders
+
+# Clean up stale orders every 15 minutes
+*/15 * * * * cd /app && /usr/local/bin/python /app/forex_scanner/maintenance/cleanup_stale_orders.py >> /var/log/cleanup_stale_orders.log 2>&1
+
+# Alternative: Run every 10 minutes for faster cleanup
+# */10 * * * * cd /app && /usr/local/bin/python /app/forex_scanner/maintenance/cleanup_stale_orders.py >> /var/log/cleanup_stale_orders.log 2>&1

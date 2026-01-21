@@ -279,6 +279,19 @@ class SMCSimpleConfig:
     scalp_entry_rsi_sell_min: float = 0.0  # Min RSI for SELL entries (0 = disabled)
     scalp_min_ema_distance_pips: float = 0.0  # Min distance from EMA in pips (0 = disabled)
 
+    # SCALP REJECTION CANDLE CONFIRMATION (v2.25.0)
+    # Require entry-TF rejection candle (pin bar, engulfing, hammer) before scalp entry
+    # Based on Jan 2026 analysis: MAE=0 on most losing trades means no reversal confirmation
+    scalp_require_rejection_candle: bool = False  # Require rejection candle for scalp entries
+    scalp_rejection_min_strength: float = 0.70  # Minimum pattern strength for rejection candle (0-1)
+    scalp_use_market_on_rejection: bool = True  # Use market order when rejection candle confirmed
+
+    # SCALP ENTRY CANDLE ALIGNMENT (v2.25.1)
+    # Simpler alternative: require entry candle color matches direction (green=BUY, red=SELL)
+    # This ensures immediate momentum has shifted in trade direction before entry
+    scalp_require_entry_candle_alignment: bool = False  # Require entry candle aligned with direction
+    scalp_use_market_on_entry_alignment: bool = True  # Use market order when entry candle aligned
+
     # PATTERN CONFIRMATION (v2.23.0) - Alternative triggers
     # Price action patterns to boost confidence or enable marginal entries
     pattern_confirmation_enabled: bool = False  # Master toggle
@@ -395,14 +408,19 @@ class SMCSimpleConfig:
         return not self.block_asian_session
 
     def is_macd_filter_enabled(self, epic: str) -> bool:
-        """Check if MACD filter is enabled for a specific pair"""
-        if not self.macd_alignment_filter_enabled:
-            return False
+        """Check if MACD filter is enabled for a specific pair
+
+        Per-pair overrides take precedence over global setting.
+        This allows enabling MACD filter for specific pairs even when globally disabled.
+        """
+        # Check per-pair override first
         if epic in self._pair_overrides:
             override = self._pair_overrides[epic]
             if override.get('macd_filter_enabled') is not None:
-                return override['macd_filter_enabled']
-        return True
+                return bool(override['macd_filter_enabled'])
+
+        # Fall back to global setting
+        return self.macd_alignment_filter_enabled
 
     def get_pair_sl_buffer(self, epic: str) -> int:
         """Get SL buffer for a specific pair"""
@@ -940,6 +958,40 @@ class SMCSimpleConfig:
                 return float(override['scalp_fib_pullback_min'])
         return None
 
+    def get_pair_scalp_require_rejection_candle(self, epic: str) -> Optional[bool]:
+        """
+        Get per-pair scalp rejection candle requirement override.
+
+        v2.25.0: Require entry-TF rejection candle before scalp entry.
+        Based on Jan 2026 analysis - helps USDJPY, EURUSD, AUDJPY but hurts GBPUSD.
+
+        Returns:
+            Per-pair scalp_require_rejection_candle if set,
+            None otherwise (use global scalp_require_rejection_candle)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_require_rejection_candle') is not None:
+                return bool(override['scalp_require_rejection_candle'])
+        return None
+
+    def get_pair_scalp_require_entry_candle_alignment(self, epic: str) -> Optional[bool]:
+        """
+        Get per-pair entry candle alignment requirement override.
+
+        v2.25.1: Simpler alternative to rejection candle - requires entry candle
+        color to match trade direction (green for BUY, red for SELL).
+
+        Returns:
+            Per-pair scalp_require_entry_candle_alignment if set,
+            None otherwise (use global scalp_require_entry_candle_alignment)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_require_entry_candle_alignment') is not None:
+                return bool(override['scalp_require_entry_candle_alignment'])
+        return None
+
     def get_effective_scalp_config(self, epic: str) -> dict:
         """
         Get effective scalp configuration for a pair, merging per-pair overrides with globals.
@@ -959,6 +1011,10 @@ class SMCSimpleConfig:
             'swing_break_tolerance_pips': self.get_pair_scalp_swing_break_tolerance(epic) or getattr(self, 'scalp_swing_break_tolerance_pips', 0.5),
             'qualification_mode': self.get_pair_scalp_qualification_mode(epic) or self.scalp_qualification_mode,
             'fib_pullback_min': self.get_pair_scalp_fib_pullback_min(epic) or self.scalp_fib_pullback_min,
+            # v2.25.0: Rejection candle confirmation
+            'require_rejection_candle': self.get_pair_scalp_require_rejection_candle(epic) if self.get_pair_scalp_require_rejection_candle(epic) is not None else self.scalp_require_rejection_candle,
+            # v2.25.1: Entry candle alignment (simpler alternative)
+            'require_entry_candle_alignment': self.get_pair_scalp_require_entry_candle_alignment(epic) if self.get_pair_scalp_require_entry_candle_alignment(epic) is not None else self.scalp_require_entry_candle_alignment,
         }
 
     def check_macd_alignment(
@@ -1220,6 +1276,11 @@ class SMCSimpleConfigService:
             'scalp_require_htf_alignment', 'scalp_momentum_only_filter',
             'scalp_entry_rsi_buy_max', 'scalp_entry_rsi_sell_min',
             'scalp_min_ema_distance_pips',
+            # SCALP REJECTION CANDLE CONFIRMATION (v2.25.0)
+            'scalp_require_rejection_candle', 'scalp_rejection_min_strength',
+            'scalp_use_market_on_rejection',
+            # SCALP ENTRY CANDLE ALIGNMENT (v2.25.1)
+            'scalp_require_entry_candle_alignment', 'scalp_use_market_on_entry_alignment',
             # PATTERN CONFIRMATION (v2.23.0) - Alternative triggers
             'pattern_confirmation_enabled', 'pattern_confirmation_mode',
             'pattern_min_strength', 'pattern_pin_bar_enabled',

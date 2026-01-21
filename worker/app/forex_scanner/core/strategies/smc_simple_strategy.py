@@ -921,6 +921,15 @@ class SMCSimpleStrategy:
             'scalp_entry_rsi_sell_min': 'scalp_entry_rsi_sell_min',
             'scalp_min_ema_distance_pips': 'scalp_min_ema_distance_pips',
 
+            # v2.25.0: Scalp Rejection Candle Confirmation
+            'scalp_require_rejection_candle': 'scalp_require_rejection_candle',
+            'scalp_rejection_min_strength': 'scalp_rejection_min_strength',
+            'scalp_use_market_on_rejection': 'scalp_use_market_on_rejection',
+
+            # v2.25.1: Scalp Entry Candle Alignment (simpler alternative to rejection candle)
+            'scalp_require_entry_candle_alignment': 'scalp_require_entry_candle_alignment',
+            'scalp_use_market_on_entry_alignment': 'scalp_use_market_on_entry_alignment',
+
             # v2.23.0: Pattern Confirmation (test ACTIVE vs MONITORING mode)
             'pattern_confirmation_enabled': 'pattern_confirmation_enabled',
             'pattern_confirmation_mode': 'pattern_confirmation_mode',
@@ -1050,6 +1059,16 @@ class SMCSimpleStrategy:
         self.scalp_entry_rsi_buy_max = getattr(config, 'scalp_entry_rsi_buy_max', 100.0)
         self.scalp_entry_rsi_sell_min = getattr(config, 'scalp_entry_rsi_sell_min', 0.0)
         self.scalp_min_ema_distance_pips = getattr(config, 'scalp_min_ema_distance_pips', 0.0)
+
+        # v2.25.0: Scalp rejection candle confirmation
+        # Require entry-TF rejection candle before scalp entry
+        self.scalp_require_rejection_candle = getattr(config, 'scalp_require_rejection_candle', False)
+        self.scalp_rejection_min_strength = getattr(config, 'scalp_rejection_min_strength', 0.70)
+        self.scalp_use_market_on_rejection = getattr(config, 'scalp_use_market_on_rejection', True)
+
+        # v2.25.1: Scalp entry candle alignment (simpler alternative)
+        # Require entry candle color matches direction (green=BUY, red=SELL)
+        self.scalp_require_entry_candle_alignment = getattr(config, 'scalp_require_entry_candle_alignment', False)
 
     def _configure_scalp_mode(self):
         """Configure strategy for high-frequency scalping mode.
@@ -1419,6 +1438,11 @@ class SMCSimpleStrategy:
         # ================================================================
         # SCALP MODE: Apply per-pair configuration before signal detection
         # ================================================================
+        # v2.25.0: Reset rejection candle confirmation flag
+        self._scalp_rejection_confirmed = False
+        # v2.25.1: Reset entry candle alignment confirmation flag
+        self._scalp_entry_alignment_confirmed = False
+
         if self.scalp_mode_enabled:
             pair_scalp_config = self._apply_pair_scalp_config(epic)
             self.logger.debug(f"🎯 Scalp config applied for {pair}: EMA={pair_scalp_config['ema_period']}, "
@@ -1615,7 +1639,13 @@ class SMCSimpleStrategy:
 
             # v2.24.0: Detect patterns and divergence BEFORE pullback validation
             # This allows them to serve as alternative TIER 3 entries
-            if getattr(self, 'pattern_confirmation_enabled', False) or getattr(self, 'pattern_as_entry_enabled', False):
+            # v2.25.0: Also detect patterns when scalp_require_rejection_candle is enabled
+            should_detect_patterns = (
+                getattr(self, 'pattern_confirmation_enabled', False) or
+                getattr(self, 'pattern_as_entry_enabled', False) or
+                (self.scalp_mode_enabled and getattr(self, 'scalp_require_rejection_candle', False))
+            )
+            if should_detect_patterns:
                 try:
                     from forex_scanner.core.strategies.helpers.smc_candlestick_patterns import SMCCandlestickPatterns
                     pattern_detector = SMCCandlestickPatterns(self.logger)
@@ -1852,6 +1882,121 @@ class SMCSimpleStrategy:
                         context={'ema_distance': ema_distance, 'filter': 'ema_distance'}
                     )
                     return None
+
+                # ================================================================
+                # Filter 5: REJECTION CANDLE CONFIRMATION (v2.25.0)
+                # Require entry-TF rejection candle before scalp entry
+                # Based on Jan 2026 analysis: MAE=0 means no reversal confirmation
+                # Per-pair override: helps USDJPY/EURUSD/AUDJPY, hurts GBPUSD
+                # ================================================================
+                # Check per-pair override first, then fall back to global
+                scalp_require_rejection = getattr(self, 'scalp_require_rejection_candle', False)
+                if hasattr(self, '_db_config') and self._db_config:
+                    pair_override = self._db_config.get_pair_scalp_require_rejection_candle(epic)
+                    if pair_override is not None:
+                        scalp_require_rejection = pair_override
+
+                if scalp_require_rejection:
+                    rejection_min_strength = getattr(self, 'scalp_rejection_min_strength', 0.70)
+
+                    # Check if we have a valid rejection candle (pattern_data from earlier detection)
+                    has_rejection_candle = False
+                    rejection_pattern_type = None
+                    rejection_strength = 0.0
+
+                    if pattern_data and pattern_data.get('strength', 0) >= rejection_min_strength:
+                        has_rejection_candle = True
+                        rejection_pattern_type = pattern_data.get('pattern_type', 'unknown')
+                        rejection_strength = pattern_data.get('strength', 0)
+
+                    if not has_rejection_candle:
+                        rejection_reason = f"Scalp filter: No rejection candle (min strength {rejection_min_strength*100:.0f}%)"
+                        self.logger.info(f"   ❌ {rejection_reason}")
+                        self._track_rejection(
+                            stage='SCALP_ENTRY_FILTER',
+                            reason=rejection_reason,
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context={
+                                'filter': 'rejection_candle',
+                                'has_pattern': pattern_data is not None,
+                                'pattern_strength': pattern_data.get('strength', 0) if pattern_data else 0,
+                                'required_strength': rejection_min_strength
+                            }
+                        )
+                        return None
+
+                    # Rejection candle confirmed - log it
+                    self.logger.info(f"   ✅ Rejection candle: {rejection_pattern_type} (strength: {rejection_strength*100:.0f}%)")
+
+                    # Set flag for market order if scalp_use_market_on_rejection is enabled
+                    use_market_on_rejection = getattr(self, 'scalp_use_market_on_rejection', True)
+                    if use_market_on_rejection:
+                        self._scalp_rejection_confirmed = True
+                        self.logger.info(f"   📍 Using MARKET order (rejection candle confirmed)")
+
+            # ================================================================
+            # Filter 6: ENTRY CANDLE ALIGNMENT (v2.25.1)
+            # Simple alternative to rejection candle - requires entry candle
+            # color to match trade direction (green for BUY, red for SELL)
+            # ================================================================
+            scalp_require_entry_alignment = getattr(self, 'scalp_require_entry_candle_alignment', False)
+
+            # Check for per-pair override
+            if hasattr(self, '_db_config') and self._db_config:
+                pair_override = self._db_config.get_pair_scalp_require_entry_candle_alignment(epic)
+                if pair_override is not None:
+                    scalp_require_entry_alignment = pair_override
+
+            if scalp_require_entry_alignment:
+                self.logger.info(f"\n🕯️ Filter 6: Entry Candle Alignment Check")
+
+                # Get entry candle OHLC
+                entry_candle_open = entry_df['open'].iloc[-1]
+                entry_candle_close = entry_df['close'].iloc[-1]
+
+                is_bullish_candle = entry_candle_close > entry_candle_open
+                is_bearish_candle = entry_candle_close < entry_candle_open
+                is_doji = entry_candle_close == entry_candle_open
+
+                candle_color = 'GREEN' if is_bullish_candle else ('RED' if is_bearish_candle else 'DOJI')
+
+                # Check alignment: BUY needs green candle, SELL needs red candle
+                candle_aligned = (
+                    (direction == 'BULL' and is_bullish_candle) or
+                    (direction == 'BEAR' and is_bearish_candle)
+                )
+
+                if not candle_aligned:
+                    expected_color = 'GREEN' if direction == 'BULL' else 'RED'
+                    alignment_reason = f"Entry candle not aligned: {candle_color} candle for {direction} signal (need {expected_color})"
+                    self.logger.info(f"   ❌ {alignment_reason}")
+                    self._track_rejection(
+                        stage='SCALP_ENTRY_FILTER',
+                        reason=alignment_reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context={
+                            'filter': 'entry_candle_alignment',
+                            'candle_color': candle_color,
+                            'direction': direction,
+                            'entry_open': float(entry_candle_open),
+                            'entry_close': float(entry_candle_close)
+                        }
+                    )
+                    return None
+
+                self.logger.info(f"   ✅ Entry candle aligned: {candle_color} candle for {direction} signal")
+
+                # Set flag for market order if scalp_use_market_on_entry_alignment is enabled
+                use_market_on_alignment = getattr(self, 'scalp_use_market_on_entry_alignment', True)
+                if use_market_on_alignment:
+                    self._scalp_entry_alignment_confirmed = True
+                    self.logger.info(f"   📍 Using MARKET order (entry candle aligned)")
 
             # ================================================================
             # TIER 4: Swing Proximity Validation (v2.15.0)
@@ -2653,6 +2798,18 @@ class SMCSimpleStrategy:
                 'macd_line': round(macd_line, 6),
                 'macd_signal': round(macd_signal, 6),
                 'macd_histogram': round(macd_histogram, 6),
+
+                # v2.26.0: Filter metadata for performance analysis
+                'filter_metadata': {
+                    'volume_filter_enabled': self.volume_filter_enabled,
+                    'min_volume_ratio_threshold': pair_min_volume if self.volume_filter_enabled else None,
+                    'macd_filter_enabled': self._db_config.is_macd_filter_enabled(epic) if hasattr(self, '_db_config') and self._db_config else False,
+                    'entry_candle_alignment_required': scalp_require_entry_alignment if 'scalp_require_entry_alignment' in locals() else False,
+                    'entry_candle_alignment_confirmed': getattr(self, '_scalp_entry_alignment_confirmed', False),
+                    'rejection_candle_required': self.scalp_require_rejection_candle if self.scalp_mode_enabled else False,
+                    'rejection_candle_confirmed': getattr(self, '_scalp_rejection_confirmed', False),
+                    'market_order_reason': 'entry_alignment' if getattr(self, '_scalp_entry_alignment_confirmed', False) else ('rejection_candle' if getattr(self, '_scalp_rejection_confirmed', False) else 'default'),
+                },
 
                 # Strategy indicators (for alert_history compatibility)
                 'strategy_indicators': {
@@ -4116,6 +4273,24 @@ class SMCSimpleStrategy:
         """
         if not self.limit_order_enabled:
             # Limit orders disabled - return current price (market order behavior)
+            return current_close, 0.0
+
+        # v2.25.0: Check for rejection candle confirmed - use market order
+        # When scalp_require_rejection_candle is enabled and a rejection candle is detected,
+        # the candle itself provides momentum confirmation, so we use market order instead of STOP
+        if self.scalp_mode_enabled and getattr(self, '_scalp_rejection_confirmed', False):
+            self.logger.info(f"   📍 Market price: {current_close:.5f}")
+            self.logger.info(f"   📍 MARKET order (rejection candle confirmation)")
+            self._current_api_order_type = 'MARKET'
+            return current_close, 0.0
+
+        # v2.25.1: Check for entry candle alignment confirmed - use market order
+        # When scalp_require_entry_candle_alignment is enabled and candle color matches direction,
+        # the aligned candle provides momentum confirmation, so we use market order instead of STOP
+        if self.scalp_mode_enabled and getattr(self, '_scalp_entry_alignment_confirmed', False):
+            self.logger.info(f"   📍 Market price: {current_close:.5f}")
+            self.logger.info(f"   📍 MARKET order (entry candle alignment confirmation)")
+            self._current_api_order_type = 'MARKET'
             return current_close, 0.0
 
         # v2.17.0: Check for per-pair stop offset override first
