@@ -23,6 +23,13 @@ try:
 except ImportError:
     SCANNER_CONFIG_AVAILABLE = False
 
+# Import SMC config service for scalp mode detection
+try:
+    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+    SMC_CONFIG_AVAILABLE = True
+except ImportError:
+    SMC_CONFIG_AVAILABLE = False
+
 
 @dataclass
 class AlertCooldownConfig:
@@ -79,6 +86,15 @@ class AlertDeduplicationManager:
                 max_alerts_per_epic_hour=self._scanner_cfg.max_alerts_per_epic_hour
             )
             self.logger.info("[CONFIG:DB] ✅ Deduplication config loaded from database (NO FALLBACK)")
+
+        # Load SMC config for scalp mode detection
+        self._smc_config = None
+        if SMC_CONFIG_AVAILABLE:
+            try:
+                self._smc_config = get_smc_simple_config()
+                self.logger.info("[CONFIG:DB] ✅ SMC config loaded for scalp mode detection")
+            except Exception as e:
+                self.logger.warning(f"[CONFIG:DB] ⚠️ Could not load SMC config: {e}")
 
         # ✅ LOG THE ACTUAL CONFIGURATION BEING USED
         self.logger.info("🛡️ Alert deduplication manager initialized")
@@ -370,10 +386,18 @@ class AlertDeduplicationManager:
         3. Recent trade CLOSURES (allows market to settle after close)
         """
         try:
-            # Get cooldown settings from database (NO FALLBACK)
-            if self._scanner_cfg:
+            # Get cooldown settings - check if in scalp mode first
+            # v2.26.0: Scalp mode uses 15min cooldown, standard mode uses 30min
+            if self._smc_config and self._smc_config.scalp_mode_enabled:
+                # SCALP MODE: Use shorter cooldown for fast cycles
+                trade_cooldown_minutes = self._smc_config.scalp_cooldown_minutes
+                trade_cooldown_enabled = True
+                self.logger.debug(f"Using SCALP mode cooldown: {trade_cooldown_minutes} minutes")
+            elif self._scanner_cfg:
+                # STANDARD MODE: Use scanner config cooldown
                 trade_cooldown_minutes = self._scanner_cfg.trade_cooldown_minutes
                 trade_cooldown_enabled = self._scanner_cfg.trade_cooldown_enabled
+                self.logger.debug(f"Using STANDARD mode cooldown: {trade_cooldown_minutes} minutes")
             else:
                 # Using config_override - use sensible defaults
                 trade_cooldown_minutes = 30

@@ -12,8 +12,41 @@ PROD_API_BASE_URL = "https://api.ig.com/gateway/deal"
 
 # Locks to prevent concurrent token refresh race conditions
 # Without these, multiple async tasks could all see expired token and call ig_login simultaneously
-_demo_token_lock = asyncio.Lock()
-_prod_token_lock = asyncio.Lock()
+# NOTE: Locks must be created lazily to avoid binding to old event loops after restart
+_demo_token_lock = None
+_prod_token_lock = None
+
+def _get_demo_lock():
+    """Get or create demo token lock in current event loop."""
+    global _demo_token_lock
+    try:
+        # Check if lock exists and is valid for current event loop
+        if _demo_token_lock is not None:
+            # Try to access the loop - will raise if wrong event loop
+            _demo_token_lock._loop
+            return _demo_token_lock
+    except (AttributeError, RuntimeError):
+        pass
+
+    # Create new lock in current event loop
+    _demo_token_lock = asyncio.Lock()
+    return _demo_token_lock
+
+def _get_prod_lock():
+    """Get or create prod token lock in current event loop."""
+    global _prod_token_lock
+    try:
+        # Check if lock exists and is valid for current event loop
+        if _prod_token_lock is not None:
+            # Try to access the loop - will raise if wrong event loop
+            _prod_token_lock._loop
+            return _prod_token_lock
+    except (AttributeError, RuntimeError):
+        pass
+
+    # Create new lock in current event loop
+    _prod_token_lock = asyncio.Lock()
+    return _prod_token_lock
 
 # Global in-memory token cache (demo account)
 ig_token_cache = {
@@ -38,7 +71,7 @@ async def get_ig_auth_headers(force_refresh: bool = False):
         return _build_headers(ig_token_cache, IG_API_KEY)
 
     # Token needs refresh - acquire lock to prevent concurrent refresh
-    async with _demo_token_lock:
+    async with _get_demo_lock():
         # Double-check after acquiring lock (another task may have refreshed)
         now = datetime.utcnow()
         if not force_refresh and _is_token_valid(ig_token_cache, now):
@@ -111,7 +144,7 @@ async def get_prod_auth_headers(force_refresh: bool = False):
         return _build_headers(prod_token_cache, PROD_IG_API_KEY)
 
     # Token needs refresh - acquire lock to prevent concurrent refresh
-    async with _prod_token_lock:
+    async with _get_prod_lock():
         # Double-check after acquiring lock (another task may have refreshed)
         now = datetime.utcnow()
         if not force_refresh and _is_prod_token_valid(prod_token_cache, now):
