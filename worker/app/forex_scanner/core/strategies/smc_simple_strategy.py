@@ -1802,6 +1802,11 @@ class SMCSimpleStrategy:
                 if self.scalp_momentum_only_filter and entry_type not in allowed_entry_types:
                     rejection_reason = f"Scalp filter: Non-momentum entry ({entry_type}) blocked"
                     self.logger.info(f"   ❌ {rejection_reason}")
+                    # Collect full market context including prices for outcome analysis
+                    context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                          ema_result=ema_result, swing_result=swing_result,
+                                                          pullback_result=pullback_result, direction=direction)
+                    context.update({'entry_type': entry_type, 'filter': 'momentum_only'})
                     self._track_rejection(
                         stage='SCALP_ENTRY_FILTER',
                         reason=rejection_reason,
@@ -1809,7 +1814,7 @@ class SMCSimpleStrategy:
                         pair=pair,
                         candle_timestamp=candle_timestamp,
                         direction=direction,
-                        context={'entry_type': entry_type, 'filter': 'momentum_only'}
+                        context=context
                     )
                     return None
 
@@ -1822,6 +1827,11 @@ class SMCSimpleStrategy:
                     if not htf_aligned:
                         rejection_reason = f"Scalp filter: HTF misalignment ({direction} vs HTF {htf_candle_direction})"
                         self.logger.info(f"   ❌ {rejection_reason}")
+                        # Collect full market context including prices for outcome analysis
+                        context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                              ema_result=ema_result, swing_result=swing_result,
+                                                              pullback_result=pullback_result, direction=direction)
+                        context.update({'htf_candle_direction': htf_candle_direction, 'filter': 'htf_alignment'})
                         self._track_rejection(
                             stage='SCALP_ENTRY_FILTER',
                             reason=rejection_reason,
@@ -1829,7 +1839,7 @@ class SMCSimpleStrategy:
                             pair=pair,
                             candle_timestamp=candle_timestamp,
                             direction=direction,
-                            context={'htf_candle_direction': htf_candle_direction, 'filter': 'htf_alignment'}
+                            context=context
                         )
                         return None
 
@@ -1844,6 +1854,11 @@ class SMCSimpleStrategy:
                     if direction == 'BULL' and rsi_value > self.scalp_entry_rsi_buy_max:
                         rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} > {self.scalp_entry_rsi_buy_max} (overbought BUY)"
                         self.logger.info(f"   ❌ {rejection_reason}")
+                        # Collect full market context including prices for outcome analysis
+                        context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                              ema_result=ema_result, swing_result=swing_result,
+                                                              pullback_result=pullback_result, direction=direction)
+                        context.update({'rsi': rsi_value, 'filter': 'rsi_zone'})
                         self._track_rejection(
                             stage='SCALP_ENTRY_FILTER',
                             reason=rejection_reason,
@@ -1851,12 +1866,17 @@ class SMCSimpleStrategy:
                             pair=pair,
                             candle_timestamp=candle_timestamp,
                             direction=direction,
-                            context={'rsi': rsi_value, 'filter': 'rsi_zone'}
+                            context=context
                         )
                         return None
                     if direction == 'BEAR' and rsi_value < self.scalp_entry_rsi_sell_min:
                         rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} < {self.scalp_entry_rsi_sell_min} (oversold SELL)"
                         self.logger.info(f"   ❌ {rejection_reason}")
+                        # Collect full market context including prices for outcome analysis
+                        context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                              ema_result=ema_result, swing_result=swing_result,
+                                                              pullback_result=pullback_result, direction=direction)
+                        context.update({'rsi': rsi_value, 'filter': 'rsi_zone'})
                         self._track_rejection(
                             stage='SCALP_ENTRY_FILTER',
                             reason=rejection_reason,
@@ -1864,7 +1884,7 @@ class SMCSimpleStrategy:
                             pair=pair,
                             candle_timestamp=candle_timestamp,
                             direction=direction,
-                            context={'rsi': rsi_value, 'filter': 'rsi_zone'}
+                            context=context
                         )
                         return None
 
@@ -1872,6 +1892,11 @@ class SMCSimpleStrategy:
                 if self.scalp_min_ema_distance_pips > 0 and ema_distance < self.scalp_min_ema_distance_pips:
                     rejection_reason = f"Scalp filter: EMA distance {ema_distance:.1f} < {self.scalp_min_ema_distance_pips} pips"
                     self.logger.info(f"   ❌ {rejection_reason}")
+                    # Collect full market context including prices for outcome analysis
+                    context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                          ema_result=ema_result, swing_result=swing_result,
+                                                          pullback_result=pullback_result, direction=direction)
+                    context.update({'ema_distance': ema_distance, 'filter': 'ema_distance'})
                     self._track_rejection(
                         stage='SCALP_ENTRY_FILTER',
                         reason=rejection_reason,
@@ -1879,7 +1904,7 @@ class SMCSimpleStrategy:
                         pair=pair,
                         candle_timestamp=candle_timestamp,
                         direction=direction,
-                        context={'ema_distance': ema_distance, 'filter': 'ema_distance'}
+                        context=context
                     )
                     return None
 
@@ -1912,6 +1937,16 @@ class SMCSimpleStrategy:
                     if not has_rejection_candle:
                         rejection_reason = f"Scalp filter: No rejection candle (min strength {rejection_min_strength*100:.0f}%)"
                         self.logger.info(f"   ❌ {rejection_reason}")
+                        # Collect full market context including prices for outcome analysis
+                        context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                              ema_result=ema_result, swing_result=swing_result,
+                                                              pullback_result=pullback_result, direction=direction)
+                        context.update({
+                            'filter': 'rejection_candle',
+                            'has_pattern': pattern_data is not None,
+                            'pattern_strength': pattern_data.get('strength', 0) if pattern_data else 0,
+                            'required_strength': rejection_min_strength
+                        })
                         self._track_rejection(
                             stage='SCALP_ENTRY_FILTER',
                             reason=rejection_reason,
@@ -1919,12 +1954,7 @@ class SMCSimpleStrategy:
                             pair=pair,
                             candle_timestamp=candle_timestamp,
                             direction=direction,
-                            context={
-                                'filter': 'rejection_candle',
-                                'has_pattern': pattern_data is not None,
-                                'pattern_strength': pattern_data.get('strength', 0) if pattern_data else 0,
-                                'required_strength': rejection_min_strength
-                            }
+                            context=context
                         )
                         return None
 
@@ -1973,6 +2003,17 @@ class SMCSimpleStrategy:
                     expected_color = 'GREEN' if direction == 'BULL' else 'RED'
                     alignment_reason = f"Entry candle not aligned: {candle_color} candle for {direction} signal (need {expected_color})"
                     self.logger.info(f"   ❌ {alignment_reason}")
+                    # Collect full market context including prices for outcome analysis
+                    context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                          ema_result=ema_result, swing_result=swing_result,
+                                                          pullback_result=pullback_result, direction=direction)
+                    context.update({
+                        'filter': 'entry_candle_alignment',
+                        'candle_color': candle_color,
+                        'direction': direction,
+                        'entry_open': float(entry_candle_open),
+                        'entry_close': float(entry_candle_close)
+                    })
                     self._track_rejection(
                         stage='SCALP_ENTRY_FILTER',
                         reason=alignment_reason,
@@ -1980,13 +2021,7 @@ class SMCSimpleStrategy:
                         pair=pair,
                         candle_timestamp=candle_timestamp,
                         direction=direction,
-                        context={
-                            'filter': 'entry_candle_alignment',
-                            'candle_color': candle_color,
-                            'direction': direction,
-                            'entry_open': float(entry_candle_open),
-                            'entry_close': float(entry_candle_close)
-                        }
+                        context=context
                     )
                     return None
 

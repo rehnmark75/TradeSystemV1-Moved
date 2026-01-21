@@ -189,8 +189,10 @@ class RejectionOutcomeAnalyzer:
             self.logger.warning(f"Could not load database config, using defaults: {e}")
 
         # Analysis window: How long to look for outcome (hours after rejection)
-        self.max_analysis_hours = 48  # 48 hours max
-        self.min_candles_required = 12  # At least 12 5-minute candles (1 hour)
+        self.max_analysis_hours = 48  # 48 hours max (swing mode)
+        self.max_analysis_hours_scalp = 8  # 8 hours max for scalp mode
+        self.min_candles_required_5m = 12  # At least 12 5-minute candles (1 hour)
+        self.min_candles_required_1m = 60  # At least 60 1-minute candles (1 hour)
 
         self.logger.info(f"RejectionOutcomeAnalyzer initialized")
         self.logger.info(f"  Fixed SL: {self.fixed_sl_pips} pips, Fixed TP: {self.fixed_tp_pips} pips")
@@ -218,6 +220,24 @@ class RejectionOutcomeAnalyzer:
             if sl and tp:
                 return (sl, tp)
         return (self.fixed_sl_pips, self.fixed_tp_pips)
+
+    def is_scalp_rejection(self, rejection_stage: str) -> bool:
+        """
+        Determine if a rejection is scalp-related (needs 1m candles).
+
+        Args:
+            rejection_stage: The rejection stage name
+
+        Returns:
+            True if scalp rejection, False otherwise
+        """
+        scalp_stages = [
+            'SCALP_ENTRY_FILTER',
+            'SCALP_SPREAD',
+            'SCALP_QUALIFICATION',
+            'VOLUME_LOW'  # Often occurs in scalp mode
+        ]
+        return rejection_stage in scalp_stages
 
     def get_unanalyzed_rejections(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
         """
@@ -267,14 +287,15 @@ class RejectionOutcomeAnalyzer:
             self.logger.error(f"Failed to fetch rejections: {e}")
             return pd.DataFrame()
 
-    def fetch_price_data(self, epic: str, start_time: datetime, end_time: datetime) -> pd.DataFrame:
+    def fetch_price_data(self, epic: str, start_time: datetime, end_time: datetime, timeframe: int = 5) -> pd.DataFrame:
         """
-        Fetch 5-minute candles for outcome analysis from ig_candles table.
+        Fetch candles for outcome analysis from ig_candles table.
 
         Args:
             epic: Currency pair epic
             start_time: Analysis window start
             end_time: Analysis window end
+            timeframe: Candle timeframe in minutes (1 for scalp, 5 for swing)
 
         Returns:
             DataFrame with OHLC data
@@ -288,7 +309,7 @@ class RejectionOutcomeAnalyzer:
             close
         FROM ig_candles
         WHERE epic = :epic
-          AND timeframe = 5
+          AND timeframe = :timeframe
           AND start_time >= :start_time
           AND start_time <= :end_time
         ORDER BY start_time ASC
@@ -297,12 +318,14 @@ class RejectionOutcomeAnalyzer:
         try:
             df = self.db_manager.execute_query(query, {
                 'epic': epic,
+                'timeframe': timeframe,
                 'start_time': start_time,
                 'end_time': end_time
             })
+            self.logger.debug(f"Fetched {len(df)} {timeframe}m candles for {epic}")
             return df
         except Exception as e:
-            self.logger.error(f"Failed to fetch candle data for {epic}: {e}")
+            self.logger.error(f"Failed to fetch {timeframe}m candle data for {epic}: {e}")
             return pd.DataFrame()
 
     def calculate_entry_exit_prices(
@@ -364,7 +387,9 @@ class RejectionOutcomeAnalyzer:
         take_profit_price: float,
         candles: pd.DataFrame,
         pip_value: float,
-        rejection_timestamp: datetime
+        rejection_timestamp: datetime,
+        min_candles_required: int,
+        max_analysis_hours: int
     ) -> Dict[str, Any]:
         """
         Determine if price would have hit TP or SL first.
@@ -407,12 +432,14 @@ class RejectionOutcomeAnalyzer:
             'analysis_notes': None
         }
 
-        if candles.empty or len(candles) < self.min_candles_required:
-            result['analysis_notes'] = f"Insufficient data: {len(candles)} candles (min: {self.min_candles_required})"
+        if candles.empty or len(candles) < min_candles_required:
+            result['analysis_notes'] = f"Insufficient data: {len(candles)} candles (min: {min_candles_required})"
             return result
 
         # Calculate data quality score based on candle count
-        expected_candles = (self.max_analysis_hours * 60) / 5  # 5-minute candles
+        # Determine candle size from timeframe (5m for swing, 1m for scalp)
+        candle_size_minutes = 5 if min_candles_required <= 12 else 1
+        expected_candles = (max_analysis_hours * 60) / candle_size_minutes
         result['data_quality_score'] = min(1.0, len(candles) / expected_candles)
 
         # Track MFE and MAE
@@ -495,7 +522,7 @@ class RejectionOutcomeAnalyzer:
                 break
 
         # If neither hit, mark as STILL_OPEN
-        if result['outcome'] == OutcomeType.INSUFFICIENT_DATA and len(candles) >= self.min_candles_required:
+        if result['outcome'] == OutcomeType.INSUFFICIENT_DATA and len(candles) >= min_candles_required:
             result['outcome'] = OutcomeType.STILL_OPEN
             result['analysis_notes'] = f"Neither TP nor SL hit within {len(candles)} candles"
 
@@ -564,16 +591,32 @@ class RejectionOutcomeAnalyzer:
             direction, current_price, bid_price, ask_price, pip_value
         )
 
+        # Determine if this is a scalp rejection (needs 1m candles)
+        rejection_stage = rejection['rejection_stage']
+        is_scalp = self.is_scalp_rejection(rejection_stage)
+
+        # Set parameters based on rejection type
+        if is_scalp:
+            timeframe = 1  # 1-minute candles for scalp
+            max_hours = self.max_analysis_hours_scalp
+            min_candles = self.min_candles_required_1m
+            self.logger.debug(f"Scalp rejection detected: using 1m candles, {max_hours}h window")
+        else:
+            timeframe = 5  # 5-minute candles for swing
+            max_hours = self.max_analysis_hours
+            min_candles = self.min_candles_required_5m
+            self.logger.debug(f"Swing rejection detected: using 5m candles, {max_hours}h window")
+
         # Fetch candle data for analysis window
         analysis_start = rejection_timestamp
-        analysis_end = rejection_timestamp + timedelta(hours=self.max_analysis_hours)
+        analysis_end = rejection_timestamp + timedelta(hours=max_hours)
 
-        candles = self.fetch_price_data(epic, analysis_start, analysis_end)
+        candles = self.fetch_price_data(epic, analysis_start, analysis_end, timeframe)
 
         # Determine outcome
         outcome_data = self.determine_outcome(
             direction, entry_price, stop_loss_price, take_profit_price,
-            candles, pip_value, rejection_timestamp
+            candles, pip_value, rejection_timestamp, min_candles, max_hours
         )
 
         # Calculate potential profit/loss in pips
