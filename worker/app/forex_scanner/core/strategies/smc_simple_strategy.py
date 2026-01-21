@@ -1079,14 +1079,11 @@ class SMCSimpleStrategy:
         Key changes:
         - Faster timeframes: 1H/5m/1m instead of 4H/15m/5m
         - Smaller targets: 5 pip TP/SL (1:1 R:R)
-        - Relaxed filters: Disable EMA slope, volume (but KEEP swing proximity)
+        - Relaxed filters: Disable EMA slope, volume, swing proximity
         - Spread gate: Only trade when spread < 1 pip
         - Shorter cooldown: 15 minutes instead of 3 hours
 
-        v2.27.0 CHANGE: KEEP swing proximity enabled in scalp mode
-        - Analysis showed we're taking trades in wrong direction near swing levels
-        - Swing proximity checks 5m TRIGGER TF swings (where TIER 2 detects breaks)
-        - Uses tighter min_distance threshold (default 6 pips, configurable per-pair in database)
+        Testing HTF alignment fix in isolation first (swing proximity disabled)
         """
         self.logger.info("=" * 60)
         self.logger.info("SCALP MODE ENABLED - High Frequency Configuration")
@@ -1112,15 +1109,13 @@ class SMCSimpleStrategy:
         # Lower confidence threshold for more entries
         self.min_confidence = self.scalp_min_confidence
 
-        # Disable restrictive filters (EXCEPT swing proximity)
+        # Disable restrictive filters (including swing proximity)
         if self.scalp_disable_ema_slope_validation:
             self.ema_slope_validation_enabled = False
 
-        # v2.27.0: DON'T disable swing proximity in scalp mode - we need it!
-        # Swing proximity prevents wrong-direction entries near 5m trigger TF swings
-        # Uses tighter threshold (6 pips default vs 12 pips standard mode)
-        # if self.scalp_disable_swing_proximity:  # COMMENTED OUT
-        #     self.swing_proximity_enabled = False
+        # Re-enabled: Testing HTF alignment fix in isolation first
+        if self.scalp_disable_swing_proximity:
+            self.swing_proximity_enabled = False
 
         if self.scalp_disable_volume_filter:
             self.volume_filter_enabled = False
@@ -1190,8 +1185,7 @@ class SMCSimpleStrategy:
         self.logger.info(f"   EMA Buffer: {self.ema_buffer_pips} pips (relaxed for scalp)")
         self.logger.info(f"   Swing Lookback: {self.swing_lookback} bars (increased for better detection)")
         self.logger.info(f"   Swing Break Tolerance: {self.scalp_swing_break_tolerance_pips} pips (allows near-breaks)")
-        self.logger.info("   Filters DISABLED: EMA slope, Volume")
-        self.logger.info(f"   Swing Proximity: ENABLED (checks 5m trigger TF, min_distance from database)")
+        self.logger.info("   Filters DISABLED: EMA slope, Volume, Swing Proximity")
         self.logger.info("=" * 60)
 
     def _get_pair_scalp_config(self, epic: str) -> dict:
