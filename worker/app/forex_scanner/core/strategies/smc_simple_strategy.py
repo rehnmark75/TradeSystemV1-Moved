@@ -2098,9 +2098,14 @@ class SMCSimpleStrategy:
             # v2.17.0: Pass epic for per-pair offset override
             # ================================================================
             self.logger.info(f"\n📊 LIMIT ORDER: Calculating Entry Offset")
-            entry_price, limit_offset_pips = self._calculate_limit_entry(
-                market_price, direction, entry_type, pip_value, entry_df, epic
-            )
+            if self.limit_order_enabled:
+                entry_price, limit_offset_pips = self._calculate_limit_entry(
+                    market_price, direction, entry_type, pip_value, entry_df, epic
+                )
+            else:
+                entry_price = market_price
+                limit_offset_pips = 0.0
+                self._current_api_order_type = 'MARKET'
 
             # ================================================================
             # v2.17.0: Preliminary Order Type (will be refined after confidence)
