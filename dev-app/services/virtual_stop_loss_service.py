@@ -35,10 +35,13 @@ from config_virtual_stop import (
     # Dynamic VSL imports
     DYNAMIC_VSL_ENABLED,
     SPREAD_AWARE_TRIGGERS_ENABLED,
-    BASELINE_SPREAD_PIPS,
     MAX_SPREAD_PENALTY_PIPS,
     get_dynamic_vsl_config,
     is_dynamic_vsl_enabled,
+    # Spread-adjusted VSL imports
+    SPREAD_AWARE_VSL_ADJUSTMENT_ENABLED,
+    get_pair_baseline_spread,
+    calculate_spread_adjusted_vsl,
 )
 # Import DEMO auth headers for closing trades (production headers are for streaming only)
 from dependencies import get_ig_auth_headers
@@ -193,7 +196,30 @@ class VirtualStopLossService:
                     return False
 
                 # Get VSL configuration
-                virtual_sl_pips = trade.virtual_sl_pips or get_virtual_sl_pips(trade.symbol)
+                base_vsl_pips = trade.virtual_sl_pips or get_virtual_sl_pips(trade.symbol)
+
+                # Apply spread adjustment if current spread is wider than baseline
+                # This protects against immediate VSL hits when spreads are wide
+                virtual_sl_pips = base_vsl_pips
+                spread_adjustment = 0.0
+
+                if SPREAD_AWARE_VSL_ADJUSTMENT_ENABLED and self.stream_manager:
+                    try:
+                        # Get current spread from stream manager's last known price
+                        last_price = self.stream_manager.get_last_price(trade.symbol)
+                        if last_price and hasattr(last_price, 'bid') and hasattr(last_price, 'offer'):
+                            point_value = get_point_value(trade.symbol)
+                            current_spread_pips = (last_price.offer - last_price.bid) / point_value
+                            virtual_sl_pips = calculate_spread_adjusted_vsl(
+                                trade.symbol, base_vsl_pips, current_spread_pips
+                            )
+                            spread_adjustment = virtual_sl_pips - base_vsl_pips
+                            if spread_adjustment > 0:
+                                logger.info(f"[VSL] 📊 Spread adjustment for {trade.symbol}: "
+                                           f"spread={current_spread_pips:.1f} pips, "
+                                           f"VSL widened {base_vsl_pips:.1f} → {virtual_sl_pips:.1f} pips")
+                    except Exception as e:
+                        logger.debug(f"[VSL] Could not get spread for adjustment: {e}")
 
                 # Calculate virtual SL price
                 point_value = get_point_value(trade.symbol)
@@ -447,16 +473,17 @@ class VirtualStopLossService:
         if not SPREAD_AWARE_TRIGGERS_ENABLED:
             return base_trigger
 
-        # Add penalty if spread is wider than baseline
-        if current_spread_pips > BASELINE_SPREAD_PIPS:
+        # Add penalty if spread is wider than baseline for this pair
+        baseline_spread = get_pair_baseline_spread(epic)
+        if current_spread_pips > baseline_spread:
             spread_penalty = min(
-                current_spread_pips - BASELINE_SPREAD_PIPS,
+                current_spread_pips - baseline_spread,
                 MAX_SPREAD_PENALTY_PIPS
             )
             adjusted_trigger = base_trigger + spread_penalty
             logger.debug(f"[VSL] Spread-adjusted BE trigger for {epic}: "
                         f"{base_trigger} + {spread_penalty:.1f} = {adjusted_trigger:.1f} pips "
-                        f"(spread: {current_spread_pips:.1f})")
+                        f"(spread: {current_spread_pips:.1f}, baseline: {baseline_spread:.1f})")
             return adjusted_trigger
 
         return base_trigger
@@ -761,14 +788,19 @@ class VirtualStopLossService:
 
     async def _position_sync_loop(self):
         """Periodically sync scalp positions from database."""
+        sync_count = 0
         while self._running:
             try:
                 await asyncio.sleep(POSITION_SYNC_INTERVAL_SECONDS)
+                sync_count += 1
                 await self._sync_scalp_positions()
+                # Log heartbeat every 10 syncs (~5 min) to confirm loop is running
+                if sync_count % 10 == 0:
+                    logger.info(f"[VSL] 💓 Sync loop heartbeat: {sync_count} syncs completed, tracking {len(self.positions)} positions")
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[VSL] Position sync error: {e}")
+                logger.error(f"[VSL] Position sync error: {e}", exc_info=True)
                 await asyncio.sleep(10)  # Wait before retry
 
     async def _sync_scalp_positions(self):
@@ -783,12 +815,18 @@ class VirtualStopLossService:
 
                 # Track which trades we found
                 found_ids = set()
+                new_positions_added = []
 
                 # Add any new positions
                 for trade in scalp_trades:
                     found_ids.add(trade.id)
                     if trade.id not in self.positions:
                         self.add_scalp_position(trade)
+                        new_positions_added.append(f"Trade {trade.id} {trade.symbol}")
+
+                # Log when new positions are discovered during sync
+                if new_positions_added:
+                    logger.info(f"[VSL] 🔄 Sync discovered {len(new_positions_added)} new position(s): {', '.join(new_positions_added)}")
 
                 # Remove positions that are no longer active
                 with self._lock:
@@ -797,10 +835,11 @@ class VirtualStopLossService:
                         self.remove_position(trade_id)
 
                 self._stats["last_sync_time"] = datetime.utcnow().isoformat()
+                self._stats["last_sync_found"] = len(found_ids)
                 logger.debug(f"[VSL] Synced {len(found_ids)} scalp positions from database")
 
         except Exception as e:
-            logger.error(f"[VSL] Error syncing positions: {e}")
+            logger.error(f"[VSL] Error syncing positions: {e}", exc_info=True)
 
     def get_status(self) -> dict:
         """

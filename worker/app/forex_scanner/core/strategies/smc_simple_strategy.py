@@ -2,9 +2,24 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.24.0
-DATE: 2026-01-19
+VERSION: 2.28.0
+DATE: 2026-01-22
 STATUS: Scalp Mode for High-Frequency Trading
+
+v2.28.0 CHANGES (Scalp Reversal Override - Counter-Trend Opportunity):
+    - NEW: When HTF alignment fails, check for strict reversal conditions instead of rejecting
+    - NEW: scalp_reversal_enabled - allow counter-trend entries with strict gating
+    - NEW: Requires runway >= 15 pips (distance to swing level for profit room)
+    - NEW: Requires entry momentum >= 0.60 OR RSI in extreme zone (overbought/oversold)
+    - NEW: Blocks reversal in breakout regimes and high volatility states
+    - NEW: entry_type = 'REVERSAL' for counter-trend scalp trades
+    - IMPACT: Captures reversal opportunities when HTF shows temporary misalignment
+    - CONFIG: scalp_reversal_enabled (default: true)
+    - CONFIG: scalp_reversal_min_runway_pips (default: 15.0)
+    - CONFIG: scalp_reversal_min_entry_momentum (default: 0.60)
+    - CONFIG: scalp_reversal_block_regimes (default: ['breakout'])
+    - CONFIG: scalp_reversal_block_volatility_states (default: ['high'])
+    - CONFIG: scalp_reversal_allow_rsi_extremes (default: true)
 
 v2.24.0 CHANGES (Alternative TIER 3 Entries - Pattern & Divergence):
     - NEW: pattern_as_entry_enabled - allow patterns as standalone TIER 3 entry
@@ -15,7 +30,7 @@ v2.24.0 CHANGES (Alternative TIER 3 Entries - Pattern & Divergence):
     - NEW: entry_type now supports 'PATTERN' and 'DIVERGENCE' in addition to PULLBACK/MOMENTUM
     - NEW: Scalp filter allows PATTERN and DIVERGENCE entries alongside MOMENTUM
     - IMPACT: More entry opportunities when HTF structure is aligned but pullback zone fails
-    - CONFIG: pattern_as_entry_enabled (default: true), divergence_as_entry_enabled (default: true)
+    - CONFIG: pattern_as_entry_enabled (default: false), divergence_as_entry_enabled (default: false)
 
 v2.20.0 CHANGES (Scalp Mode - High Frequency Trading):
     - NEW: scalp_mode_enabled toggle for high-frequency 5 pip TP trading
