@@ -25,7 +25,8 @@ TRADING_BLACKLIST = [
 # ================== TRAILING STOP MASTER CONTROL ==================
 # Set to False to completely disable trailing stop monitoring
 # Set to True to re-enable trailing stops
-TRAILING_STOPS_ENABLED = False
+# ENABLED (Jan 2026): Re-enabled with scalp-specific configs to replace VSL system
+TRAILING_STOPS_ENABLED = True
 
 # Additional epic mappings from broker transaction analyzer
 BROKER_EPIC_MAP = {
@@ -524,6 +525,215 @@ PAIR_TRAILING_CONFIGS = {
     },
 }
 
+# =============================================================================
+# SCALP MODE TRAILING CONFIGURATIONS (Jan 2026)
+# =============================================================================
+# Scalp-specific trailing stop configs based on VSL analysis (Jan 20-22, 2026)
+#
+# Key findings from 2-day analysis:
+# - VSL at 5-6 pips was too tight (67% premature stops, $2,506 loss)
+# - Profitable trades captured only 46% of potential (83% locked at BE)
+# - Optimal stops: 12-20 pips (ABOVE IG minimum, so VSL not needed)
+# - USDCAD: 100% success rate with 12 pips
+# - Majors: 15 pips optimal
+# - JPY pairs: 20 pips due to higher volatility
+#
+# Strategy: Use IG native stops with progressive trailing
+# =============================================================================
+
+SCALP_TRAILING_CONFIGS = {
+    # ========== USDCAD - HIGHEST PRIORITY (100% success rate) ==========
+    'CS.D.USDCAD.MINI.IP': {
+        'early_breakeven_trigger_points': 6,    # Quick BE protection
+        'early_breakeven_buffer_points': 1,     # Lock +1 pip (from data: improve from 0.5)
+        'stage1_trigger_points': 10,            # Stage1 at +10 pips
+        'stage1_lock_points': 5,                # Lock +5 pips
+        'stage2_trigger_points': 12,            # Stage2 at +12 pips (realistic TP)
+        'stage2_lock_points': 8,                # Lock +8 pips
+        'stage3_trigger_points': 15,            # Stage3 if trade runs further
+        'stage3_atr_multiplier': 1.5,           # Tighter ATR for scalping
+        'stage3_min_distance': 5,
+        'min_trail_distance': 6,                # 12 pip initial stop (optimal from data)
+        'break_even_trigger_points': 6,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 10,     # Close 50% at +10 pips
+        'partial_close_size': 0.5,
+    },
+
+    # ========== MAJOR PAIRS (15 pip optimal stop) ==========
+    'CS.D.EURUSD.CEEM.IP': {
+        'early_breakeven_trigger_points': 8,    # From data: avoid premature BE
+        'early_breakeven_buffer_points': 1,     # Lock +1 pip (improved from 0.5)
+        'stage1_trigger_points': 12,            # Stage1 at +12 pips
+        'stage1_lock_points': 6,                # Lock +6 pips
+        'stage2_trigger_points': 15,            # Stage2 at +15 pips (realistic TP)
+        'stage2_lock_points': 10,               # Lock +10 pips
+        'stage3_trigger_points': 20,            # Stage3 if trade runs further
+        'stage3_atr_multiplier': 1.5,
+        'stage3_min_distance': 5,
+        'min_trail_distance': 8,                # 15 pip initial stop (optimal from data)
+        'break_even_trigger_points': 8,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 12,     # Close 50% at +12 pips
+        'partial_close_size': 0.5,
+    },
+
+    'CS.D.GBPUSD.MINI.IP': {
+        'early_breakeven_trigger_points': 8,
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 12,
+        'stage1_lock_points': 6,
+        'stage2_trigger_points': 15,
+        'stage2_lock_points': 10,
+        'stage3_trigger_points': 20,
+        'stage3_atr_multiplier': 1.5,
+        'stage3_min_distance': 5,
+        'min_trail_distance': 8,                # 15 pip initial stop
+        'break_even_trigger_points': 8,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 12,
+        'partial_close_size': 0.5,
+    },
+
+    'CS.D.AUDUSD.MINI.IP': {
+        'early_breakeven_trigger_points': 6,    # AUDUSD: 14.3% capture rate, needs adjustment
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 10,            # Realistic MFE for AUDUSD (3-3.5 pips typical)
+        'stage1_lock_points': 5,
+        'stage2_trigger_points': 12,
+        'stage2_lock_points': 8,
+        'stage3_trigger_points': 15,
+        'stage3_atr_multiplier': 1.5,
+        'stage3_min_distance': 4,
+        'min_trail_distance': 8,                # 15 pip initial stop
+        'break_even_trigger_points': 6,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 10,
+        'partial_close_size': 0.5,
+    },
+
+    'CS.D.NZDUSD.MINI.IP': {
+        'early_breakeven_trigger_points': 8,
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 12,
+        'stage1_lock_points': 6,
+        'stage2_trigger_points': 15,
+        'stage2_lock_points': 10,
+        'stage3_trigger_points': 20,
+        'stage3_atr_multiplier': 1.5,
+        'stage3_min_distance': 5,
+        'min_trail_distance': 8,                # 15 pip initial stop
+        'break_even_trigger_points': 8,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 12,
+        'partial_close_size': 0.5,
+    },
+
+    'CS.D.USDCHF.MINI.IP': {
+        'early_breakeven_trigger_points': 8,
+        'early_breakeven_buffer_points': 1,
+        'stage1_trigger_points': 12,
+        'stage1_lock_points': 6,
+        'stage2_trigger_points': 15,
+        'stage2_lock_points': 10,
+        'stage3_trigger_points': 20,
+        'stage3_atr_multiplier': 1.5,
+        'stage3_min_distance': 5,
+        'min_trail_distance': 8,                # 15 pip initial stop
+        'break_even_trigger_points': 8,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 12,
+        'partial_close_size': 0.5,
+    },
+
+    # ========== JPY PAIRS (20 pip optimal stop - higher volatility) ==========
+    'CS.D.USDJPY.MINI.IP': {
+        'early_breakeven_trigger_points': 10,   # JPY pairs need more room
+        'early_breakeven_buffer_points': 1.5,   # Lock +1.5 pips (higher volatility)
+        'stage1_trigger_points': 15,            # Stage1 at +15 pips
+        'stage1_lock_points': 8,                # Lock +8 pips
+        'stage2_trigger_points': 20,            # Stage2 at +20 pips (realistic TP)
+        'stage2_lock_points': 12,               # Lock +12 pips
+        'stage3_trigger_points': 25,            # Stage3 if trade runs further
+        'stage3_atr_multiplier': 1.5,
+        'stage3_min_distance': 6,
+        'min_trail_distance': 10,               # 20 pip initial stop (optimal from data)
+        'break_even_trigger_points': 10,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 15,     # Close 50% at +15 pips
+        'partial_close_size': 0.5,
+    },
+
+    'CS.D.EURJPY.MINI.IP': {
+        'early_breakeven_trigger_points': 10,   # EURJPY: 31.3% capture, needs loosening
+        'early_breakeven_buffer_points': 1.5,
+        'stage1_trigger_points': 15,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 20,
+        'stage2_lock_points': 12,
+        'stage3_trigger_points': 25,
+        'stage3_atr_multiplier': 1.5,
+        'stage3_min_distance': 6,
+        'min_trail_distance': 10,               # 20 pip initial stop
+        'break_even_trigger_points': 10,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 15,
+        'partial_close_size': 0.5,
+    },
+
+    'CS.D.AUDJPY.MINI.IP': {
+        'early_breakeven_trigger_points': 10,
+        'early_breakeven_buffer_points': 1.5,
+        'stage1_trigger_points': 15,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 20,
+        'stage2_lock_points': 12,
+        'stage3_trigger_points': 25,
+        'stage3_atr_multiplier': 1.5,
+        'stage3_min_distance': 6,
+        'min_trail_distance': 10,               # 20 pip initial stop
+        'break_even_trigger_points': 10,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 15,
+        'partial_close_size': 0.5,
+    },
+
+    'CS.D.GBPJPY.MINI.IP': {
+        'early_breakeven_trigger_points': 10,
+        'early_breakeven_buffer_points': 1.5,
+        'stage1_trigger_points': 15,
+        'stage1_lock_points': 8,
+        'stage2_trigger_points': 20,
+        'stage2_lock_points': 12,
+        'stage3_trigger_points': 25,
+        'stage3_atr_multiplier': 1.5,
+        'stage3_min_distance': 6,
+        'min_trail_distance': 10,               # 20 pip initial stop
+        'break_even_trigger_points': 10,
+        'enable_partial_close': True,
+        'partial_close_trigger_points': 15,
+        'partial_close_size': 0.5,
+    },
+}
+
+# Default scalp configuration for unlisted pairs
+DEFAULT_SCALP_TRAILING_CONFIG = {
+    'early_breakeven_trigger_points': 8,
+    'early_breakeven_buffer_points': 1,
+    'stage1_trigger_points': 12,
+    'stage1_lock_points': 6,
+    'stage2_trigger_points': 15,
+    'stage2_lock_points': 10,
+    'stage3_trigger_points': 20,
+    'stage3_atr_multiplier': 1.5,
+    'stage3_min_distance': 5,
+    'min_trail_distance': 8,                    # 15 pip initial stop
+    'break_even_trigger_points': 8,
+    'enable_partial_close': True,
+    'partial_close_trigger_points': 12,
+    'partial_close_size': 0.5,
+}
+
 # Default configuration - v3.0.0 balanced settings for unlisted pairs
 DEFAULT_TRAILING_CONFIG = {
     'early_breakeven_trigger_points': 15,   # v3.0.0: 10→15
@@ -543,11 +753,15 @@ DEFAULT_TRAILING_CONFIG = {
 }
 
 
-def get_trailing_config_for_epic(epic: str) -> dict:
+def get_trailing_config_for_epic(epic: str, is_scalp_trade: bool = False) -> dict:
     """
     Get trailing stop configuration for specific epic/pair.
 
-    Priority:
+    Priority for scalp trades:
+    1. Pair-specific config from SCALP_TRAILING_CONFIGS
+    2. DEFAULT_SCALP_TRAILING_CONFIG fallback
+
+    Priority for regular trades:
     1. Pair-specific config from PAIR_TRAILING_CONFIGS
     2. DEFAULT_TRAILING_CONFIG fallback
 
@@ -556,12 +770,29 @@ def get_trailing_config_for_epic(epic: str) -> dict:
 
     Args:
         epic: Trading symbol (e.g., 'CS.D.EURUSD.CEEM.IP')
+        is_scalp_trade: Whether this is a scalp trade (default: False)
 
     Returns:
         Dictionary with trailing configuration values
     """
-    config = PAIR_TRAILING_CONFIGS.get(epic, DEFAULT_TRAILING_CONFIG.copy())
+    if is_scalp_trade:
+        config = SCALP_TRAILING_CONFIGS.get(epic, DEFAULT_SCALP_TRAILING_CONFIG.copy())
+    else:
+        config = PAIR_TRAILING_CONFIGS.get(epic, DEFAULT_TRAILING_CONFIG.copy())
     return config
+
+
+def get_scalp_trailing_config_for_epic(epic: str) -> dict:
+    """
+    Convenience function to get scalp trailing configuration.
+
+    Args:
+        epic: Trading symbol
+
+    Returns:
+        Dictionary with scalp trailing configuration values
+    """
+    return get_trailing_config_for_epic(epic, is_scalp_trade=True)
 
 # ================== DEFAULT VALUES ==================
 DEFAULT_TEST_EPIC = "CS.D.USDJPY.MINI.IP"

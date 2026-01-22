@@ -13,7 +13,7 @@ safety net in case streaming fails.
 # MASTER TOGGLE
 # =============================================================================
 
-VIRTUAL_STOP_LOSS_ENABLED = True
+VIRTUAL_STOP_LOSS_ENABLED = False  # DISABLED: Replaced with scalp-specific trailing configs
 
 # =============================================================================
 # GLOBAL DEFAULTS
@@ -189,9 +189,64 @@ DYNAMIC_VSL_ENABLED = True
 
 # Spread-aware threshold adjustment
 # When spread widens, require more profit before triggering breakeven
+# AND widen initial VSL to account for spread cost
 SPREAD_AWARE_TRIGGERS_ENABLED = True
-BASELINE_SPREAD_PIPS = 1.0  # Normal spread assumption
+SPREAD_AWARE_VSL_ADJUSTMENT_ENABLED = True  # NEW: Also adjust initial VSL based on spread
 MAX_SPREAD_PENALTY_PIPS = 2.0  # Cap adjustment at +2 pips max
+
+# Per-pair baseline spreads (typical spreads during London/NY overlap - best conditions)
+# Used to calculate spread adjustment: when current > baseline, widen VSL
+# Data from IG Markets typical spreads
+PAIR_BASELINE_SPREADS = {
+    # Major pairs - tight spreads
+    'CS.D.EURUSD.CEEM.IP': 0.6,   # EUR/USD - tightest
+    'CS.D.EURUSD.MINI.IP': 0.6,
+    'CS.D.GBPUSD.MINI.IP': 0.9,   # GBP/USD
+    'CS.D.GBPUSD.CEEM.IP': 0.9,
+    'CS.D.USDJPY.MINI.IP': 0.7,   # USD/JPY
+    'CS.D.USDCHF.MINI.IP': 1.5,   # USD/CHF - wider
+    'CS.D.USDCAD.MINI.IP': 1.5,   # USD/CAD - wider
+    'CS.D.AUDUSD.MINI.IP': 0.8,   # AUD/USD
+    'CS.D.NZDUSD.MINI.IP': 1.2,   # NZD/USD - wider
+    # JPY crosses - wider spreads
+    'CS.D.EURJPY.MINI.IP': 1.1,   # EUR/JPY
+    'CS.D.GBPJPY.MINI.IP': 1.8,   # GBP/JPY - widest
+    'CS.D.AUDJPY.MINI.IP': 1.3,   # AUD/JPY
+}
+DEFAULT_BASELINE_SPREAD_PIPS = 1.0  # Fallback for unknown pairs
+
+
+def get_pair_baseline_spread(epic: str) -> float:
+    """Get the baseline spread for a pair."""
+    return PAIR_BASELINE_SPREADS.get(epic, DEFAULT_BASELINE_SPREAD_PIPS)
+
+
+def calculate_spread_adjusted_vsl(epic: str, base_vsl_pips: float, current_spread_pips: float) -> float:
+    """
+    Calculate spread-adjusted VSL distance.
+
+    When spread is wider than baseline, add the excess to VSL.
+    This ensures trades have room to breathe when spreads widen.
+
+    Args:
+        epic: Market epic
+        base_vsl_pips: Base VSL distance in pips
+        current_spread_pips: Current spread in pips
+
+    Returns:
+        Adjusted VSL distance in pips
+    """
+    if not SPREAD_AWARE_VSL_ADJUSTMENT_ENABLED:
+        return base_vsl_pips
+
+    baseline = get_pair_baseline_spread(epic)
+
+    if current_spread_pips > baseline:
+        # Add spread excess to VSL, capped at MAX_SPREAD_PENALTY_PIPS
+        spread_excess = min(current_spread_pips - baseline, MAX_SPREAD_PENALTY_PIPS)
+        return base_vsl_pips + spread_excess
+
+    return base_vsl_pips
 
 # Default dynamic VSL configuration for majors
 # Updated Jan 20, 2026: Added progressive lock stages to protect profit

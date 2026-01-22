@@ -89,13 +89,15 @@ class TrailingConfig:
     trend_strength_min: float = 0.6
 
     @classmethod
-    def from_epic(cls, epic: str, method: TrailingMethod = TrailingMethod.PROGRESSIVE_3_STAGE):
+    def from_epic(cls, epic: str, method: TrailingMethod = TrailingMethod.PROGRESSIVE_3_STAGE,
+                  is_scalp_trade: bool = False):
         """
         Create TrailingConfig with pair-specific settings from config.py
 
         Args:
             epic: Trading symbol (e.g., 'CS.D.EURUSD.CEEM.IP')
             method: Trailing method to use (default: PROGRESSIVE_3_STAGE)
+            is_scalp_trade: Whether this is a scalp trade (uses SCALP_TRAILING_CONFIGS)
 
         Returns:
             TrailingConfig instance with pair-specific values
@@ -104,7 +106,7 @@ class TrailingConfig:
         """
         from config import get_trailing_config_for_epic
 
-        pair_config = get_trailing_config_for_epic(epic)
+        pair_config = get_trailing_config_for_epic(epic, is_scalp_trade=is_scalp_trade)
 
         return cls(
             method=method,
