@@ -1,0 +1,11 @@
+{
+  "ui": {
+    "showMemoryUsage": true
+  },
+  "general": {
+    "previewFeatures": true,
+    "checkpointing": {
+      "enabled": true
+    }
+  }
+}
