@@ -11,4 +11,10 @@
 | #914 | 3:55 PM | 🔵 | SMC Simple Strategy - Scalp Mode Uses 1-Minute Micro-Pullback Logic | ~331 |
 | #913 | " | 🔵 | SMC Simple Strategy - USDJPY Session Multipliers and TIER 3 Pullback System | ~370 |
 | #890 | 3:48 PM | 🔵 | SMC Simple Strategy - EMA Bias and Signal Validation Logic | ~309 |
+
+### Jan 22, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #1401 | 12:41 PM | 🟣 | VSL Service Improvements and Scalp Reversal Strategy Feature | ~382 |
 </claude-mem-context>
