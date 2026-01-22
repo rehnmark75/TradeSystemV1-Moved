@@ -684,9 +684,12 @@ async def startup_coordinator():
                     except Exception as vsl_start_error:
                         logger.error(f"❌ VSL service start error: {vsl_start_error}")
 
-                # Schedule VSL service start (needs auth headers from async context)
-                asyncio.create_task(start_vsl_service())
-                logger.info("✅ Virtual Stop Loss service scheduled for startup")
+                # Start VSL service directly (await to ensure it completes and errors are logged)
+                # Previously used create_task which caused silent failures
+                try:
+                    await start_vsl_service()
+                except Exception as vsl_await_error:
+                    logger.error(f"❌ VSL service await error: {vsl_await_error}", exc_info=True)
 
             except Exception as vsl_error:
                 startup_errors.append(f"VSL initialization: {vsl_error}")

@@ -620,31 +620,17 @@ async def ig_place_order(
                     # - limit_price = TAKE PROFIT level (not the limit order entry!)
                     # - sl_price = stop loss level
 
-                    # v3.2.0: Calculate VSL fields for scalp trades (limit orders)
+                    # Scalp trade detection (limit orders)
+                    # VSL system disabled - scalp trades now use progressive trailing with scalp configs
                     is_scalp = body.is_scalp_trade or (sl_limit and sl_limit <= 8)
-                    virtual_sl_pips_value = body.virtual_sl_pips
+
+                    # VSL DISABLED (Jan 2026): No longer calculating VSL fields
+                    # Scalp trades now use regular trailing system with SCALP_TRAILING_CONFIGS
+                    virtual_sl_pips_value = None
                     virtual_sl_price_value = None
 
                     if is_scalp:
-                        try:
-                            from config_virtual_stop import get_virtual_sl_pips
-                            from services.ig_orders import get_point_value
-
-                            if virtual_sl_pips_value is None:
-                                virtual_sl_pips_value = get_virtual_sl_pips(symbol)
-
-                            point_value = get_point_value(symbol)
-                            sl_distance = virtual_sl_pips_value * point_value
-
-                            if direction.upper() == "BUY":
-                                virtual_sl_price_value = body.entry_level - sl_distance
-                            else:  # SELL
-                                virtual_sl_price_value = body.entry_level + sl_distance
-
-                            logger.info(f"⚡ [LIMIT] Scalp trade: VSL @ {virtual_sl_price_value:.5f} ({virtual_sl_pips_value} pips)")
-                        except ImportError:
-                            logger.warning("⚠️ VSL config not available for limit order")
-                            is_scalp = False
+                        logger.info(f"⚡ [LIMIT] Scalp trade: Using scalp trailing configs (VSL disabled)")
 
                     # Calculate trigger_distance for limit orders (troubleshooting IG rejections)
                     # trigger_distance = gap between entry level and current market price
@@ -672,11 +658,12 @@ async def ig_place_order(
                         status="pending_limit",  # New status for limit orders
                         alert_id=alert_id,
                         monitor_until=expiry_time,  # Use monitor_until for expiry tracking
-                        # v3.2.0: VSL fields for scalp trades
+                        # Scalp flag preserved for trailing system
                         is_scalp_trade=is_scalp,
-                        virtual_sl_pips=virtual_sl_pips_value,
-                        virtual_sl_price=virtual_sl_price_value,
-                        # v3.3.0: Troubleshooting data for IG rejections
+                        # VSL fields deprecated (system disabled)
+                        virtual_sl_pips=None,
+                        virtual_sl_price=None,
+                        # Troubleshooting data for IG rejections
                         min_stop_distance_points=min_distance,
                         trigger_distance=trigger_distance_value,
                     )
@@ -685,7 +672,7 @@ async def ig_place_order(
                     db.commit()
                     logger.info(f"✅ Limit order logged to database: {symbol} @ {body.entry_level}")
                     if is_scalp:
-                        logger.info(f"   ⚡ Scalp trade: is_scalp_trade=True, VSL={virtual_sl_pips_value} pips")
+                        logger.info(f"   ⚡ Scalp trade: is_scalp_trade=True (using scalp trailing configs)")
                     logger.info(f"   Deal Ref: {deal_reference}, Expiry: {expiry_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
                     if alert_id:
                         logger.info(f"   Linked to alert_id: {alert_id}")
@@ -945,33 +932,17 @@ async def ig_place_order(
         # Save to database
         try:
             # Check if this is a scalp trade (explicitly set or detected from tight SL)
+            # VSL system disabled - scalp trades now use progressive trailing with scalp-specific configs
             is_scalp = body.is_scalp_trade or (sl_limit and sl_limit <= 8)  # <=8 pips = scalp trade
-            virtual_sl_pips_value = body.virtual_sl_pips
 
-            # Calculate virtual SL price if scalp trade
+            # VSL DISABLED (Jan 2026): No longer calculating VSL fields
+            # Scalp trades now use regular trailing system with SCALP_TRAILING_CONFIGS
+            # These configs provide optimal 12-20 pip stops based on analysis
+            virtual_sl_pips_value = None
             virtual_sl_price_value = None
+
             if is_scalp:
-                try:
-                    from config_virtual_stop import get_virtual_sl_pips
-                    from services.ig_orders import get_point_value
-
-                    # Use provided VSL pips or get from config
-                    if virtual_sl_pips_value is None:
-                        virtual_sl_pips_value = get_virtual_sl_pips(symbol)
-
-                    # Calculate VSL price
-                    point_value = get_point_value(symbol)
-                    sl_distance = virtual_sl_pips_value * point_value
-
-                    if direction.upper() == "BUY":
-                        virtual_sl_price_value = entry_price - sl_distance
-                    else:  # SELL
-                        virtual_sl_price_value = entry_price + sl_distance
-
-                    logger.info(f"⚡ Scalp trade detected: VSL @ {virtual_sl_price_value:.5f} ({virtual_sl_pips_value} pips)")
-                except ImportError:
-                    logger.warning("⚠️ VSL config not available, skipping virtual SL calculation")
-                    is_scalp = False
+                logger.info(f"⚡ Scalp trade detected: Using scalp trailing configs (VSL disabled)")
 
             trade_log = TradeLog(
                 symbol=symbol,
@@ -985,10 +956,11 @@ async def ig_place_order(
                 endpoint="dev",
                 status="pending",
                 alert_id=alert_id,
-                # Virtual Stop Loss fields
+                # Scalp flag preserved for trailing system to use scalp configs
                 is_scalp_trade=is_scalp,
-                virtual_sl_pips=virtual_sl_pips_value,
-                virtual_sl_price=virtual_sl_price_value,
+                # VSL fields deprecated (system disabled)
+                virtual_sl_pips=None,
+                virtual_sl_price=None,
             )
 
             db.add(trade_log)
@@ -999,18 +971,10 @@ async def ig_place_order(
             if alert_id is not None:
                 logger.info(f"✅ Trade linked to alert_id: {alert_id}")
 
-            # Register scalp trade with Virtual Stop Loss service
-            if is_scalp:
-                try:
-                    from services.virtual_stop_loss_service import get_vsl_service
-                    vsl_service = get_vsl_service()
-                    if vsl_service and vsl_service._running:
-                        vsl_service.add_scalp_position(trade_log)
-                        logger.info(f"⚡ Trade {trade_log.id} registered with VSL service")
-                    else:
-                        logger.warning("⚠️ VSL service not running, scalp trade not monitored in real-time")
-                except Exception as vsl_error:
-                    logger.warning(f"⚠️ Failed to register with VSL service: {vsl_error}")
+            # VSL service registration disabled - using regular trailing system instead
+            # if is_scalp:
+            #     # VSL service no longer used - regular trailing handles scalp trades
+            #     pass
                 
         except SQLAlchemyError as e:
             db.rollback()

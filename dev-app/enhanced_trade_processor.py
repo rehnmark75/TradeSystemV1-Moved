@@ -54,28 +54,77 @@ class CombinedTrailingConfig(TrailingConfig):
 
 class CombinedTradeProcessor(EnhancedTradeProcessor):
     """Trade processor with both trailing and EMA exit systems + validation + PROFIT PROTECTION + ENHANCED STATUS MANAGEMENT"""
-    
+
     def __init__(self, config: CombinedTrailingConfig, order_sender, logger, trading_headers=None):
         # ✅ CRITICAL: Initialize with new trailing config structure
         super().__init__(config, order_sender, logger)
         self.ema_exit = EMATrendExit(logger, order_sender) if config.enable_ema_exit else None
         self.config = config
+        self.default_config = config  # Store default config
         self.trading_headers = trading_headers  # Store headers for validation methods
-        
+
         # ✅ NEW: Initialize enhanced status manager
         self.enhanced_status_manager = None
         if ENHANCED_STATUS_MANAGER_AVAILABLE and trading_headers:
             self.enhanced_status_manager = EnhancedTradeStatusManager(trading_headers)
             self.logger.info("✅ Enhanced status manager initialized in trade processor")
-        
+
         # Log profit protection rule
         if getattr(config, 'enable_profit_protection_rule', False):
             self.logger.info(f"🛡️ [PROFIT PROTECTION] Enabled: {config.profit_protection_trigger}pt → {config.profit_protection_stop}pt stop")
-        
+
         if config.enable_ema_exit:
             self.logger.info(f"[EMA EXIT] Enabled with {config.ema_confirmation_candles} candle confirmation on {config.ema_timeframe}min timeframe")
         else:
             self.logger.info("[EMA EXIT] Disabled")
+
+    def get_config_for_trade(self, trade: TradeLog) -> TrailingConfig:
+        """
+        Dynamically select the correct trailing config based on trade's scalp flag.
+
+        Jan 2026: VSL system replaced with scalp-specific trailing configs.
+        When is_scalp_trade=True, use SCALP_TRAILING_CONFIGS for tighter, data-backed stops.
+
+        Args:
+            trade: Trade to get config for
+
+        Returns:
+            TrailingConfig with appropriate settings for this trade
+        """
+        try:
+            from config import get_trailing_config_for_epic
+
+            # Check if this is a scalp trade
+            is_scalp = getattr(trade, 'is_scalp_trade', False)
+
+            if is_scalp:
+                self.logger.debug(f"⚡ [SCALP CONFIG] Trade {trade.id}: Loading scalp-specific trailing config")
+
+            # Get pair-specific config with scalp flag
+            pair_config = get_trailing_config_for_epic(trade.symbol, is_scalp_trade=is_scalp)
+
+            # Create a new TrailingConfig instance with the pair-specific values
+            # Use the default config as base and override with pair-specific values
+            config = TrailingConfig(
+                epic=trade.symbol,
+                stage1_trigger_points=pair_config.get('stage1_trigger_points', self.default_config.stage1_trigger_points),
+                stage1_lock_points=pair_config.get('stage1_lock_points', self.default_config.stage1_lock_points),
+                stage2_trigger_points=pair_config.get('stage2_trigger_points', self.default_config.stage2_trigger_points),
+                stage2_lock_points=pair_config.get('stage2_lock_points', self.default_config.stage2_lock_points),
+                stage3_trigger_points=pair_config.get('stage3_trigger_points', self.default_config.stage3_trigger_points),
+                stage3_atr_multiplier=pair_config.get('stage3_atr_multiplier', self.default_config.stage3_atr_multiplier),
+                stage3_min_distance=pair_config.get('stage3_min_distance', self.default_config.stage3_min_distance),
+                min_trail_distance=pair_config.get('min_trail_distance', self.default_config.min_trail_distance),
+                break_even_trigger_points=pair_config.get('break_even_trigger_points', self.default_config.break_even_trigger_points),
+                initial_trigger_points=pair_config.get('early_breakeven_trigger_points',
+                                                      self.default_config.initial_trigger_points),
+            )
+
+            return config
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to load config for trade {trade.id}: {e}, using default")
+            return self.default_config
     
     def set_trading_headers(self, trading_headers: dict):
         """Update trading headers for API calls"""
@@ -238,11 +287,18 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
         """
         MAIN PROCESSING METHOD with PROFIT PROTECTION RULE
         Order of operations:
+        0. Load correct config based on is_scalp_trade flag (Jan 2026)
         1. Check for 15-point profit protection rule (HIGHEST PRIORITY)
         2. Check EMA exit conditions
         3. Continue with normal trailing logic
         """
         try:
+            # ✅ STEP 0: DYNAMIC CONFIG SELECTION (Jan 2026 - Scalp mode support)
+            trade_config = self.get_config_for_trade(trade)
+            # Update the trailing manager's config for this trade
+            self.trailing_manager.config = trade_config
+            self.config = trade_config  # Also update processor's config reference
+
             # ✅ STEP 1: PROFIT PROTECTION RULE - HIGHEST PRIORITY
             if self.should_apply_profit_protection_rule(trade, current_price):
                 self.logger.info(f"🛡️ [PROFIT PROTECTION] Applying rule for trade {trade.id} {trade.symbol}")
@@ -434,27 +490,32 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
             # Don't block processing on verification errors
             return True
     
-    async def process_trade_with_combined_validation(self, trade: TradeLog, current_price: float, 
+    async def process_trade_with_combined_validation(self, trade: TradeLog, current_price: float,
                                                    trading_headers: dict = None, db: Session = None) -> bool:
         """
         ✅ ENHANCED: Processing with comprehensive validation using enhanced status management
         Now uses EnhancedTradeStatusManager for intelligent trade verification instead of simple ghost trade detection
         """
-        
+
         # Use provided headers or stored headers
         headers = trading_headers or self.trading_headers
         if not headers:
             self.logger.error(f"❌ [NO HEADERS] Trade {trade.id}: No trading headers available for validation")
             # Fallback to enhanced processing without validation
             return await self.process_trade_enhanced(trade, current_price, db)
-        
+
         # Update headers in status manager if needed
         if headers != self.trading_headers:
             self.set_trading_headers(headers)
-        
+
         self.logger.info(f"🔧 [COMBINED+ ENHANCED] Processing trade {trade.id} {trade.symbol} status={trade.status}")
-        
+
         try:
+            # ✅ STEP 0: Dynamic Config Selection (Jan 2026 - Scalp mode support)
+            trade_config = self.get_config_for_trade(trade)
+            # Update the trailing manager's config for this trade
+            self.trailing_manager.config = trade_config
+            self.config = trade_config  # Also update processor's config reference
             # ✅ ENHANCED STEP 1: Use comprehensive verification instead of simple deal existence check
             if ENHANCED_STATUS_MANAGER_AVAILABLE and self.enhanced_status_manager:
                 # Use the new comprehensive verification system
@@ -486,20 +547,26 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
 
     async def process_trade_with_advanced_trailing(self, trade: TradeLog, current_price: float, db: Session) -> bool:
         """Enhanced processing with EMA exit check followed by trailing logic - 🔧 FIXED METHOD"""
-        
+
         # Diagnostic log
         self.logger.info(f"🔧 [COMBINED] Processing trade {trade.id} {trade.symbol} status={trade.status}")
-        
+
         try:
+            # --- Step -1: Dynamic Config Selection (Jan 2026 - Scalp mode support) ---
+            trade_config = self.get_config_for_trade(trade)
+            # Update the trailing manager's config for this trade
+            self.trailing_manager.config = trade_config
+            self.config = trade_config  # Also update processor's config reference
+
             # --- Step 0: EMA Trend Reversal Check (if enabled) ---
             if self.ema_exit and trade.status in ["tracking", "break_even", "trailing", "profit_protected"]:
                 should_exit, exit_reason = self.ema_exit.should_exit_trade(trade, db)
-                
+
                 if should_exit:
                     self.logger.warning(f"[EMA EXIT TRIGGERED] Trade {trade.id} {trade.symbol}: {exit_reason}")
                     success = self.ema_exit.execute_ema_exit(trade, exit_reason, db)
                     return success  # Exit early, don't continue with trailing logic
-            
+
             # --- Continue with existing break-even and trailing logic ---
             # ✅ CRITICAL FIX: Call the parent class method using super()
             return await super().process_trade_with_advanced_trailing(trade, current_price, db)

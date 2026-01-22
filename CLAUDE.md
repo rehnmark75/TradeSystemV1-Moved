@@ -202,6 +202,90 @@ IG Markets API (Lightstreamer) → ig_candles table (5m base)
 
 ---
 
+## ⚡ Scalp Mode Trailing System (Jan 2026)
+
+**File**: `dev-app/config.py` → `SCALP_TRAILING_CONFIGS`
+
+### Background: VSL System Replacement
+
+The Virtual Stop Loss (VSL) system was **deprecated in January 2026** after analysis revealed:
+- **67% premature stops** (5-6 pips too tight, $2,506 loss over 2 days)
+- **Early profit locks** (83% locked at BE, only 46% profit capture)
+- **Optimal stops: 12-20 pips** (ABOVE IG's 10-pip minimum, making VSL unnecessary)
+
+### New Architecture
+
+Scalp trades now use **IG native stops** with progressive trailing, differentiated by the `is_scalp_trade` flag.
+
+**Key Files:**
+- `dev-app/config.py` - `SCALP_TRAILING_CONFIGS` (12-20 pip stops, data-backed)
+- `dev-app/enhanced_trade_processor.py` - Dynamic config selection via `get_config_for_trade()`
+- `dev-app/config_virtual_stop.py` - VSL disabled (`VIRTUAL_STOP_LOSS_ENABLED = False`)
+
+### Scalp Trailing Configuration
+
+**Per-Pair Optimal Stops (based on 2-day analysis):**
+
+| Pair | Initial Stop | BE Trigger | Stage1 | Stage2 | Partial Close | Success Rate |
+|------|-------------|-----------|---------|---------|---------------|--------------|
+| **USDCAD** | 12 pips | +6 pips | +10 → lock +5 | +12 → lock +8 | 50% @ +10 | **100%** |
+| **Majors** | 15 pips | +8 pips | +12 → lock +6 | +15 → lock +10 | 50% @ +12 | 67% |
+| **JPY Pairs** | 20 pips | +10 pips | +15 → lock +8 | +20 → lock +12 | 50% @ +15 | 50% |
+
+**Progressive Stages:**
+1. **Early BE** (+6-10 pips): Move to BE, lock +1-1.5 pips
+2. **Stage 1** (+10-15 pips): Lock +5-8 pips profit
+3. **Stage 2** (+12-20 pips): Lock +8-12 pips profit
+4. **Stage 3** (+15-25 pips): ATR-based trailing (1.5x)
+
+### How It Works
+
+**1. Trade Creation (orders_router.py):**
+```python
+# Scalp flag set based on is_scalp_trade or tight SL (≤8 pips)
+is_scalp = body.is_scalp_trade or (sl_limit and sl_limit <= 8)
+trade_log = TradeLog(..., is_scalp_trade=is_scalp)
+```
+
+**2. Dynamic Config Selection (enhanced_trade_processor.py):**
+```python
+def get_config_for_trade(self, trade: TradeLog) -> TrailingConfig:
+    """Load scalp or regular config based on is_scalp_trade flag."""
+    is_scalp = getattr(trade, 'is_scalp_trade', False)
+    pair_config = get_trailing_config_for_epic(trade.symbol, is_scalp_trade=is_scalp)
+    # Returns SCALP_TRAILING_CONFIGS if scalp, else PAIR_TRAILING_CONFIGS
+```
+
+**3. Processing (trade_monitor.py → enhanced_trade_processor.py):**
+- Config loaded per-trade before processing
+- Trailing manager updated with correct config
+- Progressive trailing applied based on scalp-specific stages
+
+### Verification
+
+Check logs for scalp trades:
+```bash
+docker logs -f fastapi-dev | grep -E "(⚡|SCALP CONFIG|is_scalp_trade)"
+```
+
+Expected output:
+```
+⚡ Scalp trade: is_scalp_trade=True (using scalp trailing configs)
+⚡ [SCALP CONFIG] Trade 1971: Loading scalp-specific trailing config
+```
+
+### Benefits vs VSL
+
+| Aspect | Old VSL | New Scalp Trailing |
+|--------|---------|-------------------|
+| Stop Distance | 5-6 pips | 12-20 pips (data-backed) |
+| Management | Manual close (streaming) | IG native stops |
+| Reliability | Streaming can fail | IG manages stops |
+| Complexity | High (sync, spread adjustments) | Low (config-driven) |
+| Profit Capture | 46% (BE locks) | 60-70% (progressive stages) |
+
+---
+
 ## 📋 Extended Documentation
 
 For detailed information, see these docs (read with Read tool when needed):
@@ -214,7 +298,7 @@ For detailed information, see these docs (read with Read tool when needed):
 | Parameter Optimization | `claude-optimization.md` |
 | Market Intelligence | `claude-intelligence.md` |
 | Trailing Stop System | `claude-trailing-system.md` |
-| Virtual Stop Loss (Scalping) | `claude-vsl-system.md` |
+| ~~Virtual Stop Loss (Scalping)~~ | ~~`claude-vsl-system.md`~~ **DEPRECATED (Jan 2026): Replaced with scalp-specific trailing configs** |
 | Development Best Practices | `claude-development.md` |
 | Configuration System | `claude-configuration.md` |
 
@@ -404,8 +488,9 @@ This file controls:
 - ✅ Dynamic parameter optimization system (database-driven)
 - ✅ Market intelligence with regime detection
 - ✅ Progressive trailing stop system with 4 stages
+- ✅ Scalp-specific trailing configs (12-20 pips, data-backed) **NEW: Jan 2026**
 - ✅ Claude AI trade analysis integration
 - ✅ Smart Money Concepts (SMC) analysis
-- ✅ Virtual Stop Loss for scalping mode (bypasses IG min SL restrictions)
+- ~~✅ Virtual Stop Loss for scalping mode~~ **DEPRECATED: Jan 2026** - Replaced with scalp trailing configs
 
 For detailed setup and usage instructions, start with the [Overview & Navigation](claude-overview.md).

@@ -7,5 +7,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #1375 | 12:18 PM | 🔵 | Trailing Stop Configuration File: 3-Stage System with MFE Protection | ~438 |
+| #1401 | 12:41 PM | 🟣 | VSL Service Improvements and Scalp Reversal Strategy Feature | ~382 |
 </claude-mem-context>
