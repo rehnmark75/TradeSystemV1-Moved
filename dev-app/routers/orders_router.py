@@ -965,18 +965,9 @@ async def ig_place_order(
         logger.info(f"✅ Order confirmed: Deal ID {deal_id}, Entry Price: {entry_price}")
 
         # Convert to actual prices for database
-        # Note: For CEEM, entry_price is now normalized, so we need to use the original scaled price for SL/TP calc
-        # since get_point_value("CEEM") returns 1.0 expecting scaled prices
-        if "CEEM" in symbol:
-            # Use original scaled price for SL/TP calculation since point_value=1.0 expects scaled format
-            actual_stop_price = convert_stop_distance_to_price(float(entry_price_raw), sl_limit, direction, symbol)
-            actual_limit_price = convert_limit_distance_to_price(float(entry_price_raw), limit_distance, direction, symbol)
-            # Then normalize the results to match entry_price format
-            actual_stop_price = actual_stop_price / 10000.0
-            actual_limit_price = actual_limit_price / 10000.0
-        else:
-            actual_stop_price = convert_stop_distance_to_price(entry_price, sl_limit, direction, symbol)
-            actual_limit_price = convert_limit_distance_to_price(entry_price, limit_distance, direction, symbol)
+        # FIXED: Use normalized entry_price for all pairs (CEEM prices are already normalized)
+        actual_stop_price = convert_stop_distance_to_price(entry_price, sl_limit, direction, symbol)
+        actual_limit_price = convert_limit_distance_to_price(entry_price, limit_distance, direction, symbol)
         
         logger.info(f"🔍 DEBUG: alert_id parameter value: {alert_id} (type: {type(alert_id)})")
         logger.info(f"🔍 DEBUG: alert_id is None: {alert_id is None}")
