@@ -21,6 +21,7 @@ async def get_current_bid_price(auth_headers, epic):
         data = response.json()
 
         bid_price = data["snapshot"]["bid"]
+        offer_price = data["snapshot"]["offer"]  # Ask/offer price for BUY trades
         currency_symbol = data["instrument"]["currencies"][0].get("symbol", "")
         currency_code = data["instrument"]["currencies"][0].get("code", "")
         min_distance = data["dealingRules"].get("minNormalStopOrLimitDistance", {}).get("value", None)
@@ -31,8 +32,15 @@ async def get_current_bid_price(auth_headers, epic):
         except (KeyError, ValueError, IndexError):
             one_pip = 0.0001
 
+        # Calculate spread in price units and pips
+        spread_price = offer_price - bid_price
+        spread_pips = spread_price / one_pip
+
         return {
             "bid_price": bid_price,
+            "offer_price": offer_price,
+            "spread_price": spread_price,
+            "spread_pips": spread_pips,
             "currency": currency_symbol,
             "point_size": one_pip,
             "currency_code": currency_code,

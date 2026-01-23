@@ -421,12 +421,65 @@ async def ig_place_order(
 
         logger.info(json.dumps(f"No open position for {symbol}, placing order."))
 
-        # Get current market data
+        # Get current market data including spread
         price_info = await get_current_bid_price(trading_headers, symbol)
         bid_price = price_info["bid_price"]
+        offer_price = price_info["offer_price"]
+        spread_pips = price_info["spread_pips"]
         currency_code = price_info["currency_code"]
         min_distance = price_info["min_distance"]
-        logger.info(f"this is min_distance for epic {epic}: {min_distance}")
+        logger.info(f"📊 Market data for {epic}: bid={bid_price:.5f}, offer={offer_price:.5f}, spread={spread_pips:.2f} pips, min_distance={min_distance}")
+
+        # Check if spread is too wide (> 2 pips)
+        MAX_SPREAD_PIPS = 2.0
+        if spread_pips > MAX_SPREAD_PIPS:
+            rejection_msg = (
+                f"Spread too wide: {spread_pips:.2f} pips exceeds maximum {MAX_SPREAD_PIPS} pips. "
+                f"Market conditions unfavorable - waiting for tighter spreads."
+            )
+            logger.warning(f"🚫 SPREAD REJECTED: {symbol} - {rejection_msg}")
+
+            # Log rejection to alert_history database
+            try:
+                from services.models import AlertHistory
+                spread_rejection = AlertHistory(
+                    alert_timestamp=datetime.utcnow(),
+                    epic=symbol,
+                    pair=epic,
+                    signal_type=direction,
+                    strategy="order_validation",
+                    confidence_score=0.0,
+                    price=bid_price,
+                    bid_price=bid_price,
+                    ask_price=offer_price,
+                    spread_pips=spread_pips,
+                    timeframe="live",
+                    status="rejected_spread",
+                    order_status="rejected",
+                    claude_reason=rejection_msg,
+                    alert_message=f"Trade blocked: Spread {spread_pips:.2f} pips > {MAX_SPREAD_PIPS} pips maximum",
+                    alert_level="WARNING"
+                )
+                db.add(spread_rejection)
+                db.commit()
+                logger.info(f"✅ Spread rejection logged to alert_history (id={spread_rejection.id})")
+            except Exception as log_error:
+                logger.error(f"❌ Failed to log spread rejection to database: {str(log_error)}")
+
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "Spread too wide",
+                    "message": rejection_msg,
+                    "spread_pips": round(spread_pips, 2),
+                    "max_spread_pips": MAX_SPREAD_PIPS,
+                    "bid": bid_price,
+                    "offer": offer_price,
+                    "epic": symbol,
+                    "alert_id": alert_id,
+                    "reason": "spread_too_wide"
+                }
+            )
 
         # Check if min_distance is too large (> 4 points)
         if min_distance and min_distance > 4:
