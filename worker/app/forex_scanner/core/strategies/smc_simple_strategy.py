@@ -2047,9 +2047,15 @@ class SMCSimpleStrategy:
                             context.update({
                                 'htf_candle_direction': htf_candle_direction,
                                 'htf_candle_direction_prev': htf_candle_direction_prev,
-                                'filter': 'htf_alignment',
-                                'reversal_override_reason': reversal_reason,
-                                'reversal_override_details': reversal_override_details
+                                'rejection_details': {
+                                    'filter': 'htf_alignment',
+                                    'htf_current': htf_candle_direction,
+                                    'htf_previous': htf_candle_direction_prev,
+                                    'signal_direction': direction,
+                                    'reversal_override_attempted': reversal_reason is not None,
+                                    'reversal_override_reason': reversal_reason,
+                                    'reversal_override_details': reversal_override_details
+                                }
                             })
                             self._track_rejection(
                                 stage='SCALP_ENTRY_FILTER',
@@ -2221,11 +2227,15 @@ class SMCSimpleStrategy:
                                                           ema_result=ema_result, swing_result=swing_result,
                                                           pullback_result=pullback_result, direction=direction)
                     context.update({
-                        'filter': 'entry_candle_alignment',
-                        'candle_color': candle_color,
-                        'direction': direction,
-                        'entry_open': float(entry_candle_open),
-                        'entry_close': float(entry_candle_close)
+                        'rejection_details': {
+                            'filter': 'entry_candle_alignment',
+                            'candle_color': candle_color,
+                            'expected_color': expected_color,
+                            'signal_direction': direction,
+                            'entry_candle_open': float(entry_candle_open),
+                            'entry_candle_close': float(entry_candle_close),
+                            'is_doji': is_doji
+                        }
                     })
                     self._track_rejection(
                         stage='SCALP_ENTRY_FILTER',
