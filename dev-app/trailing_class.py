@@ -700,8 +700,9 @@ class Progressive3StageTrailing(TrailingStrategy):
         from config import (EARLY_BREAKEVEN_TRIGGER_POINTS, STAGE1_TRIGGER_POINTS,
                            STAGE2_TRIGGER_POINTS, STAGE3_TRIGGER_POINTS)
 
-        # Get pair-specific early breakeven config if available
-        pair_config = self._get_pair_config(trade.symbol)
+        # Get pair-specific early breakeven config if available (use scalp config if scalp trade)
+        is_scalp = getattr(trade, 'is_scalp_trade', False)
+        pair_config = self._get_pair_config(trade.symbol, is_scalp=is_scalp)
         early_be_trigger = pair_config.get('early_breakeven_trigger_points', EARLY_BREAKEVEN_TRIGGER_POINTS)
         stage1_trigger = pair_config.get('stage1_trigger_points', STAGE1_TRIGGER_POINTS)
         stage2_trigger = pair_config.get('stage2_trigger_points', STAGE2_TRIGGER_POINTS)
@@ -713,6 +714,8 @@ class Progressive3StageTrailing(TrailingStrategy):
         else:  # SELL
             profit_points = int((trade.entry_price - current_price) / point_value)
 
+        self.logger.info(f"🔧 [STAGE3 CALC] Trade {trade.id}: profit={profit_points}pts, stage3_trigger={stage3_trigger}pts")
+
         current_stop = trade.sl_price or 0.0
 
         # 🆕 Stage 2.5: MFE Protection Check
@@ -722,6 +725,8 @@ class Progressive3StageTrailing(TrailingStrategy):
             self.logger.info(f"[MFE PROTECTION] {trade.symbol}: "
                            f"Profit declined, protecting at {mfe_protection_level:.5f}")
             return mfe_protection_level
+
+        self.logger.info(f"🔧 [STAGE3 CALC] After MFE check, checking stage: profit={profit_points} >= {stage3_trigger}?")
 
         # Determine which stage we're in and calculate appropriate trail level
         # NEW 4-STAGE SYSTEM: Stage 0 (Early BE) → Stage 1 (Profit Lock) → Stage 2 → Stage 3
@@ -769,10 +774,10 @@ class Progressive3StageTrailing(TrailingStrategy):
 
         return trail_level
 
-    def _get_pair_config(self, symbol: str) -> dict:
+    def _get_pair_config(self, symbol: str, is_scalp: bool = False) -> dict:
         """Get pair-specific trailing configuration from config.py"""
         from config import get_trailing_config_for_epic
-        return get_trailing_config_for_epic(symbol)
+        return get_trailing_config_for_epic(symbol, is_scalp_trade=is_scalp)
 
     def _calculate_early_breakeven(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
         """
@@ -906,6 +911,7 @@ class Progressive3StageTrailing(TrailingStrategy):
     def _calculate_stage3_trail(self, trade: TradeLog, current_price: float,
                               candle_data: List[IGCandle], current_stop: float) -> Optional[float]:
         """Stage 3: Percentage-based dynamic trailing (replaces ATR-based)"""
+        self.logger.info(f"🎯 [STAGE3 CALC START] Trade {trade.id} {trade.symbol}: Calculating percentage-based trail")
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
 
@@ -2158,10 +2164,15 @@ class EnhancedTradeProcessor:
                 if profit_points >= stage3_trigger:
                     # Stage 3: Percentage-based trailing
                     self.logger.info(f"🚀 [STAGE 3 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 3 trigger {stage3_trigger}pts - Percentage trailing")
-                    # Use progressive 3-stage strategy directly
-                    progressive_strategy = Progressive3StageTrailing(self.config, self.logger)
+                    # Use progressive 3-stage strategy with SCALP config
+                    is_scalp = getattr(trade, 'is_scalp_trade', False)
+                    self.logger.info(f"🔧 [STAGE3 DEBUG] Creating Progressive3StageTrailing for scalp={is_scalp}...")
+                    scalp_config = TrailingConfig.from_epic(trade.symbol, is_scalp_trade=is_scalp)
+                    progressive_strategy = Progressive3StageTrailing(scalp_config, self.logger)
+                    self.logger.info(f"🔧 [STAGE3 DEBUG] Calling calculate_trail_level...")
                     try:
                         new_trail_level = progressive_strategy.calculate_trail_level(trade, current_price, [], db)
+                        self.logger.info(f"🔧 [STAGE3 DEBUG] Got trail level: {new_trail_level}")
                         if new_trail_level:
                             current_stop = trade.sl_price or 0.0
                             # ✅ FIXED: Calculate proper directional adjustment
