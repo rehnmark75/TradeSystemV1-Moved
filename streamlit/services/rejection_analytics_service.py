@@ -58,6 +58,7 @@ class RejectionAnalyticsService:
                 pair,
                 rejection_stage,
                 rejection_reason,
+                rejection_details,
                 attempted_direction,
                 current_price,
                 market_hour,

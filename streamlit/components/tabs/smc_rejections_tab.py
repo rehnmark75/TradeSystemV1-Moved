@@ -154,8 +154,62 @@ def _render_stage_breakdown(df: pd.DataFrame, stats: dict):
         )
         st.plotly_chart(fig_bar, use_container_width=True)
 
+    # Parse rejection_details to extract filter type for SCALP_ENTRY_FILTER
+    if 'rejection_details' in df.columns:
+        import json
+        def extract_filter_type(row):
+            """Extract specific filter type from rejection_details JSON"""
+            if row.get('rejection_stage') != 'SCALP_ENTRY_FILTER':
+                return None
+
+            details = row.get('rejection_details')
+            if pd.isna(details):
+                return None
+
+            try:
+                if isinstance(details, str):
+                    details = json.loads(details)
+                if isinstance(details, dict):
+                    filter_type = details.get('filter', '')
+                    if filter_type == 'htf_alignment':
+                        return 'HTF Alignment'
+                    elif filter_type == 'entry_candle_alignment':
+                        return 'Candle Color'
+                    elif filter_type:
+                        return filter_type
+            except:
+                pass
+            return None
+
+        df['filter_type'] = df.apply(extract_filter_type, axis=1)
+
+    # Parse rejection_reason to categorize TIER2_SWING rejections
+    def extract_tier2_category(row):
+        """Categorize TIER2_SWING rejections by parsing rejection_reason"""
+        if row.get('rejection_stage') != 'TIER2_SWING':
+            return None
+
+        reason = row.get('rejection_reason', '')
+        if pd.isna(reason):
+            return None
+
+        if 'No recent swing highs' in reason or 'No recent swing lows' in reason:
+            return 'No Swing Levels'
+        elif 'Weak breakout body' in reason:
+            return 'Weak Breakout Body'
+        elif 'Weak breakout candle' in reason:
+            return 'Weak Breakout Candle'
+        elif 'BULL:' in reason or 'BEAR:' in reason or 'Price did not break swing' in reason:
+            return 'Insufficient Breakout Depth'
+        else:
+            return 'Other'
+
+    df['tier2_category'] = df.apply(extract_tier2_category, axis=1)
+
     # Detailed reason breakdown
     st.subheader("Top Rejection Reasons")
+
+    # Group by stage and reason only (cleaner for the main table)
     reason_counts = df.groupby(['rejection_stage', 'rejection_reason']).size().reset_index(name='Count')
     reason_counts = reason_counts.sort_values('Count', ascending=False).head(20)
 
@@ -169,6 +223,100 @@ def _render_stage_breakdown(df: pd.DataFrame, stats: dict):
             "Count": st.column_config.NumberColumn("Count", format="%d")
         }
     )
+
+    # Show detailed SCALP_ENTRY_FILTER breakdown if we have filter_type data
+    if 'filter_type' in df.columns:
+        scalp_filter_df = df[df['rejection_stage'] == 'SCALP_ENTRY_FILTER'].copy()
+        if not scalp_filter_df.empty and scalp_filter_df['filter_type'].notna().any():
+            st.markdown("---")
+            st.subheader("Scalp Entry Filter Breakdown")
+
+            filter_counts = scalp_filter_df['filter_type'].value_counts().reset_index()
+            filter_counts.columns = ['Filter Type', 'Count']
+
+            col1, col2 = st.columns([1, 1])
+
+            with col1:
+                # Summary metrics
+                total_scalp = len(scalp_filter_df)
+                htf_count = len(scalp_filter_df[scalp_filter_df['filter_type'] == 'HTF Alignment'])
+                candle_count = len(scalp_filter_df[scalp_filter_df['filter_type'] == 'Candle Color'])
+
+                st.metric("Total Scalp Filter Rejections", f"{total_scalp:,}")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("HTF Alignment", f"{htf_count:,}", f"{htf_count/total_scalp*100:.0f}%" if total_scalp > 0 else "0%")
+                with col_b:
+                    st.metric("Candle Color", f"{candle_count:,}", f"{candle_count/total_scalp*100:.0f}%" if total_scalp > 0 else "0%")
+
+            with col2:
+                # Pie chart
+                fig_scalp = px.pie(
+                    filter_counts,
+                    values='Count',
+                    names='Filter Type',
+                    title="Scalp Filter Type Distribution",
+                    color_discrete_map={'HTF Alignment': '#ff6b6b', 'Candle Color': '#ffd43b'}
+                )
+                st.plotly_chart(fig_scalp, use_container_width=True)
+
+    # Show detailed TIER2_SWING breakdown if we have tier2_category data
+    if 'tier2_category' in df.columns:
+        tier2_df = df[df['rejection_stage'] == 'TIER2_SWING'].copy()
+        if not tier2_df.empty and tier2_df['tier2_category'].notna().any():
+            st.markdown("---")
+            st.subheader("TIER2 Swing Rejection Breakdown")
+
+            category_counts = tier2_df['tier2_category'].value_counts().reset_index()
+            category_counts.columns = ['Category', 'Count']
+
+            col1, col2 = st.columns([1, 1])
+
+            with col1:
+                # Summary metrics
+                total_tier2 = len(tier2_df)
+                no_swing_count = len(tier2_df[tier2_df['tier2_category'] == 'No Swing Levels'])
+                weak_body_count = len(tier2_df[tier2_df['tier2_category'] == 'Weak Breakout Body'])
+                weak_candle_count = len(tier2_df[tier2_df['tier2_category'] == 'Weak Breakout Candle'])
+                insufficient_depth_count = len(tier2_df[tier2_df['tier2_category'] == 'Insufficient Breakout Depth'])
+
+                st.metric("Total TIER2 Rejections", f"{total_tier2:,}")
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("No Swing Levels", f"{no_swing_count:,}", f"{no_swing_count/total_tier2*100:.0f}%" if total_tier2 > 0 else "0%")
+                    st.metric("Weak Breakout Body", f"{weak_body_count:,}", f"{weak_body_count/total_tier2*100:.0f}%" if total_tier2 > 0 else "0%")
+                with col_b:
+                    st.metric("Weak Breakout Candle", f"{weak_candle_count:,}", f"{weak_candle_count/total_tier2*100:.0f}%" if total_tier2 > 0 else "0%")
+                    st.metric("Insufficient Depth", f"{insufficient_depth_count:,}", f"{insufficient_depth_count/total_tier2*100:.0f}%" if total_tier2 > 0 else "0%")
+
+            with col2:
+                # Pie chart
+                fig_tier2 = px.pie(
+                    category_counts,
+                    values='Count',
+                    names='Category',
+                    title="TIER2 Rejection Category Distribution",
+                    color_discrete_map={
+                        'No Swing Levels': '#f44336',
+                        'Weak Breakout Body': '#ff9800',
+                        'Weak Breakout Candle': '#ffc107',
+                        'Insufficient Breakout Depth': '#03a9f4'
+                    }
+                )
+                st.plotly_chart(fig_tier2, use_container_width=True)
+
+            # Add explanation of categories
+            with st.expander("What do these categories mean?"):
+                st.markdown("""
+                **No Swing Levels**: No recent swing highs or lows found in the lookback period. Cannot identify breakout levels.
+
+                **Weak Breakout Body**: The candle body (open to close) is too small relative to the full candle range. Suggests weak momentum.
+
+                **Weak Breakout Candle**: The entire candle range (high to low) is too small relative to ATR. May indicate low volatility or weak breakout.
+
+                **Insufficient Breakout Depth**: Price broke past the swing level but not deep enough to confirm a true breakout. Needs more conviction.
+                """)
 
 
 def _render_rejection_outcome_analysis(days_filter: int):
