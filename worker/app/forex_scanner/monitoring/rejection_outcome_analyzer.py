@@ -281,7 +281,7 @@ class RejectionOutcomeAnalyzer:
                 'start_date': start_date,
                 'end_date': end_date
             })
-            self.logger.info(f"Found {len(df)} unanalyzed rejections between {start_date} and {end_date}")
+            self.logger.debug(f"Found {len(df)} unanalyzed rejections between {start_date} and {end_date}")
             return df
         except Exception as e:
             self.logger.error(f"Failed to fetch rejections: {e}")
@@ -584,7 +584,7 @@ class RejectionOutcomeAnalyzer:
         ask_price = float(rejection['ask_price']) if rejection['ask_price'] else None
 
         if current_price == 0:
-            self.logger.warning(f"Rejection {rejection_id}: No price data available")
+            self.logger.debug(f"Rejection {rejection_id}: No price data available")
             return None
 
         entry_price, stop_loss_price, take_profit_price = self.calculate_entry_exit_prices(
