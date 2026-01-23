@@ -366,26 +366,16 @@ class OrderExecutor:
                 self.logger.debug(f"📋 Using strategy-provided limit_distance: {limit_distance} pips")
 
             # === SL/TP OVERRIDE (database-driven, per-pair configurable) ===
-            # NOTE: In scalp mode, broker SL must be ~10 pips as SAFETY NET
-            # The actual tight stop (3-4 pips) is handled by VSL streaming service
+            # v3.3.0 (Jan 2026): Per-pair optimized SL/TP takes priority over legacy scalp mode
+            # Priority: per-pair override > scalp mode legacy > strategy defaults
             try:
                 from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
 
                 smc_config = get_smc_simple_config()
+                is_scalp_mode = getattr(smc_config, 'scalp_mode_enabled', False)
 
-                # v3.2.0: In scalp mode, set broker SL to safety net value and override TP
-                if getattr(smc_config, 'scalp_mode_enabled', False):
-                    BROKER_SAFETY_SL_PIPS = 10  # Safety net if VSL streaming fails
-                    scalp_tp = getattr(smc_config, 'scalp_tp_pips', 5.0)
-                    original_sl = stop_distance
-                    original_tp = limit_distance
-                    stop_distance = BROKER_SAFETY_SL_PIPS  # Broker SL as safety net
-                    limit_distance = int(scalp_tp)
-                    self.logger.info(
-                        f"🎯 [SCALP MODE] SL/TP [{internal_epic}]: SL {original_sl}→{stop_distance} (safety net), "
-                        f"TP {original_tp}→{limit_distance} pips (VSL handles tight 3-4 pip stop)"
-                    )
-                elif smc_config.fixed_sl_tp_override_enabled:
+                # PRIORITY 1: Check per-pair fixed SL/TP override (works in both scalp and swing mode)
+                if smc_config.fixed_sl_tp_override_enabled:
                     # Get per-pair SL/TP (falls back to global if not set)
                     pair_sl = smc_config.get_pair_fixed_stop_loss(internal_epic)
                     pair_tp = smc_config.get_pair_fixed_take_profit(internal_epic)
@@ -395,10 +385,25 @@ class OrderExecutor:
                         original_tp = limit_distance
                         stop_distance = pair_sl
                         limit_distance = pair_tp
+                        mode_label = "SCALP" if is_scalp_mode else "SWING"
                         self.logger.info(
-                            f"🔒 FIXED SL/TP OVERRIDE [{internal_epic}]: SL {original_sl}→{stop_distance}, "
-                            f"TP {original_tp}→{limit_distance} pips (from database)"
+                            f"🔒 [{mode_label} MODE] FIXED SL/TP [{internal_epic}]: SL {original_sl}→{stop_distance}, "
+                            f"TP {original_tp}→{limit_distance} pips (optimized per-pair from database)"
                         )
+
+                # PRIORITY 2: Legacy scalp mode (only if per-pair override not enabled)
+                # NOTE: This is deprecated - kept for backward compatibility only
+                elif is_scalp_mode:
+                    BROKER_SAFETY_SL_PIPS = 10  # Legacy safety net (VSL system deprecated)
+                    scalp_tp = getattr(smc_config, 'scalp_tp_pips', 5.0)
+                    original_sl = stop_distance
+                    original_tp = limit_distance
+                    stop_distance = BROKER_SAFETY_SL_PIPS
+                    limit_distance = int(scalp_tp)
+                    self.logger.warning(
+                        f"⚠️ [SCALP LEGACY] SL/TP [{internal_epic}]: SL {original_sl}→{stop_distance}, "
+                        f"TP {original_tp}→{limit_distance} pips (legacy mode - consider enabling fixed_sl_tp_override)"
+                    )
             except Exception as e:
                 self.logger.debug(f"Database config not available, using strategy values: {e}")
 
