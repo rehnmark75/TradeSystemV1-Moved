@@ -2,9 +2,27 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.28.0
+VERSION: 2.30.0
 DATE: 2026-01-22
 STATUS: Scalp Mode for High-Frequency Trading
+
+v2.30.0 CHANGES (Per-Pair ATR-Optimized Scalp SL/TP):
+    - NEW: Per-pair scalp SL/TP values based on historical ATR analysis
+    - ANALYSIS: Calculated optimal SL = ATR × 1.8, TP = SL × 2.5 for each pair
+    - DATABASE: Populated smc_simple_pair_overrides.scalp_sl_pips and scalp_tp_pips
+    - RANGE: SL 5.4-15.5 pips, TP 13.5-38.8 pips (pair-specific, not one-size-fits-all)
+    - EXAMPLES: EURUSD SL=10.2 TP=25.5, USDJPY SL=15.2 TP=38.0, AUDUSD SL=5.4 TP=13.5
+    - CONFIG SERVICE: Added get_pair_scalp_sl() and get_pair_scalp_tp() methods
+    - STRATEGY: Checks per-pair scalp SL/TP first, falls back to global if not set
+    - IMPACT: Each pair now uses SL/TP optimized for its volatility characteristics
+    - R:R: Consistent 1:2.5 risk:reward ratio across all pairs
+
+v2.29.0 CHANGES (Disable Confidence Cap in Scalp Mode):
+    - NEW: Confidence cap check is skipped when scalp_mode_enabled=True
+    - REASONING: High confidence in scalp mode indicates strong momentum confirmation
+    - REASONING: The confidence paradox (high confidence = worse) was observed in regular trading, not scalp
+    - IMPACT: Allows high confidence scalp trades to execute without artificial cap
+    - CHANGE: Modified line 2735 to skip cap check when self.scalp_mode_enabled
 
 v2.28.0 CHANGES (Scalp Reversal Override - Counter-Trend Opportunity):
     - NEW: When HTF alignment fails, check for strict reversal conditions instead of rejecting
@@ -2334,10 +2352,26 @@ class SMCSimpleStrategy:
                 has_backtest_tp_override = self._config_override and 'fixed_take_profit_pips' in self._config_override
 
                 if self.scalp_mode_enabled:
-                    # SCALP MODE: Always use scalp SL/TP (highest priority for scalp trades)
-                    fixed_sl_pips = self.scalp_sl_pips
-                    fixed_tp_pips = self.scalp_tp_pips
-                    self.logger.info(f"   🎯 Using SCALP MODE SL/TP")
+                    # SCALP MODE: Check for per-pair optimized SL/TP first (highest priority)
+                    # v2.29.0: Per-pair scalp SL/TP based on ATR analysis
+                    if self._using_database_config and self._db_config:
+                        pair_scalp_sl = self._db_config.get_pair_scalp_sl(epic)
+                        pair_scalp_tp = self._db_config.get_pair_scalp_tp(epic)
+
+                        if pair_scalp_sl is not None and pair_scalp_tp is not None:
+                            fixed_sl_pips = pair_scalp_sl
+                            fixed_tp_pips = pair_scalp_tp
+                            self.logger.info(f"   🎯 Using PER-PAIR SCALP SL/TP: SL={fixed_sl_pips:.1f}, TP={fixed_tp_pips:.1f} (ATR-optimized)")
+                        else:
+                            # Fall back to global scalp values
+                            fixed_sl_pips = self.scalp_sl_pips
+                            fixed_tp_pips = self.scalp_tp_pips
+                            self.logger.info(f"   🎯 Using GLOBAL SCALP SL/TP: SL={fixed_sl_pips:.1f}, TP={fixed_tp_pips:.1f}")
+                    else:
+                        # Use global scalp values (file config mode)
+                        fixed_sl_pips = self.scalp_sl_pips
+                        fixed_tp_pips = self.scalp_tp_pips
+                        self.logger.info(f"   🎯 Using SCALP MODE SL/TP")
                 elif has_backtest_sl_override or has_backtest_tp_override:
                     # Use backtest overrides (highest priority after scalp mode)
                     fixed_sl_pips = self.fixed_stop_loss_pips
@@ -2728,11 +2762,12 @@ class SMCSimpleStrategy:
             # ================================================================
             # Analysis of 85 trades (Dec 2025) showed confidence > 0.75 had only 42% WR
             # v2.11.1: Use database service method if available (supports per-pair override)
+            # v2.29.0: Skip confidence cap in scalp mode (high confidence = more momentum confirmation)
             if self._using_database_config and self._db_config:
                 pair_max_confidence = self._db_config.get_pair_max_confidence(epic)
             else:
                 pair_max_confidence = self._get_pair_param(epic, 'MAX_CONFIDENCE_THRESHOLD', self.max_confidence)
-            if round(confidence, 4) > pair_max_confidence:
+            if not self.scalp_mode_enabled and round(confidence, 4) > pair_max_confidence:
                 reason = f"Confidence too high ({confidence*100:.0f}% > {pair_max_confidence*100:.0f}% cap)"
                 self.logger.info(f"\n❌ {reason} (paradox: high confidence = worse outcomes)")
                 # Build context for rejection tracking

@@ -110,10 +110,10 @@ def main():
                 processed_args.append(arg)
                 print(f"📚 Historical intelligence: ENABLED")
 
-            # Handle scalp mode flag (VSL emulation)
+            # Handle scalp mode flag (Optimized SL/TP)
             elif arg == "--scalp":
                 processed_args.append(arg)
-                print(f"🎯 Scalp mode: ENABLED (Virtual Stop Loss emulation)")
+                print(f"🎯 Scalp mode: ENABLED (Optimized 6-8 pip SL, 10 pip TP)")
 
             # Handle scalp offset override
             elif arg == "--scalp-offset" and i + 1 < len(args):
@@ -339,8 +339,8 @@ Supported Strategies:
 Additional Options:
   --show-signals     Show detailed signal breakdown
   --pipeline         Use full signal pipeline with trade validator (realistic live simulation)
-  --scalp            Enable scalping mode with Virtual Stop Loss (VSL) emulation
-                     Uses 3 pip VSL for majors, 4 pip VSL for JPY pairs, 5 pip TP
+  --scalp            Enable scalping mode with optimized SL/TP (Jan 2026)
+                     Uses 6-8 pip SL (data-backed per pair), 10 pip TP target
   --all             Test all pairs (default if no pair specified)
   --strategy NAME   Use specific strategy (full name)
   --timeframe 5m    Use different timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d)
@@ -403,9 +403,9 @@ Chart Generation Examples:
   python bt.py EURUSD 14 --chart --chart-output /tmp/eurusd_backtest.png
   python bt.py EURUSD 30 --parallel --chart            # Parallel backtest with chart
 
-Scalping Mode Examples (VSL Emulation):
-  python bt.py EURUSD 7 --scalp                        # Scalp EURUSD with 3 pip VSL, 5 pip TP
-  python bt.py USDJPY 7 --scalp                        # Scalp USDJPY with 4 pip VSL (JPY pair)
+Scalping Mode Examples (Optimized SL/TP):
+  python bt.py EURUSD 7 --scalp                        # Scalp EURUSD with 7 pip SL, 10 pip TP
+  python bt.py USDJPY 7 --scalp                        # Scalp USDJPY with 8 pip SL, 10 pip TP
   python bt.py EURUSD 7 --scalp --show-signals         # Show detailed scalp signals
   python bt.py EURUSD 7 --scalp --override scalp_tp_pips=7  # Override TP to 7 pips
   python bt.py EURUSD 7 --scalp --scalp-offset 2       # Override order offset to 2 pips

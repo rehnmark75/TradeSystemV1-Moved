@@ -1501,17 +1501,106 @@ class EnhancedTradeProcessor:
             else:
                 return current_price + fallback_distance
 
+    def apply_guaranteed_profit_lock(self, trade: TradeLog, current_price: float, db: Session) -> Optional[bool]:
+        """
+        CRITICAL PROTECTION: If trade reaches +10 pips profit, ensure SL is at least +1 pip.
+
+        This applies BEFORE any other trailing stop logic and ensures profitable trades
+        can never return to a loss.
+
+        Args:
+            trade: Trade object with entry price and direction
+            current_price: Current market price
+            db: Database session for updates
+
+        Returns:
+            True if profit lock was applied, False if not needed, None if error
+        """
+        from config import ENABLE_GUARANTEED_PROFIT_LOCK, GUARANTEED_PROFIT_LOCK_TRIGGER, GUARANTEED_PROFIT_LOCK_MINIMUM
+
+        if not ENABLE_GUARANTEED_PROFIT_LOCK:
+            return False
+
+        # Skip if already applied
+        if getattr(trade, 'guaranteed_profit_lock_applied', False):
+            return False
+
+        point_value = get_point_value(trade.symbol)
+
+        # Calculate current profit in pips
+        if trade.direction.upper() == 'BUY':
+            profit_pips = (current_price - trade.entry_price) / point_value
+            guaranteed_sl = trade.entry_price + (GUARANTEED_PROFIT_LOCK_MINIMUM * point_value)
+            current_stop = trade.sl_price or 0.0
+            needs_adjustment = profit_pips >= GUARANTEED_PROFIT_LOCK_TRIGGER and current_stop < guaranteed_sl
+        else:  # SELL
+            profit_pips = (trade.entry_price - current_price) / point_value
+            guaranteed_sl = trade.entry_price - (GUARANTEED_PROFIT_LOCK_MINIMUM * point_value)
+            current_stop = trade.sl_price or 0.0
+            needs_adjustment = profit_pips >= GUARANTEED_PROFIT_LOCK_TRIGGER and current_stop > guaranteed_sl
+
+        # If profit >= trigger AND current SL would result in loss
+        if needs_adjustment:
+            self.logger.info(f"🛡️ [GUARANTEED PROFIT LOCK] Trade {trade.id} {trade.symbol} reached +{profit_pips:.1f} pips")
+            self.logger.info(f"   Moving SL from {current_stop:.5f} to {guaranteed_sl:.5f} (+{GUARANTEED_PROFIT_LOCK_MINIMUM} pip minimum)")
+
+            # Calculate adjustment
+            adjustment_distance = abs(guaranteed_sl - current_stop)
+            adjustment_points = int(adjustment_distance / point_value)
+            direction_stop = "increase" if trade.direction.upper() == 'BUY' else "decrease"
+
+            # Send stop adjustment
+            success = self._send_stop_adjustment(
+                trade, adjustment_points, direction_stop, 0,
+                new_stop_level=guaranteed_sl
+            )
+
+            if isinstance(success, dict) and success.get("status") == "updated":
+                trade.sl_price = guaranteed_sl
+                trade.guaranteed_profit_lock_applied = True
+                trade.guaranteed_profit_lock_timestamp = datetime.utcnow()
+                trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+
+                try:
+                    db.commit()
+                    self.logger.info(f"✅ [PROFIT LOCK SUCCESS] Trade {trade.id}: Guaranteed +{GUARANTEED_PROFIT_LOCK_MINIMUM} pip minimum locked")
+                    return True
+                except Exception as commit_error:
+                    db.rollback()
+                    self.logger.error(f"❌ [PROFIT LOCK COMMIT FAILED] Trade {trade.id}: {commit_error}")
+                    return None
+            else:
+                self.logger.warning(f"⚠️ [PROFIT LOCK FAILED] Trade {trade.id}: Adjustment returned {success}")
+                return None
+
+        return False
+
     async def process_trade_with_advanced_trailing(self, trade: TradeLog, current_price: float, db: Session) -> bool:
         """Process trade with break-even logic and then advanced trailing - CRITICALLY FIXED"""
 
         # Diagnostic log
         self.logger.info(f"🔧 [ENHANCED] Processing trade {trade.id} {trade.symbol} status={trade.status}")
 
+        # STEP 0: GUARANTEED PROFIT LOCK (HIGHEST PRIORITY)
+        # If trade reaches +10 pips, ensure it never goes into loss
+        profit_lock_result = self.apply_guaranteed_profit_lock(trade, current_price, db)
+        if profit_lock_result is True:
+            # Profit lock was applied - this is the most important protection
+            # Continue with remaining trailing logic
+            pass
+        elif profit_lock_result is None:
+            # Error occurred - abort processing
+            self.logger.error(f"❌ [PROCESS ABORT] Trade {trade.id}: Profit lock failed with error")
+            return False
+
         try:
             # ✅ NEW: Use pair-specific configuration dynamically
             from config import get_trailing_config_for_epic
 
-            trailing_config = get_trailing_config_for_epic(trade.symbol)
+            trailing_config = get_trailing_config_for_epic(
+                trade.symbol,
+                is_scalp_trade=getattr(trade, 'is_scalp_trade', False),
+            )
             STAGE1_TRIGGER_POINTS = trailing_config['stage1_trigger_points']
             STAGE1_LOCK_POINTS = trailing_config['stage1_lock_points']
             STAGE2_TRIGGER_POINTS = trailing_config['stage2_trigger_points']

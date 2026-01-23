@@ -1,58 +1,54 @@
 """
-Virtual Stop Loss Configuration for Scalping Backtest Mode
+Scalp Mode Configuration for Backtesting
 
-Mirrors dev-app/config_virtual_stop.py for backtesting purposes.
-These values determine the VSL levels used during trade simulation.
+UPDATED: January 23, 2026 - Replaced VSL system with scalp-specific trailing configs
+Mirrors live scalp trailing system from dev-app/config.py SCALP_TRAILING_CONFIGS
 
-Key difference from live VSL:
-- Live: Uses Lightstreamer to monitor real-time prices
-- Backtest: Simulates VSL checks bar-by-bar using OHLC data
+Key Changes from VSL System:
+- VSL DEPRECATED: 5-6 pip virtual stops caused 67% premature exits
+- NEW SYSTEM: Uses IG native stops with progressive trailing (6-8 pip initial SL)
+- Analysis showed optimal stops: USDCAD 8 pips, Majors 7 pips, some 6 pips
+- TP reduced from 15 to 10 pips (more realistic based on actual win patterns)
 
-VSL allows tighter stop losses than IG's broker minimum (~10 pips)
-by monitoring prices in real-time and closing programmatically.
-
-IMPORTANT: This file must stay in sync with dev-app/config_virtual_stop.py
-Last synced: 2026-01-17 (aligned with Jan 15-16 analysis results)
+IMPORTANT: This file must stay in sync with live scalp trailing configs
+Last synced: 2026-01-23 (aligned with Jan 20-23 SL/TP optimization)
 """
 
 # =============================================================================
-# PER-PAIR VSL CONFIGURATION
+# PER-PAIR SCALP SL/TP CONFIGURATION (Jan 23, 2026 Optimization)
 # =============================================================================
 
-# Virtual SL settings per currency pair
-# Analysis from Jan 15-16, 2026 showed 3 pips was too tight for majors:
-# - 93.9% VSL hit rate with only 6.1% win rate
-# - 67% of signals were directionally correct but stopped out during retracements
-# - MAE ranged from 3.0-8.4 pips on losing trades
-# Widened to 5 pips for majors, 6 pips for JPY (higher volatility)
+# Optimal stop loss and take profit per pair based on 3-day analysis
+# Analysis showed average losses at 5-7 pips, wins peaking at 5-7 pips
+# New strategy: Tighter SL (6-8 pips), realistic TP (10 pips)
 PAIR_VSL_CONFIGS = {
-    # Major pairs - 5 pips VSL (widened from 3 pips based on Jan 2026 analysis)
-    'CS.D.EURUSD.CEEM.IP': {'vsl_pips': 5.0, 'enabled': True},
-    'CS.D.EURUSD.MINI.IP': {'vsl_pips': 5.0, 'enabled': True},
-    'CS.D.GBPUSD.MINI.IP': {'vsl_pips': 5.0, 'enabled': True},
-    'CS.D.GBPUSD.CEEM.IP': {'vsl_pips': 5.0, 'enabled': True},
-    'CS.D.USDCHF.MINI.IP': {'vsl_pips': 5.0, 'enabled': True},
-    'CS.D.USDCAD.MINI.IP': {'vsl_pips': 5.0, 'enabled': True},
-    'CS.D.AUDUSD.MINI.IP': {'vsl_pips': 5.0, 'enabled': True},
-    'CS.D.NZDUSD.MINI.IP': {'vsl_pips': 5.0, 'enabled': True},
+    # Tight stops (6 pips) - Lowest observed loss patterns
+    'CS.D.NZDUSD.MINI.IP': {'vsl_pips': 6.0, 'enabled': True},  # Avg loss 5.1 pips
+    'CS.D.USDCHF.MINI.IP': {'vsl_pips': 6.0, 'enabled': True},  # Avg loss 5.0 pips, best R:R
 
-    # JPY pairs - 6 pips VSL (higher volatility - increased from 4 pips)
-    # Analysis showed 4 pips was too tight - normal MAE is 6-14 pips
-    # Trades were in correct direction but hit VSL during retracements
-    'CS.D.USDJPY.MINI.IP': {'vsl_pips': 6.0, 'enabled': True},
-    'CS.D.EURJPY.MINI.IP': {'vsl_pips': 6.0, 'enabled': True},
-    'CS.D.GBPJPY.MINI.IP': {'vsl_pips': 6.0, 'enabled': True},
-    'CS.D.AUDJPY.MINI.IP': {'vsl_pips': 6.0, 'enabled': True},
+    # Standard stops (7 pips) - Majority of pairs
+    'CS.D.GBPUSD.MINI.IP': {'vsl_pips': 7.0, 'enabled': True},  # Avg loss 5.9 pips
+    'CS.D.GBPUSD.CEEM.IP': {'vsl_pips': 7.0, 'enabled': True},
+    'CS.D.EURJPY.MINI.IP': {'vsl_pips': 7.0, 'enabled': True},  # Avg loss 6.4 pips
+    'CS.D.AUDJPY.MINI.IP': {'vsl_pips': 7.0, 'enabled': True},  # Avg loss 6.1 pips
+    'CS.D.EURUSD.CEEM.IP': {'vsl_pips': 7.0, 'enabled': True},  # Worst performer, needs monitoring
+    'CS.D.EURUSD.MINI.IP': {'vsl_pips': 7.0, 'enabled': True},
+
+    # Wider stops (8 pips) - Higher volatility or buffer needed
+    'CS.D.AUDUSD.MINI.IP': {'vsl_pips': 8.0, 'enabled': True},  # Best performer, keep wider
+    'CS.D.USDJPY.MINI.IP': {'vsl_pips': 8.0, 'enabled': True},  # Highest MAE (8.0 pips)
+    'CS.D.USDCAD.MINI.IP': {'vsl_pips': 8.0, 'enabled': True},  # Avg loss 6.5 pips + outlier buffer
+    'CS.D.GBPJPY.MINI.IP': {'vsl_pips': 8.0, 'enabled': True},
 }
 
 # =============================================================================
 # DEFAULT VALUES
 # =============================================================================
 
-# Default VSL for unknown pairs (matches live: 5 pips)
-DEFAULT_VSL_PIPS = 5.0
+# Default SL for unknown pairs (matches global optimized value)
+DEFAULT_VSL_PIPS = 7.0
 
-# Default scalp take profit (matches live dynamic VSL target)
+# Default scalp take profit (optimized from 15 to 10 pips based on actual win patterns)
 DEFAULT_SCALP_TP_PIPS = 10.0
 
 # Default limit order offset for scalping (momentum confirmation)

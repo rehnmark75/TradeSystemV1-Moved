@@ -1000,6 +1000,38 @@ class SMCSimpleConfig:
                 return bool(override['scalp_require_entry_candle_alignment'])
         return None
 
+    def get_pair_scalp_sl(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair scalp stop loss override (ATR-optimized).
+
+        v2.29.0: Per-pair scalp SL values calculated from ATR analysis.
+        Each pair has an optimal SL based on its historical volatility.
+
+        Returns:
+            Per-pair scalp_sl_pips if set, None otherwise (use global scalp_sl_pips)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_sl_pips') is not None:
+                return float(override['scalp_sl_pips'])
+        return None
+
+    def get_pair_scalp_tp(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair scalp take profit override (ATR-optimized).
+
+        v2.29.0: Per-pair scalp TP values calculated from ATR analysis.
+        Each pair has an optimal TP based on its historical volatility (2.5:1 R:R).
+
+        Returns:
+            Per-pair scalp_tp_pips if set, None otherwise (use global scalp_tp_pips)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_tp_pips') is not None:
+                return float(override['scalp_tp_pips'])
+        return None
+
     def get_effective_scalp_config(self, epic: str) -> dict:
         """
         Get effective scalp configuration for a pair, merging per-pair overrides with globals.
@@ -1456,6 +1488,9 @@ class SMCSimpleConfigService:
                 'scalp_qualification_mode': row.get('scalp_qualification_mode'),
                 # Scalp pullback threshold override (v2.24.1) - per-pair optimal threshold
                 'scalp_fib_pullback_min': row.get('scalp_fib_pullback_min'),
+                # Scalp SL/TP overrides (v2.30.0) - ATR-optimized per-pair values
+                'scalp_sl_pips': row.get('scalp_sl_pips'),
+                'scalp_tp_pips': row.get('scalp_tp_pips'),
             }
 
         return config

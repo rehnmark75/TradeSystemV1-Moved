@@ -28,6 +28,14 @@ TRADING_BLACKLIST = [
 # ENABLED (Jan 2026): Re-enabled with scalp-specific configs to replace VSL system
 TRAILING_STOPS_ENABLED = True
 
+# ================== GUARANTEED PROFIT LOCK ==================
+# CRITICAL PROTECTION: If trade reaches this profit, never go into loss
+# This applies to BOTH fixed and dynamic trailing systems
+# Feature added: Jan 2026 - Ensures profitable trades stay profitable
+ENABLE_GUARANTEED_PROFIT_LOCK = True
+GUARANTEED_PROFIT_LOCK_TRIGGER = 10  # Pips profit to activate protection
+GUARANTEED_PROFIT_LOCK_MINIMUM = 1   # Minimum pips profit to lock (SL = entry + 1)
+
 # Additional epic mappings from broker transaction analyzer
 BROKER_EPIC_MAP = {
     'USD/CAD': 'CS.D.USDCAD.MINI.IP',
@@ -132,7 +140,7 @@ STAGE3_MIN_ADJUSTMENT = 5    # Minimum points to move stop (prevents too-frequen
 
 # ================== PARTIAL CLOSE CONFIGURATION ==================
 # Partial close feature: Close part of position at break-even trigger instead of moving stop
-ENABLE_PARTIAL_CLOSE_AT_BREAKEVEN = True  # Master toggle for partial close feature
+ENABLE_PARTIAL_CLOSE_AT_BREAKEVEN = False  # Master toggle for partial close feature (DISABLED)
 PARTIAL_CLOSE_SIZE = 0.5  # Size to close (0.5 = 50% of position)
 
 # v3.1.0: Post-Partial-Close Trailing Enhancements
@@ -208,7 +216,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,               # v3.0.0: 4→8
         'min_trail_distance': 10,               # v3.0.0: 8→10
         'break_even_trigger_points': 18,        # v3.0.0: 15→18
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,     # v3.0.0: 13→20
         'partial_close_size': 0.4,              # v3.0.0: 0.5→0.4 (keep 60% running)
     },
@@ -225,7 +233,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -242,7 +250,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -259,7 +267,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -276,7 +284,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -294,7 +302,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -312,7 +320,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 10,
         'min_trail_distance': 12,
         'break_even_trigger_points': 22,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 25,
         'partial_close_size': 0.4,
     },
@@ -329,7 +337,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -346,7 +354,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -365,7 +373,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 10,
         'min_trail_distance': 12,
         'break_even_trigger_points': 22,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 25,
         'partial_close_size': 0.4,
     },
@@ -382,7 +390,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 10,
         'min_trail_distance': 12,
         'break_even_trigger_points': 22,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 25,
         'partial_close_size': 0.4,
     },
@@ -399,7 +407,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 10,
         'min_trail_distance': 12,
         'break_even_trigger_points': 22,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 25,
         'partial_close_size': 0.4,
     },
@@ -416,7 +424,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 10,
         'min_trail_distance': 12,
         'break_even_trigger_points': 22,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 25,
         'partial_close_size': 0.4,
     },
@@ -433,7 +441,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 10,
         'min_trail_distance': 12,
         'break_even_trigger_points': 22,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 25,
         'partial_close_size': 0.4,
     },
@@ -450,7 +458,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 10,
         'min_trail_distance': 12,
         'break_even_trigger_points': 22,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 25,
         'partial_close_size': 0.4,
     },
@@ -468,7 +476,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -485,7 +493,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -502,7 +510,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -519,7 +527,7 @@ PAIR_TRAILING_CONFIGS = {
         'stage3_min_distance': 8,
         'min_trail_distance': 10,
         'break_even_trigger_points': 18,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 20,
         'partial_close_size': 0.4,
     },
@@ -555,7 +563,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 5,
         'min_trail_distance': 6,                # 12 pip initial stop (optimal from data)
         'break_even_trigger_points': 6,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 10,     # Close 50% at +10 pips
         'partial_close_size': 0.5,
     },
@@ -573,7 +581,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 5,
         'min_trail_distance': 8,                # 15 pip initial stop (optimal from data)
         'break_even_trigger_points': 8,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 12,     # Close 50% at +12 pips
         'partial_close_size': 0.5,
     },
@@ -590,7 +598,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 5,
         'min_trail_distance': 8,                # 15 pip initial stop
         'break_even_trigger_points': 8,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 12,
         'partial_close_size': 0.5,
     },
@@ -607,7 +615,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 4,
         'min_trail_distance': 8,                # 15 pip initial stop
         'break_even_trigger_points': 6,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 10,
         'partial_close_size': 0.5,
     },
@@ -624,7 +632,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 5,
         'min_trail_distance': 8,                # 15 pip initial stop
         'break_even_trigger_points': 8,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 12,
         'partial_close_size': 0.5,
     },
@@ -641,7 +649,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 5,
         'min_trail_distance': 8,                # 15 pip initial stop
         'break_even_trigger_points': 8,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 12,
         'partial_close_size': 0.5,
     },
@@ -659,7 +667,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 6,
         'min_trail_distance': 10,               # 20 pip initial stop (optimal from data)
         'break_even_trigger_points': 10,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 15,     # Close 50% at +15 pips
         'partial_close_size': 0.5,
     },
@@ -676,7 +684,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 6,
         'min_trail_distance': 10,               # 20 pip initial stop
         'break_even_trigger_points': 10,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 15,
         'partial_close_size': 0.5,
     },
@@ -693,7 +701,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 6,
         'min_trail_distance': 10,               # 20 pip initial stop
         'break_even_trigger_points': 10,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 15,
         'partial_close_size': 0.5,
     },
@@ -710,7 +718,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_min_distance': 6,
         'min_trail_distance': 10,               # 20 pip initial stop
         'break_even_trigger_points': 10,
-        'enable_partial_close': True,
+        'enable_partial_close': False,
         'partial_close_trigger_points': 15,
         'partial_close_size': 0.5,
     },
@@ -729,7 +737,7 @@ DEFAULT_SCALP_TRAILING_CONFIG = {
     'stage3_min_distance': 5,
     'min_trail_distance': 8,                    # 15 pip initial stop
     'break_even_trigger_points': 8,
-    'enable_partial_close': True,
+    'enable_partial_close': False,
     'partial_close_trigger_points': 12,
     'partial_close_size': 0.5,
 }
@@ -747,7 +755,7 @@ DEFAULT_TRAILING_CONFIG = {
     'stage3_min_distance': 8,               # v3.0.0: 4→8
     'min_trail_distance': 10,               # v3.0.0: 8→10
     'break_even_trigger_points': 18,        # v3.0.0: 15→18
-    'enable_partial_close': True,
+    'enable_partial_close': False,
     'partial_close_trigger_points': 20,     # v3.0.0: 13→20
     'partial_close_size': 0.4,              # v3.0.0: 0.5→0.4
 }
