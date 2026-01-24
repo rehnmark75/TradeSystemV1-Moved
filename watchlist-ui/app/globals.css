@@ -135,6 +135,20 @@ input {
   border-bottom: 1px solid #efe7db;
 }
 
+.sort-btn {
+  border: none;
+  background: none;
+  color: #6e6254;
+  font-size: 0.75rem;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sort-btn:hover {
+  color: #0f4c5c;
+}
+
 .row {
   display: grid;
   grid-template-columns: 30px 80px 70px 80px 70px 70px 80px 80px 80px 70px 90px;

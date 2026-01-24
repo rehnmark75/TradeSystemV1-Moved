@@ -117,6 +117,8 @@ export default function Page() {
   const [details, setDetails] = useState<Record<string, WatchlistDetail | null>>({});
   const [oscOpen, setOscOpen] = useState<Record<string, boolean>>({});
   const [maOpen, setMaOpen] = useState<Record<string, boolean>>({});
+  const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days">("signal");
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
   const apiPath = (path: string) => `api/${path}`;
 
@@ -163,6 +165,59 @@ export default function Page() {
     return rows.filter((row) => row.ticker?.toUpperCase().includes(term));
   }, [rows, filter]);
 
+  const numberOrNull = (value: unknown) => {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  const getSignalDate = (row: WatchlistRow) => {
+    if (CROSSOVER.has(watchlist)) {
+      return row.crossover_date ? new Date(row.crossover_date).getTime() : 0;
+    }
+    return row.scan_date ? new Date(row.scan_date).getTime() : 0;
+  };
+
+  const sortValue = (row: WatchlistRow) => {
+    switch (sortKey) {
+      case "rs":
+        return numberOrNull(row.rs_percentile) ?? -Infinity;
+      case "daq":
+        return numberOrNull(row.daq_score) ?? -Infinity;
+      case "tv":
+        return numberOrNull(row.tv_overall_score) ?? -Infinity;
+      case "days":
+        return numberOrNull(row.days_on_list) ?? -Infinity;
+      case "signal":
+      default:
+        return getSignalDate(row);
+    }
+  };
+
+  const sortedRows = useMemo(() => {
+    const data = [...filteredRows];
+    data.sort((a, b) => {
+      const aVal = sortValue(a);
+      const bVal = sortValue(b);
+      if (aVal === bVal) {
+        return a.ticker.localeCompare(b.ticker);
+      }
+      return sortDir === "desc" ? bVal - aVal : aVal - bVal;
+    });
+    return data;
+  }, [filteredRows, sortKey, sortDir, watchlist]);
+
+  const toggleSort = (key: "signal" | "rs" | "daq" | "tv" | "days") => {
+    if (sortKey === key) {
+      setSortDir(sortDir === "desc" ? "asc" : "desc");
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
+
   const toggleExpand = async (ticker: string) => {
     const next = !expanded[ticker];
     setExpanded((prev) => ({ ...prev, [ticker]: next }));
@@ -183,14 +238,6 @@ export default function Page() {
 
   const toggleMa = (ticker: string) => {
     setMaOpen((prev) => ({ ...prev, [ticker]: !prev[ticker] }));
-  };
-
-  const numberOrNull = (value: unknown) => {
-    if (value === null || value === undefined || value === "") {
-      return null;
-    }
-    const parsed = Number(value);
-    return Number.isNaN(parsed) ? null : parsed;
   };
 
   const formatValue = (value: unknown, digits = 2) => {
@@ -412,11 +459,21 @@ export default function Page() {
         <div className="list-header">
           <span></span>
           <span>Ticker</span>
-          <span>Signal</span>
-          <span>RS</span>
-          <span>DAQ</span>
-          <span>TV</span>
-          <span>Days</span>
+          <button className="sort-btn" onClick={() => toggleSort("signal")}>
+            Signal {sortKey === "signal" ? (sortDir === "desc" ? "▾" : "▴") : ""}
+          </button>
+          <button className="sort-btn" onClick={() => toggleSort("rs")}>
+            RS {sortKey === "rs" ? (sortDir === "desc" ? "▾" : "▴") : ""}
+          </button>
+          <button className="sort-btn" onClick={() => toggleSort("daq")}>
+            DAQ {sortKey === "daq" ? (sortDir === "desc" ? "▾" : "▴") : ""}
+          </button>
+          <button className="sort-btn" onClick={() => toggleSort("tv")}>
+            TV {sortKey === "tv" ? (sortDir === "desc" ? "▾" : "▴") : ""}
+          </button>
+          <button className="sort-btn" onClick={() => toggleSort("days")}>
+            Days {sortKey === "days" ? (sortDir === "desc" ? "▾" : "▴") : ""}
+          </button>
           <span>Price</span>
           <span>Volume</span>
           <span>RSI</span>
@@ -428,7 +485,7 @@ export default function Page() {
         ) : (
           <Virtuoso
             style={{ height: 540 }}
-            data={filteredRows}
+            data={sortedRows}
             itemContent={(index, row) => {
               const rsVal = row.rs_percentile ?? null;
               const daqVal = row.daq_score ?? null;
