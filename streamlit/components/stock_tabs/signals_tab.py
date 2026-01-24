@@ -11,6 +11,7 @@ Unified view of all scanner signals with:
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
+from .tradingview_gauge import render_tv_summary_section
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -958,6 +959,9 @@ def _render_signal_card(signal: Dict[str, Any], service=None):
                 high_short=daq_high_short,
                 sector_weak=daq_sector_weak
             )
+
+            # TradingView Technical Summary
+            render_tv_summary_section(signal)
 
         # Claude AI Analysis Section
         if has_claude:

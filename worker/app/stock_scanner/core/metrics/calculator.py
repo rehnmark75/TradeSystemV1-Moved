@@ -370,6 +370,21 @@ class MetricsCalculator:
         if ytd_perf is not None:
             metrics['perf_ytd'] = round(ytd_perf, 2)
 
+        # Calculate TradingView indicators
+        from .tradingview_indicators import TradingViewIndicators
+        tv = TradingViewIndicators()
+        tv_metrics = tv.calculate_all(
+            highs=highs,
+            lows=lows,
+            closes=closes,
+            volumes=volumes,
+            current_price=current_price,
+            existing_rsi=metrics.get('rsi_14'),
+            existing_macd=metrics.get('macd'),
+            existing_macd_signal=metrics.get('macd_signal')
+        )
+        metrics.update(tv_metrics)
+
         # Save to database
         await self._save_metrics(metrics)
 

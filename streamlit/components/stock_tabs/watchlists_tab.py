@@ -14,6 +14,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, date
 from typing import Dict, Any, Optional
+from .tradingview_gauge import render_tv_summary_section
 
 # RS Percentile color helpers
 def _get_rs_color(percentile):
@@ -407,6 +408,9 @@ def _render_daq_detail(row: Dict[str, Any]) -> None:
         st.markdown(_render_score_bar(row.get('daq_news_score'), 10, 'News'), unsafe_allow_html=True)
         st.markdown(_render_score_bar(row.get('daq_regime_score'), 10, 'Regime'), unsafe_allow_html=True)
         st.markdown(_render_score_bar(row.get('daq_sector_score'), 10, 'Sector'), unsafe_allow_html=True)
+
+    # TradingView Technical Summary
+    render_tv_summary_section(row)
 
 
 def render_watchlists_tab(service):

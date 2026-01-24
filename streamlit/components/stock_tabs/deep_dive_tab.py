@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any
 import os
 import requests
+from .tradingview_gauge import render_tv_summary_section
 
 
 def render_deep_dive_tab(service):
@@ -1001,6 +1002,9 @@ def _render_technical_and_smc_analysis(metrics, fundamentals, active_signal):
 
         if not active_signal:
             st.caption("📊 Derived from technical indicators (no active signal)")
+
+    # TradingView Technical Summary
+    render_tv_summary_section(metrics)
 
 
 def _render_fundamentals_section(fundamentals):

@@ -186,7 +186,27 @@ class StockAnalyticsService:
                 COALESCE(s.confidence, 0) as signal_confidence,
                 i.earnings_date,
                 i.beta,
-                i.short_percent_float
+                i.short_percent_float,
+                -- TradingView summary counts
+                COALESCE(m.tv_osc_buy, 0) as tv_osc_buy,
+                COALESCE(m.tv_osc_sell, 0) as tv_osc_sell,
+                COALESCE(m.tv_osc_neutral, 0) as tv_osc_neutral,
+                COALESCE(m.tv_ma_buy, 0) as tv_ma_buy,
+                COALESCE(m.tv_ma_sell, 0) as tv_ma_sell,
+                COALESCE(m.tv_ma_neutral, 0) as tv_ma_neutral,
+                COALESCE(m.tv_overall_signal, 'NEUTRAL') as tv_overall_signal,
+                COALESCE(m.tv_overall_score, 0) as tv_overall_score,
+                -- Individual TradingView indicators (for detail view)
+                m.rsi_14, m.macd, m.macd_signal,
+                m.stoch_k, m.stoch_d, m.cci_20,
+                m.adx_14, m.plus_di, m.minus_di,
+                m.ao_value, m.momentum_10,
+                m.stoch_rsi_k, m.stoch_rsi_d,
+                m.williams_r, m.bull_power, m.bear_power,
+                m.ultimate_osc,
+                m.ema_10, m.ema_20, m.ema_30, m.ema_50, m.ema_100, m.ema_200,
+                m.sma_10, m.sma_20, m.sma_30, m.sma_50, m.sma_100, m.sma_200,
+                m.ichimoku_base, m.vwma_20
             FROM stock_watchlist w
             JOIN stock_instruments i ON w.ticker = i.ticker
             LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
