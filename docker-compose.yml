@@ -155,6 +155,21 @@ services:
       retries: 3
       start_period: 10s
 
+  watchlist-ui:
+    build:
+      context: ./watchlist-ui
+      dockerfile: Dockerfile
+    container_name: watchlist-ui
+    restart: unless-stopped
+    ports:
+      - "3010:3000"
+    environment:
+      - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin

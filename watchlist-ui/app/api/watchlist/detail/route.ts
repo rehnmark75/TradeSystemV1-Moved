@@ -1,0 +1,250 @@
+import { NextResponse } from "next/server";
+import { pool } from "../../../../lib/db";
+
+const CROSSOVER = ["ema_50_crossover", "ema_20_crossover", "macd_bullish_cross"];
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const watchlist = searchParams.get("watchlist");
+  const ticker = searchParams.get("ticker");
+  const scanDate = searchParams.get("date");
+
+  if (!watchlist || !ticker) {
+    return NextResponse.json({ error: "watchlist and ticker are required" }, { status: 400 });
+  }
+
+  const client = await pool.connect();
+  try {
+    if (CROSSOVER.includes(watchlist)) {
+      const query = `
+        SELECT
+          w.ticker,
+          i.name,
+          COALESCE(i.exchange, 'NASDAQ') as exchange,
+          w.price,
+          w.volume,
+          w.avg_volume,
+          COALESCE(w.ema_20, m.ema_20) as ema_20,
+          COALESCE(w.ema_50, m.ema_50) as ema_50,
+          COALESCE(w.ema_200, m.ema_200) as ema_200,
+          COALESCE(w.rsi_14, m.rsi_14) as rsi_14,
+          COALESCE(w.macd, m.macd) as macd,
+          m.macd_signal,
+          w.macd_histogram,
+          w.gap_pct,
+          w.price_change_1d,
+          w.scan_date,
+          w.crossover_date,
+          (CURRENT_DATE - w.crossover_date) + 1 as days_on_list,
+          w.avg_daily_change_5d,
+          w.daq_score,
+          w.daq_grade,
+          w.daq_mtf_score,
+          w.daq_volume_score,
+          w.daq_smc_score,
+          w.daq_quality_score,
+          w.daq_catalyst_score,
+          w.daq_news_score,
+          w.daq_regime_score,
+          w.daq_sector_score,
+          w.daq_earnings_risk,
+          w.daq_high_short_interest,
+          w.daq_sector_underperforming,
+          w.atr_14,
+          w.atr_percent,
+          w.swing_high,
+          w.swing_low,
+          w.swing_high_date,
+          w.swing_low_date,
+          w.nearest_ob_price,
+          w.nearest_ob_type,
+          w.nearest_ob_distance,
+          w.suggested_entry_low,
+          w.suggested_entry_high,
+          w.suggested_stop_loss,
+          w.suggested_target_1,
+          w.suggested_target_2,
+          w.risk_reward_ratio,
+          w.risk_percent,
+          w.volume_trend,
+          w.relative_volume,
+          w.rs_percentile,
+          w.rs_trend,
+          i.earnings_date,
+          CASE
+            WHEN i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE
+            THEN (i.earnings_date - CURRENT_DATE)
+            ELSE NULL
+          END as days_to_earnings,
+          -- TradingView summary counts
+          m.tv_osc_buy,
+          m.tv_osc_sell,
+          m.tv_osc_neutral,
+          m.tv_ma_buy,
+          m.tv_ma_sell,
+          m.tv_ma_neutral,
+          m.tv_overall_signal,
+          m.tv_overall_score,
+          -- Oscillators and indicators
+          m.stoch_k,
+          m.stoch_d,
+          m.cci_20,
+          m.adx_14,
+          m.plus_di,
+          m.minus_di,
+          m.ao_value,
+          m.momentum_10,
+          m.stoch_rsi_k,
+          m.stoch_rsi_d,
+          m.williams_r,
+          m.bull_power,
+          m.bear_power,
+          m.ultimate_osc,
+          -- Moving averages
+          m.ema_10,
+          m.ema_20,
+          m.ema_30,
+          m.ema_50,
+          m.ema_100,
+          m.ema_200,
+          m.sma_10,
+          m.sma_20,
+          m.sma_30,
+          m.sma_50,
+          m.sma_100,
+          m.sma_200,
+          m.ichimoku_base,
+          m.vwma_20
+        FROM stock_watchlist_results w
+        LEFT JOIN stock_instruments i ON w.ticker = i.ticker
+        LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
+          AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+        WHERE w.watchlist_name = $1
+          AND w.status = 'active'
+          AND w.ticker = $2
+        LIMIT 1
+      `;
+      const result = await client.query(query, [watchlist, ticker]);
+      return NextResponse.json({ row: result.rows[0] || null });
+    }
+
+    const query = `
+      SELECT
+        w.ticker,
+        i.name,
+        COALESCE(i.exchange, 'NASDAQ') as exchange,
+        w.price,
+        w.volume,
+        w.avg_volume,
+        COALESCE(w.ema_20, m.ema_20) as ema_20,
+        COALESCE(w.ema_50, m.ema_50) as ema_50,
+        COALESCE(w.ema_200, m.ema_200) as ema_200,
+        COALESCE(w.rsi_14, m.rsi_14) as rsi_14,
+        COALESCE(w.macd, m.macd) as macd,
+        m.macd_signal,
+        w.macd_histogram,
+        w.gap_pct,
+        w.price_change_1d,
+        w.scan_date,
+        w.crossover_date,
+        1 as days_on_list,
+        w.avg_daily_change_5d,
+        w.daq_score,
+        w.daq_grade,
+        w.daq_mtf_score,
+        w.daq_volume_score,
+        w.daq_smc_score,
+        w.daq_quality_score,
+        w.daq_catalyst_score,
+        w.daq_news_score,
+        w.daq_regime_score,
+        w.daq_sector_score,
+        w.daq_earnings_risk,
+        w.daq_high_short_interest,
+        w.daq_sector_underperforming,
+        w.atr_14,
+        w.atr_percent,
+        w.swing_high,
+        w.swing_low,
+        w.swing_high_date,
+        w.swing_low_date,
+        w.nearest_ob_price,
+        w.nearest_ob_type,
+        w.nearest_ob_distance,
+        w.suggested_entry_low,
+        w.suggested_entry_high,
+        w.suggested_stop_loss,
+        w.suggested_target_1,
+        w.suggested_target_2,
+        w.risk_reward_ratio,
+        w.risk_percent,
+        w.volume_trend,
+        w.relative_volume,
+        w.rs_percentile,
+        w.rs_trend,
+        i.earnings_date,
+        CASE
+          WHEN i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE
+          THEN (i.earnings_date - CURRENT_DATE)
+          ELSE NULL
+        END as days_to_earnings,
+        -- TradingView summary counts
+        m.tv_osc_buy,
+        m.tv_osc_sell,
+        m.tv_osc_neutral,
+        m.tv_ma_buy,
+        m.tv_ma_sell,
+        m.tv_ma_neutral,
+        m.tv_overall_signal,
+        m.tv_overall_score,
+        -- Oscillators and indicators
+        m.stoch_k,
+        m.stoch_d,
+        m.cci_20,
+        m.adx_14,
+        m.plus_di,
+        m.minus_di,
+        m.ao_value,
+        m.momentum_10,
+        m.stoch_rsi_k,
+        m.stoch_rsi_d,
+        m.williams_r,
+        m.bull_power,
+        m.bear_power,
+        m.ultimate_osc,
+        -- Moving averages
+        m.ema_10,
+        m.ema_20,
+        m.ema_30,
+        m.ema_50,
+        m.ema_100,
+        m.ema_200,
+        m.sma_10,
+        m.sma_20,
+        m.sma_30,
+        m.sma_50,
+        m.sma_100,
+        m.sma_200,
+        m.ichimoku_base,
+        m.vwma_20
+      FROM stock_watchlist_results w
+      LEFT JOIN stock_instruments i ON w.ticker = i.ticker
+      LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
+        AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+      WHERE w.watchlist_name = $1
+        AND w.scan_date = COALESCE($2::date, (
+          SELECT MAX(scan_date)
+          FROM stock_watchlist_results
+          WHERE watchlist_name = $1
+        ))
+        AND w.ticker = $3
+      LIMIT 1
+    `;
+    const result = await client.query(query, [watchlist, scanDate, ticker]);
+    return NextResponse.json({ row: result.rows[0] || null });
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to load detail" }, { status: 500 });
+  } finally {
+    client.release();
+  }
+}

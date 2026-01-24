@@ -1,0 +1,496 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap");
+
+:root {
+  color-scheme: light;
+  --bg: #f6f2ea;
+  --panel: #ffffff;
+  --ink: #1a1a1a;
+  --muted: #6b6b6b;
+  --accent: #0f4c5c;
+  --accent-2: #f0d9b5;
+  --border: #e4ddd2;
+  --good: #1e7e34;
+  --warn: #fd7e14;
+  --bad: #dc3545;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "IBM Plex Sans", sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at 20% 0%, #fff4e3, transparent 45%),
+    radial-gradient(circle at 80% 20%, #e0f2f2, transparent 35%),
+    var(--bg);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(110deg, #0f4c5c 0%, #1b6b7a 45%, #57c5b6 100%);
+  color: white;
+  padding: 18px 20px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.header h1 {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.6rem;
+}
+
+.header p {
+  margin: 6px 0 0;
+  opacity: 0.9;
+}
+
+.header-chip {
+  background: rgba(255, 255, 255, 0.18);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  backdrop-filter: blur(6px);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 8px 20px rgba(27, 27, 27, 0.06);
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: 2.2fr 1fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.controls label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+select,
+input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.9rem;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.summary-card {
+  background: #fffaf2;
+  border: 1px solid #efd7b2;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+
+.summary-card strong {
+  display: block;
+  font-size: 1rem;
+  margin-top: 4px;
+}
+
+.list-header {
+  display: grid;
+  grid-template-columns: 30px 80px 70px 80px 70px 70px 80px 80px 80px 70px 90px;
+  gap: 10px;
+  font-size: 0.75rem;
+  color: #6e6254;
+  padding: 6px 12px;
+  border-bottom: 1px solid #efe7db;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 30px 80px 70px 80px 70px 70px 80px 80px 80px 70px 90px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f3ede4;
+  background: #fff;
+}
+
+.row-expanded {
+  background: #fdf5e7;
+}
+
+.row:hover {
+  background: #fbf6ee;
+}
+
+.row button {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.expand-btn {
+  font-size: 0.9rem;
+  color: #5b4a3a;
+}
+
+.ticker-btn {
+  text-align: left;
+  font-weight: 700;
+}
+
+.scan-cell {
+  font-size: 0.8rem;
+  color: #6e6254;
+}
+
+.pill {
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.pill.good {
+  background: #d4edda;
+  color: #155724;
+}
+
+.pill.warn {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.pill.bad {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.expander {
+  background: #fefaf2;
+  border: 1px solid #efe2cc;
+  border-radius: 10px;
+  margin: 8px 12px 12px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 12px;
+}
+
+.expander h4 {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.gauge-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.gauge-card {
+  background: #fff;
+  border: 1px solid #efe2cc;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.gauge-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #6e6254;
+  margin-bottom: 6px;
+}
+
+.gauge {
+  position: relative;
+  width: 150px;
+  height: 75px;
+  margin: 0 auto 6px;
+  background: conic-gradient(from 180deg, #dc3545 0deg 60deg, #ffc107 60deg 120deg, #28a745 120deg 180deg);
+  border-radius: 150px 150px 0 0;
+  overflow: hidden;
+}
+
+.gauge::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -20px;
+  top: 10px;
+  background: #fff;
+  border-radius: 130px 130px 0 0;
+  z-index: 1;
+}
+
+.gauge-needle {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 2px;
+  height: 60px;
+  background: #2b2b2b;
+  transform-origin: bottom center;
+  z-index: 2;
+}
+
+.gauge-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #2b2b2b;
+  border-radius: 50%;
+  left: calc(50% - 4px);
+  bottom: 2px;
+  z-index: 3;
+}
+
+.gauge-meta {
+  font-size: 0.75rem;
+  color: #6e6254;
+}
+
+.detail-section {
+  margin: 0 12px 12px;
+  border: 1px solid #efe2cc;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.detail-toggle {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: none;
+  background: #fff7eb;
+  font-weight: 600;
+  cursor: pointer;
+  color: #5b4a3a;
+  border-radius: 10px;
+}
+
+.detail-table {
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #f3ede4;
+  padding-bottom: 6px;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.signal {
+  font-weight: 600;
+}
+
+.signal.buy {
+  color: #1e7e34;
+}
+
+.signal.sell {
+  color: #dc3545;
+}
+
+.signal.neutral {
+  color: #6c757d;
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  padding: 10px 12px 12px;
+}
+
+.chart-card {
+  background: #fff;
+  border: 1px solid #efe2cc;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.chart-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #5b4a3a;
+  margin-bottom: 6px;
+}
+
+.tv-frame {
+  width: 100%;
+  height: 360px;
+  border: none;
+  border-radius: 8px;
+  background: #f8f8f8;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.detail-item {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.daq-panel {
+  background: #fff;
+  border: 1px solid #efe2cc;
+  border-radius: 12px;
+  margin: 0 12px 12px;
+  padding: 12px;
+}
+
+.daq-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.daq-grade {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #0f4c5c;
+}
+
+.daq-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.risk-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.risk-badge.earnings {
+  background: #dc3545;
+}
+
+.risk-badge.high-si {
+  background: #fd7e14;
+}
+
+.risk-badge.sector-weak {
+  background: #6c757d;
+}
+
+.daq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.daq-block h5 {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: #0f4c5c;
+}
+
+.daq-row {
+  display: grid;
+  grid-template-columns: 60px 1fr 60px;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.8rem;
+  margin-bottom: 6px;
+}
+
+.bar {
+  background: #f1efe9;
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #0f4c5c, #57c5b6);
+}
+
+.footer-note {
+  margin-top: 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .controls {
+    grid-template-columns: 1fr;
+  }
+
+  .list-header,
+  .row {
+    grid-template-columns: 24px 70px 60px 70px 60px 60px 70px 70px 70px 60px 80px;
+  }
+
+  .expander {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-row {
+    grid-template-columns: 1fr 80px 80px;
+  }
+
+  .tv-frame {
+    height: 300px;
+  }
+}
