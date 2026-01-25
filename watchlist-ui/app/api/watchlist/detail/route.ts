@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { pool } from "../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 const CROSSOVER = ["ema_50_crossover", "ema_20_crossover", "macd_bullish_cross"];
 
 export async function GET(request: Request) {
@@ -114,11 +116,41 @@ export async function GET(request: Request) {
           m.sma_100,
           m.sma_200,
           m.ichimoku_base,
-          m.vwma_20
+          m.vwma_20,
+          cs.claude_grade,
+          cs.claude_score,
+          cs.claude_action,
+          cs.claude_thesis,
+          cs.claude_conviction,
+          cs.claude_key_strengths,
+          cs.claude_key_risks,
+          cs.claude_position_rec,
+          cs.claude_stop_adjustment,
+          cs.claude_time_horizon,
+          cs.claude_analyzed_at
         FROM stock_watchlist_results w
         LEFT JOIN stock_instruments i ON w.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
           AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+        LEFT JOIN LATERAL (
+          SELECT
+            claude_grade,
+            claude_score,
+            claude_action,
+            claude_thesis,
+            claude_conviction,
+            claude_key_strengths,
+            claude_key_risks,
+            claude_position_rec,
+            claude_stop_adjustment,
+            claude_time_horizon,
+            claude_analyzed_at
+          FROM stock_scanner_signals
+          WHERE ticker = w.ticker
+            AND claude_analyzed_at IS NOT NULL
+          ORDER BY claude_analyzed_at DESC
+          LIMIT 1
+        ) cs ON TRUE
         WHERE w.watchlist_name = $1
           AND w.status = 'active'
           AND w.ticker = $2
@@ -226,11 +258,41 @@ export async function GET(request: Request) {
         m.sma_100,
         m.sma_200,
         m.ichimoku_base,
-        m.vwma_20
+        m.vwma_20,
+        cs.claude_grade,
+        cs.claude_score,
+        cs.claude_action,
+        cs.claude_thesis,
+        cs.claude_conviction,
+        cs.claude_key_strengths,
+        cs.claude_key_risks,
+        cs.claude_position_rec,
+        cs.claude_stop_adjustment,
+        cs.claude_time_horizon,
+        cs.claude_analyzed_at
       FROM stock_watchlist_results w
       LEFT JOIN stock_instruments i ON w.ticker = i.ticker
       LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
         AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+      LEFT JOIN LATERAL (
+        SELECT
+          claude_grade,
+          claude_score,
+          claude_action,
+          claude_thesis,
+          claude_conviction,
+          claude_key_strengths,
+          claude_key_risks,
+          claude_position_rec,
+          claude_stop_adjustment,
+          claude_time_horizon,
+          claude_analyzed_at
+        FROM stock_scanner_signals
+        WHERE ticker = w.ticker
+          AND claude_analyzed_at IS NOT NULL
+        ORDER BY claude_analyzed_at DESC
+        LIMIT 1
+      ) cs ON TRUE
       WHERE w.watchlist_name = $1
         AND w.scan_date = COALESCE($2::date, (
           SELECT MAX(scan_date)

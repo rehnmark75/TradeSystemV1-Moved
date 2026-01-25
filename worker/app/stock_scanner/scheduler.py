@@ -377,17 +377,19 @@ class StockScheduler:
             results['metrics'] = {'error': str(e)}
 
         # === STAGE 4: Relative Strength (RS) Calculation ===
+        rs_date = data_date
         logger.info("\n[STAGE 4/13] Calculating Relative Strength vs SPY...")
         try:
-            rs_stats = await self.rs_populator.populate_rs(calc_date=data_date)
+            rs_date = await self._get_latest_metrics_date()
+            rs_stats = await self.rs_calculator.calculate_all_rs(calculation_date=rs_date)
+            if 'error' in rs_stats:
+                logger.warning(f"[WARN] RS (DB): {rs_stats['error']} - falling back to SPY via yfinance")
+                rs_stats = await self.rs_populator.populate_rs(calc_date=rs_date)
             results['rs'] = rs_stats
             if 'error' in rs_stats:
                 logger.warning(f"[WARN] RS: {rs_stats['error']}")
             else:
-                logger.info(f"[OK] RS: {rs_stats['updated']} stocks updated")
-                logger.info(f"     Elite (90+): {rs_stats['distribution']['elite_90+']}, "
-                           f"Strong (70-89): {rs_stats['distribution']['strong_70-89']}, "
-                           f"Weak (<40): {rs_stats['distribution']['weak_0-39']}")
+                logger.info(f"[OK] RS: {rs_stats.get('updated', rs_stats.get('processed', 0))} stocks updated")
         except Exception as e:
             logger.error(f"[FAIL] RS: {e}")
             results['rs'] = {'error': str(e)}
@@ -395,7 +397,7 @@ class StockScheduler:
         # === STAGE 4b: Market Regime Calculation ===
         logger.info("\n[STAGE 4b/13] Calculating Market Regime...")
         try:
-            regime_stats = await self.market_regime_calculator.calculate_market_regime()
+            regime_stats = await self.market_regime_calculator.calculate_market_regime(calculation_date=rs_date)
             results['market_regime'] = regime_stats
             if 'error' in regime_stats:
                 logger.warning(f"[WARN] Market Regime: {regime_stats['error']}")
@@ -412,7 +414,7 @@ class StockScheduler:
         # === STAGE 4c: Sector RS Calculation ===
         logger.info("\n[STAGE 4c/13] Calculating Sector RS...")
         try:
-            sector_stats = await self.rs_calculator.calculate_sector_rs()
+            sector_stats = await self.rs_calculator.calculate_sector_rs(calculation_date=rs_date)
             results['sector_rs'] = sector_stats
             if 'error' in sector_stats:
                 logger.warning(f"[WARN] Sector RS: {sector_stats['error']}")
@@ -742,6 +744,16 @@ class StockScheduler:
             'failed': failed,
             'total_candles': total_candles
         }
+
+    async def _get_latest_metrics_date(self) -> date:
+        """Get latest calculation_date from stock_screening_metrics."""
+        try:
+            row = await self.db.fetchrow(
+                "SELECT MAX(calculation_date) as max_date FROM stock_screening_metrics"
+            )
+            return row["max_date"] if row and row["max_date"] else datetime.now().date()
+        except Exception:
+            return datetime.now().date()
 
     async def _mark_potentially_delisted(self, tickers: list):
         """
@@ -1456,11 +1468,16 @@ async def run_once(task: str):
         elif task == "metrics":
             await scheduler.calculator.calculate_all_metrics()
         elif task == "rs":
-            await scheduler.rs_populator.populate_rs()
+            rs_date = await scheduler._get_latest_metrics_date()
+            rs_stats = await scheduler.rs_calculator.calculate_all_rs(calculation_date=rs_date)
+            if 'error' in rs_stats:
+                await scheduler.rs_populator.populate_rs(calc_date=rs_date)
         elif task == "market_regime":
-            await scheduler.market_regime_calculator.calculate_market_regime()
+            rs_date = await scheduler._get_latest_metrics_date()
+            await scheduler.market_regime_calculator.calculate_market_regime(calculation_date=rs_date)
         elif task == "sector_rs":
-            await scheduler.rs_calculator.calculate_sector_rs()
+            rs_date = await scheduler._get_latest_metrics_date()
+            await scheduler.rs_calculator.calculate_sector_rs(calculation_date=rs_date)
         elif task == "smc":
             await scheduler.smc_analyzer.run_analysis_pipeline()
         elif task == "watchlist":
@@ -1501,7 +1518,7 @@ async def run_once(task: str):
                 print("Deep Analysis Orchestrator not available")
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, rs, smc, watchlist, signals, scanners, premarket, premarketpricing, intraday, postmarket, weekly, fundamentals, brokersync, techwldaq")
+            print("Available: pipeline, sync, synthesize, metrics, rs, sector_rs, market_regime, smc, watchlist, signals, scanners, premarket, premarketpricing, intraday, postmarket, weekly, fundamentals, brokersync, techwldaq")
     finally:
         await scheduler.cleanup()
 
@@ -1511,7 +1528,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
-                       choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'smc',
+                       choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'sector_rs', 'market_regime', 'smc',
                                'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing',
                                'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync',
                                'techwldaq', 'status'],

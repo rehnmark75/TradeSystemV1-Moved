@@ -94,7 +94,7 @@ def render_chart_tab(service):
             with date_col1:
                 signal_date_from = st.date_input(
                     "From date",
-                    value=datetime.now() - timedelta(days=30),
+                    value=datetime.now() - timedelta(days=2),
                     key="chart_signal_date_from"
                 )
             with date_col2:
@@ -125,7 +125,7 @@ def render_chart_tab(service):
             with date_col1:
                 watchlist_date_from = st.date_input(
                     "From date",
-                    value=datetime.now() - timedelta(days=30),
+                    value=datetime.now() - timedelta(days=2),
                     key="chart_watchlist_date_from"
                 )
             with date_col2:

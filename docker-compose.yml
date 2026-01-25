@@ -165,6 +165,23 @@ services:
       - "3010:3000"
     environment:
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+      - FASTAPI_GENERAL_URL=http://fastapi-general:8008
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+
+  fastapi-general:
+    build:
+      context: .
+      dockerfile: fastapi-general/Dockerfile
+    container_name: fastapi-general
+    restart: unless-stopped
+    ports:
+      - "8008:8008"
+    environment:
+      - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
     networks:
       - lab-net
     depends_on:

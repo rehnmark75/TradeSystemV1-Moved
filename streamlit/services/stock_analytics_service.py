@@ -55,6 +55,15 @@ class StockAnalyticsService:
         finally:
             conn.close()
 
+    def _get_latest_metrics_date(self) -> Optional[str]:
+        """Get the latest calculation date for screening metrics (cached)."""
+        # Note: This could be cached more aggressively if date doesn't change often during the day
+        query = "SELECT MAX(calculation_date) as latest_date FROM stock_screening_metrics"
+        results = self._execute_query(query, ())
+        if results and results[0]['latest_date']:
+            return str(results[0]['latest_date'])
+        return None
+
     # =========================================================================
     # OVERVIEW QUERIES
     # =========================================================================
@@ -513,7 +522,7 @@ class StockAnalyticsService:
     # SIGNAL QUERIES
     # =========================================================================
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=300)
     def get_all_signals(_self,
                         signal_type: str = None,
                         days_back: int = 7,
@@ -703,7 +712,7 @@ class StockAnalyticsService:
     # TOP PICKS QUERIES
     # =========================================================================
 
-    @st.cache_data(ttl=60)  # Reduced TTL to allow Claude analysis to show sooner
+    @st.cache_data(ttl=300)  # Increased TTL for better performance
     def get_daily_top_picks(_self) -> Dict[str, Any]:
         """
         Get daily top picks categorized by setup type.
@@ -1563,7 +1572,7 @@ Analyze and respond in this exact JSON format:
     # SCANNER SIGNALS
     # =========================================================================
 
-    @st.cache_data(ttl=60, show_spinner=False)
+    @st.cache_data(ttl=300, show_spinner=False)
     def get_scanner_signals(
         _self,
         scanner_name: str = None,
@@ -1790,7 +1799,7 @@ Analyze and respond in this exact JSON format:
 
         return _self._execute_query(query, tuple(params) if params else None)
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=300)
     def get_scanner_stats(_self) -> Dict[str, Any]:
         """Get statistics about scanner signals."""
         conn = _self._get_connection()
@@ -2659,7 +2668,7 @@ Respond in this exact JSON format:
     # NEW DASHBOARD METHODS (Stock Scanner Redesign)
     # =========================================================================
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=300)
     def get_dashboard_stats(_self) -> Dict[str, Any]:
         """
         Get comprehensive dashboard statistics for the redesigned stock scanner page.
@@ -2810,7 +2819,7 @@ Respond in this exact JSON format:
         """
         return _self._execute_query(query, ())
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=300)
     def get_top_signals(_self, limit: int = 5, min_tier: str = 'A') -> List[Dict[str, Any]]:
         """
         Get top quality active signals for dashboard display.
@@ -2904,8 +2913,8 @@ Respond in this exact JSON format:
     # WATCHLIST METHODS (5 Predefined Technical Screens)
     # =========================================================================
 
-    @st.cache_data(ttl=60)
-    def get_watchlist_results(_self, watchlist_name: str, scan_date: str = None) -> pd.DataFrame:
+    @st.cache_data(ttl=300)
+    def get_watchlist_results(_self, watchlist_name: str, scan_date: str = None, limit: int = 100) -> pd.DataFrame:
         """
         Get results for a specific predefined watchlist.
 
@@ -2921,10 +2930,14 @@ Respond in this exact JSON format:
             watchlist_name: One of: ema_50_crossover, ema_20_crossover,
                            macd_bullish_cross, gap_up_continuation, rsi_oversold_bounce
             scan_date: Optional date string (YYYY-MM-DD). For event watchlists only.
+            limit: Maximum number of results to return (default: 100)
 
         Returns:
             DataFrame with stocks matching the watchlist criteria
         """
+        # Pre-fetch latest metrics date to avoid subquery in main join
+        latest_metrics_date = _self._get_latest_metrics_date()
+
         # Crossover watchlists show all active entries (ignores scan_date)
         crossover_watchlists = {'ema_50_crossover', 'ema_20_crossover', 'macd_bullish_cross'}
 
@@ -3013,7 +3026,7 @@ Respond in this exact JSON format:
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
                 LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
-                    AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+                    AND m.calculation_date = %s
                 LEFT JOIN LATERAL (
                     SELECT ticker, quality_tier, signal_type
                     FROM stock_scanner_signals
@@ -3025,8 +3038,9 @@ Respond in this exact JSON format:
                 WHERE w.watchlist_name = %s
                 AND w.status = 'active'
                 ORDER BY w.volume DESC
+                LIMIT %s
             """
-            results = _self._execute_query(query, (watchlist_name,))
+            results = _self._execute_query(query, (latest_metrics_date, watchlist_name, limit))
         else:
             # For event watchlists: show entries for specific date, days is always 1
             query = """
@@ -3112,7 +3126,7 @@ Respond in this exact JSON format:
                 FROM stock_watchlist_results w
                 LEFT JOIN stock_instruments i ON w.ticker = i.ticker
                 LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
-                    AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+                    AND m.calculation_date = %s
                 LEFT JOIN LATERAL (
                     SELECT ticker, quality_tier, signal_type
                     FROM stock_scanner_signals
@@ -3128,10 +3142,363 @@ Respond in this exact JSON format:
                     WHERE watchlist_name = %s
                 ))
                 ORDER BY w.volume DESC
+                LIMIT %s
             """
-            results = _self._execute_query(query, (watchlist_name, scan_date, watchlist_name))
+            results = _self._execute_query(query, (latest_metrics_date, watchlist_name, scan_date, watchlist_name, limit))
 
         return pd.DataFrame(results) if results else pd.DataFrame()
+
+    @st.cache_data(ttl=300)
+    def get_watchlist_results_light(_self, watchlist_name: str, scan_date: str = None, limit: int = 100, include_trades: bool = False) -> pd.DataFrame:
+        """
+        Get lightweight watchlist results for fast list rendering.
+
+        Returns only the columns needed for list views to reduce join cost.
+        """
+        crossover_watchlists = {'ema_50_crossover', 'ema_20_crossover', 'macd_bullish_cross'}
+
+        if watchlist_name in crossover_watchlists:
+            if include_trades:
+                query = """
+                    WITH open_trades AS (
+                        SELECT DISTINCT
+                            SPLIT_PART(ticker, '.', 1) as ticker,
+                            side,
+                            profit
+                        FROM broker_trades
+                        WHERE status = 'open'
+                    )
+                    SELECT
+                        w.ticker,
+                        w.price,
+                        w.volume,
+                        w.avg_volume,
+                        w.ema_20,
+                        w.ema_50,
+                        w.ema_200,
+                        w.rsi_14,
+                        w.macd,
+                        w.gap_pct,
+                        w.price_change_1d,
+                        w.scan_date,
+                        w.crossover_date,
+                        (CURRENT_DATE - w.crossover_date) + 1 as days_on_list,
+                        w.avg_daily_change_5d,
+                        CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
+                        t.side as trade_side,
+                        t.profit as trade_profit,
+                        w.daq_score,
+                        w.daq_grade,
+                        w.daq_earnings_risk,
+                        w.daq_high_short_interest,
+                        w.rs_percentile,
+                        w.rs_trend
+                    FROM stock_watchlist_results w
+                    LEFT JOIN open_trades t ON w.ticker = t.ticker
+                    WHERE w.watchlist_name = %s
+                    AND w.status = 'active'
+                    ORDER BY w.volume DESC
+                    LIMIT %s
+                """
+                results = _self._execute_query(query, (watchlist_name, limit))
+            else:
+                query = """
+                    SELECT
+                        w.ticker,
+                        w.price,
+                        w.volume,
+                        w.avg_volume,
+                        w.ema_20,
+                        w.ema_50,
+                        w.ema_200,
+                        w.rsi_14,
+                        w.macd,
+                        w.gap_pct,
+                        w.price_change_1d,
+                        w.scan_date,
+                        w.crossover_date,
+                        (CURRENT_DATE - w.crossover_date) + 1 as days_on_list,
+                        w.avg_daily_change_5d,
+                        false as in_trade,
+                        NULL as trade_side,
+                        NULL as trade_profit,
+                        w.daq_score,
+                        w.daq_grade,
+                        w.daq_earnings_risk,
+                        w.daq_high_short_interest,
+                        w.rs_percentile,
+                        w.rs_trend
+                    FROM stock_watchlist_results w
+                    WHERE w.watchlist_name = %s
+                    AND w.status = 'active'
+                    ORDER BY w.volume DESC
+                    LIMIT %s
+                """
+                results = _self._execute_query(query, (watchlist_name, limit))
+        else:
+            if include_trades:
+                query = """
+                    WITH open_trades AS (
+                        SELECT DISTINCT
+                            SPLIT_PART(ticker, '.', 1) as ticker,
+                            side,
+                            profit
+                        FROM broker_trades
+                        WHERE status = 'open'
+                    )
+                    SELECT
+                        w.ticker,
+                        w.price,
+                        w.volume,
+                        w.avg_volume,
+                        w.ema_20,
+                        w.ema_50,
+                        w.ema_200,
+                        w.rsi_14,
+                        w.macd,
+                        w.gap_pct,
+                        w.price_change_1d,
+                        w.scan_date,
+                        w.crossover_date,
+                        1 as days_on_list,
+                        w.avg_daily_change_5d,
+                        CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
+                        t.side as trade_side,
+                        t.profit as trade_profit,
+                        w.daq_score,
+                        w.daq_grade,
+                        w.daq_earnings_risk,
+                        w.daq_high_short_interest,
+                        w.rs_percentile,
+                        w.rs_trend
+                    FROM stock_watchlist_results w
+                    LEFT JOIN open_trades t ON w.ticker = t.ticker
+                    WHERE w.watchlist_name = %s
+                    AND w.scan_date = COALESCE(%s::date, (
+                        SELECT MAX(scan_date)
+                        FROM stock_watchlist_results
+                        WHERE watchlist_name = %s
+                    ))
+                    ORDER BY w.volume DESC
+                    LIMIT %s
+                """
+                results = _self._execute_query(query, (watchlist_name, scan_date, watchlist_name, limit))
+            else:
+                query = """
+                    SELECT
+                        w.ticker,
+                        w.price,
+                        w.volume,
+                        w.avg_volume,
+                        w.ema_20,
+                        w.ema_50,
+                        w.ema_200,
+                        w.rsi_14,
+                        w.macd,
+                        w.gap_pct,
+                        w.price_change_1d,
+                        w.scan_date,
+                        w.crossover_date,
+                        1 as days_on_list,
+                        w.avg_daily_change_5d,
+                        false as in_trade,
+                        NULL as trade_side,
+                        NULL as trade_profit,
+                        w.daq_score,
+                        w.daq_grade,
+                        w.daq_earnings_risk,
+                        w.daq_high_short_interest,
+                        w.rs_percentile,
+                        w.rs_trend
+                    FROM stock_watchlist_results w
+                    WHERE w.watchlist_name = %s
+                    AND w.scan_date = COALESCE(%s::date, (
+                        SELECT MAX(scan_date)
+                        FROM stock_watchlist_results
+                        WHERE watchlist_name = %s
+                    ))
+                    ORDER BY w.volume DESC
+                    LIMIT %s
+                """
+                results = _self._execute_query(query, (watchlist_name, scan_date, watchlist_name, limit))
+
+        return pd.DataFrame(results) if results else pd.DataFrame()
+
+    @st.cache_data(ttl=300)
+    def get_watchlist_detail(_self, watchlist_name: str, ticker: str, scan_date: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed watchlist data for a single ticker (trade plan, DAQ, metrics).
+        """
+        crossover_watchlists = {'ema_50_crossover', 'ema_20_crossover', 'macd_bullish_cross'}
+
+        if watchlist_name in crossover_watchlists:
+            query = """
+                WITH open_trades AS (
+                    SELECT DISTINCT
+                        SPLIT_PART(ticker, '.', 1) as ticker,
+                        side,
+                        profit,
+                        open_price,
+                        current_price
+                    FROM broker_trades
+                    WHERE status = 'open'
+                )
+                SELECT
+                    w.ticker,
+                    i.name,
+                    w.price,
+                    w.volume,
+                    w.avg_volume,
+                    w.ema_20,
+                    w.ema_50,
+                    w.ema_200,
+                    w.rsi_14,
+                    w.macd,
+                    w.macd_histogram,
+                    w.gap_pct,
+                    w.price_change_1d,
+                    w.scan_date,
+                    w.crossover_date,
+                    (CURRENT_DATE - w.crossover_date) + 1 as days_on_list,
+                    w.avg_daily_change_5d as avg_daily_change_5d,
+                    CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
+                    t.side as trade_side,
+                    t.profit as trade_profit,
+                    w.daq_score,
+                    w.daq_grade,
+                    w.daq_mtf_score,
+                    w.daq_volume_score,
+                    w.daq_smc_score,
+                    w.daq_quality_score,
+                    w.daq_catalyst_score,
+                    w.daq_news_score,
+                    w.daq_regime_score,
+                    w.daq_sector_score,
+                    w.daq_earnings_risk,
+                    w.daq_high_short_interest,
+                    w.daq_sector_underperforming,
+                    w.atr_14,
+                    w.atr_percent,
+                    w.swing_high,
+                    w.swing_low,
+                    w.swing_high_date,
+                    w.swing_low_date,
+                    w.nearest_ob_price,
+                    w.nearest_ob_type,
+                    w.nearest_ob_distance,
+                    w.suggested_entry_low,
+                    w.suggested_entry_high,
+                    w.suggested_stop_loss,
+                    w.suggested_target_1,
+                    w.suggested_target_2,
+                    w.risk_reward_ratio,
+                    w.risk_percent,
+                    w.volume_trend,
+                    w.relative_volume,
+                    w.rs_percentile as rs_percentile,
+                    w.rs_trend as rs_trend,
+                    i.earnings_date,
+                    CASE
+                        WHEN i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE
+                        THEN (i.earnings_date - CURRENT_DATE)
+                        ELSE NULL
+                    END as days_to_earnings
+                FROM stock_watchlist_results w
+                LEFT JOIN stock_instruments i ON w.ticker = i.ticker
+                LEFT JOIN open_trades t ON w.ticker = t.ticker
+                WHERE w.watchlist_name = %s
+                AND w.status = 'active'
+                AND w.ticker = %s
+                LIMIT 1
+            """
+            results = _self._execute_query(query, (watchlist_name, ticker))
+        else:
+            query = """
+                WITH open_trades AS (
+                    SELECT DISTINCT
+                        SPLIT_PART(ticker, '.', 1) as ticker,
+                        side,
+                        profit,
+                        open_price,
+                        current_price
+                    FROM broker_trades
+                    WHERE status = 'open'
+                )
+                SELECT
+                    w.ticker,
+                    i.name,
+                    w.price,
+                    w.volume,
+                    w.avg_volume,
+                    w.ema_20,
+                    w.ema_50,
+                    w.ema_200,
+                    w.rsi_14,
+                    w.macd,
+                    w.macd_histogram,
+                    w.gap_pct,
+                    w.price_change_1d,
+                    w.scan_date,
+                    w.crossover_date,
+                    1 as days_on_list,
+                    w.avg_daily_change_5d as avg_daily_change_5d,
+                    CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
+                    t.side as trade_side,
+                    t.profit as trade_profit,
+                    w.daq_score,
+                    w.daq_grade,
+                    w.daq_mtf_score,
+                    w.daq_volume_score,
+                    w.daq_smc_score,
+                    w.daq_quality_score,
+                    w.daq_catalyst_score,
+                    w.daq_news_score,
+                    w.daq_regime_score,
+                    w.daq_sector_score,
+                    w.daq_earnings_risk,
+                    w.daq_high_short_interest,
+                    w.daq_sector_underperforming,
+                    w.atr_14,
+                    w.atr_percent,
+                    w.swing_high,
+                    w.swing_low,
+                    w.swing_high_date,
+                    w.swing_low_date,
+                    w.nearest_ob_price,
+                    w.nearest_ob_type,
+                    w.nearest_ob_distance,
+                    w.suggested_entry_low,
+                    w.suggested_entry_high,
+                    w.suggested_stop_loss,
+                    w.suggested_target_1,
+                    w.suggested_target_2,
+                    w.risk_reward_ratio,
+                    w.risk_percent,
+                    w.volume_trend,
+                    w.relative_volume,
+                    w.rs_percentile as rs_percentile,
+                    w.rs_trend as rs_trend,
+                    i.earnings_date,
+                    CASE
+                        WHEN i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE
+                        THEN (i.earnings_date - CURRENT_DATE)
+                        ELSE NULL
+                    END as days_to_earnings
+                FROM stock_watchlist_results w
+                LEFT JOIN stock_instruments i ON w.ticker = i.ticker
+                LEFT JOIN open_trades t ON w.ticker = t.ticker
+                WHERE w.watchlist_name = %s
+                AND w.scan_date = COALESCE(%s::date, (
+                    SELECT MAX(scan_date)
+                    FROM stock_watchlist_results
+                    WHERE watchlist_name = %s
+                ))
+                AND w.ticker = %s
+                LIMIT 1
+            """
+            results = _self._execute_query(query, (watchlist_name, scan_date, watchlist_name, ticker))
+
+        return results[0] if results else None
 
     @st.cache_data(ttl=300)
     def get_watchlist_available_dates(_self, watchlist_name: str = None) -> List[str]:
@@ -3164,7 +3531,7 @@ Respond in this exact JSON format:
 
         return [str(r['scan_date']) for r in results] if results else []
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=300)
     def get_watchlist_stats(_self, scan_date: str = None) -> Dict[str, Any]:
         """
         Get statistics for all predefined watchlists.
@@ -3204,20 +3571,30 @@ Respond in this exact JSON format:
             """
             event_results = _self._execute_query(event_query, (scan_date,))
         else:
-            event_query = """
-                SELECT
-                    watchlist_name,
-                    COUNT(*) as stock_count,
-                    MAX(scan_date) as last_scan
+            # Optimize: Get max date first, then count
+            # This avoids a correlated subquery scan on the whole table
+            max_date_query = """
+                SELECT MAX(scan_date) as max_date
                 FROM stock_watchlist_results
                 WHERE watchlist_name IN ('gap_up_continuation', 'rsi_oversold_bounce')
-                AND scan_date = (
-                    SELECT MAX(scan_date) FROM stock_watchlist_results
-                    WHERE watchlist_name IN ('gap_up_continuation', 'rsi_oversold_bounce')
-                )
-                GROUP BY watchlist_name
             """
-            event_results = _self._execute_query(event_query, ())
+            max_date_result = _self._execute_query(max_date_query, ())
+            max_date = max_date_result[0]['max_date'] if max_date_result else None
+
+            if max_date:
+                event_query = """
+                    SELECT
+                        watchlist_name,
+                        COUNT(*) as stock_count,
+                        MAX(scan_date) as last_scan
+                    FROM stock_watchlist_results
+                    WHERE watchlist_name IN ('gap_up_continuation', 'rsi_oversold_bounce')
+                    AND scan_date = %s
+                    GROUP BY watchlist_name
+                """
+                event_results = _self._execute_query(event_query, (max_date,))
+            else:
+                event_results = []
 
         # Combine results
         all_results = crossover_results + event_results
@@ -3227,6 +3604,7 @@ Respond in this exact JSON format:
         last_scan = max((r['last_scan'] for r in all_results), default=None) if all_results else None
 
         # Get total stocks scanned (from stock_instruments)
+        # Uses index created in migration 020
         total_query = "SELECT COUNT(*) as total FROM stock_instruments WHERE is_active = true"
         total_result = _self._execute_query(total_query, ())
         total_stocks = total_result[0]['total'] if total_result else 0
@@ -3237,7 +3615,7 @@ Respond in this exact JSON format:
             'total_stocks_scanned': total_stocks
         }
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=300)
     def get_all_active_tickers_from_instruments(_self) -> List[str]:
         """
         Get all active tickers from stock_instruments table.
@@ -3797,7 +4175,7 @@ Respond in this exact JSON format:
 
         return result
 
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=300)
     def get_custom_screen_results(_self, filters: List[Dict], sort_by: str = 'rs_percentile', limit: int = 100) -> pd.DataFrame:
         """
         Execute a custom screen with flexible filters.

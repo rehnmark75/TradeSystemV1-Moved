@@ -62,6 +62,31 @@ def warm_alert_history_cache():
         logger.warning(f"Failed to pre-warm alert history cache: {e}")
 
 
+def warm_stock_scanner_caches():
+    """Pre-warm stock scanner watchlist results and dashboard stats."""
+    try:
+        from services.stock_analytics_service import get_stock_service
+        service = get_stock_service()
+
+        logger.info("Pre-warming stock scanner dashboard stats...")
+        service.get_dashboard_stats()
+        service.get_scanner_leaderboard()
+
+        watchlists = [
+            'ema_50_crossover', 'ema_20_crossover', 'macd_bullish_cross',
+            'gap_up_continuation', 'rsi_oversold_bounce'
+        ]
+
+        for wl in watchlists:
+            logger.info(f"Pre-warming watchlist cache: {wl}...")
+            # Warm with default limit 100
+            service.get_watchlist_results(wl, limit=100)
+
+        logger.info("Stock scanner caches pre-warmed successfully")
+    except Exception as e:
+        logger.warning(f"Failed to pre-warm stock scanner caches: {e}")
+
+
 def run_cache_warmup_async():
     """
     Run cache warmup in background threads.
@@ -81,6 +106,7 @@ def run_cache_warmup_async():
         threading.Thread(target=warm_rejection_caches, daemon=True),
         threading.Thread(target=warm_overview_caches, daemon=True),
         threading.Thread(target=warm_alert_history_cache, daemon=True),
+        threading.Thread(target=warm_stock_scanner_caches, daemon=True),
     ]
 
     for t in threads:

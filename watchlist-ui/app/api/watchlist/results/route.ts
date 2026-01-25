@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { pool } from "../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 const CROSSOVER = ["ema_50_crossover", "ema_20_crossover", "macd_bullish_cross"];
 
 export async function GET(request: Request) {

@@ -461,7 +461,7 @@ def render_signals_tab(service):
     col4.metric("Awaiting Analysis", stats.get('awaiting_analysis', 0), help="Active signals not yet analyzed")
 
     # Deep Analysis (DAQ) stats - Row 3
-    daq_stats = service.get_deep_analysis_summary(days=7)
+    daq_stats = service.get_deep_analysis_summary(days=2)
     if daq_stats and daq_stats.get('total', 0) > 0:
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Deep Analyzed", daq_stats.get('total', 0), help="Signals with Deep Analysis Quality (DAQ) score")
@@ -510,8 +510,8 @@ def render_signals_tab(service):
     with col1:
         date_from = st.date_input(
             "Signal Date From",
-            value=datetime.now().date() - timedelta(days=7),
-            help="Filter signals detected from this date (default: last 7 days)"
+            value=datetime.now().date() - timedelta(days=2),
+            help="Filter signals detected from this date (default: last 2 days)"
         )
 
     with col2:

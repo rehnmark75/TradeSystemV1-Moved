@@ -3,7 +3,8 @@ const nextConfig = {
   reactStrictMode: true,
   basePath: "/watchlist-fast",
   assetPrefix: "/watchlist-fast",
-  trailingSlash: true
+  trailingSlash: true,
+  output: "standalone"
 };
 
 module.exports = nextConfig;

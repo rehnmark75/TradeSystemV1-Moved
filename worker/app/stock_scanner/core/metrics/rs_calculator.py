@@ -36,6 +36,20 @@ SECTOR_ETF_MAP = {
     'Materials': 'XLB',
 }
 
+SECTOR_NAME_ALIASES = {
+    'Technology': ['Technology'],
+    'Health Care': ['Health Care', 'Healthcare'],
+    'Financials': ['Financials', 'Financial Services'],
+    'Consumer Discretionary': ['Consumer Discretionary', 'Consumer Cyclical'],
+    'Consumer Staples': ['Consumer Staples', 'Consumer Defensive'],
+    'Communication Services': ['Communication Services'],
+    'Industrials': ['Industrials'],
+    'Energy': ['Energy'],
+    'Utilities': ['Utilities'],
+    'Real Estate': ['Real Estate'],
+    'Materials': ['Materials', 'Basic Materials'],
+}
+
 
 class RSCalculator:
     """
@@ -51,6 +65,10 @@ class RSCalculator:
     def __init__(self, db_manager):
         self.db = db_manager
         self._spy_returns: Dict[str, float] = {}  # Cache SPY returns by date
+
+    def _get_sector_aliases(self, sector: str) -> List[str]:
+        """Return sector name aliases for matching instrument data."""
+        return SECTOR_NAME_ALIASES.get(sector, [sector])
 
     async def calculate_all_rs(
         self,
@@ -101,6 +119,7 @@ class RSCalculator:
             stock_return = stock.get('price_change_20d') or stock.get('perf_1m')
 
             if stock_return is not None and spy_return != 0:
+                stock_return = float(stock_return)
                 # RS ratio: stock return / SPY return (normalized)
                 # If SPY is up 5% and stock is up 10%, RS = 2.0 (outperforming 2x)
                 rs_vs_spy = stock_return / spy_return if spy_return != 0 else 1.0
@@ -368,12 +387,13 @@ class RSCalculator:
                     FROM stock_screening_metrics m
                     JOIN stock_instruments i ON m.ticker = i.ticker
                     WHERE m.calculation_date = $1
-                      AND i.sector = $2
+                      AND i.sector = ANY($2::text[])
                       AND m.rs_percentile IS NOT NULL
                     ORDER BY m.rs_percentile DESC
                     LIMIT 5
                 """
-                top_rows = await self.db.fetch(top_stocks_query, calculation_date, sector)
+                sector_aliases = self._get_sector_aliases(sector)
+                top_rows = await self.db.fetch(top_stocks_query, calculation_date, sector_aliases)
                 top_stocks = [
                     {'ticker': r['ticker'], 'rs_percentile': r['rs_percentile']}
                     for r in top_rows
@@ -383,9 +403,9 @@ class RSCalculator:
                 count_query = """
                     SELECT COUNT(*) as cnt
                     FROM stock_instruments
-                    WHERE sector = $1 AND is_active = TRUE
+                    WHERE sector = ANY($1::text[]) AND is_active = TRUE
                 """
-                count_row = await self.db.fetch(count_query, sector)
+                count_row = await self.db.fetch(count_query, sector_aliases)
                 stock_count = count_row[0]['cnt'] if count_row else 0
 
                 # Get 1d and 5d returns for sector
@@ -678,6 +698,8 @@ class MarketRegimeCalculator:
         rows = await self.db.fetch(query, calc_date)
 
         avg_atr = float(rows[0]['avg_atr']) if rows and rows[0]['avg_atr'] else 3.0
+        if np.isnan(avg_atr):
+            avg_atr = 3.0
 
         # Classify based on historical norms
         if avg_atr < 2.0:

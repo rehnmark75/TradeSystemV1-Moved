@@ -10,6 +10,71 @@ import plotly.graph_objects as go
 from typing import Dict, List, Any, Optional
 
 
+def render_tv_compact_summary(ticker_data: Dict[str, Any]) -> None:
+    """
+    Render a lightweight TradingView summary (no Plotly charts) for watchlist views.
+
+    Shows only the overall signal badge and counts without heavy gauge rendering.
+    Use this for list views where performance matters.
+
+    Args:
+        ticker_data: Dictionary containing TV indicator summary counts
+    """
+    signal = ticker_data.get('tv_overall_signal', 'NEUTRAL')
+    score = ticker_data.get('tv_overall_score', 0)
+    osc_buy = ticker_data.get('tv_osc_buy', 0)
+    osc_sell = ticker_data.get('tv_osc_sell', 0)
+    ma_buy = ticker_data.get('tv_ma_buy', 0)
+    ma_sell = ticker_data.get('tv_ma_sell', 0)
+
+    # Convert score to float if it's a Decimal
+    if score is not None:
+        score = float(score)
+    else:
+        score = 0.0
+
+    # Color mapping
+    signal_colors = {
+        'STRONG BUY': '#28a745',
+        'BUY': '#5cb85c',
+        'NEUTRAL': '#ffc107',
+        'SELL': '#f0ad4e',
+        'STRONG SELL': '#dc3545'
+    }
+
+    signal_text_colors = {
+        'STRONG BUY': '#ffffff',
+        'BUY': '#ffffff',
+        'NEUTRAL': '#856404',
+        'SELL': '#ffffff',
+        'STRONG SELL': '#ffffff'
+    }
+
+    bg_color = signal_colors.get(signal, '#ffc107')
+    text_color = signal_text_colors.get(signal, '#000')
+
+    st.markdown(f"""
+        <div style="margin: 8px 0; padding: 8px; background: #f8f9fa; border-radius: 6px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 0.75rem; color: #666; font-weight: 500;">TradingView Summary</span>
+                <div style="
+                    background-color:{bg_color};
+                    color:{text_color};
+                    padding:3px 10px;
+                    border-radius:10px;
+                    font-size:0.75rem;
+                    font-weight:600;
+                ">{signal}</div>
+            </div>
+            <div style="display: flex; gap: 12px; margin-top: 6px; font-size: 0.7rem; color: #666;">
+                <span>Osc: {osc_buy}↑ {osc_sell}↓</span>
+                <span>MA: {ma_buy}↑ {ma_sell}↓</span>
+                <span>Score: {score:.1f}</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+
 def render_tv_summary_section(ticker_data: Dict[str, Any]) -> None:
     """
     Render TradingView-style technical summary section.
@@ -25,6 +90,10 @@ def render_tv_summary_section(ticker_data: Dict[str, Any]) -> None:
     st.markdown("---")
     st.markdown("### Technical Summary")
 
+    # Extract ticker and unique identifier for keys
+    ticker = ticker_data.get('ticker', 'UNKNOWN')
+    row_idx = ticker_data.get('_row_idx', id(ticker_data))  # Use row index or object id as fallback
+
     # Three-column layout for gauges
     col1, col2, col3 = st.columns(3)
 
@@ -33,7 +102,9 @@ def render_tv_summary_section(ticker_data: Dict[str, Any]) -> None:
             title="Oscillators",
             buy=ticker_data.get('tv_osc_buy', 0),
             sell=ticker_data.get('tv_osc_sell', 0),
-            neutral=ticker_data.get('tv_osc_neutral', 0)
+            neutral=ticker_data.get('tv_osc_neutral', 0),
+            ticker=ticker,
+            row_idx=row_idx
         )
 
     with col2:
@@ -41,13 +112,17 @@ def render_tv_summary_section(ticker_data: Dict[str, Any]) -> None:
             title="Moving Averages",
             buy=ticker_data.get('tv_ma_buy', 0),
             sell=ticker_data.get('tv_ma_sell', 0),
-            neutral=ticker_data.get('tv_ma_neutral', 0)
+            neutral=ticker_data.get('tv_ma_neutral', 0),
+            ticker=ticker,
+            row_idx=row_idx
         )
 
     with col3:
         render_overall_gauge(
             signal=ticker_data.get('tv_overall_signal', 'NEUTRAL'),
-            score=ticker_data.get('tv_overall_score', 0.0)
+            score=ticker_data.get('tv_overall_score', 0.0),
+            ticker=ticker,
+            row_idx=row_idx
         )
 
     # Expandable detail tables
@@ -58,7 +133,7 @@ def render_tv_summary_section(ticker_data: Dict[str, Any]) -> None:
         render_ma_details(ticker_data)
 
 
-def render_gauge(title: str, buy: int, sell: int, neutral: int) -> None:
+def render_gauge(title: str, buy: int, sell: int, neutral: int, ticker: str, row_idx: any = None) -> None:
     """
     Render a semicircular gauge showing Buy/Sell/Neutral distribution.
 
@@ -67,6 +142,8 @@ def render_gauge(title: str, buy: int, sell: int, neutral: int) -> None:
         buy: Number of BUY signals
         sell: Number of SELL signals
         neutral: Number of NEUTRAL signals
+        ticker: Stock ticker symbol for unique key generation
+        row_idx: Optional unique row identifier to prevent duplicate keys
     """
     total = buy + sell + neutral
 
@@ -80,10 +157,9 @@ def render_gauge(title: str, buy: int, sell: int, neutral: int) -> None:
 
     # Create gauge chart
     fig = go.Figure(go.Indicator(
-        mode="gauge+number",
+        mode="gauge",
         value=score,
         title={'text': title, 'font': {'size': 14, 'color': '#333'}},
-        number={'suffix': "", 'font': {'size': 0}},  # Hide number, show in summary
         gauge={
             'axis': {
                 'range': [-100, 100],
@@ -114,7 +190,8 @@ def render_gauge(title: str, buy: int, sell: int, neutral: int) -> None:
         font={'family': 'Arial'}
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    gauge_key = f"tv_gauge_{ticker}_{title}_{row_idx}" if row_idx is not None else f"tv_gauge_{ticker}_{title}"
+    st.plotly_chart(fig, use_container_width=True, key=gauge_key)
 
     # Summary counts below gauge
     st.markdown(f"""
@@ -126,14 +203,24 @@ def render_gauge(title: str, buy: int, sell: int, neutral: int) -> None:
     """, unsafe_allow_html=True)
 
 
-def render_overall_gauge(signal: str, score: float) -> None:
+def render_overall_gauge(signal: str, score: float, ticker: str, row_idx: any = None) -> None:
     """
     Render the overall summary gauge.
 
     Args:
         signal: Overall signal (STRONG BUY, BUY, NEUTRAL, SELL, STRONG SELL)
         score: Overall score (-100 to +100)
+        ticker: Stock ticker symbol for unique key generation
+        row_idx: Optional unique row identifier to prevent duplicate keys
     """
+    # Handle None values and convert Decimal to float
+    if signal is None:
+        signal = 'NEUTRAL'
+    if score is None:
+        score = 0.0
+    else:
+        score = float(score)  # Convert Decimal to float
+
     # Color mapping
     signal_colors = {
         'STRONG BUY': '#28a745',
@@ -156,10 +243,9 @@ def render_overall_gauge(signal: str, score: float) -> None:
 
     # Create gauge
     fig = go.Figure(go.Indicator(
-        mode="gauge+number",
+        mode="gauge",
         value=score,
         title={'text': "Overall", 'font': {'size': 14, 'color': '#333'}},
-        number={'suffix': "", 'font': {'size': 0}},
         gauge={
             'axis': {
                 'range': [-100, 100],
@@ -190,9 +276,13 @@ def render_overall_gauge(signal: str, score: float) -> None:
         font={'family': 'Arial'}
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    gauge_key = f"tv_gauge_{ticker}_Overall_{row_idx}" if row_idx is not None else f"tv_gauge_{ticker}_Overall"
+    st.plotly_chart(fig, use_container_width=True, key=gauge_key)
 
-    # Signal badge
+    # Signal badge - prepare formatted values to avoid None issues
+    signal_display = str(signal) if signal is not None else 'NEUTRAL'
+    score_display = f"{score:.1f}" if score is not None else "0.0"
+
     st.markdown(f"""
         <div style="text-align:center; margin-top:-10px;">
             <div style="
@@ -203,8 +293,8 @@ def render_overall_gauge(signal: str, score: float) -> None:
                 font-size:0.85rem;
                 font-weight:600;
                 display:inline-block;
-            ">{signal}</div>
-            <div style="color:#6c757d; font-size:0.75rem; margin-top:4px;">Score: {score:.1f}</div>
+            ">{signal_display}</div>
+            <div style="color:#6c757d; font-size:0.75rem; margin-top:4px;">Score: {score_display}</div>
         </div>
     """, unsafe_allow_html=True)
 
@@ -467,6 +557,10 @@ def _classify_ma(price: float, ma: Optional[float]) -> str:
     """MA: Price > MA = Buy, Price < MA = Sell."""
     if ma is None or price == 0:
         return 'NEUTRAL'
+
+    # Convert to float to handle Decimal types from database
+    price = float(price)
+    ma = float(ma)
 
     # Within 0.1% = Neutral
     threshold = ma * 0.001

@@ -8,6 +8,7 @@ RUN npm install
 COPY app ./app
 COPY lib ./lib
 
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 EXPOSE 3000

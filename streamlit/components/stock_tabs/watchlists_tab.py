@@ -14,7 +14,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, date
 from typing import Dict, Any, Optional
-from .tradingview_gauge import render_tv_summary_section
+from .tradingview_gauge import render_tv_summary_section, render_tv_compact_summary
 
 # RS Percentile color helpers
 def _get_rs_color(percentile):
@@ -409,8 +409,8 @@ def _render_daq_detail(row: Dict[str, Any]) -> None:
         st.markdown(_render_score_bar(row.get('daq_regime_score'), 10, 'Regime'), unsafe_allow_html=True)
         st.markdown(_render_score_bar(row.get('daq_sector_score'), 10, 'Sector'), unsafe_allow_html=True)
 
-    # TradingView Technical Summary
-    render_tv_summary_section(row)
+    # TradingView Technical Summary (compact version for performance)
+    render_tv_compact_summary(row)
 
 
 def render_watchlists_tab(service):
@@ -444,6 +444,8 @@ def render_watchlists_tab(service):
     def on_watchlist_dropdown_change():
         dropdown_idx = st.session_state.watchlist_selector_dropdown
         st.session_state.selected_watchlist_key = watchlist_options[dropdown_idx]
+        st.session_state.watchlist_detail_key = None
+        st.session_state.watchlist_detail_context = None
 
     col_watchlist, col_date = st.columns([3, 1])
 
@@ -475,12 +477,17 @@ def render_watchlists_tab(service):
             else:
                 st.info("No data")
         else:
-            st.markdown("""
-            <div style="padding: 0.5rem; background: #e8f4f8; border-radius: 5px; font-size: 0.85rem; text-align: center; margin-top: 1.5rem;">
-                📊 <b>Live tracking</b><br>
-                <span style="color: #666; font-size: 0.75rem;">Days since crossover</span>
-            </div>
-            """, unsafe_allow_html=True)
+            st.checkbox(
+                "Last 2 days only",
+                value=True,
+                key="watchlist_recent_only",
+                help="Only show stocks that crossed over today or yesterday"
+            )
+
+    detail_context = f"{selected_watchlist}:{selected_date or 'latest'}"
+    if st.session_state.get("watchlist_detail_context") != detail_context:
+        st.session_state.watchlist_detail_context = detail_context
+        st.session_state.watchlist_detail_key = None
 
     # Get watchlist stats for selected date
     with st.spinner("Loading watchlist data..."):
@@ -549,234 +556,372 @@ def render_watchlists_tab(service):
             ):
                 # Update session state and rerun to switch watchlist
                 st.session_state.selected_watchlist_key = wl_key
+                st.session_state.watchlist_detail_key = None
+                st.session_state.watchlist_detail_context = None
                 st.rerun()
 
     st.markdown("---")
 
-    # Get results for selected watchlist and date
-    with st.spinner(f"Loading {watchlist_info['name']} results..."):
-        df = service.get_watchlist_results(selected_watchlist, selected_date)
+    # Initialize limit in session state
+    if 'watchlist_limit' not in st.session_state:
+        st.session_state.watchlist_limit = 100  # Default limit
 
-    if df.empty:
-        st.info(f"No stocks currently match the {watchlist_info['name']} criteria. This scan runs daily.")
-        return
-
-    # Results header
+    # Limit selector (before query for performance)
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.markdown(f"### {result_count} Stocks Matching Criteria")
+        st.markdown("### Loading Results...")
     with col2:
-        csv = df.to_csv(index=False)
-        st.download_button("📥 Export CSV", csv, f"watchlist_{selected_watchlist}_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
-
-    # Format dataframe for display
-    display_df = df.copy()
-    display_df['Price'] = display_df['price'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
-    display_df['Volume'] = display_df['volume'].apply(lambda x: f"{x/1e6:.1f}M" if pd.notnull(x) else '-')
-    display_df['Avg Vol'] = display_df['avg_volume'].apply(lambda x: f"{x/1e6:.1f}M" if pd.notnull(x) else '-')
-    display_df['EMA 20'] = display_df['ema_20'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
-    display_df['EMA 50'] = display_df['ema_50'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
-    display_df['EMA 200'] = display_df['ema_200'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
-    display_df['RSI'] = display_df['rsi_14'].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else '-')
-    display_df['1D Chg'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
-    display_df['Avg/Day'] = display_df['avg_daily_change_5d'].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else '-')
-
-    # Days column - for crossover watchlists this is days since crossover
-    display_df['Days'] = display_df['days_on_list'].apply(lambda x: f"{int(x)}d" if pd.notnull(x) else '1d')
-
-    # DAQ Score column - Deep Analysis Quality score if available
-    if 'daq_score' in display_df.columns:
-        def format_daq(row):
-            score = row.get('daq_score')
-            grade = row.get('daq_grade', '')
-            if pd.isna(score) or score is None:
-                return '-'
-            return f"{int(score)} {grade}" if grade else f"{int(score)}"
-        display_df['DAQ'] = display_df.apply(format_daq, axis=1)
-    else:
-        display_df['DAQ'] = '-'
-
-    # RS Percentile column - color-coded relative strength
-    if 'rs_percentile' in display_df.columns:
-        def format_rs(row):
-            rs = row.get('rs_percentile')
-            trend = row.get('rs_trend', '')
-            if pd.isna(rs) or rs is None:
-                return '-'
-            icon = RS_TREND_ICONS.get(trend, '')
-            return f"{int(rs)}{icon}"
-        display_df['RS'] = display_df.apply(format_rs, axis=1)
-    else:
-        display_df['RS'] = '-'
-
-    # In Trade column - shows if stock has open broker position with profit
-    def format_trade_status(row):
-        if row.get('in_trade'):
-            profit = row.get('trade_profit', 0) or 0
-            side = row.get('trade_side', 'BUY')
-            side_icon = '📈' if side == 'BUY' else '📉'
-            if profit >= 0:
-                return f"{side_icon} +${profit:.0f}"
-            else:
-                return f"{side_icon} -${abs(profit):.0f}"
-        return ''
-
-    display_df['Trade'] = display_df.apply(format_trade_status, axis=1)
-
-    # Crossover date formatting for crossover watchlists
-    if 'crossover_date' in display_df.columns and is_crossover:
-        display_df['Crossover'] = display_df['crossover_date'].apply(
-            lambda x: x.strftime('%m/%d') if pd.notnull(x) else '-'
+        query_limit = st.selectbox(
+            "Fetch",
+            options=[50, 100, 250, 500, 1000, 5000],
+            index=1,  # Default to 100
+            key="watchlist_query_limit",
+            help="Number of stocks to fetch from database (higher = slower)"
         )
 
-    # Conditional columns based on watchlist type
-    # Include Trade column if any stocks are in trade
-    has_trades = display_df['Trade'].any()
-    # Include DAQ column if any stocks have DAQ scores
-    has_daq = 'daq_score' in df.columns and df['daq_score'].notna().any()
+    # Get results for selected watchlist and date with LIMIT
+    with st.spinner(f"Loading top {query_limit} {watchlist_info['name']} results..."):
+        df = service.get_watchlist_results_light(selected_watchlist, selected_date, limit=query_limit)
 
-    if selected_watchlist == 'gap_up_continuation':
-        display_df['Gap %'] = display_df['gap_pct'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
-        cols = ['ticker', 'RS', 'Price', 'Gap %', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
-        if has_daq:
-            cols.insert(2, 'DAQ')
-        if has_trades:
-            cols.insert(1, 'Trade')
-        result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
-    elif selected_watchlist == 'rsi_oversold_bounce':
-        cols = ['ticker', 'RS', 'Price', 'RSI', 'Volume', '1D Chg', 'Avg/Day']
-        if has_daq:
-            cols.insert(2, 'DAQ')
-        if has_trades:
-            cols.insert(1, 'Trade')
-        result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
-    elif selected_watchlist == 'macd_bullish_cross':
-        display_df['MACD'] = display_df['macd'].apply(lambda x: f"{x:.3f}" if pd.notnull(x) else '-')
-        cols = ['ticker', 'RS', 'Days', 'Crossover', 'Price', 'MACD', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
-        if has_daq:
-            cols.insert(2, 'DAQ')
-        if has_trades:
-            cols.insert(1, 'Trade')
-        result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
-    else:
-        # EMA crossover watchlists
-        cols = ['ticker', 'RS', 'Days', 'Crossover', 'Price', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
-        if has_daq:
-            cols.insert(2, 'DAQ')
-        if has_trades:
-            cols.insert(1, 'Trade')
-        result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
+    # Apply "Last 2 days only" filter if enabled and it's a crossover watchlist
+    if not df.empty and is_crossover and st.session_state.get('watchlist_recent_only', True):
+        df = df[df['days_on_list'] <= 2]
 
-    # Style functions
-    def style_change(val):
-        if '+' in str(val):
-            return 'color: #28a745; font-weight: bold;'
-        elif '-' in str(val) and val != '-':
-            return 'color: #dc3545;'
-        return ''
+    if df.empty:
+        if is_crossover and st.session_state.get('watchlist_recent_only', True):
+            st.info(f"No stocks crossed over in the last 2 days. Uncheck 'Last 2 days only' to see all {result_count} active entries.")
+        else:
+            st.info(f"No stocks currently match the {watchlist_info['name']} criteria. This scan runs daily.")
+        return
 
-    def style_rsi(val):
-        try:
-            rsi = float(val)
-            if rsi < 30:
-                return 'background-color: #d4edda; color: #155724; font-weight: bold;'
-            elif rsi > 70:
-                return 'background-color: #f8d7da; color: #721c24;'
-        except (ValueError, TypeError):
-            pass
-        return ''
+    result_count = len(df)
 
-    def style_days(val):
-        """Highlight stocks that appear frequently (3+ days = pattern forming)"""
-        try:
-            days = int(val.replace('d', ''))
-            if days >= 5:
-                return 'background-color: #cce5ff; color: #004085; font-weight: bold;'
-            elif days >= 3:
-                return 'background-color: #fff3cd; color: #856404;'
-        except (ValueError, TypeError, AttributeError):
-            pass
-        return ''
+    # Update header with actual count
+    st.markdown(f"### {result_count} Stocks Loaded (sorted by volume)")
 
-    def style_trade(val):
-        """Style the trade column - green for profit, red for loss"""
-        if not val:
-            return ''
-        if '+$' in str(val):
-            return 'background-color: #d4edda; color: #155724; font-weight: bold;'
-        elif '-$' in str(val):
-            return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
-        return ''
-
-    def style_rs(val):
-        """Style the RS column based on percentile value"""
-        if val == '-' or not val:
-            return ''
-        try:
-            # Extract number from string like "85↗️"
-            rs = int(''.join(filter(str.isdigit, str(val))))
-            if rs >= 90:
-                return 'background-color: #d4edda; color: #155724; font-weight: bold;'  # Elite - green
-            elif rs >= 70:
-                return 'background-color: #d1ecf1; color: #0c5460; font-weight: bold;'  # Strong - blue
-            elif rs >= 40:
-                return 'background-color: #fff3cd; color: #856404;'  # Average - yellow
-            else:
-                return 'background-color: #f8d7da; color: #721c24;'  # Weak - red
-        except (ValueError, TypeError):
-            pass
-        return ''
-
-    def style_daq(val):
-        """Style the DAQ column based on score and grade"""
-        if val == '-' or not val:
-            return ''
-        try:
-            # Extract score from string like "75 A" or "85 A+"
-            score = int(''.join(filter(str.isdigit, str(val).split()[0])))
-            if score >= 85:  # A+
-                return 'background-color: #1e7e34; color: white; font-weight: bold;'
-            elif score >= 70:  # A
-                return 'background-color: #28a745; color: white; font-weight: bold;'
-            elif score >= 60:  # B
-                return 'background-color: #17a2b8; color: white;'
-            elif score >= 50:  # C
-                return 'background-color: #ffc107; color: #212529;'
-            else:  # D
-                return 'background-color: #6c757d; color: white;'
-        except (ValueError, TypeError, IndexError):
-            pass
-        return ''
-
-    styled_df = result_df.style.map(style_change, subset=['1D Chg'])
-    if 'Days' in result_df.columns:
-        styled_df = styled_df.map(style_days, subset=['Days'])
-    if 'RSI' in result_df.columns:
-        styled_df = styled_df.map(style_rsi, subset=['RSI'])
-    if 'Gap %' in result_df.columns:
-        styled_df = styled_df.map(style_change, subset=['Gap %'])
-    if 'Trade' in result_df.columns:
-        styled_df = styled_df.map(style_trade, subset=['Trade'])
-    if 'RS' in result_df.columns:
-        styled_df = styled_df.map(style_rs, subset=['RS'])
-    if 'DAQ' in result_df.columns:
-        styled_df = styled_df.map(style_daq, subset=['DAQ'])
+    if query_limit < 5000:
+        st.info(f"💡 Showing top {result_count} stocks by volume. Increase 'Fetch' limit above to load more (may be slower).")
 
     # View mode toggle - Expandable vs Table (Expandable is default)
     view_col1, view_col2 = st.columns([3, 1])
     with view_col2:
         view_mode = st.radio(
             "View",
-            ["Expandable", "Table"],
+            ["Compact", "Expandable", "Table"],
             horizontal=True,
             key="watchlist_view_mode",
-            help="Expandable view lets you click rows to see DAQ breakdown"
+            help="Compact is fastest; Expandable and Table show more formatting"
         )
 
-    if view_mode == "Table":
+    if view_mode == "Compact":
+        # Minimal formatting for fast render
+        compact_df = df.copy()
+        compact_df['Price'] = compact_df['price'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
+        compact_df['Volume'] = compact_df['volume'].apply(lambda x: f"{x/1e6:.1f}M" if pd.notnull(x) else '-')
+        compact_df['RSI'] = compact_df['rsi_14'].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else '-')
+        compact_df['1D Chg'] = compact_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
+        compact_df['Days'] = compact_df['days_on_list'].apply(lambda x: f"{int(x)}d" if pd.notnull(x) else '1d')
+
+        if 'rs_percentile' in compact_df.columns:
+            def format_rs(row):
+                rs = row.get('rs_percentile')
+                trend = row.get('rs_trend', '')
+                if pd.isna(rs) or rs is None:
+                    return '-'
+                icon = RS_TREND_ICONS.get(trend, '')
+                return f"{int(rs)}{icon}"
+            compact_df['RS'] = compact_df.apply(format_rs, axis=1)
+        else:
+            compact_df['RS'] = '-'
+
+        if 'daq_score' in compact_df.columns:
+            def format_daq(row):
+                score = row.get('daq_score')
+                grade = row.get('daq_grade', '')
+                if pd.isna(score) or score is None:
+                    return '-'
+                return f"{int(score)} {grade}" if grade else f"{int(score)}"
+            compact_df['DAQ'] = compact_df.apply(format_daq, axis=1)
+        else:
+            compact_df['DAQ'] = '-'
+
+        base_cols = ['ticker', 'RS', 'DAQ', 'Days', 'Price', 'Volume', 'RSI', '1D Chg']
+        if selected_watchlist in EVENT_WATCHLISTS:
+            base_cols = ['ticker', 'RS', 'DAQ', 'Price', 'Volume', 'RSI', '1D Chg']
+        compact_df = compact_df[base_cols].rename(columns={'ticker': 'Ticker'})
+        st.dataframe(compact_df, use_container_width=True, hide_index=True, height=420)
+
+        st.markdown("### Details")
+        ticker_list = df['ticker'].tolist()
+        selected_ticker = st.selectbox("Select stock", ticker_list, key="watchlist_compact_ticker")
+        detail_key = f"{detail_context}:{selected_ticker}"
+        if st.button(f"Load details for {selected_ticker}", key="watchlist_compact_load"):
+            st.session_state.watchlist_detail_key = detail_key
+            st.rerun()
+
+        if st.session_state.get("watchlist_detail_key") == detail_key:
+            detail_row = service.get_watchlist_detail(selected_watchlist, selected_ticker, selected_date)
+        else:
+            detail_row = None
+
+        if detail_row:
+            _render_trade_plan(detail_row)
+            if detail_row.get('daq_score') and not pd.isna(detail_row.get('daq_score')):
+                _render_daq_detail(detail_row)
+
+        if st.button(f"📈 Open {selected_ticker} Chart & Analysis", key="watchlist_compact_chart"):
+            st.session_state.chart_ticker = selected_ticker
+            st.session_state.current_chart_ticker = selected_ticker
+            components.html("""
+            <script>
+                const tabs = parent.document.querySelectorAll('[data-baseweb="tab"]');
+                if (tabs.length >= 8) {
+                    tabs[7].click();
+                }
+            </script>
+            """, height=0)
+
+    elif view_mode == "Table":
+        # Use all fetched data for display
+        df_display = df
+
+        # Format dataframe for display
+        display_df = df_display.copy()
+        display_df['Price'] = display_df['price'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
+        display_df['Volume'] = display_df['volume'].apply(lambda x: f"{x/1e6:.1f}M" if pd.notnull(x) else '-')
+        display_df['Avg Vol'] = display_df['avg_volume'].apply(lambda x: f"{x/1e6:.1f}M" if pd.notnull(x) else '-')
+        display_df['EMA 20'] = display_df['ema_20'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
+        display_df['EMA 50'] = display_df['ema_50'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
+        display_df['EMA 200'] = display_df['ema_200'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else '-')
+        display_df['RSI'] = display_df['rsi_14'].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else '-')
+        display_df['1D Chg'] = display_df['price_change_1d'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
+        display_df['Avg/Day'] = display_df['avg_daily_change_5d'].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else '-')
+
+        # Days column - for crossover watchlists this is days since crossover
+        display_df['Days'] = display_df['days_on_list'].apply(lambda x: f"{int(x)}d" if pd.notnull(x) else '1d')
+
+        # DAQ Score column - Deep Analysis Quality score if available
+        if 'daq_score' in display_df.columns:
+            def format_daq(row):
+                score = row.get('daq_score')
+                grade = row.get('daq_grade', '')
+                if pd.isna(score) or score is None:
+                    return '-'
+                return f"{int(score)} {grade}" if grade else f"{int(score)}"
+            display_df['DAQ'] = display_df.apply(format_daq, axis=1)
+        else:
+            display_df['DAQ'] = '-'
+
+        # RS Percentile column - color-coded relative strength
+        if 'rs_percentile' in display_df.columns:
+            def format_rs(row):
+                rs = row.get('rs_percentile')
+                trend = row.get('rs_trend', '')
+                if pd.isna(rs) or rs is None:
+                    return '-'
+                icon = RS_TREND_ICONS.get(trend, '')
+                return f"{int(rs)}{icon}"
+            display_df['RS'] = display_df.apply(format_rs, axis=1)
+        else:
+            display_df['RS'] = '-'
+
+        # In Trade column - shows if stock has open broker position with profit
+        def format_trade_status(row):
+            if row.get('in_trade'):
+                profit = row.get('trade_profit', 0) or 0
+                side = row.get('trade_side', 'BUY')
+                side_icon = '📈' if side == 'BUY' else '📉'
+                if profit >= 0:
+                    return f"{side_icon} +${profit:.0f}"
+                else:
+                    return f"{side_icon} -${abs(profit):.0f}"
+            return ''
+
+        display_df['Trade'] = display_df.apply(format_trade_status, axis=1)
+
+        # Crossover date formatting for crossover watchlists
+        if 'crossover_date' in display_df.columns and is_crossover:
+            display_df['Crossover'] = display_df['crossover_date'].apply(
+                lambda x: x.strftime('%m/%d') if pd.notnull(x) else '-'
+            )
+
+        # Conditional columns based on watchlist type
+        # Include Trade column if any stocks are in trade
+        has_trades = display_df['Trade'].any()
+        # Include DAQ column if any stocks have DAQ scores
+        has_daq = 'daq_score' in df_display.columns and df_display['daq_score'].notna().any()
+
+        if selected_watchlist == 'gap_up_continuation':
+            display_df['Gap %'] = display_df['gap_pct'].apply(lambda x: f"{x:+.1f}%" if pd.notnull(x) else '-')
+            cols = ['ticker', 'RS', 'Price', 'Gap %', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+            if has_daq:
+                cols.insert(2, 'DAQ')
+            if has_trades:
+                cols.insert(1, 'Trade')
+            result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
+        elif selected_watchlist == 'rsi_oversold_bounce':
+            cols = ['ticker', 'RS', 'Price', 'RSI', 'Volume', '1D Chg', 'Avg/Day']
+            if has_daq:
+                cols.insert(2, 'DAQ')
+            if has_trades:
+                cols.insert(1, 'Trade')
+            result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
+        elif selected_watchlist == 'macd_bullish_cross':
+            display_df['MACD'] = display_df['macd'].apply(lambda x: f"{x:.3f}" if pd.notnull(x) else '-')
+            cols = ['ticker', 'RS', 'Days', 'Crossover', 'Price', 'MACD', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+            if has_daq:
+                cols.insert(2, 'DAQ')
+            if has_trades:
+                cols.insert(1, 'Trade')
+            result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
+        else:
+            # EMA crossover watchlists
+            cols = ['ticker', 'RS', 'Days', 'Crossover', 'Price', 'Volume', 'RSI', '1D Chg', 'Avg/Day']
+            if has_daq:
+                cols.insert(2, 'DAQ')
+            if has_trades:
+                cols.insert(1, 'Trade')
+            result_df = display_df[cols].rename(columns={'ticker': 'Ticker'})
+
+        # Style functions
+        def style_change(val):
+            if '+' in str(val):
+                return 'color: #28a745; font-weight: bold;'
+            elif '-' in str(val) and val != '-':
+                return 'color: #dc3545;'
+            return ''
+
+        def style_rsi(val):
+            try:
+                rsi = float(val)
+                if rsi < 30:
+                    return 'background-color: #d4edda; color: #155724; font-weight: bold;'
+                elif rsi > 70:
+                    return 'background-color: #f8d7da; color: #721c24;'
+            except (ValueError, TypeError):
+                pass
+            return ''
+
+        def style_days(val):
+            """Highlight stocks that appear frequently (3+ days = pattern forming)"""
+            try:
+                days = int(val.replace('d', ''))
+                if days >= 5:
+                    return 'background-color: #cce5ff; color: #004085; font-weight: bold;'
+                elif days >= 3:
+                    return 'background-color: #fff3cd; color: #856404;'
+            except (ValueError, TypeError, AttributeError):
+                pass
+            return ''
+
+        def style_trade(val):
+            """Style the trade column - green for profit, red for loss"""
+            if not val:
+                return ''
+            if '+$' in str(val):
+                return 'background-color: #d4edda; color: #155724; font-weight: bold;'
+            elif '-$' in str(val):
+                return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
+            return ''
+
+        def style_rs(val):
+            """Style the RS column based on percentile value"""
+            if val == '-' or not val:
+                return ''
+            try:
+                # Extract number from string like "85↗️"
+                rs = int(''.join(filter(str.isdigit, str(val))))
+                if rs >= 90:
+                    return 'background-color: #d4edda; color: #155724; font-weight: bold;'  # Elite - green
+                elif rs >= 70:
+                    return 'background-color: #d1ecf1; color: #0c5460; font-weight: bold;'  # Strong - blue
+                elif rs >= 40:
+                    return 'background-color: #fff3cd; color: #856404;'  # Average - yellow
+                else:
+                    return 'background-color: #f8d7da; color: #721c24;'  # Weak - red
+            except (ValueError, TypeError):
+                pass
+            return ''
+
+        def style_daq(val):
+            """Style the DAQ column based on score and grade"""
+            if val == '-' or not val:
+                return ''
+            try:
+                # Extract score from string like "75 A" or "85 A+"
+                score = int(''.join(filter(str.isdigit, str(val).split()[0])))
+                if score >= 85:  # A+
+                    return 'background-color: #1e7e34; color: white; font-weight: bold;'
+                elif score >= 70:  # A
+                    return 'background-color: #28a745; color: white; font-weight: bold;'
+                elif score >= 60:  # B
+                    return 'background-color: #17a2b8; color: white;'
+                elif score >= 50:  # C
+                    return 'background-color: #ffc107; color: #212529;'
+                else:  # D
+                    return 'background-color: #6c757d; color: white;'
+            except (ValueError, TypeError, IndexError):
+                pass
+            return ''
+
+        styled_df = result_df.style.map(style_change, subset=['1D Chg'])
+        if 'Days' in result_df.columns:
+            styled_df = styled_df.map(style_days, subset=['Days'])
+        if 'RSI' in result_df.columns:
+            styled_df = styled_df.map(style_rsi, subset=['RSI'])
+        if 'Gap %' in result_df.columns:
+            styled_df = styled_df.map(style_change, subset=['Gap %'])
+        if 'Trade' in result_df.columns:
+            styled_df = styled_df.map(style_trade, subset=['Trade'])
+        if 'RS' in result_df.columns:
+            styled_df = styled_df.map(style_rs, subset=['RS'])
+        if 'DAQ' in result_df.columns:
+            styled_df = styled_df.map(style_daq, subset=['DAQ'])
+
         # Standard table view
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
     else:
+        import math
+
+        total_rows = len(df)
+        page_col1, page_col2 = st.columns([3, 1])
+        with page_col2:
+            page_size = st.selectbox(
+                "Rows",
+                options=[25, 50, 100, 200],
+                index=0,
+                key="watchlist_page_size",
+                help="Fewer rows renders faster"
+            )
+        total_pages = max(1, math.ceil(total_rows / page_size))
+        with page_col1:
+            page = st.number_input(
+                "Page",
+                min_value=1,
+                max_value=total_pages,
+                value=1,
+                step=1,
+                key="watchlist_page"
+            )
+
+        filter_col1, filter_col2 = st.columns([2, 2])
+        with filter_col1:
+            ticker_filter = st.text_input(
+                "Filter tickers",
+                value="",
+                key="watchlist_ticker_filter",
+                help="Type to reduce the number of expanders rendered"
+            )
+        with filter_col2:
+            focus_options = ["All"] + df['ticker'].tolist()
+            focus_ticker = st.selectbox(
+                "Focus",
+                focus_options,
+                index=0,
+                key="watchlist_focus_ticker",
+                help="Show a single ticker for faster detail loading"
+            )
+
         # Expandable view - table-like rows that expand to show DAQ details
         # Add CSS for table-like styling
         st.markdown("""
@@ -839,19 +984,30 @@ def render_watchlists_tab(service):
         else:
             df_sorted = df
 
+        if ticker_filter:
+            df_sorted = df_sorted[df_sorted['ticker'].str.contains(ticker_filter.upper(), na=False)]
+
+        if focus_ticker != "All":
+            df_sorted = df_sorted[df_sorted['ticker'] == focus_ticker]
+
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        df_page = df_sorted.iloc[start_idx:end_idx]
+
         # Rows with expanders
-        for idx, row in df_sorted.iterrows():
-            ticker = row['ticker']
-            price = row.get('price', 0) or 0
-            volume = row.get('volume', 0) or 0
-            rsi = row.get('rsi_14')
-            rs = row.get('rs_percentile')
-            rs_trend = row.get('rs_trend', '')
-            daq_score = row.get('daq_score')
-            daq_grade = row.get('daq_grade', '')
-            change_1d = row.get('price_change_1d', 0) or 0
-            avg_daily = row.get('avg_daily_change_5d', 0) or 0
-            days_on_list = row.get('days_on_list', 1) or 1
+        for row in df_page.itertuples(index=True):
+            row_dict = row._asdict()
+            ticker = row_dict.get('ticker')
+            price = row_dict.get('price', 0) or 0
+            volume = row_dict.get('volume', 0) or 0
+            rsi = row_dict.get('rsi_14')
+            rs = row_dict.get('rs_percentile')
+            rs_trend = row_dict.get('rs_trend', '')
+            daq_score = row_dict.get('daq_score')
+            daq_grade = row_dict.get('daq_grade', '')
+            change_1d = row_dict.get('price_change_1d', 0) or 0
+            avg_daily = row_dict.get('avg_daily_change_5d', 0) or 0
+            days_on_list = row_dict.get('days_on_list', 1) or 1
 
             # Format values
             price_str = f"${price:.2f}"
@@ -901,9 +1057,9 @@ def render_watchlists_tab(service):
 
             # Risk indicators for expander title
             risk_indicator = ""
-            if row.get('daq_earnings_risk'):
+            if row_dict.get('daq_earnings_risk'):
                 risk_indicator += " ⚠️"
-            if row.get('daq_high_short_interest'):
+            if row_dict.get('daq_high_short_interest'):
                 risk_indicator += " 🩳"
 
             # Build expander label with key metrics - more comprehensive header
@@ -914,7 +1070,7 @@ def render_watchlists_tab(service):
             change_sign = "+" if change_1d >= 0 else ""
 
             # Get crossover date for display
-            crossover_date = row.get('crossover_date')
+            crossover_date = row_dict.get('crossover_date')
             if crossover_date and not pd.isna(crossover_date):
                 crossover_str = f" | {crossover_date.strftime('%m/%d')}"
             else:
@@ -951,12 +1107,23 @@ def render_watchlists_tab(service):
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Trade Plan section - always show first as it's most actionable
-                _render_trade_plan(row.to_dict())
+                detail_key = f"{detail_context}:{ticker}"
+                selected_detail_key = st.session_state.get("watchlist_detail_key")
+                if selected_detail_key == detail_key:
+                    detail_row = service.get_watchlist_detail(selected_watchlist, ticker, selected_date)
+                else:
+                    detail_row = None
 
-                # DAQ detail breakdown (only if DAQ data exists)
-                if daq_score and not pd.isna(daq_score):
-                    _render_daq_detail(row.to_dict())
+                if st.button(f"Load details for {ticker}", key=f"wl_detail_{detail_key}"):
+                    st.session_state.watchlist_detail_key = detail_key
+                    st.rerun()
+
+                # Trade Plan and DAQ details only when explicitly loaded
+                if detail_row:
+                    detail_row['_row_idx'] = row_dict.get('Index')
+                    _render_trade_plan(detail_row)
+                    if detail_row.get('daq_score') and not pd.isna(detail_row.get('daq_score')):
+                        _render_daq_detail(detail_row)
 
                 # Button to open chart and analysis for this stock
                 if st.button(f"📈 Open {ticker} Chart & Analysis", key=f"chart_btn_{ticker}"):
