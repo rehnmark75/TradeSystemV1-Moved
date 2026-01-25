@@ -278,11 +278,12 @@ services:
 
   stock-scheduler:
     build:
-      context: ./worker
+      context: ./stock-scanner
+      dockerfile: Dockerfile
     container_name: stock-scheduler
     restart: unless-stopped
     volumes:
-      - ./worker/app:/app
+      - ./stock-scanner/app:/app
       - ./logs/stock-scheduler:/app/stock_scanner/logs
     environment:
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks

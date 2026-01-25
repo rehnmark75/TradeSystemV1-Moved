@@ -7,14 +7,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY worker/requirements.txt /app/requirements.txt
+COPY stock-scanner/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 RUN pip install --no-cache-dir fastapi uvicorn[standard]
 
-COPY worker/app /app/worker/app
+COPY stock-scanner/app /app/stock_scanner_lib
 COPY fastapi-general/app /app/app
 
-ENV PYTHONPATH=/app/worker/app
+ENV PYTHONPATH=/app/stock_scanner_lib
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8008
