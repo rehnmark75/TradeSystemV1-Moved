@@ -69,7 +69,6 @@ class Settings(BaseSettings):
 
 # Container health check endpoints
 HEALTH_ENDPOINTS = {
-    "fastapi-dev": "http://fastapi-dev:8000/health",
     "fastapi-prod": "http://fastapi-prod:8000/position-closer/health",
     "fastapi-stream": "http://fastapi-stream:8000/stream/health",
     "tradingview": "http://tradingview:8080/health",
@@ -79,7 +78,6 @@ HEALTH_ENDPOINTS = {
 
 # Custom headers for health checks (e.g., authentication bypass)
 HEALTH_HEADERS = {
-    "fastapi-dev": {"x-apim-gateway": "verified"},
     "fastapi-prod": {"x-apim-gateway": "verified"},
     "fastapi-stream": {"x-apim-gateway": "verified"},
 }
@@ -88,6 +86,7 @@ HEALTH_HEADERS = {
 TCP_CHECK_CONTAINERS = {
     "postgres": ("postgres", 5432),
     "nginx": ("nginx", 80),
+    "fastapi-dev": ("fastapi-dev", 8000),  # Health endpoint times out, use TCP check instead
 }
 
 # Container descriptions for UI

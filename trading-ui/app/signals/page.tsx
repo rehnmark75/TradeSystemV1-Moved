@@ -116,6 +116,15 @@ type SignalStats = {
   by_scanner: Array<{ scanner_name: string; signal_count: number; avg_score: number; active_count: number }>;
 };
 
+type NoteEntry = {
+  id: number;
+  ticker: string;
+  note_text: string;
+  context: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 const numberOrNull = (value: unknown) => {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -273,6 +282,13 @@ export default function SignalsPage() {
   const [maOpen, setMaOpen] = useState<Record<number, boolean>>({});
   const [claudeLoading, setClaudeLoading] = useState<Record<number, boolean>>({});
   const [claudeMessage, setClaudeMessage] = useState<Record<number, string>>({});
+  const [notes, setNotes] = useState<Record<string, NoteEntry[]>>({});
+  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
+  const [noteLoading, setNoteLoading] = useState<Record<string, boolean>>({});
+  const [noteMessage, setNoteMessage] = useState<Record<string, string>>({});
+  const [noteEditing, setNoteEditing] = useState<Record<string, number | null>>({});
+  const [noteEditDraft, setNoteEditDraft] = useState<Record<string, string>>({});
+  const [notesOpen, setNotesOpen] = useState<Record<string, boolean>>({});
 
   const [scannerFilter, setScannerFilter] = useState("All Scanners");
   const [tierFilter, setTierFilter] = useState("All Tiers");
@@ -343,8 +359,12 @@ export default function SignalsPage() {
     loadSignals();
   }, [scannerFilter, tierFilter, statusFilter, claudeFilter, dateFrom, dateTo, rsFilter, rsTrendFilter, orderBy]);
 
-  const toggleExpand = (id: number) => {
-    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleExpand = async (signal: SignalRow) => {
+    const next = !expanded[signal.id];
+    setExpanded((prev) => ({ ...prev, [signal.id]: next }));
+    if (next) {
+      await loadNotes(signal.ticker);
+    }
   };
 
   const riskBadges = (signal: SignalRow) => {
@@ -376,6 +396,87 @@ export default function SignalsPage() {
       }
     }
     setClaudeLoading((prev) => ({ ...prev, [signal.id]: false }));
+  };
+
+  const loadNotes = async (ticker: string, force = false) => {
+    if (notes[ticker] && !force) return;
+    setNoteLoading((prev) => ({ ...prev, [ticker]: true }));
+    const res = await fetch(`${apiPath("notes")}?ticker=${encodeURIComponent(ticker)}&context=signals`);
+    const data = await res.json();
+    setNotes((prev) => ({ ...prev, [ticker]: data.rows || [] }));
+    setNoteLoading((prev) => ({ ...prev, [ticker]: false }));
+  };
+
+  const saveNote = async (ticker: string) => {
+    const text = (noteDraft[ticker] || "").trim();
+    if (!text) return;
+    setNoteLoading((prev) => ({ ...prev, [ticker]: true }));
+    setNoteMessage((prev) => ({ ...prev, [ticker]: "" }));
+    const res = await fetch(`${apiPath("notes")}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker, note: text, context: "signals" })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setNoteMessage((prev) => ({ ...prev, [ticker]: data?.error || "Failed to save note." }));
+    } else {
+      setNoteDraft((prev) => ({ ...prev, [ticker]: "" }));
+      await loadNotes(ticker, true);
+      setNoteMessage((prev) => ({ ...prev, [ticker]: "Note saved." }));
+    }
+    setNoteLoading((prev) => ({ ...prev, [ticker]: false }));
+  };
+
+  const saveNoteEdit = async (ticker: string) => {
+    const noteId = noteEditing[ticker];
+    const text = (noteEditDraft[ticker] || "").trim();
+    if (!noteId || !text) return;
+    setNoteLoading((prev) => ({ ...prev, [ticker]: true }));
+    setNoteMessage((prev) => ({ ...prev, [ticker]: "" }));
+    const res = await fetch(`${apiPath("notes")}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: noteId, note: text })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setNoteMessage((prev) => ({ ...prev, [ticker]: data?.error || "Failed to update note." }));
+    } else {
+      setNoteEditing((prev) => ({ ...prev, [ticker]: null }));
+      setNoteEditDraft((prev) => ({ ...prev, [ticker]: "" }));
+      await loadNotes(ticker, true);
+      setNoteMessage((prev) => ({ ...prev, [ticker]: "Note updated." }));
+    }
+    setNoteLoading((prev) => ({ ...prev, [ticker]: false }));
+  };
+
+  const deleteNote = async (ticker: string, noteId: number) => {
+    setNoteLoading((prev) => ({ ...prev, [ticker]: true }));
+    setNoteMessage((prev) => ({ ...prev, [ticker]: "" }));
+    const res = await fetch(`${apiPath("notes")}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: noteId })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setNoteMessage((prev) => ({ ...prev, [ticker]: data?.error || "Failed to delete note." }));
+    } else {
+      await loadNotes(ticker, true);
+      setNoteMessage((prev) => ({ ...prev, [ticker]: "Note deleted." }));
+    }
+    setNoteLoading((prev) => ({ ...prev, [ticker]: false }));
+  };
+
+  const formatNoteTime = (value: string | null | undefined) => {
+    if (!value) return "";
+    return new Date(value).toLocaleString("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
   };
 
   return (
@@ -508,7 +609,7 @@ export default function SignalsPage() {
               return (
                 <div>
                   <div className={`signals-row ${expandedRow ? "row-expanded" : ""}`}>
-                    <button className="expand-btn" onClick={() => toggleExpand(signal.id)} aria-label="Toggle details">
+                    <button className="expand-btn" onClick={() => toggleExpand(signal)} aria-label="Toggle details">
                       {expandedRow ? "▾" : "▸"}
                     </button>
                     <span className="ticker-btn">{signal.ticker}</span>
@@ -523,6 +624,90 @@ export default function SignalsPage() {
 
                   {expandedRow ? (
                     <div>
+                      <div className="detail-section notes-panel">
+                        <button
+                          className="detail-toggle"
+                          onClick={() => setNotesOpen((prev) => ({ ...prev, [signal.ticker]: !prev[signal.ticker] }))}
+                        >
+                          {notesOpen[signal.ticker] ? "▾" : "▸"} Notes & Journal ({notes[signal.ticker]?.length ?? 0})
+                        </button>
+                        {notesOpen[signal.ticker] ? (
+                          <div className="notes-content">
+                            <textarea
+                              value={noteDraft[signal.ticker] || ""}
+                              onChange={(e) => setNoteDraft((prev) => ({ ...prev, [signal.ticker]: e.target.value }))}
+                              placeholder="Add thesis, risk plan, or post-mortem notes..."
+                            />
+                            <div className="notes-actions">
+                              <button
+                                className="notes-btn"
+                                onClick={() => saveNote(signal.ticker)}
+                                disabled={noteLoading[signal.ticker] || !(noteDraft[signal.ticker] || "").trim()}
+                              >
+                                {noteLoading[signal.ticker] ? "Saving..." : "Save note"}
+                              </button>
+                              {noteMessage[signal.ticker] ? <span className="notes-status">{noteMessage[signal.ticker]}</span> : null}
+                            </div>
+                            <div className="notes-list">
+                              {noteLoading[signal.ticker] && !notes[signal.ticker] ? (
+                                <div className="footer-note">Loading notes...</div>
+                              ) : notes[signal.ticker]?.length ? (
+                                notes[signal.ticker]?.map((note) => (
+                                  <div className="note-item" key={note.id}>
+                                    <div className="note-meta">
+                                      {formatNoteTime(note.created_at)}
+                                      <span className="note-actions">
+                                        <button
+                                          className="note-link"
+                                          onClick={() => {
+                                            setNoteEditing((prev) => ({ ...prev, [signal.ticker]: note.id }));
+                                            setNoteEditDraft((prev) => ({ ...prev, [signal.ticker]: note.note_text }));
+                                          }}
+                                        >
+                                          Edit
+                                        </button>
+                                        <button className="note-link danger" onClick={() => deleteNote(signal.ticker, note.id)}>
+                                          Delete
+                                        </button>
+                                      </span>
+                                    </div>
+                                    {noteEditing[signal.ticker] === note.id ? (
+                                      <div>
+                                        <textarea
+                                          value={noteEditDraft[signal.ticker] || ""}
+                                          onChange={(e) => setNoteEditDraft((prev) => ({ ...prev, [signal.ticker]: e.target.value }))}
+                                        />
+                                        <div className="notes-actions">
+                                          <button
+                                            className="notes-btn"
+                                            onClick={() => saveNoteEdit(signal.ticker)}
+                                            disabled={noteLoading[signal.ticker] || !(noteEditDraft[signal.ticker] || "").trim()}
+                                          >
+                                            {noteLoading[signal.ticker] ? "Saving..." : "Save edit"}
+                                          </button>
+                                          <button
+                                            className="notes-btn secondary"
+                                            onClick={() => {
+                                              setNoteEditing((prev) => ({ ...prev, [signal.ticker]: null }));
+                                              setNoteEditDraft((prev) => ({ ...prev, [signal.ticker]: "" }));
+                                            }}
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="note-text">{note.note_text}</div>
+                                    )}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="footer-note">No notes yet.</div>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
                       <div className="expander">
                         <div>
                           <h4>Trade Plan (3% SL / 5% TP)</h4>

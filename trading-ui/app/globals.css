@@ -199,7 +199,7 @@ input {
 
 .list-header {
   display: grid;
-  grid-template-columns: 30px 80px 70px 80px 70px 70px 80px 80px 80px 70px 90px;
+  grid-template-columns: 30px 80px 70px 80px 70px 70px 80px 80px 80px 70px 50px 50px 50px;
   gap: 10px;
   font-size: 0.75rem;
   color: #6e6254;
@@ -223,7 +223,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: 30px 80px 70px 80px 70px 70px 80px 80px 80px 70px 90px;
+  grid-template-columns: 30px 80px 70px 80px 70px 70px 80px 80px 80px 70px 50px 50px 50px;
   gap: 10px;
   align-items: center;
   padding: 8px 12px;
@@ -402,6 +402,134 @@ input {
   border: 1px solid #efe2cc;
   border-radius: 10px;
   background: #fff;
+}
+
+.notes-panel {
+  background: #fff7eb;
+}
+
+.notes-content {
+  padding: 12px;
+}
+
+.notes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.notes-header h4 {
+  margin: 0;
+  color: var(--accent);
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.notes-meta {
+  font-size: 0.75rem;
+  color: #6e6254;
+}
+
+.notes-panel textarea {
+  width: 100%;
+  min-height: 90px;
+  border-radius: 8px;
+  border: 1px solid #efe2cc;
+  padding: 8px;
+  font-family: "IBM Plex Sans", sans-serif;
+  background: #fff;
+  resize: vertical;
+}
+
+.note-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.note-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.note-link.danger {
+  color: #b42318;
+}
+
+.notes-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.notes-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notes-btn.secondary {
+  background: #ead8c1;
+  color: #5b4a3a;
+}
+
+.notes-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.notes-status {
+  font-size: 0.8rem;
+  color: #6e6254;
+}
+
+.notes-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.note-item {
+  border: 1px solid #efe2cc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.note-meta {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #a08e79;
+  margin-bottom: 4px;
+}
+
+.note-text {
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+  color: #2f2418;
+}
+
+.note-item textarea {
+  width: 100%;
+  min-height: 70px;
+  border-radius: 8px;
+  border: 1px solid #efe2cc;
+  padding: 6px;
+  font-family: "IBM Plex Sans", sans-serif;
+  background: #fff;
+  resize: vertical;
 }
 
 .detail-toggle {
@@ -970,7 +1098,7 @@ input {
 
   .list-header,
   .row {
-    grid-template-columns: 24px 70px 60px 70px 60px 60px 70px 70px 70px 60px 80px;
+    grid-template-columns: 24px 70px 60px 70px 60px 60px 70px 70px 70px 60px 40px 40px 40px;
   }
 
   .signals-header,

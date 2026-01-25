@@ -43,6 +43,9 @@ export async function GET(request: Request) {
           w.rs_trend,
           m.tv_overall_score,
           m.tv_overall_signal,
+          m.perf_1w,
+          m.perf_1m,
+          m.perf_3m,
           COALESCE(i.exchange, 'NASDAQ') as exchange
         FROM stock_watchlist_results w
         LEFT JOIN stock_instruments i ON w.ticker = i.ticker
@@ -82,6 +85,9 @@ export async function GET(request: Request) {
         w.rs_trend,
         m.tv_overall_score,
         m.tv_overall_signal,
+        m.perf_1w,
+        m.perf_1m,
+        m.perf_3m,
         COALESCE(i.exchange, 'NASDAQ') as exchange
       FROM stock_watchlist_results w
       LEFT JOIN stock_instruments i ON w.ticker = i.ticker

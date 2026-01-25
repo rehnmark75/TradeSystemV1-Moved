@@ -7,6 +7,7 @@ RUN npm install
 
 COPY app ./app
 COPY lib ./lib
+COPY components ./components
 
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build

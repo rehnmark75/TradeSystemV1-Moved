@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import Link from "next/link";
 import { WATCHLIST_DEFINITIONS } from "../../lib/watchlists";
+import { PositionSizingCalculator } from "../../components/PositionSizingCalculator";
+import { TimeframeBadgesCompact } from "../../components/TimeframeBadges";
 
 type WatchlistRow = {
   ticker: string;
@@ -29,6 +31,9 @@ type WatchlistRow = {
   rs_trend: string | null;
   tv_overall_score: number | null;
   tv_overall_signal: string | null;
+  perf_1w: number | null;
+  perf_1m: number | null;
+  perf_3m: number | null;
   exchange: string | null;
 };
 
@@ -96,6 +101,9 @@ type WatchlistDetail = WatchlistRow & {
   sma_200: number | null;
   ichimoku_base: number | null;
   vwma_20: number | null;
+  perf_1w: number | null;
+  perf_1m: number | null;
+  perf_3m: number | null;
   claude_grade: string | null;
   claude_score: number | null;
   claude_action: string | null;
@@ -107,6 +115,15 @@ type WatchlistDetail = WatchlistRow & {
   claude_stop_adjustment: string | null;
   claude_time_horizon: string | null;
   claude_analyzed_at: string | null;
+};
+
+type NoteEntry = {
+  id: number;
+  ticker: string;
+  note_text: string;
+  context: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 const CROSSOVER = new Set(["ema_50_crossover", "ema_20_crossover", "macd_bullish_cross"]);
@@ -131,6 +148,13 @@ export default function Page() {
   const [maOpen, setMaOpen] = useState<Record<string, boolean>>({});
   const [claudeLoading, setClaudeLoading] = useState<Record<string, boolean>>({});
   const [claudeMessage, setClaudeMessage] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, NoteEntry[]>>({});
+  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
+  const [noteLoading, setNoteLoading] = useState<Record<string, boolean>>({});
+  const [noteMessage, setNoteMessage] = useState<Record<string, string>>({});
+  const [noteEditing, setNoteEditing] = useState<Record<string, number | null>>({});
+  const [noteEditDraft, setNoteEditDraft] = useState<Record<string, string>>({});
+  const [notesOpen, setNotesOpen] = useState<Record<string, boolean>>({});
   const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days">("signal");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
@@ -242,11 +266,85 @@ export default function Page() {
     setDetails((prev) => ({ ...prev, [ticker]: data.row || null }));
   };
 
+  const loadNotes = async (ticker: string, force = false) => {
+    if (notes[ticker] && !force) return;
+    setNoteLoading((prev) => ({ ...prev, [ticker]: true }));
+    const res = await fetch(`${apiPath("notes")}?ticker=${encodeURIComponent(ticker)}&context=watchlist`);
+    const data = await res.json();
+    setNotes((prev) => ({ ...prev, [ticker]: data.rows || [] }));
+    setNoteLoading((prev) => ({ ...prev, [ticker]: false }));
+  };
+
+  const saveNote = async (ticker: string) => {
+    const text = (noteDraft[ticker] || "").trim();
+    if (!text) return;
+    setNoteLoading((prev) => ({ ...prev, [ticker]: true }));
+    setNoteMessage((prev) => ({ ...prev, [ticker]: "" }));
+    const res = await fetch(`${apiPath("notes")}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker, note: text, context: "watchlist" })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setNoteMessage((prev) => ({ ...prev, [ticker]: data?.error || "Failed to save note." }));
+    } else {
+      setNoteDraft((prev) => ({ ...prev, [ticker]: "" }));
+      await loadNotes(ticker, true);
+      setNoteMessage((prev) => ({ ...prev, [ticker]: "Note saved." }));
+    }
+    setNoteLoading((prev) => ({ ...prev, [ticker]: false }));
+  };
+
+  const saveNoteEdit = async (ticker: string) => {
+    const noteId = noteEditing[ticker];
+    const text = (noteEditDraft[ticker] || "").trim();
+    if (!noteId || !text) return;
+    setNoteLoading((prev) => ({ ...prev, [ticker]: true }));
+    setNoteMessage((prev) => ({ ...prev, [ticker]: "" }));
+    const res = await fetch(`${apiPath("notes")}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: noteId, note: text })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setNoteMessage((prev) => ({ ...prev, [ticker]: data?.error || "Failed to update note." }));
+    } else {
+      setNoteEditing((prev) => ({ ...prev, [ticker]: null }));
+      setNoteEditDraft((prev) => ({ ...prev, [ticker]: "" }));
+      await loadNotes(ticker, true);
+      setNoteMessage((prev) => ({ ...prev, [ticker]: "Note updated." }));
+    }
+    setNoteLoading((prev) => ({ ...prev, [ticker]: false }));
+  };
+
+  const deleteNote = async (ticker: string, noteId: number) => {
+    setNoteLoading((prev) => ({ ...prev, [ticker]: true }));
+    setNoteMessage((prev) => ({ ...prev, [ticker]: "" }));
+    const res = await fetch(`${apiPath("notes")}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: noteId })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setNoteMessage((prev) => ({ ...prev, [ticker]: data?.error || "Failed to delete note." }));
+    } else {
+      await loadNotes(ticker, true);
+      setNoteMessage((prev) => ({ ...prev, [ticker]: "Note deleted." }));
+    }
+    setNoteLoading((prev) => ({ ...prev, [ticker]: false }));
+  };
+
   const toggleExpand = async (ticker: string) => {
     const next = !expanded[ticker];
     setExpanded((prev) => ({ ...prev, [ticker]: next }));
     if (next && !details[ticker]) {
       await loadDetails(ticker);
+    }
+    if (next) {
+      await loadNotes(ticker);
     }
   };
 
@@ -285,6 +383,16 @@ export default function Page() {
   const formatList = (value: string[] | string | null | undefined) => {
     if (!value) return "";
     return Array.isArray(value) ? value.join(", ") : value;
+  };
+
+  const formatNoteTime = (value: string | null | undefined) => {
+    if (!value) return "";
+    return new Date(value).toLocaleString("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
   };
 
   const classifyRsi = (rsi: unknown) => {
@@ -455,6 +563,8 @@ export default function Page() {
       </div>
 
       <div className="panel">
+        <PositionSizingCalculator />
+
         <div className="controls">
           <div>
             <label>Watchlist</label>
@@ -532,6 +642,8 @@ export default function Page() {
           <span>Volume</span>
           <span>RSI</span>
           <span>1D</span>
+          <span>W</span>
+          <span>M</span>
         </div>
 
         {loading ? (
@@ -614,10 +726,120 @@ export default function Page() {
                         ? `${Number(row.price_change_1d).toFixed(1)}%`
                         : "-"}
                     </span>
+                    <span
+                      className={
+                        row.perf_1w !== null && row.perf_1w !== undefined
+                          ? Number(row.perf_1w) >= 0
+                            ? "pill good"
+                            : "pill bad"
+                          : ""
+                      }
+                    >
+                      {row.perf_1w !== null && row.perf_1w !== undefined
+                        ? `${Number(row.perf_1w) >= 0 ? "+" : ""}${Number(row.perf_1w).toFixed(1)}%`
+                        : "-"}
+                    </span>
+                    <span
+                      className={
+                        row.perf_1m !== null && row.perf_1m !== undefined
+                          ? Number(row.perf_1m) >= 0
+                            ? "pill good"
+                            : "pill bad"
+                          : ""
+                      }
+                    >
+                      {row.perf_1m !== null && row.perf_1m !== undefined
+                        ? `${Number(row.perf_1m) >= 0 ? "+" : ""}${Number(row.perf_1m).toFixed(1)}%`
+                        : "-"}
+                    </span>
                   </div>
 
                   {expandedRow ? (
                     <div>
+                      <div className="detail-section notes-panel">
+                        <button
+                          className="detail-toggle"
+                          onClick={() => setNotesOpen((prev) => ({ ...prev, [row.ticker]: !prev[row.ticker] }))}
+                        >
+                          {notesOpen[row.ticker] ? "▾" : "▸"} Notes & Journal ({notes[row.ticker]?.length ?? 0})
+                        </button>
+                        {notesOpen[row.ticker] ? (
+                          <div className="notes-content">
+                            <textarea
+                              value={noteDraft[row.ticker] || ""}
+                              onChange={(e) => setNoteDraft((prev) => ({ ...prev, [row.ticker]: e.target.value }))}
+                              placeholder="Add thesis, risk plan, or post-mortem notes..."
+                            />
+                            <div className="notes-actions">
+                              <button
+                                className="notes-btn"
+                                onClick={() => saveNote(row.ticker)}
+                                disabled={noteLoading[row.ticker] || !(noteDraft[row.ticker] || "").trim()}
+                              >
+                                {noteLoading[row.ticker] ? "Saving..." : "Save note"}
+                              </button>
+                              {noteMessage[row.ticker] ? <span className="notes-status">{noteMessage[row.ticker]}</span> : null}
+                            </div>
+                            <div className="notes-list">
+                              {noteLoading[row.ticker] && !notes[row.ticker] ? (
+                                <div className="footer-note">Loading notes...</div>
+                              ) : notes[row.ticker]?.length ? (
+                                notes[row.ticker]?.map((note) => (
+                                  <div className="note-item" key={note.id}>
+                                    <div className="note-meta">
+                                      {formatNoteTime(note.created_at)}
+                                      <span className="note-actions">
+                                        <button
+                                          className="note-link"
+                                          onClick={() => {
+                                            setNoteEditing((prev) => ({ ...prev, [row.ticker]: note.id }));
+                                            setNoteEditDraft((prev) => ({ ...prev, [row.ticker]: note.note_text }));
+                                          }}
+                                        >
+                                          Edit
+                                        </button>
+                                        <button className="note-link danger" onClick={() => deleteNote(row.ticker, note.id)}>
+                                          Delete
+                                        </button>
+                                      </span>
+                                    </div>
+                                    {noteEditing[row.ticker] === note.id ? (
+                                      <div>
+                                        <textarea
+                                          value={noteEditDraft[row.ticker] || ""}
+                                          onChange={(e) => setNoteEditDraft((prev) => ({ ...prev, [row.ticker]: e.target.value }))}
+                                        />
+                                        <div className="notes-actions">
+                                          <button
+                                            className="notes-btn"
+                                            onClick={() => saveNoteEdit(row.ticker)}
+                                            disabled={noteLoading[row.ticker] || !(noteEditDraft[row.ticker] || "").trim()}
+                                          >
+                                            {noteLoading[row.ticker] ? "Saving..." : "Save edit"}
+                                          </button>
+                                          <button
+                                            className="notes-btn secondary"
+                                            onClick={() => {
+                                              setNoteEditing((prev) => ({ ...prev, [row.ticker]: null }));
+                                              setNoteEditDraft((prev) => ({ ...prev, [row.ticker]: "" }));
+                                            }}
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="note-text">{note.note_text}</div>
+                                    )}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="footer-note">No notes yet.</div>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
                       <div className="expander">
                         <div>
                           <h4>Trade Plan</h4>
