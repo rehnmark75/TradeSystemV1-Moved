@@ -54,7 +54,7 @@ class Settings(BaseSettings):
         "fastapi-stream",
         "task-worker",
         "nginx",
-        "stock-scheduler"
+        "stock-scanner"
     ]
 
     # Containers to exclude from monitoring (run-once, temporary, or irrelevant)
@@ -101,7 +101,7 @@ CONTAINER_DESCRIPTIONS = {
     "vector-db": "Vector Database - Semantic search (ChromaDB)",
     "economic-calendar": "Economic Calendar - Event scraping",
     "task-worker": "Task Worker - Background jobs & forex scanner",
-    "stock-scheduler": "Stock Scheduler - Daily stock data updates & weekly instrument sync",
+    "stock-scanner": "Stock Scheduler - Daily stock data updates & weekly instrument sync",
     "db-backup": "Database Backup - Automated backups",
     "pgadmin": "PgAdmin - Database management UI",
     "certbot": "Certbot - SSL certificate management",

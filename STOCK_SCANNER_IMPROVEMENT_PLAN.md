@@ -12,7 +12,7 @@ After analyzing the stock scanner system, I've identified the current state and 
 
 ```
 ┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│  stock-scheduler    │────▶│     PostgreSQL      │◀────│     Streamlit       │
+│  stock-scanner    │────▶│     PostgreSQL      │◀────│     Streamlit       │
 │  (task-worker)      │     │    (stocks DB)      │     │   (stock_scanner)   │
 └─────────────────────┘     └─────────────────────┘     └─────────────────────┘
          │
@@ -30,7 +30,7 @@ After analyzing the stock scanner system, I've identified the current state and 
 
 | Component | Status | Data Freshness |
 |-----------|--------|----------------|
-| stock-scheduler | Running | Up 2 days |
+| stock-scanner | Running | Up 2 days |
 | Latest candles | 2025-12-08 20:30 | ~16 hours old |
 | Watchlist | 2025-12-08 | Yesterday's data |
 | ZLMA signals | 74 signals | 2025-12-05 only |
@@ -252,7 +252,7 @@ Adjust scoring weights based on:
 ### Today (Critical)
 1. **Verify Pipeline Will Run Tonight**
    ```bash
-   docker logs stock-scheduler --tail 5
+   docker logs stock-scanner --tail 5
    # Should show: "Next task: pipeline at 2025-12-09 22:30 EST"
    ```
 
@@ -297,7 +297,7 @@ SCAN_SCHEDULE = {
 ```
 
 ### docker-compose.yml
-No changes needed - stock-scheduler already configured to run continuously.
+No changes needed - stock-scanner already configured to run continuously.
 
 ---
 

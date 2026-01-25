@@ -26,7 +26,7 @@ docker exec -it task-worker bash
 
 ```bash
 # ✅ CORRECT - Use docker compose (v2, space-separated)
-docker compose up -d stock-scheduler
+docker compose up -d stock-scanner
 docker compose restart task-worker
 docker compose logs -f fastapi-dev
 
@@ -38,13 +38,13 @@ docker-compose up -d  # OLD VERSION - causes ContainerConfig errors
 
 ```bash
 # Restart a single container (safest)
-docker restart stock-scheduler
+docker restart stock-scanner
 
 # Recreate single container with new config (use --no-deps!)
-docker compose up -d --no-deps --force-recreate stock-scheduler
+docker compose up -d --no-deps --force-recreate stock-scanner
 
 # View logs
-docker compose logs -f --tail 100 stock-scheduler
+docker compose logs -f --tail 100 stock-scanner
 
 # Check container status
 docker ps --format "table {{.Names}}\t{{.Status}}"
@@ -53,10 +53,10 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 **⚠️ NEVER run these without `--no-deps` flag:**
 ```bash
 # DANGEROUS - may recreate dependent containers like postgres!
-docker compose up -d stock-scheduler  # Without --no-deps
+docker compose up -d stock-scanner  # Without --no-deps
 
 # SAFE - only affects the specified container
-docker compose up -d --no-deps stock-scheduler
+docker compose up -d --no-deps stock-scanner
 ```
 
 ---

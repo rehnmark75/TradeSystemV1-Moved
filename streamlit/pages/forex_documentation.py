@@ -505,7 +505,7 @@ def render_container_details_section():
         {"Container": "nginx", "Port": "80/443", "Purpose": "Reverse proxy, SSL termination", "Entry Point": "-", "Config": "nginx.conf"},
         {"Container": "pgadmin", "Port": "4445", "Purpose": "Database administration UI", "Entry Point": "-", "Config": "-"},
         {"Container": "db-backup", "Port": "-", "Purpose": "Scheduled database backups", "Entry Point": "enhanced_backup.sh", "Config": "-"},
-        {"Container": "stock-scheduler", "Port": "-", "Purpose": "Stock scanner scheduler", "Entry Point": "scheduler.py", "Config": "-"},
+        {"Container": "stock-scanner", "Port": "-", "Purpose": "Stock scanner scheduler", "Entry Point": "scheduler.py", "Config": "-"},
     ]
 
     df = pd.DataFrame(containers_data)

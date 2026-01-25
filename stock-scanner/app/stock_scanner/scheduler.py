@@ -19,24 +19,24 @@ Full Pipeline Stages:
 
 Usage:
     # Run full pipeline once
-    docker exec stock-scheduler python -m stock_scanner.scheduler pipeline
+    docker exec stock-scanner python -m stock_scanner.scheduler pipeline
 
     # Run individual stages
-    docker exec stock-scheduler python -m stock_scanner.scheduler sync
-    docker exec stock-scheduler python -m stock_scanner.scheduler synthesize
-    docker exec stock-scheduler python -m stock_scanner.scheduler metrics
-    docker exec stock-scheduler python -m stock_scanner.scheduler smc
-    docker exec stock-scheduler python -m stock_scanner.scheduler watchlist
-    docker exec stock-scheduler python -m stock_scanner.scheduler signals
-    docker exec stock-scheduler python -m stock_scanner.scheduler scanners
+    docker exec stock-scanner python -m stock_scanner.scheduler sync
+    docker exec stock-scanner python -m stock_scanner.scheduler synthesize
+    docker exec stock-scanner python -m stock_scanner.scheduler metrics
+    docker exec stock-scanner python -m stock_scanner.scheduler smc
+    docker exec stock-scanner python -m stock_scanner.scheduler watchlist
+    docker exec stock-scanner python -m stock_scanner.scheduler signals
+    docker exec stock-scanner python -m stock_scanner.scheduler scanners
 
     # Run quick scans
-    docker exec stock-scheduler python -m stock_scanner.scheduler premarket
-    docker exec stock-scheduler python -m stock_scanner.scheduler intraday
-    docker exec stock-scheduler python -m stock_scanner.scheduler postmarket
+    docker exec stock-scanner python -m stock_scanner.scheduler premarket
+    docker exec stock-scanner python -m stock_scanner.scheduler intraday
+    docker exec stock-scanner python -m stock_scanner.scheduler postmarket
 
     # Run continuous scheduler
-    docker exec stock-scheduler python -m stock_scanner.scheduler run
+    docker exec stock-scanner python -m stock_scanner.scheduler run
 """
 
 import asyncio

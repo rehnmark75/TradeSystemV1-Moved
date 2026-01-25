@@ -276,15 +276,15 @@ services:
       - postgres
       - minio
 
-  stock-scheduler:
+  stock-scanner:
     build:
       context: ./stock-scanner
       dockerfile: Dockerfile
-    container_name: stock-scheduler
+    container_name: stock-scanner
     restart: unless-stopped
     volumes:
       - ./stock-scanner/app:/app
-      - ./logs/stock-scheduler:/app/stock_scanner/logs
+      - ./logs/stock-scanner:/app/stock_scanner/logs
     environment:
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
