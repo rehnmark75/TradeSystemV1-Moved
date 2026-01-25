@@ -44,6 +44,7 @@ import logging
 import sys
 import os
 from datetime import datetime, time, timedelta, date
+from typing import Optional, Tuple
 import pytz
 
 sys.path.insert(0, '/app')
@@ -68,6 +69,14 @@ try:
 except ImportError:
     SCANNER_MANAGER_AVAILABLE = False
     ScannerManager = None
+
+# Analyst recommendations (Finnhub)
+try:
+    from stock_scanner.core.analyst import AnalystRecommendationService
+    ANALYST_RECO_AVAILABLE = True
+except ImportError:
+    ANALYST_RECO_AVAILABLE = False
+    AnalystRecommendationService = None
 
 # Import performance tracker
 try:
@@ -259,6 +268,61 @@ class StockScheduler:
                 logger.info("Pre-Market Service initialized (Finnhub)")
             else:
                 logger.warning("Pre-Market Service skipped - FINNHUB_API_KEY not configured")
+
+    async def refresh_watchlist_recommendations(
+        self,
+        scan_date: Optional[str] = None,
+        max_per_run: Optional[int] = None,
+        force_refresh: bool = False,
+    ):
+        """Refresh Finnhub analyst recommendations for watchlist tickers."""
+        if not ANALYST_RECO_AVAILABLE:
+            logger.warning("Analyst recommendation service not available")
+            return
+
+        if not config.FINNHUB_API_KEY:
+            logger.warning("FINNHUB_API_KEY not configured - skipping recommendations")
+            return
+
+        limit = max_per_run or config.FINNHUB_RECO_MAX_PER_SCAN
+
+        parsed_date = None
+        if scan_date:
+            try:
+                parsed_date = datetime.strptime(scan_date, "%Y-%m-%d").date()
+            except ValueError:
+                logger.warning(f"Invalid scan_date format: {scan_date} (expected YYYY-MM-DD)")
+
+        query = """
+            SELECT DISTINCT ticker
+            FROM stock_watchlist_results
+            WHERE scan_date = COALESCE($1::date, (
+                SELECT MAX(scan_date) FROM stock_watchlist_results
+            ))
+        """
+        rows = await self.db.fetch(query, parsed_date)
+        tickers = [r["ticker"] for r in rows]
+
+        if not tickers:
+            logger.info("No watchlist tickers found for recommendation refresh")
+            return
+
+        service = AnalystRecommendationService(
+            db_manager=self.db,
+            finnhub_api_key=config.FINNHUB_API_KEY,
+            cache_ttl_hours=config.FINNHUB_RECO_CACHE_TTL_HOURS,
+        )
+
+        result = await service.enrich_tickers(
+            tickers=tickers,
+            max_per_run=limit,
+            force_refresh=force_refresh,
+        )
+
+        logger.info(
+            "[RECO] Watchlist recommendations: "
+            f"{result.get('successful', 0)}/{result.get('attempted', 0)} updated"
+        )
 
         logger.info("Enhanced Stock Scheduler initialized")
 
@@ -1453,7 +1517,7 @@ class StockScheduler:
         self.running = False
 
 
-async def run_once(task: str):
+async def run_once(task: str, scan_date: Optional[str] = None, limit: Optional[int] = None, force: bool = False):
     """Run a specific task once"""
     scheduler = StockScheduler()
     await scheduler.setup()
@@ -1493,6 +1557,12 @@ async def run_once(task: str):
             await scheduler.run_pre_market_scan()
         elif task == "premarketpricing":
             await scheduler.run_premarket_pricing_scan()
+        elif task == "recommendations":
+            await scheduler.refresh_watchlist_recommendations(
+                scan_date=scan_date,
+                max_per_run=limit,
+                force_refresh=force,
+            )
         elif task == "intraday":
             await scheduler.run_intraday_scan()
         elif task == "postmarket":
@@ -1518,7 +1588,7 @@ async def run_once(task: str):
                 print("Deep Analysis Orchestrator not available")
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, rs, sector_rs, market_regime, smc, watchlist, signals, scanners, premarket, premarketpricing, intraday, postmarket, weekly, fundamentals, brokersync, techwldaq")
+            print("Available: pipeline, sync, synthesize, metrics, rs, sector_rs, market_regime, smc, watchlist, signals, scanners, premarket, premarketpricing, recommendations, intraday, postmarket, weekly, fundamentals, brokersync, techwldaq")
     finally:
         await scheduler.cleanup()
 
@@ -1529,10 +1599,13 @@ def main():
     parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
                        choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'sector_rs', 'market_regime', 'smc',
-                               'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing',
+                               'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing', 'recommendations',
                                'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync',
                                'techwldaq', 'status'],
                        help='Command to execute')
+    parser.add_argument('--date', help='Watchlist scan date (YYYY-MM-DD) for recommendations')
+    parser.add_argument('--limit', type=int, help='Max tickers to refresh (default config)')
+    parser.add_argument('--force', action='store_true', help='Force refresh even if cached')
     args = parser.parse_args()
 
     if args.command == 'run':
@@ -1548,10 +1621,10 @@ def main():
             scheduler.stop()
 
     elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'smc', 'watchlist',
-                          'signals', 'scanners', 'premarket', 'premarketpricing', 'intraday',
+                          'signals', 'scanners', 'premarket', 'premarketpricing', 'recommendations', 'intraday',
                           'postmarket', 'weekly', 'fundamentals', 'brokersync', 'techwldaq']:
         print(f"Running {args.command}...")
-        asyncio.run(run_once(args.command))
+        asyncio.run(run_once(args.command, scan_date=args.date, limit=args.limit, force=args.force))
 
     elif args.command == 'status':
         scheduler = StockScheduler()
@@ -1588,6 +1661,7 @@ def main():
         print("  pipeline         - Run full 11-stage pipeline")
         print("  premarket        - Run pre-market scanner scan only")
         print("  premarketpricing - Run Finnhub pre-market quotes & news (9:00 AM ET scan)")
+        print("  recommendations  - Refresh Finnhub analyst recommendations for watchlists")
         print("  intraday         - Run intraday scan only")
         print("  postmarket       - Run post-market scan only")
         print("  scanners         - Run all scanner strategies")

@@ -120,6 +120,12 @@ export async function GET(request: Request) {
           m.perf_1w,
           m.perf_1m,
           m.perf_3m,
+          ar.period as reco_period,
+          ar.strong_buy as reco_strong_buy,
+          ar.buy as reco_buy,
+          ar.hold as reco_hold,
+          ar.sell as reco_sell,
+          ar.strong_sell as reco_strong_sell,
           cs.claude_grade,
           cs.claude_score,
           cs.claude_action,
@@ -135,6 +141,13 @@ export async function GET(request: Request) {
         LEFT JOIN stock_instruments i ON w.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
           AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+        LEFT JOIN LATERAL (
+          SELECT period, strong_buy, buy, hold, sell, strong_sell
+          FROM stock_analyst_recommendations
+          WHERE ticker = w.ticker
+          ORDER BY period DESC
+          LIMIT 1
+        ) ar ON TRUE
         LEFT JOIN LATERAL (
           SELECT
             claude_grade,
@@ -265,6 +278,12 @@ export async function GET(request: Request) {
         m.perf_1w,
         m.perf_1m,
         m.perf_3m,
+        ar.period as reco_period,
+        ar.strong_buy as reco_strong_buy,
+        ar.buy as reco_buy,
+        ar.hold as reco_hold,
+        ar.sell as reco_sell,
+        ar.strong_sell as reco_strong_sell,
         cs.claude_grade,
         cs.claude_score,
         cs.claude_action,
@@ -280,6 +299,13 @@ export async function GET(request: Request) {
       LEFT JOIN stock_instruments i ON w.ticker = i.ticker
       LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
         AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+      LEFT JOIN LATERAL (
+        SELECT period, strong_buy, buy, hold, sell, strong_sell
+        FROM stock_analyst_recommendations
+        WHERE ticker = w.ticker
+        ORDER BY period DESC
+        LIMIT 1
+      ) ar ON TRUE
       LEFT JOIN LATERAL (
         SELECT
           claude_grade,
@@ -311,7 +337,8 @@ export async function GET(request: Request) {
     const result = await client.query(query, [watchlist, scanDate, ticker]);
     return NextResponse.json({ row: result.rows[0] || null });
   } catch (error) {
-    return NextResponse.json({ error: "Failed to load detail" }, { status: 500 });
+    console.error("watchlist detail error", error);
+    return NextResponse.json({ error: "Failed to load detail", detail: String(error) }, { status: 500 });
   } finally {
     client.release();
   }

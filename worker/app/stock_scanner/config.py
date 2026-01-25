@@ -60,6 +60,10 @@ NEWS_LOOKBACK_DAYS = 7  # How far back to fetch news
 NEWS_CACHE_TTL = 3600   # Cache news for 1 hour
 NEWS_MIN_ARTICLES = 2   # Minimum articles for confident sentiment
 
+# Analyst recommendations (Finnhub)
+FINNHUB_RECO_CACHE_TTL_HOURS = 24
+FINNHUB_RECO_MAX_PER_SCAN = 20
+
 # =============================================================================
 # CLAUDE AI ANALYSIS CONFIGURATION
 # =============================================================================

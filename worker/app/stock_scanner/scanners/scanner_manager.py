@@ -49,6 +49,14 @@ except ImportError:
     NewsEnrichmentService = None
     EnrichmentResult = None
 
+# Analyst recommendation imports
+try:
+    from ..core.analyst import AnalystRecommendationService
+    ANALYST_RECO_AVAILABLE = True
+except ImportError:
+    ANALYST_RECO_AVAILABLE = False
+    AnalystRecommendationService = None
+
 # Deep analysis imports
 try:
     from ..services.deep_analysis import DeepAnalysisOrchestrator, DeepAnalysisConfig
@@ -228,6 +236,10 @@ class ScannerManager:
         if save_to_db and deduplicated:
             await self._auto_enrich_signals_with_news(deduplicated)
 
+        # Auto-enrich new signals with analyst recommendations (Finnhub)
+        if save_to_db and deduplicated:
+            await self._auto_enrich_signals_with_recommendations(deduplicated)
+
         # Auto-run deep analysis on high-quality signals
         if save_to_db and deduplicated:
             await self._auto_deep_analysis(deduplicated)
@@ -350,6 +362,51 @@ class ScannerManager:
             'successful': successful,
         }
         logger.info(f"[NEWS] Enrichment complete: {successful}/{len(enrichment_results)} successful")
+
+    async def _auto_enrich_signals_with_recommendations(
+        self,
+        signals: List[SignalSetup],
+    ):
+        """
+        Automatically fetch analyst recommendation trends for new signals.
+
+        Uses Finnhub /stock/recommendation with caching to limit API usage.
+        """
+        if not ANALYST_RECO_AVAILABLE:
+            logger.debug("Analyst recommendations not available - skipping")
+            return
+
+        try:
+            from ..config import FINNHUB_API_KEY, FINNHUB_RECO_CACHE_TTL_HOURS, FINNHUB_RECO_MAX_PER_SCAN
+        except ImportError:
+            logger.debug("Could not import config - skipping recommendations")
+            return
+
+        if not FINNHUB_API_KEY:
+            logger.debug("FINNHUB_API_KEY not configured - skipping recommendations")
+            return
+
+        tickers = sorted({s.ticker for s in signals if s.ticker})
+        if not tickers:
+            return
+
+        service = AnalystRecommendationService(
+            db_manager=self.db,
+            finnhub_api_key=FINNHUB_API_KEY,
+            cache_ttl_hours=FINNHUB_RECO_CACHE_TTL_HOURS,
+        )
+
+        result = await service.enrich_tickers(
+            tickers=tickers,
+            max_per_run=FINNHUB_RECO_MAX_PER_SCAN,
+            force_refresh=False,
+        )
+
+        self._scan_stats['finnhub_recommendations'] = result
+        logger.info(
+            "[RECO] Recommendations: "
+            f"{result.get('successful', 0)}/{result.get('attempted', 0)} updated"
+        )
 
     async def _auto_deep_analysis(
         self,

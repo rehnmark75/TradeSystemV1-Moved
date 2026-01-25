@@ -35,6 +35,12 @@ type WatchlistRow = {
   perf_1m: number | null;
   perf_3m: number | null;
   exchange: string | null;
+  reco_period: string | null;
+  reco_strong_buy: number | null;
+  reco_buy: number | null;
+  reco_hold: number | null;
+  reco_sell: number | null;
+  reco_strong_sell: number | null;
 };
 
 type WatchlistDetail = WatchlistRow & {
@@ -538,6 +544,45 @@ export default function Page() {
     return badges.length ? badges : null;
   };
 
+  const recoSummary = (item: WatchlistRow | WatchlistDetail) => {
+    const strongBuy = numberOrNull(item.reco_strong_buy) ?? 0;
+    const buy = numberOrNull(item.reco_buy) ?? 0;
+    const hold = numberOrNull(item.reco_hold) ?? 0;
+    const sell = numberOrNull(item.reco_sell) ?? 0;
+    const strongSell = numberOrNull(item.reco_strong_sell) ?? 0;
+    const total = strongBuy + buy + hold + sell + strongSell;
+    if (!total) {
+      return { label: "-", tone: "" };
+    }
+    const score = strongBuy * 2 + buy - sell - strongSell * 2;
+    const strongThreshold = total * 0.5;
+    const mildThreshold = total * 0.2;
+    if (score >= strongThreshold) {
+      return { label: "Strong Buy", tone: "good" };
+    }
+    if (score >= mildThreshold) {
+      return { label: "Buy", tone: "good" };
+    }
+    if (score <= -strongThreshold) {
+      return { label: "Strong Sell", tone: "bad" };
+    }
+    if (score <= -mildThreshold) {
+      return { label: "Sell", tone: "bad" };
+    }
+    return { label: "Hold", tone: "warn" };
+  };
+
+  const recoCountsText = (item: WatchlistRow | WatchlistDetail) => {
+    const strongBuy = numberOrNull(item.reco_strong_buy) ?? 0;
+    const buy = numberOrNull(item.reco_buy) ?? 0;
+    const hold = numberOrNull(item.reco_hold) ?? 0;
+    const sell = numberOrNull(item.reco_sell) ?? 0;
+    const strongSell = numberOrNull(item.reco_strong_sell) ?? 0;
+    const total = strongBuy + buy + hold + sell + strongSell;
+    if (!total) return "No analyst data";
+    return `SB ${strongBuy} | B ${buy} | H ${hold} | S ${sell} | SS ${strongSell}`;
+  };
+
   return (
     <div className="page">
       <div className="topbar">
@@ -635,6 +680,7 @@ export default function Page() {
           <button className="sort-btn" onClick={() => toggleSort("tv")}>
             TV {sortKey === "tv" ? (sortDir === "desc" ? "▾" : "▴") : ""}
           </button>
+          <span>Reco</span>
           <button className="sort-btn" onClick={() => toggleSort("days")}>
             Days {sortKey === "days" ? (sortDir === "desc" ? "▾" : "▴") : ""}
           </button>
@@ -656,6 +702,7 @@ export default function Page() {
               const rsVal = row.rs_percentile ?? null;
               const daqVal = row.daq_score ?? null;
               const days = row.days_on_list ?? 0;
+              const reco = recoSummary(row);
               const expandedRow = expanded[row.ticker] || false;
 
               return (
@@ -696,6 +743,9 @@ export default function Page() {
                       {row.tv_overall_score !== null && row.tv_overall_score !== undefined
                         ? Number(row.tv_overall_score).toFixed(1)
                         : "-"}
+                    </span>
+                    <span className={reco.tone ? `pill ${reco.tone}` : ""} title={recoCountsText(row)}>
+                      {reco.label}
                     </span>
                     <span>{CROSSOVER.has(watchlist) ? `${days}d` : "-"}</span>
                     <span>
@@ -917,6 +967,30 @@ export default function Page() {
                             </div>
                           ) : (
                             <div className="footer-note">Loading summary...</div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="detail-section">
+                        <div className="reco-card">
+                          <div className="reco-header">
+                            <h4>Analyst Recommendations</h4>
+                            <span className="reco-period">
+                              {details[row.ticker]?.reco_period ?? row.reco_period
+                                ? `Period ${details[row.ticker]?.reco_period ?? row.reco_period}`
+                                : "No data"}
+                            </span>
+                          </div>
+                          {recoCountsText(details[row.ticker] || row) !== "No analyst data" ? (
+                            <div className="reco-grid">
+                              <div><span>Strong Buy</span><strong>{details[row.ticker]?.reco_strong_buy ?? row.reco_strong_buy ?? 0}</strong></div>
+                              <div><span>Buy</span><strong>{details[row.ticker]?.reco_buy ?? row.reco_buy ?? 0}</strong></div>
+                              <div><span>Hold</span><strong>{details[row.ticker]?.reco_hold ?? row.reco_hold ?? 0}</strong></div>
+                              <div><span>Sell</span><strong>{details[row.ticker]?.reco_sell ?? row.reco_sell ?? 0}</strong></div>
+                              <div><span>Strong Sell</span><strong>{details[row.ticker]?.reco_strong_sell ?? row.reco_strong_sell ?? 0}</strong></div>
+                            </div>
+                          ) : (
+                            <div className="footer-note">No analyst recommendations yet.</div>
                           )}
                         </div>
                       </div>

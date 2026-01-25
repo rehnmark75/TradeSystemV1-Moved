@@ -538,6 +538,32 @@ class FinnhubClient:
             logger.error(f"Failed to get quote for {symbol}: {e.message}")
             raise
 
+    # =========================================================================
+    # ANALYST RECOMMENDATIONS
+    # =========================================================================
+
+    async def get_recommendation_trends(self, symbol: str, use_cache: bool = True) -> List[Dict[str, Any]]:
+        """
+        Get analyst recommendation trends for a symbol.
+
+        API: /stock/recommendation
+
+        Returns:
+            List of dicts with keys:
+            - period (YYYY-MM-DD)
+            - strongBuy, buy, hold, sell, strongSell
+        """
+        params = {"symbol": symbol.upper()}
+
+        try:
+            data = await self._request("/stock/recommendation", params, use_cache=use_cache)
+            if not isinstance(data, list):
+                return []
+            return data
+        except FinnhubError as e:
+            logger.error(f"Failed to fetch recommendations for {symbol}: {e.message}")
+            raise
+
     async def get_quotes_batch(
         self,
         symbols: List[str],

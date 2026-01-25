@@ -199,7 +199,7 @@ input {
 
 .list-header {
   display: grid;
-  grid-template-columns: 30px 80px 70px 80px 70px 70px 80px 80px 80px 70px 50px 50px 50px;
+  grid-template-columns: 30px 80px 70px 80px 70px 70px 70px 70px 80px 80px 80px 70px 50px 50px;
   gap: 10px;
   font-size: 0.75rem;
   color: #6e6254;
@@ -223,7 +223,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: 30px 80px 70px 80px 70px 70px 80px 80px 80px 70px 50px 50px 50px;
+  grid-template-columns: 30px 80px 70px 80px 70px 70px 70px 70px 80px 80px 80px 70px 50px 50px;
   gap: 10px;
   align-items: center;
   padding: 8px 12px;
@@ -530,6 +530,48 @@ input {
   font-family: "IBM Plex Sans", sans-serif;
   background: #fff;
   resize: vertical;
+}
+
+.reco-card {
+  padding: 12px;
+}
+
+.reco-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.reco-header h4 {
+  margin: 0;
+  color: var(--accent);
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.reco-period {
+  font-size: 0.75rem;
+  color: #6e6254;
+}
+
+.reco-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.reco-grid div {
+  background: #fff;
+  border: 1px solid #efe2cc;
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+
+.reco-grid span {
+  color: #6e6254;
 }
 
 .detail-toggle {
@@ -1098,7 +1140,7 @@ input {
 
   .list-header,
   .row {
-    grid-template-columns: 24px 70px 60px 70px 60px 60px 70px 70px 70px 60px 40px 40px 40px;
+    grid-template-columns: 24px 70px 60px 70px 60px 60px 60px 60px 70px 70px 70px 60px 40px 40px;
   }
 
   .signals-header,
