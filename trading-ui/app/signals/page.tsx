@@ -38,6 +38,9 @@ type SignalRow = {
   company_name: string | null;
   sector: string | null;
   exchange: string | null;
+  analyst_rating: string | null;
+  target_price: number | null;
+  number_of_analysts: number | null;
   rs_percentile: number | null;
   rs_trend: string | null;
   atr_14: number | null;
@@ -292,14 +295,10 @@ export default function SignalsPage() {
 
   const [scannerFilter, setScannerFilter] = useState("All Scanners");
   const [tierFilter, setTierFilter] = useState("All Tiers");
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [statusFilter, setStatusFilter] = useState("All");
   const [claudeFilter, setClaudeFilter] = useState("All Signals");
-  const [dateFrom, setDateFrom] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 2);
-    return d.toISOString().slice(0, 10);
-  });
-  const [dateTo, setDateTo] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
   const [rsFilter, setRsFilter] = useState("All RS");
   const [rsTrendFilter, setRsTrendFilter] = useState("All Trends");
   const [orderBy, setOrderBy] = useState("score");
@@ -483,13 +482,14 @@ export default function SignalsPage() {
     <div className="page">
       <div className="topbar">
         <Link href="/" className="brand">
-          Stocks Hub
+          Trading Hub
         </Link>
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>
           <Link href="/broker">Broker</Link>
           <Link href="/market">Market</Link>
+          <Link href="/forex">Forex Analytics</Link>
         </div>
       </div>
 
@@ -612,7 +612,14 @@ export default function SignalsPage() {
                     <button className="expand-btn" onClick={() => toggleExpand(signal)} aria-label="Toggle details">
                       {expandedRow ? "▾" : "▸"}
                     </button>
-                    <span className="ticker-btn">{signal.ticker}</span>
+                    <span className="ticker-cell">
+                      <Link className="ticker-btn" href={`/stocks/${signal.ticker}`}>
+                        {signal.ticker}
+                      </Link>
+                      <Link className="deep-link" href={`/stocks/${signal.ticker}`} title="Open deep dive">
+                        ↗
+                      </Link>
+                    </span>
                     <span className="scanner-cell">{signal.scanner_name?.replace(/_/g, " ") || "-"}</span>
                     <span>{formatValue(signal.composite_score, 1)}</span>
                     <span className="pill">{signal.quality_tier ?? "-"}</span>
@@ -720,6 +727,11 @@ export default function SignalsPage() {
                             <div className="detail-item">ATR%: {formatValue(signal.atr_percent, 2)}</div>
                             <div className="detail-item">Relative Vol: {formatValue(signal.relative_volume, 2)}x</div>
                             <div className="detail-item">RS: {signal.rs_percentile ?? "-"} {signal.rs_trend ? `(${rsTrendText(signal.rs_trend)})` : ""}</div>
+                            <div className="detail-item">
+                              Analyst: {signal.analyst_rating ?? "-"}
+                              {signal.number_of_analysts ? ` (${signal.number_of_analysts})` : ""}
+                            </div>
+                            <div className="detail-item">Target: {signal.target_price ? `$${Number(signal.target_price).toFixed(2)}` : "-"}</div>
                           </div>
                           {badges.length ? (
                             <div className="daq-badges">

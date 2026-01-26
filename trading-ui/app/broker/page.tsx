@@ -125,13 +125,14 @@ export default function BrokerPage() {
     <div className="page">
       <div className="topbar">
         <Link href="/" className="brand">
-          Stocks Hub
+          Trading Hub
         </Link>
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>
           <Link href="/broker">Broker</Link>
           <Link href="/market">Market</Link>
+          <Link href="/forex">Forex Analytics</Link>
         </div>
       </div>
 

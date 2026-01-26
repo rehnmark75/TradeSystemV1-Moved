@@ -35,6 +35,9 @@ type WatchlistRow = {
   perf_1m: number | null;
   perf_3m: number | null;
   exchange: string | null;
+  analyst_rating: string | null;
+  target_price: number | null;
+  number_of_analysts: number | null;
   reco_period: string | null;
   reco_strong_buy: number | null;
   reco_buy: number | null;
@@ -552,6 +555,14 @@ export default function Page() {
     const strongSell = numberOrNull(item.reco_strong_sell) ?? 0;
     const total = strongBuy + buy + hold + sell + strongSell;
     if (!total) {
+      const analyst = (item as WatchlistRow).analyst_rating || (item as WatchlistDetail).analyst_rating;
+      if (analyst) {
+        const normalized = String(analyst).toLowerCase();
+        if (normalized.includes("buy")) return { label: "Buy", tone: "good" };
+        if (normalized.includes("sell")) return { label: "Sell", tone: "bad" };
+        if (normalized.includes("hold")) return { label: "Hold", tone: "warn" };
+        return { label: analyst, tone: "warn" };
+      }
       return { label: "-", tone: "" };
     }
     const score = strongBuy * 2 + buy - sell - strongSell * 2;
@@ -579,7 +590,14 @@ export default function Page() {
     const sell = numberOrNull(item.reco_sell) ?? 0;
     const strongSell = numberOrNull(item.reco_strong_sell) ?? 0;
     const total = strongBuy + buy + hold + sell + strongSell;
-    if (!total) return "No analyst data";
+    if (!total) {
+      const analyst = (item as WatchlistRow).analyst_rating || (item as WatchlistDetail).analyst_rating;
+      const analystsCount = (item as WatchlistRow).number_of_analysts ?? (item as WatchlistDetail).number_of_analysts;
+      if (analyst) {
+        return `${analyst}${analystsCount ? ` (${analystsCount} analysts)` : ""}`;
+      }
+      return "No analyst data";
+    }
     return `SB ${strongBuy} | B ${buy} | H ${hold} | S ${sell} | SS ${strongSell}`;
   };
 
@@ -587,13 +605,14 @@ export default function Page() {
     <div className="page">
       <div className="topbar">
         <Link href="/" className="brand">
-          Stocks Hub
+          Trading Hub
         </Link>
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>
           <Link href="/broker">Broker</Link>
           <Link href="/market">Market</Link>
+          <Link href="/forex">Forex Analytics</Link>
         </div>
       </div>
 
@@ -711,9 +730,14 @@ export default function Page() {
                     <button className="expand-btn" onClick={() => toggleExpand(row.ticker)} aria-label="Toggle details">
                       {expandedRow ? "▾" : "▸"}
                     </button>
-                    <button className="ticker-btn" onClick={() => toggleExpand(row.ticker)}>
-                      {row.ticker}
-                    </button>
+                    <div className="ticker-cell">
+                      <button className="ticker-btn" onClick={() => toggleExpand(row.ticker)}>
+                        {row.ticker}
+                      </button>
+                      <Link className="deep-link" href={`/stocks/${row.ticker}`} title="Open deep dive">
+                        ↗
+                      </Link>
+                    </div>
                     <span className="scan-cell">
                       {CROSSOVER.has(watchlist)
                         ? row.crossover_date
@@ -990,7 +1014,15 @@ export default function Page() {
                               <div><span>Strong Sell</span><strong>{details[row.ticker]?.reco_strong_sell ?? row.reco_strong_sell ?? 0}</strong></div>
                             </div>
                           ) : (
-                            <div className="footer-note">No analyst recommendations yet.</div>
+                            <div className="footer-note">
+                              {details[row.ticker]?.analyst_rating || row.analyst_rating
+                                ? `Consensus: ${details[row.ticker]?.analyst_rating || row.analyst_rating}${
+                                    details[row.ticker]?.number_of_analysts || row.number_of_analysts
+                                      ? ` (${details[row.ticker]?.number_of_analysts || row.number_of_analysts} analysts)`
+                                      : ""
+                                  }`
+                                : "No analyst recommendations yet."}
+                            </div>
                           )}
                         </div>
                       </div>

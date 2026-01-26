@@ -202,11 +202,11 @@ def parse_trade_logs(trade_id: int, log_file: str = "/app/logs/trade_monitor.log
     return events
 
 
-def get_pair_config(symbol: str) -> Dict[str, Any]:
+def get_pair_config(symbol: str, is_scalp_trade: bool = False) -> Dict[str, Any]:
     """Get pair-specific trailing configuration"""
     try:
         from config import get_trailing_config_for_epic
-        return get_trailing_config_for_epic(symbol)
+        return get_trailing_config_for_epic(symbol, is_scalp_trade=is_scalp_trade)
     except Exception:
         return {
             "stage1_trigger_points": 12,
@@ -390,8 +390,8 @@ async def get_trade_analysis(trade_id: int, db: Session = Depends(get_db)):
     if not trade:
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
 
-    # Get pair configuration
-    pair_config = get_pair_config(trade.symbol)
+    # Always use scalp configs for analysis (per user preference)
+    pair_config = get_pair_config(trade.symbol, is_scalp_trade=True)
 
     # Parse logs
     log_events = parse_trade_logs(trade_id)
@@ -408,7 +408,6 @@ async def get_trade_analysis(trade_id: int, db: Session = Depends(get_db)):
     # CEEM epics already have prices scaled (e.g., 11739.9 for EURUSD 1.17399)
     # MINI epics have standard prices (e.g., 1.17399 for EURUSD)
     if "CEEM" in trade.symbol:
-        # CEEM prices are already in points format, just need difference
         multiplier = 1
     elif "JPY" in trade.symbol:
         multiplier = 100
@@ -438,6 +437,8 @@ async def get_trade_analysis(trade_id: int, db: Session = Depends(get_db)):
             "sl_price": display_sl,
             "tp_price": display_tp,
             "status": trade.status,
+            "profit_loss": trade.profit_loss,
+            "pnl_currency": trade.pnl_currency,
             "deal_id": trade.deal_id,
             "ig_min_stop_distance": trade.min_stop_distance_points,
             "moved_to_breakeven": trade.moved_to_breakeven,

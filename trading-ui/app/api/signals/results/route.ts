@@ -121,6 +121,9 @@ export async function GET(request: Request) {
         i.name as company_name,
         i.sector,
         COALESCE(i.exchange, 'NASDAQ') as exchange,
+        i.analyst_rating,
+        i.target_price,
+        i.number_of_analysts,
         -- RS and trade plan context
         m.rs_percentile,
         m.rs_trend,
