@@ -1874,13 +1874,9 @@ class EnhancedTradeProcessor:
                                     self.logger.info(f"✅ [PARTIAL CLOSE DB] Trade {trade.id}: Database updated, "
                                                    f"current_size={refreshed_trade.current_size}, continuing to Stage 2/3")
 
-                                    # ✅ ENHANCEMENT: Move SL to entry + min_distance to guarantee profit
+                                    # ✅ FIX (Jan 2026): Always use config stage1_lock_points for profit lock
                                     # Calculate profit protection stop level
-                                    ig_min_distance = getattr(refreshed_trade, 'min_stop_distance_points', None)
-                                    if ig_min_distance:
-                                        lock_points = max(1, round(ig_min_distance))
-                                    else:
-                                        lock_points = trailing_config['stage1_lock_points']
+                                    lock_points = trailing_config['stage1_lock_points']
 
                                     if refreshed_trade.direction.upper() == "BUY":
                                         profit_protection_stop = refreshed_trade.entry_price + (lock_points * point_value)
@@ -1957,16 +1953,13 @@ class EnhancedTradeProcessor:
                     # Skip break-even stop move entirely - partial close already executed
                     self.logger.info(f"⏭️ [SKIP BE STOP] Trade {trade.id}: Partial close succeeded, skipping break-even stop move")
                 else:
-                    # Calculate break-even stop level using IG's minimum distance if available
-                    # ✅ ENHANCEMENT: Use IG's minimum stop distance for better trade evolution
-                    ig_min_distance = getattr(trade, 'min_stop_distance_points', None)
-                    if ig_min_distance:
-                        lock_points = max(1, round(ig_min_distance))  # Round and ensure minimum 1 point
-                        self.logger.info(f"🎯 [USING IG MIN] Trade {trade.id}: Using IG minimum distance {lock_points}pts")
-                    else:
-                        # ✅ NEW: Use pair-specific configuration
-                        lock_points = trailing_config['stage1_lock_points']
-                        self.logger.info(f"⚠️ [FALLBACK CONFIG] Trade {trade.id}: No IG minimum distance, using pair config {lock_points}pts")
+                    # ✅ FIX (Jan 2026): Always use config stage1_lock_points for profit lock
+                    # min_stop_distance_points is broker's min distance from CURRENT price (constraint)
+                    # stage1_lock_points is profit to lock from ENTRY price (strategy config)
+                    # These are semantically different - don't confuse them!
+                    lock_points = trailing_config['stage1_lock_points']
+                    is_scalp = getattr(trade, 'is_scalp_trade', False)
+                    self.logger.info(f"💰 [STAGE1 LOCK] Trade {trade.id}: Using {'SCALP' if is_scalp else 'REGULAR'} config lock_points={lock_points}pts")
                     if trade.direction.upper() == "BUY":
                         break_even_stop = trade.entry_price + (lock_points * point_value)  # Entry + lock_points
                     else:
@@ -1975,9 +1968,8 @@ class EnhancedTradeProcessor:
                 
                     # Enhanced logging: Track exact values used
                     self.logger.info(f"💰 [BREAK-EVEN DETAILED] Trade {trade.id}:")
-                    self.logger.info(f"   → IG minimum: {ig_min_distance} points")
                     self.logger.info(f"   → Trigger points: {break_even_trigger_points} points")
-                    self.logger.info(f"   → Using lock_points: {lock_points} points")
+                    self.logger.info(f"   → Config lock_points: {lock_points} points (from {'SCALP' if is_scalp else 'REGULAR'} config)")
                     self.logger.info(f"   → Entry: {trade.entry_price:.5f}")
                     self.logger.info(f"   → Break-even stop: {break_even_stop:.5f}")
                     self.logger.info(f"   → Distance from entry: {((break_even_stop - trade.entry_price) / point_value):.1f} points")

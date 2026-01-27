@@ -37,14 +37,18 @@ LIGHTSTREAMER_DEMO_URL = "https://demo-apd.marketdatasystems.com"
 # Active trading pairs for streaming and analysis
 ACTIVE_EPICS = [
     "CS.D.GBPUSD.MINI.IP",
-    "CS.D.USDJPY.MINI.IP", 
+    "CS.D.USDJPY.MINI.IP",
     "CS.D.AUDUSD.MINI.IP",
     "CS.D.USDCAD.MINI.IP",
     "CS.D.EURJPY.MINI.IP",
     "CS.D.AUDJPY.MINI.IP",
     "CS.D.NZDUSD.MINI.IP",
     "CS.D.USDCHF.MINI.IP",
-    "CS.D.EURUSD.CEEM.IP"
+    "CS.D.EURUSD.CEEM.IP",
+    "CS.D.EURGBP.MINI.IP",
+    # Commodities & Crypto (verified tradeable on demo - Jan 2026)
+    "CS.D.CFEGOLD.CEE.IP",   # Spot Gold ($1)
+    "CS.D.SOLUSD.CFD.IP"     # Solana ($1)
 ]
 
 # Additional available epics (currently disabled)

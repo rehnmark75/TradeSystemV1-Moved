@@ -1,8 +1,11 @@
 import httpx
+import logging
 from config import API_BASE_URL
 from sqlalchemy.orm import Session
 from .models import Candle
 from datetime import timedelta
+
+logger = logging.getLogger(__name__)
 
 
 async def get_current_bid_price(auth_headers, epic):
@@ -32,9 +35,26 @@ async def get_current_bid_price(auth_headers, epic):
         except (KeyError, ValueError, IndexError):
             one_pip = 0.0001
 
+        # CRITICAL: IG REST API returns prices SCALED by scalingFactor
+        # Example: EURUSD at 1.1922 returns bid=11922.0 (scaled by 10000)
+        # This is DIFFERENT from Lightstreamer which returns unscaled prices!
+        # The scalingFactor MUST be used when calculating spread in pips.
+        scaling_factor = data["snapshot"].get("scalingFactor", 1)
+
         # Calculate spread in price units and pips
+        # Formula: spread_pips = (offer - bid) / (one_pip * scaling_factor)
+        # Without scaling_factor, a 0.9 point spread would incorrectly show as 9000 pips!
         spread_price = offer_price - bid_price
-        spread_pips = spread_price / one_pip
+        spread_pips = spread_price / (one_pip * scaling_factor)
+
+        # Sanity check: forex spreads should never exceed 50 pips
+        # If we see higher values, the calculation is likely wrong
+        if spread_pips > 50:
+            logger.error(
+                f"[SPREAD BUG] {epic}: Calculated spread {spread_pips:.1f} pips is unrealistic! "
+                f"bid={bid_price}, offer={offer_price}, scaling_factor={scaling_factor}, one_pip={one_pip}. "
+                f"This indicates a scaling calculation error."
+            )
 
         return {
             "bid_price": bid_price,

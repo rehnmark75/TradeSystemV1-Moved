@@ -621,16 +621,16 @@ SCALP_TRAILING_CONFIGS = {
     },
 
     'CS.D.NZDUSD.MINI.IP': {
-        'early_breakeven_trigger_points': 8,
+        'early_breakeven_trigger_points': 6,
         'early_breakeven_buffer_points': 1,
         'stage1_trigger_points': 10,
         'stage1_lock_points': 5,
-        'stage2_trigger_points': 15,            # Stage2 at +15 pips - lock solid profit
-        'stage2_lock_points': 10,               # Lock +10 pips
-        'stage3_trigger_points': 17,            # Stage3 dynamic trailing starts at +17
+        'stage2_trigger_points': 12,            # Stage2 at +15 pips - lock solid profit
+        'stage2_lock_points': 8,               # Lock +10 pips
+        'stage3_trigger_points': 15,            # Stage3 dynamic trailing starts at +17
         'stage3_atr_multiplier': 1.5,
         'stage3_min_distance': 5,
-        'min_trail_distance': 8,                # 15 pip initial stop
+        'min_trail_distance': 3,                # 15 pip initial stop
         'break_even_trigger_points': 8,
         'enable_partial_close': False,
         'partial_close_trigger_points': 12,
@@ -642,12 +642,12 @@ SCALP_TRAILING_CONFIGS = {
         'early_breakeven_buffer_points': 1,
         'stage1_trigger_points': 10,
         'stage1_lock_points': 5,
-        'stage2_trigger_points': 15,            # Stage2 at +15 pips - lock solid profit
-        'stage2_lock_points': 10,               # Lock +10 pips
-        'stage3_trigger_points': 17,            # Stage3 dynamic trailing starts at +17
+        'stage2_trigger_points': 12,            # Stage2 at +15 pips - lock solid profit
+        'stage2_lock_points': 8,               # Lock +10 pips
+        'stage3_trigger_points': 15,            # Stage3 dynamic trailing starts at +17
         'stage3_atr_multiplier': 1.5,
         'stage3_min_distance': 5,
-        'min_trail_distance': 8,                # 15 pip initial stop
+        'min_trail_distance': 3,                # 15 pip initial stop
         'break_even_trigger_points': 8,
         'enable_partial_close': False,
         'partial_close_trigger_points': 12,
