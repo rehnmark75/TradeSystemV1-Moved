@@ -426,6 +426,15 @@ export default function SMCRejectionsPage() {
         <Link href="/forex/trade-performance" className="forex-pill">
           Trade Performance
         </Link>
+        <Link href="/forex/entry-timing" className="forex-pill">
+          Entry Timing
+        </Link>
+        <Link href="/forex/mae-analysis" className="forex-pill">
+          MAE Analysis
+        </Link>
+        <Link href="/forex/alert-history" className="forex-pill">
+          Alert History
+        </Link>
         <Link href="/forex/trade-analysis" className="forex-pill">
           Trade Analysis
         </Link>

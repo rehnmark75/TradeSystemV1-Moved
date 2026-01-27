@@ -90,6 +90,7 @@ export default function ForexTradePerformancePage() {
   const [payload, setPayload] = useState<TradesPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const [resultFilter, setResultFilter] = useState<string[]>([]);
   const [directionFilter, setDirectionFilter] = useState<string[]>([]);
@@ -110,7 +111,7 @@ export default function ForexTradePerformancePage() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [days]);
+  }, [days, refreshTick]);
 
   const trades = payload?.trades ?? [];
   const availableResults = useMemo(() => {
@@ -154,7 +155,35 @@ export default function ForexTradePerformancePage() {
     return true;
   });
 
-  const metrics = useMemo(() => calculateMetrics(filteredTrades), [filteredTrades]);
+  const metrics = useMemo(() => calculateMetrics(trades), [trades]);
+
+  const [exportEnabled, setExportEnabled] = useState(false);
+
+  const downloadCsv = () => {
+    if (!filteredTrades.length) return;
+    const headers = Object.keys(filteredTrades[0] ?? {});
+    const rows = filteredTrades.map((row) =>
+      headers
+        .map((key) => {
+          const value = row[key as keyof TradeRow];
+          if (value == null) return "";
+          const text = String(value).replace(/"/g, "\"\"");
+          return `"${text}"`;
+        })
+        .join(",")
+    );
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    link.download = `trades_${days}d_${stamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="page">
@@ -189,6 +218,15 @@ export default function ForexTradePerformancePage() {
         <Link href="/forex/trade-analysis" className="forex-pill">
           Trade Analysis
         </Link>
+        <Link href="/forex/entry-timing" className="forex-pill">
+          Entry Timing
+        </Link>
+        <Link href="/forex/mae-analysis" className="forex-pill">
+          MAE Analysis
+        </Link>
+        <Link href="/forex/alert-history" className="forex-pill">
+          Alert History
+        </Link>
         <Link href="/forex/performance-snapshot" className="forex-pill">
           Performance Snapshot
         </Link>
@@ -212,6 +250,22 @@ export default function ForexTradePerformancePage() {
               ))}
             </select>
           </div>
+          <button className="section-tab active" onClick={() => setRefreshTick((tick) => tick + 1)}>
+            Refresh
+          </button>
+          <label>
+            <input
+              type="checkbox"
+              checked={exportEnabled}
+              onChange={(event) => setExportEnabled(event.target.checked)}
+            />
+            Enable Export
+          </label>
+          {exportEnabled ? (
+            <button className="section-tab" onClick={downloadCsv}>
+              Download CSV
+            </button>
+          ) : null}
           <div className="forex-badge">{filteredTrades.length} trades</div>
         </div>
 

@@ -282,6 +282,47 @@ input {
   background: #fffdf7;
 }
 
+.alert-row {
+  border: 1px solid #efd7b2;
+  border-radius: 12px;
+  background: #fffaf2;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.alert-row summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #5b4a3a;
+  list-style: none;
+}
+
+.alert-row summary::-webkit-details-marker {
+  display: none;
+}
+
+.alert-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.alert-chart {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid #efd7b2;
+  background: #fff;
+}
+
+.alert-reason {
+  margin-top: 8px;
+  background: #fff3da;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+
 .trade-analysis-controls {
   display: flex;
   gap: 14px;
