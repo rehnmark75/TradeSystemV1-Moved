@@ -297,6 +297,31 @@ REGIME_STRATEGY_CONFIDENCE_MODIFIERS = {
         'ranging_market': 0.7,  # Good - some ranging behavior
         'scalping': 0.75        # Good - balanced conditions
     },
+    'reversal': {
+        # REVERSAL REGIME: Market structure suggests direction change is coming
+        # Signals should align WITH the expected reversal, not fight it
+        # Added Jan 2026 after analysis showed reversal regime trades weren't being filtered
+
+        # Trend-following strategies (poor in reversals - they follow current trend)
+        'ema': 0.4,             # Poor - EMA follows trends, fights reversals
+        'smart_money_ema': 0.45, # Poor - slightly better with smart money context
+        'ema_double': 0.4,      # Poor - trend crossovers lag during reversals
+        'macd': 0.5,            # Moderate - MACD divergence can detect reversals
+        'smart_money_macd': 0.55, # Moderate - divergence + smart money helps
+        'ichimoku': 0.5,        # Moderate - cloud takes time to reflect reversal
+        'momentum': 0.35,       # Poor - momentum strategies fight reversals
+        'kama': 0.5,            # Moderate - adaptive but slow to reverse
+        'zero_lag': 0.45,       # Poor - fast but follows trend
+        'bb_supertrend': 0.5,   # Moderate - can catch band extremes
+
+        # Reversal-friendly strategies (good at detecting direction changes)
+        'mean_reversion': 0.85, # Excellent - reversal = mean reversion opportunity
+        'bollinger': 0.8,       # Very good - band extremes signal reversals
+        'smc': 0.6,             # Good - smart money can detect reversal setups
+        'smc_simple': 0.55,     # Moderate - needs reversal-direction alignment check
+        'ranging_market': 0.6,  # Good - reversals often lead to ranges
+        'scalping': 0.4         # Poor - reversals too volatile for scalping
+    },
     'unknown': {
         # PRIORITY: EMA - conservative defaults when regime unclear
         'ema': 0.8,             # GOOD - safe default for foundational strategy

@@ -1708,6 +1708,8 @@ class SMCSimpleStrategy:
             # TIER 1: 4H EMA Directional Bias
             # ================================================================
             self.logger.info(f"\n📊 TIER 1: Checking {self.htf_timeframe.upper()} {self.ema_period} EMA Bias")
+            slope_status = "ON" if self.ema_slope_validation_enabled else "OFF"
+            self.logger.info(f"   ⚙️  Settings: buffer={self.ema_buffer_pips}p, min_dist={self.min_distance_from_ema}p, slope={slope_status}")
 
             ema_result = self._check_ema_bias(df_4h, pip_value)
 
@@ -1756,6 +1758,8 @@ class SMCSimpleStrategy:
             # TIER 2: Swing Break Confirmation (15m or 1H based on config)
             # ================================================================
             self.logger.info(f"\n📈 TIER 2: Checking {self.trigger_tf} Swing Break")
+            dynamic_lb = "ON" if getattr(self, 'dynamic_swing_lookback_enabled', False) else "OFF"
+            self.logger.info(f"   ⚙️  Settings: lookback={self.swing_lookback}, strength={self.swing_strength}, dynamic={dynamic_lb}")
 
             swing_result = self._check_swing_break(df_trigger, direction, pip_value, epic)
 
@@ -1788,6 +1792,7 @@ class SMCSimpleStrategy:
             # TIER 3: Pullback Entry Zone (5m or 15m based on config)
             # ================================================================
             self.logger.info(f"\n🎯 TIER 3: Checking {self.entry_tf} Pullback Zone")
+            self.logger.info(f"   ⚙️  Settings: fib={self.fib_min*100:.0f}%-{self.fib_max*100:.0f}%, confirm_bars={self.pullback_confirm_bars}")
 
             if df_entry is None or len(df_entry) < 10:
                 self.logger.info(f"   ⚠️  No {self.entry_tf} data available, using {self.trigger_tf} for entry")

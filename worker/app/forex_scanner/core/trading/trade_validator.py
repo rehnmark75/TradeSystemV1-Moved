@@ -20,6 +20,7 @@ UPDATED CHANGES:
 
 import logging
 import os
+import json
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, time as datetime_time, timezone, timedelta
 try:
@@ -374,7 +375,9 @@ class TradeValidator:
             'failed_news_filtering': 0,
             'news_confidence_reductions': 0,
             # v2.3.2: Market bias filter stats
-            'failed_market_bias_filter': 0
+            'failed_market_bias_filter': 0,
+            # v2.26.0: Reversal regime filter stats
+            'failed_reversal_filter': 0
         }
         
         self.logger.info("✅ TradeValidator initialized (duplicate detection handled by Scanner)")
@@ -764,6 +767,74 @@ class TradeValidator:
 
         except Exception as e:
             self.logger.warning(f"⚠️ Failed to save Claude rejection file: {e}")
+
+    def _save_reversal_rejection(
+        self,
+        signal: Dict,
+        rejection_reason: str,
+        market_bias: str,
+        directional_consensus: float,
+        regime_confidence: float
+    ):
+        """
+        Save reversal regime filter rejection to smc_simple_rejections table for analysis.
+
+        Added Jan 2026 to track when signals are blocked for fighting expected reversals.
+        """
+        if self.backtest_mode:
+            return  # Don't save in backtest mode
+
+        epic = signal.get('epic', 'unknown')
+
+        try:
+            # Use db_manager if available
+            if hasattr(self, 'db_manager') and self.db_manager is not None:
+                from datetime import datetime
+
+                # Build rejection details JSON
+                rejection_details = {
+                    'market_bias': market_bias,
+                    'directional_consensus': directional_consensus,
+                    'regime_confidence': regime_confidence,
+                    'signal_type': signal.get('signal_type', 'unknown'),
+                    'strategy': signal.get('strategy', 'unknown'),
+                    'confidence_score': signal.get('confidence_score', 0),
+                    'price': signal.get('price', 0),
+                    'filter_type': 'REVERSAL_REGIME_DIRECTION'
+                }
+
+                # Get pair name from epic
+                pair = epic.split('.')[2] if '.' in epic else epic
+
+                # Insert into smc_simple_rejections table
+                insert_sql = """
+                    INSERT INTO smc_simple_rejections (
+                        scan_timestamp, epic, pair, rejection_stage, rejection_reason,
+                        rejection_details, attempted_direction, current_price
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                """
+
+                self.db_manager.execute_query(
+                    insert_sql,
+                    (
+                        datetime.utcnow(),
+                        epic,
+                        pair,
+                        'REVERSAL_FILTER',  # Matches STAGE_REVERSAL_FILTER
+                        rejection_reason,
+                        json.dumps(rejection_details),
+                        signal.get('signal_type', 'unknown'),
+                        signal.get('price', 0)
+                    ),
+                    fetch=False
+                )
+
+                self.logger.info(f"💾 Reversal filter rejection saved to DB: {epic}")
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to save reversal rejection to DB: {e}")
 
     def _fetch_candles_for_vision(self, epic: str) -> Optional[Dict]:
         """
@@ -1560,13 +1631,20 @@ class TradeValidator:
                 'news_failure_rate': f"{(self.validation_stats['failed_news_filtering'] / total) * 100:.1f}%",
                 'claude_failure_rate': f"{(self.validation_stats['failed_claude_rejection'] + self.validation_stats['failed_claude_score']) / total * 100:.1f}%",
                 'risk_failure_rate': f"{(self.validation_stats['failed_risk_management'] / total) * 100:.1f}%",
-                'market_bias_filter_rate': f"{(self.validation_stats['failed_market_bias_filter'] / total) * 100:.1f}%"
+                'market_bias_filter_rate': f"{(self.validation_stats['failed_market_bias_filter'] / total) * 100:.1f}%",
+                'reversal_filter_rate': f"{(self.validation_stats['failed_reversal_filter'] / total) * 100:.1f}%"
             },
             # v2.3.2: Market Bias Filter metrics
             'market_bias_filter_metrics': {
                 'enabled': self.market_bias_filter_enabled,
                 'min_consensus_threshold': self.market_bias_min_consensus,
                 'signals_blocked': self.validation_stats.get('failed_market_bias_filter', 0)
+            },
+            # v2.26.0: Reversal Regime Filter metrics
+            'reversal_filter_metrics': {
+                'enabled': True,  # Always enabled when market intelligence is enabled
+                'signals_blocked': self.validation_stats.get('failed_reversal_filter', 0),
+                'description': 'Blocks signals that fight expected reversal direction'
             },
             'claude_metrics': {
                 'enabled': self.enable_claude_filtering,
@@ -2523,6 +2601,55 @@ class TradeValidator:
                                 f"Confidence modifier reduced by 20% (now {signal['market_intelligence_confidence_modifier']:.1%})"
                             )
 
+                        # CRITICAL FIX #6: REVERSAL REGIME DIRECTION ALIGNMENT
+                        # Added Jan 2026: Signals in reversal regime should align WITH the expected reversal
+                        # If market was bullish and reversal expected, BEAR signal is good (aligns with reversal)
+                        # If market was bearish and reversal expected, BULL signal is good (aligns with reversal)
+                        # Signals that continue the prior trend in reversal regime are BAD
+                        if dominant_regime == 'reversal':
+                            is_fighting_reversal = False
+                            reversal_desc = ""
+
+                            # BULL signal in bullish market + reversal = fighting the reversal (expects DOWN)
+                            if market_bias == 'bullish' and signal_type in ['BUY', 'BULL']:
+                                is_fighting_reversal = True
+                                reversal_desc = "BULL signal in reversal regime (market was bullish, expects DOWN reversal)"
+                            # BEAR signal in bearish market + reversal = fighting the reversal (expects UP)
+                            elif market_bias == 'bearish' and signal_type in ['SELL', 'BEAR']:
+                                is_fighting_reversal = True
+                                reversal_desc = "BEAR signal in reversal regime (market was bearish, expects UP reversal)"
+
+                            if is_fighting_reversal:
+                                # Block signals that fight the expected reversal when consensus is high
+                                if directional_consensus >= 0.8:  # Strong prior trend = strong reversal expected
+                                    reason = (
+                                        f"Reversal Regime Filter: {reversal_desc} "
+                                        f"(prior trend consensus: {directional_consensus:.0%})"
+                                    )
+                                    self.validation_stats['failed_reversal_filter'] += 1
+                                    self.logger.warning(f"🧠🔄🚫 {epic} {signal_type} BLOCKED BY REVERSAL FILTER: {reason}")
+
+                                    # Save rejection to database for analysis
+                                    self._save_reversal_rejection(
+                                        signal=signal,
+                                        rejection_reason=reason,
+                                        market_bias=market_bias,
+                                        directional_consensus=directional_consensus,
+                                        regime_confidence=regime_confidence
+                                    )
+
+                                    return False, reason
+                                else:
+                                    # Apply penalty for moderate consensus
+                                    reversal_penalty = 0.7  # 30% confidence reduction for fighting reversal
+                                    signal['market_intelligence_confidence_modifier'] *= reversal_penalty
+                                    self.logger.warning(
+                                        f"🧠🔄⚠️ {epic}: {reversal_desc} (consensus: {directional_consensus:.0%}) - "
+                                        f"Confidence modifier reduced by 30% (now {signal['market_intelligence_confidence_modifier']:.1%})"
+                                    )
+                            else:
+                                self.logger.info(f"🧠🔄✅ {epic}: Signal ALIGNS with reversal expectation (good)")
+
                         self.logger.info(f"🧠✅ {epic}: Probabilistic compatibility PASSED - Strategy '{strategy}' in '{dominant_regime}' regime")
                         self.logger.info(f"🧠📊 {epic}: Final confidence modifier: {signal['market_intelligence_confidence_modifier']:.1%} (Regime confidence: {regime_confidence:.1%})")
 
@@ -2536,6 +2663,7 @@ class TradeValidator:
                             'ranging': ['mean_reversion', 'bollinger', 'stochastic', 'ranging_market', 'smc', 'macd'],
                             'breakout': ['bollinger', 'kama', 'momentum', 'momentum_bias', 'bb_supertrend', 'macd', 'ema_double'],
                             'consolidation': ['mean_reversion', 'stochastic', 'ranging_market', 'smc', 'macd'],
+                            'reversal': ['mean_reversion', 'bollinger', 'smc', 'smc_simple', 'macd'],  # Added Jan 2026
                             'scalping': ['scalping', 'zero_lag', 'momentum_bias'],
                             'high_volatility': ['macd', 'zero_lag_squeeze', 'zero_lag', 'momentum', 'kama', 'ema', 'ema_double', 'momentum_bias', 'bb_supertrend'],
                             'low_volatility': ['mean_reversion', 'bollinger', 'stochastic', 'ema', 'ema_double', 'ranging_market', 'smc', 'macd'],

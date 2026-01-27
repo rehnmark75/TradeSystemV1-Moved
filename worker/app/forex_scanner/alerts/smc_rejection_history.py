@@ -81,6 +81,8 @@ class SMCRejectionHistoryManager:
     STAGE_SCALP_ENTRY_FILTER = 'SCALP_ENTRY_FILTER'  # Scalp mode RSI/momentum filters
     # v2.25.0: Market bias filter (counter-trend with high directional consensus)
     STAGE_MARKET_BIAS_FILTER = 'MARKET_BIAS_FILTER'  # Trade direction conflicts with market bias
+    # v2.26.0: Reversal regime filter (signal fights expected reversal direction)
+    STAGE_REVERSAL_FILTER = 'REVERSAL_FILTER'  # Signal continues prior trend in reversal regime
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
@@ -95,7 +97,9 @@ class SMCRejectionHistoryManager:
         # v2.24.0: Scalp mode filters
         STAGE_SCALP_ENTRY_FILTER,
         # v2.25.0: Market bias filter
-        STAGE_MARKET_BIAS_FILTER
+        STAGE_MARKET_BIAS_FILTER,
+        # v2.26.0: Reversal regime filter
+        STAGE_REVERSAL_FILTER
     ]
 
     def __init__(self, db_manager, config=None):
