@@ -167,6 +167,9 @@ class ScannerConfig:
     smc_min_structure_score: float = 0.0
     smc_conflict_tolerance: int = 0  # Number of conflicts to allow before rejecting (0 = reject on any conflict)
 
+    # ENTRY QUALITY FILTER SETTINGS
+    min_entry_quality_score: float = 0.3  # Minimum entry quality score to allow trade execution
+
     # CLAUDE TRADE VALIDATION SETTINGS
     require_claude_approval: bool = False
     claude_fail_secure: bool = False
@@ -662,6 +665,8 @@ class ScannerConfigService:
             'order_connect_timeout', 'order_read_timeout', 'order_total_timeout',
             'order_circuit_breaker_threshold', 'order_circuit_breaker_recovery',
             'dynamic_stops_enabled',
+            # Entry Quality Filter Settings
+            'min_entry_quality_score',
         ]
 
         # Fields that should be integers

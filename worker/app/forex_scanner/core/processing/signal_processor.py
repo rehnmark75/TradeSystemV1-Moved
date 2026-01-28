@@ -399,6 +399,20 @@ class SignalProcessor:
                 else:
                     self.logger.info(f"✅ Signal passed confidence: {confidence:.2%} ≥ {effective_threshold:.2%}")
             
+            # NEW: Step 2b - Entry quality score filtering
+            entry_quality = signal.get('entry_quality_score')
+            min_quality = getattr(self._scanner_cfg, 'min_entry_quality_score', 0.3)
+            if entry_quality is not None and min_quality > 0:
+                if entry_quality < min_quality:
+                    self.logger.info(f"🔽 Signal filtered: {epic} entry quality {entry_quality:.3f} < {min_quality:.2f}")
+                    processing_result['quality_filtered'] = True
+                    processing_result['processing_time_ms'] = int((time.time() - start_time) * 1000)
+                    signal['processing_result'] = processing_result
+                    signal['filtered_reason'] = f"Entry quality below minimum: {entry_quality:.3f} < {min_quality:.2f}"
+                    return signal
+                else:
+                    self.logger.info(f"✅ Signal passed entry quality: {entry_quality:.3f} ≥ {min_quality:.2f}")
+
             # EXISTING: Step 3 - Enhanced validation (confidence check removed from here)
             validated_signal = self._validate_and_clean_signal_enhanced(signal)
             
