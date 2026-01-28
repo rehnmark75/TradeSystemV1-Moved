@@ -48,6 +48,7 @@ type WatchlistRow = {
 
 type WatchlistDetail = WatchlistRow & {
   name: string | null;
+  signal_id: number | null;
   macd_signal: number | null;
   daq_mtf_score: number | null;
   daq_volume_score: number | null;
@@ -358,12 +359,20 @@ export default function Page() {
   };
 
   const runClaudeAnalysis = async (ticker: string) => {
+    const signalId = details[ticker]?.signal_id ?? null;
+    const rowMatch = rows.find((row) => row.ticker === ticker);
+    const scanDateValue =
+      details[ticker]?.scan_date || rowMatch?.scan_date || rowMatch?.crossover_date || null;
     setClaudeLoading((prev) => ({ ...prev, [ticker]: true }));
     setClaudeMessage((prev) => ({ ...prev, [ticker]: "" }));
-    const res = await fetch(`${apiPath("claude/analyze")}`, {
+    const endpoint = signalId ? "claude/analyze" : "claude/analyze-watchlist";
+    const body = signalId
+      ? { signal_id: signalId }
+      : { watchlist_name: watchlist, ticker, scan_date: scanDateValue };
+    const res = await fetch(`${apiPath(endpoint)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker })
+      body: JSON.stringify(body)
     });
     const data = await res.json();
     if (!res.ok) {

@@ -129,17 +129,18 @@ export async function GET(request: Request) {
           ar.hold as reco_hold,
           ar.sell as reco_sell,
           ar.strong_sell as reco_strong_sell,
-          cs.claude_grade,
-          cs.claude_score,
-          cs.claude_action,
-          cs.claude_thesis,
-          cs.claude_conviction,
-          cs.claude_key_strengths,
-          cs.claude_key_risks,
-          cs.claude_position_rec,
-          cs.claude_stop_adjustment,
-          cs.claude_time_horizon,
-          cs.claude_analyzed_at
+          ls.signal_id,
+          COALESCE(cs.claude_grade, cl.claude_grade) as claude_grade,
+          COALESCE(cs.claude_score, cl.claude_score) as claude_score,
+          COALESCE(cs.claude_action, cl.claude_action) as claude_action,
+          COALESCE(cs.claude_thesis, cl.claude_thesis) as claude_thesis,
+          COALESCE(cs.claude_conviction, cl.claude_conviction) as claude_conviction,
+          COALESCE(cs.claude_key_strengths, cl.claude_key_strengths) as claude_key_strengths,
+          COALESCE(cs.claude_key_risks, cl.claude_key_risks) as claude_key_risks,
+          COALESCE(cs.claude_position_rec, cl.claude_position_rec) as claude_position_rec,
+          COALESCE(cs.claude_stop_adjustment, cl.claude_stop_adjustment) as claude_stop_adjustment,
+          COALESCE(cs.claude_time_horizon, cl.claude_time_horizon) as claude_time_horizon,
+          COALESCE(cs.claude_analyzed_at, cl.claude_analyzed_at) as claude_analyzed_at
         FROM stock_watchlist_results w
         LEFT JOIN stock_instruments i ON w.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -151,6 +152,13 @@ export async function GET(request: Request) {
           ORDER BY period DESC
           LIMIT 1
         ) ar ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT id as signal_id
+          FROM stock_scanner_signals
+          WHERE ticker = w.ticker
+          ORDER BY signal_timestamp DESC
+          LIMIT 1
+        ) ls ON TRUE
         LEFT JOIN LATERAL (
           SELECT
             claude_grade,
@@ -170,6 +178,25 @@ export async function GET(request: Request) {
           ORDER BY claude_analyzed_at DESC
           LIMIT 1
         ) cs ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            claude_grade,
+            claude_score,
+            claude_action,
+            claude_thesis,
+            claude_conviction,
+            claude_key_strengths,
+            claude_key_risks,
+            claude_position_rec,
+            claude_stop_adjustment,
+            claude_time_horizon,
+            claude_analyzed_at
+          FROM stock_watchlist_claude_analysis
+          WHERE watchlist_name = w.watchlist_name
+            AND ticker = w.ticker
+          ORDER BY claude_analyzed_at DESC
+          LIMIT 1
+        ) cl ON TRUE
         WHERE w.watchlist_name = $1
           AND w.status = 'active'
           AND w.ticker = $2
@@ -290,17 +317,18 @@ export async function GET(request: Request) {
         ar.hold as reco_hold,
         ar.sell as reco_sell,
         ar.strong_sell as reco_strong_sell,
-        cs.claude_grade,
-        cs.claude_score,
-        cs.claude_action,
-        cs.claude_thesis,
-        cs.claude_conviction,
-        cs.claude_key_strengths,
-        cs.claude_key_risks,
-        cs.claude_position_rec,
-        cs.claude_stop_adjustment,
-        cs.claude_time_horizon,
-        cs.claude_analyzed_at
+        ls.signal_id,
+        COALESCE(cs.claude_grade, cl.claude_grade) as claude_grade,
+        COALESCE(cs.claude_score, cl.claude_score) as claude_score,
+        COALESCE(cs.claude_action, cl.claude_action) as claude_action,
+        COALESCE(cs.claude_thesis, cl.claude_thesis) as claude_thesis,
+        COALESCE(cs.claude_conviction, cl.claude_conviction) as claude_conviction,
+        COALESCE(cs.claude_key_strengths, cl.claude_key_strengths) as claude_key_strengths,
+        COALESCE(cs.claude_key_risks, cl.claude_key_risks) as claude_key_risks,
+        COALESCE(cs.claude_position_rec, cl.claude_position_rec) as claude_position_rec,
+        COALESCE(cs.claude_stop_adjustment, cl.claude_stop_adjustment) as claude_stop_adjustment,
+        COALESCE(cs.claude_time_horizon, cl.claude_time_horizon) as claude_time_horizon,
+        COALESCE(cs.claude_analyzed_at, cl.claude_analyzed_at) as claude_analyzed_at
       FROM stock_watchlist_results w
       LEFT JOIN stock_instruments i ON w.ticker = i.ticker
       LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -312,6 +340,13 @@ export async function GET(request: Request) {
         ORDER BY period DESC
         LIMIT 1
       ) ar ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT id as signal_id
+        FROM stock_scanner_signals
+        WHERE ticker = w.ticker
+        ORDER BY signal_timestamp DESC
+        LIMIT 1
+      ) ls ON TRUE
       LEFT JOIN LATERAL (
         SELECT
           claude_grade,
@@ -331,6 +366,25 @@ export async function GET(request: Request) {
         ORDER BY claude_analyzed_at DESC
         LIMIT 1
       ) cs ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          claude_grade,
+          claude_score,
+          claude_action,
+          claude_thesis,
+          claude_conviction,
+          claude_key_strengths,
+          claude_key_risks,
+          claude_position_rec,
+          claude_stop_adjustment,
+          claude_time_horizon,
+          claude_analyzed_at
+        FROM stock_watchlist_claude_analysis
+        WHERE watchlist_name = w.watchlist_name
+          AND ticker = w.ticker
+        ORDER BY claude_analyzed_at DESC
+        LIMIT 1
+      ) cl ON TRUE
       WHERE w.watchlist_name = $1
         AND w.scan_date = COALESCE($2::date, (
           SELECT MAX(scan_date)

@@ -18,6 +18,7 @@ type StatsPayload = {
   smc_conflicts: number;
   most_rejected_pair: string;
   by_stage: Record<string, number>;
+  by_direction: Record<string, number>;
 };
 
 type RejectionRow = {
@@ -40,6 +41,9 @@ type RejectionRow = {
   sr_blocking_type: string | null;
   sr_blocking_distance_pips: number | null;
   sr_path_blocked_pct: number | null;
+  potential_rr_ratio: number | null;
+  potential_risk_pips: number | null;
+  potential_reward_pips: number | null;
 };
 
 type ConflictPayload = {
@@ -85,15 +89,28 @@ const stageColors: Record<string, string> = {
   CONFIDENCE: "#f08c00",
   TIER1_EMA: "#2f9e44",
   TIER2_SWING: "#228be6",
+  TIER3_PULLBACK: "#7950f2",
   SCALP_ENTRY_FILTER: "#d9480f",
-  SMC_CONFLICT: "#e03131"
+  SMC_CONFLICT: "#e03131",
+  REVERSAL_FILTER: "#be4bdb",
+  SR_LEVEL: "#1098ad",
+  SR_PATH_BLOCKED: "#0ca678",
+  RISK_LIMIT: "#868e96",
+  RISK_RR: "#495057",
+  SESSION: "#ced4da",
+  COOLDOWN: "#adb5bd",
+  MARKET_BIAS_FILTER: "#fab005",
+  REVERSAL_REGIME_DIRECTION: "#9c36b5"
 };
+
+const DIRECTION_OPTIONS = ["All", "BULL", "BEAR"];
 
 export default function SMCRejectionsPage() {
   const [days, setDays] = useState(7);
   const [stage, setStage] = useState("All");
   const [pair, setPair] = useState("All");
   const [session, setSession] = useState("All");
+  const [direction, setDirection] = useState("All");
   const [activeTab, setActiveTab] = useState("stage");
   const [selectedPairDetail, setSelectedPairDetail] = useState<string>("All");
 
@@ -149,9 +166,39 @@ export default function SMCRejectionsPage() {
     loadData();
   }, []);
 
+  // Filter rows by direction
+  const filteredRows = useMemo(() => {
+    if (direction === "All") return rows;
+    return rows.filter((row) => row.attempted_direction === direction);
+  }, [rows, direction]);
+
+  // Direction analysis stats - prefer stats API data, fallback to client calculation
+  const directionStats = useMemo(() => {
+    // Use API stats if available
+    if (stats?.by_direction && Object.keys(stats.by_direction).length > 0) {
+      const bullCount = Number(stats.by_direction.BULL ?? 0);
+      const bearCount = Number(stats.by_direction.BEAR ?? 0);
+      return {
+        bull: { count: bullCount },
+        bear: { count: bearCount },
+        asymmetry: Math.abs(bullCount - bearCount),
+        dominant: bullCount > bearCount ? "BULL" : bearCount > bullCount ? "BEAR" : "EQUAL"
+      };
+    }
+    // Fallback to client-side calculation from rows
+    const bullRows = rows.filter((row) => row.attempted_direction === "BULL");
+    const bearRows = rows.filter((row) => row.attempted_direction === "BEAR");
+    return {
+      bull: { count: bullRows.length },
+      bear: { count: bearRows.length },
+      asymmetry: Math.abs(bullRows.length - bearRows.length),
+      dominant: bullRows.length > bearRows.length ? "BULL" : bearRows.length > bullRows.length ? "BEAR" : "EQUAL"
+    };
+  }, [rows, stats?.by_direction]);
+
   const stageCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       counts[row.rejection_stage] = (counts[row.rejection_stage] || 0) + 1;
     });
     const fromRows = Object.entries(counts).map(([label, value]) => ({ label, value }));
@@ -162,7 +209,7 @@ export default function SMCRejectionsPage() {
       }));
     }
     return fromRows.sort((a, b) => b.value - a.value);
-  }, [rows, stats?.by_stage]);
+  }, [filteredRows, stats?.by_stage]);
 
   const stageTotal = stageCounts.reduce((sum, row) => sum + row.value, 0) || 1;
   const stageGradient = stageCounts.length
@@ -179,7 +226,7 @@ export default function SMCRejectionsPage() {
 
   const topReasons = useMemo(() => {
     const counts: Record<string, number> = {};
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       const stageLabel = row.rejection_stage ?? "UNKNOWN";
       const reasonLabel = row.rejection_reason ?? "Unknown";
       const key = `${stageLabel}|||${reasonLabel}`;
@@ -192,11 +239,11 @@ export default function SMCRejectionsPage() {
       })
       .sort((a, b) => b.value - a.value)
       .slice(0, 20);
-  }, [rows]);
+  }, [filteredRows]);
 
   const scalpFilterBreakdown = useMemo(() => {
     const counts: Record<string, number> = {};
-    rows
+    filteredRows
       .filter((row) => row.rejection_stage === "SCALP_ENTRY_FILTER")
       .forEach((row) => {
         const details = parseDetails(row.rejection_details);
@@ -204,11 +251,11 @@ export default function SMCRejectionsPage() {
         counts[filterType] = (counts[filterType] || 0) + 1;
       });
     return Object.entries(counts).map(([label, value]) => ({ label, value }));
-  }, [rows]);
+  }, [filteredRows]);
 
   const tier2Breakdown = useMemo(() => {
     const counts: Record<string, number> = {};
-    rows
+    filteredRows
       .filter((row) => row.rejection_stage === "TIER2_SWING")
       .forEach((row) => {
         const reason = row.rejection_reason ?? "";
@@ -220,20 +267,20 @@ export default function SMCRejectionsPage() {
         counts[category] = (counts[category] || 0) + 1;
       });
     return Object.entries(counts).map(([label, value]) => ({ label, value }));
-  }, [rows]);
+  }, [filteredRows]);
 
   const sessionCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       if (!row.market_session) return;
       counts[row.market_session] = (counts[row.market_session] || 0) + 1;
     });
     return Object.entries(counts).map(([label, value]) => ({ label, value }));
-  }, [rows]);
+  }, [filteredRows]);
 
   const hourCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       if (row.market_hour == null) return;
       const key = String(row.market_hour).padStart(2, "0");
       counts[key] = (counts[key] || 0) + 1;
@@ -241,22 +288,22 @@ export default function SMCRejectionsPage() {
     return Object.entries(counts)
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => Number(a.label) - Number(b.label));
-  }, [rows]);
+  }, [filteredRows]);
 
   const nearMisses = useMemo(() => {
-    return rows.filter(
+    return filteredRows.filter(
       (row) => row.rejection_stage === "CONFIDENCE" && (row.confidence_score ?? 0) >= 0.45
     );
-  }, [rows]);
+  }, [filteredRows]);
 
   const srBlocking = useMemo(() => {
     const counts: Record<string, number> = {};
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       if (!row.sr_blocking_type) return;
       counts[row.sr_blocking_type] = (counts[row.sr_blocking_type] || 0) + 1;
     });
     return Object.entries(counts).map(([label, value]) => ({ label, value }));
-  }, [rows]);
+  }, [filteredRows]);
 
   useEffect(() => {
     if (selectedPairDetail === "All" && options?.pairs?.length) {
@@ -266,7 +313,7 @@ export default function SMCRejectionsPage() {
   }, [options?.pairs, selectedPairDetail]);
 
   const emaStats = useMemo(() => {
-    const values = rows
+    const values = filteredRows
       .map((row) => Number(row.ema_distance_pips ?? 0))
       .filter((value) => Number.isFinite(value) && value > 0);
     const sorted = [...values].sort((a, b) => a - b);
@@ -277,10 +324,10 @@ export default function SMCRejectionsPage() {
       ? sorted[Math.floor(sorted.length / 2)]
       : 0;
     return { mean, median, count: values.length };
-  }, [rows]);
+  }, [filteredRows]);
 
   const atrStats = useMemo(() => {
-    const values = rows
+    const values = filteredRows
       .map((row) => Number(row.atr_percentile ?? 0))
       .filter((value) => Number.isFinite(value));
     const sorted = [...values].sort((a, b) => a - b);
@@ -291,7 +338,7 @@ export default function SMCRejectionsPage() {
       ? sorted[Math.floor(sorted.length / 2)]
       : 0;
     return { mean, median, count: values.length };
-  }, [rows]);
+  }, [filteredRows]);
 
   const emaBuckets = useMemo(() => {
     const buckets = [
@@ -302,14 +349,14 @@ export default function SMCRejectionsPage() {
       { label: "100+", min: 100, max: Infinity }
     ];
     const counts = buckets.map((bucket) => ({ ...bucket, value: 0 }));
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       const value = Number(row.ema_distance_pips ?? 0);
       if (!Number.isFinite(value)) return;
       const bucket = counts.find((item) => value >= item.min && value < item.max);
       if (bucket) bucket.value += 1;
     });
     return counts;
-  }, [rows]);
+  }, [filteredRows]);
 
   const atrBuckets = useMemo(() => {
     const buckets = [
@@ -320,14 +367,14 @@ export default function SMCRejectionsPage() {
       { label: "80-100", min: 80, max: Infinity }
     ];
     const counts = buckets.map((bucket) => ({ ...bucket, value: 0 }));
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       const value = Number(row.atr_percentile ?? 0);
       if (!Number.isFinite(value)) return;
       const bucket = counts.find((item) => value >= item.min && value < item.max);
       if (bucket) bucket.value += 1;
     });
     return counts;
-  }, [rows]);
+  }, [filteredRows]);
 
   const maxEmaBucket = emaBuckets.length
     ? Math.max(...emaBuckets.map((row) => row.value))
@@ -341,7 +388,7 @@ export default function SMCRejectionsPage() {
       string,
       { count: number; emaTotal: number; atrTotal: number }
     > = {};
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       const key = row.pair ?? row.epic ?? "Unknown";
       if (!buckets[key]) {
         buckets[key] = { count: 0, emaTotal: 0, atrTotal: 0 };
@@ -361,7 +408,99 @@ export default function SMCRejectionsPage() {
       }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 20);
-  }, [rows]);
+  }, [filteredRows]);
+
+  // Generate issues to investigate based on outcome data
+  const issues = useMemo(() => {
+    const result: Array<{
+      type: "urgent" | "warning" | "ok" | "info";
+      title: string;
+      desc: string;
+      action?: string;
+      metrics?: Array<{ label: string; value: string }>;
+    }> = [];
+
+    // Check outcome win rate by stage
+    const winRateByStage = outcomes?.win_rate_by_stage ?? [];
+    winRateByStage.forEach((stage: any) => {
+      const wr = Number(stage.would_be_win_rate) || 0;
+      const count = Number(stage.total) || 0;
+      if (count < 10) return; // Skip small samples
+
+      if (wr > 70) {
+        result.push({
+          type: "urgent",
+          title: `${stage.rejection_stage}: ${wr.toFixed(0)}% WR`,
+          desc: `High would-be win rate indicates over-filtering. ${count} signals rejected.`,
+          action: "Consider relaxing this filter threshold by 15-20%",
+          metrics: [
+            { label: "Would-Be WR", value: `${wr.toFixed(1)}%` },
+            { label: "Rejected", value: String(count) }
+          ]
+        });
+      } else if (wr > 55 && wr <= 70) {
+        result.push({
+          type: "warning",
+          title: `${stage.rejection_stage}: ${wr.toFixed(0)}% WR`,
+          desc: `Moderate win rate - worth monitoring. ${count} signals rejected.`,
+          action: "Review parameter settings for optimization",
+          metrics: [
+            { label: "Would-Be WR", value: `${wr.toFixed(1)}%` },
+            { label: "Rejected", value: String(count) }
+          ]
+        });
+      } else if (wr < 40 && count > 20) {
+        result.push({
+          type: "ok",
+          title: `${stage.rejection_stage}: Working well`,
+          desc: `Low ${wr.toFixed(0)}% would-be win rate confirms filter is blocking bad trades.`,
+          metrics: [
+            { label: "Would-Be WR", value: `${wr.toFixed(1)}%` },
+            { label: "Blocked", value: String(count) }
+          ]
+        });
+      }
+    });
+
+    // Check direction asymmetry
+    const totalWithDir = directionStats.bull.count + directionStats.bear.count;
+    if (totalWithDir > 20) {
+      const bullPct = (directionStats.bull.count / totalWithDir) * 100;
+      const bearPct = (directionStats.bear.count / totalWithDir) * 100;
+      const diff = Math.abs(bullPct - bearPct);
+
+      if (diff > 25) {
+        const dominant = bullPct > bearPct ? "BULL" : "BEAR";
+        result.push({
+          type: "warning",
+          title: `Direction Bias: ${dominant} over-filtered`,
+          desc: `${dominant} signals are ${diff.toFixed(0)}% more likely to be rejected.`,
+          action: "Consider direction-specific confidence thresholds",
+          metrics: [
+            { label: "BULL", value: `${directionStats.bull.count} (${bullPct.toFixed(0)}%)` },
+            { label: "BEAR", value: `${directionStats.bear.count} (${bearPct.toFixed(0)}%)` }
+          ]
+        });
+      }
+    }
+
+    // Check near-misses count
+    if (nearMisses.length > 10) {
+      result.push({
+        type: "info",
+        title: `${nearMisses.length} Near-Misses`,
+        desc: "Signals with confidence 0.45-0.50 that almost passed filters.",
+        action: "Review near-misses tab to identify potential opportunities",
+        metrics: [
+          { label: "Count", value: String(nearMisses.length) }
+        ]
+      });
+    }
+
+    // Sort: urgent first, then warning, then ok, then info
+    const priority = { urgent: 0, warning: 1, info: 2, ok: 3 };
+    return result.sort((a, b) => priority[a.type] - priority[b.type]);
+  }, [outcomes, directionStats, nearMisses]);
 
   const maxStageCount = stageCounts.length ? Math.max(...stageCounts.map((row) => row.value)) : 1;
   const maxSessionCount = sessionCounts.length
@@ -491,6 +630,16 @@ export default function SMCRejectionsPage() {
               ))}
             </select>
           </div>
+          <div>
+            <label>Direction</label>
+            <select value={direction} onChange={(e) => setDirection(e.target.value)}>
+              {DIRECTION_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
           <button className="section-tab active" onClick={loadData}>
             Refresh
           </button>
@@ -525,6 +674,69 @@ export default function SMCRejectionsPage() {
                 <strong>{stats?.smc_conflicts ?? 0}</strong>
               </div>
             </div>
+
+            {/* Issues Summary Panel */}
+            {issues.length > 0 && (
+              <div className="issues-panel">
+                <div className="issues-header">
+                  <h3>Issues to Investigate</h3>
+                  <span className="muted">{issues.length} items detected</span>
+                </div>
+                <div className="issues-grid">
+                  {issues.slice(0, 6).map((issue, idx) => (
+                    <div key={idx} className={`issue-card ${issue.type}`}>
+                      <div className="issue-title">
+                        <span className="issue-icon">
+                          {issue.type === "urgent" ? "🚨" : issue.type === "warning" ? "⚠️" : issue.type === "ok" ? "✅" : "ℹ️"}
+                        </span>
+                        {issue.title}
+                      </div>
+                      <div className="issue-desc">{issue.desc}</div>
+                      {issue.action && <div className="issue-action">{issue.action}</div>}
+                      {issue.metrics && (
+                        <div className="issue-metrics">
+                          {issue.metrics.map((m, i) => (
+                            <div key={i} className="issue-metric">
+                              <span>{m.label}</span>
+                              <strong>{m.value}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Direction Analysis */}
+            {(directionStats.bull.count > 0 || directionStats.bear.count > 0) && (
+              <div className="direction-analysis">
+                <h4>Direction Analysis</h4>
+                <div className="direction-comparison">
+                  <div className="direction-stat bull">
+                    <span className="label">BULL Rejections</span>
+                    <span className="value">{directionStats.bull.count}</span>
+                    <span className="sub">
+                      {((directionStats.bull.count / (directionStats.bull.count + directionStats.bear.count || 1)) * 100).toFixed(0)}% of total
+                    </span>
+                  </div>
+                  <div className="direction-stat bear">
+                    <span className="label">BEAR Rejections</span>
+                    <span className="value">{directionStats.bear.count}</span>
+                    <span className="sub">
+                      {((directionStats.bear.count / (directionStats.bull.count + directionStats.bear.count || 1)) * 100).toFixed(0)}% of total
+                    </span>
+                  </div>
+                </div>
+                {directionStats.asymmetry > (directionStats.bull.count + directionStats.bear.count) * 0.25 && (
+                  <div className="direction-alert">
+                    Direction asymmetry detected: {directionStats.dominant} signals are being rejected more frequently.
+                    Consider reviewing direction-specific filter settings.
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="section-tabs">
               <button
@@ -680,26 +892,32 @@ export default function SMCRejectionsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows
+                      {filteredRows
                         .filter((row) =>
                           selectedPairDetail === "All"
                             ? true
                             : (row.pair ?? row.epic) === selectedPairDetail
                         )
                         .slice(0, 50)
-                        .map((row) => (
-                          <tr key={row.id}>
-                            <td className="cell-time">
-                              {formatDateTime(row.scan_timestamp).replace(", ", "\n")}
-                            </td>
-                            <td className="cell-nowrap">{row.rejection_stage}</td>
-                            <td className="cell-reason">{row.rejection_reason ?? "-"}</td>
-                            <td className="cell-nowrap">{row.attempted_direction ?? "-"}</td>
-                            <td className="cell-nowrap">{row.market_session ?? "-"}</td>
-                            <td className="cell-nowrap">{row.ema_distance_pips ?? "-"}</td>
-                            <td className="cell-nowrap">{row.atr_percentile ?? "-"}</td>
-                          </tr>
-                        ))}
+                        .map((row) => {
+                          const emaDist = row.ema_distance_pips != null ? Number(row.ema_distance_pips) : null;
+                          const atrPct = row.atr_percentile != null ? Number(row.atr_percentile) : null;
+                          return (
+                            <tr key={row.id}>
+                              <td className="cell-time">
+                                {formatDateTime(row.scan_timestamp).replace(", ", "\n")}
+                              </td>
+                              <td className="cell-nowrap">{row.rejection_stage}</td>
+                              <td className="cell-reason">{row.rejection_reason ?? "-"}</td>
+                              <td className={`cell-nowrap ${row.attempted_direction === "BULL" ? "cell-bull" : row.attempted_direction === "BEAR" ? "cell-bear" : ""}`}>
+                                {row.attempted_direction ?? "-"}
+                              </td>
+                              <td className="cell-nowrap">{row.market_session ?? "-"}</td>
+                              <td className="cell-nowrap">{emaDist != null && Number.isFinite(emaDist) ? emaDist.toFixed(1) : "-"}</td>
+                              <td className="cell-nowrap">{atrPct != null && Number.isFinite(atrPct) ? atrPct.toFixed(0) : "-"}</td>
+                            </tr>
+                          );
+                        })}
                     </tbody>
                     </table>
                   </div>
@@ -830,7 +1048,7 @@ export default function SMCRejectionsPage() {
                   </div>
                   <div className="summary-card">
                     Would-Be Win Rate
-                    <strong>{outcomes?.summary?.would_be_win_rate?.toFixed(1) ?? 0}%</strong>
+                    <strong>{(Number(outcomes?.summary?.would_be_win_rate) || 0).toFixed(1)}%</strong>
                   </div>
                   <div className="summary-card">
                     Winners
@@ -849,18 +1067,21 @@ export default function SMCRejectionsPage() {
                 <div className="panel chart-panel">
                   <div className="chart-title">Would-Be Win Rate by Stage</div>
                   <div className="bar-stack">
-                    {(outcomes?.win_rate_by_stage ?? []).map((row: any) => (
-                      <div key={row.rejection_stage} className="bar-row">
-                        <span>{row.rejection_stage}</span>
-                        <div className="bar-track">
-                          <div
-                            className="bar-fill"
-                            style={{ width: `${row.would_be_win_rate ?? 0}%` }}
-                          />
+                    {(outcomes?.win_rate_by_stage ?? []).map((row: any) => {
+                      const wr = Number(row.would_be_win_rate) || 0;
+                      return (
+                        <div key={row.rejection_stage} className="bar-row">
+                          <span>{row.rejection_stage}</span>
+                          <div className="bar-track">
+                            <div
+                              className="bar-fill"
+                              style={{ width: `${wr}%` }}
+                            />
+                          </div>
+                          <strong>{wr.toFixed(1)}%</strong>
                         </div>
-                        <strong>{row.would_be_win_rate?.toFixed(1) ?? 0}%</strong>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </>
@@ -1023,28 +1244,48 @@ export default function SMCRejectionsPage() {
             {activeTab === "near" ? (
               <div className="panel table-panel">
                 <div className="chart-title">Near-Misses (Confidence ≥ 0.45)</div>
-                <table className="forex-table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Pair</th>
-                      <th>Confidence</th>
-                      <th>Stage</th>
-                      <th>Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {nearMisses.slice(0, 30).map((row) => (
-                      <tr key={row.id}>
-                        <td>{formatDateTime(row.scan_timestamp)}</td>
-                        <td>{row.pair ?? row.epic}</td>
-                        <td>{row.confidence_score?.toFixed(2)}</td>
-                        <td>{row.rejection_stage}</td>
-                        <td>{row.rejection_reason ?? "-"}</td>
+                <p className="chart-caption">Signals that almost passed filters - potential missed opportunities.</p>
+                <div className="table-scroll">
+                  <table className="forex-table">
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Pair</th>
+                        <th>Dir</th>
+                        <th>Confidence</th>
+                        <th>EMA Dist</th>
+                        <th>ATR%</th>
+                        <th>R:R</th>
+                        <th>Session</th>
+                        <th>Reason</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {nearMisses.slice(0, 50).map((row) => {
+                        const conf = Number(row.confidence_score) || 0;
+                        const confClass = conf >= 0.48 ? "cell-conf-high" : conf >= 0.45 ? "cell-conf-mid" : "cell-conf-low";
+                        const emaDist = row.ema_distance_pips != null ? Number(row.ema_distance_pips) : null;
+                        const atrPct = row.atr_percentile != null ? Number(row.atr_percentile) : null;
+                        const rrRatio = row.potential_rr_ratio != null ? Number(row.potential_rr_ratio) : null;
+                        return (
+                          <tr key={row.id}>
+                            <td className="cell-time">{formatDateTime(row.scan_timestamp)}</td>
+                            <td className="cell-nowrap">{row.pair ?? row.epic}</td>
+                            <td className={`cell-nowrap ${row.attempted_direction === "BULL" ? "cell-bull" : row.attempted_direction === "BEAR" ? "cell-bear" : ""}`}>
+                              {row.attempted_direction ?? "-"}
+                            </td>
+                            <td className={`cell-nowrap ${confClass}`}>{conf.toFixed(2)}</td>
+                            <td className="cell-nowrap">{emaDist != null && Number.isFinite(emaDist) ? emaDist.toFixed(1) : "-"}</td>
+                            <td className="cell-nowrap">{atrPct != null && Number.isFinite(atrPct) ? atrPct.toFixed(0) : "-"}</td>
+                            <td className="cell-nowrap">{rrRatio != null && Number.isFinite(rrRatio) ? rrRatio.toFixed(2) : "-"}</td>
+                            <td className="cell-nowrap">{row.market_session ?? "-"}</td>
+                            <td className="cell-reason">{row.rejection_reason ?? "-"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : null}
 

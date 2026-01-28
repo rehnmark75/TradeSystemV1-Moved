@@ -25,7 +25,8 @@ export async function GET(request: Request) {
           epic,
           pair,
           rejection_stage,
-          confidence_score
+          confidence_score,
+          attempted_direction
         FROM smc_simple_rejections
         WHERE scan_timestamp >= NOW() - INTERVAL '${days} days'
       ),
@@ -35,6 +36,14 @@ export async function GET(request: Request) {
           COUNT(*) as stage_count
         FROM base_data
         GROUP BY rejection_stage
+      ),
+      direction_counts AS (
+        SELECT
+          attempted_direction,
+          COUNT(*) as dir_count
+        FROM base_data
+        WHERE attempted_direction IS NOT NULL
+        GROUP BY attempted_direction
       ),
       totals AS (
         SELECT
@@ -67,7 +76,8 @@ export async function GET(request: Request) {
         nm.near_miss_count,
         sc.conflict_count,
         tp.pair as most_rejected_pair,
-        (SELECT json_object_agg(rejection_stage, stage_count) FROM stage_counts) as by_stage
+        (SELECT json_object_agg(rejection_stage, stage_count) FROM stage_counts) as by_stage,
+        (SELECT json_object_agg(attempted_direction, dir_count) FROM direction_counts) as by_direction
       FROM totals t
       CROSS JOIN near_misses nm
       CROSS JOIN smc_conflicts sc
@@ -82,7 +92,8 @@ export async function GET(request: Request) {
       near_misses: Number(row?.near_miss_count ?? 0),
       smc_conflicts: Number(row?.conflict_count ?? 0),
       most_rejected_pair: row?.most_rejected_pair ?? "N/A",
-      by_stage: row?.by_stage ?? {}
+      by_stage: row?.by_stage ?? {},
+      by_direction: row?.by_direction ?? {}
     });
   } catch (error) {
     console.error("Failed to load SMC rejection stats", error);
