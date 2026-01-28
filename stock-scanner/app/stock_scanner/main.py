@@ -782,7 +782,11 @@ class StockScannerCLI:
         ticker: str = None,
         signal_id: int = None,
         batch: bool = False,
-        min_tier: str = 'A'
+        min_tier: str = 'A',
+        days_back: int = 1,
+        max_signals: int = 50,
+        force_reanalyze: bool = False,
+        include_non_active: bool = False
     ):
         """
         Run deep analysis on signals.
@@ -844,8 +848,10 @@ class StockScannerCLI:
                 print(f"Batch analyzing unanalyzed {min_tier}+ signals...")
                 results = await orchestrator.auto_analyze_high_quality_signals(
                     min_tier=min_tier,
-                    days_back=1,
-                    max_signals=50
+                    days_back=days_back,
+                    max_signals=max_signals,
+                    force_reanalyze=force_reanalyze,
+                    include_non_active=include_non_active
                 )
 
                 if results:
@@ -1850,6 +1856,28 @@ def create_parser() -> argparse.ArgumentParser:
         choices=["A+", "A", "B"],
         help="Minimum tier for batch analysis (default: A)"
     )
+    deep_analyze_parser.add_argument(
+        "--days",
+        type=int,
+        default=1,
+        help="Days back for batch analysis (default: 1)"
+    )
+    deep_analyze_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum signals to analyze in batch (default: 50)"
+    )
+    deep_analyze_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-analyze signals even if DAQ already exists"
+    )
+    deep_analyze_parser.add_argument(
+        "--include-non-active",
+        action="store_true",
+        help="Include triggered/partial_exit signals in batch analysis"
+    )
 
     # deep-list
     deep_list_parser = subparsers.add_parser(
@@ -2163,7 +2191,11 @@ async def main():
                 ticker=getattr(args, "ticker", None),
                 signal_id=getattr(args, "signal_id", None),
                 batch=getattr(args, "batch", False),
-                min_tier=getattr(args, "min_tier", "A")
+                min_tier=getattr(args, "min_tier", "A"),
+                days_back=getattr(args, "days", 1),
+                max_signals=getattr(args, "limit", 50),
+                force_reanalyze=getattr(args, "force", False),
+                include_non_active=getattr(args, "include_non_active", False)
             )
         elif args.command == "deep-list":
             success = await cli.cmd_deep_list(

@@ -101,7 +101,8 @@ class DeepAnalysisOrchestrator:
     async def analyze_signal(
         self,
         signal_id: int,
-        save_to_db: bool = True
+        save_to_db: bool = True,
+        force_reanalyze: bool = False
     ) -> Optional[DeepAnalysisResult]:
         """
         Run full deep analysis pipeline for a signal.
@@ -125,7 +126,7 @@ class DeepAnalysisOrchestrator:
         logger.info(f"Starting deep analysis for {ticker} (signal_id={signal_id})")
 
         # Check cooldown (don't re-analyze same ticker within cooldown period)
-        if not await self._check_cooldown(ticker):
+        if not force_reanalyze and not await self._check_cooldown(ticker):
             logger.info(f"Skipping {ticker} - within cooldown period")
             return None
 
@@ -181,7 +182,8 @@ class DeepAnalysisOrchestrator:
         self,
         signal_ids: List[int],
         save_to_db: bool = True,
-        max_concurrent: int = 5
+        max_concurrent: int = 5,
+        force_reanalyze: bool = False
     ) -> List[DeepAnalysisResult]:
         """
         Run deep analysis for multiple signals with concurrency control.
@@ -201,7 +203,11 @@ class DeepAnalysisOrchestrator:
 
         async def analyze_with_limit(signal_id: int) -> Optional[DeepAnalysisResult]:
             async with semaphore:
-                return await self.analyze_signal(signal_id, save_to_db)
+                return await self.analyze_signal(
+                    signal_id,
+                    save_to_db=save_to_db,
+                    force_reanalyze=force_reanalyze
+                )
 
         tasks = [analyze_with_limit(sid) for sid in signal_ids]
         all_results = await asyncio.gather(*tasks)
@@ -215,7 +221,9 @@ class DeepAnalysisOrchestrator:
         self,
         min_tier: str = 'A',
         days_back: int = 1,
-        max_signals: int = 50
+        max_signals: int = 50,
+        force_reanalyze: bool = False,
+        include_non_active: bool = False
     ) -> List[DeepAnalysisResult]:
         """
         Automatically analyze high-quality signals that haven't been analyzed yet.
@@ -235,7 +243,14 @@ class DeepAnalysisOrchestrator:
             return []
 
         # Get unanalyzed high-quality signals
-        tier_filter = "('A+', 'A')" if min_tier == 'A' else "('A+')"
+        if min_tier == 'B':
+            tier_filter = "('A+', 'A', 'B')"
+        elif min_tier == 'A':
+            tier_filter = "('A+', 'A')"
+        else:
+            tier_filter = "('A+')"
+
+        status_filter = "IN ('active', 'triggered', 'partial_exit')" if include_non_active else "= 'active'"
 
         query = f"""
             SELECT s.id, s.ticker, s.quality_tier, s.composite_score
@@ -243,8 +258,8 @@ class DeepAnalysisOrchestrator:
             LEFT JOIN stock_deep_analysis d ON s.id = d.signal_id
             WHERE s.quality_tier IN {tier_filter}
               AND s.signal_timestamp >= NOW() - INTERVAL '{days_back} days'
-              AND s.status = 'active'
-              AND d.id IS NULL
+              AND s.status {status_filter}
+              {"AND d.id IS NULL" if not force_reanalyze else ""}
             ORDER BY s.composite_score DESC
             LIMIT $1
         """
@@ -261,7 +276,8 @@ class DeepAnalysisOrchestrator:
         return await self.analyze_signals_batch(
             signal_ids,
             save_to_db=True,
-            max_concurrent=self.config.max_concurrent_analyses
+            max_concurrent=self.config.max_concurrent_analyses,
+            force_reanalyze=force_reanalyze
         )
 
     async def _fetch_signal(self, signal_id: int) -> Optional[Dict[str, Any]]:

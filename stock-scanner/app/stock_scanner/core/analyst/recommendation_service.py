@@ -6,7 +6,7 @@ Designed to enrich new signals without exceeding free-tier rate limits.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from ..news.finnhub_client import FinnhubClient, FinnhubError, FinnhubRateLimitError
@@ -81,7 +81,12 @@ class AnalystRecommendationService:
         row = await self.db.fetchrow(query, ticker)
         if not row or not row["updated_at"]:
             return False
-        return row["updated_at"] >= datetime.utcnow() - timedelta(hours=self.cache_ttl_hours)
+        updated_at = row["updated_at"]
+        # Normalize timestamps to timezone-aware UTC before comparison.
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=self.cache_ttl_hours)
+        return updated_at >= cutoff
 
     async def _upsert_trends(self, ticker: str, trends: List[Dict[str, Any]]):
         query = """

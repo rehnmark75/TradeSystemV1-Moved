@@ -229,6 +229,10 @@ class GapAndGoStrategy:
         max_stop_distance = entry_price * (self.max_stop_pct / 100)
         if (entry_price - stop_loss_price) > max_stop_distance:
             stop_loss_price = entry_price - max_stop_distance
+        # Ensure stop is below entry for BUY signals (avoid invalid stop-loss)
+        min_stop_distance = max(entry_price * 0.002, 0.01)
+        if stop_loss_price >= entry_price:
+            stop_loss_price = entry_price - min_stop_distance
 
         # Calculate gap size in price terms
         gap_size = current_open - prev_close
