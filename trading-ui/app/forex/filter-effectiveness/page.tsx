@@ -133,6 +133,30 @@ export default function FilterEffectivenessPage() {
           <div className="chart-placeholder">Loading filter analysis...</div>
         ) : payload ? (
           <>
+            {/* How to use */}
+            <div
+              style={{
+                marginBottom: "1.5rem",
+                padding: "1rem",
+                background: "rgba(15, 76, 92, 0.04)",
+                borderRadius: "6px",
+                fontSize: "0.85rem",
+                lineHeight: 1.6,
+                color: "var(--muted)"
+              }}
+            >
+              <strong style={{ color: "var(--ink)" }}>How to use this page</strong>
+              <br />
+              Each section groups trades by a filter dimension and compares win rates across groups.
+              A filter is <strong style={{ color: "var(--good)" }}>PREDICTIVE</strong> if the
+              spread between best and worst group is 10%+ win rate.
+              The <strong>vs Baseline</strong> column shows how each group compares to overall
+              performance. Green BEST/red WORST labels highlight actionable rows.
+              If the worst group has many trades and poor results, consider blocking it.
+              If a filter is <strong style={{ color: "var(--warn)" }}>NOT PREDICTIVE</strong>,
+              it adds complexity without improving outcomes and may be worth disabling.
+            </div>
+
             {/* Baseline Stats */}
             <div className="metrics-grid" style={{ marginBottom: "2rem" }}>
               <div className="summary-card">
@@ -197,6 +221,27 @@ export default function FilterEffectivenessPage() {
   );
 }
 
+const FILTER_GUIDES: Record<string, string> = {
+  "Entry Quality Score":
+    "Measures how close the entry is to the optimal Fibonacci retracement zone (38.2%-50%) combined with entry candle momentum. Higher scores mean price pulled back to a better level with stronger candle body. If 'Very Low' performs worst, set a minimum threshold to block poor entries.",
+  "Direction vs Structure Alignment":
+    "Compares trade direction (BUY/SELL) against the detected market structure bias (BULLISH/BEARISH/RANGING). 'ALIGNED' means trading with structure, 'COUNTER' means against it. If RANGING outperforms ALIGNED, the structure detector may be lagging price action.",
+  "Market Structure Bias":
+    "The raw market structure classification from Smart Money analysis. Shows whether trades taken during BULLISH, BEARISH, RANGING, or NEUTRAL structure perform differently. Large win rate gaps suggest the strategy works better in certain structures.",
+  "Order Flow Alignment":
+    "Whether trade direction matches the order flow bias from order block and fair value gap analysis. 'ALIGNED' means order flow supports the trade direction. If CONFLICTING trades perform equally, the order flow analysis isn't adding edge.",
+  "Market Regime":
+    "The detected market regime (trending, ranging, breakout, high_volatility) from performance metrics. If all regimes show similar win rates, the regime detector isn't useful for filtering. If one regime consistently underperforms, consider blocking trades during that regime.",
+  "Volatility State":
+    "Market volatility classification (low, normal, high, extreme) at signal time. Helps identify whether the strategy performs better in calm or volatile conditions. Wide spreads between groups suggest volatility-based filtering could help.",
+  "MTF Alignment":
+    "Whether all analyzed timeframes (1m, 5m, 15m) agree on direction. 'All TFs Aligned' means every timeframe confirms the signal. If aligned and non-aligned trades perform similarly, requiring full alignment just reduces signal count without improving quality.",
+  "Efficiency Ratio":
+    "Measures price movement efficiency (0-1). High efficiency means price is trending cleanly; low means choppy/ranging. Useful for identifying whether the strategy needs clean trends to work or handles chop well.",
+  "MTF Confluence Score":
+    "A composite score (0-1) measuring how many timeframes support the signal direction and how strong that support is. Higher scores mean more timeframes agree. Check if higher confluence actually translates to better outcomes.",
+};
+
 function FilterGroupCard({ group, baseline }: { group: FilterGroup; baseline: Baseline }) {
   const maxWinRate = Math.max(...group.metrics.map((m) => m.win_rate || 0));
   const minWinRate = Math.min(...group.metrics.filter((m) => m.trades >= 3).map((m) => m.win_rate || 0));
@@ -227,6 +272,23 @@ function FilterGroupCard({ group, baseline }: { group: FilterGroup; baseline: Ba
           {group.is_predictive ? "PREDICTIVE" : "NOT PREDICTIVE"}
         </span>
       </div>
+
+      {FILTER_GUIDES[group.name] && (
+        <p
+          style={{
+            margin: "0.75rem 0 0",
+            padding: "0.6rem 0.75rem",
+            background: "rgba(15, 76, 92, 0.04)",
+            borderRadius: "4px",
+            fontSize: "0.82rem",
+            lineHeight: 1.5,
+            color: "var(--muted)"
+          }}
+        >
+          <strong style={{ color: "var(--ink)" }}>How to read: </strong>
+          {FILTER_GUIDES[group.name]}
+        </p>
+      )}
 
       <table className="forex-table" style={{ marginTop: "1rem" }}>
         <thead>
