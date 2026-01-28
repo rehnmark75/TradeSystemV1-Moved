@@ -586,6 +586,9 @@ export default function SMCRejectionsPage() {
         <Link href="/forex/smc-rejections" className="forex-pill">
           SMC Rejections
         </Link>
+        <Link href="/forex/filter-effectiveness" className="forex-pill">
+          Filter Audit
+        </Link>
       </div>
 
       <div className="panel">
