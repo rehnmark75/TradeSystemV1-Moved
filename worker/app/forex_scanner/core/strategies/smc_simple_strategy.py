@@ -277,6 +277,14 @@ class SMCSimpleStrategy:
         elif self._backtest_mode:
             self.logger.info("   Rejection tracking: DISABLED (backtest mode)")
 
+        # v2.31.1: In-memory filter stats for backtest summary (Jan 2026)
+        # Tracks filter rejections during backtest to show which filters are most aggressive
+        self._filter_stats = {
+            'signals_detected': 0,
+            'signals_passed': 0,
+            'filter_rejections': {}  # {filter_name: count}
+        }
+
         # v2.15.0: Swing Proximity Validator initialization
         self.swing_proximity_validator = None
         if self.swing_proximity_enabled:
@@ -1156,6 +1164,11 @@ class SMCSimpleStrategy:
         # Reduce buffer from 2.5 pips to 1.0 pip for more entries
         self.ema_buffer_pips = 1.0
 
+        # v2.31.0: Override min EMA distance for scalp mode (use database-configured value)
+        # Bug fix: Previously used global min_distance_from_ema=3.0 even in scalp mode,
+        # causing backtest to reject signals that live scanner would accept
+        self.min_distance_from_ema = self.scalp_min_ema_distance_pips
+
         # Override SL/TP for scalping (5 pip targets)
         self.fixed_stop_loss_pips = self.scalp_sl_pips
         self.fixed_take_profit_pips = self.scalp_tp_pips
@@ -1367,6 +1380,92 @@ class SMCSimpleStrategy:
                          f"Offset={limit_offset} pips")
 
         return pair_config
+
+    def _apply_pair_scalp_filters(
+        self,
+        epic: str,
+        signal: Dict,
+        candle_timestamp: Any
+    ) -> Tuple[bool, str]:
+        """
+        Apply per-pair scalp filters based on Jan 2026 NZDUSD trade analysis.
+
+        These filters are configurable per-pair via parameter_overrides JSONB.
+        Currently only NZDUSD has filters configured - other pairs pass through.
+
+        Filters:
+        1. Efficiency Ratio - rejects choppy markets (ER < threshold)
+        2. Trending Regime - requires market_regime_detected == 'trending'
+        3. Session Hours - restricts to high-liquidity hours
+        4. MACD Alignment - requires MACD histogram to align with direction
+        5. EMA Stack Alignment - requires EMA stack to match direction
+
+        Args:
+            epic: IG Markets epic code
+            signal: Signal dict with performance metrics already added
+            candle_timestamp: Current candle timestamp for session check
+
+        Returns:
+            Tuple of (passed: bool, rejection_reason: str)
+        """
+        if not self._using_database_config or not self._db_config:
+            return True, ""
+
+        direction = signal.get('signal_type', signal.get('direction', ''))
+
+        # Filter 1: Efficiency Ratio
+        min_er = self._db_config.get_pair_scalp_min_efficiency_ratio(epic)
+        if min_er is not None:
+            current_er = signal.get('efficiency_ratio', 0.0)
+            if current_er is not None and current_er < min_er:
+                self._track_filter_rejection('efficiency_ratio')
+                return False, f"efficiency_ratio {current_er:.3f} < {min_er:.3f}"
+
+        # Filter 2: Trending Regime
+        if self._db_config.get_pair_scalp_require_trending_regime(epic):
+            regime = signal.get('market_regime_detected', 'unknown')
+            if regime != 'trending':
+                self._track_filter_rejection('trending_regime')
+                return False, f"market_regime={regime} (requires trending)"
+
+        # Filter 3: Session Hours (UTC)
+        start_hour = self._db_config.get_pair_scalp_session_start_hour(epic)
+        end_hour = self._db_config.get_pair_scalp_session_end_hour(epic)
+        if start_hour is not None and end_hour is not None:
+            # Extract hour from candle timestamp
+            if hasattr(candle_timestamp, 'hour'):
+                current_hour = candle_timestamp.hour
+            elif hasattr(candle_timestamp, 'to_pydatetime'):
+                current_hour = candle_timestamp.to_pydatetime().hour
+            else:
+                current_hour = datetime.utcnow().hour
+
+            if current_hour < start_hour or current_hour >= end_hour:
+                self._track_filter_rejection('session_hours')
+                return False, f"hour={current_hour} outside session {start_hour}-{end_hour} UTC"
+
+        # Filter 4: MACD Alignment
+        if self._db_config.get_pair_scalp_require_macd_alignment(epic):
+            macd_hist = signal.get('macd_histogram', 0.0)
+            if macd_hist is not None:
+                if direction == 'BULL' and macd_hist < -0.0001:
+                    self._track_filter_rejection('macd_alignment')
+                    return False, f"MACD histogram {macd_hist:.6f} negative on BUY"
+                if direction == 'BEAR' and macd_hist > 0.0001:
+                    self._track_filter_rejection('macd_alignment')
+                    return False, f"MACD histogram {macd_hist:.6f} positive on SELL"
+
+        # Filter 5: EMA Stack Alignment
+        if self._db_config.get_pair_scalp_require_ema_stack_alignment(epic):
+            ema_stack = signal.get('ema_stack_order', 'mixed')
+            if direction == 'BULL' and ema_stack != 'bullish':
+                self._track_filter_rejection('ema_stack_alignment')
+                return False, f"EMA stack {ema_stack} not bullish for BUY"
+            if direction == 'BEAR' and ema_stack != 'bearish':
+                self._track_filter_rejection('ema_stack_alignment')
+                return False, f"EMA stack {ema_stack} not bearish for SELL"
+
+        return True, ""
 
     def _get_current_spread(self, epic: str, df: pd.DataFrame) -> float:
         """Get current spread estimate based on session and pair.
@@ -1711,7 +1810,7 @@ class SMCSimpleStrategy:
             slope_status = "ON" if self.ema_slope_validation_enabled else "OFF"
             self.logger.info(f"   ⚙️  Settings: buffer={self.ema_buffer_pips}p, min_dist={self.min_distance_from_ema}p, slope={slope_status}")
 
-            ema_result = self._check_ema_bias(df_4h, pip_value)
+            ema_result = self._check_ema_bias(df_4h, pip_value, epic=epic)
 
             if not ema_result['valid']:
                 self.logger.info(f"   ❌ {ema_result['reason']}")
@@ -2649,11 +2748,18 @@ class SMCSimpleStrategy:
             # EMA distance is the strongest predictor of CONFIDENCE rejection outcomes
             # v2.12.0: Added direction-aware confidence threshold support
             # v2.20.0: Scalp mode always uses scalp_min_confidence (highest priority)
+            # v2.31.2: Allow per-pair scalp_min_confidence override (NZDUSD needs 55-65% band)
             if self.scalp_mode_enabled:
-                # SCALP MODE: Always use scalp confidence threshold (highest priority)
-                pair_min_confidence = self.scalp_min_confidence
-                adjustment_type = "scalp-mode"
-                self.logger.info(f"   🎯 Scalp mode threshold: {self.scalp_min_confidence*100:.0f}%")
+                # SCALP MODE: Check per-pair override first, then use global
+                pair_scalp_min = self._get_pair_param(epic, 'scalp_min_confidence', None)
+                if pair_scalp_min is not None:
+                    pair_min_confidence = pair_scalp_min
+                    adjustment_type = "scalp-mode-pair"
+                    self.logger.info(f"   🎯 Per-pair scalp threshold: {pair_scalp_min*100:.0f}%")
+                else:
+                    pair_min_confidence = self.scalp_min_confidence
+                    adjustment_type = "scalp-mode"
+                    self.logger.info(f"   🎯 Scalp mode threshold: {self.scalp_min_confidence*100:.0f}%")
             elif self._backtest_mode and self._config_override and 'min_confidence' in self._config_override:
                 # Backtest mode with min_confidence override - use the overridden instance variable
                 pair_min_confidence = self.min_confidence
@@ -2778,11 +2884,22 @@ class SMCSimpleStrategy:
             # Analysis of 85 trades (Dec 2025) showed confidence > 0.75 had only 42% WR
             # v2.11.1: Use database service method if available (supports per-pair override)
             # v2.29.0: Skip confidence cap in scalp mode (high confidence = more momentum confirmation)
+            # v2.31.2: Allow per-pair scalp max confidence override (NZDUSD high conf = 5% WR!)
             if self._using_database_config and self._db_config:
                 pair_max_confidence = self._db_config.get_pair_max_confidence(epic)
             else:
                 pair_max_confidence = self._get_pair_param(epic, 'MAX_CONFIDENCE_THRESHOLD', self.max_confidence)
-            if not self.scalp_mode_enabled and round(confidence, 4) > pair_max_confidence:
+
+            # v2.31.2: Check per-pair scalp max confidence if configured
+            apply_max_confidence_check = not self.scalp_mode_enabled
+            if self.scalp_mode_enabled:
+                scalp_max_conf = self._get_pair_param(epic, 'scalp_max_confidence', None)
+                if scalp_max_conf is not None:
+                    pair_max_confidence = scalp_max_conf
+                    apply_max_confidence_check = True
+                    self.logger.info(f"   ⚠️ Per-pair scalp max confidence: {scalp_max_conf*100:.0f}%")
+
+            if apply_max_confidence_check and round(confidence, 4) > pair_max_confidence:
                 reason = f"Confidence too high ({confidence*100:.0f}% > {pair_max_confidence*100:.0f}% cap)"
                 self.logger.info(f"\n❌ {reason} (paradox: high confidence = worse outcomes)")
                 # Build context for rejection tracking
@@ -3032,7 +3149,7 @@ class SMCSimpleStrategy:
                 'confidence_score': round(confidence, 2),
                 'epic': epic,
                 'pair': pair,
-                'timeframe': '15m',
+                'timeframe': self.trigger_tf,
                 'entry_price': entry_price,
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
@@ -3267,6 +3384,41 @@ class SMCSimpleStrategy:
                     self.logger.warning(f"⚠️ SMC chart data detection failed: {smc_error}")
 
             # ================================================================
+            # PAIR SCALP FILTERS (v2.31.0)
+            # Per-pair configurable filters for scalp trades based on
+            # Jan 2026 NZDUSD trade analysis. Checks efficiency ratio,
+            # regime, session hours, MACD alignment, EMA stack.
+            # Only active for pairs with filters configured in database.
+            # ================================================================
+            # v2.31.1: Track signal detected (before filters) for backtest stats
+            self._track_signal_detected()
+
+            if self.scalp_mode_enabled:
+                filter_passed, filter_reason = self._apply_pair_scalp_filters(
+                    epic=epic,
+                    signal=signal,
+                    candle_timestamp=candle_timestamp
+                )
+                if not filter_passed:
+                    self.logger.info(f"\n⚠️ PAIR_SCALP_FILTER rejected: {filter_reason}")
+                    self._track_rejection(
+                        stage='PAIR_SCALP_FILTER',
+                        reason=filter_reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context={
+                            'efficiency_ratio': signal.get('efficiency_ratio'),
+                            'market_regime_detected': signal.get('market_regime_detected'),
+                            'macd_histogram': signal.get('macd_histogram'),
+                            'ema_stack_order': signal.get('ema_stack_order'),
+                            **self._collect_market_context(df_trigger, df_4h, entry_df, pip_value, direction=direction)
+                        }
+                    )
+                    return None
+
+            # ================================================================
             # SCALP SIGNAL QUALIFICATION (v2.21.0)
             # Run momentum confirmation filters on scalp signals
             # Mode: MONITORING (logs only) or ACTIVE (blocks signals)
@@ -3317,6 +3469,8 @@ class SMCSimpleStrategy:
                     # Don't fail the signal if qualification fails
                     self.logger.warning(f"⚠️ Signal qualification failed: {qual_error}")
 
+            # v2.31.1: Track signal passed all filters for backtest stats
+            self._track_signal_passed()
             return signal
 
         except Exception as e:
@@ -3340,7 +3494,7 @@ class SMCSimpleStrategy:
             return 'BEARISH'
         return 'NEUTRAL'
 
-    def _check_ema_bias(self, df_4h: pd.DataFrame, pip_value: float) -> Dict:
+    def _check_ema_bias(self, df_4h: pd.DataFrame, pip_value: float, epic: str = None) -> Dict:
         """
         TIER 1: Check 4H 50 EMA directional bias
 
@@ -3367,7 +3521,15 @@ class SMCSimpleStrategy:
         distance_pips = abs(current_close - ema_value) / pip_value
 
         # Check if price is beyond EMA buffer zone
-        buffer = self.ema_buffer_pips * pip_value
+        # v2.31.2: Use per-pair EMA buffer override if configured (e.g., NZDUSD needs smaller buffer)
+        effective_ema_buffer = self.ema_buffer_pips
+        if epic and self.scalp_mode_enabled and hasattr(self, '_config_service') and self._config_service:
+            pair_buffer = self._config_service.get_pair_scalp_ema_buffer_pips(epic)
+            if pair_buffer is not None:
+                effective_ema_buffer = pair_buffer
+                self.logger.info(f"   📏 Per-pair EMA buffer: {effective_ema_buffer} pips for {epic}")
+
+        buffer = effective_ema_buffer * pip_value
 
         if current_close > ema_value + buffer:
             direction = 'BULL'
@@ -3376,7 +3538,7 @@ class SMCSimpleStrategy:
         else:
             return {
                 'valid': False,
-                'reason': f"Price in EMA buffer zone ({distance_pips:.1f} pips, need >{self.ema_buffer_pips})"
+                'reason': f"Price in EMA buffer zone ({distance_pips:.1f} pips, need >{effective_ema_buffer})"
             }
 
         # Check minimum distance from EMA
@@ -4817,7 +4979,13 @@ class SMCSimpleStrategy:
             return True, f"Cooldown OK ({hours_since:.1f}h, status={order_status})"
 
         # Backtest mode or fallback: use adaptive or static cooldown
-        if self.adaptive_cooldown_enabled:
+        # v2.31.0: Scalp mode in backtest should use scalp cooldown, not adaptive cooldown
+        # This matches live behavior where scalp uses status-based 0.25-0.5h cooldowns
+        if self.scalp_mode_enabled and self._backtest_mode:
+            effective_cooldown = self.scalp_cooldown_minutes / 60.0  # Convert minutes to hours
+            cooldown_breakdown = f"scalp={self.scalp_cooldown_minutes}min"
+            cooldown_type = "scalp"
+        elif self.adaptive_cooldown_enabled:
             effective_cooldown, cooldown_breakdown = self._calculate_adaptive_cooldown(pair, check_time)
             cooldown_type = "adaptive"
         else:
@@ -5333,6 +5501,9 @@ class SMCSimpleStrategy:
             direction: Attempted direction (BULL/BEAR) if known
             context: Additional context data (prices, indicators, etc.)
         """
+        # v2.31.1: Always track to in-memory stats for backtest summary
+        self._track_filter_rejection(stage)
+
         if self.rejection_manager is None:
             return
 
@@ -5974,6 +6145,58 @@ class SMCSimpleStrategy:
         if self.rejection_manager is not None:
             return self.rejection_manager.flush()
         return True
+
+    # =========================================================================
+    # FILTER STATS TRACKING (v2.31.1 - Jan 2026)
+    # In-memory tracking for backtest summary display
+    # =========================================================================
+
+    def _track_filter_rejection(self, filter_name: str) -> None:
+        """
+        Track a filter rejection in the in-memory stats (for backtest summary).
+
+        Args:
+            filter_name: Name of the filter that rejected (e.g., 'efficiency_ratio', 'session_hours')
+        """
+        if filter_name not in self._filter_stats['filter_rejections']:
+            self._filter_stats['filter_rejections'][filter_name] = 0
+        self._filter_stats['filter_rejections'][filter_name] += 1
+
+    def _track_signal_detected(self) -> None:
+        """Track that a signal was detected (before filters)."""
+        self._filter_stats['signals_detected'] += 1
+
+    def _track_signal_passed(self) -> None:
+        """Track that a signal passed all filters."""
+        self._filter_stats['signals_passed'] += 1
+
+    def get_filter_stats(self) -> Dict:
+        """
+        Get filter statistics for backtest summary display.
+
+        Returns:
+            Dict containing:
+            - signals_detected: Total signals detected before filters
+            - signals_passed: Signals that passed all filters
+            - signals_filtered: Signals rejected by filters
+            - filter_rejections: Dict of {filter_name: rejection_count}
+            - filter_rate: Percentage of signals filtered out
+        """
+        stats = self._filter_stats.copy()
+        stats['signals_filtered'] = stats['signals_detected'] - stats['signals_passed']
+        if stats['signals_detected'] > 0:
+            stats['filter_rate'] = (stats['signals_filtered'] / stats['signals_detected']) * 100
+        else:
+            stats['filter_rate'] = 0.0
+        return stats
+
+    def reset_filter_stats(self) -> None:
+        """Reset filter stats (call at start of new backtest)."""
+        self._filter_stats = {
+            'signals_detected': 0,
+            'signals_passed': 0,
+            'filter_rejections': {}
+        }
 
 
 def create_smc_simple_strategy(config, logger=None, db_manager=None, config_override: dict = None):

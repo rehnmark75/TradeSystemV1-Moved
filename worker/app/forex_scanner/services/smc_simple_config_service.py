@@ -1057,6 +1057,106 @@ class SMCSimpleConfig:
             'require_entry_candle_alignment': self.get_pair_scalp_require_entry_candle_alignment(epic) if self.get_pair_scalp_require_entry_candle_alignment(epic) is not None else self.scalp_require_entry_candle_alignment,
         }
 
+    # =========================================================================
+    # SCALP PAIR FILTER GETTERS (v2.31.0)
+    # Per-pair scalp trade filters based on Jan 2026 NZDUSD trade analysis.
+    # These filters are stored in parameter_overrides JSONB and can be
+    # configured independently per pair.
+    # =========================================================================
+
+    def get_pair_scalp_min_efficiency_ratio(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair minimum efficiency ratio for scalp trades.
+
+        Filters out choppy/ranging markets where tight stops get whipsawed.
+        Recommended: 0.12 based on NZDUSD analysis (winner had 0.1475, losers < 0.10).
+
+        Returns:
+            Minimum efficiency ratio threshold if set, None otherwise (filter disabled)
+        """
+        value = self.get_for_pair(epic, 'scalp_min_efficiency_ratio')
+        return float(value) if value is not None else None
+
+    def get_pair_scalp_require_trending_regime(self, epic: str) -> bool:
+        """
+        Get per-pair trending regime requirement for scalp trades.
+
+        Only allows scalp entries when market_regime_detected == 'trending'.
+        Based on NZDUSD analysis: winner was in trending, 2/3 losers in ranging.
+
+        Returns:
+            True if trending regime required, False otherwise (default)
+        """
+        value = self.get_for_pair(epic, 'scalp_require_trending_regime')
+        return bool(value) if value is not None else False
+
+    def get_pair_scalp_session_start_hour(self, epic: str) -> Optional[int]:
+        """
+        Get per-pair scalp session start hour (UTC).
+
+        Filters out low-liquidity hours where whipsaw risk is higher.
+        Recommended: 14 (2 PM UTC = London afternoon / NY open).
+
+        Returns:
+            Session start hour (0-23 UTC) if set, None otherwise (filter disabled)
+        """
+        value = self.get_for_pair(epic, 'scalp_session_start_hour')
+        return int(value) if value is not None else None
+
+    def get_pair_scalp_session_end_hour(self, epic: str) -> Optional[int]:
+        """
+        Get per-pair scalp session end hour (UTC).
+
+        Filters out low-liquidity hours where whipsaw risk is higher.
+        Recommended: 22 (10 PM UTC = NY close).
+
+        Returns:
+            Session end hour (0-23 UTC) if set, None otherwise (filter disabled)
+        """
+        value = self.get_for_pair(epic, 'scalp_session_end_hour')
+        return int(value) if value is not None else None
+
+    def get_pair_scalp_require_macd_alignment(self, epic: str) -> bool:
+        """
+        Get per-pair MACD alignment requirement for scalp trades.
+
+        Requires MACD histogram to align with trade direction:
+        - BUY: histogram > -0.0001
+        - SELL: histogram < +0.0001
+
+        Returns:
+            True if MACD alignment required, False otherwise (default)
+        """
+        value = self.get_for_pair(epic, 'scalp_require_macd_alignment')
+        return bool(value) if value is not None else False
+
+    def get_pair_scalp_require_ema_stack_alignment(self, epic: str) -> bool:
+        """
+        Get per-pair EMA stack alignment requirement for scalp trades.
+
+        Requires EMA stack order to match trade direction:
+        - BUY: ema_stack_order == 'bullish'
+        - SELL: ema_stack_order == 'bearish'
+
+        Returns:
+            True if EMA stack alignment required, False otherwise (default)
+        """
+        value = self.get_for_pair(epic, 'scalp_require_ema_stack_alignment')
+        return bool(value) if value is not None else False
+
+    def get_pair_scalp_ema_buffer_pips(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair EMA buffer for scalp trades.
+
+        Some pairs like NZDUSD tend to hover close to the EMA, so they need
+        a smaller buffer to generate signals. Default scalp buffer is 1.0 pip.
+
+        Returns:
+            Custom EMA buffer in pips if configured, None otherwise
+        """
+        value = self.get_for_pair(epic, 'scalp_ema_buffer_pips')
+        return float(value) if value is not None else None
+
     def check_macd_alignment(
         self,
         signal_type: str,
@@ -1611,6 +1711,18 @@ class SMCSimpleConfigService:
     def get_pair_stop_offset(self, epic: str, entry_type: str = 'MOMENTUM') -> float:
         """Get stop entry offset in pips for a specific pair"""
         return self.get_config().get_pair_stop_offset(epic, entry_type)
+
+    # =========================================================================
+    # SCALP EMA BUFFER SERVICE ACCESSORS (v2.31.2)
+    # =========================================================================
+
+    def get_pair_scalp_ema_buffer_pips(self, epic: str) -> Optional[float]:
+        """Get per-pair EMA buffer for scalp trades.
+
+        Some pairs like NZDUSD tend to hover close to the EMA, so they need
+        a smaller buffer to generate signals. Default scalp buffer is 1.0 pip.
+        """
+        return self.get_config().get_pair_scalp_ema_buffer_pips(epic)
 
 
 # Global singleton instance
