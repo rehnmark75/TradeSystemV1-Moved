@@ -1034,8 +1034,8 @@ async def get_trade_outcome_analysis(trade_id: int, db: Session = Depends(get_db
         if alert:
             strategy_indicators = safe_json_parse(alert.strategy_indicators)
 
-    # Calculate MFE/MAE from candle data (using IGCandle table with 5m for precision)
-    mfe_mae = calculate_mfe_mae(trade, db, IGCandle, timeframe=5)
+    # Calculate MFE/MAE from candle data (using IGCandle table with 1m candles)
+    mfe_mae = calculate_mfe_mae(trade, db, IGCandle, timeframe=1)
 
     # Classify exit type
     exit_type = classify_exit_type(trade)

@@ -621,12 +621,14 @@ class OrderExecutor:
             self.request_stats['successful_requests'] += 1
 
             # v2.19.0: Update order status based on result
+            # v2.20.0 FIX: Also handle 'skipped' (HTTP 409 duplicate) and 'blocked' (HTTP 403)
             if alert_id:
                 result_status = result.get('status')
                 if result_status in ['success', 'pending']:
                     # Order placed successfully (market filled or limit pending)
                     self._update_alert_status(alert_id, 'placed')
-                elif result_status == 'error':
+                elif result_status in ['error', 'skipped', 'blocked']:
+                    # Order failed, was skipped (duplicate position), or blocked
                     self._update_alert_status(alert_id, 'rejected')
 
             # Track pending trade for performance monitoring (use internal epic for consistency)
@@ -649,7 +651,12 @@ class OrderExecutor:
                 self.logger.info(f"⏳ {error_msg}")
             else:
                 self.logger.error(f"❌ {error_msg}")
-            
+
+            # v2.20.0 FIX: Update alert status on exception (was being skipped, leaving alerts stuck as 'pending')
+            if alert_id:
+                self._update_alert_status(alert_id, 'rejected')
+                self.logger.info(f"📝 Alert {alert_id} marked as 'rejected' after execution failure")
+
             return {
                 "status": "error",
                 "message": error_msg,

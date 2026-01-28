@@ -278,7 +278,7 @@ class EnhancedBacktestCommands:
                 self._display_detailed_signals(signals_result[:max_signals_display], max_signals_display, total_signals)
 
             # Display performance summary
-            self._display_performance_summary(execution_id, signals_result)
+            self._display_performance_summary(execution_id, signals_result, results)
 
         except Exception as e:
             self.logger.error(f"❌ Error displaying results: {e}")
@@ -457,7 +457,7 @@ class EnhancedBacktestCommands:
             import traceback
             self.logger.debug(traceback.format_exc())
 
-    def _display_performance_summary(self, execution_id: int, signals: List[Dict]):
+    def _display_performance_summary(self, execution_id: int, signals: List[Dict], results: Dict = None):
         """Display performance summary statistics"""
 
         try:
@@ -520,8 +520,72 @@ class EnhancedBacktestCommands:
 
             self.logger.info("=" * 50)
 
+            # v2.31.1: Display filter rejection stats
+            self._display_filter_stats(results)
+
         except Exception as e:
             self.logger.error(f"❌ Error calculating performance summary: {e}")
+
+    def _display_filter_stats(self, results: Dict = None):
+        """
+        Display filter rejection statistics for backtest summary.
+
+        Shows which filters are rejecting the most signals to help
+        identify overly aggressive filters that may need tuning.
+        """
+        if not results:
+            return
+
+        filter_stats = results.get('filter_stats')
+        if not filter_stats:
+            return
+
+        signals_detected = filter_stats.get('signals_detected', 0)
+        signals_passed = filter_stats.get('signals_passed', 0)
+        signals_filtered = filter_stats.get('signals_filtered', 0)
+        filter_rate = filter_stats.get('filter_rate', 0.0)
+        filter_rejections = filter_stats.get('filter_rejections', {})
+
+        # Only show if signals were detected (show even if all passed to confirm tracking works)
+        if signals_detected == 0:
+            return
+
+        self.logger.info(f"\n🔍 FILTER REJECTION SUMMARY:")
+        self.logger.info("=" * 50)
+        self.logger.info(f"   📊 Signals Detected: {signals_detected}")
+        self.logger.info(f"   ✅ Signals Passed: {signals_passed}")
+        self.logger.info(f"   ❌ Signals Filtered: {signals_filtered} ({filter_rate:.1f}%)")
+
+        if filter_rejections:
+            self.logger.info(f"\n   📋 Rejections by Filter:")
+
+            # Sort by rejection count (highest first)
+            sorted_filters = sorted(
+                filter_rejections.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+
+            # Calculate total rejections for percentage
+            total_rejections = sum(filter_rejections.values())
+
+            for filter_name, count in sorted_filters:
+                # Calculate percentage of total rejections
+                pct = (count / total_rejections * 100) if total_rejections > 0 else 0
+
+                # Format filter name for display
+                display_name = filter_name.replace('_', ' ').title()
+
+                # Add warning indicator for potentially aggressive filters
+                warning = ""
+                if pct > 50:
+                    warning = " ⚠️ HIGH"
+                elif pct > 30:
+                    warning = " ⚡"
+
+                self.logger.info(f"      {display_name}: {count} ({pct:.0f}%){warning}")
+
+        self.logger.info("=" * 50)
 
     def quick_enhanced_backtest(self, epic: str, hours: int = 24, show_signals: bool = True, pipeline: bool = False, config_override: dict = None, use_historical_intelligence: bool = True) -> bool:
         """Quick enhanced backtest for recent signals"""

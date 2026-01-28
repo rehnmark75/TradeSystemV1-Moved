@@ -412,7 +412,32 @@ class BacktestTradingOrchestrator:
         enhanced_results['validation_summary'] = self._get_validation_summary()
         enhanced_results['trade_validator_stats'] = self.trade_validator.get_validation_statistics() if self.trade_validator else {'status': 'disabled_basic_mode'}
 
+        # v2.31.1: Add filter stats from strategy for backtest summary
+        filter_stats = self._get_strategy_filter_stats()
+        if filter_stats:
+            enhanced_results['filter_stats'] = filter_stats
+
         return enhanced_results
+
+    def _get_strategy_filter_stats(self) -> Optional[Dict]:
+        """
+        Get filter statistics from the strategy for backtest summary.
+
+        Returns:
+            Dict with filter rejection counts, or None if not available
+        """
+        try:
+            # Access the SMC Simple strategy through the scanner's signal detector
+            if hasattr(self.scanner, 'signal_detector'):
+                signal_detector = self.scanner.signal_detector
+                if hasattr(signal_detector, 'smc_simple_strategy') and signal_detector.smc_simple_strategy:
+                    strategy = signal_detector.smc_simple_strategy
+                    if hasattr(strategy, 'get_filter_stats'):
+                        return strategy.get_filter_stats()
+            return None
+        except Exception as e:
+            self.logger.debug(f"Could not get filter stats: {e}")
+            return None
 
     def _get_validation_summary(self) -> Dict:
         """Get validation pipeline summary"""
@@ -491,6 +516,10 @@ class BacktestTradingOrchestrator:
             },
             'order_logger': self.order_logger  # Include order_logger for direct CSV export
         }
+
+        # v2.31.1: Include filter_stats from enhanced_results for backtest summary
+        if results.get('filter_stats'):
+            report['filter_stats'] = results['filter_stats']
 
         # Log comprehensive summary
         self.logger.info(f"📊 Orchestration Report Summary:")
