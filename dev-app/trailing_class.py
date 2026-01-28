@@ -63,6 +63,9 @@ class TrailingConfig:
     stage3_atr_multiplier: float = 0.8 # ATR multiplier for stage 3 (tighter)
     stage3_min_distance: int = 2      # Minimum distance for stage 3
 
+    # Partial close trigger (ATR-adaptive in v3.2.0)
+    partial_close_trigger_points: int = 13  # Profit level to trigger partial close
+
     # EMA Exit compatibility (disabled by default for progressive trailing)
     enable_ema_exit: bool = False
 
@@ -696,17 +699,12 @@ class Progressive3StageTrailing(TrailingStrategy):
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
 
-        # Use 4-stage configuration with early breakeven (Stage 0)
-        from config import (EARLY_BREAKEVEN_TRIGGER_POINTS, STAGE1_TRIGGER_POINTS,
-                           STAGE2_TRIGGER_POINTS, STAGE3_TRIGGER_POINTS)
-
-        # Get pair-specific early breakeven config if available (use scalp config if scalp trade)
-        is_scalp = getattr(trade, 'is_scalp_trade', False)
-        pair_config = self._get_pair_config(trade.symbol, is_scalp=is_scalp)
-        early_be_trigger = pair_config.get('early_breakeven_trigger_points', EARLY_BREAKEVEN_TRIGGER_POINTS)
-        stage1_trigger = pair_config.get('stage1_trigger_points', STAGE1_TRIGGER_POINTS)
-        stage2_trigger = pair_config.get('stage2_trigger_points', STAGE2_TRIGGER_POINTS)
-        stage3_trigger = pair_config.get('stage3_trigger_points', STAGE3_TRIGGER_POINTS)
+        # v3.2.0: Use self.config (ATR-adaptive when available) for stage detection
+        # self.config is set by CombinedTradeProcessor.get_config_for_trade() with ATR-proportional values
+        early_be_trigger = self.config.initial_trigger_points
+        stage1_trigger = self.config.stage1_trigger_points
+        stage2_trigger = self.config.stage2_trigger_points
+        stage3_trigger = self.config.stage3_trigger_points
 
         # Calculate current profit in points
         if direction == "BUY":
@@ -838,9 +836,8 @@ class Progressive3StageTrailing(TrailingStrategy):
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
 
-        # Get pair-specific lock points or use default (5 points)
-        pair_config = self._get_pair_config(trade.symbol)
-        lock_points = pair_config.get('stage1_lock_points', 5)
+        # v3.2.0: Use self.config (ATR-adaptive) for lock points instead of static pair config
+        lock_points = self.config.stage1_lock_points
 
         # Calculate profit lock level
         if direction == "BUY":
@@ -877,21 +874,20 @@ class Progressive3StageTrailing(TrailingStrategy):
         direction = trade.direction.upper()
         point_value = self._get_point_value(trade.symbol)
 
-        # ✅ NEW: DEFENSIVE CHECK - Ensure profit actually >= 16 points before Stage 2
-        # This protects against Stage 2 being called incorrectly or for legacy trades
-        from config import STAGE2_TRIGGER_POINTS
+        # ✅ DEFENSIVE CHECK - Ensure profit actually meets Stage 2 trigger
+        # v3.2.0: Use config value (ATR-adaptive) instead of global constant
+        stage2_trigger = self.config.stage2_trigger_points
         if direction == "BUY":
             current_profit_points = int((current_price - trade.entry_price) / point_value)
         else:  # SELL
             current_profit_points = int((trade.entry_price - current_price) / point_value)
 
-        if current_profit_points < STAGE2_TRIGGER_POINTS:
-            self.logger.warning(f"⚠️ [STAGE 2 GUARD] Trade {trade.id}: Profit {current_profit_points}pts < Stage 2 trigger {STAGE2_TRIGGER_POINTS}pts - REJECTING Stage 2")
+        if current_profit_points < stage2_trigger:
+            self.logger.warning(f"⚠️ [STAGE 2 GUARD] Trade {trade.id}: Profit {current_profit_points}pts < Stage 2 trigger {stage2_trigger}pts - REJECTING Stage 2")
             return None
 
-        # ✅ FIXED: Stage 2 locks in 10 points profit (not config value)
-        # When price reaches 16+ points, move stop to entry + 10 points
-        profit_lock_points = 10
+        # v3.2.0: Use config lock points (ATR-adaptive) instead of hardcoded value
+        profit_lock_points = self.config.stage2_lock_points
 
         if direction == "BUY":
             trail_level = trade.entry_price + (profit_lock_points * point_value)
@@ -1600,18 +1596,13 @@ class EnhancedTradeProcessor:
             return False
 
         try:
-            # ✅ NEW: Use pair-specific configuration dynamically
-            from config import get_trailing_config_for_epic
-
-            trailing_config = get_trailing_config_for_epic(
-                trade.symbol,
-                is_scalp_trade=getattr(trade, 'is_scalp_trade', False),
-            )
-            STAGE1_TRIGGER_POINTS = trailing_config['stage1_trigger_points']
-            STAGE1_LOCK_POINTS = trailing_config['stage1_lock_points']
-            STAGE2_TRIGGER_POINTS = trailing_config['stage2_trigger_points']
-            STAGE2_LOCK_POINTS = trailing_config['stage2_lock_points']
-            STAGE3_TRIGGER_POINTS = trailing_config['stage3_trigger_points']
+            # v3.2.0: Use self.config (already set by get_config_for_trade with ATR adaptation)
+            # instead of reloading static config from get_trailing_config_for_epic()
+            STAGE1_TRIGGER_POINTS = self.config.stage1_trigger_points
+            STAGE1_LOCK_POINTS = self.config.stage1_lock_points
+            STAGE2_TRIGGER_POINTS = self.config.stage2_trigger_points
+            STAGE2_LOCK_POINTS = self.config.stage2_lock_points
+            STAGE3_TRIGGER_POINTS = self.config.stage3_trigger_points
 
             self.logger.info(f"📊 [PAIR CONFIG] {trade.symbol}: "
                            f"Stage1({STAGE1_TRIGGER_POINTS}pts→{STAGE1_LOCK_POINTS}pts) "
@@ -1620,8 +1611,16 @@ class EnhancedTradeProcessor:
 
             point_value = get_point_value(trade.symbol)
 
-            # Use config file value only (no dynamic calculation)
-            break_even_trigger_points = trailing_config['break_even_trigger_points']
+            # v3.2.0: Load static pair config for non-stage fields (partial close, buffer, etc.)
+            # Stage trigger/lock values come from self.config (ATR-adaptive if available)
+            from config import get_trailing_config_for_epic
+            trailing_config = get_trailing_config_for_epic(
+                trade.symbol,
+                is_scalp_trade=getattr(trade, 'is_scalp_trade', False),
+            )
+
+            # v3.2.0: Use self.config for break-even trigger (ATR-adaptive)
+            break_even_trigger_points = self.config.break_even_trigger_points
             break_even_trigger = break_even_trigger_points * point_value
             
             # Calculate safe trailing distance
@@ -1660,8 +1659,8 @@ class EnhancedTradeProcessor:
                             f"profit={profit_points}pts, trigger={break_even_trigger_points}pts")
 
             # --- STEP 0: Early Break-Even (Risk Elimination) ---
-            # v2.8.0: Move SL to entry BEFORE partial close to eliminate risk first
-            early_be_trigger_points = trailing_config.get('early_breakeven_trigger_points', 10)
+            # v3.2.0: Use ATR-adaptive early BE trigger from self.config
+            early_be_trigger_points = self.config.initial_trigger_points
             early_be_buffer_points = trailing_config.get('early_breakeven_buffer_points', 1)
             is_profitable_for_early_be = profit_points >= early_be_trigger_points
 
@@ -1804,7 +1803,8 @@ class EnhancedTradeProcessor:
                 # NOT at break-even trigger
                 enable_partial_close = trailing_config.get('enable_partial_close', True)
                 partial_close_size = trailing_config.get('partial_close_size', 0.5)
-                partial_close_trigger = trailing_config.get('partial_close_trigger_points', 13)  # Default 13 pips
+                # v3.2.0: Use self.config (ATR-adaptive) for partial close trigger
+                partial_close_trigger = self.config.partial_close_trigger_points
                 partial_close_succeeded = False
 
                 # Check if profit is sufficient for partial close (separate threshold from BE)
@@ -1874,9 +1874,9 @@ class EnhancedTradeProcessor:
                                     self.logger.info(f"✅ [PARTIAL CLOSE DB] Trade {trade.id}: Database updated, "
                                                    f"current_size={refreshed_trade.current_size}, continuing to Stage 2/3")
 
-                                    # ✅ FIX (Jan 2026): Always use config stage1_lock_points for profit lock
+                                    # v3.2.0: Use ATR-adaptive stage1_lock_points
                                     # Calculate profit protection stop level
-                                    lock_points = trailing_config['stage1_lock_points']
+                                    lock_points = self.config.stage1_lock_points
 
                                     if refreshed_trade.direction.upper() == "BUY":
                                         profit_protection_stop = refreshed_trade.entry_price + (lock_points * point_value)
@@ -1953,11 +1953,11 @@ class EnhancedTradeProcessor:
                     # Skip break-even stop move entirely - partial close already executed
                     self.logger.info(f"⏭️ [SKIP BE STOP] Trade {trade.id}: Partial close succeeded, skipping break-even stop move")
                 else:
-                    # ✅ FIX (Jan 2026): Always use config stage1_lock_points for profit lock
+                    # v3.2.0: Use ATR-adaptive stage1_lock_points for profit lock
                     # min_stop_distance_points is broker's min distance from CURRENT price (constraint)
                     # stage1_lock_points is profit to lock from ENTRY price (strategy config)
                     # These are semantically different - don't confuse them!
-                    lock_points = trailing_config['stage1_lock_points']
+                    lock_points = self.config.stage1_lock_points
                     is_scalp = getattr(trade, 'is_scalp_trade', False)
                     self.logger.info(f"💰 [STAGE1 LOCK] Trade {trade.id}: Using {'SCALP' if is_scalp else 'REGULAR'} config lock_points={lock_points}pts")
                     if trade.direction.upper() == "BUY":
@@ -2371,7 +2371,8 @@ class EnhancedTradeProcessor:
                 calm_period_active = time_since_partial < POST_PARTIAL_CLOSE_CALM_MINUTES
 
                 # Calculate price move since partial close (use entry + partial_close_trigger as reference)
-                partial_close_trigger = trailing_config.get('partial_close_trigger_points', 25)
+                # v3.2.0: Use self.config (ATR-adaptive) for partial close trigger
+                partial_close_trigger = self.config.partial_close_trigger_points
                 if trade.direction.upper() == "BUY":
                     partial_close_price = trade.entry_price + (partial_close_trigger * point_value)
                     price_move_since_partial = (current_price - partial_close_price) / point_value

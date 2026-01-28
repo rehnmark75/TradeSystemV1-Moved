@@ -214,7 +214,12 @@ class AlertHistory(Base):
     order_flow_analysis = Column(JSON, nullable=True)
     enhanced_confidence_score = Column(Numeric(5, 4), nullable=True, index=True)
     confluence_details = Column(JSON, nullable=True)
-    
+
+    # ATR and volatility (used by ATR-adaptive trailing stop system)
+    atr = Column(Numeric(10, 6), nullable=True)
+    atr_percentile = Column(Numeric(5, 2), nullable=True)
+    volatility_state = Column(String(20), nullable=True)
+
     def __repr__(self):
         return f"<AlertHistory(id={self.id}, epic={self.epic}, signal_type={self.signal_type}, strategy={self.strategy})>"
 

@@ -12,7 +12,7 @@ ENHANCED WITH PROFIT PROTECTION RULE - 15PT → 10PT RULE INTEGRATION
 from dataclasses import dataclass
 from datetime import datetime
 from sqlalchemy.orm import Session
-from services.models import TradeLog
+from services.models import TradeLog, AlertHistory
 from typing import Optional, Dict
 import httpx
 from config import API_BASE_URL
@@ -78,21 +78,24 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
         else:
             self.logger.info("[EMA EXIT] Disabled")
 
-    def get_config_for_trade(self, trade: TradeLog) -> TrailingConfig:
+    def get_config_for_trade(self, trade: TradeLog, db: Session = None) -> TrailingConfig:
         """
-        Dynamically select the correct trailing config based on trade's scalp flag.
+        Dynamically select trailing config based on trade's scalp flag and ATR.
 
-        Jan 2026: VSL system replaced with scalp-specific trailing configs.
-        When is_scalp_trade=True, use SCALP_TRAILING_CONFIGS for tighter, data-backed stops.
+        v3.2.0 (Jan 2026): ATR-adaptive trailing stops for scalp trades.
+        When ATR data is available via alert_history, stage thresholds are scaled
+        proportionally to volatility at signal time, with min/max bounds.
+        Falls back to static config when ATR data is unavailable.
 
         Args:
             trade: Trade to get config for
+            db: Database session for ATR lookup (optional, falls back to static)
 
         Returns:
             TrailingConfig with appropriate settings for this trade
         """
         try:
-            from config import get_trailing_config_for_epic
+            from config import get_trailing_config_for_epic, compute_atr_trailing_config
 
             # Check if this is a scalp trade
             is_scalp = getattr(trade, 'is_scalp_trade', False)
@@ -100,11 +103,44 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
             if is_scalp:
                 self.logger.debug(f"⚡ [SCALP CONFIG] Trade {trade.id}: Loading scalp-specific trailing config")
 
-            # Get pair-specific config with scalp flag
+            # Get pair-specific static config with scalp flag
             pair_config = get_trailing_config_for_epic(trade.symbol, is_scalp_trade=is_scalp)
 
-            # Create a new TrailingConfig instance with the pair-specific values
-            # Use the default config as base and override with pair-specific values
+            # v3.2.0: ATR-adaptive trailing for scalp trades
+            atr_pips = None
+            if is_scalp and db is not None and getattr(trade, 'alert_id', None):
+                try:
+                    alert = db.query(AlertHistory).filter(
+                        AlertHistory.id == trade.alert_id
+                    ).first()
+
+                    if alert and alert.atr is not None:
+                        point_value = get_point_value(trade.symbol)
+                        atr_pips = float(alert.atr) / point_value
+
+                        # Compute ATR-proportional config with bounds
+                        static_snapshot = dict(pair_config)
+                        pair_config = compute_atr_trailing_config(atr_pips, pair_config)
+
+                        self.logger.info(
+                            f"📐 [ATR TRAILING] Trade {trade.id} {trade.symbol}: "
+                            f"ATR={atr_pips:.1f} pips → "
+                            f"earlyBE={pair_config['early_breakeven_trigger_points']}pts "
+                            f"(was {static_snapshot.get('early_breakeven_trigger_points')}), "
+                            f"S1={pair_config['stage1_trigger_points']}→lock {pair_config['stage1_lock_points']}, "
+                            f"S2={pair_config['stage2_trigger_points']}→lock {pair_config['stage2_lock_points']}, "
+                            f"S3={pair_config['stage3_trigger_points']}pts"
+                        )
+                    else:
+                        self.logger.debug(
+                            f"📐 [ATR TRAILING] Trade {trade.id}: No ATR in alert {trade.alert_id}, using static config"
+                        )
+                except Exception as e:
+                    self.logger.warning(
+                        f"⚠️ [ATR TRAILING] Trade {trade.id}: ATR lookup failed ({e}), using static config"
+                    )
+
+            # Create a new TrailingConfig instance with the (possibly ATR-adjusted) values
             config = TrailingConfig(
                 epic=trade.symbol,
                 stage1_trigger_points=pair_config.get('stage1_trigger_points', self.default_config.stage1_trigger_points),
@@ -118,6 +154,8 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                 break_even_trigger_points=pair_config.get('break_even_trigger_points', self.default_config.break_even_trigger_points),
                 initial_trigger_points=pair_config.get('early_breakeven_trigger_points',
                                                       self.default_config.initial_trigger_points),
+                partial_close_trigger_points=pair_config.get('partial_close_trigger_points',
+                                                             self.default_config.partial_close_trigger_points),
             )
 
             return config
@@ -294,7 +332,8 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
         """
         try:
             # ✅ STEP 0: DYNAMIC CONFIG SELECTION (Jan 2026 - Scalp mode support)
-            trade_config = self.get_config_for_trade(trade)
+            # v3.2.0: Pass db for ATR-adaptive trailing config lookup
+            trade_config = self.get_config_for_trade(trade, db=db)
             # Update the trailing manager's config for this trade
             self.trailing_manager.config = trade_config
             self.config = trade_config  # Also update processor's config reference
@@ -512,7 +551,8 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
 
         try:
             # ✅ STEP 0: Dynamic Config Selection (Jan 2026 - Scalp mode support)
-            trade_config = self.get_config_for_trade(trade)
+            # v3.2.0: Pass db for ATR-adaptive trailing config lookup
+            trade_config = self.get_config_for_trade(trade, db=db)
             # Update the trailing manager's config for this trade
             self.trailing_manager.config = trade_config
             self.config = trade_config  # Also update processor's config reference
@@ -553,7 +593,8 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
 
         try:
             # --- Step -1: Dynamic Config Selection (Jan 2026 - Scalp mode support) ---
-            trade_config = self.get_config_for_trade(trade)
+            # v3.2.0: Pass db for ATR-adaptive trailing config lookup
+            trade_config = self.get_config_for_trade(trade, db=db)
             # Update the trailing manager's config for this trade
             self.trailing_manager.config = trade_config
             self.config = trade_config  # Also update processor's config reference
