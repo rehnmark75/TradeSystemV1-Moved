@@ -2872,10 +2872,23 @@ class SMCSimpleStrategy:
             # v2.12.0: Added direction-aware confidence threshold support
             # v2.20.0: Scalp mode always uses scalp_min_confidence (highest priority)
             # v2.31.2: Allow per-pair scalp_min_confidence override (NZDUSD needs 55-65% band)
+            # v2.35.2: Use max(scalp_min, pair_min) to never bypass per-pair thresholds
             if self.scalp_mode_enabled:
-                # SCALP MODE: Check per-pair override first, then use global
+                # SCALP MODE: Use max of scalp threshold and per-pair threshold
+                # This ensures scalp mode never bypasses per-pair optimized thresholds
                 pair_scalp_min = self._get_pair_param(epic, 'scalp_min_confidence', None)
-                if pair_scalp_min is not None:
+                pair_general_min = self._db_config.get_pair_min_confidence(epic) if self._db_config else None
+
+                # Determine scalp threshold (per-pair scalp or global)
+                scalp_threshold = pair_scalp_min if pair_scalp_min is not None else self.scalp_min_confidence
+
+                # v2.35.2: Take max of scalp threshold and per-pair min_confidence
+                # This prevents scalp mode from taking trades below per-pair minimums
+                if pair_general_min is not None and pair_general_min > scalp_threshold:
+                    pair_min_confidence = pair_general_min
+                    adjustment_type = "scalp-mode-capped"
+                    self.logger.info(f"   🎯 Scalp threshold capped by pair min: {pair_general_min*100:.0f}% (scalp was {scalp_threshold*100:.0f}%)")
+                elif pair_scalp_min is not None:
                     pair_min_confidence = pair_scalp_min
                     adjustment_type = "scalp-mode-pair"
                     self.logger.info(f"   🎯 Per-pair scalp threshold: {pair_scalp_min*100:.0f}%")
