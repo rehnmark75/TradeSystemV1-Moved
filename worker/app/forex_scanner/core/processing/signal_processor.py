@@ -1430,7 +1430,7 @@ class SignalProcessor:
                     alert_message += f" [SM: {signal.get('smart_money_score', 0):.2f}]"
                 
                 alert_id = self.alert_history.save_alert(
-                    signal_data=alert_data,
+                    signal=alert_data,
                     alert_message=alert_message,
                     alert_level='INFO'
                 )
@@ -1524,7 +1524,12 @@ class SignalProcessor:
                 'entry_price': float(signal.get('entry_price', 0)) if signal.get('entry_price') else None,
                 'stop_loss': float(signal.get('stop_loss', 0)) if signal.get('stop_loss') else None,
                 'take_profit': float(signal.get('take_profit', 0)) if signal.get('take_profit') else None,
-                
+
+                # HTF Bias fields (v2.35.5 - fix persistence bug)
+                'htf_bias_score': signal.get('htf_bias_score'),
+                'htf_bias_mode': signal.get('htf_bias_mode'),
+                'htf_bias_details': signal.get('htf_bias_details'),
+
                 # Enhanced metadata
                 'metadata': json.dumps({
                     'enhanced_signal': True,

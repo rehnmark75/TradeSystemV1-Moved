@@ -1478,6 +1478,10 @@ class SMCSimpleStrategy:
 
         direction = signal.get('signal_type', signal.get('direction', ''))
 
+        # v2.35.5: Backtest override support for scalp filters
+        # These overrides allow testing filters in backtest without affecting live trading
+        override = self._config_override if hasattr(self, '_config_override') and self._config_override else {}
+
         # Filter 1: Efficiency Ratio
         min_er = self._db_config.get_pair_scalp_min_efficiency_ratio(epic)
         if min_er is not None:
@@ -1520,15 +1524,40 @@ class SMCSimpleStrategy:
                     self._track_filter_rejection('macd_alignment')
                     return False, f"MACD histogram {macd_hist:.6f} positive on SELL"
 
-        # Filter 5: EMA Stack Alignment
-        if self._db_config.get_pair_scalp_require_ema_stack_alignment(epic):
-            ema_stack = signal.get('ema_stack_order', 'mixed')
-            if direction == 'BULL' and ema_stack != 'bullish':
+        # Filter 5: EMA Stack Alignment (with backtest override support)
+        # Check override first, then fall back to database config
+        if 'scalp_require_ema_stack_alignment' in override:
+            ema_stack_filter_enabled = override['scalp_require_ema_stack_alignment']
+        else:
+            ema_stack_filter_enabled = self._db_config.get_pair_scalp_require_ema_stack_alignment(epic)
+
+        ema_stack = signal.get('ema_stack_order', 'mixed')
+        ema_stack_misaligned = (
+            (direction == 'BULL' and ema_stack != 'bullish') or
+            (direction == 'BEAR' and ema_stack != 'bearish')
+        )
+
+        if ema_stack_misaligned:
+            if ema_stack_filter_enabled:
                 self._track_filter_rejection('ema_stack_alignment')
-                return False, f"EMA stack {ema_stack} not bullish for BUY"
-            if direction == 'BEAR' and ema_stack != 'bearish':
-                self._track_filter_rejection('ema_stack_alignment')
-                return False, f"EMA stack {ema_stack} not bearish for SELL"
+                return False, f"EMA stack {ema_stack} not aligned for {direction}"
+            else:
+                # v2.35.5: MONITORING mode - log would-reject without blocking
+                self.logger.info(f"📊 [MONITOR] EMA stack {ema_stack} misaligned for {direction} (would reject if enabled)")
+                self._track_filter_rejection('ema_stack_alignment_monitor')
+
+        # Filter 5b: Breakout Regime Block (v2.35.5 - with backtest override support)
+        # Codex analysis: 0% win rate in breakout regime
+        scalp_block_breakout = override.get('scalp_block_breakout_regime', False)
+        market_regime = signal.get('market_regime_detected', 'unknown')
+        if market_regime == 'breakout':
+            if scalp_block_breakout:
+                self._track_filter_rejection('breakout_regime')
+                return False, f"Breakout regime blocked (market_regime={market_regime})"
+            else:
+                # MONITORING mode - log would-reject without blocking
+                self.logger.info(f"📊 [MONITOR] Breakout regime detected (would reject if scalp_block_breakout_regime enabled)")
+                self._track_filter_rejection('breakout_regime_monitor')
 
         # =========================================================================
         # v2.32.0: USDCAD-specific filters based on Jan 2026 trade analysis
@@ -1558,6 +1587,29 @@ class SMCSimpleStrategy:
             if current_adx is not None and current_adx < min_adx:
                 self._track_filter_rejection('min_adx')
                 return False, f"ADX {current_adx:.1f} < {min_adx:.1f}"
+
+        # =========================================================================
+        # v2.35.5: Entry Quality/Momentum Gates (Codex recommendation)
+        # These filters are BACKTEST-ONLY by default via override system
+        # Codex analysis: entry_quality < 0.30 = 1 win in 12 trades, avg -$59.06
+        #                 entry_momentum < 0.30 = 3 wins in 16 trades, avg -$39.20
+        # =========================================================================
+
+        # Filter 9: Minimum Entry Quality Score (backtest override only)
+        min_entry_quality = override.get('scalp_min_entry_quality_score', None)
+        if min_entry_quality is not None:
+            entry_quality = signal.get('entry_quality_score')
+            if entry_quality is not None and entry_quality < min_entry_quality:
+                self._track_filter_rejection('entry_quality')
+                return False, f"Entry quality {entry_quality:.2f} < {min_entry_quality:.2f}"
+
+        # Filter 10: Minimum Entry Candle Momentum (backtest override only)
+        min_entry_momentum = override.get('scalp_min_entry_candle_momentum', None)
+        if min_entry_momentum is not None:
+            entry_momentum = signal.get('entry_candle_momentum')
+            if entry_momentum is not None and entry_momentum < min_entry_momentum:
+                self._track_filter_rejection('entry_momentum')
+                return False, f"Entry momentum {entry_momentum:.2f} < {min_entry_momentum:.2f}"
 
         return True, ""
 
@@ -6015,6 +6067,16 @@ class SMCSimpleStrategy:
             signal['adx_plus_di'] = metrics.adx_plus_di
             signal['adx_minus_di'] = metrics.adx_minus_di
             signal['adx_trend_strength'] = metrics.adx_trend_strength
+
+            # v2.35.5: MONITORING - Log entry quality/momentum below recommended thresholds
+            eq_score = metrics.entry_quality_score
+            momentum = metrics.entry_candle_momentum
+            if eq_score is not None and eq_score < 0.30:
+                self.logger.info(f"📊 [MONITOR] Entry quality {eq_score:.2f} < 0.30 threshold (would reject if gate enabled)")
+                self._track_filter_rejection('entry_quality_monitor')
+            if momentum is not None and momentum < 0.30:
+                self.logger.info(f"📊 [MONITOR] Entry momentum {momentum:.2f} < 0.30 threshold (would reject if gate enabled)")
+                self._track_filter_rejection('entry_momentum_monitor')
 
             # Extract extended indicators from DataFrames (non-invasive)
             self._extract_extended_indicators(signal, df_entry, df_trigger, df_4h)

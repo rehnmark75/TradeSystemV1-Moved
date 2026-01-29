@@ -532,7 +532,8 @@ class AlertHistoryManager:
                         rsi_zone, rsi_divergence,
                         ema_9, ema_21, ema_50, ema_200, price_vs_ema_200, ema_stack_order,
                         candle_body_pips, candle_upper_wick_pips, candle_lower_wick_pips, candle_type,
-                        htf_candle_direction, htf_candle_direction_prev
+                        htf_candle_direction, htf_candle_direction_prev,
+                        htf_bias_score, htf_bias_mode, htf_bias_details
                     ) VALUES (
                         %(alert_timestamp)s,
                         %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(price)s, %(bid_price)s, %(ask_price)s,
@@ -569,7 +570,8 @@ class AlertHistoryManager:
                         %(rsi_zone)s, %(rsi_divergence)s,
                         %(ema_9)s, %(ema_21)s, %(ema_50)s, %(ema_200)s, %(price_vs_ema_200)s, %(ema_stack_order)s,
                         %(candle_body_pips)s, %(candle_upper_wick_pips)s, %(candle_lower_wick_pips)s, %(candle_type)s,
-                        %(htf_candle_direction)s, %(htf_candle_direction_prev)s
+                        %(htf_candle_direction)s, %(htf_candle_direction_prev)s,
+                        %(htf_bias_score)s, %(htf_bias_mode)s, %(htf_bias_details)s
                     ) RETURNING id
                 '''
 
@@ -1555,6 +1557,11 @@ class AlertHistoryManager:
                 'htf_candle_direction': signal.get('htf_candle_direction'),
                 'htf_candle_direction_prev': signal.get('htf_candle_direction_prev'),
 
+                # HTF Bias Score System (v2.35.5 - fix persistence bug)
+                'htf_bias_score': signal.get('htf_bias_score'),
+                'htf_bias_mode': signal.get('htf_bias_mode'),
+                'htf_bias_details': signal.get('htf_bias_details'),
+
                 # Deduplication
                 'signal_hash': signal_hash,
                 'data_source': data_source,
@@ -1657,6 +1664,21 @@ class AlertHistoryManager:
             except Exception as e:
                 self.logger.warning(f"⚠️ Error serializing performance_metrics: {e}")
                 alert_data['performance_metrics'] = None
+
+            # Clean and serialize htf_bias_details (v2.35.5 - fix persistence bug)
+            try:
+                htf_bias_details = signal.get('htf_bias_details')
+                if htf_bias_details is not None:
+                    cleaned_htf_bias = safe_json_serialize(htf_bias_details)
+                    if isinstance(cleaned_htf_bias, (dict, list)):
+                        alert_data['htf_bias_details'] = json.dumps(cleaned_htf_bias)
+                    else:
+                        alert_data['htf_bias_details'] = None
+                else:
+                    alert_data['htf_bias_details'] = None
+            except Exception as e:
+                self.logger.warning(f"⚠️ Error serializing htf_bias_details: {e}")
+                alert_data['htf_bias_details'] = None
 
             # ================================
             # HANDLE DATETIME CONVERSIONS

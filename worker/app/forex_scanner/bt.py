@@ -428,6 +428,26 @@ Scalp Tier Tuning Examples:
   python bt.py USDJPY 7 --scalp --scalp-confidence 0.40 --scalp-cooldown 20  # Higher confidence
   python bt.py EURUSD 7 --scalp --scalp-tolerance 1.0  # More tolerant swing break detection
 
+Codex Filter Testing (v2.35.5 - test filters without affecting live):
+  # EMA Stack Alignment (Codex: 14 misaligned trades = 1 win, avg -$56.11)
+  python bt.py EURUSD 14 --scalp --override scalp_require_ema_stack_alignment=true
+
+  # Entry Quality Gate (Codex: <0.30 bucket = 1 win in 12 trades, avg -$59.06)
+  python bt.py EURUSD 14 --scalp --override scalp_min_entry_quality_score=0.30
+
+  # Entry Momentum Gate (Codex: <0.30 bucket = 3 wins in 16 trades, avg -$39.20)
+  python bt.py EURUSD 14 --scalp --override scalp_min_entry_candle_momentum=0.30
+
+  # Breakout Regime Block (Codex: 0% win rate in breakout regime)
+  python bt.py EURUSD 14 --scalp --override scalp_block_breakout_regime=true
+
+  # Combined - test all Codex filters together
+  python bt.py EURUSD 14 --scalp \\
+    --override scalp_require_ema_stack_alignment=true \\
+    --override scalp_min_entry_quality_score=0.30 \\
+    --override scalp_min_entry_candle_momentum=0.30 \\
+    --override scalp_block_breakout_regime=true
+
 Scalp Signal Qualification (v2.21.0):
   --qualification-monitor    Enable qualification in MONITORING mode (logs results, passes all signals)
   --qualification-active     Enable qualification in ACTIVE mode (blocks signals below threshold)
