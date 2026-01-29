@@ -2419,6 +2419,48 @@ class SMCSimpleStrategy:
                         )
                         return None
 
+                    # Filter 3b: Per-pair RSI zone block (v2.36.0)
+                    # Block signals when RSI is in a poor-performing zone for this pair
+                    if self._config_service:
+                        if direction == 'BULL':
+                            rsi_block_zone = self._config_service.get_pair_scalp_rsi_block_buy_zone(epic)
+                            if rsi_block_zone and rsi_block_zone[0] <= rsi_value <= rsi_block_zone[1]:
+                                rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} in blocked zone [{rsi_block_zone[0]:.0f}-{rsi_block_zone[1]:.0f}] for BUY"
+                                self.logger.info(f"   ❌ {rejection_reason}")
+                                context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                                      ema_result=ema_result, swing_result=swing_result,
+                                                                      pullback_result=pullback_result, direction=direction)
+                                context.update({'rsi': rsi_value, 'filter': 'rsi_block_zone'})
+                                self._track_rejection(
+                                    stage='SCALP_ENTRY_FILTER',
+                                    reason=rejection_reason,
+                                    epic=epic,
+                                    pair=pair,
+                                    candle_timestamp=candle_timestamp,
+                                    direction=direction,
+                                    context=context
+                                )
+                                return None
+                        else:  # BEAR
+                            rsi_block_zone = self._config_service.get_pair_scalp_rsi_block_sell_zone(epic)
+                            if rsi_block_zone and rsi_block_zone[0] <= rsi_value <= rsi_block_zone[1]:
+                                rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} in blocked zone [{rsi_block_zone[0]:.0f}-{rsi_block_zone[1]:.0f}] for SELL"
+                                self.logger.info(f"   ❌ {rejection_reason}")
+                                context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                                      ema_result=ema_result, swing_result=swing_result,
+                                                                      pullback_result=pullback_result, direction=direction)
+                                context.update({'rsi': rsi_value, 'filter': 'rsi_block_zone'})
+                                self._track_rejection(
+                                    stage='SCALP_ENTRY_FILTER',
+                                    reason=rejection_reason,
+                                    epic=epic,
+                                    pair=pair,
+                                    candle_timestamp=candle_timestamp,
+                                    direction=direction,
+                                    context=context
+                                )
+                                return None
+
                 # Filter 4: Minimum EMA distance
                 if self.scalp_min_ema_distance_pips > 0 and ema_distance < self.scalp_min_ema_distance_pips:
                     rejection_reason = f"Scalp filter: EMA distance {ema_distance:.1f} < {self.scalp_min_ema_distance_pips} pips"
@@ -2574,6 +2616,33 @@ class SMCSimpleStrategy:
                 if use_market_on_alignment:
                     self._scalp_entry_alignment_confirmed = True
                     self.logger.info(f"   📍 Using MARKET order (entry candle aligned)")
+
+            # ================================================================
+            # Filter 7: PER-PAIR HOUR BLOCK (v2.36.0)
+            # Block signals during specific hours that perform poorly for this pair
+            # Example: AUDUSD hours 0,5,6,22,23 UTC have 0-9% win rate
+            # ================================================================
+            if self._config_service:
+                blocked_hours = self._config_service.get_pair_scalp_blocked_hours_utc(epic)
+                if blocked_hours:
+                    current_hour = candle_timestamp.hour if candle_timestamp else datetime.now().hour
+                    if current_hour in blocked_hours:
+                        rejection_reason = f"Scalp filter: Hour {current_hour} UTC is blocked for {pair} (blocked hours: {blocked_hours})"
+                        self.logger.info(f"   ❌ {rejection_reason}")
+                        context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                              ema_result=ema_result, swing_result=swing_result,
+                                                              pullback_result=pullback_result, direction=direction)
+                        context.update({'filter': 'blocked_hours', 'hour': current_hour, 'blocked_hours': blocked_hours})
+                        self._track_rejection(
+                            stage='SCALP_ENTRY_FILTER',
+                            reason=rejection_reason,
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context=context
+                        )
+                        return None
 
             # ================================================================
             # TIER 4: Swing Proximity Validation (v2.15.0)

@@ -1291,6 +1291,55 @@ class SMCSimpleConfig:
         value = self.get_for_pair(epic, 'scalp_ema_buffer_pips')
         return float(value) if value is not None else None
 
+    def get_pair_scalp_rsi_block_buy_zone(self, epic: str) -> Optional[tuple]:
+        """
+        Get per-pair RSI zone to block for BUY signals.
+
+        v2.36.0: Based on Jan 2026 analysis showing RSI 50-60 zone has poor
+        win rate for BUY signals on some pairs (e.g., AUDUSD 30.6% WR in this zone).
+
+        Returns:
+            Tuple of (min_rsi, max_rsi) if configured, None otherwise
+        """
+        min_val = self.get_for_pair(epic, 'scalp_rsi_block_buy_min')
+        max_val = self.get_for_pair(epic, 'scalp_rsi_block_buy_max')
+        if min_val is not None and max_val is not None:
+            return (float(min_val), float(max_val))
+        return None
+
+    def get_pair_scalp_rsi_block_sell_zone(self, epic: str) -> Optional[tuple]:
+        """
+        Get per-pair RSI zone to block for SELL signals.
+
+        v2.36.0: Allows blocking SELL signals when RSI is in a poor-performing zone.
+
+        Returns:
+            Tuple of (min_rsi, max_rsi) if configured, None otherwise
+        """
+        min_val = self.get_for_pair(epic, 'scalp_rsi_block_sell_min')
+        max_val = self.get_for_pair(epic, 'scalp_rsi_block_sell_max')
+        if min_val is not None and max_val is not None:
+            return (float(min_val), float(max_val))
+        return None
+
+    def get_pair_scalp_blocked_hours_utc(self, epic: str) -> Optional[list]:
+        """
+        Get per-pair blocked hours (UTC) for scalp signals.
+
+        v2.36.0: Based on Jan 2026 analysis showing certain hours have 0% win rate
+        for some pairs (e.g., AUDUSD hours 0,5,6,22,23 UTC).
+
+        Returns:
+            List of blocked hour integers if configured, None otherwise
+        """
+        value = self.get_for_pair(epic, 'scalp_blocked_hours_utc')
+        if value is not None and isinstance(value, str) and value.strip():
+            try:
+                return [int(h.strip()) for h in value.split(',') if h.strip()]
+            except ValueError:
+                return None
+        return None
+
     def check_macd_alignment(
         self,
         signal_type: str,
@@ -1740,6 +1789,12 @@ class SMCSimpleConfigService:
                 'scalp_block_ranging_market': row.get('scalp_block_ranging_market'),
                 'scalp_block_low_volatility_trending': row.get('scalp_block_low_volatility_trending'),
                 'scalp_min_adx': row.get('scalp_min_adx'),
+                # RSI zone block and hour block filters (v2.36.0)
+                'scalp_rsi_block_buy_min': row.get('scalp_rsi_block_buy_min'),
+                'scalp_rsi_block_buy_max': row.get('scalp_rsi_block_buy_max'),
+                'scalp_rsi_block_sell_min': row.get('scalp_rsi_block_sell_min'),
+                'scalp_rsi_block_sell_max': row.get('scalp_rsi_block_sell_max'),
+                'scalp_blocked_hours_utc': row.get('scalp_blocked_hours_utc'),
             }
 
         return config
@@ -1872,6 +1927,45 @@ class SMCSimpleConfigService:
         a smaller buffer to generate signals. Default scalp buffer is 1.0 pip.
         """
         return self.get_config().get_pair_scalp_ema_buffer_pips(epic)
+
+    # =========================================================================
+    # RSI ZONE BLOCK AND HOUR BLOCK FILTERS (v2.36.0)
+    # =========================================================================
+
+    def get_pair_scalp_rsi_block_buy_zone(self, epic: str) -> Optional[tuple]:
+        """
+        Get per-pair RSI zone to block for BUY signals.
+
+        v2.36.0: Based on Jan 2026 analysis showing RSI 50-60 zone has poor
+        win rate for BUY signals on some pairs (e.g., AUDUSD 30.6% WR in this zone).
+
+        Returns:
+            Tuple of (min_rsi, max_rsi) if configured, None otherwise
+        """
+        return self.get_config().get_pair_scalp_rsi_block_buy_zone(epic)
+
+    def get_pair_scalp_rsi_block_sell_zone(self, epic: str) -> Optional[tuple]:
+        """
+        Get per-pair RSI zone to block for SELL signals.
+
+        v2.36.0: Allows blocking SELL signals when RSI is in a poor-performing zone.
+
+        Returns:
+            Tuple of (min_rsi, max_rsi) if configured, None otherwise
+        """
+        return self.get_config().get_pair_scalp_rsi_block_sell_zone(epic)
+
+    def get_pair_scalp_blocked_hours_utc(self, epic: str) -> Optional[list]:
+        """
+        Get per-pair blocked hours (UTC) for scalp signals.
+
+        v2.36.0: Based on Jan 2026 analysis showing certain hours have 0% win rate
+        for some pairs (e.g., AUDUSD hours 0,5,6,22,23 UTC).
+
+        Returns:
+            List of blocked hour integers if configured, None otherwise
+        """
+        return self.get_config().get_pair_scalp_blocked_hours_utc(epic)
 
 
 # Global singleton instance
