@@ -12,41 +12,49 @@ PROD_API_BASE_URL = "https://api.ig.com/gateway/deal"
 
 # Locks to prevent concurrent token refresh race conditions
 # Without these, multiple async tasks could all see expired token and call ig_login simultaneously
-# NOTE: Locks must be created lazily to avoid binding to old event loops after restart
-_demo_token_lock = None
-_prod_token_lock = None
+# NOTE: Locks are stored per-event-loop to avoid cross-loop issues between main thread and monitor thread
+_demo_locks = {}  # event_loop_id -> Lock
+_prod_locks = {}  # event_loop_id -> Lock
 
 def _get_demo_lock():
-    """Get or create demo token lock in current event loop."""
-    global _demo_token_lock
-    try:
-        # Check if lock exists and is valid for current event loop
-        if _demo_token_lock is not None:
-            # Try to access the loop - will raise if wrong event loop
-            _demo_token_lock._loop
-            return _demo_token_lock
-    except (AttributeError, RuntimeError):
-        pass
+    """Get or create demo token lock for the current event loop.
 
-    # Create new lock in current event loop
-    _demo_token_lock = asyncio.Lock()
-    return _demo_token_lock
+    Python 3.10+ removed the _loop attribute from asyncio.Lock, so we track
+    event loops explicitly using their id() to handle multiple event loops
+    (e.g., main FastAPI loop and monitoring thread loop).
+    """
+    global _demo_locks
+    try:
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+
+        if loop_id not in _demo_locks:
+            _demo_locks[loop_id] = asyncio.Lock()
+
+        return _demo_locks[loop_id]
+    except RuntimeError:
+        # No running event loop - create ephemeral lock (shouldn't happen in normal flow)
+        return asyncio.Lock()
 
 def _get_prod_lock():
-    """Get or create prod token lock in current event loop."""
-    global _prod_token_lock
-    try:
-        # Check if lock exists and is valid for current event loop
-        if _prod_token_lock is not None:
-            # Try to access the loop - will raise if wrong event loop
-            _prod_token_lock._loop
-            return _prod_token_lock
-    except (AttributeError, RuntimeError):
-        pass
+    """Get or create prod token lock for the current event loop.
 
-    # Create new lock in current event loop
-    _prod_token_lock = asyncio.Lock()
-    return _prod_token_lock
+    Python 3.10+ removed the _loop attribute from asyncio.Lock, so we track
+    event loops explicitly using their id() to handle multiple event loops
+    (e.g., main FastAPI loop and monitoring thread loop).
+    """
+    global _prod_locks
+    try:
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+
+        if loop_id not in _prod_locks:
+            _prod_locks[loop_id] = asyncio.Lock()
+
+        return _prod_locks[loop_id]
+    except RuntimeError:
+        # No running event loop - create ephemeral lock (shouldn't happen in normal flow)
+        return asyncio.Lock()
 
 # Global in-memory token cache (demo account)
 ig_token_cache = {
