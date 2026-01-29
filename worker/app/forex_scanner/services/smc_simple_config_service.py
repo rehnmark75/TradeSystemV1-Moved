@@ -1105,6 +1105,24 @@ class SMCSimpleConfig:
                 return float(override['scalp_tp_pips'])
         return None
 
+    def get_pair_scalp_sr_tolerance(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair S/R tolerance for scalp mode validation.
+
+        v2.35.1: Per-pair S/R tolerance based on pair volatility.
+        - Low volatility (AUDUSD, NZDUSD): 5 pips
+        - Medium volatility (EURUSD, USDCAD, USDCHF): 6 pips
+        - High volatility (GBPUSD, GBPJPY, USDJPY, EURJPY, AUDJPY): 8 pips
+
+        Returns:
+            Per-pair scalp_sr_tolerance_pips if set, None otherwise (use global sr_level_tolerance_pips)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_sr_tolerance_pips') is not None:
+                return float(override['scalp_sr_tolerance_pips'])
+        return None
+
     def get_effective_scalp_config(self, epic: str) -> dict:
         """
         Get effective scalp configuration for a pair, merging per-pair overrides with globals.
@@ -1715,6 +1733,8 @@ class SMCSimpleConfigService:
                 # HTF Bias Score overrides (v2.35.0) - per-pair active/monitor/disabled mode
                 'htf_bias_mode': row.get('htf_bias_mode'),
                 'htf_bias_min_threshold': row.get('htf_bias_min_threshold'),
+                # S/R tolerance override (v2.35.1) - per-pair S/R validation threshold
+                'scalp_sr_tolerance_pips': row.get('scalp_sr_tolerance_pips'),
             }
 
         return config

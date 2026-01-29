@@ -713,6 +713,9 @@ class TradingOrchestrator:
                 'sr_blocking_distance_pips': sr_path_blocking.get('distance_pips'),
                 'sr_path_blocked_pct': sr_path_blocking.get('path_blocked_pct'),
                 'target_distance_pips': sr_path_blocking.get('target_distance_pips'),
+
+                # v2.35.1: Per-pair S/R tolerance tracking
+                'sr_tolerance_pips': signal.get('sr_tolerance_pips'),
             }
 
             # Save to database

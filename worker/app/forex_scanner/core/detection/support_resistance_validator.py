@@ -90,17 +90,22 @@ class SupportResistanceValidator:
             if not levels['support_levels'] and not levels['resistance_levels']:
                 return True, "No significant levels found - trade allowed", levels
             
+            # v2.35.1: Check for per-signal tolerance override
+            tolerance_override = signal.get('sr_tolerance_pips')
+
             # Check proximity to major levels
             validation_result = self._check_level_proximity(
                 current_price=current_price,
                 signal_type=signal_type,
                 levels=levels,
                 df=df,
-                epic=epic
+                epic=epic,
+                tolerance_override=tolerance_override
             )
             
             # Enhanced validation details
             pip_size = self._get_pip_size(epic)
+            effective_tolerance = tolerance_override if tolerance_override is not None else self.level_tolerance_pips
             validation_details = {
                 'support_levels': levels['support_levels'],
                 'resistance_levels': levels['resistance_levels'],
@@ -109,7 +114,8 @@ class SupportResistanceValidator:
                 'current_price': current_price,
                 'signal_type': signal_type,
                 'pip_size': pip_size,
-                'level_tolerance_pips': self.level_tolerance_pips,
+                'level_tolerance_pips': effective_tolerance,
+                'tolerance_override_applied': tolerance_override is not None,
                 'validation_timestamp': datetime.now().isoformat()
             }
             
@@ -340,7 +346,8 @@ class SupportResistanceValidator:
                               signal_type: str,
                               levels: Dict,
                               df: pd.DataFrame,
-                              epic: str = None) -> Dict:
+                              epic: str = None,
+                              tolerance_override: float = None) -> Dict:
         """
         Check if trade direction conflicts with nearby major levels
 
@@ -356,8 +363,12 @@ class SupportResistanceValidator:
             levels: Dictionary with support/resistance levels
             df: Price dataframe for volume analysis
             epic: Trading instrument epic (for pair-aware pip size)
+            tolerance_override: Optional per-signal tolerance override in pips (v2.35.1)
         """
         pip_size = self._get_pip_size(epic) if epic else 0.0001
+
+        # v2.35.1: Use tolerance override if provided, otherwise use default
+        effective_tolerance = tolerance_override if tolerance_override is not None else self.level_tolerance_pips
 
         all_support_levels = levels.get('support_levels', [])
         all_resistance_levels = levels.get('resistance_levels', [])
@@ -371,7 +382,7 @@ class SupportResistanceValidator:
                 distance_to_resistance = abs(resistance - current_price) / pip_size
 
                 # If we're AT or very close to a resistance level
-                if distance_to_resistance <= self.level_tolerance_pips:
+                if distance_to_resistance <= effective_tolerance:
                     # Check if resistance was recently broken with volume
                     volume_break = self._check_volume_break(df, resistance, 'resistance')
 
@@ -379,7 +390,7 @@ class SupportResistanceValidator:
                         return {
                             'is_valid': False,
                             'reason': f"BUY signal rejected - price AT resistance level {resistance:.5f} "
-                                    f"({distance_to_resistance:.1f} pips away, minimum: {self.level_tolerance_pips})"
+                                    f"({distance_to_resistance:.1f} pips away, minimum: {effective_tolerance})"
                         }
                     else:
                         # Volume break confirmed, allow trade
@@ -393,7 +404,7 @@ class SupportResistanceValidator:
             if nearest_resistance and nearest_resistance > current_price:
                 distance_to_resistance = (nearest_resistance - current_price) / pip_size
 
-                if distance_to_resistance <= self.level_tolerance_pips:
+                if distance_to_resistance <= effective_tolerance:
                     # Check if resistance was recently broken with volume
                     volume_break = self._check_volume_break(df, nearest_resistance, 'resistance')
 
@@ -401,7 +412,7 @@ class SupportResistanceValidator:
                         return {
                             'is_valid': False,
                             'reason': f"BUY signal too close to resistance at {nearest_resistance:.5f} "
-                                    f"({distance_to_resistance:.1f} pips away, minimum: {self.level_tolerance_pips})"
+                                    f"({distance_to_resistance:.1f} pips away, minimum: {effective_tolerance})"
                         }
 
         # SELL/BEAR signal validation
@@ -411,7 +422,7 @@ class SupportResistanceValidator:
                 distance_to_support = abs(support - current_price) / pip_size
 
                 # If we're AT or very close to a support level
-                if distance_to_support <= self.level_tolerance_pips:
+                if distance_to_support <= effective_tolerance:
                     # Check if support was recently broken with volume
                     volume_break = self._check_volume_break(df, support, 'support')
 
@@ -419,7 +430,7 @@ class SupportResistanceValidator:
                         return {
                             'is_valid': False,
                             'reason': f"SELL signal rejected - price AT support level {support:.5f} "
-                                    f"({distance_to_support:.1f} pips away, minimum: {self.level_tolerance_pips})"
+                                    f"({distance_to_support:.1f} pips away, minimum: {effective_tolerance})"
                         }
                     else:
                         # Volume break confirmed, allow trade
@@ -433,7 +444,7 @@ class SupportResistanceValidator:
             if nearest_support and nearest_support < current_price:
                 distance_to_support = (current_price - nearest_support) / pip_size
 
-                if distance_to_support <= self.level_tolerance_pips:
+                if distance_to_support <= effective_tolerance:
                     # Check if support was recently broken with volume
                     volume_break = self._check_volume_break(df, nearest_support, 'support')
 
@@ -441,7 +452,7 @@ class SupportResistanceValidator:
                         return {
                             'is_valid': False,
                             'reason': f"SELL signal too close to support at {nearest_support:.5f} "
-                                    f"({distance_to_support:.1f} pips away, minimum: {self.level_tolerance_pips})"
+                                    f"({distance_to_support:.1f} pips away, minimum: {effective_tolerance})"
                         }
 
         # If we get here, trade is allowed

@@ -276,12 +276,13 @@ class SMCRejectionHistoryManager:
                     volatility_state, adx_value, adx_trend_strength, performance_metrics,
                     sr_blocking_level, sr_blocking_type, sr_blocking_distance_pips,
                     sr_path_blocked_pct, target_distance_pips,
-                    ema_slope_atr
+                    ema_slope_atr,
+                    sr_tolerance_pips
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT DO NOTHING
             """
@@ -370,7 +371,9 @@ class SMCRejectionHistoryManager:
                     self._safe_float(data.get('sr_path_blocked_pct')),
                     self._safe_float(data.get('target_distance_pips')),
                     # v2.16.0: EMA Slope validation
-                    self._safe_float(data.get('ema_slope_atr'))
+                    self._safe_float(data.get('ema_slope_atr')),
+                    # v2.35.1: Per-pair S/R tolerance
+                    self._safe_float(data.get('sr_tolerance_pips'))
                 )
 
                 cursor.execute(insert_sql, values)
