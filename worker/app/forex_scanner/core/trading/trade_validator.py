@@ -1380,7 +1380,44 @@ class TradeValidator:
             if not self._validate_market_data_format(market_data):
                 self.logger.warning(f"⚠️ Invalid market data format for {epic} - allowing trade")
                 return True, "S/R validation skipped - invalid data format"
-            
+
+            # ================================================================
+            # v2.35.2: CHECK SIGNAL'S SWING-LEVEL S/R DISTANCES
+            # The strategy detects swing-level S/R and stores distances in the signal.
+            # We must check these against configured tolerances BEFORE pivot-based validation.
+            # This ensures per-pair tolerances (5-8 pips) are enforced on swing levels.
+            # ================================================================
+            signal_type = signal.get('signal_type', '').upper()
+
+            # Get effective tolerance: per-signal override > validator default
+            sr_tolerance = signal.get('sr_tolerance_pips')
+            if sr_tolerance is None:
+                sr_tolerance = self.sr_validator.level_tolerance_pips
+
+            # Check signal's pre-calculated S/R distances
+            dist_to_support = signal.get('distance_to_support_pips')
+            dist_to_resistance = signal.get('distance_to_resistance_pips')
+
+            # For BUY/BULL: Check if too close to resistance (target direction)
+            if signal_type in ['BUY', 'BULL'] and dist_to_resistance is not None:
+                try:
+                    dist_val = float(dist_to_resistance)
+                    if dist_val < sr_tolerance:
+                        self.logger.info(f"🚫 S/R BLOCK [{epic}]: BUY signal {dist_val:.1f} pips from resistance (min: {sr_tolerance} pips)")
+                        return False, f"BUY signal too close to resistance ({dist_val:.1f} pips < {sr_tolerance} pip tolerance)"
+                except (ValueError, TypeError):
+                    pass
+
+            # For SELL/BEAR: Check if too close to support (target direction)
+            if signal_type in ['SELL', 'BEAR'] and dist_to_support is not None:
+                try:
+                    dist_val = float(dist_to_support)
+                    if dist_val < sr_tolerance:
+                        self.logger.info(f"🚫 S/R BLOCK [{epic}]: SELL signal {dist_val:.1f} pips from support (min: {sr_tolerance} pips)")
+                        return False, f"SELL signal too close to support ({dist_val:.1f} pips < {sr_tolerance} pip tolerance)"
+                except (ValueError, TypeError):
+                    pass
+
             # Use the S/R validator with path-to-target blocking check
             # This uses the new validate_with_path_blocking method which includes:
             # 1. Standard proximity check (are we AT an S/R level?)
