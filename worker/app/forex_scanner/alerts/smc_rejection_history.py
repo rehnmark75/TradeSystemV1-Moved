@@ -83,6 +83,8 @@ class SMCRejectionHistoryManager:
     STAGE_MARKET_BIAS_FILTER = 'MARKET_BIAS_FILTER'  # Trade direction conflicts with market bias
     # v2.26.0: Reversal regime filter (signal fights expected reversal direction)
     STAGE_REVERSAL_FILTER = 'REVERSAL_FILTER'  # Signal continues prior trend in reversal regime
+    # v2.35.4: HTF candle alignment filter (prevents counter-momentum trades)
+    STAGE_TIER1_HTF_CANDLE = 'TIER1_HTF_CANDLE'  # HTF candle direction conflicts with signal
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
@@ -99,7 +101,9 @@ class SMCRejectionHistoryManager:
         # v2.25.0: Market bias filter
         STAGE_MARKET_BIAS_FILTER,
         # v2.26.0: Reversal regime filter
-        STAGE_REVERSAL_FILTER
+        STAGE_REVERSAL_FILTER,
+        # v2.35.4: HTF candle alignment filter
+        STAGE_TIER1_HTF_CANDLE
     ]
 
     def __init__(self, db_manager, config=None):

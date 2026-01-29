@@ -1945,7 +1945,53 @@ class SMCSimpleStrategy:
             htf_candle_direction_prev = self._get_candle_direction(
                 df_4h['open'].iloc[-3], df_4h['close'].iloc[-3]
             )
-            self.logger.debug(f"   📊 4H Candle: {htf_candle_direction} (prev: {htf_candle_direction_prev})")
+            self.logger.debug(f"   📊 HTF Candle: {htf_candle_direction} (prev: {htf_candle_direction_prev})")
+
+            # ================================================================
+            # v2.35.4: HTF CANDLE ALIGNMENT FILTER (scalp mode)
+            # ================================================================
+            # Reject signals where HTF candle direction contradicts trade direction.
+            # Analysis of Jan 29, 2026 trades showed 73% of losing trades had
+            # HTF candle direction OPPOSITE to trade direction.
+            # - BULL signal + BEARISH HTF candle = likely reversal, reject
+            # - BEAR signal + BULLISH HTF candle = likely reversal, reject
+            # ================================================================
+            if self.scalp_mode_enabled and getattr(self, 'scalp_require_htf_alignment', False):
+                htf_aligned = (
+                    (direction == 'BULL' and htf_candle_direction == 'BULLISH') or
+                    (direction == 'BEAR' and htf_candle_direction == 'BEARISH') or
+                    (htf_candle_direction == 'DOJI')  # Allow DOJI (neutral)
+                )
+
+                if not htf_aligned:
+                    expected_htf = 'BULLISH' if direction == 'BULL' else 'BEARISH'
+                    rejection_reason = (
+                        f"HTF candle not aligned: {htf_candle_direction} candle for {direction} signal "
+                        f"(need {expected_htf})"
+                    )
+                    self.logger.info(f"   ❌ {rejection_reason}")
+
+                    # Track rejection with full market context
+                    self._track_rejection(
+                        stage='TIER1_HTF_CANDLE',
+                        reason=rejection_reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context={
+                            'htf_candle_direction': htf_candle_direction,
+                            'htf_candle_direction_prev': htf_candle_direction_prev,
+                            'expected_htf_candle': expected_htf,
+                            'ema_direction': direction,
+                            'ema_value': ema_value,
+                            'ema_distance_pips': ema_distance,
+                            'filter': 'htf_candle_alignment'
+                        }
+                    )
+                    return None
+                else:
+                    self.logger.info(f"   ✅ HTF candle aligned: {htf_candle_direction} matches {direction}")
 
             # ================================================================
             # TIER 2: Swing Break Confirmation (15m or 1H based on config)
