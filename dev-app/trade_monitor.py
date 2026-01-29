@@ -617,8 +617,14 @@ class TradeMonitor:
                 bid = float(data["snapshot"]["bid"])
                 offer = float(data["snapshot"]["offer"])
                 mid_price = (bid + offer) / 2
-                
-                self.logger.debug(f"📊 [PRICE] {symbol}: bid={bid:.5f}, offer={offer:.5f}, mid={mid_price:.5f}")
+
+                # Normalize CEEM prices (IG returns scaled prices like 11927.05 instead of 1.19270)
+                if "CEEM" in symbol and mid_price > 1000:
+                    mid_price = mid_price / 10000.0
+                    self.logger.debug(f"📊 [PRICE CEEM] {symbol}: normalized {bid:.2f}/{offer:.2f} → {mid_price:.5f}")
+                else:
+                    self.logger.debug(f"📊 [PRICE] {symbol}: bid={bid:.5f}, offer={offer:.5f}, mid={mid_price:.5f}")
+
                 return mid_price
                 
         except Exception as e:

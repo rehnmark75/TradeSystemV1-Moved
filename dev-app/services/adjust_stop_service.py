@@ -98,11 +98,17 @@ async def adjust_stop_logic(
             "trailingStop": False
         }
 
+        # Helper: normalize CEEM prices (IG returns scaled like 11988.2 instead of 1.19882)
+        def normalize_ceem_price(price: float, epic: str) -> float:
+            if "CEEM" in epic and price > 1000:
+                return price / 10000.0
+            return price
+
         # --- STOP logic ---
         if new_stop is not None:
             payload["stopLevel"] = float(new_stop)
         elif position.get("stopLevel"):
-            old_stop = float(position["stopLevel"])
+            old_stop = normalize_ceem_price(float(position["stopLevel"]), epic)
             offset = ig_points_to_price(float(stop_offset_points), epic) if stop_offset_points else 0.0002
 
             # Apply direction correctly based on adjustDirectionStop
@@ -133,7 +139,7 @@ async def adjust_stop_logic(
         if new_limit is not None:
             payload["limitLevel"] = float(new_limit)
         elif position.get("limitLevel"):
-            old_limit = float(position["limitLevel"])
+            old_limit = normalize_ceem_price(float(position["limitLevel"]), epic)
             offset = ig_points_to_price(float(limit_offset_points), epic) if limit_offset_points else 0.0002
 
             # Apply direction correctly based on adjustDirectionLimit

@@ -45,6 +45,14 @@ formatter = logging.Formatter(
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
+
+def normalize_ceem_price(price: float, epic: str) -> float:
+    """Normalize CEEM prices from IG API (scaled format like 11988.2 to 1.19882)"""
+    if "CEEM" in epic and price > 1000:
+        return price / 10000.0
+    return price
+
+
 class TradeRequest(BaseModel):
     # Required fields
     epic: str
@@ -1188,7 +1196,7 @@ async def modify_stop_price(
 
         # --- Stop logic ---
         if position.get("stopLevel"):
-            old = float(position["stopLevel"])
+            old = normalize_ceem_price(float(position["stopLevel"]), epic)
             step = ig_points_to_price(float(stop_offset_points), epic) if stop_offset_points is not None else step_sign * 0.0002
             payload["stopLevel"] = round(old + step, 5)
         elif position.get("stopDistance"):
@@ -1198,7 +1206,7 @@ async def modify_stop_price(
 
         # --- Limit logic ---
         if position.get("limitLevel"):
-            old = float(position["limitLevel"])
+            old = normalize_ceem_price(float(position["limitLevel"]), epic)
             step = ig_points_to_price(float(limit_offset_points), epic) if limit_offset_points is not None else step_sign * 0.0002
             payload["limitLevel"] = round(old + step, 5)
         elif position.get("limitDistance"):
@@ -1289,7 +1297,7 @@ async def adjust_stop_price(
         if new_stop is not None:
             payload["stopLevel"] = float(new_stop)
         elif position.get("stopLevel"):
-            old_stop = float(position["stopLevel"])
+            old_stop = normalize_ceem_price(float(position["stopLevel"]), epic)
             offset = ig_points_to_price(float(stop_offset_points), epic) if stop_offset_points else 0.0002
             
             # ✅ FIXED: Apply direction correctly based on adjustDirectionStop
@@ -1320,7 +1328,7 @@ async def adjust_stop_price(
         if new_limit is not None:
             payload["limitLevel"] = float(new_limit)
         elif position.get("limitLevel"):
-            old_limit = float(position["limitLevel"])
+            old_limit = normalize_ceem_price(float(position["limitLevel"]), epic)
             offset = ig_points_to_price(float(limit_offset_points), epic) if limit_offset_points else 0.0002
             
             # ✅ FIXED: Apply direction correctly based on adjustDirectionLimit
