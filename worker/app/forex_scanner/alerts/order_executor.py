@@ -374,11 +374,23 @@ class OrderExecutor:
                 smc_config = get_smc_simple_config()
                 is_scalp_mode = getattr(smc_config, 'scalp_mode_enabled', False)
 
-                # PRIORITY 1: Check per-pair fixed SL/TP override (works in both scalp and swing mode)
+                # PRIORITY 1: Check per-pair SL/TP override
                 if smc_config.fixed_sl_tp_override_enabled:
-                    # Get per-pair SL/TP (falls back to global if not set)
-                    pair_sl = smc_config.get_pair_fixed_stop_loss(internal_epic)
-                    pair_tp = smc_config.get_pair_fixed_take_profit(internal_epic)
+                    if is_scalp_mode:
+                        # Scalp mode: use ATR-optimized scalp SL/TP (scalp_sl_pips/scalp_tp_pips columns)
+                        pair_sl = smc_config.get_pair_scalp_sl(internal_epic)
+                        pair_tp = smc_config.get_pair_scalp_tp(internal_epic)
+                        # Fall back to global scalp values if per-pair not set
+                        if pair_sl is None:
+                            pair_sl = getattr(smc_config, 'scalp_sl_pips', None)
+                        if pair_tp is None:
+                            pair_tp = getattr(smc_config, 'scalp_tp_pips', None)
+                        source_label = "scalp ATR-optimized"
+                    else:
+                        # Swing mode: use fixed SL/TP (fixed_stop_loss_pips/fixed_take_profit_pips columns)
+                        pair_sl = smc_config.get_pair_fixed_stop_loss(internal_epic)
+                        pair_tp = smc_config.get_pair_fixed_take_profit(internal_epic)
+                        source_label = "fixed per-pair"
 
                     if pair_sl is not None and pair_tp is not None:
                         original_sl = stop_distance
@@ -387,8 +399,8 @@ class OrderExecutor:
                         limit_distance = pair_tp
                         mode_label = "SCALP" if is_scalp_mode else "SWING"
                         self.logger.info(
-                            f"🔒 [{mode_label} MODE] FIXED SL/TP [{internal_epic}]: SL {original_sl}→{stop_distance}, "
-                            f"TP {original_tp}→{limit_distance} pips (optimized per-pair from database)"
+                            f"🔒 [{mode_label} MODE] SL/TP [{internal_epic}]: SL {original_sl}→{stop_distance}, "
+                            f"TP {original_tp}→{limit_distance} pips ({source_label} from database)"
                         )
 
                 # PRIORITY 2: Legacy scalp mode (only if per-pair override not enabled)

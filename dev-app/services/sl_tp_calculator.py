@@ -74,8 +74,8 @@ async def calculate_trade_levels(epic: str, trading_headers: dict,
             "calculationMethod": "Fallback (ATR unavailable)"
         }
 
-def validate_sl_tp_levels(stop_distance: int, limit_distance: int,
-                         min_distance: int = None) -> dict:
+def validate_sl_tp_levels(stop_distance: float, limit_distance: float,
+                         min_distance: float = None) -> dict:
     """
     Validate and adjust SL/TP levels to meet broker requirements.
 

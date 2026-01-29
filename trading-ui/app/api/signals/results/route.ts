@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   const maxRs = searchParams.get("maxRs");
   const rsTrend = searchParams.get("rsTrend");
   const limit = Number(searchParams.get("limit") || 100);
-  const orderBy = searchParams.get("orderBy") || "score";
+  const orderBy = searchParams.get("orderBy") || "date_desc";
 
   const conditions: string[] = [];
   const params: Array<string | number | string[]> = [];
@@ -207,8 +207,10 @@ export async function GET(request: Request) {
       query += ` WHERE ${rsConditions.join(" AND ")}`;
     }
 
-    if (orderBy === "timestamp") {
+    if (orderBy === "timestamp" || orderBy === "date_desc") {
       query += " ORDER BY s.signal_timestamp DESC";
+    } else if (orderBy === "date_asc") {
+      query += " ORDER BY s.signal_timestamp ASC";
     } else {
       query += `
         ORDER BY

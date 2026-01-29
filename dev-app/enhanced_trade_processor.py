@@ -458,14 +458,34 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
         """Sync trade record with actual IG position data"""
         try:
             real_data = await self.get_real_position_data(trade.deal_id, trading_headers)
-            
+
             if not real_data:
                 self.logger.error(f"[SYNC FAILED] Trade {trade.id}: Could not get IG position data")
                 return False
-            
+
+            # Normalize CEEM prices from IG API (they return scaled prices like 11988.2 instead of 1.19882)
+            epic = real_data.get("epic", trade.symbol)
+            if "CEEM" in epic:
+                entry_price_raw = float(real_data["entry_price"])
+                if entry_price_raw > 1000:  # Clearly scaled
+                    real_data["entry_price"] = entry_price_raw / 10000.0
+                    self.logger.debug(f"[SYNC CEEM] Normalized entry: {entry_price_raw} → {real_data['entry_price']}")
+
+                if real_data.get("current_stop"):
+                    stop_raw = float(real_data["current_stop"])
+                    if stop_raw > 1000:
+                        real_data["current_stop"] = stop_raw / 10000.0
+                        self.logger.debug(f"[SYNC CEEM] Normalized stop: {stop_raw} → {real_data['current_stop']}")
+
+                if real_data.get("current_limit"):
+                    limit_raw = float(real_data["current_limit"])
+                    if limit_raw > 1000:
+                        real_data["current_limit"] = limit_raw / 10000.0
+                        self.logger.debug(f"[SYNC CEEM] Normalized limit: {limit_raw} → {real_data['current_limit']}")
+
             # Check for discrepancies and update if needed
             updates_needed = []
-            
+
             if abs(float(real_data["entry_price"]) - trade.entry_price) > 0.00001:
                 updates_needed.append(f"entry_price: {trade.entry_price} → {real_data['entry_price']}")
                 trade.entry_price = float(real_data["entry_price"])

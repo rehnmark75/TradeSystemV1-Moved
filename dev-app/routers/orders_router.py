@@ -52,8 +52,8 @@ class TradeRequest(BaseModel):
 
     # Optional fields
     size: Optional[float] = None
-    stop_distance: Optional[int] = None
-    limit_distance: Optional[int] = None
+    stop_distance: Optional[float] = None
+    limit_distance: Optional[float] = None
     use_provided_sl_tp: Optional[bool] = False  # Use scanner-provided SL/TP values
     custom_label: Optional[str] = None
     risk_reward: Optional[float] = 2.0  # Default RR

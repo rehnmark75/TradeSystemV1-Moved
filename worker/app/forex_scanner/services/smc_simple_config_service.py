@@ -287,6 +287,12 @@ class SMCSimpleConfig:
     scalp_entry_rsi_sell_min: float = 0.0  # Min RSI for SELL entries (0 = disabled)
     scalp_min_ema_distance_pips: float = 0.0  # Min distance from EMA in pips (0 = disabled)
 
+    # HTF BIAS SCORE SYSTEM (v2.35.0) - Replaces binary HTF alignment with continuous score
+    # Professional approach: continuous bias measurement instead of binary filter
+    htf_bias_enabled: bool = True  # Master toggle for HTF bias score system
+    htf_bias_min_threshold: float = 0.400  # Minimum score required (0.0-1.0)
+    htf_bias_confidence_multiplier_enabled: bool = True  # Use bias score to adjust confidence
+
     # SCALP REJECTION CANDLE CONFIRMATION (v2.25.0)
     # Require entry-TF rejection candle (pin bar, engulfing, hammer) before scalp entry
     # Based on Jan 2026 analysis: MAE=0 on most losing trades means no reversal confirmation
@@ -1000,6 +1006,73 @@ class SMCSimpleConfig:
                 return bool(override['scalp_require_entry_candle_alignment'])
         return None
 
+    def get_pair_scalp_reversal_enabled(self, epic: str) -> Optional[bool]:
+        """
+        Get per-pair scalp reversal override enabled flag.
+
+        v2.31.0: Allows HTF misalignment bypass when reversal conditions are met.
+        Based on Jan 2026 analysis - helps GBPUSD (1.51 PF) and NZDUSD (0->35 signals).
+
+        Returns:
+            Per-pair scalp_reversal_enabled if set,
+            None otherwise (use global scalp_reversal_enabled)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_reversal_enabled') is not None:
+                return bool(override['scalp_reversal_enabled'])
+        return None
+
+    def get_pair_scalp_reversal_min_runway_pips(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair scalp reversal minimum runway pips override.
+
+        v2.31.0: Minimum distance from recent swing to allow reversal override.
+        Based on Jan 2026 analysis - 5 pips optimal for GBPUSD/NZDUSD.
+
+        Returns:
+            Per-pair scalp_reversal_min_runway_pips if set,
+            None otherwise (use global scalp_reversal_min_runway_pips)
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('scalp_reversal_min_runway_pips') is not None:
+                return float(override['scalp_reversal_min_runway_pips'])
+        return None
+
+    def get_pair_htf_bias_mode(self, epic: str) -> str:
+        """
+        Get per-pair HTF bias mode.
+
+        v2.35.0: Per-pair HTF bias mode determines filtering behavior:
+        - 'active': Filter signals below threshold (reject low-bias signals)
+        - 'monitor': Calculate and log bias score only, never filter
+        - 'disabled': Skip bias calculation entirely
+
+        Returns:
+            Per-pair htf_bias_mode if set, 'active' as default
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('htf_bias_mode') is not None:
+                return str(override['htf_bias_mode'])
+        return 'active'  # Default to active mode
+
+    def get_pair_htf_bias_threshold(self, epic: str) -> float:
+        """
+        Get per-pair HTF bias minimum threshold.
+
+        v2.35.0: Per-pair threshold override for HTF bias filtering.
+
+        Returns:
+            Per-pair htf_bias_min_threshold if set, global threshold otherwise
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('htf_bias_min_threshold') is not None:
+                return float(override['htf_bias_min_threshold'])
+        return self.htf_bias_min_threshold
+
     def get_pair_scalp_sl(self, epic: str) -> Optional[float]:
         """
         Get per-pair scalp stop loss override (ATR-optimized).
@@ -1055,6 +1128,9 @@ class SMCSimpleConfig:
             'require_rejection_candle': self.get_pair_scalp_require_rejection_candle(epic) if self.get_pair_scalp_require_rejection_candle(epic) is not None else self.scalp_require_rejection_candle,
             # v2.25.1: Entry candle alignment (simpler alternative)
             'require_entry_candle_alignment': self.get_pair_scalp_require_entry_candle_alignment(epic) if self.get_pair_scalp_require_entry_candle_alignment(epic) is not None else self.scalp_require_entry_candle_alignment,
+            # v2.31.0: Per-pair reversal override settings (Jan 2026 GBPUSD/NZDUSD optimization)
+            'reversal_enabled': self.get_pair_scalp_reversal_enabled(epic) if self.get_pair_scalp_reversal_enabled(epic) is not None else self.scalp_reversal_enabled,
+            'reversal_min_runway_pips': self.get_pair_scalp_reversal_min_runway_pips(epic) if self.get_pair_scalp_reversal_min_runway_pips(epic) is not None else self.scalp_reversal_min_runway_pips,
         }
 
     # =========================================================================
@@ -1143,6 +1219,46 @@ class SMCSimpleConfig:
         """
         value = self.get_for_pair(epic, 'scalp_require_ema_stack_alignment')
         return bool(value) if value is not None else False
+
+    def get_pair_scalp_block_ranging_market(self, epic: str) -> bool:
+        """
+        Get per-pair ranging market block for scalp trades.
+
+        v2.32.0: Based on Jan 2026 USDCAD analysis showing 0% win rate in ranging markets.
+        When enabled, blocks any trade where market_regime_detected == 'ranging'.
+
+        Returns:
+            True if ranging markets should be blocked, False otherwise (default)
+        """
+        value = self.get_for_pair(epic, 'scalp_block_ranging_market')
+        return bool(value) if value is not None else False
+
+    def get_pair_scalp_block_low_volatility_trending(self, epic: str) -> bool:
+        """
+        Get per-pair low volatility + trending block for scalp trades.
+
+        v2.32.0: Based on Jan 2026 USDCAD analysis showing 20% win rate when
+        market_regime_detected == 'trending' AND volatility_state == 'low'.
+        This combination indicates lack of momentum to reach TP.
+
+        Returns:
+            True if low volatility trending markets should be blocked, False otherwise (default)
+        """
+        value = self.get_for_pair(epic, 'scalp_block_low_volatility_trending')
+        return bool(value) if value is not None else False
+
+    def get_pair_scalp_min_adx(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair minimum ADX threshold for scalp trades.
+
+        v2.32.0: Based on Jan 2026 USDCAD analysis showing 90% of losses had ADX < 20.
+        When set, blocks trades where adx_value < threshold.
+
+        Returns:
+            Minimum ADX value threshold if set, None otherwise (filter disabled)
+        """
+        value = self.get_for_pair(epic, 'scalp_min_adx')
+        return float(value) if value is not None else None
 
     def get_pair_scalp_ema_buffer_pips(self, epic: str) -> Optional[float]:
         """
@@ -1419,6 +1535,8 @@ class SMCSimpleConfigService:
             'scalp_require_htf_alignment', 'scalp_momentum_only_filter',
             'scalp_entry_rsi_buy_max', 'scalp_entry_rsi_sell_min',
             'scalp_min_ema_distance_pips',
+            # HTF BIAS SCORE SYSTEM (v2.35.0) - Professional continuous bias measurement
+            'htf_bias_enabled', 'htf_bias_min_threshold', 'htf_bias_confidence_multiplier_enabled',
             # SCALP REJECTION CANDLE CONFIRMATION (v2.25.0)
             'scalp_require_rejection_candle', 'scalp_rejection_min_strength',
             'scalp_use_market_on_rejection',
@@ -1591,6 +1709,12 @@ class SMCSimpleConfigService:
                 # Scalp SL/TP overrides (v2.30.0) - ATR-optimized per-pair values
                 'scalp_sl_pips': row.get('scalp_sl_pips'),
                 'scalp_tp_pips': row.get('scalp_tp_pips'),
+                # Scalp reversal overrides (v2.31.0) - per-pair HTF misalignment bypass
+                'scalp_reversal_enabled': row.get('scalp_reversal_enabled'),
+                'scalp_reversal_min_runway_pips': row.get('scalp_reversal_min_runway_pips'),
+                # HTF Bias Score overrides (v2.35.0) - per-pair active/monitor/disabled mode
+                'htf_bias_mode': row.get('htf_bias_mode'),
+                'htf_bias_min_threshold': row.get('htf_bias_min_threshold'),
             }
 
         return config

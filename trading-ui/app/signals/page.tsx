@@ -301,7 +301,7 @@ export default function SignalsPage() {
   const [dateTo, setDateTo] = useState<string>("");
   const [rsFilter, setRsFilter] = useState("All RS");
   const [rsTrendFilter, setRsTrendFilter] = useState("All Trends");
-  const [orderBy, setOrderBy] = useState("score");
+  const [orderBy, setOrderBy] = useState("date_desc");
 
   useEffect(() => {
     const loadStats = async () => {
@@ -573,7 +573,8 @@ export default function SignalsPage() {
             <label>Order By</label>
             <select value={orderBy} onChange={(e) => setOrderBy(e.target.value)}>
               <option value="score">Score</option>
-              <option value="timestamp">Most Recent</option>
+              <option value="date_desc">Date (Newest)</option>
+              <option value="date_asc">Date (Oldest)</option>
             </select>
           </div>
         </div>

@@ -105,6 +105,11 @@ const stageColors: Record<string, string> = {
 
 const DIRECTION_OPTIONS = ["All", "BULL", "BEAR"];
 
+const formatPercent = (value: number, total: number) => {
+  if (!total) return "0.0";
+  return ((value / total) * 100).toFixed(1);
+};
+
 export default function SMCRejectionsPage() {
   const [days, setDays] = useState(7);
   const [stage, setStage] = useState("All");
@@ -268,6 +273,16 @@ export default function SMCRejectionsPage() {
       });
     return Object.entries(counts).map(([label, value]) => ({ label, value }));
   }, [filteredRows]);
+
+  const scalpTotal = useMemo(
+    () => scalpFilterBreakdown.reduce((sum, row) => sum + row.value, 0),
+    [scalpFilterBreakdown]
+  );
+
+  const tier2Total = useMemo(
+    () => tier2Breakdown.reduce((sum, row) => sum + row.value, 0),
+    [tier2Breakdown]
+  );
 
   const sessionCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -503,6 +518,9 @@ export default function SMCRejectionsPage() {
   }, [outcomes, directionStats, nearMisses]);
 
   const maxStageCount = stageCounts.length ? Math.max(...stageCounts.map((row) => row.value)) : 1;
+  const sessionTotal = sessionCounts.reduce((sum, row) => sum + row.value, 0);
+  const hourTotal = hourCounts.reduce((sum, row) => sum + row.value, 0);
+  const srBlockingTotal = srBlocking.reduce((sum, row) => sum + row.value, 0);
   const maxSessionCount = sessionCounts.length
     ? Math.max(...sessionCounts.map((row) => row.value))
     : 1;
@@ -818,6 +836,9 @@ export default function SMCRejectionsPage() {
                   </div>
                   <div className="panel chart-panel">
                     <div className="chart-title">Rejection Counts by Stage</div>
+                    <div style={{ fontSize: "0.85rem", color: "#6c757d", marginBottom: "12px" }}>
+                      Share of all rejections by stage (n={stageTotal})
+                    </div>
                     <div className="bar-stack">
                       {stageCounts.map((row) => (
                         <div key={row.label} className="bar-row">
@@ -832,6 +853,7 @@ export default function SMCRejectionsPage() {
                             />
                           </div>
                           <strong>{row.value}</strong>
+                          <span className="bar-percent">{formatPercent(row.value, stageTotal)}%</span>
                         </div>
                       ))}
                     </div>
@@ -929,6 +951,9 @@ export default function SMCRejectionsPage() {
                 {scalpFilterBreakdown.length ? (
                   <div className="panel chart-panel">
                     <div className="chart-title">Scalp Entry Filter Breakdown</div>
+                    <div style={{ fontSize: "0.85rem", color: "#6c757d", marginBottom: "12px" }}>
+                      Share of SCALP_ENTRY_FILTER rejects (n={scalpTotal})
+                    </div>
                     <div className="bar-stack">
                       {scalpFilterBreakdown.map((row) => (
                         <div key={row.label} className="bar-row">
@@ -936,10 +961,11 @@ export default function SMCRejectionsPage() {
                           <div className="bar-track">
                             <div
                               className="bar-fill"
-                              style={{ width: `${(row.value / stageTotal) * 100}%` }}
+                              style={{ width: `${(row.value / (scalpTotal || 1)) * 100}%` }}
                             />
                           </div>
                           <strong>{row.value}</strong>
+                          <span className="bar-percent">{formatPercent(row.value, scalpTotal)}%</span>
                         </div>
                       ))}
                     </div>
@@ -949,6 +975,9 @@ export default function SMCRejectionsPage() {
                 {tier2Breakdown.length ? (
                   <div className="panel chart-panel">
                     <div className="chart-title">Tier2 Swing Rejections</div>
+                    <div style={{ fontSize: "0.85rem", color: "#6c757d", marginBottom: "12px" }}>
+                      Share of TIER2_SWING rejects (n={tier2Total})
+                    </div>
                     <div className="bar-stack">
                       {tier2Breakdown.map((row) => (
                         <div key={row.label} className="bar-row">
@@ -956,10 +985,11 @@ export default function SMCRejectionsPage() {
                           <div className="bar-track">
                             <div
                               className="bar-fill"
-                              style={{ width: `${(row.value / stageTotal) * 100}%` }}
+                              style={{ width: `${(row.value / (tier2Total || 1)) * 100}%` }}
                             />
                           </div>
                           <strong>{row.value}</strong>
+                          <span className="bar-percent">{formatPercent(row.value, tier2Total)}%</span>
                         </div>
                       ))}
                     </div>
@@ -985,40 +1015,48 @@ export default function SMCRejectionsPage() {
                   </div>
                 </div>
                 <div className="forex-grid">
-                  <div className="panel chart-panel">
-                    <div className="chart-title">Conflicts by Pair</div>
-                    <div className="bar-stack">
-                      {(conflicts?.by_pair ?? []).map((row) => (
-                        <div key={row.pair} className="bar-row">
-                          <span>{row.pair ?? "-"}</span>
-                          <div className="bar-track">
-                            <div
-                              className="bar-fill"
-                              style={{ width: `${(row.count / maxConflictPair) * 100}%` }}
-                            />
-                          </div>
-                          <strong>{row.count}</strong>
-                        </div>
-                      ))}
-                    </div>
+                <div className="panel chart-panel">
+                  <div className="chart-title">Conflicts by Pair</div>
+                  <div style={{ fontSize: "0.85rem", color: "#6c757d", marginBottom: "12px" }}>
+                    Share of conflicts by pair (n={conflicts?.stats.total ?? 0})
                   </div>
-                  <div className="panel chart-panel">
-                    <div className="chart-title">Conflicts by Session</div>
-                    <div className="bar-stack">
-                      {(conflicts?.by_session ?? []).map((row) => (
-                        <div key={row.market_session} className="bar-row">
-                          <span>{row.market_session ?? "-"}</span>
-                          <div className="bar-track">
-                            <div
-                              className="bar-fill"
-                              style={{ width: `${(row.count / maxConflictSession) * 100}%` }}
-                            />
-                          </div>
-                          <strong>{row.count}</strong>
+                  <div className="bar-stack">
+                    {(conflicts?.by_pair ?? []).map((row) => (
+                      <div key={row.pair} className="bar-row">
+                        <span>{row.pair ?? "-"}</span>
+                        <div className="bar-track">
+                          <div
+                            className="bar-fill"
+                            style={{ width: `${(row.count / maxConflictPair) * 100}%` }}
+                          />
                         </div>
-                      ))}
-                    </div>
+                        <strong>{row.count}</strong>
+                        <span className="bar-percent">{formatPercent(row.count, conflicts?.stats.total ?? 0)}%</span>
+                      </div>
+                    ))}
                   </div>
+                </div>
+                <div className="panel chart-panel">
+                  <div className="chart-title">Conflicts by Session</div>
+                  <div style={{ fontSize: "0.85rem", color: "#6c757d", marginBottom: "12px" }}>
+                    Share of conflicts by session (n={conflicts?.stats.total ?? 0})
+                  </div>
+                  <div className="bar-stack">
+                    {(conflicts?.by_session ?? []).map((row) => (
+                      <div key={row.market_session} className="bar-row">
+                        <span>{row.market_session ?? "-"}</span>
+                        <div className="bar-track">
+                          <div
+                            className="bar-fill"
+                            style={{ width: `${(row.count / maxConflictSession) * 100}%` }}
+                          />
+                        </div>
+                        <strong>{row.count}</strong>
+                        <span className="bar-percent">{formatPercent(row.count, conflicts?.stats.total ?? 0)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 </div>
                 <div className="panel table-panel">
                   <div className="chart-title">Top Conflict Reasons</div>
@@ -1093,6 +1131,9 @@ export default function SMCRejectionsPage() {
             {activeTab === "sr" ? (
               <div className="panel chart-panel">
                 <div className="chart-title">S/R Path Blocking</div>
+                <div style={{ fontSize: "0.85rem", color: "#6c757d", marginBottom: "12px" }}>
+                  Share of S/R blocks (n={srBlockingTotal})
+                </div>
                 <div className="bar-stack">
                   {srBlocking.map((row) => (
                     <div key={row.label} className="bar-row">
@@ -1104,6 +1145,7 @@ export default function SMCRejectionsPage() {
                         />
                       </div>
                       <strong>{row.value}</strong>
+                      <span className="bar-percent">{formatPercent(row.value, srBlockingTotal)}%</span>
                     </div>
                   ))}
                 </div>
@@ -1114,6 +1156,9 @@ export default function SMCRejectionsPage() {
               <div className="forex-grid">
                 <div className="panel chart-panel">
                   <div className="chart-title">Rejections by Session</div>
+                  <div style={{ fontSize: "0.85rem", color: "#6c757d", marginBottom: "12px" }}>
+                    Share by session (n={sessionTotal})
+                  </div>
                   <div className="bar-stack">
                     {sessionCounts.map((row) => (
                       <div key={row.label} className="bar-row">
@@ -1125,12 +1170,16 @@ export default function SMCRejectionsPage() {
                           />
                         </div>
                         <strong>{row.value}</strong>
+                        <span className="bar-percent">{formatPercent(row.value, sessionTotal)}%</span>
                       </div>
                     ))}
                   </div>
                 </div>
                 <div className="panel chart-panel">
                   <div className="chart-title">Rejections by Hour (UTC)</div>
+                  <div style={{ fontSize: "0.85rem", color: "#6c757d", marginBottom: "12px" }}>
+                    Share by hour (n={hourTotal})
+                  </div>
                   <div className="bar-stack">
                     {hourCounts.map((row) => (
                       <div key={row.label} className="bar-row">
@@ -1142,6 +1191,7 @@ export default function SMCRejectionsPage() {
                           />
                         </div>
                         <strong>{row.value}</strong>
+                        <span className="bar-percent">{formatPercent(row.value, hourTotal)}%</span>
                       </div>
                     ))}
                   </div>

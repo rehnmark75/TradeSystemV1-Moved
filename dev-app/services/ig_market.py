@@ -41,6 +41,18 @@ async def get_current_bid_price(auth_headers, epic):
         # The scalingFactor MUST be used when calculating spread in pips.
         scaling_factor = data["snapshot"].get("scalingFactor", 1)
 
+        # FIX: MINI epics often don't return scalingFactor, so infer from price magnitude
+        # If bid > 1000 and scaling_factor is 1 (default), prices are pre-scaled
+        original_sf = scaling_factor
+        if scaling_factor == 1 and bid_price > 1000:
+            # Pre-scaled prices (e.g., EURUSD.1.MINI: 11989 instead of 1.1989)
+            scaling_factor = 10000
+            logger.info(f"[SPREAD FIX] {epic}: Inferred scaling_factor={scaling_factor} from bid={bid_price} (was {original_sf})")
+        elif scaling_factor == 1 and bid_price > 100:
+            # JPY pairs scaled (e.g., USDJPY.1.MINI: 15000 instead of 150.00)
+            scaling_factor = 100
+            logger.info(f"[SPREAD FIX] {epic}: Inferred scaling_factor={scaling_factor} from bid={bid_price} (was {original_sf})")
+
         # Calculate spread in price units and pips
         # Formula: spread_pips = (offer - bid) / (one_pip * scaling_factor)
         # Without scaling_factor, a 0.9 point spread would incorrectly show as 9000 pips!

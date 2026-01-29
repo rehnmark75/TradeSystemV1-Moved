@@ -646,10 +646,21 @@ input {
 
 .bar-row {
   display: grid;
-  grid-template-columns: 130px 1fr 90px;
+  grid-template-columns: 150px 1fr 70px 70px;
   align-items: center;
   gap: 12px;
   font-size: 0.85rem;
+}
+
+.bar-row strong {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-percent {
+  text-align: right;
+  color: #6c757d;
+  font-variant-numeric: tabular-nums;
 }
 
 .bar-track {

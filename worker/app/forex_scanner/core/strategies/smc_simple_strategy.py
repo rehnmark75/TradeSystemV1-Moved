@@ -2,9 +2,30 @@
 """
 SMC Simple Strategy - 3-Tier EMA-Based Trend Following
 
-VERSION: 2.30.0
-DATE: 2026-01-22
+VERSION: 2.35.0
+DATE: 2026-01-29
 STATUS: Scalp Mode for High-Frequency Trading
+
+v2.35.0 CHANGES (HTF Bias Score System - Professional Redesign):
+    - REDESIGN: Replaced binary HTF alignment filter with continuous bias score (0.0-1.0)
+    - PHILOSOPHY: Professional algo trader approach - continuous measurement vs binary gates
+    - NEW: htf_bias_calculator.py helper for score calculation
+    - NEW: Three-component scoring: candle body (40%), EMA slope (30%), MACD momentum (30%)
+    - NEW: Per-pair modes: 'active' (filter), 'monitor' (log only), 'disabled'
+    - NEW: Confidence multiplier: bias score adjusts confidence (0.7x-1.3x)
+    - CONFIG: htf_bias_enabled (default: true) - master toggle
+    - CONFIG: htf_bias_min_threshold (default: 0.400) - minimum score for active mode
+    - CONFIG: htf_bias_confidence_multiplier_enabled (default: true)
+    - DATABASE: htf_bias_mode per pair (EURUSD/USDCAD/USDJPY = monitor, others = active)
+    - ALERT: Added htf_bias_score, htf_bias_mode, htf_bias_details to signal/alert_history
+    - SCORE INTERPRETATION:
+        0.0-0.3: Strong counter-trend (significantly misaligned)
+        0.3-0.5: Weak counter-trend (slightly misaligned)
+        0.5-0.7: Neutral (no strong bias)
+        0.7-0.9: Aligned (favorable trend)
+        0.9-1.0: Strong alignment (optimal conditions)
+    - DEPRECATED: scalp_reversal_* parameters (reversal override system removed)
+    - IMPACT: Reduces 8 parameters to 2, cleaner code, better signal quality measurement
 
 v2.30.0 CHANGES (Per-Pair ATR-Optimized Scalp SL/TP):
     - NEW: Per-pair scalp SL/TP values based on historical ATR analysis
@@ -192,6 +213,11 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 import logging
 from datetime import datetime, timedelta, timezone
+
+# HTF Bias Score Calculator (v2.35.0)
+from forex_scanner.core.strategies.helpers.htf_bias_calculator import (
+    get_htf_bias_calculator, HTFBiasCalculator
+)
 
 
 # ============================================================================
@@ -968,6 +994,12 @@ class SMCSimpleStrategy:
             'scalp_entry_rsi_sell_min': 'scalp_entry_rsi_sell_min',
             'scalp_min_ema_distance_pips': 'scalp_min_ema_distance_pips',
 
+            # Scalp filter disable toggles (control which filters scalp mode disables)
+            'scalp_disable_swing_proximity': 'scalp_disable_swing_proximity',
+            'scalp_disable_ema_slope_validation': 'scalp_disable_ema_slope_validation',
+            'scalp_disable_volume_filter': 'scalp_disable_volume_filter',
+            'scalp_disable_macd_filter': 'scalp_disable_macd_filter',
+
             # Scalp reversal override (counter-trend)
             'scalp_reversal_enabled': 'scalp_reversal_enabled',
             'scalp_reversal_min_runway_pips': 'scalp_reversal_min_runway_pips',
@@ -984,6 +1016,11 @@ class SMCSimpleStrategy:
             # v2.25.1: Scalp Entry Candle Alignment (simpler alternative to rejection candle)
             'scalp_require_entry_candle_alignment': 'scalp_require_entry_candle_alignment',
             'scalp_use_market_on_entry_alignment': 'scalp_use_market_on_entry_alignment',
+
+            # v2.35.0: HTF Bias Score System (replaces binary HTF alignment)
+            'htf_bias_enabled': 'htf_bias_enabled',
+            'htf_bias_min_threshold': 'htf_bias_min_threshold',
+            'htf_bias_confidence_multiplier_enabled': 'htf_bias_confidence_multiplier_enabled',
 
             # v2.23.0: Pattern Confirmation (test ACTIVE vs MONITORING mode)
             'pattern_confirmation_enabled': 'pattern_confirmation_enabled',
@@ -1122,6 +1159,14 @@ class SMCSimpleStrategy:
         self.scalp_entry_rsi_buy_max = getattr(config, 'scalp_entry_rsi_buy_max', 100.0)
         self.scalp_entry_rsi_sell_min = getattr(config, 'scalp_entry_rsi_sell_min', 0.0)
         self.scalp_min_ema_distance_pips = getattr(config, 'scalp_min_ema_distance_pips', 0.0)
+
+        # v2.35.0: HTF Bias Score System (replaces binary HTF alignment)
+        # Professional approach: continuous bias measurement instead of binary filter
+        self.htf_bias_enabled = getattr(config, 'htf_bias_enabled', True)
+        self.htf_bias_min_threshold = getattr(config, 'htf_bias_min_threshold', 0.400)
+        self.htf_bias_confidence_multiplier_enabled = getattr(config, 'htf_bias_confidence_multiplier_enabled', True)
+        # Initialize HTF bias calculator
+        self._htf_bias_calculator = get_htf_bias_calculator(self.logger)
 
         # v2.25.0: Scalp rejection candle confirmation
         # Require entry-TF rejection candle before scalp entry
@@ -1372,11 +1417,23 @@ class SMCSimpleStrategy:
         self.pullback_offset_min_pips = limit_offset
         self.pullback_offset_max_pips = limit_offset
 
+        # v2.31.0: Apply per-pair reversal override settings (GBPUSD/NZDUSD optimization)
+        self.scalp_reversal_enabled = pair_config.get('reversal_enabled', self.scalp_reversal_enabled)
+        self.scalp_reversal_min_runway_pips = pair_config.get('reversal_min_runway_pips', self.scalp_reversal_min_runway_pips)
+
+        # v2.32.1: Per-pair HTF alignment override
+        # Allows disabling the HTF alignment filter for specific pairs via parameter_overrides
+        if self._db_config:
+            htf_align = self._db_config.get_for_pair(epic, 'scalp_require_htf_alignment')
+            if htf_align is not None:
+                self.scalp_require_htf_alignment = bool(htf_align)
+
         # Log if using per-pair overrides
         pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
         self.logger.debug(f"📊 {pair} Scalp Config: EMA={pair_config['ema_period']}, "
                          f"Swing={pair_config['swing_lookback_bars']}, "
                          f"HTF={pair_config['htf_timeframe']}, "
+                         f"Reversal={self.scalp_reversal_enabled}@{self.scalp_reversal_min_runway_pips}p, "
                          f"Offset={limit_offset} pips")
 
         return pair_config
@@ -1464,6 +1521,35 @@ class SMCSimpleStrategy:
             if direction == 'BEAR' and ema_stack != 'bearish':
                 self._track_filter_rejection('ema_stack_alignment')
                 return False, f"EMA stack {ema_stack} not bearish for SELL"
+
+        # =========================================================================
+        # v2.32.0: USDCAD-specific filters based on Jan 2026 trade analysis
+        # These filters address the 0% win rate in ranging markets and
+        # 20% win rate in trending+low volatility conditions
+        # =========================================================================
+
+        # Filter 6: Block Ranging Markets (0% win rate on USDCAD)
+        if self._db_config.get_pair_scalp_block_ranging_market(epic):
+            regime = signal.get('market_regime_detected', 'unknown')
+            if regime == 'ranging':
+                self._track_filter_rejection('block_ranging_market')
+                return False, f"market_regime={regime} (ranging blocked)"
+
+        # Filter 7: Block Low Volatility + Trending (20% win rate on USDCAD)
+        if self._db_config.get_pair_scalp_block_low_volatility_trending(epic):
+            regime = signal.get('market_regime_detected', 'unknown')
+            volatility = signal.get('volatility_state', 'unknown')
+            if regime == 'trending' and volatility == 'low':
+                self._track_filter_rejection('block_low_volatility_trending')
+                return False, f"trending+low_volatility blocked (regime={regime}, vol={volatility})"
+
+        # Filter 8: Minimum ADX (90% of USDCAD losses had ADX < 20)
+        min_adx = self._db_config.get_pair_scalp_min_adx(epic)
+        if min_adx is not None:
+            current_adx = signal.get('adx_value', 0.0)
+            if current_adx is not None and current_adx < min_adx:
+                self._track_filter_rejection('min_adx')
+                return False, f"ADX {current_adx:.1f} < {min_adx:.1f}"
 
         return True, ""
 
@@ -2102,47 +2188,57 @@ class SMCSimpleStrategy:
                 elif 'rsi' in df_trigger.columns and len(df_trigger) > 0:
                     rsi_value = df_trigger['rsi'].iloc[-1]
 
-                # Filter 2: HTF alignment required (v2.27.0: FIXED - now checks BOTH current AND previous HTF candles)
-                # Analysis showed 14/16 losing trades had opposite previous HTF candle
-                # When HTF prev is opposite, current candle is often a RETEST that reverses
-                if self.scalp_require_htf_alignment:
-                    htf_aligned = (
-                        (direction == 'BULL' and htf_candle_direction == 'BULLISH' and htf_candle_direction_prev == 'BULLISH') or
-                        (direction == 'BEAR' and htf_candle_direction == 'BEARISH' and htf_candle_direction_prev == 'BEARISH')
-                    )
-                    if not htf_aligned:
-                        reversal_allowed = False
-                        reversal_reason = None
-                        if getattr(self, 'scalp_reversal_enabled', False):
-                            reversal_allowed, reversal_reason, reversal_override_details = self._evaluate_reversal_scalp_override(
-                                df_entry=entry_df,
-                                df_trigger=df_trigger,
-                                df_4h=df_4h,
-                                direction=direction,
-                                pullback_depth=pullback_depth,
-                                market_price=market_price,
-                                swing_level=swing_level,
-                                pip_value=pip_value,
-                                rsi_value=rsi_value,
-                                epic=epic
-                            )
+                # Filter 2: HTF Bias Score System (v2.35.0 - replaces binary HTF alignment)
+                # Professional approach: continuous bias measurement instead of binary filter
+                # See htf_bias_calculator.py for score interpretation:
+                #   0.0-0.3: Strong counter-trend, 0.3-0.5: Weak counter-trend
+                #   0.5-0.7: Neutral, 0.7-0.9: Aligned, 0.9-1.0: Strong alignment
+                htf_bias_score = 0.5  # Default neutral
+                htf_bias_details = {}
+                htf_bias_mode = 'disabled'  # Per-pair mode
 
-                        if reversal_allowed:
-                            reversal_override_applied = True
-                            reversal_override_reason = reversal_reason
-                            entry_type = 'REVERSAL'
-                            trigger_type = 'REVERSAL_SCALP'
-                            trigger_details['reversal_override'] = True
-                            trigger_details['reversal_reason'] = reversal_reason
-                            trigger_details['reversal_details'] = reversal_override_details
-                            self.logger.info(f"   ✅ {reversal_reason}")
-                        else:
-                            rejection_reason = (
-                                f"Scalp filter: HTF misalignment ({direction} vs HTF curr={htf_candle_direction}, "
-                                f"prev={htf_candle_direction_prev})"
-                            )
-                            if reversal_reason:
-                                rejection_reason = f"{rejection_reason} | {reversal_reason}"
+                if self.htf_bias_enabled and df_4h is not None and len(df_4h) >= 5:
+                    # Get per-pair HTF bias mode
+                    if hasattr(self, '_db_config') and self._db_config is not None:
+                        htf_bias_mode = self._db_config.get_pair_htf_bias_mode(epic)
+                        htf_bias_threshold = self._db_config.get_pair_htf_bias_threshold(epic)
+                    else:
+                        htf_bias_mode = 'active'  # Default to active if no config
+                        htf_bias_threshold = self.htf_bias_min_threshold
+
+                    if htf_bias_mode != 'disabled':
+                        # Calculate HTF bias score
+                        htf_bias_score, htf_bias_details = self._htf_bias_calculator.calculate_bias_score(
+                            df_4h=df_4h,
+                            direction=direction,
+                            epic=epic
+                        )
+
+                        # Store in trigger details for alert history
+                        trigger_details['htf_bias_score'] = htf_bias_score
+                        trigger_details['htf_bias_mode'] = htf_bias_mode
+                        trigger_details['htf_bias_details'] = htf_bias_details
+
+                        # Apply confidence multiplier if enabled
+                        if self.htf_bias_confidence_multiplier_enabled:
+                            confidence_multiplier = self._htf_bias_calculator.get_confidence_multiplier(htf_bias_score)
+                            trigger_details['htf_bias_confidence_multiplier'] = confidence_multiplier
+
+                        # Check if should filter (active mode only)
+                        should_reject, filter_reason = self._htf_bias_calculator.should_filter(
+                            bias_score=htf_bias_score,
+                            threshold=htf_bias_threshold,
+                            mode=htf_bias_mode
+                        )
+
+                        interpretation = htf_bias_details.get('interpretation', 'UNKNOWN')
+                        self.logger.info(
+                            f"   📊 HTF Bias: {htf_bias_score:.3f} ({interpretation}) "
+                            f"[mode={htf_bias_mode}, threshold={htf_bias_threshold}]"
+                        )
+
+                        if should_reject:
+                            rejection_reason = f"Scalp filter: HTF bias score {htf_bias_score:.3f} < {htf_bias_threshold} ({interpretation})"
                             self.logger.info(f"   ❌ {rejection_reason}")
                             # Collect full market context including prices for outcome analysis
                             context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
@@ -2151,14 +2247,16 @@ class SMCSimpleStrategy:
                             context.update({
                                 'htf_candle_direction': htf_candle_direction,
                                 'htf_candle_direction_prev': htf_candle_direction_prev,
+                                'htf_bias_score': htf_bias_score,
+                                'htf_bias_mode': htf_bias_mode,
+                                'htf_bias_details': htf_bias_details,
                                 'rejection_details': {
-                                    'filter': 'htf_alignment',
-                                    'htf_current': htf_candle_direction,
-                                    'htf_previous': htf_candle_direction_prev,
-                                    'signal_direction': direction,
-                                    'reversal_override_attempted': reversal_reason is not None,
-                                    'reversal_override_reason': reversal_reason,
-                                    'reversal_override_details': reversal_override_details
+                                    'filter': 'htf_bias_score',
+                                    'htf_bias_score': htf_bias_score,
+                                    'htf_bias_threshold': htf_bias_threshold,
+                                    'htf_bias_mode': htf_bias_mode,
+                                    'interpretation': interpretation,
+                                    'signal_direction': direction
                                 }
                             })
                             self._track_rejection(
@@ -2171,6 +2269,10 @@ class SMCSimpleStrategy:
                                 context=context
                             )
                             return None
+                else:
+                    # HTF bias disabled or insufficient data
+                    trigger_details['htf_bias_mode'] = 'disabled'
+                    trigger_details['htf_bias_score'] = None
 
                 # Filter 3: RSI zone filter (avoid overbought buys, oversold sells)
                 if rsi_value is not None:
@@ -2743,6 +2845,19 @@ class SMCSimpleStrategy:
                 confidence -= self.momentum_confidence_penalty
                 self.logger.info(f"   ⚠️  Momentum entry penalty: -{self.momentum_confidence_penalty*100:.0f}%")
 
+            # v2.35.0: Apply HTF bias confidence multiplier
+            # Only applies if htf_bias_confidence_multiplier_enabled=True and we have a valid score
+            htf_bias_multiplier = trigger_details.get('htf_bias_confidence_multiplier')
+            if htf_bias_multiplier is not None and htf_bias_multiplier != 1.0:
+                original_confidence = confidence
+                confidence = confidence * htf_bias_multiplier
+                confidence = min(confidence, 1.0)  # Cap at 100%
+                htf_bias_score = trigger_details.get('htf_bias_score', 0.5)
+                self.logger.info(
+                    f"   📊 HTF bias multiplier: {htf_bias_multiplier:.2f}x "
+                    f"(score={htf_bias_score:.3f}) → {original_confidence*100:.0f}% → {confidence*100:.0f}%"
+                )
+
             # v2.11.0: Dynamic confidence threshold based on EMA distance, ATR, and Volume
             # Priority: Scalp mode > Backtest override > EMA distance > ATR > Volume > Pair-specific > Default
             # EMA distance is the strongest predictor of CONFIDENCE rejection outcomes
@@ -3184,6 +3299,11 @@ class SMCSimpleStrategy:
                 # v2.17.0: 4H candle direction for HTF momentum analysis
                 'htf_candle_direction': htf_candle_direction,
                 'htf_candle_direction_prev': htf_candle_direction_prev,
+
+                # v2.35.0: HTF Bias Score System (replaces binary HTF alignment)
+                'htf_bias_score': trigger_details.get('htf_bias_score'),
+                'htf_bias_mode': trigger_details.get('htf_bias_mode', 'disabled'),
+                'htf_bias_details': trigger_details.get('htf_bias_details'),
 
                 # v2.0.0: Limit order fields
                 # v3.3.0: Added api_order_type (LIMIT vs STOP) and signal_price for slippage tracking

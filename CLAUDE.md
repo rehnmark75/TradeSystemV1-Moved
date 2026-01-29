@@ -91,12 +91,14 @@ docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7 --scalp --t
 docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7 --scalp --timeframe 15m
 ```
 
-**Strategy timeframes are ALWAYS (regardless of --timeframe setting):**
+**Scalp mode strategy timeframes (regardless of --timeframe setting):**
 | Tier | Timeframe | Purpose |
 |------|-----------|---------|
-| TIER 1 HTF | 15m | EMA bias/direction |
+| TIER 1 HTF | 1h (default) | EMA bias/direction |
 | TIER 2 Trigger | 5m | Swing break detection |
 | TIER 3 Entry | 1m | Pullback entry |
+
+**Note:** GBPUSD and NZDUSD have per-pair overrides using 15m for HTF. Check `smc_simple_pair_overrides.scalp_htf_timeframe` for pair-specific settings.
 
 **Why this matters:** Live scanner runs every 2-5 minutes. Using `--timeframe 15m` only evaluates at 15m boundaries, missing signals that occur mid-candle. Jan 15 comparison showed:
 - `--timeframe 15m`: 20 signals
