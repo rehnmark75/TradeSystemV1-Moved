@@ -2450,6 +2450,13 @@ class SMCSimpleStrategy:
             # Filter 6: ENTRY CANDLE ALIGNMENT (v2.25.1)
             # Simple alternative to rejection candle - requires entry candle
             # color to match trade direction (green for BUY, red for SELL)
+            #
+            # NOTE (v2.35.4, Jan 29 2026): This filter is now DISABLED by default.
+            # The HTF candle alignment filter (TIER1_HTF_CANDLE) is the critical one
+            # for trend direction validation. This 1m filter is too noisy - candles
+            # flip rapidly and over-filter valid trades. Analysis showed HTF filter
+            # would have prevented 73% of losses; this filter was enabled but didn't
+            # help. Keep only HTF alignment to avoid over-filtering.
             # ================================================================
             scalp_require_entry_alignment = getattr(self, 'scalp_require_entry_candle_alignment', False)
 
