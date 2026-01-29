@@ -104,6 +104,19 @@ type SignalRow = {
   sector_underperforming: boolean | null;
   earnings_date: string | null;
   days_to_earnings: number | null;
+  trade_count?: number | null;
+  open_trade_count?: number | null;
+  latest_open_time?: string | null;
+  last_trade_status?: string | null;
+  last_trade_open_time?: string | null;
+  last_trade_close_time?: string | null;
+  last_trade_profit?: number | null;
+  last_trade_profit_pct?: number | null;
+  last_trade_side?: string | null;
+  last_closed_time?: string | null;
+  last_closed_profit?: number | null;
+  last_closed_profit_pct?: number | null;
+  last_closed_side?: string | null;
 };
 
 type SignalStats = {
@@ -139,6 +152,29 @@ const numberOrNull = (value: unknown) => {
 const formatValue = (value: unknown, digits = 2) => {
   const num = numberOrNull(value);
   return num === null ? "N/A" : num.toFixed(digits);
+};
+
+const formatTradeDate = (value?: string | null) => {
+  if (!value) return "-";
+  const time = new Date(value);
+  if (Number.isNaN(time.getTime())) return "-";
+  return time.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" });
+};
+
+const tradeOutcome = (profit?: number | null) => {
+  const value = numberOrNull(profit);
+  if (value === null) return { label: "-", tone: "" };
+  if (value > 0) return { label: "WIN", tone: "good" };
+  if (value < 0) return { label: "LOSS", tone: "bad" };
+  return { label: "FLAT", tone: "warn" };
+};
+
+const formatTradePnl = (profit?: number | null, profitPct?: number | null) => {
+  const value = numberOrNull(profit);
+  if (value === null) return "-";
+  const pct = numberOrNull(profitPct);
+  const pctText = pct === null ? "" : ` (${pct.toFixed(2)}%)`;
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}${pctText}`;
 };
 
 const classifyRsi = (rsi: unknown) => {
@@ -606,6 +642,14 @@ export default function SignalsPage() {
               const stop = entry * 0.97;
               const target1 = entry * 1.05;
               const target2 = entry * 1.1;
+              const tradeCount = numberOrNull(signal.trade_count) ?? 0;
+              const openTrades = numberOrNull(signal.open_trade_count) ?? 0;
+              const hasTrades = tradeCount > 0;
+              const lastClosed = tradeOutcome(signal.last_closed_profit);
+              const lastTradeDate = formatTradeDate(signal.last_trade_open_time || signal.last_trade_close_time);
+              const lastClosedDate = formatTradeDate(signal.last_closed_time);
+              const lastStatus = (signal.last_trade_status || "").toLowerCase();
+              const isRunning = lastStatus ? lastStatus === "open" : openTrades > 0;
 
               return (
                 <div>
@@ -734,6 +778,33 @@ export default function SignalsPage() {
                             </div>
                             <div className="detail-item">Target: {signal.target_price ? `$${Number(signal.target_price).toFixed(2)}` : "-"}</div>
                           </div>
+                          <h4>Trade History</h4>
+                          {hasTrades ? (
+                            <div className="detail-grid">
+                              <div className="detail-item">Trades: {tradeCount}</div>
+                              <div className="detail-item">Open: {openTrades}</div>
+                              <div className="detail-item">
+                                Last Trade:{" "}
+                                <span className={`pill ${isRunning ? "warn" : "good"}`}>
+                                  {isRunning ? "OPEN" : "CLOSED"}
+                                </span>{" "}
+                                {lastTradeDate}
+                              </div>
+                              <div className="detail-item">
+                                Last Closed:{" "}
+                                <span className={`pill ${lastClosed.tone}`}>{lastClosed.label}</span>{" "}
+                                {lastClosedDate}
+                              </div>
+                              <div className="detail-item">
+                                Last P/L: {formatTradePnl(signal.last_closed_profit, signal.last_closed_profit_pct)}
+                              </div>
+                              <div className="detail-item">
+                                Side: {signal.last_trade_side ?? signal.last_closed_side ?? "-"}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="footer-note">No recorded broker trades for this ticker.</div>
+                          )}
                           {badges.length ? (
                             <div className="daq-badges">
                               {badges.map((badge) => (

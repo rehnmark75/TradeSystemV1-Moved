@@ -195,12 +195,60 @@ export async function GET(request: Request) {
           WHEN i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE
           THEN (i.earnings_date - CURRENT_DATE)
           ELSE NULL
-        END as days_to_earnings
+        END as days_to_earnings,
+        bt_summary.trade_count,
+        bt_summary.open_trade_count,
+        bt_summary.latest_open_time,
+        bt_last.last_trade_status,
+        bt_last.last_trade_open_time,
+        bt_last.last_trade_close_time,
+        bt_last.last_trade_profit,
+        bt_last.last_trade_profit_pct,
+        bt_last.last_trade_side,
+        bt_closed.last_closed_time,
+        bt_closed.last_closed_profit,
+        bt_closed.last_closed_profit_pct,
+        bt_closed.last_closed_side
       FROM latest_signals s
       LEFT JOIN stock_instruments i ON s.ticker = i.ticker
       LEFT JOIN stock_screening_metrics m ON s.ticker = m.ticker
         AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
       LEFT JOIN stock_deep_analysis d ON s.id = d.signal_id
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::int AS trade_count,
+          COUNT(*) FILTER (WHERE status = 'open')::int AS open_trade_count,
+          MAX(open_time) FILTER (WHERE status = 'open') AS latest_open_time
+        FROM broker_trades bt
+        WHERE bt.ticker = s.ticker
+           OR split_part(bt.ticker, '.', 1) = s.ticker
+      ) bt_summary ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          bt.status AS last_trade_status,
+          bt.open_time AS last_trade_open_time,
+          bt.close_time AS last_trade_close_time,
+          bt.profit AS last_trade_profit,
+          bt.profit_pct AS last_trade_profit_pct,
+          bt.side AS last_trade_side
+        FROM broker_trades bt
+        WHERE bt.ticker = s.ticker
+           OR split_part(bt.ticker, '.', 1) = s.ticker
+        ORDER BY bt.open_time DESC NULLS LAST
+        LIMIT 1
+      ) bt_last ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          bt.close_time AS last_closed_time,
+          bt.profit AS last_closed_profit,
+          bt.profit_pct AS last_closed_profit_pct,
+          bt.side AS last_closed_side
+        FROM broker_trades bt
+        WHERE (bt.ticker = s.ticker OR split_part(bt.ticker, '.', 1) = s.ticker)
+          AND bt.status = 'closed'
+        ORDER BY bt.close_time DESC NULLS LAST
+        LIMIT 1
+      ) bt_closed ON TRUE
     `;
 
     if (rsConditions.length) {

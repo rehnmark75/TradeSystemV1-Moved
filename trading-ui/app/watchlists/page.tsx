@@ -44,6 +44,19 @@ type WatchlistRow = {
   reco_hold: number | null;
   reco_sell: number | null;
   reco_strong_sell: number | null;
+  trade_count?: number | null;
+  open_trade_count?: number | null;
+  latest_open_time?: string | null;
+  last_trade_status?: string | null;
+  last_trade_open_time?: string | null;
+  last_trade_close_time?: string | null;
+  last_trade_profit?: number | null;
+  last_trade_profit_pct?: number | null;
+  last_trade_side?: string | null;
+  last_closed_time?: string | null;
+  last_closed_profit?: number | null;
+  last_closed_profit_pct?: number | null;
+  last_closed_side?: string | null;
 };
 
 type WatchlistDetail = WatchlistRow & {
@@ -398,6 +411,29 @@ export default function Page() {
     return num === null ? "N/A" : num.toFixed(digits);
   };
 
+  const formatTradeDate = (value?: string | null) => {
+    if (!value) return "-";
+    const time = new Date(value);
+    if (Number.isNaN(time.getTime())) return "-";
+    return time.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" });
+  };
+
+  const tradeOutcome = (profit?: number | null) => {
+    const value = numberOrNull(profit);
+    if (value === null) return { label: "-", tone: "" };
+    if (value > 0) return { label: "WIN", tone: "good" };
+    if (value < 0) return { label: "LOSS", tone: "bad" };
+    return { label: "FLAT", tone: "warn" };
+  };
+
+  const formatTradePnl = (profit?: number | null, profitPct?: number | null) => {
+    const value = numberOrNull(profit);
+    if (value === null) return "-";
+    const pct = numberOrNull(profitPct);
+    const pctText = pct === null ? "" : ` (${pct.toFixed(2)}%)`;
+    return `${value >= 0 ? "+" : ""}${value.toFixed(2)}${pctText}`;
+  };
+
   const formatList = (value: string[] | string | null | undefined) => {
     if (!value) return "";
     return Array.isArray(value) ? value.join(", ") : value;
@@ -732,6 +768,14 @@ export default function Page() {
               const days = row.days_on_list ?? 0;
               const reco = recoSummary(row);
               const expandedRow = expanded[row.ticker] || false;
+              const tradeCount = numberOrNull(row.trade_count) ?? 0;
+              const openTrades = numberOrNull(row.open_trade_count) ?? 0;
+              const hasTrades = tradeCount > 0;
+              const lastClosed = tradeOutcome(row.last_closed_profit);
+              const lastTradeDate = formatTradeDate(row.last_trade_open_time || row.last_trade_close_time);
+              const lastClosedDate = formatTradeDate(row.last_closed_time);
+              const lastStatus = (row.last_trade_status || "").toLowerCase();
+              const isRunning = lastStatus ? lastStatus === "open" : openTrades > 0;
 
               return (
                 <div>
@@ -946,6 +990,33 @@ export default function Page() {
                             </div>
                           ) : (
                             <div className="footer-note">Loading details...</div>
+                          )}
+                          <h4>Trade History</h4>
+                          {hasTrades ? (
+                            <div className="detail-grid">
+                              <div className="detail-item">Trades: {tradeCount}</div>
+                              <div className="detail-item">Open: {openTrades}</div>
+                              <div className="detail-item">
+                                Last Trade:{" "}
+                                <span className={`pill ${isRunning ? "warn" : "good"}`}>
+                                  {isRunning ? "OPEN" : "CLOSED"}
+                                </span>{" "}
+                                {lastTradeDate}
+                              </div>
+                              <div className="detail-item">
+                                Last Closed:{" "}
+                                <span className={`pill ${lastClosed.tone}`}>{lastClosed.label}</span>{" "}
+                                {lastClosedDate}
+                              </div>
+                              <div className="detail-item">
+                                Last P/L: {formatTradePnl(row.last_closed_profit, row.last_closed_profit_pct)}
+                              </div>
+                              <div className="detail-item">
+                                Side: {row.last_trade_side ?? row.last_closed_side ?? "-"}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="footer-note">No recorded broker trades for this ticker.</div>
                           )}
                         </div>
                         <div>

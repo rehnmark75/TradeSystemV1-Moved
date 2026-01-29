@@ -55,7 +55,20 @@ export async function GET(request: Request) {
           ar.hold as reco_hold,
           ar.sell as reco_sell,
           ar.strong_sell as reco_strong_sell,
-          COALESCE(i.exchange, 'NASDAQ') as exchange
+          COALESCE(i.exchange, 'NASDAQ') as exchange,
+          bt_summary.trade_count,
+          bt_summary.open_trade_count,
+          bt_summary.latest_open_time,
+          bt_last.last_trade_status,
+          bt_last.last_trade_open_time,
+          bt_last.last_trade_close_time,
+          bt_last.last_trade_profit,
+          bt_last.last_trade_profit_pct,
+          bt_last.last_trade_side,
+          bt_closed.last_closed_time,
+          bt_closed.last_closed_profit,
+          bt_closed.last_closed_profit_pct,
+          bt_closed.last_closed_side
         FROM stock_watchlist_results w
         LEFT JOIN stock_instruments i ON w.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -67,6 +80,41 @@ export async function GET(request: Request) {
           ORDER BY period DESC
           LIMIT 1
         ) ar ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS trade_count,
+            COUNT(*) FILTER (WHERE status = 'open')::int AS open_trade_count,
+            MAX(open_time) FILTER (WHERE status = 'open') AS latest_open_time
+          FROM broker_trades bt
+          WHERE bt.ticker = w.ticker
+             OR split_part(bt.ticker, '.', 1) = w.ticker
+        ) bt_summary ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            bt.status AS last_trade_status,
+            bt.open_time AS last_trade_open_time,
+            bt.close_time AS last_trade_close_time,
+            bt.profit AS last_trade_profit,
+            bt.profit_pct AS last_trade_profit_pct,
+            bt.side AS last_trade_side
+          FROM broker_trades bt
+          WHERE bt.ticker = w.ticker
+             OR split_part(bt.ticker, '.', 1) = w.ticker
+          ORDER BY bt.open_time DESC NULLS LAST
+          LIMIT 1
+        ) bt_last ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            bt.close_time AS last_closed_time,
+            bt.profit AS last_closed_profit,
+            bt.profit_pct AS last_closed_profit_pct,
+            bt.side AS last_closed_side
+          FROM broker_trades bt
+          WHERE (bt.ticker = w.ticker OR split_part(bt.ticker, '.', 1) = w.ticker)
+            AND bt.status = 'closed'
+          ORDER BY bt.close_time DESC NULLS LAST
+          LIMIT 1
+        ) bt_closed ON TRUE
         WHERE w.watchlist_name = $1
           AND w.status = 'active'
         ORDER BY w.crossover_date DESC NULLS LAST, w.volume DESC
@@ -113,7 +161,20 @@ export async function GET(request: Request) {
         ar.hold as reco_hold,
         ar.sell as reco_sell,
         ar.strong_sell as reco_strong_sell,
-        COALESCE(i.exchange, 'NASDAQ') as exchange
+        COALESCE(i.exchange, 'NASDAQ') as exchange,
+        bt_summary.trade_count,
+        bt_summary.open_trade_count,
+        bt_summary.latest_open_time,
+        bt_last.last_trade_status,
+        bt_last.last_trade_open_time,
+        bt_last.last_trade_close_time,
+        bt_last.last_trade_profit,
+        bt_last.last_trade_profit_pct,
+        bt_last.last_trade_side,
+        bt_closed.last_closed_time,
+        bt_closed.last_closed_profit,
+        bt_closed.last_closed_profit_pct,
+        bt_closed.last_closed_side
       FROM stock_watchlist_results w
       LEFT JOIN stock_instruments i ON w.ticker = i.ticker
       LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -125,6 +186,41 @@ export async function GET(request: Request) {
         ORDER BY period DESC
         LIMIT 1
       ) ar ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::int AS trade_count,
+          COUNT(*) FILTER (WHERE status = 'open')::int AS open_trade_count,
+          MAX(open_time) FILTER (WHERE status = 'open') AS latest_open_time
+        FROM broker_trades bt
+        WHERE bt.ticker = w.ticker
+           OR split_part(bt.ticker, '.', 1) = w.ticker
+      ) bt_summary ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          bt.status AS last_trade_status,
+          bt.open_time AS last_trade_open_time,
+          bt.close_time AS last_trade_close_time,
+          bt.profit AS last_trade_profit,
+          bt.profit_pct AS last_trade_profit_pct,
+          bt.side AS last_trade_side
+        FROM broker_trades bt
+        WHERE bt.ticker = w.ticker
+           OR split_part(bt.ticker, '.', 1) = w.ticker
+        ORDER BY bt.open_time DESC NULLS LAST
+        LIMIT 1
+      ) bt_last ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          bt.close_time AS last_closed_time,
+          bt.profit AS last_closed_profit,
+          bt.profit_pct AS last_closed_profit_pct,
+          bt.side AS last_closed_side
+        FROM broker_trades bt
+        WHERE (bt.ticker = w.ticker OR split_part(bt.ticker, '.', 1) = w.ticker)
+          AND bt.status = 'closed'
+        ORDER BY bt.close_time DESC NULLS LAST
+        LIMIT 1
+      ) bt_closed ON TRUE
       WHERE w.watchlist_name = $1
         AND w.scan_date = COALESCE($2::date, (
           SELECT MAX(scan_date)
