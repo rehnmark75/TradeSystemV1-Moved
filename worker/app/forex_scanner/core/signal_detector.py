@@ -237,7 +237,8 @@ class SignalDetector:
         # Check if scalp mode is enabled - use faster timeframes
         scalp_mode = getattr(smc_config, 'scalp_mode_enabled', False)
         if scalp_mode:
-            htf_tf = getattr(smc_config, 'scalp_htf_timeframe', '1h')
+            # Use per-pair HTF override if available (e.g., USDCHF uses 15m instead of 1h)
+            htf_tf = smc_config.get_pair_scalp_htf_timeframe(epic) or getattr(smc_config, 'scalp_htf_timeframe', '1h')
             trigger_tf = getattr(smc_config, 'scalp_trigger_timeframe', '5m')
             entry_tf = getattr(smc_config, 'scalp_entry_timeframe', '1m')
             self.logger.info(f"🔍 [SMC_SIMPLE] SCALP MODE: Using htf_tf={htf_tf}, trigger_tf={trigger_tf}, entry_tf={entry_tf}")

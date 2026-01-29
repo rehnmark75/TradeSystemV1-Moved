@@ -648,7 +648,7 @@ Signal Display Format:
             'scalp_tp_pips': scalp_tp,
             'scalp_limit_offset_pips': offset,  # Limit order offset for momentum confirmation
             'limit_expiry_minutes': expiry,  # Limit order expiry time
-            'use_vsl_mode': True,  # Flag for BacktestScanner to use VSL simulation
+            'use_vsl_mode': False,  # VSL DEPRECATED (Jan 2026) - use ATR trailing instead
             'use_atr_trailing': True,  # v3.2.0: ATR-adaptive trailing enabled by default in scalp mode
         }
 

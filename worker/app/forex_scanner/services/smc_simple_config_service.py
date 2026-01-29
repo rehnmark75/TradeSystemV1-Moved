@@ -1735,6 +1735,11 @@ class SMCSimpleConfigService:
                 'htf_bias_min_threshold': row.get('htf_bias_min_threshold'),
                 # S/R tolerance override (v2.35.1) - per-pair S/R validation threshold
                 'scalp_sr_tolerance_pips': row.get('scalp_sr_tolerance_pips'),
+                # Codex filter overrides (v2.35.5) - per-pair filter enablement
+                'scalp_require_ema_stack_alignment': row.get('scalp_require_ema_stack_alignment'),
+                'scalp_block_ranging_market': row.get('scalp_block_ranging_market'),
+                'scalp_block_low_volatility_trending': row.get('scalp_block_low_volatility_trending'),
+                'scalp_min_adx': row.get('scalp_min_adx'),
             }
 
         return config

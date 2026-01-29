@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 # Default timeframes to pre-compute (in minutes)
-DEFAULT_BACKTEST_TIMEFRAMES = [5, 15, 240]  # 5m, 15m, 4h
+DEFAULT_BACKTEST_TIMEFRAMES = [5, 15, 60, 240]  # 5m, 15m, 1h, 4h
 
 
 def resample_ohlcv(df: pd.DataFrame, target_minutes: int) -> pd.DataFrame:

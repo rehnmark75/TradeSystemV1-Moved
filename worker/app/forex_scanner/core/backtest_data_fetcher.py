@@ -914,13 +914,17 @@ class BacktestDataFetcher(DataFetcher):
 
             # 🐌 SLOW PATH: Database fallback
             if df is None or df.empty:
-                self.logger.debug(f"💾 Database fallback for {epic} {timeframe}")
+                # Use backtest table for resampled timeframes (5m, 15m, 1h, 4h)
+                # Only use ig_candles for 1m base data
+                use_backtest_table = source_tf in (5, 15, 60, 240)
+                table_name = "ig_candles_backtest" if use_backtest_table else "ig_candles"
+                self.logger.debug(f"💾 Database fallback for {epic} {timeframe} from {table_name}")
 
-                query = """
+                query = f"""
                 SELECT start_time,
                        open, high, low, close,
                        volume, ltv
-                FROM ig_candles
+                FROM {table_name}
                 WHERE epic = :epic
                   AND timeframe = :source_tf
                   AND start_time >= :since_utc
