@@ -3397,11 +3397,12 @@ class SMCSimpleStrategy:
                     },
                     'confidence_breakdown': {
                         'total': confidence,
-                        'ema_alignment': min(ema_distance / 30, 1.0) * 0.25,
-                        'volume_bonus': 0.15 if volume_confirmed else 0.05,
-                        'pullback_quality': (1.0 if in_optimal_zone else 0.6) * 0.25,
+                        'ema_alignment': min(ema_distance / 30, 1.0) * 0.20,
+                        'volume_bonus': 0.10 if volume_confirmed else 0.04,
+                        'pullback_quality': self._calc_pullback_score_for_log(pullback_depth, in_optimal_zone),
                         'rr_quality': min(rr_ratio / 3.0, 1.0) * 0.20,
-                        'fib_accuracy': (1.0 - abs(pullback_depth - 0.382) / 0.382) * 0.15
+                        'fib_accuracy': 1.0 - min(abs(pullback_depth - 0.382) / 0.382, 1.0),
+                        'deep_pullback_penalty': 'yes' if pullback_depth > 0.60 else 'no'
                     },
                     'indicator_count': 4,
                     'data_source': 'smc_simple_3tier'
@@ -4620,10 +4621,11 @@ class SMCSimpleStrategy:
         # 4. PULLBACK QUALITY (20% weight) - Combined zone + Fib accuracy
         # ================================================================
         # v2.2.0: Single combined score instead of separate 25% + 15%
+        # v2.35.3: Added progressive penalty for deep pullbacks (>60%)
         # Perfect: In optimal zone (38.2-61.8%) AND close to 38.2%
         # Good: In optimal zone OR close to 38.2%
         # Acceptable: In valid zone (23.6-70%)
-        # Poor: Edge of zone
+        # Poor: Edge of zone or deep pullback (>60%)
 
         fib_accuracy = 1.0 - min(abs(pullback_depth - 0.382) / 0.382, 1.0)
 
@@ -4635,7 +4637,21 @@ class SMCSimpleStrategy:
             pullback_score = 0.8 * 0.20
         elif self.fib_min <= pullback_depth <= self.fib_max:
             # Acceptable: in valid zone, scale by Fib accuracy
-            pullback_score = (0.4 + fib_accuracy * 0.3) * 0.20
+            base_score = (0.4 + fib_accuracy * 0.3) * 0.20
+
+            # v2.35.3: Progressive penalty for deep pullbacks
+            # 60-65% = 20% penalty, 65-70% = 40% penalty, 70-75% = 60% penalty
+            if pullback_depth > 0.70:
+                # Very deep: likely failed breakout returning to origin
+                pullback_score = base_score * 0.40  # 60% penalty
+            elif pullback_depth > 0.65:
+                # Deep: weak momentum, risky entry
+                pullback_score = base_score * 0.60  # 40% penalty
+            elif pullback_depth > 0.60:
+                # Moderately deep: some concern
+                pullback_score = base_score * 0.80  # 20% penalty
+            else:
+                pullback_score = base_score
         else:
             # Poor: outside zone (shouldn't happen - would fail tier 3)
             pullback_score = 0.2 * 0.20
@@ -4652,6 +4668,29 @@ class SMCSimpleStrategy:
         confidence = ema_score + swing_break_score + volume_score + pullback_score + rr_score
 
         return min(confidence, 1.0)
+
+    def _calc_pullback_score_for_log(self, pullback_depth: float, in_optimal_zone: bool) -> float:
+        """
+        Calculate pullback score for logging (mirrors actual confidence calculation)
+        v2.35.3: Added to accurately log pullback quality with deep pullback penalties
+        """
+        fib_accuracy = 1.0 - min(abs(pullback_depth - 0.382) / 0.382, 1.0)
+
+        if in_optimal_zone and fib_accuracy > 0.7:
+            return 1.0 * 0.20
+        elif in_optimal_zone:
+            return 0.8 * 0.20
+        elif self.fib_min <= pullback_depth <= self.fib_max:
+            base_score = (0.4 + fib_accuracy * 0.3) * 0.20
+            # Apply deep pullback penalty
+            if pullback_depth > 0.70:
+                return base_score * 0.40
+            elif pullback_depth > 0.65:
+                return base_score * 0.60
+            elif pullback_depth > 0.60:
+                return base_score * 0.80
+            return base_score
+        return 0.2 * 0.20
 
     def _calculate_atr(self, df: pd.DataFrame, period: int = None) -> float:
         """

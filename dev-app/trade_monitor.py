@@ -790,6 +790,15 @@ class TradeMonitor:
 
             # ✅ FIX: Use correct method name and pass all required parameters
             with SessionLocal() as db:
+                # 🔧 CRITICAL FIX: Reload trade from this session to ensure changes persist
+                # The trade object passed in was loaded from a different session that's now closed,
+                # so it's in a "detached" state. Changes to detached objects don't get committed.
+                trade_id = trade.id
+                trade = db.query(TradeLog).filter(TradeLog.id == trade_id).first()
+                if not trade:
+                    self.logger.error(f"❌ Trade {trade_id} not found when reloading for processing")
+                    return False
+
                 if ENHANCED_PROCESSOR_AVAILABLE and hasattr(self.trade_processor, 'process_trade_with_combined_validation'):
                     # Use enhanced processor with validation
                     success = await self.trade_processor.process_trade_with_combined_validation(
