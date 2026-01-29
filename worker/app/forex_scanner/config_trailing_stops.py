@@ -315,6 +315,109 @@ PAIR_TRAILING_CONFIGS = {
 # - Benefit: Locks better profit before tight trailing begins
 # =============================================================================
 
+# =============================================================================
+# ATR-ADAPTIVE TRAILING STOP CONFIGURATION (v3.2.0 - Jan 2026)
+# =============================================================================
+# Instead of fixed-pip stage thresholds, compute each as ATR × multiplier.
+# This scales trailing stages to actual market volatility at signal time.
+# Falls back to static config when ATR data is unavailable.
+# =============================================================================
+
+# ATR multipliers for each trailing stage parameter
+SCALP_ATR_TRAILING_MULTIPLIERS = {
+    'early_breakeven_trigger_points': 1.5,   # ~1.5 ATR move for early BE
+    'stage1_trigger_points': 2.5,            # Clear trend commitment
+    'stage1_lock_points': 1.2,              # Lock ~1 ATR of profit
+    'stage2_trigger_points': 3.5,            # Solid trend established
+    'stage2_lock_points': 2.5,              # Lock meaningful profit
+    'stage3_trigger_points': 4.0,            # Strong trending territory
+    'stage3_min_distance': 1.0,             # Trail distance = 1 ATR
+    'min_trail_distance': 1.0,              # Minimum trailing = 1 ATR
+    'break_even_trigger_points': 1.5,        # Same as early_be
+    'partial_close_trigger_points': 2.5,     # Same as stage1
+}
+
+# Min/max bounds per parameter (prevents extreme values)
+SCALP_ATR_TRAILING_BOUNDS = {
+    'early_breakeven_trigger_points': (3, 15),
+    'stage1_trigger_points': (5, 20),
+    'stage1_lock_points': (2, 10),
+    'stage2_trigger_points': (8, 30),
+    'stage2_lock_points': (5, 20),
+    'stage3_trigger_points': (10, 35),
+    'stage3_min_distance': (3, 10),
+    'min_trail_distance': (3, 12),
+    'break_even_trigger_points': (3, 15),
+    'partial_close_trigger_points': (5, 20),
+}
+
+
+def compute_atr_trailing_config(atr_pips: float, static_config: dict) -> dict:
+    """
+    Compute ATR-proportional trailing config with clamped bounds.
+
+    Each stage threshold = round(ATR_pips × multiplier), clamped to [min, max].
+    Parameters not in the multiplier table (e.g. early_breakeven_buffer_points,
+    stage3_atr_multiplier, enable_partial_close) are kept from static_config.
+
+    Args:
+        atr_pips: ATR value in pips at signal time
+        static_config: The base static config dict (from SCALP_TRAILING_CONFIGS)
+
+    Returns:
+        New config dict with ATR-scaled values
+    """
+    result = dict(static_config)
+
+    for param, mult in SCALP_ATR_TRAILING_MULTIPLIERS.items():
+        dynamic_val = round(atr_pips * mult)
+        lo, hi = SCALP_ATR_TRAILING_BOUNDS.get(param, (1, 50))
+        result[param] = max(lo, min(hi, dynamic_val))
+
+    # early_breakeven_buffer stays fixed (1-1.5 pips, just covers spread)
+    return result
+
+
+def get_scalp_trailing_config(epic: str, atr_pips: float = None) -> dict:
+    """
+    Get scalp trailing config for an epic, optionally with ATR-based adaptation.
+
+    Args:
+        epic: Trading symbol (e.g., 'CS.D.EURUSD.CEEM.IP')
+        atr_pips: ATR value in pips at signal time (if None, use static config)
+
+    Returns:
+        Dictionary with trailing configuration values (ATR-scaled if atr_pips provided)
+    """
+    # Get base static config
+    static_config = SCALP_TRAILING_CONFIGS.get(epic, DEFAULT_SCALP_CONFIG.copy())
+
+    # If ATR provided, compute dynamic config
+    if atr_pips is not None and atr_pips > 0:
+        return compute_atr_trailing_config(atr_pips, static_config)
+
+    return static_config
+
+
+# Default scalp config for unlisted pairs
+DEFAULT_SCALP_CONFIG = {
+    'early_breakeven_trigger_points': 8,
+    'early_breakeven_buffer_points': 1,
+    'stage1_trigger_points': 12,
+    'stage1_lock_points': 6,
+    'stage2_trigger_points': 15,
+    'stage2_lock_points': 10,
+    'stage3_trigger_points': 20,
+    'stage3_atr_multiplier': 1.5,
+    'stage3_min_distance': 5,
+    'min_trail_distance': 8,
+    'break_even_trigger_points': 8,
+    'enable_partial_close': False,
+    'partial_close_trigger_points': 12,
+    'partial_close_size': 0.5,
+}
+
+
 SCALP_TRAILING_CONFIGS = {
     # ========== USDCAD - HIGHEST PRIORITY (100% success rate) ==========
     'CS.D.USDCAD.MINI.IP': {

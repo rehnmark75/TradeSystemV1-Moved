@@ -137,6 +137,13 @@ class BacktestScanner(IntelligentForexScanner):
         # 🔥 SCALPING-SPECIFIC CONFIGURATION: Still uses fixed SL/TP (no trailing)
         self._use_scalping_mode = 'SCALPING' in self.strategy_name.upper()
 
+        # 🆕 v3.2.0: ATR-Adaptive Trailing Mode
+        # When enabled, trailing distances scale to market volatility at signal time
+        self._use_atr_trailing = False
+        if self._config_override and self._config_override.get('use_atr_trailing'):
+            self._use_atr_trailing = True
+            self.logger.info(f"📊 ATR-Adaptive Trailing: ENABLED (distances scale with ATR)")
+
         # 🎯 VSL MODE: Virtual Stop Loss emulation for scalping backtests
         # When enabled via --scalp flag, uses per-pair VSL values from config
         self._use_vsl_mode = False
@@ -1168,8 +1175,14 @@ class BacktestScanner(IntelligentForexScanner):
         else:
             # Standard strategies use Progressive 3-Stage from config_trailing_stops.py
             # The factory function auto-loads pair config
-            simulator = self._create_trailing_stop_simulator(epic=epic, logger=self.logger)
-            self.logger.debug(f"📊 Created Progressive 3-Stage simulator for {epic}")
+            # 🆕 v3.2.0: Pass use_atr_trailing for ATR-adaptive mode
+            simulator = self._create_trailing_stop_simulator(
+                epic=epic,
+                use_atr_trailing=self._use_atr_trailing,
+                logger=self.logger
+            )
+            mode_desc = "ATR-Adaptive" if self._use_atr_trailing else "Progressive 3-Stage"
+            self.logger.debug(f"📊 Created {mode_desc} simulator for {epic}")
 
         # Cache for reuse
         self._trailing_stop_simulators[epic] = simulator

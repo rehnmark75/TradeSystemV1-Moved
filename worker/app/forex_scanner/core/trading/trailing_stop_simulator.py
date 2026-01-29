@@ -36,6 +36,11 @@ class TrailingStopSimulator:
     - stage2_lock_points: Stage 2 profit lock (e.g., 12 points)
     - stage3_trigger_points: Stage 3 activation (e.g., 23 points)
     - stage3_min_distance: Minimum trail distance (e.g., 4 points)
+
+    v3.2.0 ATR-Adaptive Mode:
+    - When atr_pips is provided, trailing distances scale to market volatility
+    - Each stage threshold = ATR × multiplier, clamped to min/max bounds
+    - Falls back to static config when ATR unavailable
     """
 
     def __init__(self,
@@ -68,6 +73,8 @@ class TrailingStopSimulator:
                  target_atr_multiplier: float = 3.0,
                  min_time_before_trailing_hours: float = 2.0,  # 🔧 NEW: Minimum time before trailing activates
                  breakeven_buffer_pips: float = 5.0,  # 🔧 NEW: Buffer above entry when moving to breakeven
+                 atr_pips: float = None,  # 🆕 v3.2.0: ATR value for adaptive trailing
+                 use_atr_trailing: bool = False,  # 🆕 v3.2.0: Enable ATR-adaptive trailing mode
                  logger: Optional[logging.Logger] = None):
         """
         Initialize Progressive 3-Stage trailing stop simulator with MFE Protection
@@ -97,6 +104,10 @@ class TrailingStopSimulator:
             breakeven_buffer_pips: Buffer in pips above entry when moving to breakeven (default: 5.0)
             logger: Optional logger instance
         """
+        # Store ATR-adaptive mode settings
+        self.atr_pips = atr_pips
+        self.use_atr_trailing = use_atr_trailing or (atr_pips is not None and atr_pips > 0)
+
         # Handle backward compatibility: prefer break_even_trigger, fallback to breakeven_trigger
         # 🔧 CRITICAL FIX: Changed default from 12.0 to 1.5R (1.5 * initial_stop_pips)
         # This prevents premature breakeven exits that were causing 46% breakeven rate
@@ -113,9 +124,20 @@ class TrailingStopSimulator:
             try:
                 import sys
                 sys.path.insert(0, '/app/forex_scanner')
-                from config_trailing_stops import PAIR_TRAILING_CONFIGS
+                from config_trailing_stops import PAIR_TRAILING_CONFIGS, get_scalp_trailing_config
 
-                pair_config = PAIR_TRAILING_CONFIGS.get(epic, {})
+                # 🆕 v3.2.0: Use ATR-adaptive config when atr_pips provided
+                if self.use_atr_trailing and atr_pips is not None and atr_pips > 0:
+                    pair_config = get_scalp_trailing_config(epic, atr_pips)
+                    if logger:
+                        logger.info(f"📊 ATR-Adaptive config for {epic} (ATR={atr_pips:.1f} pips): "
+                                  f"BE={pair_config.get('break_even_trigger_points')}, "
+                                  f"S1={pair_config.get('stage1_trigger_points')}→{pair_config.get('stage1_lock_points')}, "
+                                  f"S2={pair_config.get('stage2_trigger_points')}→{pair_config.get('stage2_lock_points')}, "
+                                  f"S3={pair_config.get('stage3_trigger_points')}")
+                else:
+                    pair_config = PAIR_TRAILING_CONFIGS.get(epic, {})
+
                 if pair_config:
                     self.break_even_trigger = pair_config.get('break_even_trigger_points', be_trigger)
                     self.stage1_trigger = pair_config.get('stage1_trigger_points', stage1_trigger)
@@ -128,8 +150,8 @@ class TrailingStopSimulator:
                     self.mfe_protection_threshold_pct = pair_config.get('mfe_protection_threshold_pct', mfe_protection_threshold_pct)
                     self.mfe_protection_decline_pct = pair_config.get('mfe_protection_decline_pct', mfe_protection_decline_pct)
                     self.mfe_protection_lock_pct = pair_config.get('mfe_protection_lock_pct', mfe_protection_lock_pct)
-                    if logger:
-                        logger.info(f"📊 Loaded config for {epic}: BE={self.break_even_trigger}, "
+                    if logger and not self.use_atr_trailing:
+                        logger.info(f"📊 Static config for {epic}: BE={self.break_even_trigger}, "
                                   f"S1={self.stage1_trigger}→{self.stage1_lock}, "
                                   f"S2={self.stage2_trigger}→{self.stage2_lock}, "
                                   f"S3={self.stage3_trigger}, "
@@ -181,6 +203,47 @@ class TrailingStopSimulator:
         self.logger = logger or logging.getLogger(__name__)
         self.epic = epic
 
+    def update_config_for_atr(self, atr_pips: float, epic: str = None) -> None:
+        """
+        Update trailing config dynamically based on ATR at signal time.
+
+        This allows per-trade ATR adaptation when ATR varies across signals.
+        Call this before simulate_trade if you want per-signal ATR adaptation.
+
+        Args:
+            atr_pips: ATR value in pips at signal time
+            epic: Optional epic to use for base config lookup
+        """
+        if atr_pips is None or atr_pips <= 0:
+            return
+
+        use_epic = epic or self.epic
+        try:
+            import sys
+            sys.path.insert(0, '/app/forex_scanner')
+            from config_trailing_stops import get_scalp_trailing_config
+
+            pair_config = get_scalp_trailing_config(use_epic, atr_pips)
+
+            # Update trailing parameters from ATR-scaled config
+            self.break_even_trigger = pair_config.get('break_even_trigger_points', self.break_even_trigger)
+            self.stage1_trigger = pair_config.get('stage1_trigger_points', self.stage1_trigger)
+            self.stage1_lock = pair_config.get('stage1_lock_points', self.stage1_lock)
+            self.stage2_trigger = pair_config.get('stage2_trigger_points', self.stage2_trigger)
+            self.stage2_lock = pair_config.get('stage2_lock_points', self.stage2_lock)
+            self.stage3_trigger = pair_config.get('stage3_trigger_points', self.stage3_trigger)
+            self.stage3_min_distance = pair_config.get('stage3_min_distance', self.stage3_min_distance)
+
+            self.atr_pips = atr_pips
+            self.use_atr_trailing = True
+
+            self.logger.debug(f"📊 Updated ATR-Adaptive config for {use_epic} (ATR={atr_pips:.1f} pips): "
+                            f"BE={self.break_even_trigger}, S1={self.stage1_trigger}→{self.stage1_lock}, "
+                            f"S2={self.stage2_trigger}→{self.stage2_lock}, S3={self.stage3_trigger}")
+
+        except Exception as e:
+            self.logger.warning(f"Could not update ATR config: {e}")
+
     def simulate_trade(self,
                       signal: Dict[str, Any],
                       df: pd.DataFrame,
@@ -215,6 +278,24 @@ class TrailingStopSimulator:
             signal_type = signal.get('signal_type', 'UNKNOWN').upper()
             signal_timestamp = signal.get('signal_timestamp') or signal.get('timestamp')
             signal_epic = signal.get('epic')  # Extract epic for pip calculation
+
+            # 🆕 v3.2.0: ATR-Adaptive trailing - update config based on signal's ATR
+            signal_atr_pips = signal.get('atr_pips') or signal.get('atr')
+            if signal_atr_pips is not None:
+                # Convert ATR to pips if it's in price format (small decimal)
+                if signal_atr_pips < 1.0:
+                    # ATR is in price format, convert to pips
+                    epic_for_conversion = signal_epic or self.epic
+                    if epic_for_conversion and 'JPY' in epic_for_conversion:
+                        signal_atr_pips = signal_atr_pips * 100  # JPY pairs
+                    else:
+                        signal_atr_pips = signal_atr_pips * 10000  # Standard pairs
+
+                # Update trailing config for this signal's ATR
+                if self.use_atr_trailing and signal_atr_pips > 0:
+                    self.update_config_for_atr(signal_atr_pips, signal_epic)
+                    enhanced_signal['trailing_atr_pips'] = signal_atr_pips
+                    enhanced_signal['trailing_mode'] = 'atr_adaptive'
 
             # Look ahead for performance (up to max_bars)
             max_lookback = min(self.max_bars, len(df) - signal_idx - 1)
@@ -1019,6 +1100,8 @@ class TrailingStopSimulator:
 
 def create_trailing_stop_simulator(epic: str = None,
                                    config: Optional[Dict[str, Any]] = None,
+                                   atr_pips: float = None,
+                                   use_atr_trailing: bool = False,
                                    logger: Optional[logging.Logger] = None) -> TrailingStopSimulator:
     """
     Factory function to create TrailingStopSimulator with Progressive 3-Stage system
@@ -1026,10 +1109,13 @@ def create_trailing_stop_simulator(epic: str = None,
     Args:
         epic: Trading pair (e.g., 'CS.D.EURUSD.CEEM.IP') - auto-loads config
         config: Optional configuration dictionary (overrides auto-loaded config)
+        atr_pips: ATR value in pips for ATR-adaptive trailing (v3.2.0)
+        use_atr_trailing: Enable ATR-adaptive trailing mode (v3.2.0)
         logger: Optional logger instance
 
     Returns:
         TrailingStopSimulator instance configured for Progressive 3-Stage system
+        When atr_pips is provided, trailing distances are scaled to market volatility
     """
     if config:
         return TrailingStopSimulator(
@@ -1045,8 +1131,15 @@ def create_trailing_stop_simulator(epic: str = None,
             stage3_min_distance=config.get('stage3_min_distance', 4.0),
             max_bars=config.get('max_bars', 96),
             use_atr=config.get('use_atr', False),
+            atr_pips=config.get('atr_pips', atr_pips),
+            use_atr_trailing=config.get('use_atr_trailing', use_atr_trailing),
             logger=logger
         )
     else:
-        # Auto-load from epic if provided
-        return TrailingStopSimulator(epic=epic, logger=logger)
+        # Auto-load from epic if provided, with optional ATR-adaptive mode
+        return TrailingStopSimulator(
+            epic=epic,
+            atr_pips=atr_pips,
+            use_atr_trailing=use_atr_trailing,
+            logger=logger
+        )

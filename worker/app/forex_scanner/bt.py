@@ -113,7 +113,12 @@ def main():
             # Handle scalp mode flag (Optimized SL/TP)
             elif arg == "--scalp":
                 processed_args.append(arg)
-                print(f"🎯 Scalp mode: ENABLED (Optimized 6-8 pip SL, 10 pip TP)")
+                print(f"🎯 Scalp mode: ENABLED (Optimized SL/TP + ATR-Adaptive Trailing)")
+
+            # Handle ATR-adaptive trailing mode (v3.2.0)
+            elif arg == "--atr-trailing":
+                processed_args.append(arg)
+                print(f"📊 ATR-Adaptive Trailing: ENABLED (distances scale with ATR)")
 
             # Handle scalp offset override
             elif arg == "--scalp-offset" and i + 1 < len(args):

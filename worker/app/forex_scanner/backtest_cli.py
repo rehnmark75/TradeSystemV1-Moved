@@ -148,6 +148,14 @@ Signal Display Format:
         )
 
         parser.add_argument(
+            '--atr-trailing',
+            action='store_true',
+            help='Enable ATR-adaptive trailing stops (v3.2.0). '
+                 'Trailing distances scale with market volatility at signal time. '
+                 'Each stage threshold = ATR × multiplier, clamped to min/max bounds.'
+        )
+
+        parser.add_argument(
             '--scalp-offset',
             type=float,
             default=None,
@@ -641,6 +649,7 @@ Signal Display Format:
             'scalp_limit_offset_pips': offset,  # Limit order offset for momentum confirmation
             'limit_expiry_minutes': expiry,  # Limit order expiry time
             'use_vsl_mode': True,  # Flag for BacktestScanner to use VSL simulation
+            'use_atr_trailing': True,  # v3.2.0: ATR-adaptive trailing enabled by default in scalp mode
         }
 
         # Add tier settings if overridden
@@ -989,6 +998,15 @@ Signal Display Format:
                     config_override.update(scalp_overrides)
                 else:
                     config_override = scalp_overrides
+
+            # Handle ATR-adaptive trailing mode (v3.2.0)
+            if getattr(args, 'atr_trailing', False):
+                atr_override = {'use_atr_trailing': True}
+                if config_override:
+                    config_override.update(atr_override)
+                else:
+                    config_override = atr_override
+                print("📊 ATR-Adaptive Trailing: ENABLED (distances scale with market volatility)")
 
             # Validate date range parameters
             if (args.start_date and not args.end_date) or (args.end_date and not args.start_date):
