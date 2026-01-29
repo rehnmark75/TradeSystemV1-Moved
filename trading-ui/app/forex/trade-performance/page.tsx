@@ -101,7 +101,7 @@ export default function ForexTradePerformancePage() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/stock-scanner/api/forex/trades/?days=${days}`, { signal: controller.signal })
+    fetch(`/trading/api/forex/trades/?days=${days}`, { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => setPayload(data))
       .catch((err) => {

@@ -87,7 +87,7 @@ export default function ForexAlertHistoryPage() {
       page: String(page),
       limit: "25"
     });
-    fetch(`/stock-scanner/api/forex/alert-history/?${params.toString()}`)
+    fetch(`/trading/api/forex/alert-history/?${params.toString()}`)
       .then((res) => res.json())
       .then((data) => setPayload(data))
       .catch(() => setError("Failed to load alert history."))

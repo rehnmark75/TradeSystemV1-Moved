@@ -64,7 +64,7 @@ export default function FilterEffectivenessPage() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/stock-scanner/api/forex/filter-effectiveness/?days=${days}`, {
+    fetch(`/trading/api/forex/filter-effectiveness/?days=${days}`, {
       signal: controller.signal
     })
       .then((res) => res.json())

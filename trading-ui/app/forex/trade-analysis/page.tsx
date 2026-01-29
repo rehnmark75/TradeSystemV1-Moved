@@ -141,7 +141,7 @@ export default function ForexTradeAnalysisPage() {
   });
 
   useEffect(() => {
-    fetch("/stock-scanner/api/forex/trade-analysis/trades/")
+    fetch("/trading/api/forex/trade-analysis/trades/")
       .then((res) => res.json())
       .then((data: TradeListPayload) => {
         setTradeList(data.trades ?? []);
@@ -157,21 +157,21 @@ export default function ForexTradeAnalysisPage() {
     setSignalState({ loading: true, error: null, data: null });
     setOutcomeState({ loading: true, error: null, data: null });
 
-    fetch(`/stock-scanner/api/forex/trade-analysis/trade/?tradeId=${tradeId}`)
+    fetch(`/trading/api/forex/trade-analysis/trade/?tradeId=${tradeId}`)
       .then((res) => res.json())
       .then((data) => setTrailingState({ loading: false, error: null, data }))
       .catch(() =>
         setTrailingState({ loading: false, error: "Failed to load trailing analysis.", data: null })
       );
 
-    fetch(`/stock-scanner/api/forex/trade-analysis/signal/?tradeId=${tradeId}`)
+    fetch(`/trading/api/forex/trade-analysis/signal/?tradeId=${tradeId}`)
       .then((res) => res.json())
       .then((data) => setSignalState({ loading: false, error: null, data }))
       .catch(() =>
         setSignalState({ loading: false, error: "Failed to load signal analysis.", data: null })
       );
 
-    fetch(`/stock-scanner/api/forex/trade-analysis/outcome/?tradeId=${tradeId}`)
+    fetch(`/trading/api/forex/trade-analysis/outcome/?tradeId=${tradeId}`)
       .then((res) => res.json())
       .then((data) => setOutcomeState({ loading: false, error: null, data }))
       .catch(() =>

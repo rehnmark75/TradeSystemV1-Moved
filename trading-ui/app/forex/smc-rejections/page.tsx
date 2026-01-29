@@ -129,7 +129,7 @@ export default function SMCRejectionsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/stock-scanner/api/forex/smc-rejections/options/")
+    fetch("/trading/api/forex/smc-rejections/options/")
       .then((res) => res.json())
       .then((data) => setOptions(data))
       .catch(() => setOptions(null));
@@ -146,14 +146,14 @@ export default function SMCRejectionsPage() {
     });
 
     Promise.all([
-      fetch(`/stock-scanner/api/forex/smc-rejections/stats/?days=${days}`).then((res) => res.json()),
-      fetch(`/stock-scanner/api/forex/smc-rejections/list/?${params.toString()}`).then((res) =>
+      fetch(`/trading/api/forex/smc-rejections/stats/?days=${days}`).then((res) => res.json()),
+      fetch(`/trading/api/forex/smc-rejections/list/?${params.toString()}`).then((res) =>
         res.json()
       ),
-      fetch(`/stock-scanner/api/forex/smc-rejections/conflicts/?days=${days}`).then((res) =>
+      fetch(`/trading/api/forex/smc-rejections/conflicts/?days=${days}`).then((res) =>
         res.json()
       ),
-      fetch(`/stock-scanner/api/forex/smc-rejections/outcomes/?days=${days}`).then((res) =>
+      fetch(`/trading/api/forex/smc-rejections/outcomes/?days=${days}`).then((res) =>
         res.json()
       )
     ])

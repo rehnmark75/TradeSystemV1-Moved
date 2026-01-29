@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  basePath: "/stock-scanner",
-  assetPrefix: "/stock-scanner",
+  basePath: "/trading",
+  assetPrefix: "/trading",
   trailingSlash: true,
   output: "standalone"
 };

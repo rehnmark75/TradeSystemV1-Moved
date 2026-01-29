@@ -75,7 +75,7 @@ export default function ForexMaeAnalysisPage() {
   const loadMae = () => {
     setLoading(true);
     setError(null);
-    fetch(`/stock-scanner/api/forex/mae-analysis/?days=${days}`)
+    fetch(`/trading/api/forex/mae-analysis/?days=${days}`)
       .then((res) => res.json())
       .then((data) => setPayload(data))
       .catch(() => setError("Failed to load MAE analysis."))

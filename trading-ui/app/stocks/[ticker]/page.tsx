@@ -185,7 +185,7 @@ const trendScoreFromStrength = (strength: string | null | undefined) => {
   }
 };
 
-const apiPath = (path: string) => `/stock-scanner/api/${path}`;
+const apiPath = (path: string) => `/trading/api/${path}`;
 
 const tvSymbol = (exchange: string | null | undefined, ticker: string) => {
   const raw = exchange ? exchange.toUpperCase().trim() : "";

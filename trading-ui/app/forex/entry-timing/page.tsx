@@ -100,7 +100,7 @@ export default function ForexEntryTimingPage() {
   const loadTiming = () => {
     setLoading(true);
     setError(null);
-    fetch(`/stock-scanner/api/forex/entry-timing/?days=${days}`)
+    fetch(`/trading/api/forex/entry-timing/?days=${days}`)
       .then((res) => res.json())
       .then((data) => setPayload(data))
       .catch(() => setError("Failed to load entry timing analysis."))

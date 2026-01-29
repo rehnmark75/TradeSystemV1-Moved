@@ -150,7 +150,7 @@ export default function ForexAnalyticsPage() {
     const controller = new AbortController();
     setLoadingOverview(true);
     setOverviewError(null);
-    fetch(`/stock-scanner/api/forex/overview/?days=${overviewDays}`, {
+    fetch(`/trading/api/forex/overview/?days=${overviewDays}`, {
       signal: controller.signal
     })
       .then((res) => res.json())
@@ -168,7 +168,7 @@ export default function ForexAnalyticsPage() {
     const controller = new AbortController();
     setLoadingAnalysis(true);
     setAnalysisError(null);
-    fetch(`/stock-scanner/api/forex/analysis/?days=${analysisDays}`, {
+    fetch(`/trading/api/forex/analysis/?days=${analysisDays}`, {
       signal: controller.signal
     })
       .then((res) => res.json())

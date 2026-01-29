@@ -39,7 +39,7 @@ export default function ForexPerformanceSnapshotPage() {
     setLoading(true);
     setError(null);
     fetch(
-      `/stock-scanner/api/forex/performance-snapshot/?start=${start}&end=${end}`
+      `/trading/api/forex/performance-snapshot/?start=${start}&end=${end}`
     )
       .then((res) => res.json())
       .then((data) => setPayload(data))

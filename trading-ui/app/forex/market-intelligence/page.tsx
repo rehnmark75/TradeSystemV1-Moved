@@ -73,7 +73,7 @@ export default function ForexMarketIntelligencePage() {
     setLoading(true);
     setError(null);
     fetch(
-      `/stock-scanner/api/forex/market-intelligence/?start=${start}&end=${end}&source=${source}`
+      `/trading/api/forex/market-intelligence/?start=${start}&end=${end}&source=${source}`
     )
       .then((res) => res.json())
       .then((data) => setPayload(data))

@@ -60,7 +60,7 @@ export default function ForexStrategyPage() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/stock-scanner/api/forex/analysis/?days=${days}`, {
+    fetch(`/trading/api/forex/analysis/?days=${days}`, {
       signal: controller.signal
     })
       .then((res) => res.json())
