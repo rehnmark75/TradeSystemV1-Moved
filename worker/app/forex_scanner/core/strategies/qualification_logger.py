@@ -19,12 +19,28 @@ TABLE: scalp_qualification_log (in strategy_config database)
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+import numpy as np
 
 try:
     import psycopg2
     from psycopg2.extras import RealDictCursor
 except ImportError:
     psycopg2 = None
+
+
+def _convert_numpy_types(value: Any) -> Any:
+    """Convert numpy types to native Python types for database insertion."""
+    if value is None:
+        return None
+    if isinstance(value, (np.integer, np.int64, np.int32)):
+        return int(value)
+    if isinstance(value, (np.floating, np.float64, np.float32)):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return value
 
 
 class QualificationLogger:
@@ -263,6 +279,9 @@ class QualificationLogger:
 
         Returns insert ID if successful.
         """
+        # Convert numpy types to native Python types for psycopg2
+        log_data = {k: _convert_numpy_types(v) for k, v in log_data.items()}
+
         # Build dynamic INSERT query from log_data keys
         columns = list(log_data.keys())
         placeholders = [f'%({col})s' for col in columns]

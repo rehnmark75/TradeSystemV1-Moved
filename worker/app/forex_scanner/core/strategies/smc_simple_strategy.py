@@ -350,7 +350,8 @@ class SMCSimpleStrategy:
                 self._signal_qualifier = ScalpSignalQualifier(
                     config=self.config,
                     logger=self.logger,
-                    db_config=self._db_config if hasattr(self, '_db_config') else None
+                    db_config=self._db_config if hasattr(self, '_db_config') else None,
+                    persist_results=not self._backtest_mode  # Disable DB logging in backtest
                 )
                 # Apply backtest overrides to qualifier if provided
                 if self._config_override:
