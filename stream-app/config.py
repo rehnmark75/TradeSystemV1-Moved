@@ -47,8 +47,7 @@ ACTIVE_EPICS = [
     "CS.D.EURUSD.CEEM.IP",
     "CS.D.EURGBP.MINI.IP",
     # Commodities & Crypto (verified tradeable on demo - Jan 2026)
-    "CS.D.CFEGOLD.CEE.IP",   # Spot Gold ($1)
-    "CS.D.SOLUSD.CFD.IP"     # Solana ($1)
+    "CS.D.CFEGOLD.CEE.IP"   # Spot Gold ($1)
 ]
 
 # Additional available epics (currently disabled)
