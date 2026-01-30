@@ -2,6 +2,11 @@
 Standalone Adjust Stop Service
 Provides direct access to adjust-stop logic without HTTP authentication requirements.
 This service is used by internal trade monitoring systems that need to adjust stops/limits.
+
+BULLETPROOF UPDATES (Jan 2026):
+- Added retry with exponential backoff for transient failures
+- Added post-update verification to confirm IG actually applied the stop
+- Added cache invalidation after updates
 """
 
 import json
@@ -14,7 +19,15 @@ from services.models import TradeLog
 from dependencies import get_ig_auth_headers
 from config import API_BASE_URL
 
+# Bulletproof trailing imports
+from services.retry_utils import retry_with_backoff, STOP_UPDATE_MAX_RETRIES, STOP_UPDATE_BACKOFF
+from services.stop_verification_service import get_verification_service
+
 logger = logging.getLogger("adjust_stop_service")
+
+# Configuration flags for bulletproof features (can be disabled if needed)
+VERIFY_STOP_UPDATES_ENABLED = True
+RETRY_STOP_UPDATES_ENABLED = True
 
 
 def ig_points_to_price(points: float, epic: str) -> float:
@@ -204,17 +217,88 @@ async def adjust_stop_logic(
                 "note": "This is a dry run. No request was sent to IG."
             }
 
-        # Send request to IG
+        # Send request to IG with retry logic
         update_url = f"{API_BASE_URL}/positions/otc/{deal_id}"
         logger.info(f"➡ [ADJUST-STOP-SERVICE] PUT {update_url}")
         logger.info(f"➡ [ADJUST-STOP-SERVICE] Payload: {json.dumps(payload, indent=2)}")
 
-        async with httpx.AsyncClient() as client:
-            response = await client.put(update_url, headers=headers, data=json.dumps(payload))
-            response.raise_for_status()
-            result = response.json()
+        # Define the API call operation for retry
+        async def do_update():
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.put(update_url, headers=headers, data=json.dumps(payload))
+                response.raise_for_status()
+                return response.json()
 
-        logger.info(f"✅ [ADJUST-STOP-SERVICE] {epic} adjustment successful")
+        # Execute with retry if enabled
+        if RETRY_STOP_UPDATES_ENABLED:
+            retry_result = await retry_with_backoff(
+                do_update,
+                max_retries=STOP_UPDATE_MAX_RETRIES,
+                backoff_times=STOP_UPDATE_BACKOFF,
+                operation_name=f"adjust_stop_{epic}"
+            )
+
+            if not retry_result.success:
+                logger.error(f"❌ [ADJUST-STOP-SERVICE] {epic} failed after {retry_result.attempts} attempts")
+                return {
+                    "status": "error",
+                    "message": f"Failed after {retry_result.attempts} attempts: {retry_result.last_error}",
+                    "attempts": retry_result.attempts
+                }
+
+            result = retry_result.result
+            logger.info(f"✅ [ADJUST-STOP-SERVICE] {epic} API call successful (attempts: {retry_result.attempts})")
+        else:
+            # Direct call without retry
+            result = await do_update()
+            logger.info(f"✅ [ADJUST-STOP-SERVICE] {epic} API call successful")
+
+        # BULLETPROOF: Verify the update was actually applied
+        verification_result = None
+        if VERIFY_STOP_UPDATES_ENABLED:
+            verification_service = get_verification_service()
+            verification_result = await verification_service.verify_with_retry(
+                deal_id=deal_id,
+                expected_stop=payload.get("stopLevel"),
+                expected_limit=payload.get("limitLevel"),
+                epic=epic,
+                headers=headers,
+                max_retries=3,
+                retry_delay_ms=500,
+                tolerance_pips=0.5
+            )
+
+            if not verification_result.matched:
+                logger.error(
+                    f"❌ [VERIFY MISMATCH] {epic}: Sent stop={payload.get('stopLevel')}, "
+                    f"IG has={verification_result.actual_stop} (diff={verification_result.mismatch_pips}pips)"
+                )
+                return {
+                    "status": "verification_failed",
+                    "dealId": deal_id,
+                    "sentPayload": payload,
+                    "verification": verification_result.to_dict(),
+                    "message": f"IG did not apply stop. Expected {verification_result.expected_stop}, got {verification_result.actual_stop}"
+                }
+
+            logger.info(f"✅ [VERIFY OK] {epic}: Stop confirmed at {verification_result.actual_stop}")
+
+        # Log the stop level for trailing system
+        actual_stop = verification_result.actual_stop if verification_result else payload.get("stopLevel")
+        logger.info(f"[✅ STOP UPDATED] {epic} → IG set stopLevel={actual_stop}")
+
+        # BULLETPROOF: Invalidate position cache to ensure fresh data on next read
+        try:
+            from config import CACHE_INVALIDATION_ENABLED
+            if CACHE_INVALIDATION_ENABLED:
+                # Import here to avoid circular imports
+                from trade_monitor import TradeMonitor
+                # Get the singleton monitor instance if available
+                if hasattr(TradeMonitor, '_instance') and TradeMonitor._instance:
+                    TradeMonitor._instance.position_cache.invalidate_position(deal_id)
+                    logger.debug(f"[CACHE] Invalidated position {deal_id} after stop update")
+        except Exception as cache_error:
+            logger.debug(f"Cache invalidation skipped: {cache_error}")
 
         return {
             "status": "updated",
@@ -222,7 +306,9 @@ async def adjust_stop_logic(
             "adjustDirectionStop": adjust_direction_stop,
             "adjustDirectionLimit": adjust_direction_limit,
             "sentPayload": payload,
-            "apiResponse": result
+            "apiResponse": result,
+            "verified": verification_result.matched if verification_result else None,
+            "actualStop": actual_stop
         }
 
     except httpx.HTTPStatusError as e:

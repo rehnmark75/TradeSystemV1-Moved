@@ -25,6 +25,9 @@ from services.models import TradeLog, IGCandle
 from sqlalchemy.orm import Session
 from utils import get_point_value, convert_price_to_points, calculate_move_points
 
+# Bulletproof trailing system imports (Jan 2026)
+from config import DB_COMMIT_RECOVERY_ENABLED, TRAILING_ALERT_ENABLED
+
 
 class TrailingMethod(Enum):
     """Different trailing stop methods available"""
@@ -2119,9 +2122,43 @@ class EnhancedTradeProcessor:
                                         self.logger.error(f"   → Error type: {type(commit_error).__name__}")
                                         self.logger.error(f"   → Error message: {str(commit_error)}")
                                         self.logger.error(f"   → IG Markets was updated successfully but database sync failed")
-                                        self.logger.error(f"   → This will cause database/broker mismatch!")
-                                        # Re-raise to ensure error is visible
-                                        raise
+
+                                        # BULLETPROOF: Attempt recovery
+                                        if DB_COMMIT_RECOVERY_ENABLED:
+                                            try:
+                                                self.logger.info(f"🔄 [RECOVERY] Trade {trade.id}: Attempting DB recovery...")
+                                                # Refresh trade from DB
+                                                db.refresh(trade)
+                                                # Re-apply the changes using the IG actual stop or calculated break-even
+                                                recovery_sl = float(ig_actual_stop) if ig_actual_stop else break_even_stop
+                                                trade.sl_price = recovery_sl
+                                                trade.status = "break_even" if trade.status not in ["profit_protected", "trailing"] else trade.status
+                                                trade.moved_to_breakeven = True
+                                                trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+                                                db.commit()
+                                                self.logger.info(f"✅ [RECOVERY SUCCESS] Trade {trade.id}: DB recovered successfully")
+                                            except Exception as recovery_error:
+                                                db.rollback()
+                                                self.logger.error(f"❌ [RECOVERY FAILED] Trade {trade.id}: {recovery_error}")
+                                                # Send alert for manual intervention
+                                                if TRAILING_ALERT_ENABLED:
+                                                    try:
+                                                        from services.trading_alert_service import get_alert_service
+                                                        import asyncio
+                                                        alert_service = get_alert_service()
+                                                        asyncio.create_task(alert_service.send_recovery_failed(
+                                                            trade_id=trade.id,
+                                                            deal_id=trade.deal_id or "",
+                                                            epic=trade.symbol,
+                                                            original_error=str(commit_error),
+                                                            recovery_error=str(recovery_error)
+                                                        ))
+                                                    except Exception as alert_error:
+                                                        self.logger.error(f"Failed to send recovery alert: {alert_error}")
+                                                raise recovery_error
+                                        else:
+                                            self.logger.error(f"   → DB recovery disabled - manual intervention required!")
+                                            raise
                                     # Don't return early - continue to Stage 2/3 progression check
                                 else:
                                     error_msg = api_result.get("message", "Unknown error") if isinstance(api_result, dict) else "API call failed"

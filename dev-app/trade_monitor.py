@@ -19,7 +19,12 @@ from services.models import TradeLog, IGCandle  # ✅ CORRECT: IGCandle model fo
 
 # Import utils functions
 from utils import get_point_value, convert_price_to_points  # ✅ ADDED: Import
-from database_monitoring_fix import DatabaseMonitoringFix  # ✅ CRITICAL FIX: Enhanced monitoring 
+from database_monitoring_fix import DatabaseMonitoringFix  # ✅ CRITICAL FIX: Enhanced monitoring
+
+# Bulletproof trailing system imports (Jan 2026)
+from config import MISMATCH_DETECTION_ENABLED, TRAILING_ALERT_ENABLED
+from services.mismatch_detector import get_mismatch_detector, MismatchSeverity
+from services.trading_alert_service import get_alert_service 
 # services/shared_types.py
 """
 Shared types and configurations to avoid circular imports
@@ -103,19 +108,55 @@ class ApiConfig:
 
 
 class PositionCache:
-    """Efficient position caching to minimize IG API calls"""
-    
+    """Efficient position caching to minimize IG API calls
+
+    BULLETPROOF ENHANCEMENT (Jan 2026):
+    - Added position invalidation to force fresh fetch after stop updates
+    - Prevents stale cache data from overwriting valid trailing stops
+    """
+
     def __init__(self, cache_duration_seconds: int = 30):
         self.cache_duration = cache_duration_seconds
         self._positions_cache = None
         self._last_fetch_time = None
         self._lock = threading.Lock()
-        
+        self._invalidated_positions: set = set()  # Track positions that need fresh data
+
+    def invalidate_position(self, deal_id: str) -> None:
+        """
+        Mark a specific position as invalidated.
+        Next get_positions() call will force a fresh fetch.
+
+        Call this after updating a stop to ensure next read gets fresh data.
+        """
+        with self._lock:
+            self._invalidated_positions.add(deal_id)
+            logging.getLogger("trade_monitor").debug(
+                f"[CACHE INVALIDATE] Position {deal_id} marked for refresh"
+            )
+
+    def invalidate_all(self) -> None:
+        """Force refresh of all positions on next call"""
+        with self._lock:
+            self._positions_cache = None
+            self._last_fetch_time = None
+            self._invalidated_positions.clear()
+            logging.getLogger("trade_monitor").debug("[CACHE INVALIDATE] All positions invalidated")
+
+    def has_invalidated_positions(self) -> bool:
+        """Check if any positions are marked as invalidated"""
+        with self._lock:
+            return len(self._invalidated_positions) > 0
+
     def is_cache_valid(self) -> bool:
         """Check if cache is still valid"""
         if not self._last_fetch_time or not self._positions_cache:
             return False
-        
+
+        # If any positions are invalidated, cache is not valid
+        if self.has_invalidated_positions():
+            return False
+
         return (datetime.now() - self._last_fetch_time).total_seconds() < self.cache_duration
     
     async def get_positions(self, trading_headers: dict, force_refresh: bool = False) -> Optional[List[Dict]]:
@@ -148,6 +189,8 @@ class PositionCache:
                 with self._lock:
                     self._positions_cache = positions
                     self._last_fetch_time = datetime.now()
+                    # Clear invalidations after successful fresh fetch
+                    self._invalidated_positions.clear()
 
                 return positions
 
@@ -821,6 +864,43 @@ class TradeMonitor:
                 else:
                     self.logger.error(f"❌ No suitable processing method found for trade {trade.id}")
                     return False
+
+                # BULLETPROOF: Check for DB/IG mismatch during active trailing
+                # This detects discrepancies that could indicate sync issues
+                if MISMATCH_DETECTION_ENABLED and self._trading_headers:
+                    trailing_active = (
+                        getattr(trade, 'moved_to_breakeven', False) or
+                        getattr(trade, 'early_be_executed', False)
+                    )
+                    if trailing_active:
+                        try:
+                            mismatch_detector = get_mismatch_detector()
+                            mismatch_report = await mismatch_detector.check_mismatch(
+                                trade, self._trading_headers
+                            )
+
+                            if mismatch_report.is_mismatched():
+                                if mismatch_report.severity in [MismatchSeverity.MAJOR, MismatchSeverity.CRITICAL]:
+                                    self.logger.warning(
+                                        f"⚠️ [MISMATCH] Trade {trade.id} {trade.symbol}: "
+                                        f"DB={trade.sl_price}, IG={mismatch_report.ig_stop} "
+                                        f"({mismatch_report.stop_mismatch_pips} pips)"
+                                    )
+
+                                    # Send alert if enabled
+                                    if TRAILING_ALERT_ENABLED:
+                                        alert_service = get_alert_service()
+                                        await alert_service.send_mismatch_alert(
+                                            trade_id=trade.id,
+                                            deal_id=trade.deal_id,
+                                            epic=trade.symbol,
+                                            db_stop=trade.sl_price or 0,
+                                            ig_stop=mismatch_report.ig_stop or 0,
+                                            mismatch_pips=mismatch_report.stop_mismatch_pips,
+                                            trailing_active=trailing_active
+                                        )
+                        except Exception as mismatch_error:
+                            self.logger.debug(f"Mismatch check failed for trade {trade.id}: {mismatch_error}")
 
             if not success:
                 self.logger.warning(f"⚠️ Processing failed for trade {trade.id}")

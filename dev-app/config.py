@@ -864,6 +864,45 @@ def get_scalp_trailing_config_for_epic(epic: str) -> dict:
     """
     return get_trailing_config_for_epic(epic, is_scalp_trade=True)
 
+
+# ================== BULLETPROOF TRAILING SYSTEM (Jan 2026) ==================
+# Configuration for the bulletproof trailing stop system that addresses:
+# - Post-update verification to confirm IG actually applied stops
+# - Retry logic with exponential backoff for transient failures
+# - Mismatch detection during active trailing
+# - Alert escalation for critical issues
+# - DB commit recovery mechanisms
+# - Cache invalidation after updates
+
+# Master switches for bulletproof features (can be disabled for rollback)
+VERIFY_STOP_UPDATES_ENABLED = True      # Phase 1: Verify IG applied the stop
+RETRY_STOP_UPDATES_ENABLED = True       # Phase 2: Retry on transient failures
+MISMATCH_DETECTION_ENABLED = True       # Phase 3: Detect DB/IG discrepancies
+TRAILING_ALERT_ENABLED = True           # Phase 4: Alert escalation
+DB_COMMIT_RECOVERY_ENABLED = True       # Phase 5: Recover from DB failures
+CACHE_INVALIDATION_ENABLED = True       # Phase 6: Invalidate cache after updates
+
+# Mismatch detection thresholds (in pips)
+MISMATCH_THRESHOLD_TOLERANCE = 0.5      # Within tolerance - no mismatch
+MISMATCH_THRESHOLD_MINOR = 2.0          # Log only
+MISMATCH_THRESHOLD_MAJOR = 5.0          # Telegram alert
+MISMATCH_THRESHOLD_CRITICAL = 10.0      # Telegram + flag for review
+
+# Retry configuration
+STOP_UPDATE_MAX_RETRIES = 3             # Maximum retry attempts
+STOP_UPDATE_BACKOFF_TIMES = [2, 5, 10]  # Seconds between retries
+STOP_UPDATE_TIMEOUT = 10.0              # Request timeout in seconds
+
+# Verification configuration
+VERIFICATION_MAX_RETRIES = 3            # How many times to verify
+VERIFICATION_RETRY_DELAY_MS = 500       # Delay between verification attempts
+VERIFICATION_TOLERANCE_PIPS = 0.5       # Acceptable difference in pips
+
+# Alert configuration
+TRAILING_ALERT_TELEGRAM_ENABLED = True  # Send alerts to Telegram
+ALERT_HISTORY_MAX_SIZE = 100            # Maximum alerts to keep in memory
+
+
 # ================== DEFAULT VALUES ==================
 DEFAULT_TEST_EPIC = "CS.D.USDJPY.MINI.IP"
 
