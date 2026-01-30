@@ -486,20 +486,29 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
             # Check for discrepancies and update if needed
             updates_needed = []
 
+            # CRITICAL FIX (Jan 2026): Skip SL/TP sync when trailing is active
+            # The trailing system is the source of truth - syncing from IG's cached data
+            # was overwriting valid BE/trailing stops with stale values
+            trailing_active = getattr(trade, 'moved_to_breakeven', False) or getattr(trade, 'early_be_executed', False)
+
             if abs(float(real_data["entry_price"]) - trade.entry_price) > 0.00001:
                 updates_needed.append(f"entry_price: {trade.entry_price} → {real_data['entry_price']}")
                 trade.entry_price = float(real_data["entry_price"])
-            
-            if real_data["current_stop"] and trade.sl_price:
-                if abs(float(real_data["current_stop"]) - trade.sl_price) > 0.00001:
-                    updates_needed.append(f"sl_price: {trade.sl_price} → {real_data['current_stop']}")
-                    trade.sl_price = float(real_data["current_stop"])
-            
-            if real_data["current_limit"] and trade.tp_price:
-                if abs(float(real_data["current_limit"]) - trade.tp_price) > 0.00001:
-                    updates_needed.append(f"tp_price: {trade.tp_price} → {real_data['current_limit']}")
-                    trade.tp_price = float(real_data["current_limit"])
-            
+
+            # Only sync SL/TP if trailing is NOT active
+            if trailing_active:
+                self.logger.debug(f"🔒 [SYNC SKIP] Trade {trade.id}: Trailing active, skipping SL/TP sync from IG")
+            else:
+                if real_data["current_stop"] and trade.sl_price:
+                    if abs(float(real_data["current_stop"]) - trade.sl_price) > 0.00001:
+                        updates_needed.append(f"sl_price: {trade.sl_price} → {real_data['current_stop']}")
+                        trade.sl_price = float(real_data["current_stop"])
+
+                if real_data["current_limit"] and trade.tp_price:
+                    if abs(float(real_data["current_limit"]) - trade.tp_price) > 0.00001:
+                        updates_needed.append(f"tp_price: {trade.tp_price} → {real_data['current_limit']}")
+                        trade.tp_price = float(real_data["current_limit"])
+
             if updates_needed:
                 self.logger.warning(f"[SYNC UPDATES] Trade {trade.id}: {', '.join(updates_needed)}")
                 db.commit()

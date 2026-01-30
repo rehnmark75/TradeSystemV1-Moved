@@ -48,8 +48,10 @@ class DatabaseMonitoringFix:
         This method implements multiple fallback mechanisms to ensure no trades
         are missed due to database connection issues or race conditions.
         """
+        # CRITICAL FIX (Jan 2026): Include stage profit lock statuses for continued monitoring
         active_statuses = ["pending", "tracking", "break_even", "trailing",
-                          "ema_exit_pending", "profit_protected", "partial_closed"]
+                          "ema_exit_pending", "profit_protected", "partial_closed",
+                          "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"]
 
         # Primary query - the standard approach
         try:
@@ -104,7 +106,9 @@ class DatabaseMonitoringFix:
             recent_trades = (db.query(TradeLog)
                            .filter(
                                TradeLog.timestamp >= recent_cutoff,
-                               TradeLog.status.in_(["pending", "tracking", "break_even", "trailing"])
+                               TradeLog.status.in_(["pending", "tracking", "break_even", "trailing",
+                                                   "ema_exit_pending", "profit_protected", "partial_closed",
+                                                   "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"])
                            )
                            .all())
 

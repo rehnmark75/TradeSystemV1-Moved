@@ -404,7 +404,8 @@ class OrderSender:
                     # ✅ PREFERRED: Mark specific trade by deal_id
                     updated_count = (db.query(TradeLog)
                                 .filter(TradeLog.deal_id == deal_id,
-                                        TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected", "partial_closed"]))
+                                        TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected", "partial_closed",
+                                                            "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"]))
                                 .update({
                                     TradeLog.status: "closed",
                                     TradeLog.trigger_time: datetime.utcnow(),
@@ -432,7 +433,8 @@ class OrderSender:
                     
                     updated_count = (db.query(TradeLog)
                                 .filter(TradeLog.symbol == epic,
-                                        TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "partial_closed"]))
+                                        TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "partial_closed",
+                                                            "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"]))
                                 .update({
                                     TradeLog.status: "closed",
                                     TradeLog.trigger_time: datetime.utcnow(),

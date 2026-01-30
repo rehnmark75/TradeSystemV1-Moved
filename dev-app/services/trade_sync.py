@@ -646,22 +646,32 @@ class EnhancedTradeStatusManager:
         trade.trigger_time = datetime.utcnow()
 
         # NEW: Sync position data from IG if provided
+        # CRITICAL FIX (Jan 2026): Do NOT sync SL from IG when trailing is active
+        # The trailing system is the source of truth - syncing from IG's cached data
+        # was overwriting valid BE/trailing stops with stale values
         if ig_position_data and status in ["tracking", "break_even", "trailing"]:
             position = ig_position_data.get("position", {})
 
-            # Update stop level if different
-            ig_stop_level = position.get("stopLevel")
-            if ig_stop_level and abs(float(ig_stop_level) - (trade.sl_price or 0)) > 0.0001:
-                old_sl = trade.sl_price
-                trade.sl_price = float(ig_stop_level)
-                self.logger.info(f"🔄 [SYNC SL] Trade {trade.id}: SL {old_sl} → {trade.sl_price}")
+            # SKIP SL sync if trailing is active (moved_to_breakeven or early_be_executed)
+            # The trailing system manages the stop - don't overwrite with stale IG data
+            trailing_active = getattr(trade, 'moved_to_breakeven', False) or getattr(trade, 'early_be_executed', False)
 
-            # Update take profit if different
-            ig_limit_level = position.get("limitLevel")
-            if ig_limit_level and abs(float(ig_limit_level) - (trade.tp_price or 0)) > 0.0001:
-                old_tp = trade.tp_price
-                trade.tp_price = float(ig_limit_level)
-                self.logger.info(f"🔄 [SYNC TP] Trade {trade.id}: TP {old_tp} → {trade.tp_price}")
+            if trailing_active:
+                self.logger.debug(f"🔒 [SYNC SKIP] Trade {trade.id}: Trailing active, skipping SL/TP sync from IG")
+            else:
+                # Only sync SL/TP for trades NOT being managed by trailing system
+                ig_stop_level = position.get("stopLevel")
+                if ig_stop_level and abs(float(ig_stop_level) - (trade.sl_price or 0)) > 0.0001:
+                    old_sl = trade.sl_price
+                    trade.sl_price = float(ig_stop_level)
+                    self.logger.info(f"🔄 [SYNC SL] Trade {trade.id}: SL {old_sl} → {trade.sl_price}")
+
+                # Update take profit if different
+                ig_limit_level = position.get("limitLevel")
+                if ig_limit_level and abs(float(ig_limit_level) - (trade.tp_price or 0)) > 0.0001:
+                    old_tp = trade.tp_price
+                    trade.tp_price = float(ig_limit_level)
+                    self.logger.info(f"🔄 [SYNC TP] Trade {trade.id}: TP {old_tp} → {trade.tp_price}")
 
         # Store activity close data for P/L correlation
         if activity_close_data and status == "closed":

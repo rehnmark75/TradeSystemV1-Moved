@@ -104,9 +104,17 @@ async def adjust_stop_logic(
                 return price / 10000.0
             return price
 
+        # Helper: denormalize price back to CEEM points format for sending to IG
+        # CRITICAL FIX (Jan 2026): IG expects CEEM stops in points format (11928.4 not 1.19284)
+        def denormalize_ceem_price(price: float, epic: str) -> float:
+            if "CEEM" in epic and price < 100:  # Price format, needs conversion to points
+                return price * 10000.0
+            return price
+
         # --- STOP logic ---
         if new_stop is not None:
-            payload["stopLevel"] = float(new_stop)
+            # Convert to CEEM points format if needed
+            payload["stopLevel"] = denormalize_ceem_price(float(new_stop), epic)
         elif position.get("stopLevel"):
             old_stop = normalize_ceem_price(float(position["stopLevel"]), epic)
             offset = ig_points_to_price(float(stop_offset_points), epic) if stop_offset_points else 0.0002
@@ -119,7 +127,8 @@ async def adjust_stop_logic(
                 # "decrease" means move stop price DOWN (closer to current price for both BUY/SELL)
                 new_stop_level = old_stop - offset
 
-            payload["stopLevel"] = round(new_stop_level, 5)
+            # Convert to CEEM points format if needed
+            payload["stopLevel"] = denormalize_ceem_price(round(new_stop_level, 5), epic)
 
         elif position.get("stopDistance"):
             old_distance = float(position["stopDistance"])
@@ -137,7 +146,8 @@ async def adjust_stop_logic(
 
         # --- LIMIT logic ---
         if new_limit is not None:
-            payload["limitLevel"] = float(new_limit)
+            # Convert to CEEM points format if needed
+            payload["limitLevel"] = denormalize_ceem_price(float(new_limit), epic)
         elif position.get("limitLevel"):
             old_limit = normalize_ceem_price(float(position["limitLevel"]), epic)
             offset = ig_points_to_price(float(limit_offset_points), epic) if limit_offset_points else 0.0002
@@ -150,7 +160,8 @@ async def adjust_stop_logic(
                 # "decrease" means move limit price DOWN (worse for BUY, better for SELL)
                 new_limit_level = old_limit - offset
 
-            payload["limitLevel"] = round(new_limit_level, 5)
+            # Convert to CEEM points format if needed
+            payload["limitLevel"] = denormalize_ceem_price(round(new_limit_level, 5), epic)
 
         elif position.get("limitDistance"):
             old_distance = float(position["limitDistance"])
