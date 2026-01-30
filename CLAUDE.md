@@ -321,6 +321,18 @@ For detailed information, see these docs (read with Read tool when needed):
 
 The SMC Simple strategy reads ALL configuration from the database, including per-pair overrides.
 
+### ⛔ NEVER READ `configdata/strategies/config_smc_simple.py` FOR CURRENT VALUES
+
+**This file is COMPLETELY DEPRECATED.** Values like `ENABLED_PAIRS` in that file are **STALE and WRONG**.
+
+To check actual configuration:
+```bash
+# Check enabled pairs (ACTUAL source of truth)
+docker exec postgres psql -U postgres -d strategy_config -c "SELECT epic, is_enabled FROM smc_simple_pair_overrides WHERE is_enabled = TRUE;"
+
+# Or use Streamlit UI: Scanner Config → SMC Config tab
+```
+
 ### Database Tables (in `strategy_config` database):
 | Table | Purpose |
 |-------|---------|
@@ -372,7 +384,7 @@ Located in `worker/app/forex_scanner/migrations/`:
 - `add_fixed_sl_tp_columns.sql` - Per-pair SL/TP support
 - `add_max_confidence_to_pair_overrides.sql` - Confidence cap
 
-**DO NOT** edit `worker/app/forex_scanner/config.py` or `configdata/strategies/config_smc_simple.py` for SMC Simple settings - these are LEGACY fallbacks only!
+**⛔ NEVER** read or trust values from `configdata/strategies/config_smc_simple.py` - this file is **COMPLETELY DEPRECATED** and contains **STALE DATA**. Always query the database or Streamlit UI for actual configuration!
 
 ---
 
